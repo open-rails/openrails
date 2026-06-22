@@ -317,13 +317,14 @@ func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
-// SetMerchantConfiguration keeps the legacy SDK startup hook on the new
-// merchant settings document.
-func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
-	return c.SetMerchantSettings(ctx, MerchantSettings{
-		Profile:                           in.Profile,
-		DelegatedInvokerWastedSpendLimits: in.DelegatedInvokerWastedSpendWindows,
-	})
+// SetOrgSpendDelegations implements PolicySyncClient over the customer treasury
+// surface.
+func (c *remote) SetOrgSpendDelegations(ctx context.Context, orgID string, delegations []SpendDelegationInput) error {
+	if strings.TrimSpace(orgID) == "" {
+		return fmt.Errorf("openrails: org_id required")
+	}
+	path := "/v1/orgs/" + url.PathEscape(strings.TrimSpace(orgID)) + "/spend-delegations"
+	return c.do(ctx, http.MethodPut, path, map[string]any{"delegations": delegations}, nil)
 }
 
 // ListActiveEntitlements implements Client (handler

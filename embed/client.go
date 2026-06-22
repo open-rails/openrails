@@ -246,71 +246,6 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 	return out
 }
 
-// CaptureHold transcribes handlers.ServiceCaptureHold (service_credits.go)
-// without the usage-event extension (see Capture for that).
-func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHoldRequest) (*openrails.CreditTransaction, error) {
-	ctx = c.ensureTenant(ctx)
-	if req.Amount == 0 { // gin binding: amount is `binding:"required"`
-		return nil, bindRequiredErr("Amount")
-	}
-	trx, err := c.svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: req.RequestID, Amount: req.Amount})
-	if err != nil {
-		if errors.Is(err, billingservice.ErrInsufficientCredits) {
-			return nil, openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
-		}
-		return nil, internalErr("capture failed")
-	}
-	return transactionFromService(trx), nil
-}
-
-// ReleaseHold transcribes handlers.ServiceReleaseHold (service_credits.go).
-// NOTE the handler maps EVERY release failure — including an unknown hold — to
-// 500 "release failed"; the embedded transport mirrors that (ErrInternal, not
-// ErrNotFound) so errors.Is agrees across transports.
-func (c *localClient) ReleaseHold(ctx context.Context, requestID string) error {
-	ctx = c.ensureTenant(ctx)
-	if err := c.svc.ReleaseHold(ctx, requestID); err != nil {
-		return internalErr("release failed")
-	}
-	return nil
-}
-
-// WithdrawCredits transcribes handlers.ServiceWithdrawCredits
-// (service_credits.go).
-func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.WithdrawCreditsRequest) (*openrails.CreditTransaction, error) {
-	ctx = c.ensureTenant(ctx)
-	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case strings.TrimSpace(req.Invoker) == "":
-		return nil, bindRequiredErr("Invoker")
-	case req.Amount == 0:
-		return nil, bindRequiredErr("Amount")
-	case strings.TrimSpace(req.Source) == "":
-		return nil, bindRequiredErr("Source")
-	case req.SourceID == nil:
-		return nil, bindRequiredErr("SourceID")
-	}
-	payer, err := parseCustomer(customerString(req.CustomerID), "invalid customer_id")
-	if err != nil {
-		return nil, err
-	}
-	trx, err := c.svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
-		CustomerID: &payer,
-		Invoker:    req.Invoker,
-		Currency:   currency,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
-	})
-	if err != nil {
-		return nil, mapCreditErr(err, "withdraw failed")
-	}
-	return transactionFromService(trx), nil
-}
-
 // DepositCredits transcribes handlers.ServiceDepositCredits
 // (service_credits.go).
 func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositCreditsRequest) (*openrails.CreditTransaction, error) {
@@ -397,7 +332,10 @@ func (c *localClient) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id required")
 	}
-	return c.ReleaseHold(ctx, requestID)
+	if err := c.svc.ReleaseHold(ctx, requestID); err != nil {
+		return internalErr("release failed")
+	}
+	return nil
 }
 
 // Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go)
@@ -602,9 +540,7 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invoker
 	return out, nil
 }
 
-// SetPayerSpendLimits transcribes handlers.ServiceSetPayerSpendLimits
-// (service_admission.go).
-func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.PayerSpendLimitInput) error {
+func (c *localClient) setPayerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.PayerSpendLimitInput) error {
 	ctx = c.ensureTenant(ctx)
 	// An EMPTY customer_id sets the tenant-wide DEFAULT trust-tier policy (#477,
 	// the platform capacity ladder declared once); a non-empty one is a per-subject
@@ -641,10 +577,7 @@ func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID s
 	return nil
 }
 
-// SetTierSchedule transcribes handlers.ServiceSetTierSchedule
-// (service_admission.go, #476). An empty customer_id is the tenant-wide
-// default schedule (zero payer); a non-empty one is a per-subject override.
-func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []openrails.TierScheduleRung) error {
+func (c *localClient) setTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []openrails.TierScheduleRung) error {
 	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(currency)
 	if err != nil {
@@ -665,27 +598,6 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID, curr
 	}
 	if err := c.svc.SetTierSchedule(ctx, payer, currency, rungs); err != nil {
 		return internalErr("set tier schedule failed")
-	}
-	return nil
-}
-
-// SetMerchantConfiguration transcribes handlers.ServiceSetMerchantConfiguration.
-func (c *localClient) SetMerchantConfiguration(ctx context.Context, in openrails.MerchantConfigurationInput) error {
-	ctx = c.ensureTenant(ctx)
-	ws := make([]abuse.WastedWindow, 0, len(in.DelegatedInvokerWastedSpendWindows))
-	for _, w := range in.DelegatedInvokerWastedSpendWindows {
-		ws = append(ws, abuse.WastedWindow{
-			Key:      w.Key,
-			Window:   time.Duration(w.WindowSeconds) * time.Second,
-			Limit:    w.Limit,
-			Currency: w.Currency,
-		})
-	}
-	if err := c.svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
-		Profile:                            merchantProfileInput(in.Profile),
-		DelegatedInvokerWastedSpendWindows: ws,
-	}); err != nil {
-		return internalErr("set merchant configuration failed")
 	}
 	return nil
 }
@@ -722,14 +634,42 @@ func (c *localClient) SetMerchantSettings(ctx context.Context, settings openrail
 		return internalErr("set merchant settings failed")
 	}
 	for _, schedule := range settings.TierSchedules {
-		if err := c.SetTierSchedule(ctx, "", schedule.Currency, schedule.Schedule); err != nil {
+		if err := c.setTierSchedule(ctx, "", schedule.Currency, schedule.Schedule); err != nil {
 			return err
 		}
 	}
 	for _, policy := range settings.TierSpendLimits {
-		if err := c.SetPayerSpendLimits(ctx, "", policy); err != nil {
+		if err := c.setPayerSpendLimits(ctx, "", policy); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// SetOrgSpendDelegations transcribes the org treasury spend-delegations replace
+// operation for embedded hosts.
+func (c *localClient) SetOrgSpendDelegations(ctx context.Context, orgID string, delegations []openrails.SpendDelegationInput) error {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseCustomer(orgID, "invalid org_id")
+	if err != nil {
+		return err
+	}
+	next := make([]billingservice.InvokerSpendLimitInput, 0, len(delegations))
+	for _, d := range delegations {
+		windows := make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows))
+		for _, w := range d.Windows {
+			windows = append(windows, billingservice.SpendLimitWindowInput{
+				Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
+			})
+		}
+		next = append(next, billingservice.InvokerSpendLimitInput{
+			Scope:    d.Scope,
+			ScopeKey: firstNonEmpty(d.ScopeKey, d.RoleID),
+			Windows:  windows,
+		})
+	}
+	if err := c.svc.ReplaceInvokerSpendLimits(ctx, payer, next); err != nil {
+		return internalErr("set org spend delegations failed")
 	}
 	return nil
 }
@@ -893,62 +833,6 @@ func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUs
 		})
 	}
 	return out
-}
-
-func spendLimitWindowInputs(ws []openrails.SpendLimitWindow) []billingservice.SpendLimitWindowInput {
-	out := make([]billingservice.SpendLimitWindowInput, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, billingservice.SpendLimitWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
-		})
-	}
-	return out
-}
-
-// SetInvokerSpendLimits transcribes handlers.ServiceSetInvokerSpendLimits
-// (service_admission.go, #473).
-func (c *localClient) SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.InvokerSpendLimitInput) error {
-	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
-	if err != nil {
-		return err
-	}
-	scopeKey := strings.TrimSpace(in.ScopeKey)
-	if scopeKey == "" {
-		scopeKey = strings.TrimSpace(in.RoleID)
-	}
-	if err := c.svc.SetInvokerSpendLimits(ctx, payer, billingservice.InvokerSpendLimitInput{
-		Scope:    in.Scope,
-		ScopeKey: scopeKey,
-		Windows:  spendLimitWindowInputs(in.Windows),
-	}); err != nil {
-		return internalErr("set subject budget policy failed")
-	}
-	return nil
-}
-
-// InvokerSpendLimits transcribes handlers.ServiceGetInvokerSpendLimits
-// (service_admission.go, #473): subject-owned policies only; ScopeKey maps back
-// onto role_id.
-func (c *localClient) InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]openrails.InvokerSpendLimit, error) {
-	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	policies, err := c.svc.InvokerSpendLimits(ctx, payer)
-	if err != nil {
-		return nil, internalErr("subject budget policies lookup failed")
-	}
-	out := make([]openrails.InvokerSpendLimit, 0, len(policies))
-	for _, p := range policies {
-		ws := make([]openrails.SpendLimitWindow, 0, len(p.Windows))
-		for _, w := range p.Windows {
-			ws = append(ws, openrails.SpendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
-		}
-		out = append(out, openrails.InvokerSpendLimit{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
-	}
-	return out, nil
 }
 
 func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails.EntitlementRecord {

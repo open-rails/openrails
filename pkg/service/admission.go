@@ -285,6 +285,45 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	return out, nil
 }
 
+// ReplaceInvokerSpendLimits fully replaces the payer-owned delegated-spend
+// policy document.
+func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimitInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	store := admission.NewInvokerSpendLimitStore(s.rt.DB)
+	existing, err := store.LoadAll(ctx, payer)
+	if err != nil {
+		return err
+	}
+	wanted := make(map[string]admission.InvokerSpendLimit, len(next))
+	for _, in := range next {
+		row := admission.InvokerSpendLimit{
+			Scope:    in.Scope,
+			ScopeKey: strings.TrimSpace(in.ScopeKey),
+			Windows:  budgetScopeWindowModels(in.Windows),
+		}
+		wanted[row.Scope+"\x00"+row.ScopeKey] = row
+	}
+	for _, row := range existing {
+		if _, keep := wanted[row.Scope+"\x00"+row.ScopeKey]; keep {
+			continue
+		}
+		if err := store.Delete(ctx, payer, row.Scope, row.ScopeKey); err != nil {
+			return err
+		}
+	}
+	for _, row := range wanted {
+		if err := store.Upsert(ctx, payer, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TierBudgetWindowInput / PayerSpendLimitInput configure a trust tier's money
 // policy via the admin endpoint (#298: tier admin API).
 type TierBudgetWindowInput struct {

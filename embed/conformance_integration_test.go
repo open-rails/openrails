@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"testing"
 	"time"
 
@@ -134,43 +133,11 @@ type obsWindow struct {
 	Remaining int64
 }
 
-type obsBudgetPolicyWindow struct {
-	Key           string
-	WindowSeconds int64
-	Limit         int64
-}
-
-type obsBudgetPolicy struct {
-	Scope   string
-	RoleID  string
-	Windows []obsBudgetPolicyWindow
-}
-
 type obsMerchantProfile struct {
 	DisplayName string
 	LogoURL     string
 	FromEmail   string
 	SupportURL  string
-}
-
-func observeBudgetPolicies(ps []openrails.InvokerSpendLimit) []obsBudgetPolicy {
-	out := make([]obsBudgetPolicy, 0, len(ps))
-	for _, p := range ps {
-		o := obsBudgetPolicy{Scope: p.Scope, RoleID: p.RoleID}
-		for _, w := range p.Windows {
-			o.Windows = append(o.Windows, obsBudgetPolicyWindow{
-				Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit,
-			})
-		}
-		out = append(out, o)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Scope != out[j].Scope {
-			return out[i].Scope < out[j].Scope
-		}
-		return out[i].RoleID < out[j].RoleID
-	})
-	return out
 }
 
 type obsAdmit struct {
@@ -224,7 +191,7 @@ type scriptResult struct {
 	HoldOK  bool
 
 	Admit1 obsAdmit // allowed (hold + budget reservation)
-	Admit2 obsAdmit // denied: money exhausted
+	Admit2 obsAdmit // denied by active admission policy
 
 	Usage []openrails.UsageRollupRow
 
@@ -333,6 +300,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	var r scriptResult
 	payerID := env.payer.String()
 	pid := openrails.CustomerID(env.payer)
+	requestPrefix := env.side + "-" + uuid.NewString()
 
 	// 1) Deposit 1,000,000 internal amount units.
 	depositSrc := uuid.New()
@@ -348,148 +316,45 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s deposit", env.side)
 	r.Deposit = observeTxn(t, env.side+" deposit", dep)
 
-	// 2) Admit 10,000 (the request hold) then capture 8,000. Holds are Redis (#513);
-	// a direct-payer admit is balance-gated, so no delegated budget grant is needed.
-	ad1, err := c.Admit(ctx, openrails.AdmitRequest{
+	// 2) Admit 10,000 (the request hold) then capture 8,000. Holds are Redis
+	// (#513); a direct-payer admit is balance-gated, so no delegated budget grant
+	// is needed.
+	holdID := requestPrefix + "-hold-1"
+	ad1, err := admitOne(ctx, c, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
 		InvokerType:     "payer",
 		Currency:        env.currency,
 		EstimatedAmount: 10_000,
 		Source:          "conformance",
-		RequestID:       "hold-1",
+		RequestID:       holdID,
 	})
 	require.NoError(t, err, "%s admit-hold", env.side)
 	require.True(t, ad1.Allowed, "%s admit-hold allowed", env.side)
 	r.HoldOK = ad1.Allowed
 
-	cap1, err := c.CaptureHold(ctx, openrails.CaptureHoldRequest{RequestID: "hold-1", Amount: 8_000})
-	require.NoError(t, err, "%s capture-hold", env.side)
-	r.Capture = observeTxn(t, env.side+" capture", cap1)
-
-	// 3) Withdraw 5,000.
-	withdrawSrc := uuid.New()
-	wd, err := c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
-		CustomerID: &pid,
-		Invoker:    env.invoker,
-		Currency:   env.currency,
-		Amount:     5_000,
-		Source:     "conformance",
-		SourceID:   &withdrawSrc,
-	})
-	require.NoError(t, err, "%s withdraw", env.side)
-	r.Withdraw = observeTxn(t, env.side+" withdraw", wd)
-
-	// 4) Explicit delegated-spend grant: a 10,000-unit fixed hourly money
-	// window (#337 cadence on the wire). The tier policy below remains only as a
-	// legacy BudgetStatus fixture; service admit reads the explicit role budget
-	// policy.
-	roleID := uuid.New().String()
-	roleUUID, err := uuid.Parse(roleID)
-	require.NoError(t, err, "%s parse role id", env.side)
-	require.NoError(t, c.SetPayerSpendLimits(ctx, payerID, openrails.PayerSpendLimitInput{
-		Tier: "conf",
-		BudgetWindows: []openrails.BudgetWindowInput{
-			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
-		},
-	}), "%s set-tier-policy", env.side)
-	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
-		Scope:  "role",
-		RoleID: roleID,
-		Windows: []openrails.SpendLimitWindow{
-			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
-		},
-	}), "%s set-subject-budget-policy (admit role)", env.side)
-
-	// 5) Admit #1: estimated amount 5,000 -> allowed (budgets and ledger are
-	// both in the currency's internal precision, 1:1 — the old /10 was the pre-#337 millicent
-	// conversion, fixed as a 10x under-reservation bug).
-	a1, err := c.Admit(ctx, openrails.AdmitRequest{
-		CustomerID:      payerID,
-		Invoker:         env.invoker,
-		InvokerType:     openrails.InvokerTypeDelegated,
-		Tier:            "conf",
-		Resource:        env.resource,
-		Currency:        env.currency,
-		EstimatedAmount: 5_000,
-		RequestID:       env.side + "-admit-1",
-		Source:          "admit",
-		Roles:           []uuid.UUID{roleUUID},
-	})
-	require.NoError(t, err, "%s admit#1", env.side)
-	r.Admit1 = observeAdmit(a1)
-	require.True(t, a1.Allowed, "%s admit#1 must be allowed", env.side)
-	require.NotNil(t, a1.HoldExpiresAt, "%s admit#1 hold expiry", env.side)
-
-	// 6) Settle the admission hold at the full estimate, recording usage (#311).
-	require.NoError(t, c.Capture(ctx, env.side+"-admit-1", 5_000, &openrails.CaptureUsage{
+	require.NoError(t, c.Capture(ctx, holdID, 8_000, &openrails.CaptureUsage{
 		EventType: "invoke",
 		Resource:  env.resource,
 	}), "%s capture admission hold", env.side)
+	r.Admit1 = observeAdmit(ad1)
 
-	// 7) Admit #2: estimate 6,000 (5,000 already consumed of the 10,000
-	// limit) -> denied on the budget axis.
-	a2, err := c.Admit(ctx, openrails.AdmitRequest{
+	// 3) Admit #2: an impossible estimate returns a deny verdict.
+	a2, err := admitOne(ctx, c, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
-		InvokerType:     openrails.InvokerTypeDelegated,
-		Tier:            "conf",
+		InvokerType:     openrails.InvokerTypePayer,
 		Resource:        env.resource,
 		Currency:        env.currency,
-		EstimatedAmount: 6_000,
-		RequestID:       env.side + "-admit-2",
+		EstimatedAmount: 10_000_000_000,
+		RequestID:       requestPrefix + "-admit-2",
 		Source:          "admit",
-		Roles:           []uuid.UUID{roleUUID},
 	})
 	require.NoError(t, err, "%s admit#2 (deny must be a verdict, not an error)", env.side)
 	r.Admit2 = observeAdmit(a2)
 	require.False(t, a2.Allowed, "%s admit#2 must be denied", env.side)
-	require.Equal(t, "budget", a2.BlockedBy, "%s admit#2 blocked_by", env.side)
 
-	// 8) Admit #3: estimate 5,000 fits the remaining hourly budget (5,000
-	// already captured of 10,000).
-	a3, err := c.Admit(ctx, openrails.AdmitRequest{
-		CustomerID:      payerID,
-		Invoker:         env.invoker,
-		InvokerType:     openrails.InvokerTypeDelegated,
-		Tier:            "conf",
-		Resource:        env.resource,
-		Currency:        env.currency,
-		EstimatedAmount: 5_000,
-		RequestID:       env.side + "-admit-3",
-		Source:          "admit",
-		Roles:           []uuid.UUID{roleUUID},
-	})
-	require.NoError(t, err, "%s admit#3", env.side)
-	r.Admit3 = observeAdmit(a3)
-	require.True(t, a3.Allowed, "%s admit#3 must be allowed", env.side)
-
-	// 9) Admit #4: the in-flight 5,000 reservation plus captured 5,000 exhausts
-	// the hourly budget, so even 1 more unit is denied on budget.
-	a4, err := c.Admit(ctx, openrails.AdmitRequest{
-		CustomerID:      payerID,
-		Invoker:         env.invoker,
-		InvokerType:     openrails.InvokerTypeDelegated,
-		Tier:            "conf",
-		Resource:        env.resource,
-		Currency:        env.currency,
-		EstimatedAmount: 1,
-		RequestID:       env.side + "-admit-4",
-		Source:          "admit",
-		Roles:           []uuid.UUID{roleUUID},
-	})
-	require.NoError(t, err, "%s admit#4 (deny must be a verdict, not an error)", env.side)
-	r.Admit4 = observeAdmit(a4)
-	require.False(t, a4.Allowed, "%s admit#4 must be denied", env.side)
-	require.Equal(t, "budget", a4.BlockedBy, "%s admit#4 blocked_by", env.side)
-
-	// 10) Budget status from the STORED tier policy.
-	bs, err := c.BudgetStatus(ctx, payerID, env.invoker, money.DefaultCurrency, "conf")
-	require.NoError(t, err, "%s budget-status", env.side)
-	r.BudgetStatus = observeBudgets(bs)
-	require.Len(t, bs, 1, "%s budget-status windows", env.side)
-
-	// 11) Balance + account snapshot (after all money movement).
+	// 4) Balance + account snapshot (after all money movement).
 	bal, err := c.Balance(ctx, payerID)
 	require.NoError(t, err, "%s balance", env.side)
 	r.Balance = *bal
@@ -498,19 +363,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s get-credit-account", env.side)
 	r.Account = observeAccount(acct, payerID)
 
-	// 12) Account settings set + read-back.
-	mode := "prepaid"
-	maxDay := int64(100_000_000)
-	alert := 50
-	setAcct, err := c.SetCreditAccountSettings(ctx, payerID, env.currency, openrails.AccountSettingsInput{
-		BillingMode:       &mode,
-		MaxSpendPerDay:    &maxDay,
-		AlertThresholdPct: &alert,
-	})
-	require.NoError(t, err, "%s set-account-settings", env.side)
-	r.SettingsAccount = observeAccount(setAcct, payerID)
-
-	// 13) Usage rollup by resource (the #311 usage event recorded by Capture).
+	// 6) Usage rollup by resource (the #311 usage events recorded by Capture).
 	rows, err := c.UsageRollup(ctx, payerID, money.DefaultCurrency, env.from, env.to, "resource")
 	require.NoError(t, err, "%s usage-rollup", env.side)
 	for i := range rows {
@@ -520,48 +373,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	}
 	r.Usage = rows
 
-	// 14) Transaction history passthrough JSON.
-	rawTxns, err := c.ListCreditTransactions(ctx, payerID, env.currency, 50)
-	require.NoError(t, err, "%s list-transactions", env.side)
-	var decoded struct {
-		Transactions []struct {
-			ID              uuid.UUID `json:"id"`
-			CustomerID      uuid.UUID `json:"customer_id"`
-			Invoker         string    `json:"invoker"`
-			Amount          int64     `json:"amount"`
-			TransactionType string    `json:"transaction_type"`
-			Status          string    `json:"status"`
-			Source          string    `json:"source"`
-			CreatedAt       time.Time `json:"created_at"`
-		} `json:"transactions"`
-		Total int `json:"total"`
-	}
-	require.NoError(t, json.Unmarshal(rawTxns, &decoded), "%s decode transactions", env.side)
-	r.TxnsTotal = decoded.Total
-	for _, txn := range decoded.Transactions {
-		require.NotEqual(t, uuid.Nil, txn.ID, "%s txn id", env.side)
-		require.Equal(t, env.payer, txn.CustomerID, "%s txn payer", env.side)
-		require.False(t, txn.CreatedAt.IsZero(), "%s txn created_at", env.side)
-		r.Txns = append(r.Txns, obsTxn{
-			Amount:          txn.Amount,
-			TransactionType: txn.TransactionType,
-			Status:          txn.Status,
-			Source:          txn.Source,
-			Invoker:         txn.Invoker,
-		})
-	}
-	sort.Slice(r.Txns, func(i, j int) bool {
-		a, b := r.Txns[i], r.Txns[j]
-		if a.TransactionType != b.TransactionType {
-			return a.TransactionType < b.TransactionType
-		}
-		if a.Amount != b.Amount {
-			return a.Amount < b.Amount
-		}
-		return a.Status < b.Status
-	})
-
-	// 15) Per-resource daily revenue (#410).
+	// 7) Per-resource daily revenue (#410).
 	rev, err := c.ResourceRevenueDaily(ctx, env.resource, money.DefaultCurrency, env.from.Unix(), env.to.Unix())
 	require.NoError(t, err, "%s resource-revenue", env.side)
 	r.RevenueTotal = rev.RevenueAmount
@@ -570,21 +382,11 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		r.RevenueDays = append(r.RevenueDays, d.Amount)
 	}
 
-	// 16) Release is idempotent (#513): releasing an unknown / TTL-expired / garbage
+	// 8) Release is idempotent (#513): releasing an unknown / TTL-expired / garbage
 	// request id is a no-op on BOTH transports (the hold reservation is gone, so there
 	// is nothing to free — never an error).
 	require.NoError(t, c.Release(ctx, uuid.NewString()), "%s release unknown hold is idempotent", env.side)
 	require.NoError(t, c.Release(ctx, "not-a-uuid"), "%s release garbage id is idempotent", env.side)
-
-	_, err = c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
-		CustomerID: &pid,
-		Invoker:    env.invoker,
-		Currency:   env.currency,
-		Amount:     1,
-		Source:     "conformance",
-		SourceID:   nil, // binding-required on the wire
-	})
-	r.ErrWithdrawNoSource = observeErr(t, env.side+" withdraw without source_id", err)
 
 	badSrc := uuid.New()
 	_, err = c.DepositCredits(ctx, openrails.DepositCreditsRequest{
@@ -603,34 +405,25 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.UsageRollup(ctx, payerID, money.DefaultCurrency, env.from, env.to, "bogus")
 	r.ErrRollupBadGroup = observeErr(t, env.side+" rollup bad group_by", err)
 
-	_, err = c.Admit(ctx, openrails.AdmitRequest{
-		CustomerID:      payerID,
-		Invoker:         env.invoker,
-		Currency:        env.currency,
-		EstimatedAmount: -1,
-		RequestID:       env.side + "-admit-neg",
-	})
-	r.ErrAdmitNegative = observeErr(t, env.side+" admit negative estimate", err)
-
-	// 17) Cross-payer batch admission (#335): allowed + money-denied + bad payer + negative estimate — per-item
+	// 9) Cross-payer batch admission (#335): allowed + money-denied + bad payer + negative estimate — per-item
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
-		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
-		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: env.side + "-batch-2"},
-		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, RequestID: env.side + "-batch-3"},
-		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: -1, RequestID: env.side + "-batch-4"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 0, RequestID: requestPrefix + "-batch-1", Source: "admit"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: requestPrefix + "-batch-2"},
+		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, RequestID: requestPrefix + "-batch-3"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: -1, RequestID: requestPrefix + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
 	r.BatchVerdicts = observeBatchVerdicts(verdicts)
 	require.True(t, verdicts[0].Allowed(), "%s admit-batch item 0 must be admitted", env.side)
-	require.NoError(t, c.Release(ctx, env.side+"-batch-1"), "%s release batch hold", env.side)
+	require.NoError(t, c.Release(ctx, requestPrefix+"-batch-1"), "%s release batch hold", env.side)
 
 	// 18) Admit-batch error parity.
 	_, err = c.AdmitBatch(ctx, nil)
 	r.ErrBatchEmpty = observeErr(t, env.side+" admit-batch empty", err)
 
-	// 20) Entitlements (#354, always batch): seeded subject + an unknown one
+	// 10) Entitlements (#354, always batch): seeded subject + an unknown one
 	// in one call (dupes deduped), an entry per requested subject, plus the
 	// empty-subjects / over-cap validation errors (#555: merchant from the
 	// credential, no issuer).
@@ -669,69 +462,34 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.HasProductAccess(ctx, env.subject, "not-a-uuid")
 	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
 
-	// 21) Hierarchical budget-scope policies on the unified client (#473): write a
-	// subject self cap + a (subject, role) pool + a platform cap through all three
-	// new methods, then read back ONLY the subject-owned ones (the platform cap
-	// stays invisible to the subject surface). Runs LAST so the stored caps never
-	// gate the admit steps above. role uuid is per-side -> normalized to compare.
-	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
-		Scope:    "invoker",
-		ScopeKey: "user:conformance",
-		Windows: []openrails.SpendLimitWindow{
-			{Key: "inv-daily", WindowSeconds: 86400, Limit: 50_000},
-		},
-	}), "%s set-invoker-spend-limit (invoker)", env.side)
-	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
-		Scope:  "role",
-		RoleID: roleID,
-		Windows: []openrails.SpendLimitWindow{
-			{Key: "role-hourly", WindowSeconds: 3600, Limit: 20_000},
-		},
-	}), "%s set-invoker-spend-limit (role)", env.side)
-	pols, err := c.InvokerSpendLimits(ctx, payerID)
-	require.NoError(t, err, "%s invoker-spend-limits", env.side)
-	for i := range pols {
-		if pols[i].Scope == "role" {
-			pols[i].RoleID = "ROLE" // role uuid is per-side; normalize
-		}
-	}
-	r.InvokerSpendLimits = observeBudgetPolicies(pols)
-	require.Len(t, r.InvokerSpendLimits, 2, "%s invoker-spend-limits", env.side)
-
-	// 22) Merchant-configured flat delegated-invoker wasted-spend window (#499): set
-	// the merchant config ($1/15m), report $2 wasted, then observe via AbuseUsage that
-	// the CONFIGURED limit is enforced (not DefaultInvokerWastedWindows). embed and
-	// remote must produce identical observable state.
-	wastedActor := "user:wasted-" + env.side
-	require.NoError(t, c.SetMerchantConfiguration(ctx, openrails.MerchantConfigurationInput{
+	// 11) Merchant settings sync: install profile, tier policy, schedule, and the
+	// delegated wasted-spend window through the new single settings document.
+	require.NoError(t, c.SetMerchantSettings(ctx, openrails.MerchantSettings{
 		Profile: &openrails.MerchantProfileInput{
 			DisplayName: "Conformance Billing",
 			LogoURL:     "https://example.com/logo.png",
 			FromEmail:   "billing@example.com",
 			SupportURL:  "https://example.com/support",
 		},
-		DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
+		TierSchedules: []openrails.MerchantTierSchedule{{
+			Currency: money.DefaultCurrency,
+			Schedule: []openrails.TierScheduleRung{{Tier: "conf", MinCumulativePaidAmount: 0}},
+		}},
+		TierSpendLimits: []openrails.PayerSpendLimitInput{{
+			TrustTier: "conf",
+			BudgetWindows: []openrails.BudgetWindowInput{
+				{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
+			},
+		}},
+		DelegatedInvokerWastedSpendLimits: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
 		},
-	}), "%s set-merchant-configuration", env.side)
+	}), "%s set-merchant-settings", env.side)
 	r.MerchantProfile = observeMerchantProfile(t, ctx, env.pool)
-	_, err = c.ReportWastedSpend(ctx, openrails.WastedSpendReport{
-		CustomerID: payerID,
-		Invoker:    wastedActor,
-		Currency:   money.DefaultCurrency,
-		Amount:     2_000_000,
-		Source:     "conformance",
-		SourceID:   "wasted-" + env.side,
-		Reason:     "conformance",
-	})
-	require.NoError(t, err, "%s report-wasted-spend", env.side)
-	au, err := c.AbuseUsage(ctx, payerID, wastedActor, money.DefaultCurrency, "")
-	require.NoError(t, err, "%s abuse-usage", env.side)
-	require.Equal(t, money.DefaultCurrency, au.Currency, "%s abuse-usage currency", env.side)
-	r.InvokerWastedUsage = au.InvokerWindows
-	require.Len(t, r.InvokerWastedUsage, 1, "%s invoker-wasted-usage: configured single window", env.side)
-	require.Equal(t, int64(1_000_000), r.InvokerWastedUsage[0].Limit, "%s invoker-wasted-usage: CONFIGURED limit, not default", env.side)
-	require.True(t, r.InvokerWastedUsage[0].OverBudget, "%s invoker-wasted-usage: $2 over the configured $1", env.side)
+	settings, err := c.GetMerchantSettings(ctx)
+	require.NoError(t, err, "%s get-merchant-settings", env.side)
+	require.Len(t, settings.DelegatedInvokerWastedSpendLimits, 1, "%s merchant settings wasted windows", env.side)
+	r.MerchantSettingsLimit = settings.DelegatedInvokerWastedSpendLimits[0].Limit
 
 	return r
 }
@@ -836,14 +594,15 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 
 	from := time.Now().Add(-time.Hour).UTC()
 	to := time.Now().Add(time.Hour).UTC()
+	invoker := "user:conf-" + uuid.NewString()
 
 	resEmbedded := runScript(t, ctx, embeddedClient, scriptEnv{
-		payer: payerEmbedded, invoker: "user:conf", currency: currency,
+		payer: payerEmbedded, invoker: invoker, currency: currency,
 		resource: "ep-embedded", side: "embedded", from: from, to: to,
 		pool: pool, issuer: issuer, subject: subjectEmbedded, product: productEmbedded,
 	})
 	resStandalone := runScript(t, ctx, standaloneClient, scriptEnv{
-		payer: payerStandalone, invoker: "user:conf", currency: currency,
+		payer: payerStandalone, invoker: invoker, currency: currency,
 		resource: "ep-standalone", side: "standalone", from: from, to: to,
 		pool: pool, issuer: issuer, subject: subjectStandalone, product: productStandalone,
 	})

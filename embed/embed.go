@@ -32,7 +32,7 @@ import (
 // credentials supplies a billingauth.DelegatedAuthenticator returning the
 // explicitly mapped {tenant, subject, permissions} principal, and the
 // standalone gin handler (pkg/embedded/gin.StandaloneHandler over Runtime.Embedded())
-// mounts /v1/self/* + /v1/merchant-admin/* authenticated by it — no control
+// mounts /v1/me/* + /v1/orgs/* authenticated by it — no control
 // plane required. For example:
 //
 //	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
@@ -72,9 +72,9 @@ type Options struct {
 	// engine/client.
 	Merchant string
 
-	// MerchantConfiguration seeds merchant_configurations for the bound
-	// Merchant at startup, mirroring push-merchant-config for embedded hosts.
-	MerchantConfiguration openrails.MerchantConfigurationInput
+	// MerchantSettings seeds merchant-owned settings for the bound Merchant at
+	// startup, mirroring /v1/merchant/settings for embedded hosts.
+	MerchantSettings openrails.MerchantSettings
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -159,7 +159,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 			tn, rerr := boot.ProvisionMerchant(ctx, boot.ProvisionMerchantRequest{
 				Config:   opts.Config,
 				Database: a.Runtime.DB,
-				Merchant: embeddedManifestMerchant(opts.Merchant, opts.MerchantConfiguration),
+				Merchant: embeddedManifestMerchant(opts.Merchant, opts.MerchantSettings),
 				Options:  boot.MerchantManifestReconcileOptions{Insert: true},
 			})
 			if rerr != nil {
@@ -177,14 +177,14 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{emb: emb, svc: svc, tenantID: boundMerchant}
-	if hasMerchantConfiguration(opts.MerchantConfiguration) {
+	if hasMerchantSettings(opts.MerchantSettings) {
 		if boundMerchant.IsZero() {
 			_ = emb.Close(ctx)
-			return nil, fmt.Errorf("openrails embed: MerchantConfiguration requires Merchant")
+			return nil, fmt.Errorf("openrails embed: MerchantSettings requires Merchant")
 		}
-		if err := r.Client().SetMerchantSettings(ctx, startupMerchantSettings(opts.Merchant, opts.MerchantConfiguration)); err != nil {
+		if err := r.Client().SetMerchantSettings(ctx, startupMerchantSettings(opts.Merchant, opts.MerchantSettings)); err != nil {
 			_ = emb.Close(ctx)
-			return nil, fmt.Errorf("openrails embed: seed merchant configuration: %w", err)
+			return nil, fmt.Errorf("openrails embed: seed merchant settings: %w", err)
 		}
 	}
 	if opts.RunWorkers {
@@ -196,23 +196,23 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	return r, nil
 }
 
-func hasMerchantConfiguration(in openrails.MerchantConfigurationInput) bool {
-	return in.Profile != nil || len(in.DelegatedInvokerWastedSpendWindows) > 0
+func hasMerchantSettings(in openrails.MerchantSettings) bool {
+	return in.Profile != nil ||
+		len(in.TierSchedules) > 0 ||
+		len(in.TierSpendLimits) > 0 ||
+		len(in.DelegatedInvokerWastedSpendLimits) > 0
 }
 
-func startupMerchantSettings(merchantSlug string, in openrails.MerchantConfigurationInput) openrails.MerchantSettings {
+func startupMerchantSettings(merchantSlug string, in openrails.MerchantSettings) openrails.MerchantSettings {
 	if in.Profile != nil && in.Profile.DisplayName == "" {
 		profile := *in.Profile
 		profile.DisplayName = merchantSlug
 		in.Profile = &profile
 	}
-	return openrails.MerchantSettings{
-		Profile:                           in.Profile,
-		DelegatedInvokerWastedSpendLimits: in.DelegatedInvokerWastedSpendWindows,
-	}
+	return in
 }
 
-func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantConfigurationInput) boot.ManifestMerchant {
+func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantSettings) boot.ManifestMerchant {
 	displayName := merchantSlug
 	profile := boot.ManifestMerchantProfile{}
 	if cfg.Profile != nil {

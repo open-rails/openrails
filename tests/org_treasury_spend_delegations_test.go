@@ -42,6 +42,7 @@ func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 
 	invokerKey := uuid.NewString()
 	roleKey := uuid.NewString()
+	tierKey := "tier_1"
 
 	firstDoc := map[string]any{"delegations": []map[string]any{
 		{
@@ -58,13 +59,20 @@ func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 				{"key": "week", "window_seconds": 604800, "limit": 9000, "currency": "USD"},
 			},
 		},
+		{
+			"scope":     "invoker_tier",
+			"scope_key": tierKey,
+			"windows": []map[string]any{
+				{"key": "month", "window_seconds": 2592000, "limit": 15000, "currency": "USD"},
+			},
+		},
 	}}
 	resp := requestOrgTreasuryJSON(t, srv, http.MethodPut, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations", firstDoc)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
 	resp = requestOrgTreasuryJSON(t, srv, http.MethodGet, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations", nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
-	require.Len(t, decodeDelegations(t, resp.body), 2)
+	require.Len(t, decodeDelegations(t, resp.body), 3)
 
 	secondDoc := map[string]any{"delegations": []map[string]any{
 		{

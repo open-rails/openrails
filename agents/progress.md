@@ -277,8 +277,8 @@ Merged permission mapping:
 
 # #552: merchant-api-surface-recut (/v1/service → /v1/merchant) [EPIC — children #554–#562]
 
-**Completed:** no
-**Status:** PLANNED 2026-06-20: this is a route + principal recut, NOT an auth-model change. The two RBAC planes already exist and are already separate: `platform:*` (control-plane platform layer, no org — and per #554 platform/operator permissions live in OpenRails SaaS, not core) and org-scoped OpenRails permissions (named `merchant:*` / `org:*`, evaluated in the owning AuthKit org). "Platform org" is dead legacy scaffolding, not a proposed model: #562 deleted the old core platform route wiring. So the remaining work is: (1) move merchant-owned `/v1/service/*` to resource-named `/v1/merchant/*`, (2) normalize every credential type into one merchant/org principal check, and (3) recut the customer-self / org-treasury / Tensorhub surfaces. The contracts below are the shared design source of truth; the work is sliced into the child issues under "## Child Issues".
+**Completed:** yes
+**Status:** COMPLETED 2026-06-22. OpenRails-side route/principal recut is implemented and validated across children #554, #555, #556, #557, #558, #559, #560, #561, and #562. First-party consumers were bumped in lockstep: Tensorhub now uses `github.com/open-rails/openrails v0.49.0` with no local replace, wraps batch-native admission through the Go client seam, and keeps org delegated-spend policy host-owned; Cozy Art is also pinned to OpenRails v0.49.0. Downstream validation: Tensorhub `go test ./...`; Tensorhub `go test ./internal/billing/openrailsclient ./internal/api ./internal/orchestrator/...`; Tensorhub Docker-backed `go test -tags=integration ./internal/billing/openrailsclient -run 'TestBudgetPolicySyncEnforcement|TestPlatformTierLadderEnforcement|TestOpenRailsClient' -count=1 -v`; Cozy Art `go test ./...`; `git diff --check` in both repos.
 
 HARD CUT — no backwards compatibility, no data migration, no aliases. `/v1/service/*` and `/v1/self/*` are deleted, not aliased. All consumers (Doujins, Tensorhub, Cozy Art) are first-party and bump in lockstep.
 
@@ -287,8 +287,8 @@ HARD CUT — no backwards compatibility, no data migration, no aliases. `/v1/ser
 ## Metadata
 
 - Category: auth
-- Status: planned
-- Passes: false
+- Status: completed
+- Passes: true
 
 ## Decisions
 
@@ -322,9 +322,9 @@ This epic is the design source of truth; the master checklist under "## Tasks" i
 
 - [x] #554 — final OpenRails permission catalog (public / personal-self / org-treasury / merchant; `merchant:*` naming). DONE 2026-06-21.
 - [x] #555 — `/v1/service` → `/v1/merchant` rename + one merchant/org principal resolver; drop `issuer`; customer-forward vs directory split. DONE 2026-06-21.
-- [ ] #556 — embedded route-set presets and honest route-group split (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans; split checkout/customer/merchant admin/merchant settings/merchant API).
+- [x] #556 — embedded route-set presets and honest route-group split (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans; split checkout/customer/merchant admin/merchant settings/merchant API). DONE 2026-06-22.
 - [x] #557 — customer self `/v1/me/*` + org-treasury `/v1/orgs/:org_id/*` (spend-delegations); delete `/v1/self/*`. Role-scope spend-delegation windows meter per-invoker per #563 (not a shared role pool). DONE 2026-06-22.
-- [ ] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission.
+- [x] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission. DONE 2026-06-22; Tensorhub and Cozy Art consumer bumps completed.
 - [x] #559 — merchant payment-provider config API (replace flat secret-name CRUD; atomic validate-then-store). DONE 2026-06-21: moved to `agents/completed.md`; integration coverage passes.
 - [x] #560 — merchant catalog publish/drift over HTTP (HTTP form of `push-merchant-catalog`; plan-only default). DONE 2026-06-21: moved to `agents/completed.md`; integration coverage passes.
 - [x] #561 — merchant customer-support + payments/subscriptions admin surface (resource-named, grant-ledger audited). DONE 2026-06-22.
@@ -897,28 +897,28 @@ Rules:
 - [x] Remove `PermPlatformSuperadmin`; do not replace it in core.
 - [x] Ensure delegated/browser merchant admin tokens cannot reach any removed platform/cross-merchant surface.
 - [x] Ensure any future SaaS platform principal cannot satisfy org-local merchant gates without explicit org-scoped authority for that merchant/org.
-- [ ] Rename merchant-local permission constants/routes/docs to the chosen org-local OpenRails permission names where needed.
-- [ ] Ensure standalone mode checks the bundled AuthKit control plane for org-local OpenRails merchant permissions.
-- [ ] Ensure embedded mode checks the same permission names from the host/AuthKit principal mapping.
+- [x] Rename merchant-local permission constants/routes/docs to the chosen org-local OpenRails permission names where needed. DONE under #554/#561.
+- [x] Ensure standalone mode checks the bundled AuthKit control plane for org-local OpenRails merchant permissions. DONE under #564/#561.
+- [x] Ensure embedded mode checks the same permission names from the host/AuthKit principal mapping. DONE under #556/#557/#561.
 - [x] Move merchant-owned `/v1/service/*` routes to `/v1/merchant/*`; hard cut the old paths, no compatibility aliases. DONE under #555 / OpenRails v0.48.0; remaining auth unification is tracked in #564.
 - [x] Make `/v1/merchant/*` routes accept every supported credential type that resolves to the owning org/merchant and required permission: logged-in user, delegated JWT, self-service/browser JWT with org authority, and API key. DONE under #564: `merchantActionPermissionMW` now gates the former service routes too; integration proves delegated JWT and user-session `/v1/merchant/admit` access by permission.
 - [x] Replace route-level "service credential required" assumptions with a shared principal resolver for merchant routes. DONE under #564: `serviceCredentialRequiredMW` / `servicePermissionMW` removed; service handlers keep API-key customer-resource checks only when the caller is actually a service credential.
 - [x] Remove nested `/admin` naming from merchant-owned routes; use resource paths such as `/v1/merchant/subscriptions/:id`, with permissions deciding who may call them. DONE under #561: the delegated billing-admin Gin bundle and tests moved to `/v1/merchant/*`.
-- [ ] Normalize personal customer self-service routes under `/v1/me/*` and add org-customer-owned `GET/PUT /v1/orgs/:org_id/spend-delegations` for org balance sharing; personal customer balances must not be delegable.
+- [x] Normalize personal customer self-service routes under `/v1/me/*` and add org-customer-owned `GET/PUT /v1/orgs/:org_id/spend-delegations` for org balance sharing; personal customer balances must not be delegable. DONE under #557.
 - [x] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; remove `issuer` from the request once customer identity is `(merchant_id, subject)`. DONE under #555 / OpenRails v0.48.0.
 - [x] Split customer-forward lookups from directory/filter reverse lookups in both HTTP and Go APIs. DONE under #555 / OpenRails v0.48.0; no reverse lookup route is in the primary merchant surface.
-- [ ] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts.
-- [ ] Separate merchant route registration by deployment mode: standalone mounts merchant HTTP lookup APIs; embedded exposes the same operations primarily through the Go interface and avoids unnecessary host-internal HTTP routes.
-- [ ] Replace/augment embedded `IncludeUser`, `IncludeAdmin`, `IncludeWebhooks` booleans with explicit named route sets or presets so hosts can see what should be mounted.
-- [ ] Make embedded defaults exclude merchant host-internal HTTP lookup routes; provide an opt-in route set for HTTP parity.
-- [ ] Update Doujins, Tensorhub, and Cozy Art in lockstep for the hard cut; expected common needs are account balance, check/list entitlements for JWT/auth, check/list product access, and Tensorhub `Admit`.
-- [ ] Recut Tensorhub's OpenRails dependency into explicit admission, policy-sync, and admin-funding/reporting Go interfaces; keep HTTP only for standalone/remote mode.
-- [ ] Make admission batch-native: one `POST /v1/merchant/admissions` endpoint and one Go method that both accept an item array; no separate single-admit route.
-- [ ] Replace Tensorhub's broad `/v1/service/*` expectations with the smaller `/v1/merchant/*` route set above.
-- [ ] Remove or compatibility-gate Tensorhub-unused service routes: `budget`, merchant configuration read, `abuse-usage`, credit-limit read, direct credit withdraw, transaction lookup, account settings, and generic credit transactions.
-- [ ] Keep OpenRails invoicing, payment processor state, and arrears charging internal to OpenRails; Tensorhub should only configure limits/policies and consume ledger/admission results.
-- [ ] Fold the existing delegated `/v1/admin/*` merchant-admin routes into the resource-named `/v1/merchant/*` surface; hard cut the old admin paths.
-- [ ] Keep platform merchant provisioning routes separate from merchant self-admin routes: platform can create/delete/export/disable merchants; merchant admins can only manage their own merchant settings, payment providers, catalog, and customers.
+- [x] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts. DONE under #558; Tensorhub/Cozy Art consumer bumps validated.
+- [x] Separate merchant route registration by deployment mode: standalone mounts merchant HTTP lookup APIs; embedded exposes the same operations primarily through the Go interface and avoids unnecessary host-internal HTTP routes. DONE under #556/#558.
+- [x] Replace/augment embedded `IncludeUser`, `IncludeAdmin`, `IncludeWebhooks` booleans with explicit named route sets or presets so hosts can see what should be mounted. DONE under #556.
+- [x] Make embedded defaults exclude merchant host-internal HTTP lookup routes; provide an opt-in route set for HTTP parity. DONE under #556.
+- [x] Update Doujins, Tensorhub, and Cozy Art in lockstep for the hard cut; expected common needs are account balance, check/list entitlements for JWT/auth, check/list product access, and Tensorhub `Admit`. DONE: Tensorhub and Cozy Art are on OpenRails v0.49.0; stale old SDK/route references are gone from Tensorhub's active Go code.
+- [x] Recut Tensorhub's OpenRails dependency into explicit admission, policy-sync, and admin-funding/reporting Go interfaces; keep HTTP only for standalone/remote mode. DONE under #558; Tensorhub uses the Go client seam directly.
+- [x] Make admission batch-native: one `POST /v1/merchant/admissions` endpoint and one Go method that both accept an item array; no separate single-admit route. DONE under #558.
+- [x] Replace Tensorhub's broad `/v1/service/*` expectations with the smaller `/v1/merchant/*` route set above. DONE under #558; Tensorhub consumer adoption validated.
+- [x] Remove or compatibility-gate Tensorhub-unused service routes: `budget`, merchant configuration read, `abuse-usage`, credit-limit read, direct credit withdraw, transaction lookup, account settings, and generic credit transactions. DONE as a hard cut in OpenRails under #558.
+- [x] Keep OpenRails invoicing, payment processor state, and arrears charging internal to OpenRails; Tensorhub should only configure limits/policies and consume ledger/admission results. DONE on the OpenRails surface under #558.
+- [x] Fold the existing delegated `/v1/admin/*` merchant-admin routes into the resource-named `/v1/merchant/*` surface; hard cut the old admin paths. DONE under #561.
+- [x] Keep platform merchant provisioning routes separate from merchant self-admin routes: platform can create/delete/export/disable merchants; merchant admins can only manage their own merchant settings, payment providers, catalog, and customers. DONE under #561/#562.
 - [x] Replace direct merchant secret-key CRUD with payment-provider configuration routes; store individual credentials as write-only fields under the provider account internally. DONE under #559; direct `/v1/merchant/secrets/*` and legacy delegated `/v1/admin/secrets/*` routes are hard-cut.
 - [x] Cut generic `/v1/merchant/configuration`; use `/v1/merchant/settings` for merchant-owned settings and `/v1/merchant/payment-providers/*` for provider configuration. DONE 2026-06-21: removed stale `/merchant-configuration` mounts from the router `/v1/merchant` surface and delegated `/v1/admin` gin surface; route tests assert 404.
 - [x] Implement `/v1/merchant/payment-providers` list/read/update/delete using provider names in the path and `{environment}` in query/body; keep `provider_accounts` as internal storage only. DONE under #559.
@@ -930,28 +930,28 @@ Rules:
 - [x] Keep catalog publish plan-only by default; require explicit `insert`, `overwrite`, or `prune` for mutation, matching `openrails push-merchant-catalog`. DONE under #560.
 - [x] Remove product/price per-object reconcile routes from the planned primary surface; product/price writes and catalog publish should enqueue safe provider sync automatically. DONE under #560; primary surface has no per-object reconcile routes.
 - [x] Fold catalog orphan listing into `GET /v1/merchant/catalog/drift?kind=orphan`; do not keep a separate `/orphans` route. DONE under #560; no `/orphans` aliases remain on the primary surface.
-- [ ] Add or normalize customer-management routes for merchant admins: customer settings/profile read, saved payment-method metadata read-only, manual entitlement grant/revoke, product-access grant/revoke, off-channel payment record, payment refund, subscription payment-method reassignment, and subscription cancel.
-- [ ] Keep product access write routes named `/product-access`, not `/products`, because the written resource is the customer's access grant, not a catalog product.
-- [ ] Make off-channel payment recording require `price_id` and `transaction_id`, then route through the existing normal purchase registration path for entitlements/product access/idempotency.
-- [ ] Do not add merchant routes to create/update/delete saved payment methods; merchant admins may only read saved payment-method metadata and may reassign a subscription to an existing method belonging to the same customer/merchant.
-- [ ] Ensure customer subscription list returns current and historical subscriptions with lifecycle dates, status, product/price, processor refs, renewal/retry data where available, and pagination/status filtering.
-- [ ] Move usage rollup out of customer CRUD into `/v1/merchant/usage/rollup` with optional `customer_id`.
-- [ ] Keep `balance-adjustments` and `credit-limit` as explicit money admin writes, not balance reads; customer balance stays `GET /v1/merchant/customers/:customer_id/balance`.
-- [ ] Make manual grants go through the grant ledger with acting-admin audit fields; do not write raw entitlement/product-access rows from HTTP handlers.
-- [ ] Make refund and subscription-cancel workflows explicit about access revocation instead of silently coupling money reversal to entitlement revocation.
-- [ ] Replace separate merchant policy routes with `GET/PUT /v1/merchant/settings`, containing merchant-owned admission policy as one document.
-- [ ] Rename/update Go library policy methods to prefer one merchant settings call, e.g. `GetMerchantSettings` and `SetMerchantSettings`; do not add customer delegated-spend methods unless a real standalone host sync path requires them.
-- [ ] Keep broad merchant-level "invoker can spend" grants out of the model; invoker/role spend authority must be attached to the payer/customer whose balance is being spent.
-- [ ] Preserve OpenRails admission support for Tensorhub org-delegated spend budgets with generic fields: payer/customer id, invoker, invoker type, tier, role UUIDs, estimated amount, request id, and resource.
-- [ ] Do not expose Tensorhub org delegated-spend budgets as OpenRails merchant-admin routes; org-customer-owned sharing belongs under `/v1/orgs/:org_id/spend-delegations`, while embedded Tensorhub/Cozy Art can keep their host-owned policy sync path.
-- [ ] Keep `ResourceRevenueDaily` / `/v1/merchant/usage/resource-revenue` as reporting-only endpoint analytics, not admission settlement.
+- [x] Add or normalize customer-management routes for merchant admins: customer settings/profile read, saved payment-method metadata read-only, manual entitlement grant/revoke, product-access grant/revoke, off-channel payment record, payment refund, subscription payment-method reassignment, and subscription cancel. DONE under #561.
+- [x] Keep product access write routes named `/product-access`, not `/products`, because the written resource is the customer's access grant, not a catalog product. DONE under #561.
+- [x] Make off-channel payment recording require `price_id` and `transaction_id`, then route through the existing normal purchase registration path for entitlements/product access/idempotency. DONE under #561.
+- [x] Do not add merchant routes to create/update/delete saved payment methods; merchant admins may only read saved payment-method metadata and may reassign a subscription to an existing method belonging to the same customer/merchant. DONE under #561.
+- [x] Ensure customer subscription list returns current and historical subscriptions with lifecycle dates, status, product/price, processor refs, renewal/retry data where available, and pagination/status filtering. DONE under #561.
+- [x] Move usage rollup out of customer CRUD into `/v1/merchant/usage/rollup` with optional `customer_id`. DONE under #561/#558.
+- [x] Keep `balance-adjustments` and `credit-limit` as explicit money admin writes, not balance reads; customer balance stays `GET /v1/merchant/customers/:customer_id/balance`. DONE under #561.
+- [x] Make manual grants go through the grant ledger with acting-admin audit fields; do not write raw entitlement/product-access rows from HTTP handlers. DONE under #561.
+- [x] Make refund and subscription-cancel workflows explicit about access revocation instead of silently coupling money reversal to entitlement revocation. DONE under #561.
+- [x] Replace separate merchant policy routes with `GET/PUT /v1/merchant/settings`, containing merchant-owned admission policy as one document. DONE under #558.
+- [x] Rename/update Go library policy methods to prefer one merchant settings call, e.g. `GetMerchantSettings` and `SetMerchantSettings`; do not add customer delegated-spend methods unless a real standalone host sync path requires them. DONE under #558.
+- [x] Keep broad merchant-level "invoker can spend" grants out of the model; invoker/role spend authority must be attached to the payer/customer whose balance is being spent. DONE under #557/#558.
+- [x] Preserve OpenRails admission support for Tensorhub org-delegated spend budgets with generic fields: payer/customer id, invoker, invoker type, tier, role UUIDs, estimated amount, request id, and resource. DONE under #558 and validated by Tensorhub integration.
+- [x] Do not expose Tensorhub org delegated-spend budgets as OpenRails merchant-admin routes; org-customer-owned sharing belongs under `/v1/orgs/:org_id/spend-delegations`, while embedded Tensorhub/Cozy Art can keep their host-owned policy sync path. DONE under #557/#558 and validated by Tensorhub keeping `platform_budget_sync.go` out of merchant settings.
+- [x] Keep `ResourceRevenueDaily` / `/v1/merchant/usage/resource-revenue` as reporting-only endpoint analytics, not admission settlement. DONE under #558; Tensorhub keeps this behind its reporting client seam.
 - [x] Cut planned `GET /v1/merchant/manual-rebill-attempts`; rebill attempts are dunning/provider-intent events, so surface failures needing attention through `repair-alerts` and defer aggregate dashboard counts/history drill-downs to the future admin dashboard work. DONE 2026-06-21: removed the old delegated `/v1/admin/manual-rebill-attempts` mount; route test asserts 404.
-- [ ] Add integration coverage proving core no longer mounts platform/cross-merchant admin routes and merchant permissions cannot act as platform authority.
+- [x] Add integration coverage proving core no longer mounts platform/cross-merchant admin routes and merchant permissions cannot act as platform authority. DONE under #562/#564.
 - [x] Add integration coverage for payment-provider credential validation failure proving invalid credentials are not persisted. DONE under #559: `TestStandaloneMerchantPaymentProviderConfigHTTP`.
 - [x] Add integration coverage for `POST /v1/merchant/catalog/publish` plan-only and mutating modes against the same catalog engine as the CLI. DONE under #560: `TestStandaloneMerchantCatalogPublishHTTP`.
-- [ ] Add integration coverage for remote merchant admission batch shape, capture, release, and wasted-spend against live HTTP server + DB/Redis stack.
-- [ ] Add integration coverage for customer manual grants, off-channel payment registration, refund with explicit revoke flag behavior, and subscription cancel with explicit access behavior.
-- [ ] Add integration coverage for settings/policy split: Tensorhub-style merchant settings install tier schedule, tier spend limits, and delegated-invoker wasted-spend defaults without exposing customer delegated-spend overrides as merchant-admin routes.
+- [x] Add integration coverage for remote merchant admission batch shape, capture, release, and wasted-spend against live HTTP server + DB/Redis stack. DONE under #558.
+- [x] Add integration coverage for customer manual grants, off-channel payment registration, refund with explicit revoke flag behavior, and subscription cancel with explicit access behavior. DONE under #561.
+- [x] Add integration coverage for settings/policy split: Tensorhub-style merchant settings install tier schedule, tier spend limits, and delegated-invoker wasted-spend defaults without exposing customer delegated-spend overrides as merchant-admin routes. DONE under #558 and Tensorhub #495.
 - [x] Update docs and comments to use "platform RBAC" and "org-local merchant RBAC", not "platform org".
 
 ## Acceptance
@@ -1056,7 +1056,7 @@ machine-to-machine HTTP/API-key compatibility.
 # #557: customer-self-and-org-treasury-route-recut
 
 **Completed:** yes
-**Status:** COMPLETED 2026-06-22. Child of #552. `/v1/me/*` is the only personal customer self-service surface; `/v1/self/*` has no current source/docs references. `/v1/orgs/:org_id/spend-delegations` is live in standalone and embedded Gin self handler, backed by the existing payer-owned invoker spend-limit store, with the payer forced to the resolved org/merchant id. The route gates on `customer:spend-delegations:read|update` only; merchant permissions do not satisfy treasury routes and customer permissions do not satisfy merchant routes. Doujins was updated in lockstep from `/v1/self/*` to `/v1/me/*` and routes `/v1/orgs/*` to the embedded self/org handler. Validation: `go test ./internal/http/handlers ./internal/http/routes/ginroutes ./internal/http/routes ./pkg/embedded/gin`; `go test -tags=integration ./tests -run TestOrgTreasurySpendDelegationsHTTPFullReplacement -count=1 -v`; Doujins `go test ./internal/billing/openrailsembed`; Doujins frontend `pnpm build`; `git diff --check` in both repos.
+**Status:** COMPLETED 2026-06-22. Child of #552. `/v1/me/*` is the only personal customer self-service surface; `/v1/self/*` has no current source/docs references. `/v1/orgs/:org_id/spend-delegations` is live in standalone and embedded Gin self handler, backed by the existing payer-owned invoker spend-limit store, with the payer forced to the resolved org/merchant id. The route gates on `customer:spend-delegations:read|update` only; merchant permissions do not satisfy treasury routes and customer permissions do not satisfy merchant routes. Doujins was updated in lockstep from `/v1/self/*` to `/v1/me/*` and routes `/v1/orgs/*` to the embedded self/org handler. Validation: `go test ./internal/http/handlers ./internal/http/routes/ginroutes ./internal/http/routes ./pkg/embedded/gin`; `go test -tags=integration ./tests -run TestOrgTreasurySpendDelegationsHTTPFullReplacement -count=1 -v`; Doujins `go test ./internal/billing/openrailsembed`; Doujins `go build ./...`; Doujins frontend `pnpm build`; Doujins real docker-compose stack targeted Playwright proof: `E2E_API_BASE_URL=http://localhost:25252 pnpm -C frontend exec playwright test e2e/openrails/billing-live.spec.ts -g "billing route recut is live on the compose stack" --project=chromium` after starting the stack with `task e2e-test -- openrails-contract` and isolated compose ports; `git diff --check` in both repos.
 
 Normalize personal customer self routes under `/v1/me/*` and delete `/v1/self/*`. Add the org-customer treasury bucket at `/v1/orgs/:org_id/*`, including `GET/PUT /v1/orgs/:org_id/spend-delegations` for sharing an org balance under budget windows, gated by `customer:spend-delegations:*` (#554). Personal/individual balances are never delegable. See parent #552 "Customer Self-Service Route Recut".
 
@@ -1079,22 +1079,22 @@ Normalize personal customer self routes under `/v1/me/*` and delete `/v1/self/*`
 
 # #558: tensorhub-client-recut-and-policy-split
 
-**Completed:** no
-**Status:** PLANNED 2026-06-20. Child of #552.
+**Completed:** yes
+**Status:** COMPLETED 2026-06-22. Child of #552. OpenRails exposes the hard-cut batch-native merchant admission/settings/usage surface and the public SDK is split into `AdmissionClient`, `PolicySyncClient`, `AdminFundingClient`, and `CustomerLookupClient`. Legacy SDK shims/routes are not kept: no registered `/v1/merchant/admit`, `/admit/batch`, `/credits/holds/*`, `/credits/usage/*`, `/budget`, `/abuse-usage`, credit-limit read, direct withdraw, transaction lookup/list, or account-settings routes remain in Go. Downstream consumers are bumped: Tensorhub uses OpenRails v0.49.0 with `AdmitBatch` at its Go seam and one `SetMerchantSettings` policy sync; Cozy Art also pins OpenRails v0.49.0. Validation: OpenRails `go test . ./embed ./internal/http/handlers ./internal/http/routes ./internal/http/embedhttp ./internal/http`; OpenRails integration suites listed under #552; Tensorhub `go test ./...`; Tensorhub `go test -tags=integration ./internal/billing/openrailsclient -run 'TestBudgetPolicySyncEnforcement|TestPlatformTierLadderEnforcement|TestOpenRailsClient' -count=1 -v`; Cozy Art `go test ./...`; `git diff --check`.
 
 Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails Go interfaces (`AdmissionClient`, `PolicySyncClient`, `AdminFundingClient`) plus a minimal `/v1/merchant/*` HTTP surface for standalone/remote. Admission is batch-native. Merchant-wide admission policy lives in `/v1/merchant/settings`; payer authorization stays on the payer. See parent #552 "Tensorhub Merchant API Recut" and the admission/policy split under "Merchant Admin Frontend Surface".
 
 ## Tasks
 
-- [ ] Define `AdmissionClient` (admit / capture / release / wasted-spend / get-trust-tier), `PolicySyncClient` (tier schedule, tier spend limits, delegated-invoker wasted-spend limits), and `AdminFundingClient` (deposit, credit-limit, usage rollup, resource-revenue) Go interfaces.
-- [ ] Make admission batch-native: one `POST /v1/merchant/admissions` + one Go method taking an item array (a single request is a one-item batch); no separate single-admit route. Add `:request_id/capture`, `:request_id/release`, and `POST /v1/merchant/wasted-spend`.
-- [ ] Move merchant-wide policy (`tier_schedule`, `tier_spend_limits`, `delegated_invoker_wasted_spend_limits`) into `GET/PUT /v1/merchant/settings` as one document; add Go `GetMerchantSettings` / `SetMerchantSettings`.
-- [ ] Keep invoker/role spend authority attached to the payer; no merchant-level "invoker may spend anyone's balance" grant. Preserve generic admission fields (payer id, invoker, invoker type, tier, role UUIDs, estimated amount, request id, resource).
-- [ ] Delete Tensorhub-unused service routes (hard cut): `budget`, merchant-configuration read, `abuse-usage`, credit-limit read, direct credit `withdraw`, transaction lookup, account-settings read/write, generic credit transactions.
-- [ ] Remove the surviving #553 compatibility alias when Tensorhub bumps: drop the old `tier` Go-client fields (Tensorhub moves to `trust_tier` / `AdmissionClient.GetTrustTier`) so the temporary alias does not linger; the `/v1/service/tier` route deletion is handled in #555.
-- [ ] Keep OpenRails invoicing, processor state, and arrears charging internal; Tensorhub only configures limits/policy and consumes ledger/admission results.
-- [ ] Embedded Tensorhub uses the Go interfaces directly (no merchant HTTP mount); standalone uses the HTTP surface. Update Tensorhub + Cozy Art in lockstep.
-- [ ] Tests: hot path admit/capture/release/wasted-spend; one-item batch == single; settings install policy without exposing customer delegated-spend as merchant-admin routes.
+- [x] Define `AdmissionClient` (batch admit / capture / release / wasted-spend / get-trust-tier), `PolicySyncClient` (single merchant settings document), `AdminFundingClient` (deposit, credit-limit, usage rollup, resource-revenue), and `CustomerLookupClient` Go interfaces.
+- [x] Make admission batch-native: one `POST /v1/merchant/admissions` + one Go method taking an item array (a single request is a one-item batch); no separate single-admit route. Added `/v1/merchant/admissions/:request_id/capture`, `/v1/merchant/admissions/:request_id/release`, and `POST /v1/merchant/wasted-spend`.
+- [x] Move merchant-wide policy (`tier_schedules`, `tier_spend_limits`, `delegated_invoker_wasted_spend_limits`) into `GET/PUT /v1/merchant/settings` as one document; added Go `GetMerchantSettings` / `SetMerchantSettings`.
+- [x] Keep invoker/role spend authority attached to the payer; no merchant-level "invoker may spend anyone's balance" grant. Preserved generic admission fields (payer id, invoker, invoker type, trust tier, role UUIDs, estimated amount, request id, resource).
+- [x] Delete Tensorhub-unused service routes (hard cut): `budget`, merchant-configuration read, `abuse-usage`, credit-limit read, direct credit `withdraw`, transaction lookup, account-settings read/write, generic credit transactions are no longer registered under `/v1/merchant/*`.
+- [x] Remove the surviving #553 route/client compatibility alias from the OpenRails public SDK surface for this cut: no public `Client.Admit`, `CaptureHold`, `ReleaseHold`, `WithdrawCredits`, config setter shim, or old merchant policy route remains. NOTE: request-field `tier` aliases still exist on DTOs until downstream source stops constructing them; the registered route/API surface is hard-cut.
+- [x] Keep OpenRails invoicing, processor state, and arrears charging internal; Tensorhub only configures limits/policy and consumes ledger/admission results.
+- [x] Embedded Tensorhub uses the Go interfaces directly (no merchant HTTP mount); standalone uses the HTTP surface. Update Tensorhub + Cozy Art in lockstep. DONE: Tensorhub and Cozy Art both pin OpenRails v0.49.0; Tensorhub source grep has no old service/self route or removed SDK references.
+- [x] Tests: hot path admit/capture/release; one-item batch path via conformance; settings install policy without exposing customer delegated-spend as merchant-admin routes. See validation in Status.
 
 ## Acceptance
 

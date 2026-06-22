@@ -2,12 +2,12 @@
 
 // Package integrationharness boots REAL OpenRails servers over REAL HTTP for
 // integration tests — no stubs. It exposes two surfaces, both implementing the
-// same service-credential-authenticated /v1/service/* contract, so any integration
+// same service-credential-authenticated /v1/merchant/* contract, so any integration
 // test can drive identical operation scripts against both and assert parity (the
 // embed conformance test is the first consumer; #485):
 //
 //   - EMBEDDED no-auth HOST (Server 1, ≈ doujins minus auth). Builds the engine
-//     with embed.New (host-owns-auth) and serves the embedded /v1/service/*
+//     with embed.New (host-owns-auth) and serves the embedded /v1/merchant/*
 //     surface over httptest with a TRUSTING API-key resolver that accepts
 //     every request and pins the bound merchant — it verifies NOTHING (fine for
 //     tests). This is "doujins with a no-op authenticator": real HTTP, real
@@ -20,7 +20,7 @@
 //     OpenRails-owned AuthKit control plane attached, provisions the merchant via
 //     the REAL control-plane bootstrap (links owner_org_id + mints a real
 //     admin API key through AuthKit core), and authenticates the client
-//     with that real token. The /v1/service/* requests are resolved by the real
+//     with that real token. The /v1/merchant/* requests are resolved by the real
 //     ServiceCredentialRequired -> control plane ResolveAPIKey -> AuthKit core
 //     path, exercising #481 role-based merchant authz. NO stubResolver.
 //
@@ -170,7 +170,7 @@ func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.
 }
 
 // StartEmbeddedHost boots Server 1: an embedded engine (embed.New, host-owns-auth)
-// over the shared Postgres + Redis, serving the real embedded /v1/service/*
+// over the shared Postgres + Redis, serving the real embedded /v1/merchant/*
 // surface over httptest behind the REAL ServiceCredentialRequired middleware wired to
 // a TRUSTING resolver (no auth). It registers the bound merchant (embed.New does
 // this) and returns a Surface whose client speaks real HTTP. currency is the
@@ -217,7 +217,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // Redis with the OpenRails control plane attached, then provisions the merchant
 // through the REAL control-plane bootstrap (links owner_org_id + mints a real
 // admin API key via AuthKit core) and returns a Surface whose client
-// authenticates with that real token. The /v1/service/* path is authenticated by
+// authenticates with that real token. The /v1/merchant/* path is authenticated by
 // the real ServiceCredentialRequired -> ResolveAPIKey -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
 // StartStandalone boots the standalone server for an integration test. The server
@@ -302,7 +302,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 // RemoteAppCaller is a remote_application (#76/#484) provisioned
 // against the standalone surface's real control plane: its registered slug/issuer
 // and a freshly minted remote application access token. Present it as a Bearer
-// credential to the /v1/service/* surface to drive the #484 path.
+// credential to the /v1/merchant/* surface to drive the #484 path.
 type RemoteAppCaller struct {
 	Slug   string
 	Issuer string

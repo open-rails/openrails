@@ -164,8 +164,8 @@ func validateOrgSpendDelegations(in []orgSpendDelegation) ([]admission.InvokerSp
 			return nil, fmt.Errorf("delegations[%d].customer_id is not allowed", i)
 		}
 		scope := budgets.NormalizeScope(row.Scope)
-		if scope != budgets.ScopeInvoker && scope != budgets.ScopeRole {
-			return nil, fmt.Errorf("delegations[%d].scope must be %q or %q", i, budgets.ScopeInvoker, budgets.ScopeRole)
+		if scope != budgets.ScopeInvoker && scope != budgets.ScopeRole && scope != budgets.ScopeInvokerTier {
+			return nil, fmt.Errorf("delegations[%d].scope must be %q, %q, or %q", i, budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTier)
 		}
 		scopeKey := strings.TrimSpace(row.ScopeKey)
 		if scopeKey == "" {

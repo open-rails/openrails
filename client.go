@@ -2,7 +2,7 @@
 // interface (Client) with two constructors —
 //
 //   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over its
-//     service-credential-authenticated /v1/service/* routes (this file + remote.go,
+//     service-credential-authenticated /v1/merchant/* routes (this file + remote.go,
 //     ported from the go-client module, which this package supersedes);
 //   - openrails/embed.New(...).Client() runs the engine in-process and adapts
 //     pkg/service.Service to the same interface.
@@ -61,7 +61,7 @@ type AdmissionClient interface {
 type PolicySyncClient interface {
 	GetMerchantSettings(ctx context.Context) (*MerchantSettings, error)
 	SetMerchantSettings(ctx context.Context, settings MerchantSettings) error
-	SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error
+	SetOrgSpendDelegations(ctx context.Context, orgID string, delegations []SpendDelegationInput) error
 }
 
 // AdminFundingClient is the small non-hot-path funding/reporting surface used
@@ -131,22 +131,6 @@ type CustomerID uuid.UUID
 func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id CustomerID) String() string  { return uuid.UUID(id).String() }
 func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-
-// CaptureHoldRequest settles a hold at the actual amount.
-type CaptureHoldRequest struct {
-	RequestID string
-	Amount    int64
-}
-
-// WithdrawCreditsRequest debits credits directly.
-type WithdrawCreditsRequest struct {
-	CustomerID *CustomerID
-	Invoker    string
-	Currency   string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
-}
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
 // promotions, money-in settlement). Amount is in the currency's internal
@@ -245,7 +229,7 @@ type CaptureUsage struct {
 	SourceID  string
 }
 
-// BalanceResponse is the GET /v1/service/credits/balance snapshot (handler
+// BalanceResponse is the GET /v1/merchant/credits/balance snapshot (handler
 // serviceBalanceResponse). NOTE: the wire field for the owed amount is
 // outstanding_owed_amount.
 type BalanceResponse struct {
@@ -300,18 +284,6 @@ type BudgetWindowInput struct {
 	Currency      string `json:"currency,omitempty"`
 }
 
-// MerchantConfigurationInput is the legacy SDK shape adapted onto
-// PUT /v1/merchant/settings.
-type MerchantConfigurationInput struct {
-	// Profile is merchant-owned branding and sender metadata. Nil preserves the
-	// stored profile; a non-nil empty value clears it.
-	Profile *MerchantProfileInput `json:"profile,omitempty"`
-
-	// DelegatedInvokerWastedSpendWindows configures the flat delegated-invoker
-	// abuse backstop. Amounts use the request currency's internal precision.
-	DelegatedInvokerWastedSpendWindows []BudgetWindowInput `json:"delegated_invoker_wasted_spend_windows,omitempty"`
-}
-
 // MerchantProfileInput is public/communication metadata stored per merchant.
 type MerchantProfileInput struct {
 	DisplayName string `json:"display_name,omitempty"`
@@ -335,8 +307,8 @@ type MerchantTierSchedule struct {
 	Schedule []TierScheduleRung `json:"schedule"`
 }
 
-// BudgetWindow is one computed window from POST /v1/service/budget/check,
-// GET /v1/service/budget, and Admit's budget_windows
+// BudgetWindow is one computed window from admission policy checks and Admit's
+// budget_windows
 // (pkg/service.AdmitBudgetWindowDTO on the wire).
 type BudgetWindow struct {
 	Key               string `json:"key"`
@@ -351,8 +323,8 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// PayerSpendLimitInput configures a per-payer trust-tier policy via
-// PUT /v1/service/payer-spend-limits (#298): fixed money-budget windows and wasted
+// PayerSpendLimitInput configures a per-payer trust-tier policy via merchant
+// settings (#298): fixed money-budget windows and wasted
 // spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
 // travels alongside it).
 type PayerSpendLimitInput struct {
@@ -411,7 +383,7 @@ type WastedSpendResponse struct {
 }
 
 // TierScheduleRung is one rung of the persisted same-currency tier ladder set
-// via PUT /v1/service/tier-schedules (#476): a payer reaches Tier once its
+// via merchant settings (#476): a payer reaches Tier once its
 // cumulative paid spend in the schedule currency is at least
 // MinCumulativePaidAmount. Order ascending by MinCumulativePaidAmount (the
 // server sorts defensively regardless).
@@ -430,22 +402,9 @@ type SpendLimitWindow struct {
 	Currency      string `json:"currency,omitempty"`
 }
 
-// InvokerSpendLimitInput configures a per-invoker spend limit via
-// PUT /v1/service/invoker-spend-limits (#473/#517) — the payer's cap on its
-// delegated invokers. Scope is "invoker" (a (subject, invoker) grant), "role"
-// (a (subject, role) pool), or "invoker_tier" (a shared tier grant). ScopeKey is
-// the invoker string, role uuid, or tier key. RoleID is kept as a
-// role-compatible alias for older role callers.
-type InvokerSpendLimitInput struct {
-	Scope    string             `json:"scope"`
-	ScopeKey string             `json:"scope_key,omitempty"`
-	RoleID   string             `json:"role_id,omitempty"`
-	Windows  []SpendLimitWindow `json:"windows"`
-}
-
-// InvokerSpendLimit is one per-invoker spend limit returned by
-// InvokerSpendLimits (#473/#517) — the read-back shape for host reconciliation.
-type InvokerSpendLimit struct {
+// SpendDelegationInput is one payer-owned delegation in
+// /v1/orgs/:org_id/spend-delegations.
+type SpendDelegationInput struct {
 	Scope    string             `json:"scope"`
 	ScopeKey string             `json:"scope_key,omitempty"`
 	RoleID   string             `json:"role_id,omitempty"`

@@ -42,12 +42,12 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 			Authenticator: testEmbedAuthenticator{},
 		},
 		Merchant: slug,
-		MerchantConfiguration: openrails.MerchantConfigurationInput{
+		MerchantSettings: openrails.MerchantSettings{
 			Profile: &openrails.MerchantProfileInput{
 				FromEmail:  "billing@example.com",
 				SupportURL: "https://example.com/support",
 			},
-			DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
+			DelegatedInvokerWastedSpendLimits: []openrails.BudgetWindowInput{
 				{Key: "burst", WindowSeconds: 900, Limit: 123, Currency: money.DefaultCurrency},
 			},
 		},
