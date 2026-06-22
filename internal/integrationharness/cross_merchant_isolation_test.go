@@ -221,6 +221,26 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 	require.NoError(t, json.Unmarshal(body, &admit))
 	require.Len(t, admit.Items, 1)
 	require.True(t, admit.Items[0].Result.Allowed, "delegated admit response must be allowed: %s", string(body))
+
+	globAllowed := surface.RegisterDelegatedCaller(
+		"admit-glob-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
+		dbtest.TestMerchantSlug,
+		uuid.NewString(),
+		[]string{"merchant:*"},
+	)
+	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admissions", globAllowed.Token, map[string]any{"items": []map[string]any{{
+		"customer_id":      payer,
+		"invoker":          "delegated-glob",
+		"invoker_type":     "payer",
+		"currency":         "usd",
+		"estimated_amount": 100,
+		"request_id":       "admit-glob-" + uuid.NewString(),
+	}}})
+	require.Equalf(t, http.StatusOK, status,
+		"delegated JWT with merchant:* must reach admit handler: %s", string(body))
+	require.NoError(t, json.Unmarshal(body, &admit))
+	require.Len(t, admit.Items, 1)
+	require.True(t, admit.Items[0].Result.Allowed, "delegated glob admit response must be allowed: %s", string(body))
 }
 
 func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T) {

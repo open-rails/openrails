@@ -3,15 +3,33 @@
 package tests
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
+
+type testHostPrincipalAuthenticator struct {
+	perms []string
+}
+
+func (a testHostPrincipalAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	return &billingauth.DelegatedPrincipal{
+		MerchantID:   dbtest.TestMerchantID.String(),
+		MerchantSlug: dbtest.TestMerchantSlug,
+		SubjectID:    "11111111-1111-4111-8111-111111111111",
+		Email:        "host-principal@test.example",
+		Permissions:  append([]string(nil), a.perms...),
+	}, nil
+}
 
 func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 	srv := setupTestServer(t)
@@ -91,6 +109,55 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	t.Cleanup(standalone.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodPost, standalone.URL+"/v1/merchant/admissions"))
 	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodGet, standalone.URL+"/v1/merchant/catalog/products"))
+}
+
+func TestHTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions(t *testing.T) {
+	suite := getSharedTestSuite(t)
+
+	settingsCases := []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{name: "exact settings perm", perms: []string{controlplane.PermMerchantCatalogRead}, want: http.StatusOK},
+		{name: "merchant glob settings perm", perms: []string{"merchant:*"}, want: http.StatusOK},
+		{name: "wrong namespace settings perm", perms: []string{controlplane.PermCustomerSpendDelegationsRead}, want: http.StatusForbidden},
+	}
+	for _, tc := range settingsCases {
+		t.Run(tc.name, func(t *testing.T) {
+			asm := embedhttp.FromApp(suite.App)
+			asm.DelegatedAuthenticator = testHostPrincipalAuthenticator{perms: tc.perms}
+			h := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
+				RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings},
+			}))
+			t.Cleanup(h.Close)
+
+			require.Equal(t, tc.want, status(t, h.Client(), http.MethodGet, h.URL+"/billing/v1/merchant/catalog/products"))
+		})
+	}
+
+	apiCases := []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{name: "exact api perm", perms: []string{controlplane.PermMerchantAdmissionsCreate}, want: http.StatusBadRequest},
+		{name: "merchant glob api perm", perms: []string{"merchant:*"}, want: http.StatusBadRequest},
+		{name: "wrong namespace api perm", perms: []string{controlplane.PermCustomerSpendDelegationsRead}, want: http.StatusForbidden},
+	}
+	for _, tc := range apiCases {
+		t.Run(tc.name, func(t *testing.T) {
+			asm := embedhttp.FromApp(suite.App)
+			asm.ServiceCredentialResolver = nil
+			asm.DelegatedAuthenticator = testHostPrincipalAuthenticator{perms: tc.perms}
+			h := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
+				RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI},
+			}))
+			t.Cleanup(h.Close)
+
+			require.Equal(t, tc.want, status(t, h.Client(), http.MethodPost, h.URL+"/billing/v1/merchant/admissions"))
+		})
+	}
 }
 
 func status(t *testing.T, client *http.Client, method, url string) int {

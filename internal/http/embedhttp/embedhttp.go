@@ -160,6 +160,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if routeSets[RouteSetMerchantAPI] {
 		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{
 			ServiceCredentialResolver: s.ServiceCredentialResolver,
+			DelegatedAuthenticator:    s.DelegatedAuthenticator,
 		})
 	}
 	if routeSets[RouteSetWebhooks] {
@@ -192,8 +193,8 @@ func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
 	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetMerchantSettings]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
 	}
-	if routeSets[RouteSetMerchantAPI] && (s == nil || s.ServiceCredentialResolver == nil) {
-		return fmt.Errorf("embedded billing: merchant API route group requires Options.ServiceCredentialResolver")
+	if routeSets[RouteSetMerchantAPI] && (s == nil || (s.ServiceCredentialResolver == nil && s.DelegatedAuthenticator == nil)) {
+		return fmt.Errorf("embedded billing: merchant API route group requires Options.ServiceCredentialResolver or Options.DelegatedAuthenticator")
 	}
 	return nil
 }

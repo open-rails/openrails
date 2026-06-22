@@ -108,20 +108,27 @@ EXCLUDED (consumer-only, stay on `/v1/me/*`): `products`, `products/:id/access`,
 
 # #565: finish #564 uniform auth — glob-aware perms for ALL credential types + embedded in-process host-principal path on /v1/merchant
 
-**Completed:** no
-**Status:** IN_PROGRESS 2026-06-22. Two gaps remain after #564's "all credentials → live perms → ONE gate" model:
+**Completed:** yes
+**Status:** COMPLETED 2026-06-22. Uniform merchant auth is finished. `ResolvedDelegated` and `ResolvedServiceCredential` use AuthKit's namespace-glob matcher; remote-application verifier authority is fed with raw role grant tokens so stored `merchant:*` survives to OpenRails' route gate; and embedded `/v1/merchant/*` route sets accept the in-process `billingauth.DelegatedAuthenticator` host principal, including host-only `RouteSetMerchantAPI`.
 
 **(1) Glob perms were silently restricted.** `ResolvedDelegated.HasPermission` did an EXACT string compare (and `ResolvedServiceCredential.HasPermission` likewise), so a token/key carrying a namespace glob like `merchant:*` matched NO concrete route perm and silently 403'd everywhere — even though AuthKit's verifier already lets a signer MINT a glob within its authority. DECISION (maintainer): treat every auth method equally; the MINTER chooses exact or glob (accepting a glob may expose more than strictly necessary — that is the minter's call, not a gate-enforced rule). Both `HasPermission` impls use `authbase.PermissionTokenCovers` (namespace-anchored glob: `merchant:*` covers `merchant:catalog:update`; exact still matches exact; bare `*` never matches). No credential type is special.
 
 **(2) Embedded in-process host-principal can't reach `/v1/merchant/*`.** The neutral `merchantActionPermissionMW` branches are service-credential / control-plane `DelegatedResolver` / user-session (`AdminPermissionChecker`) — all control-plane-backed, all nil for an embedded no-control-plane host (doujins/hentai0). The gin self surface already trusts a host `billingauth.DelegatedAuthenticator` principal (`DelegatedPrincipalRequired` → `resolvedFromHostPrincipal`; #564 "in-process host is trusted, perms authoritative"), but the merchant routes don't. ADD that path so the SAME `/v1/merchant/*` routes serve API keys, control-plane JWTs, AND in-process host admins — no separate route, per #564.
 
 ## Tasks
-- [ ] `ResolvedDelegated.HasPermission` + `ResolvedServiceCredential.HasPermission` → `authbase.PermissionTokenCovers` (glob-aware); update doc comments (drop "exact-match / no broad grant" wording).
-- [ ] Add shared `controlplane.ResolvedDelegatedFromHostPrincipal`; refactor ginmw `resolvedFromHostPrincipal` to use it (one impl).
-- [ ] `routes.Options.DelegatedAuthenticator` + an in-process host-principal branch in `merchantActionPermissionMW` (validate via the shared converter, gate on `resolved.HasPermission`).
-- [ ] Thread `app.DelegatedAuthenticator` through `embedhttp` (`FromApp` + `RouteSetMerchantAdmin`/`RouteSetMerchantSettings` mounts) into merchant `Options`.
-- [ ] Tests: a host principal with `merchant:*` (glob) passes a concrete merchant route; lacking it → 403; an exact perm still works; a browser delegated token carrying a glob now passes too.
-- [ ] Build + vet + unit tests; commit + tag + push.
+- [x] `ResolvedDelegated.HasPermission` + `ResolvedServiceCredential.HasPermission` → `authbase.PermissionTokenCovers` (glob-aware); update doc comments (drop "exact-match / no broad grant" wording).
+- [x] Preserve raw remote-application role grant tokens for the delegated/service verifier authority source so `merchant:*` is not pre-expanded away before OpenRails' glob-aware route gate.
+- [x] Add shared `controlplane.ResolvedDelegatedFromHostPrincipal`; refactor ginmw `resolvedFromHostPrincipal` to use it (one impl).
+- [x] `routes.Options.DelegatedAuthenticator` + an in-process host-principal branch in `merchantActionPermissionMW` (validate via the shared converter, gate on `resolved.HasPermission`).
+- [x] Thread `app.DelegatedAuthenticator` through `embedhttp` (`FromApp` + `RouteSetMerchantAdmin`/`RouteSetMerchantSettings`/`RouteSetMerchantAPI` mounts) into merchant `Options`.
+- [x] Tests: a host principal with `merchant:*` (glob) passes a concrete merchant route; lacking it → 403; an exact perm still works; a browser delegated token carrying a glob now passes too.
+- [x] Build/vet/unit/integration validation completed. Commit/tag/push intentionally left to the release flow.
+
+## Validation (2026-06-22)
+- `go test ./internal/controlplane ./internal/http/routes ./internal/http/embedhttp -run 'TestHasPermissionGlobUniformAcrossCredentials|TestMerchantActionRoutesHostPrincipalGated|TestMerchantActionRoutesDelegatedTokenGated|TestServiceRoutesDelegatedAdmitGatedByPermission|TestEmbedded|TestHTTP' -count=1`
+- `go vet ./internal/controlplane ./internal/http/routes ./internal/http/embedhttp`
+- `go test -tags=integration ./tests -run 'TestHTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer' -count=1 -v`
+- `go test -tags=integration ./internal/integrationharness -run 'TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP' -count=1 -v`
 
 ## Acceptance
 - A minter may put exact OR glob perms on ANY credential (delegated JWT, API key, in-process host principal); all matched identically via `PermissionTokenCovers`. No credential type silently drops globs.

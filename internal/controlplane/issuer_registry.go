@@ -25,7 +25,7 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
 	}
-	return c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences)
+	return c.delegatedVerifier.LoadRemoteApplications(ctx, delegatedVerifierEnricher{Service: c.Core()}, c.delegatedAudiences)
 }
 
 // ReloadRemoteApplications re-syncs the verifier's in-memory issuer registry with

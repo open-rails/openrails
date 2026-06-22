@@ -176,8 +176,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 
 	// Wire AuthKit's core as the verifier's enrichment + remote_application source
-	// so it can lazy-load any single issuer on first use (#481).
-	delegatedVerifier.WithService(authSvc.Core())
+	// so it can lazy-load any single issuer on first use (#481). Keep remote-app
+	// authority as raw grant tokens; OpenRails gates them with its own
+	// namespace-glob matcher on every credential type (#565).
+	delegatedVerifier.WithService(delegatedVerifierEnricher{Service: authSvc.Core()})
 
 	cp2 := &ControlPlane{
 		cfg:                cfg,
