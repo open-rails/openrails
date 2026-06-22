@@ -14,38 +14,51 @@ next_id: 568
 # #567: adopt authkit permission-group model (authkit #111) — org/merchant gates become permission-group checks
 
 **Completed:** no
-**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer — it proves the migration doesn't break the simple two-level case.
+**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles) — it proves the migration works for the simple `root → org → merchant` case and BREAKS the org↔merchant 1:1 (supersedes #527).
 
 ## Principle
-OpenRails' resource shape is shallow: org↔merchant is 1:1 (#527) with NO sub-resources (no repos/datasets/endpoints). So adopting authkit's permission-group model is a thin API adoption + rename, NOT a deep hierarchy build. The merchant-owning org becomes a permission-group (`type=org`, child of the root group); BOTH `merchant:*` and `customer:*` roles live in that one group; every `/v1/merchant/*` and `/v1/orgs/:org_id/*` gate evaluates there (parent-walking to the root only for platform admins). No new hierarchy levels in OpenRails.
+With the permission-group model in place we **break the org↔merchant 1:1** (supersedes #527's UNIQUE owner_org_id): an **org** is a permission-group (`type=org`, child of `root`), and each **merchant** it owns is a **child** permission-group (`type=merchant`) — so one org can own N merchants. `customer:*` (the org-as-payer treasury + spend-delegations, #566) lives on the **org** group; `merchant:*` lives on each **merchant** child. The org owner manages all its merchants via parent walk-up (the `org`-type catalog holds `merchant:*`); each merchant child carries its own staff roles. A merchant has no sub-resources, so OpenRails stays a 3-level tree: `root → org → merchant`. `/v1/merchant/*` gates evaluate at the merchant group, `/v1/orgs/:org_id/*` at the org group, `root` only for platform moderation.
 
-OpenRails uses **app-defined role catalogs, NOT custom roles**: the fixed `merchant:*` + `customer:*` permission sets (the #554 catalog) are the catalog roles; `owner` required; `AllowCustomRoles=false` — OpenRails merchants do not define their own roles. Custom roles + deep per-resource hierarchy are tensorhub's domain, not OpenRails'.
+**Reach ≠ capability** (authkit #111): `root` can delete/moderate orgs+merchants but cannot run their internals, and a merchant cannot impersonate its customers — enforced by the disjoint per-type catalogs + the no-`*` namespace-anchored-glob rule, not by structural superset.
+
+OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRoles=false` on every type; custom roles + deep hierarchy are tensorhub's domain). Two catalogs to declare:
+
+**`merchant` type** — `owner` + 2, kept minimal:
+- `owner` *(required)* — all `merchant:*`; the only role that touches config (`settings`, `payment-providers`, `catalog`) and the machine path (`admissions`).
+- `support` — customer-facing ops: `merchant:customer-settings:read|update`, `merchant:payments:read|refund`, `merchant:subscriptions:read|update`, `merchant:usage:read`, `merchant:repair-alerts:read`. (Asymmetry in action: `subscriptions:update` lets support CANCEL a customer's subscription, but the #554 catalog has NO `merchant:subscriptions:create`, so neither support nor owner can create one as the customer.)
+- `viewer` — read-only: every `merchant:*:read`. Finance / audit / analyst.
+
+**`org` type** — `owner` (all `customer:*` incl. spend-delegations, and manages child merchants via `merchant:*`) plus whatever finance/treasury split #566 lands. `AllowCustomRoles=false`.
 
 ## Tasks
 - [ ] Bump authkit to the #111 release; adopt the group-scoped authorize signature (`HasAdminPermission(orgSlug,…)` → `Can(principal, perm, group)`), updating `authpolicy.AdminPermissionChecker` + the merchant/org gate middleware (`merchantActionPermissionMW`, `RequirePermission`).
-- [ ] Bootstrap: `CreateOrg` → create a permission-group (type `org`, parent=root); assign the bootstrap admin the `owner` role; mint the admin api-key nested under the group. Keep org↔merchant 1:1 — the merchant's group IS the owning org's group.
-- [ ] Declare OpenRails' fixed per-type role catalog to authkit: the `merchant:*` + `customer:*` perms as catalog roles; `owner` required; `AllowCustomRoles=false`.
-- [ ] `/v1/merchant/*` + `/v1/orgs/:org_id/*` gates resolve perms at the merchant's permission-group; confirm `merchant:*` AND `customer:*` both evaluate there and the owner auto-holds both (generalized `OwnerOwnsAppResources`).
+- [ ] Bootstrap: create an `org` permission-group (parent=`root`) + a child `merchant` group per owned merchant (N≥1); assign the bootstrap admin the org `owner` role; mint the admin api-key nested under the right group. The org owner reaches its merchants via walk-up (org catalog holds `merchant:*`).
+- [ ] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer` (perm sets in Principle); `org` = `owner` (+ any #566 finance split). `owner` required on each.
+- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (perm `merchant:*`); `/v1/orgs/:org_id/*` gates resolve at the **org** group (perm `customer:*`). Org owner auto-holds `merchant:*` over its merchant children via walk-up; merchant `owner` auto-holds `merchant:*` on its own group.
 - [ ] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact).
-- [ ] Platform surface: `platform:merchants:*` operator perms resolve at the root group.
+- [ ] Root (operator) surface: `platform:merchants:*` moderation perms resolve at the `root` group — reach ≠ capability (operators delete/restore merchants, never run them).
 - [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green.
 - [ ] Update embed + standalone bootstrap; re-run integrationharness + tests/ green.
 
 ## Acceptance
 - OpenRails consumes the permission-group API; org-scoped calls are gone in favor of group-scoped.
-- The merchant's permission-group holds `merchant:*` + `customer:*` (fixed catalog, no custom roles); gates evaluate there; owner auto-holds.
-- org↔merchant stays 1:1; no extra hierarchy levels.
+- The `merchant` group holds `merchant:*` (roles `owner`/`support`/`viewer`); the `org` group holds `customer:*`; fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
+- org↔merchant 1:1 is broken (supersedes #527): one org owns N merchant child-groups; the tree is `root → org → merchant`.
 - All existing merchant/customer/admin auth tests + #564 parity stay green against the new authkit.
 
 ## Note
-OpenRails is the shallow/simple adopter (no custom roles, no sub-resource hierarchy). It exists in this plan to prove authkit #111 doesn't break the two-level case; the deep features (per-repo groups, custom roles) land in tensorhub.
+OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, no sub-resource hierarchy below the merchant). It proves authkit #111 works for the shallow `root → org → merchant` case; the deep features (per-repo groups, custom roles) land in tensorhub.
 
 ---
 
 # #566: org-as-payer treasury routes — extend /v1/orgs/:org_id/* to the full payer subset of the customer surface
 
-**Completed:** no
-**Status:** PLANNED 2026-06-22 (Claude). Follow-on to #557 (which created `/v1/orgs/:org_id/*` with only `spend-delegations`). Builds on the #554 `customer:*` catalog.
+**Completed:** yes
+**Status:** DONE 2026-06-22 (Claude). Follow-on to #557. Builds on the #554 `customer:*` catalog. Implemented as a group-level `ginmw.OrgTreasuryScopeRequired` middleware that scope-checks `:org_id` and REBINDS the acting payer subject to the org's payable subject (the merchant/org uuid), so the SHARED `/v1/me` money handlers operate on the org balance unchanged — perms stay on the resolved principal (`PrincipalContextKey`), so the rebind never widens authority. Both transports inherit the routes (both call `RegisterOrgTreasuryRoutes`). 5 integration tests green over HTTP against the real DB + Redis.
+
+**Two implementation decisions (deviations from the literal target sketch, grounded in the principle):**
+- **`status` NOT mounted.** The only `/me` status handler (`GetMyBillingStatus`) returns subscriptions + entitlements — consumer concepts the org does not own (and the EXCLUDED list names). The payer's account state is already exposed by `balance` + `settings`. (`status` was in the target sketch but NOT the acceptance criteria.)
+- **Billing-mode (prepaid/arrears) is merchant-granted, NOT customer self-service.** The shared `SetMyCreditAccountSettings` deliberately refuses platform-owned policy fields (the existing `/me` invariant; only the service/merchant `serviceAccountSettingsRequest` carries `billing_mode`). So `PUT /v1/orgs/:org_id/settings` sets self-imposed caps + auto-topup; the org's arrears tab is granted by the merchant via `merchant:customer-settings:update`. Honors "reuse handlers, no new handler logic".
 
 ## Principle
 An org is a **payer**, not a **consumer**. It holds an API-credit balance, pre-pays, owes in arrears, has a billing mode, gets invoices, and sets payment methods — but it does NOT itself own catalog products, entitlements, or personal subscriptions (its *members* consume; the org *funds*). So the org surface should mirror the **payer subset** of `/v1/me/*`, scoped to the org's payable subject, and expose NONE of the consumer routes.
@@ -65,15 +78,15 @@ GET/PUT /v1/orgs/:org_id/spend-delegations      # done in #557
 EXCLUDED (consumer-only, stay on `/v1/me/*`): `products`, `products/:id/access`, `entitlements/active`, `subscriptions/*`, `notifications`.
 
 ## Tasks
-- [ ] Factor the payer-subject resolution so each `/v1/me/*` money handler works for BOTH surfaces: `/v1/me` → token `delegated_sub`; `/v1/orgs/:org_id` → the org's payable subject (the same `customers` row the `spend-delegations` store already keys on). Reuse the `requireOrgTreasuryPrincipal` + `orgIDMatchesResolved` scope check (403 `org_scope_mismatch`).
-- [ ] Mount the payer-subset routes under `/v1/orgs/:org_id/*` on BOTH transports (standalone gin `RegisterOrgTreasuryRoutes` + embedded `embgin.SelfHandler`), reusing the existing money handlers — NOT new handler logic.
-- [ ] Do NOT mount the consumer routes (products/entitlements/subscriptions/notifications) on the org surface.
-- [ ] Permission split: extend the #554 catalog with a small `customer:*` split so a finance persona ≠ a spend-delegation editor — e.g. `customer:balance:read` (balance/transactions/status/usage/payments/invoices), `customer:billing:update` (settings/billing mode/caps), `customer:payment-methods:update` (payment-methods CRUD + stripe portal), `customer:checkout:create` (pre-pay), plus the existing `customer:spend-delegations:read|update`. Gate each route accordingly. (Finalize the exact granularity when implementing.)
-- [ ] Seed the new `customer:*` perms in the catalog; confirm the org owner auto-holds `customer:*` (already true — owner namespaces derive from `Config.Permissions` via `ownerGrantTokens()`).
-- [ ] Reject targeting a personal/individual balance through the org surface (no `customer_id` param; payer forced from `:org_id`) — same guard as `spend-delegations`.
-- [ ] Tests: org payer can read balance / load credits via checkout / set prepaid|arrears / manage payment-methods / view invoices, all scoped to the org's payable subject; a merchant-only token (`merchant:*`) cannot reach any org-payer route and vice versa (namespace separation); the org surface exposes NO consumer routes; cross-org access is 403.
-- [ ] Tensorhub use-case E2E: org loads balance via `checkout` → sets billing mode via `settings` → a delegated user draws it down within a `spend-delegations` window.
-- [ ] Update hosts only if they consume the new org-payer routes (tensorhub is the primary consumer); no consumer change for the personal surface.
+- [x] Factor the payer-subject resolution so each `/v1/me/*` money handler works for BOTH surfaces. DONE differently/better than planned: instead of editing each handler, `ginmw.OrgTreasuryScopeRequired` rebinds the acting `UserContext.UserID` to the org payable subject (`resolved.MerchantID.UUID()`) — so `selfAccountPayer`/`r.GetUser()` resolve the org payer with ZERO handler changes. `CustomerIDFromString(merchantUUID)` == the customer id the spend-delegations store keys on. The scope check is the shared `ginmw.OrgIDMatchesDelegated` (403 `org_scope_mismatch`); the handler's `orgIDMatchesResolved` now delegates to it (one impl).
+- [x] Mount the payer-subset routes under `/v1/orgs/:org_id/*` on BOTH transports — added to `RegisterOrgTreasuryRoutes`, which BOTH the standalone gin (`routes_self.go`) and the embedded (`pkg/embedded/gin/self.go` `SelfHandler`) already call. Reuses the existing money handlers, no new handler logic.
+- [x] Do NOT mount the consumer routes — only the payer subset is mounted; `TestOrgTreasuryPayerSurface_NoConsumerRoutes` asserts products/products/:id/access/entitlements/active/subscriptions/notifications all 404 on the org surface.
+- [x] Permission split — added `customer:balance:read` (balance/transactions/usage/payments/invoices), `customer:billing:update` (settings/caps), `customer:payment-methods:update` (payment-methods CRUD + stripe portal), `customer:checkout:create` (checkout) to the catalog; each route gated accordingly. (Note: `status` not mounted — see decision above.)
+- [x] Seed the new `customer:*` perms in the catalog; org owner auto-holds them — `catalogEntries` extended; `OperatorRolePermissions() == CatalogNames()` so the owner/operator role and `OwnerOwnsAppResources` cover the new perms. `TestOperatorRolePermissions_AreOrgCatalog` + `TestCatalogPermissionsCoveredByOwnerGrant` green.
+- [x] Reject targeting a personal/individual balance through the org surface — there is no `customer_id` path/body param; the payer is FORCED from `:org_id` via the rebind. The spend-delegations handlers still reject a body `customer_id` (unchanged).
+- [x] Tests — `tests/org_treasury_payer_surface_test.go` (//go:build integration, real DB+Redis over HTTP): full payer loop (load credits→balance→transactions→settings→usage/payments/invoices/payment-methods→spend-delegations, all scoped to the org payable subject); permission split (balance:read token → reads OK, every write/spend 403); merchant-only token → 403 (namespace separation); cross-org → 403 `org_scope_mismatch`; no consumer routes (404).
+- [x] Tensorhub use-case E2E — `TestOrgTreasuryPayer_DelegatedDrawDownE2E`: org loads credits → reads balance over HTTP → grants invoker a per-day window via `PUT spend-delegations` over HTTP → the spendgate-backed admitter (real PG+Redis, the production path) lets the invoker draw the ORG balance down within the window, blocks the breach, and an ungranted second invoker is denied (per-invoker isolation, #563). Billing-mode-via-settings replaced per the decision above (merchant-granted, not self-service).
+- [x] Update hosts — no host change required: the routes are ADDITIVE and tensorhub already consumes `spend-delegations`. Tensorhub adopting org-`checkout`/`settings`/`balance` is an optional future enhancement on the tensorhub side (it currently funds org balance via the admin-funding client), not a break.
 
 ## Acceptance
 - An org has the full **payer** surface at `/v1/orgs/:org_id/*` (balance, pre-pay, arrears/billing-mode, invoices, payment-methods), scoped to the org's payable subject, gated by `customer:*`.
