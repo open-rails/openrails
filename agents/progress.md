@@ -59,6 +59,8 @@ OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRole
 ## Note
 OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, two flat top-level personas — `merchant` + `customer` — under `root`, no nesting, no `org`). It proves authkit #111 works for the flat case and that there's no built-in `org`; the deep features (nested per-resource groups, custom roles, the `org` persona) land in tensorhub.
 
+**Two route surfaces per merchant (don't conflate):** (1) authkit AUTO-GENERATES the staff/credential MANAGEMENT routes from the `merchant`/`customer` profiles — `/merchant/:id/{members,api-keys,remote-applications}`, `/customer/:id/{members,api-keys,…}` (disabled capabilities aren't generated). OpenRails mounts these and builds none of them. (2) OpenRails' OWN DOMAIN routes — `/v1/merchant/*` (catalog/payments/admissions, the #564 unified-auth surface) + the customer balance/checkout/spend-delegations surface. Both gate on the SAME `merchant:*`/`customer:*` perms (persona ≡ namespace), so a `support`/`owner` role works across both.
+
 ---
 
 # #566: org-as-payer treasury routes — extend /v1/orgs/:org_id/* to the full payer subset of the customer surface
