@@ -134,36 +134,43 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	lockedRegistration := !options.hosted
 
 	coreCfg := authcore.Config{
-		Keys:              keySource,
-		VerifyOnly:        verifyOnly,
-		Issuer:            issuer,
-		BaseURL:           issuer,
-		IssuedAudiences:   []string{"openrails"},
-		ExpectedAudiences: []string{"openrails"},
-		APIKeyPrefix:      APIKeyPrefix,
-		Environment:       strings.TrimSpace(cfg.Env),
-		Permissions:       Catalog(),
-		// OpenRails declares NO org roles of its own (#543). Merchant-admin
-		// authority comes from AuthKit's built-in `owner` role for human admins,
-		// and from direct permission-scoped API keys for server-to-server
-		// automation. OwnerOwnsAppResources makes the owner's apex grant cover
-		// OpenRails' app-defined resource namespaces too (e.g. `merchant:*`), not
-		// just `org:*` — owning the org owns the merchant (org⇄merchant 1:1, #554/#100).
-		OwnerOwnsAppResources: true,
-		DefaultRoles:          nil,
+		Keys: authcore.KeysConfig{
+			Source:     keySource,
+			VerifyOnly: verifyOnly,
+		},
+		Token: authcore.TokenConfig{
+			Issuer:            issuer,
+			IssuedAudiences:   []string{"openrails"},
+			ExpectedAudiences: []string{"openrails"},
+		},
+		Frontend:    authcore.FrontendConfig{BaseURL: issuer},
+		APIKeys:     authcore.APIKeysConfig{Prefix: APIKeyPrefix},
+		Environment: strings.TrimSpace(cfg.Env),
+		RBAC: authcore.RBACConfig{
+			Permissions: Catalog(),
+			// OpenRails declares NO org roles of its own (#543). Merchant-admin
+			// authority comes from AuthKit's built-in `owner` role for human admins,
+			// and from direct permission-scoped API keys for server-to-server
+			// automation. OwnerOwnsAppResources makes the owner's apex grant cover
+			// OpenRails' app-defined resource namespaces too (e.g. `merchant:*`), not
+			// just `org:*` — owning the org owns the merchant (org⇄merchant 1:1, #554/#100).
+			OwnerOwnsAppResources: true,
+			DefaultRoles:          nil,
+		},
 		// Private standalone posture: no public user self-registration, no public
 		// org onboarding/management. Embedded bootstrap/core calls
 		// (CreateOrg/AssignRole/MintAPIKey) are unaffected. Hosted products
 		// opt in with WithHostedPosture; no config/env knob opens this in standalone.
-		NativeUserRegistrationMode: registrationMode(lockedRegistration),
-		OrgRegistrationMode:        registrationMode(lockedRegistration),
+		Registration: authcore.RegistrationConfig{
+			NativeUserMode: registrationMode(lockedRegistration),
+			OrgMode:        registrationMode(lockedRegistration),
+		},
 	}
 
-	authSvc, err := authhttp.NewService(coreCfg)
+	authSvc, err := authhttp.NewServer(coreCfg, pool)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
-	authSvc = authSvc.WithPostgres(pool)
 
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
