@@ -130,7 +130,7 @@ func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
 }
 
 // serviceBalanceResponse is the customer balance snapshot served by
-// GET /v1/service/credits/balance (issue #235/#247).
+// GET /v1/merchant/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
 	CustomerID            uuid.UUID `json:"customer_id"`
 	Currency              string    `json:"currency"`
@@ -218,7 +218,7 @@ type serviceAccountSettingsRequest struct {
 	AlertThresholdPct        *int    `json:"alert_threshold_pct"`
 }
 
-// ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
+// ServiceSetCreditAccountSettings (PUT /v1/merchant/credits/account-settings)
 // configures a customer's billing account: prepaid vs arrears mode, spend caps,
 // auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
 // proxies to this with its service API key; OpenRails owns the settings.
@@ -284,7 +284,7 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
+// ServiceGetCreditAccountSettings (GET /v1/merchant/credits/account-settings)
 // reads a customer's current billing-account settings (issue #242).
 func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
@@ -312,7 +312,7 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// ServiceListCustomerCreditTransactions (GET /v1/service/credits/transactions)
+// ServiceListCustomerCreditTransactions (GET /v1/merchant/credits/transactions)
 // lists a customer's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: customer_id, currency, limit, offset.
 func ServiceListCustomerCreditTransactions(r *httprequest.Request) {

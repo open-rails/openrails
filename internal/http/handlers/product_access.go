@@ -171,7 +171,7 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) product
 	return productAccessCheckResponse{CustomerID: identity.CustomerIDFromString(userID).UUID().String(), ProductID: productID.String(), HasAccess: has}
 }
 
-// --- API-key service (GET /v1/service/users/:user_id/product-access) ---
+// --- API-key service (GET /v1/merchant/customers/:user_id/product-access) ---
 
 // ServiceGetUserProductAccess lists a user's accessible products for a
 // server-to-server (API-key) caller. Optional ?product_id=... narrows to a single
