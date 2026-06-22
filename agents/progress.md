@@ -7,7 +7,70 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 564
+next_id: 565
+
+---
+
+# #564: unify /v1/merchant auth (no source discrimination) + least-privilege live-DB subset for remote-app-signed JWTs; retire #259 allowlist
+
+**Completed:** no
+**Status:** PLANNED 2026-06-21 (Claude). The auth half of #555, confirmed with Paul over several turns. SECURITY-CRITICAL.
+
+## Principle (the auth model)
+Every `/v1/merchant/*` request follows ONE path, regardless of credential type:
+1. The presented credential is validated — access-token (signed by OpenRails'/host's own key), API key, delegated-user JWT, or self-service JWT (the last two signed by a **remote application**).
+2. The credential's permissions are determined by a **live DB check**.
+3. Those perms are compared to the permission the route requires.
+4. `next()` or reject.
+**The credential TYPE never gates a route — only the permission does.** Making routes discriminate by auth source is wrong. There is no "browser-safe" ceiling; a browser holding any token has the same blast radius (whatever perms that token carries), and that is governed by the signer's granted authority (below).
+
+Permission source per credential type:
+- **Access token** (OpenRails/host-signed): perms = the logged-in user's live org-role perms. Cannot over-claim (we sign it).
+- **API key**: perms = its stored role, resolved live (already correct today).
+- **Delegated-user / self-service JWT** (remote-app-signed): perms = the JWT claim **INTERSECTED with the signing remote-app's STORED authority** (live DB). A remote-app can only put ≤ its own current authority on a JWT it signs; anything beyond is DROPPED. Least-privilege: a leaked/stolen token carries minimal blast radius. This REPLACES the #259 hardcoded browser-safe allowlist.
+
+## Findings / current state (2026-06-21)
+- `internal/controlplane/delegated.go` `ResolveDelegated` (~167–241): verifies sig/issuer/aud, then sets `Permissions: principal.Permissions` (raw merchant-signed claim) filtered ONLY by the hardcoded `IsDelegatedPermission` allowlist (applied in `newDelegatedVerifier`'s `WithPermissions`, ~135–142). It calls `c.merchantForIssuer(ctx, issuer)` at ~218 but **discards `raID`** (the remote_application UUID). NO intersection with stored authority today.
+- **Pattern to mirror — `internal/controlplane/service_jwt.go` (~36–55, "BND-C1"):** `mid,mslug,ownerOrgID,ownerOrgSlug,raID,err := c.merchantForIssuer(ctx,issuer)`; `_,storedPerms,err := c.Core().ResolveRemoteApplicationAuthority(ctx,raID)`; `permissions := intersectPermissions(cleanPermissionList(principal.Permissions), storedPerms)`; service-JWT hard-rejects empty with `ErrServiceCredentialScopeDenied`. Reuse `intersectPermissions` + `cleanPermissionList` (already in controlplane). AuthKit needs NO change (`GetRemoteApplication(issuer)`, `ResolveRemoteApplicationAuthority(raID)` exist; `merchantForIssuer` already returns raID).
+- Route discrimination to remove: SERVICE routes (`routes/routes.go` `RegisterServiceRoutes` ~145) use `serviceCredentialRequiredMW()` (service-cred ONLY) + per-route `servicePermissionMW(perm)` → /admit,/credits reject delegated/user-session. ACTION routes (`RegisterMerchantActionRoutes`/`merchantActionPermissionMW` ~287) already try service-cred→delegated→user-session but the delegated branch gates on `IsDelegatedPermission` (routes.go:328).
+- `IsDelegatedPermission` sites: `controlplane/catalog.go:145` (def; plus `merchantCatalog` map + `IsMerchantPermission` + `MerchantCatalogNames` = the #259 machinery), `controlplane/delegated.go:137` (verifier filter), `ginmw/delegated.go:201` (`can` gate), `ginmw/principal.go:170` (`principalFromDelegated` `can` gate), `routes/routes.go:328` (action MW delegated branch).
+
+## Tasks
+**A. Live-DB subset intersection (delegated + self-service JWTs):**
+- [ ] In `ResolveDelegated` capture `raID` from `merchantForIssuer` (currently `_`-discarded ~218).
+- [ ] `ResolveRemoteApplicationAuthority(ctx, raID)` → storedPerms; set `ResolvedDelegated.Permissions = intersectPermissions(cleanPermissionList(principal.Permissions), storedPerms)` (mirror service_jwt.go BND-C1).
+- [ ] Empty-intersection: do NOT hard-reject (unlike service JWT) — a permissionless delegated token is still valid for `/v1/me/*` self-service; only the per-route permission gate rejects. (Re-confirm this is the right call vs service_jwt's `ErrServiceCredentialScopeDenied`.)
+- [ ] Remove the `WithPermissions(IsDelegatedPermission)` filter from `newDelegatedVerifier` (delegated.go ~135–142) — the intersection is now the control.
+- [ ] Verify whether self-service JWTs use the same `ResolveDelegated` path or a distinct one; apply the intersection there too.
+
+**B. Delete the #259 hardcoded allowlist:**
+- [ ] Delete `IsDelegatedPermission` (catalog.go:142–148) + fix its 3 gate callers: `ginmw/delegated.go:201` (remove gate), `ginmw/principal.go:170` (remove gate — perms already intersected at resolve time), `routes/routes.go:328` (change `!IsDelegatedPermission(perm) || !resolved.HasPermission(perm)` → just `!resolved.HasPermission(perm)`).
+- [ ] Grep callers of `merchantCatalog`/`IsMerchantPermission`/`MerchantCatalogNames`; delete the now-unused ones. **WARNING:** if `MerchantCatalogNames` feeds a browser-token mint perm-set anywhere, replace it with the remote-app's actual granted authority — do NOT reintroduce a hardcoded list.
+
+**C. Unify route auth (no source discrimination):**
+- [ ] Make `RegisterServiceRoutes` use the SAME unified credential resolution as the action routes (service-cred → delegated → user-session), gating per-route on the `merchant:*` permission. Group-level auth MW must pin the merchant BEFORE `MerchantDBConnMW` (order: auth → DBconn → per-route perm).
+- [ ] Factor ONE shared unified auth+perm path so `RegisterServiceRoutes` and `RegisterMerchantActionRoutes` stop diverging (retire the `serviceCredentialRequiredMW` vs `merchantActionPermissionMW` split).
+- [ ] Confirm: a delegated/user-session principal holding `merchant:admissions:create` CAN call `/admit`; one without it gets 403 — by permission, never by source.
+
+**D. Tests (rewrite #259 + add intersection + integration):**
+- [ ] Find + rewrite the #259 tests that assert the browser-safe allowlist (grep `IsDelegatedPermission`, `browser-safe`, `TestFederatedDelegatedTokens`, `catalog_delegated_test.go`, `controlplane/delegated_test.go`) → assert "effective perms = claim ∩ remote-app stored authority".
+- [ ] Unit: claimed perm beyond the remote-app's authority is DROPPED; claimed perm within it survives.
+- [ ] Unit: a remote-app granted a formerly-"non-browser-safe" perm (e.g. `merchant:admissions:create`) now mints tokens that CARRY it (no allowlist).
+- [ ] Integration (real Postgres + real delegated JWT, NOT httptest+fakes): delegated token hits a `/v1/merchant` route end-to-end via the live standalone server, gated by permission. (Existing delegated integration tests target the OLD `/v1/admin` gin surface — add `/v1/merchant`.)
+- [ ] Integration: per-credential parity — API key, delegated JWT, user-session all pass the SAME `/v1/merchant` gate when holding the perm; all 403 when not.
+- [ ] Re-run cross_merchant_isolation: delegated + service still isolated after unification.
+
+**E. Ship:**
+- [ ] `go build ./...` + `go vet ./...` + full unit + integrationharness + tests/ green.
+- [ ] Update `docs/principal-boundary-audit.md` to the uniform model (credential→live-perms→route-gate; intersection replaces #259 allowlist).
+- [ ] **DEPLOY DEPENDENCY (do not skip):** the intersection yields perms ONLY if signing remote-apps are GRANTED org-role authority. The old model didn't require this (allowlist + raw claim). Verify federated merchant-frontend remote-apps carry the right org-role authority in bootstrap/config and in the integration harness (`harness.go:452/461` `RegisterRemoteApplication[WithPermissionsClaim]`). If a real merchant frontend app has no granted authority, its delegated tokens carry ZERO perms after this change — document/seed the required grant.
+
+## Acceptance
+- No `/v1/merchant` route inspects credential type; access is purely permission-based.
+- A remote-app-signed JWT's effective perms = claim ∩ remote-app stored authority (least-privilege; excess dropped).
+- `IsDelegatedPermission` + the #259 browser-safe allowlist are gone.
+- #259 tests assert the subset model; integration proves a real delegated JWT passes a `/v1/merchant` route by permission.
+- All credential types reach all `/v1/merchant` routes, gated only by permission.
 
 ---
 
@@ -1012,54 +1075,6 @@ Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails
 - Tensorhub hot path uses only admit/capture/release/wasted-spend/trust-tier read; policy sync and admin funding/reporting are separate interfaces.
 - Admission has one batch-shaped API; a one-item request uses the same route/shape.
 - Removed service routes have no remaining first-party caller.
-
----
-
-# #559: merchant-payment-provider-config-api
-
-**Completed:** no
-**Status:** IN_PROGRESS 2026-06-21: parallel handler/service slice is implemented but not mounted. Added merchant payment-provider config service methods over existing `provider_accounts` + provider-account-scoped secrets, plus route-agnostic handlers for list/read/PUT/DELETE. Updates validate supplied credential values before writing provider account rows or secrets; responses expose redacted configured/last_validated metadata only. Solana `private_key` is now explicitly non-merchant-writable even under provider-account scoped names. `/v1/merchant/*` route wiring and old `/secrets/*` hard cut remain blocked on #555.
-
-Replace flat secret-name CRUD with `/v1/merchant/payment-providers/*` (list/read/PUT/DELETE), provider in the path and environment in the body/query, gated by `merchant:payment-providers:*` (#554). Updates are atomic: validate supplied credentials against the provider, then store only on success. Status is returned as redacted field metadata, never plaintext. See parent #552 "Merchant Route Contracts".
-
-## Tasks
-
-- [x] Implement route-agnostic handlers for `GET /v1/merchant/payment-providers`, `GET/PUT/DELETE /v1/merchant/payment-providers/:provider`; keep `provider_accounts` as internal storage only. Route mounting waits for #555.
-- [x] Validate supplied credentials against the provider before storage; never persist on validation failure (no separate `/validate` route).
-- [x] Return credential status as `{configured, last_validated_at?}`; never return plaintext.
-- [x] Support test/live environments explicitly; enforce one active config per `{merchant, provider, environment}`.
-- [x] Cover current provider fields: Stripe, NMI/Mobius, CCBill, Solana (Solana private key stays platform-owned, not merchant-writable).
-- [ ] Delete direct `/v1/merchant/secrets/*` CRUD (hard cut); keep provider-account-scoped secret storage internal.
-- [ ] Tests: invalid credentials are not persisted; responses never leak plaintext; delete/disable removes a provider from future use. DONE so far: focused unit coverage for invalid scoped Stripe validation not persisting, redacted response status, Solana private-key non-writability.
-
-## Acceptance
-
-- Providers are configured through provider routes with redacted field status.
-- Invalid credentials are never persisted.
-- Direct secret-name CRUD is gone.
-
----
-
-# #560: merchant-catalog-publish-over-http
-
-**Completed:** no
-**Status:** IN_PROGRESS 2026-06-21: parallel publish handler slice is implemented but not mounted. Added route-agnostic `MerchantPublishCatalog` handler that accepts the inner single-merchant `{catalog:{...}}` shape, validates it, computes `catalog.Plan`, stays plan-only by default, and applies through `catalog.ApplyWithOptions` only when `insert`, `overwrite`, or `prune` is explicit. Added JSON tags to catalog manifest/plan/apply structs for the HTTP shape. `/v1/merchant/catalog/publish` route wiring remains blocked on #555.
-
-Expose catalog-as-code over HTTP with the same plan/apply engine as `openrails push-merchant-catalog`, gated by `merchant:catalog:*` (#554). The route is single-merchant (merchant from auth) and plan-only by default; mutation requires explicit `insert`, `overwrite`, or `prune`. Product/price writes auto-enqueue provider sync. See parent #552 "Catalog".
-
-## Tasks
-
-- [ ] Implement catalog product/price CRUD + activate/deactivate under `/v1/merchant/catalog/*`; writes auto-enqueue provider sync (no per-object reconcile routes).
-- [x] Add route-agnostic `POST /v1/merchant/catalog/publish` handler reusing the CLI plan/apply engine; body is the inner single-merchant manifest (no `catalogs[]` wrapper); plan-only by default; mutation needs explicit `insert` / `overwrite` / `prune`. Route mounting waits for #555.
-- [ ] Add `GET /v1/merchant/catalog/drift` (incl. `?kind=orphan`) and `POST /v1/merchant/catalog/drift/refresh`; no separate `/orphans` route.
-- [ ] Tests: plan-only vs mutating modes against the same engine as the CLI; a product/price write enqueues provider sync.
-
-## Acceptance
-
-- Catalog publish/apply works over both CLI and HTTP on one shared engine with plan-only-by-default semantics.
-- No per-object reconcile routes in the primary surface.
-
----
 
 # #561: merchant-customer-support-admin-surface
 
