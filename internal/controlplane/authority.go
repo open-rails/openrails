@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrNoControlPlane is returned by authority checks invoked on a nil control
@@ -31,6 +33,24 @@ func (c *ControlPlane) HasAdminPermission(ctx context.Context, orgSlug, userID, 
 		return false, nil
 	}
 	return c.Core().HasPermission(ctx, slug, userID, strings.TrimSpace(perm))
+}
+
+// ResolveMerchantForOrg resolves the merchant owned by an AuthKit org slug.
+// Route auth uses it after a live org permission check so user-session merchant
+// routes pin the same merchant context as API-key and delegated JWT principals.
+func (c *ControlPlane) ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error) {
+	if c == nil || c.Core() == nil {
+		return merchant.ID{}, "", ErrNoControlPlane
+	}
+	slug := strings.ToLower(strings.TrimSpace(orgSlug))
+	if slug == "" {
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+	}
+	org, err := c.Core().ResolveOrgBySlug(ctx, slug)
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	return c.merchantForOwnerOrg(ctx, org.ID)
 }
 
 // IsAdmin reports whether the user holds a broad merchant-owner grant in their

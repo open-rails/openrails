@@ -25,7 +25,14 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
 		return
 	}
+	updateSubscriptionPaymentMethod(r, user.ID, true)
+}
 
+func AdminUpdateSubscriptionPaymentMethod(r *httprequest.Request) {
+	updateSubscriptionPaymentMethod(r, "", false)
+}
+
+func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID string, enforceOwnership bool) {
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
@@ -63,7 +70,8 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	if subscription.CustomerID.String() != user.ID {
+	targetUserID := subscription.CustomerID.String()
+	if enforceOwnership && targetUserID != authenticatedUserID {
 		r.ErrorJSON(http.StatusForbidden, "You don't own this subscription")
 		return
 	}
@@ -78,7 +86,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(ctx, paymentMethodID, user.ID)
+	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(ctx, paymentMethodID, targetUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, vault.ErrPaymentMethodNotFound):
@@ -88,7 +96,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusForbidden, "You don't own this payment method")
 			return
 		default:
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": paymentMethodID, "user_id": user.ID}).Error("Failed to validate payment method ownership")
+			log.WithError(err).WithFields(log.Fields{"payment_method_id": paymentMethodID, "user_id": targetUserID}).Error("Failed to validate payment method ownership")
 			r.ErrorJSON(http.StatusInternalServerError, "Failed to validate payment method")
 			return
 		}
@@ -128,7 +136,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	log.WithFields(log.Fields{"subscription_id": subscription.ID, "processor_subscription": subscription.ProcessorSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": user.ID}).Info("Subscription payment method updated successfully")
+	log.WithFields(log.Fields{"subscription_id": subscription.ID, "processor_subscription": subscription.ProcessorSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
 
 	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
 }

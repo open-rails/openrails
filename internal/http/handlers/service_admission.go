@@ -205,9 +205,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "too many items")
 		return
 	}
-	resolved, status, msg := serviceCredentialFromRequest(r)
-	if resolved == nil {
-		r.ErrorJSON(status, msg)
+	if !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -218,7 +216,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	verdicts := serviceAdmitBatchVerdicts(
 		r.Request.Context(),
 		req.Items,
-		func(ts billingidentity.CustomerID) bool { return resolved.AllowsCustomer(ts.UUID()) },
+		func(ts billingidentity.CustomerID) bool { return serviceCustomerScopeAllows(r, ts) },
 		svc.Admit,
 	)
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
@@ -394,7 +392,7 @@ func trustTierQuery(r *httprequest.Request) string {
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
-// Merchant-admin gated at the route (`merchant:customers:update`) - NOT self-serve.
+// Merchant-admin gated at the route (`merchant:customer-settings:update`) - NOT self-serve.
 func ServiceSetCreditLimit(r *httprequest.Request) {
 	var req serviceCreditLimitRequest
 	if !r.BindJSON(&req) {

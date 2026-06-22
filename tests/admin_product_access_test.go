@@ -17,14 +17,14 @@ import (
 
 // TestAdminProductAccessGrantAndRevoke exercises the #528 delegated product-access
 // WRITE surface end-to-end against Postgres: a merchant admin holding
-// merchant:customers:update grants a user ownership of a product
+// merchant:customer-settings:update grants a user ownership of a product
 // (POST /v1/admin/users/:id/product-access), the grant appears in the composite
 // user-detail product_access section, and a DELETE revokes it. Product access
 // (#250) is a SEPARATE concept from entitlements, with its own write capability.
 func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "be000000-0000-4000-8000-000000000005",
-		[]string{controlplane.PermMerchantCustomersUpdate, controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantCustomerSettingsRead})
 
 	products := suite.SeedProducts()
 	productID := products[0].Product.ID
@@ -76,7 +76,7 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 func TestAdminProductAccess_RequiresProductAccessWrite(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "be000000-0000-4000-8000-000000000006",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	products := suite.SeedProducts()
 	body, _ := json.Marshal(map[string]any{"product_id": products[0].Product.ID.String()})

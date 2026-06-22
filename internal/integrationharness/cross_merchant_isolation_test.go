@@ -57,14 +57,14 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	aToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-a-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	b := surface.ProvisionOwnedMerchant("iso-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 
@@ -129,7 +129,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-ra-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	payer := uuid.NewString()
@@ -156,12 +156,130 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 		"iso-ra-claim-only-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		"",
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 	)
 	status, body := requestJSON(t, http.MethodGet,
 		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, claimOnly.Token, nil)
 	require.Containsf(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status,
 		"self-claimed remote_application permissions must not authorize without stored authority: %s", string(body))
+}
+
+func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+
+	serviceToken := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"admit-service-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+	)
+	payer := uuid.NewString()
+	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
+
+	denied := surface.RegisterDelegatedCaller(
+		"admit-denied-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
+		dbtest.TestMerchantSlug,
+		uuid.NewString(),
+		[]string{controlplane.PermMerchantCustomerSettingsRead},
+	)
+	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", denied.Token, map[string]any{
+		"customer_id":      payer,
+		"invoker":          "delegated-denied",
+		"invoker_type":     "payer",
+		"currency":         "usd",
+		"estimated_amount": 100,
+		"request_id":       "admit-denied-" + uuid.NewString(),
+	})
+	require.Equalf(t, http.StatusForbidden, status,
+		"delegated JWT without merchant:admissions:create must fail by permission: %s", string(body))
+
+	allowed := surface.RegisterDelegatedCaller(
+		"admit-allowed-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
+		dbtest.TestMerchantSlug,
+		uuid.NewString(),
+		[]string{controlplane.PermMerchantAdmissionsCreate},
+	)
+	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", allowed.Token, map[string]any{
+		"customer_id":      payer,
+		"invoker":          "delegated-allowed",
+		"invoker_type":     "payer",
+		"currency":         "usd",
+		"estimated_amount": 100,
+		"request_id":       "admit-allowed-" + uuid.NewString(),
+	})
+	require.Equalf(t, http.StatusOK, status,
+		"delegated JWT with merchant:admissions:create must reach admit handler: %s", string(body))
+	var admit struct {
+		Allowed bool `json:"allowed"`
+	}
+	require.NoError(t, json.Unmarshal(body, &admit))
+	require.True(t, admit.Allowed, "delegated admit response must be allowed: %s", string(body))
+}
+
+func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+
+	serviceToken := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"admit-user-service-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+	)
+	payer := uuid.NewString()
+	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
+
+	cp := embcp.Get(surface.app)
+	require.NotNil(t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(t, core, "authkit core")
+
+	mintUserToken := func(role string, perms []string) string {
+		t.Helper()
+		username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
+		email := username + "@example.com"
+		user, err := core.CreateUser(ctx, email, username)
+		require.NoError(t, err, "create user")
+		require.NoError(t, core.AddMember(ctx, dbtest.TestMerchantSlug, user.ID), "add user to merchant org")
+		require.NoError(t, core.DefineRole(ctx, dbtest.TestMerchantSlug, role), "define role")
+		require.NoError(t, core.SetRolePermissions(ctx, dbtest.TestMerchantSlug, role, perms), "set role permissions")
+		require.NoError(t, core.AssignRole(ctx, dbtest.TestMerchantSlug, user.ID, role), "assign role")
+		token, _, err := core.IssueAccessToken(ctx, user.ID, email, map[string]any{"org": dbtest.TestMerchantSlug})
+		require.NoError(t, err, "issue active-org access token")
+		return token
+	}
+
+	deniedToken := mintUserToken("r"+strings.ReplaceAll(uuid.NewString(), "-", "")[:20], []string{controlplane.PermMerchantCustomerSettingsRead})
+	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", deniedToken, map[string]any{
+		"customer_id":      payer,
+		"invoker":          "user-denied",
+		"invoker_type":     "payer",
+		"currency":         "usd",
+		"estimated_amount": 100,
+		"request_id":       "admit-user-denied-" + uuid.NewString(),
+	})
+	require.Equalf(t, http.StatusForbidden, status,
+		"user session without merchant:admissions:create must fail by permission: %s", string(body))
+
+	allowedToken := mintUserToken("r"+strings.ReplaceAll(uuid.NewString(), "-", "")[:20], []string{controlplane.PermMerchantAdmissionsCreate})
+	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", allowedToken, map[string]any{
+		"customer_id":      payer,
+		"invoker":          "user-allowed",
+		"invoker_type":     "payer",
+		"currency":         "usd",
+		"estimated_amount": 100,
+		"request_id":       "admit-user-allowed-" + uuid.NewString(),
+	})
+	require.Equalf(t, http.StatusOK, status,
+		"user session with merchant:admissions:create must reach admit handler: %s", string(body))
+	var admit struct {
+		Allowed bool `json:"allowed"`
+	}
+	require.NoError(t, json.Unmarshal(body, &admit))
+	require.True(t, admit.Allowed, "user-session admit response must be allowed: %s", string(body))
 }
 
 func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
@@ -173,7 +291,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-admin-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	targetUser := uuid.NewString()
@@ -183,13 +301,13 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 		"iso-admin-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead},
+		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)
 	adminB := surface.RegisterDelegatedCaller(
 		"iso-admin-b-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		b.OrgSlug,
 		uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead},
+		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)
 
 	bProfile := adminProfile(t, surface.BaseURL, adminB.Token, targetUser)
@@ -209,7 +327,7 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 	serviceToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-self-service-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	subjectA := uuid.NewString()
@@ -236,9 +354,9 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 		"self token A sees its own balance, not subject B's balance")
 
 	status, body := requestJSON(t, http.MethodGet,
-		surface.BaseURL+"/v1/admin/users/"+subjectB, selfA.Token, nil)
+		surface.BaseURL+"/v1/merchant/customers/"+subjectB, selfA.Token, nil)
 	require.Equalf(t, http.StatusForbidden, status,
-		"self token must not be usable on :user_id admin routes: %s", string(body))
+		"self token must not be usable on merchant customer-support routes: %s", string(body))
 }
 
 func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
@@ -309,7 +427,7 @@ func assertNoServiceBalance(t *testing.T, baseURL, token, payer string) {
 
 func adminProfile(t *testing.T, baseURL, token, userID string) adminBillingProfileSnapshot {
 	t.Helper()
-	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/admin/users/"+userID, token, nil)
+	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/merchant/customers/"+userID, token, nil)
 	require.Equalf(t, http.StatusOK, status, "admin profile: %s", string(body))
 	var out adminBillingProfileSnapshot
 	require.NoError(t, json.Unmarshal(body, &out))

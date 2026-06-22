@@ -22,11 +22,11 @@ func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string)
 		// delegated merchant-admin token (the control plane resolves it).
 		opts.DelegatedResolver = s.controlPlane
 	}
-	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. The catalog
-	// admin actions and the (formerly `/v1/service/*`) machine billing routes both
-	// mount here, gated by `merchant:*` permissions; the old gin `/v1/service`
-	// duplicate is deleted.
+	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone
+	// mounts every merchant route set here: human admin/support, settings/catalog,
+	// and the machine billing API.
 	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
+	httproutes.RegisterMerchantSettingsRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
 	httproutes.RegisterServiceRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
 }
 

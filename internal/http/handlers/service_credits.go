@@ -78,14 +78,52 @@ func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.Resolve
 	return resolved, 0, ""
 }
 
-func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
-	resolved, status, msg := serviceCredentialFromRequest(r)
-	if resolved == nil {
-		r.ErrorJSON(status, msg)
+const MerchantRoutePrincipalContextKey = "openrails.merchant_route_principal"
+
+func hasMerchantRoutePrincipal(r *httprequest.Request) bool {
+	if r == nil {
 		return false
 	}
-	if !resolved.AllowsCustomer(tenantSubject.UUID()) {
-		r.ErrorJSON(http.StatusForbidden, "service_credential_customer_scope_denied")
+	if _, ok := r.Get(MerchantRoutePrincipalContextKey); ok {
+		return true
+	}
+	return false
+}
+
+func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
+	if v, ok := r.Get(ginmw.ServiceCredentialContextKey); ok {
+		resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+		if !ok || resolved == nil {
+			r.ErrorJSON(http.StatusInternalServerError, "API key state invalid")
+			return false
+		}
+		if !resolved.AllowsCustomer(tenantSubject.UUID()) {
+			r.ErrorJSON(http.StatusForbidden, "service_credential_customer_scope_denied")
+			return false
+		}
+		return true
+	}
+	if hasMerchantRoutePrincipal(r) {
+		return true
+	}
+	r.ErrorJSON(http.StatusUnauthorized, "merchant principal required")
+	return false
+}
+
+func serviceCustomerScopeAllows(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
+	if v, ok := r.Get(ginmw.ServiceCredentialContextKey); ok {
+		resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+		return ok && resolved != nil && resolved.AllowsCustomer(tenantSubject.UUID())
+	}
+	return hasMerchantRoutePrincipal(r)
+}
+
+func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
+	if hasMerchantRoutePrincipal(r) {
+		return true
+	}
+	if resolved, status, msg := serviceCredentialFromRequest(r); resolved == nil {
+		r.ErrorJSON(status, msg)
 		return false
 	}
 	return true

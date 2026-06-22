@@ -587,7 +587,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Enabled:    true,
 	})
 	if len(permissions) == 0 {
-		permissions = []string{controlplane.PermMerchantCustomersUpdate}
+		permissions = []string{controlplane.PermMerchantCustomerSettingsUpdate}
 	}
 	require.NoError(h.t, err, "register service-JWT issuer")
 	role := slug + "-service-jwt"

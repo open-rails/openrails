@@ -9,10 +9,10 @@ import (
 )
 
 func TestResolvedServiceCredential_HasPermission(t *testing.T) {
-	r := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersRead, PermMerchantCustomersUpdate}}
+	r := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate}}
 
-	if !r.HasPermission(PermMerchantCustomersUpdate) {
-		t.Errorf("expected granted permission %q to be held", PermMerchantCustomersUpdate)
+	if !r.HasPermission(PermMerchantCustomerSettingsUpdate) {
+		t.Errorf("expected granted permission %q to be held", PermMerchantCustomerSettingsUpdate)
 	}
 	if r.HasPermission(PermMerchantCatalogUpdate) {
 		t.Errorf("did not expect ungranted permission %q to be held", PermMerchantCatalogUpdate)
@@ -30,7 +30,7 @@ func TestResolvedServiceCredential_ApexGrantDoesNotBypassPermissionChecks(t *tes
 
 func TestResolvedServiceCredential_EmptyDeniesAll(t *testing.T) {
 	r := &ResolvedServiceCredential{}
-	if r.HasPermission(PermMerchantCustomersRead) {
+	if r.HasPermission(PermMerchantCustomerSettingsRead) {
 		t.Error("empty API key should grant nothing")
 	}
 }

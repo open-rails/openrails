@@ -44,13 +44,13 @@ func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject str
 
 // TestAdminUserDetailComposite_Delegated validates the #528 delegated /v1/admin
 // surface end-to-end against Postgres: a merchant admin holding
-// merchant:customers:read reads a user's COMPOSITE billing detail, which
+// merchant:customer-settings:read reads a user's COMPOSITE billing detail, which
 // embeds the entitlements section (plus the payment_methods + product_access
 // sections introduced in #528 increment 4).
 func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b3333333-3333-4333-8333-333333333333",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	userID := uuid.New().String()
 	now := time.Now().UTC()
@@ -127,7 +127,7 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 func TestAdminUserPaymentMethodDelete_Delegated(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
-		[]string{controlplane.PermMerchantCustomersUpdate})
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate})
 
 	userID := uuid.New().String()
 	pm := suite.CreateTestPaymentMethod(userID)
@@ -138,7 +138,7 @@ func TestAdminUserPaymentMethodDelete_Delegated(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	check := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users/%s", userID), nil)
 	req.Header.Set("Authorization", "Bearer host-credential")
 	w = httptest.NewRecorder()

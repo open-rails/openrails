@@ -115,7 +115,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	mux := http.NewServeMux()
 
-	if routeSets[RouteSetPublicCatalog] || routeSets[RouteSetCustomer] {
+	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
@@ -136,6 +136,18 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted
 		// via embgin.SelfHandler (issuer→owner), not the base handler.
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
+	}
+	if routeSets[RouteSetMerchantSettings] {
+		adminOpts := httproutes.Options{
+			Authenticator: s.Authenticator,
+		}
+		if s.AdminChecker != nil {
+			adminOpts.AdminPermissionChecker = s.AdminChecker
+		}
+		if s.ServiceCredentialResolver != nil {
+			adminOpts.ServiceCredentialResolver = s.ServiceCredentialResolver
+		}
+		httproutes.RegisterMerchantSettingsRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetMerchantAPI] {
 		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{
@@ -169,7 +181,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 }
 
 func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
-	if (routeSets[RouteSetPublicCatalog] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin]) && (s == nil || s.Authenticator == nil) {
+	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetMerchantSettings]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
 	}
 	if routeSets[RouteSetMerchantAPI] && (s == nil || s.ServiceCredentialResolver == nil) {

@@ -26,21 +26,21 @@ import (
 )
 
 // #528 hard cut: the admin payments surface is the delegated /v1/admin model.
-// Reads require merchant:customers:read; refunds require
-// merchant:customers:update. Tests authenticate as a delegated merchant principal
+// Reads require merchant:customer-settings:read; refunds require
+// merchant:customer-settings:update. Tests authenticate as a delegated merchant principal
 // via newHostSeamAdminRouter (the retired per-user admin JWT is gone).
 
 // adminPaymentsReader mounts the delegated admin surface with billing:read.
 func adminPaymentsReader(t *testing.T, suite *TestContainerSuite) *gin.Engine {
 	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000001",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 }
 
 // adminPaymentsWriter mounts the delegated admin surface with payments:write
 // (and billing:read, which a refund operator naturally also holds).
 func adminPaymentsWriter(t *testing.T, suite *TestContainerSuite) *gin.Engine {
 	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000002",
-		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate})
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate})
 }
 
 // TestAdminListPayments tests GET /v1/admin/payments

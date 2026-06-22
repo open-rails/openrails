@@ -105,10 +105,10 @@ func TestServiceCredentialRequired_SucceedsForCorrectMerchantAndPermission(t *te
 			OwnerOrgSlug: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			MerchantSlug: dbtest.TestMerchantSlug,
-			Permissions:  []string{controlplane.PermMerchantCustomersUpdate},
+			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
 		},
 	}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), dbtest.TestMerchantID.String())
@@ -121,10 +121,10 @@ func TestServiceCredentialRequired_SucceedsForServiceJWT(t *testing.T) {
 			OwnerOrgSlug: "cozy-art",
 			MerchantID:   dbtest.TestMerchantID,
 			MerchantSlug: dbtest.TestMerchantSlug,
-			Permissions:  []string{controlplane.PermMerchantCustomersUpdate},
+			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
 		},
 	}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), dbtest.TestMerchantID.String())
@@ -139,7 +139,7 @@ func TestServiceCredentialRequired_ApexGrantDoesNotBypassGate(t *testing.T) {
 			Permissions:  []string{authcore.OrgOwnerGrant},
 		},
 	}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
@@ -150,10 +150,10 @@ func TestServiceCredentialRequired_DeniesMissingPermission(t *testing.T) {
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerOrgSlug: "operator",
 			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{controlplane.PermMerchantCustomersRead}, // read only
+			Permissions:  []string{controlplane.PermMerchantCustomerSettingsRead}, // read only
 		},
 	}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "permission_required")
@@ -168,14 +168,14 @@ func TestServiceCredentialRequired_DeniesUnknownPermissionSet(t *testing.T) {
 			Permissions:  []string{"openrails:something:unknown"},
 		},
 	}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestServiceCredentialRequired_DeniesExpiredAPIKey(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrAccessTokenExpired}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "service_credential_expired")
@@ -183,7 +183,7 @@ func TestServiceCredentialRequired_DeniesExpiredAPIKey(t *testing.T) {
 
 func TestServiceCredentialRequired_DeniesRevokedAPIKey(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrAccessTokenRevoked}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "service_credential_revoked")
@@ -191,7 +191,7 @@ func TestServiceCredentialRequired_DeniesRevokedAPIKey(t *testing.T) {
 
 func TestServiceCredentialRequired_DeniesUnknownAPIKey(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrInvalidAccessToken}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "service_credential_invalid")
@@ -200,7 +200,7 @@ func TestServiceCredentialRequired_DeniesUnknownAPIKey(t *testing.T) {
 func TestServiceCredentialRequired_DeniesCrossMerchantAPIKey(t *testing.T) {
 	// Owning AuthKit org maps to no active OpenRails merchant for this deployment.
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: controlplane.ErrServiceCredentialMerchantUnresolved}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "service_credential_merchant_unresolved")
@@ -208,7 +208,7 @@ func TestServiceCredentialRequired_DeniesCrossMerchantAPIKey(t *testing.T) {
 
 func TestServiceCredentialRequired_DeniesMissingBearer(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
@@ -216,13 +216,13 @@ func TestServiceCredentialRequired_DeniesMissingBearer(t *testing.T) {
 func TestServiceCredentialRequired_DeniesNonServiceCredential(t *testing.T) {
 	// A JWT or delegated token is not an API key: these service routes accept only API keys.
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: false}
-	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestServiceCredentialRequired_NilResolverFailsClosed(t *testing.T) {
-	r := newServiceCredentialTestRouter(nil, controlplane.PermMerchantCustomersUpdate)
+	r := newServiceCredentialTestRouter(nil, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }

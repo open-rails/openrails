@@ -135,6 +135,10 @@ type Client interface {
 	// token-issuance enrichment and list renders: bake names into token
 	// claims and gate per-request from the token, not from this call.
 	ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
+	// ListEntitlements is the single-subject form of ListActiveEntitlements.
+	ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error)
+	// HasEntitlement checks one entitlement for one subject at `at`.
+	HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error)
 	// ListCustomersWithEntitlement is the REVERSE of ListActiveEntitlements (#535):
 	// the customer ids (== external subject ids, #364 UUID-only) holding an ACTIVE
 	// window of `entitlement` for the merchant. It walks the keyset-paginated
@@ -142,6 +146,10 @@ type Client interface {
 	// "now". Backs a host directory's filter-by-entitlement (the authkit
 	// EntitlementFilterProvider).
 	ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error)
+	// ListProductAccess lists active product-access grants for one subject.
+	ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error)
+	// HasProductAccess checks one product id for one subject.
+	HasProductAccess(ctx context.Context, subject, productID string) (bool, error)
 	// AdmitBatch performs one cross-payer batch admission (#335): N admit items
 	// (mixed payers) in ONE call with per-item verdicts. Per-item isolation: one
 	// item's deny or error never fails the batch; the returned slice is
@@ -495,6 +503,33 @@ type EntitlementRecord struct {
 	RevokeReason *string    `json:"revoke_reason,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// ProductAccessGrant is one active product-access row from the merchant lookup
+// API.
+type ProductAccessGrant struct {
+	ID           string     `json:"id"`
+	CustomerID   string     `json:"customer_id"`
+	ProductID    string     `json:"product_id"`
+	ProductSlug  string     `json:"product_slug,omitempty"`
+	ProductName  string     `json:"product_name,omitempty"`
+	SourceType   string     `json:"source_type"`
+	SourceID     string     `json:"source_id,omitempty"`
+	PaymentID    *string    `json:"payment_id,omitempty"`
+	Status       string     `json:"status"`
+	StartsAt     time.Time  `json:"starts_at"`
+	EndsAt       *time.Time `json:"ends_at,omitempty"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason *string    `json:"revoke_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// ProductAccessCheck is the response from a single product-access check.
+type ProductAccessCheck struct {
+	CustomerID string `json:"customer_id"`
+	ProductID  string `json:"product_id"`
+	HasAccess  bool   `json:"has_access"`
 }
 
 // AdmitBatchVerdict is one per-item verdict from POST /v1/service/admit/batch.

@@ -310,10 +310,10 @@ go openrails.RunWorkers(ctx)
 
 // Mount the billing surface. Routes live under /billing/v1/*.
 // Zero value uses embedded.EmbeddedDefaultRouteSets:
-// public catalog, customer, merchant admin, and webhooks.
+// checkout, customer, merchant admin, and webhooks.
 handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
     RouteSets: []embedded.RouteSet{
-        embedded.RouteSetPublicCatalog,
+        embedded.RouteSetCheckout,
         embedded.RouteSetCustomer,
         embedded.RouteSetMerchantAdmin,
         embedded.RouteSetWebhooks,

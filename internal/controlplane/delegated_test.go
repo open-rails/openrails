@@ -5,7 +5,6 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,23 +41,14 @@ const (
 )
 
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
-// configuration (issuer, openrails audience, local public key, self-permission
-// catalog validator), seeded with a freshly generated signing key.
+// configuration (issuer, openrails audience, local public key, NO permission
+// allowlist — #564), seeded with a freshly generated signing key.
 func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) {
 	t.Helper()
 	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
 	require.NoError(t, err)
 
-	v := authhttp.NewVerifier(
-		authhttp.WithPermissions(func(permissions []string) error {
-			for _, p := range permissions {
-				if !IsDelegatedPermission(p) {
-					return fmt.Errorf("permission %q is not a browser-safe org: permission", p)
-				}
-			}
-			return nil
-		}),
-	)
+	v := authhttp.NewVerifier()
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
 		ID:      "remote-app-1",
 		Slug:    "openrails-test",
@@ -115,7 +105,9 @@ func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer
 func (s delegatedRemoteAppSource) ResolveRemoteApplicationAuthority(_ context.Context, appID string) ([]authcore.OrgMembership, []string, error) {
 	for i := range s {
 		if s[i].ID == appID {
-			return nil, MerchantCatalogNames(), nil
+			// #564: the test remote-app's stored authority is the full catalog;
+			// ResolveDelegated intersects the token claim against this.
+			return nil, CatalogNames(), nil
 		}
 	}
 	return nil, nil, authcore.ErrRemoteApplicationNotFound
@@ -173,23 +165,30 @@ func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {
 	require.Error(t, err, "a token whose aud does not include openrails must be rejected")
 }
 
-func TestDelegatedVerify_RejectsPlatformPermission(t *testing.T) {
+// #564: a delegated token can carry ANY permission the SIGNING remote-app holds —
+// including merchant:admissions:create, which the deleted #259 browser-safe allowlist
+// used to block. AuthKit bounds the claim to the signer's stored authority (the test
+// remote-app holds the full catalog), so an in-authority claim is carried.
+func TestDelegatedVerify_CarriesInAuthorityPermIncludingAdmit(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	// An operator/server-to-server grant on a browser token must be rejected.
+	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
+		Permissions: []string{PermMerchantAdmissionsCreate},
+	})
+	_, dp, err := v.VerifyDelegatedAccess(tok)
+	require.NoError(t, err, "admit is carriable on a delegated token when the signer holds it (#564)")
+	require.Contains(t, dp.Permissions, PermMerchantAdmissionsCreate)
+}
+
+// #564 (reject, not drop): a claim BEYOND the signer's stored authority rejects the
+// whole token — AuthKit fails loud rather than silently dropping the excess perm.
+func TestDelegatedVerify_RejectsOverClaimBeyondSignerAuthority(t *testing.T) {
+	v, signer := newTestDelegatedVerifier(t)
+	// org:* is not in the remote-app's stored authority (the OpenRails catalog).
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
 		Permissions: []string{authcore.OrgOwnerGrant},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err)
-}
-
-func TestDelegatedVerify_RejectsMixedAdminAndPlatformPermission(t *testing.T) {
-	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermMerchantCustomersRead, "platform:orgs:update"},
-	})
-	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err, "any platform permission taints the whole token")
+	require.Error(t, err, "a perm beyond the signer's authority must reject the whole token")
 }
 
 func TestDelegatedVerify_RejectsExpired(t *testing.T) {

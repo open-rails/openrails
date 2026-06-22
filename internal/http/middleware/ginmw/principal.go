@@ -167,9 +167,8 @@ func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ Creden
 		CredentialType: typ,
 		Subject:        strings.TrimSpace(resolved.DelegatedSubject),
 		can: func(_ context.Context, perm string) bool {
-			if !controlplane.IsDelegatedPermission(perm) {
-				return false
-			}
+			// #564: resolved.Permissions is already the claim ∩ signer authority;
+			// gate purely on the permission, never the credential type.
 			return resolved.HasPermission(perm)
 		},
 	}

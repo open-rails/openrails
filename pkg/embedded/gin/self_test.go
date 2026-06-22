@@ -92,7 +92,7 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
 	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, merchant.ID{})
-	w := doSelf(h, http.MethodGet, "/billing/v1/me/balance")
+	w := doSelf(h, http.MethodGet, "/billing/v1/me/balance?currency=usd")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
 	// Principal missing its explicit merchant mapping => 401.
@@ -101,16 +101,16 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 			SubjectID: "user-1",
 		},
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance")
+	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance?currency=usd")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
-	// A platform grant can never be smuggled onto the self surface.
+	// A platform grant can never be smuggled into a merchant-admin gate.
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("platform:metrics:read"),
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance")
-	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	w = doSelf(h, http.MethodGet, "/billing/v1/admin/metrics")
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
 func TestSelfHandler_DefaultUserAuthenticatorGetsSelfSurface(t *testing.T) {

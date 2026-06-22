@@ -4,12 +4,14 @@ package embedhttp
 type RouteSet string
 
 const (
-	// RouteSetPublicCatalog mounts public catalog and checkout discovery routes.
-	RouteSetPublicCatalog RouteSet = "public_catalog"
+	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
+	RouteSetCheckout RouteSet = "checkout"
 	// RouteSetCustomer mounts customer-facing billing routes.
 	RouteSetCustomer RouteSet = "customer"
-	// RouteSetMerchantAdmin mounts merchant operator catalog/admin action routes.
+	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
 	RouteSetMerchantAdmin RouteSet = "merchant_admin"
+	// RouteSetMerchantSettings mounts provider secrets, catalog pushes, and merchant config routes.
+	RouteSetMerchantSettings RouteSet = "merchant_settings"
 	// RouteSetMerchantAPI mounts host-internal service/API-key routes.
 	RouteSetMerchantAPI RouteSet = "merchant_api"
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
@@ -20,7 +22,7 @@ const (
 // host-internal merchant API routes because embedded hosts normally call the
 // in-process service facade instead of looping through HTTP.
 var EmbeddedDefaultRouteSets = []RouteSet{
-	RouteSetPublicCatalog,
+	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
 	RouteSetWebhooks,
@@ -29,9 +31,10 @@ var EmbeddedDefaultRouteSets = []RouteSet{
 // StandaloneDefaultRouteSets is the full standalone HTTP surface, including
 // host-internal merchant API routes.
 var StandaloneDefaultRouteSets = []RouteSet{
-	RouteSetPublicCatalog,
+	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
+	RouteSetMerchantSettings,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }

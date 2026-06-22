@@ -31,7 +31,7 @@ import (
 func TestAdminGetUserBillingProfile(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b3333333-3333-4333-8333-333333333333",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	t.Run("returns empty profile for new user", func(t *testing.T) {
 		userID := uuid.New().String()
@@ -92,7 +92,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 func TestAdminListSubscriptions(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID

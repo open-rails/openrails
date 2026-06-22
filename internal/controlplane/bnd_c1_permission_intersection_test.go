@@ -13,7 +13,7 @@ import (
 func TestIntersectPermissions_EmptyStoredDeniesAll(t *testing.T) {
 	// Stored authority is empty → no permissions survive, regardless of what
 	// the token claims (including org:*).
-	claimed := []string{authcore.OrgOwnerGrant, PermMerchantCustomersRead, PermMerchantCustomersUpdate}
+	claimed := []string{authcore.OrgOwnerGrant, PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate}
 	got := intersectPermissions(claimed, nil)
 	if len(got) != 0 {
 		t.Errorf("intersectPermissions with empty stored = %v, want empty", got)
@@ -21,7 +21,7 @@ func TestIntersectPermissions_EmptyStoredDeniesAll(t *testing.T) {
 }
 
 func TestIntersectPermissions_EmptyClaimedYieldsEmpty(t *testing.T) {
-	stored := []string{PermMerchantCustomersRead, PermMerchantCustomersUpdate}
+	stored := []string{PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate}
 	got := intersectPermissions(nil, stored)
 	if len(got) != 0 {
 		t.Errorf("intersectPermissions with empty claimed = %v, want empty", got)
@@ -29,11 +29,11 @@ func TestIntersectPermissions_EmptyClaimedYieldsEmpty(t *testing.T) {
 }
 
 func TestIntersectPermissions_OnlyGrantedPermissionsSurvive(t *testing.T) {
-	stored := []string{PermMerchantCustomersRead}
-	claimed := []string{PermMerchantCustomersRead, PermMerchantCustomersUpdate, authcore.OrgOwnerGrant}
+	stored := []string{PermMerchantCustomerSettingsRead}
+	claimed := []string{PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate, authcore.OrgOwnerGrant}
 	got := intersectPermissions(claimed, stored)
-	if len(got) != 1 || got[0] != PermMerchantCustomersRead {
-		t.Errorf("intersectPermissions = %v, want [%q]", got, PermMerchantCustomersRead)
+	if len(got) != 1 || got[0] != PermMerchantCustomerSettingsRead {
+		t.Errorf("intersectPermissions = %v, want [%q]", got, PermMerchantCustomerSettingsRead)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
 	// The critical BND-C1 case: a token self-asserts org:* but the
 	// remote application's stored authority only grants merchant customer reads.
 	// The owner-grant claim must be stripped.
-	stored := []string{PermMerchantCustomersRead}
+	stored := []string{PermMerchantCustomerSettingsRead}
 	claimed := []string{authcore.OrgOwnerGrant}
 	got := intersectPermissions(claimed, stored)
 	if len(got) != 0 {
@@ -52,7 +52,7 @@ func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
 func TestIntersectPermissions_AdminGrantedWhenStored(t *testing.T) {
 	// If an operator EXPLICITLY grants org:* to a remote_application
 	// (unusual but valid), the token may claim it and it should pass through.
-	stored := []string{authcore.OrgOwnerGrant, PermMerchantCustomersRead}
+	stored := []string{authcore.OrgOwnerGrant, PermMerchantCustomerSettingsRead}
 	claimed := []string{authcore.OrgOwnerGrant}
 	got := intersectPermissions(claimed, stored)
 	if len(got) != 1 || got[0] != authcore.OrgOwnerGrant {

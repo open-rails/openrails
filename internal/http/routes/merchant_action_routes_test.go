@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -36,27 +36,132 @@ func (c *merchantActionChecker) HasAdminPermission(_ context.Context, _, _, perm
 	return false, nil
 }
 
-func TestRegisterMerchantActionRoutesRequiresCatalogWrite(t *testing.T) {
+func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 	mux := http.NewServeMux()
 	checker := &merchantActionChecker{}
-	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
+	opts := Options{
 		Authenticator:          merchantActionAuth{},
 		AdminPermissionChecker: checker,
-	})
+	}
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterMerchantSettingsRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		perm   string
+	}{
+		{
+			name:   "catalog read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/catalog/products",
+			perm:   controlplane.PermMerchantCatalogRead,
+		},
+		{
+			name:   "catalog publish",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/catalog/publish",
+			perm:   controlplane.PermMerchantCatalogUpdate,
+		},
+		{
+			name:   "payment providers read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/payment-providers",
+			perm:   controlplane.PermMerchantPaymentProvidersRead,
+		},
+		{
+			name:   "payment providers write",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/payment-providers/stripe",
+			perm:   controlplane.PermMerchantPaymentProvidersUpdate,
+		},
+		{
+			name:   "customer profile",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
+			name:   "customer payment methods readonly",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payment-methods",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
+			name:   "off channel payment",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payments/off-channel",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "merchant payments read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/payments",
+			perm:   controlplane.PermMerchantPaymentsRead,
+		},
+		{
+			name:   "merchant payment refund",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/payments/11111111-1111-1111-1111-111111111111/refunds",
+			perm:   controlplane.PermMerchantPaymentsRefund,
+		},
+		{
+			name:   "merchant subscriptions read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/subscriptions",
+			perm:   controlplane.PermMerchantSubscriptionsRead,
+		},
+		{
+			name:   "merchant subscription cancel",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/subscriptions/11111111-1111-1111-1111-111111111111/cancel",
+			perm:   controlplane.PermMerchantSubscriptionsUpdate,
+		},
+		{
+			name:   "repair alerts read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/repair-alerts",
+			perm:   controlplane.PermMerchantRepairAlertsRead,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checker.perm = ""
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected forbidden before handler execution, got %d", rec.Code)
+			}
+			if checker.perm != tc.perm {
+				t.Fatalf("expected %q permission, got %q", tc.perm, checker.perm)
+			}
+		})
+	}
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected forbidden before handler execution, got %d", rec.Code)
-	}
-	if checker.perm != policy.PermMerchantCatalogUpdate {
-		t.Fatalf("expected %q permission, got %q", policy.PermMerchantCatalogUpdate, checker.perm)
-	}
-
-	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/catalog/products", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("old admin catalog route should not be registered, got %d", rec.Code)
+	}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/billing/v1/merchant/catalog/products/prod_123/reconcile"},
+		{method: http.MethodGet, path: "/billing/v1/merchant/catalog/orphans"},
+		{method: http.MethodGet, path: "/billing/v1/merchant/catalog/stripe/orphans"},
+		{method: http.MethodPost, path: "/billing/v1/merchant/catalog/drift/reconcile-all"},
+		{method: http.MethodGet, path: "/billing/v1/merchant/merchant-configuration"},
+		{method: http.MethodPut, path: "/billing/v1/merchant/merchant-configuration"},
+		{method: http.MethodDelete, path: "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payment-methods/22222222-2222-2222-2222-222222222222"},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s should not be registered on primary merchant surface, got %d", tc.method, tc.path, rec.Code)
+		}
 	}
 }
 
@@ -70,16 +175,49 @@ func TestMerchantActionRoutesDelegatedTokenGated(t *testing.T) {
 	del := fakeMerchantDelegatedResolver{resolved: &controlplane.ResolvedDelegated{
 		DelegatedSubject: "admin-1",
 		Merchant:         "merchant_1",
-		Permissions:      []string{controlplane.PermMerchantCustomersRead},
+		Permissions:      []string{controlplane.PermMerchantCustomerSettingsRead},
 	}}
-	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
+	opts := Options{
 		DelegatedResolver: del,
-	})
+	}
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterMerchantSettingsRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil)
+	req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/catalog/publish", nil)
 	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc") // JWT-shaped delegated token
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("delegated token lacking catalog:update should be 403, got %d", rec.Code)
+	}
+}
+
+func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{name: "missing admission", perms: []string{controlplane.PermMerchantCustomerSettingsRead}, want: http.StatusForbidden},
+		{name: "has admission", perms: []string{controlplane.PermMerchantAdmissionsCreate}, want: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			del := fakeMerchantDelegatedResolver{resolved: &controlplane.ResolvedDelegated{
+				MerchantID:       dbtest.TestMerchantID,
+				Merchant:         "merchant_1",
+				DelegatedSubject: "admin-1",
+				Permissions:      tc.perms,
+			}}
+			RegisterServiceRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
+				DelegatedResolver: del,
+			})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admit", nil)
+			req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
+			mux.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

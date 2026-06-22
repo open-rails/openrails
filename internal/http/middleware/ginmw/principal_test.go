@@ -34,8 +34,8 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	r.GET("/admin", UserSessionAdminPrincipalRequired(fakeAdminPrincipalChecker{
 		allowedOrg:  "merchant-org",
 		allowedUser: "admin-1",
-		allowedPerm: controlplane.PermMerchantCustomersRead,
-	}), RequirePermission(controlplane.PermMerchantCustomersRead), func(c *gin.Context) {
+		allowedPerm: controlplane.PermMerchantCustomerSettingsRead,
+	}), RequirePermission(controlplane.PermMerchantCustomerSettingsRead), func(c *gin.Context) {
 		p, ok := PrincipalFromGin(c)
 		require.True(t, ok)
 		require.Equal(t, CredentialUserSession, p.CredentialType)
@@ -78,23 +78,21 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 		OwnerOrgSlug: "merchant-org",
 		MerchantID:   dbtest.TestMerchantID,
 		Permissions: []string{
-			controlplane.PermMerchantCustomersRead,
+			controlplane.PermMerchantCustomerSettingsRead,
 		},
 	}, CredentialAPIKey)
 	require.NotNil(t, servicePrincipal)
 	require.Empty(t, servicePrincipal.Subject)
-	require.True(t, servicePrincipal.Can(ctx, controlplane.PermMerchantCustomersRead))
+	require.True(t, servicePrincipal.Can(ctx, controlplane.PermMerchantCustomerSettingsRead))
 
 	delegatedPrincipal := principalFromDelegated(&controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,
 		DelegatedSubject: "user-1",
-		Permissions:      []string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantAdmissionsCreate, "platform:orgs:update"},
+		Permissions:      []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantAdmissionsCreate},
 	}, CredentialDelegatedUser)
 	require.NotNil(t, delegatedPrincipal)
 	require.Equal(t, "user-1", delegatedPrincipal.Subject)
-	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantCustomersRead))
-	// merchant:admissions:create is the machine hot-path grant — even if a token
-	// claims it, it is NOT browser-delegatable, so the delegated principal is denied.
-	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantAdmissionsCreate))
+	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantCustomerSettingsRead))
+	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantAdmissionsCreate))
 	require.False(t, delegatedPrincipal.Can(ctx, "platform:orgs:update"))
 }

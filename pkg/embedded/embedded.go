@@ -21,11 +21,12 @@ import (
 type RouteSet = embedhttp.RouteSet
 
 const (
-	RouteSetPublicCatalog = embedhttp.RouteSetPublicCatalog
-	RouteSetCustomer      = embedhttp.RouteSetCustomer
-	RouteSetMerchantAdmin = embedhttp.RouteSetMerchantAdmin
-	RouteSetMerchantAPI   = embedhttp.RouteSetMerchantAPI
-	RouteSetWebhooks      = embedhttp.RouteSetWebhooks
+	RouteSetCheckout         = embedhttp.RouteSetCheckout
+	RouteSetCustomer         = embedhttp.RouteSetCustomer
+	RouteSetMerchantAdmin    = embedhttp.RouteSetMerchantAdmin
+	RouteSetMerchantSettings = embedhttp.RouteSetMerchantSettings
+	RouteSetMerchantAPI      = embedhttp.RouteSetMerchantAPI
+	RouteSetWebhooks         = embedhttp.RouteSetWebhooks
 )
 
 var (

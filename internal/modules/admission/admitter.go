@@ -6,6 +6,12 @@
 // cutoff, loads the cached cap windows, reads the O(1) ledger balance, and runs
 // the single spendgate EVAL that checks affordability + every window and places
 // the in-flight hold. No Postgres locks, no per-request budget reservation rows.
+//
+// Delegated metering is PER-INVOKER (#563): a role/tier grant only selects WHICH
+// invokers a window applies to — it is never a pool shared across them. The
+// Invoker string and role UUIDs are host-owned, opaque, stable keys; OpenRails
+// never materializes a row for a delegated invoker. Only the payer scope is
+// aggregate across the whole account.
 package admission
 
 import (

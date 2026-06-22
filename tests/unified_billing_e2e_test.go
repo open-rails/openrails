@@ -84,8 +84,8 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	// Merchant-wide token (no CustomerResource): AllowsCustomer returns true for
 	// every customer under the merchant, so each test's random payer is in scope.
 	resolver := stubServiceCredentialResolver{permissions: []string{
-		controlplane.PermMerchantCustomersRead,
-		controlplane.PermMerchantCustomersUpdate,
+		controlplane.PermMerchantCustomerSettingsRead,
+		controlplane.PermMerchantCustomerSettingsUpdate,
 		controlplane.PermMerchantAdmissionsCreate,
 	}, resources: []authcore.APIKeyResource{
 		controlplane.MerchantResource(dbtest.TestMerchantID),

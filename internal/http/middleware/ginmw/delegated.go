@@ -51,7 +51,7 @@ type DelegatedResolver interface {
 //   - sets the acting user (the token's `delegated_sub`) as the request's
 //     user context, so the existing user-facing `me` handlers naturally scope
 //     every read/write to that user — never another user's data,
-//   - records any browser-safe org permissions for admin route gates.
+//   - records AuthKit-bounded permissions for admin route gates.
 //
 // Rejected (fail-closed): missing/expired/revoked tokens, normal-`sub` (non-
 // delegated) tokens, wrong audience/issuer/signature, tokens carrying any
@@ -178,10 +178,10 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 	}
 }
 
-// resolvedFromHostPrincipal validates a host-supplied principal and converts
-// it to the *controlplane.ResolvedDelegated shape the delegated context
-// carries. Validation is strict and fail-closed: explicit merchant + subject and
-// every supplied permission inside the delegated browser catalog.
+// resolvedFromHostPrincipal validates a host-supplied principal and converts it to
+// the *controlplane.ResolvedDelegated shape. The embedding host is trusted (in
+// process), so its supplied permissions are authoritative — no allowlist (#564);
+// merchant + subject must be explicit.
 func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane.ResolvedDelegated, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -198,8 +198,8 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 	perms := make([]string, 0, len(p.Permissions))
 	for _, perm := range p.Permissions {
 		perm = strings.TrimSpace(perm)
-		if !controlplane.IsDelegatedPermission(perm) {
-			return nil, billingauth.ErrDelegatedPrincipalInvalid
+		if perm == "" {
+			continue
 		}
 		perms = append(perms, perm)
 	}

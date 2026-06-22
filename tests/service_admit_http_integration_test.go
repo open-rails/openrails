@@ -54,7 +54,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/merchant")
 	resolver := stubServiceCredentialResolver{
-		permissions: []string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate, controlplane.PermMerchantAdmissionsCreate},
+		permissions: []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate},
 		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(payerID),

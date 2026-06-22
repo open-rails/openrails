@@ -261,11 +261,11 @@ func pickUSDPrices(t *testing.T, suite *TestContainerSuite) (recurring, oneOff *
 func ensureNMISandboxPlan(t *testing.T, client *nmi.NMIClient, securityKey, planID string, recurring *models.Price) {
 	t.Helper()
 	out := postNMIForm(t, client.DirectPostURL, url.Values{
-		"security_key": {securityKey},
-		"recurring":    {"add_plan"},
-		"plan_id":      {planID},
-		"plan_name":    {"OpenRails E2E " + planID},
-		"plan_amount":  {decimalAmount(recurring.Amount)},
+		"security_key":  {securityKey},
+		"recurring":     {"add_plan"},
+		"plan_id":       {planID},
+		"plan_name":     {"OpenRails E2E " + planID},
+		"plan_amount":   {decimalAmount(recurring.Amount)},
 		"day_frequency": {strconv.Itoa(derefInt(recurring.BillingCycleDays))},
 		"plan_payments": {"0"},
 	})

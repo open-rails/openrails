@@ -92,7 +92,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	serviceJWTB := standalone.RegisterServiceJWTIssuer(
 		"or502-jwt-b",
 		merchantB.OrgSlug,
-		[]string{controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
 		nil,
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, serviceJWTB.Token, customerB, 4_000)
@@ -103,7 +103,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	crossScopedServiceJWT := standalone.RegisterServiceJWTIssuer(
 		"or502-jwt-cross",
 		merchantB.OrgSlug,
-		[]string{controlplane.PermMerchantCustomersUpdate},
+		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceJWT.Token, uuid.New(), 10)

@@ -33,7 +33,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 		Info("delegated self-service API routes registered on public handler")
 
 	// Browser-direct ADMIN surface (#259, #528): the SAME delegated middleware
-	// authenticates; per-route gates require browser-safe `org:` permissions and
+	// authenticates; per-route gates require AuthKit-bounded merchant/admin permissions and
 	// the handlers act on a `:user_id` WITHIN the token's pinned merchant. This is
 	// THE admin surface (#528 retired the per-user `/v1/admin`). Mounted on the
 	// same public engine alongside /v1/me/*.

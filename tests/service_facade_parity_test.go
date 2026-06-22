@@ -134,10 +134,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	group := router.Group("/v1/merchant")
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{
-			controlplane.PermMerchantCustomersRead,
-			controlplane.PermMerchantCustomersUpdate,
+			controlplane.PermMerchantCustomerSettingsRead,
+			controlplane.PermMerchantCustomerSettingsUpdate,
 			controlplane.PermMerchantAdmissionsCreate,
-			controlplane.PermMerchantCustomersRead,
+			controlplane.PermMerchantCustomerSettingsRead,
 		},
 		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),

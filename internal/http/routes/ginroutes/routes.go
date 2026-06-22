@@ -20,7 +20,7 @@ const SelfRoutePrefix = "/me"
 // AdminRoutePrefix is the path under the merchant-scoped public API where the
 // (delegated) ADMIN billing surface lives (#259, #528). A merchant's host
 // frontend mints a FEDERATED, MERCHANT-SIGNED delegated access token carrying
-// browser-safe `org:` permissions for one of its ADMIN users; the browser
+// AuthKit-bounded merchant/admin permissions for one of its ADMIN users; the browser
 // presents it as a Bearer token directly against this surface to act on ANY user
 // WITHIN the token's merchant via the `:user_id` path param. The acting admin is
 // the token's `delegated_sub` (recorded for audit) and the acting merchant is
@@ -130,7 +130,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 
 // RegisterAdminRoutes mounts the browser-direct delegated admin billing
 // surface on a merchant-scoped PUBLIC route group authenticated by a FEDERATED,
-// MERCHANT-SIGNED delegated access token carrying browser-safe `org:` permissions
+// MERCHANT-SIGNED delegated access token carrying AuthKit-bounded merchant/admin permissions
 // (issue #259). Unlike the self-service surface (which has no `:user_id` and acts
 // only on the token's own subject), these routes act on ANY user WITHIN the
 // token's merchant via the `:user_id` path param.
@@ -160,19 +160,13 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	read := ginmw.RequirePermission(controlplane.PermMerchantCustomersRead)
-	subRead := ginmw.RequirePermission(controlplane.PermMerchantCustomersRead)
-	entWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
-	productAccessWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
-	payWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
+	read := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsRead)
+	subRead := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsRead)
+	entWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
+	productAccessWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
+	payWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
 	subWrite := ginmw.RequirePermission(controlplane.PermMerchantSubscriptionsUpdate)
-	configRead := ginmw.RequirePermission(controlplane.PermMerchantSettingsRead)
-	configWrite := ginmw.RequirePermission(controlplane.PermMerchantSettingsUpdate)
 	metricsRead := ginmw.RequirePermission(controlplane.PermMerchantUsageRead)
-	secretsList := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersRead)
-	secretsWrite := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
-	secretsDelete := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
-	secretsTest := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
 
 	// Merchant metrics (issue #259 + #232): a merchant admin reads THEIR OWN merchant's
 	// analytics. The metrics queries are merchant-scoped to the request's merchant
@@ -183,20 +177,9 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	// processors,churn}); ?period/?currency/?granularity control the shape.
 	group.GET("/metrics", metricsRead, wrap(httphandlers.GetAdminMetrics))
 
-	group.GET("/merchant-configuration", configRead, wrap(httphandlers.ServiceGetMerchantConfiguration))
-	group.PUT("/merchant-configuration", configWrite, wrap(httphandlers.ServiceSetMerchantConfiguration))
-
-	secretGroup := group.Group("/secrets")
-	secretGroup.GET("", secretsList, merchantSecretListHandler(rt))
-	secretGroup.GET("/registry", secretsList, merchantSecretRegistryHandler())
-	secretGroup.PUT("/*name", secretsWrite, merchantSecretPutHandler(rt))
-	secretGroup.DELETE("/*name", secretsDelete, merchantSecretDeleteHandler(rt))
-	secretGroup.POST("/validate/*name", secretsTest, merchantSecretValidateHandler(rt))
-
 	// Merchant-wide operational lists. They reuse admin handlers, but the delegated
 	// middleware pins the merchant before RLS-aware queries run.
 	group.GET("/repair-alerts", read, wrap(httphandlers.GetAdminRepairAlerts))
-	group.GET("/manual-rebill-attempts", read, wrap(httphandlers.GetAdminManualRebillAttempts))
 
 	users := group.Group("/users/:user_id")
 

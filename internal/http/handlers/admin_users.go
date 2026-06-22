@@ -7,16 +7,19 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
 type adminUserPath struct {
-	UserID string `uri:"user_id" binding:"required"`
+	UserID string `uri:"customer_id" binding:"required"`
 }
 
 // adminUserBillingProfile is the composite admin user-detail (#528): one read
@@ -24,6 +27,7 @@ type adminUserPath struct {
 // per-section endpoints.
 type adminUserBillingProfile struct {
 	CustomerID     string                       `json:"customer_id"`
+	TrustTier      string                       `json:"trust_tier,omitempty"`
 	Subscriptions  []models.Subscription        `json:"subscriptions"`
 	Entitlements   []models.Entitlement         `json:"entitlements"`
 	Payments       []*models.Payment            `json:"payments"`
@@ -43,7 +47,7 @@ type adminCreditBalanceResponse struct {
 }
 
 type adminPaymentMethodPath struct {
-	UserID string `uri:"user_id" binding:"required"`
+	UserID string `uri:"customer_id" binding:"required"`
 	ID     string `uri:"id" binding:"required"`
 }
 
@@ -98,6 +102,13 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	if r.State.MoneyService != nil {
 		payer := identity.CustomerIDFromString(path.UserID)
 		if !payer.IsZero() {
+			currency := r.Query("currency")
+			if currency == "" {
+				currency = money.DefaultCurrency
+			}
+			if tier, err := r.State.MoneyService.GetTier(ctx, payer, currency); err == nil {
+				profile.TrustTier = tier
+			}
 			balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, payer)
 			if err != nil {
 				log.WithError(err).WithField("user_id", path.UserID).Error("failed to load credit balances")
@@ -128,6 +139,24 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		}
 	}
 	r.SuccessJSON(profile)
+}
+
+func GetAdminUserPaymentMethods(r *httprequest.Request) {
+	var path adminUserPath
+	if err := r.ShouldBindURI(&path); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	if r.State.PaymentMethodService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
+		return
+	}
+	pms, err := r.State.PaymentMethodService.GetByUserID(r.Request.Context(), path.UserID)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment methods")
+		return
+	}
+	r.SuccessJSON(map[string]any{"object": "list", "data": paymentMethodsToAPI(pms)})
 }
 
 func DeleteAdminUserPaymentMethod(r *httprequest.Request) {
@@ -241,4 +270,37 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSONMessage("subscription cancelled successfully")
+}
+
+func AdminResumeSubscription(r *httprequest.Request) {
+	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
+		return
+	}
+	if r.State.SubscriptionService == nil || r.State.RiverProducer == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
+		return
+	}
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
+	if err != nil {
+		r.ErrorJSON(http.StatusNotFound, "subscription not found")
+		return
+	}
+	now := time.Now().UTC()
+	if !subscriptions.Resumable(sub, now) {
+		r.ErrorJSON(http.StatusBadRequest, "subscription is not resumable")
+		return
+	}
+	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
+		UserID:         sub.CustomerID.String(),
+		SubscriptionID: subscriptionID,
+	}, &river.InsertOpts{
+		Queue:      riverjobs.QueueBilling,
+		UniqueOpts: subscriptionLifecycleUniqueOpts(),
+	}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue resume")
+		return
+	}
+	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
 }

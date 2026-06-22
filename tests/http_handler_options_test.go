@@ -73,6 +73,7 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	embeddedDefault := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{}))
 	t.Cleanup(embeddedDefault.Close)
 	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/merchant/admit"))
+	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/catalog/products"))
 
 	embeddedMerchantAPI := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
 		RouteSets: []server.RouteSet{server.RouteSetMerchantAPI},
@@ -80,9 +81,16 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	t.Cleanup(embeddedMerchantAPI.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/merchant/admit"))
 
+	embeddedMerchantSettings := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
+		RouteSets: []server.RouteSet{server.RouteSetMerchantSettings},
+	}))
+	t.Cleanup(embeddedMerchantSettings.Close)
+	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantSettings.Client(), http.MethodGet, embeddedMerchantSettings.URL+"/billing/v1/merchant/catalog/products"))
+
 	standalone := httptest.NewServer(srv.Handler())
 	t.Cleanup(standalone.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodPost, standalone.URL+"/v1/merchant/admit"))
+	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodGet, standalone.URL+"/v1/merchant/catalog/products"))
 }
 
 func status(t *testing.T, client *http.Client, method, url string) int {

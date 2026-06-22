@@ -47,7 +47,7 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 	}
 
 	h := s.newHTTPHandlerMux(HTTPHandlerOptions{
-		RouteSets: []RouteSet{RouteSetPublicCatalog, RouteSetCustomer, RouteSetWebhooks},
+		RouteSets: []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks},
 	})
 
 	// Optional-auth public route: reaches the handler even unauthenticated.
@@ -102,14 +102,14 @@ func TestEmbeddedMuxAdminAssembles(t *testing.T) {
 
 	// #528: the per-user `/admin` surface was removed from the base handler — the
 	// admin surface is now the delegated one mounted via embgin.SelfHandler.
-	// RouteSetMerchantAdmin assembles the merchant action routes; mounted => 401 (not 404).
+	// RouteSetMerchantAdmin assembles merchant support routes; mounted => 401 (not 404).
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/customers/user_123", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
-	// /billing/v1/admin/* is no longer on the base handler (404).
+	// Merchant settings routes are a separate opt-in set.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/subscriptions", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -127,6 +127,10 @@ func TestEmbeddedMuxPrivilegedRoutesRequireAuthenticatorAtConstruction(t *testin
 		"embedded billing: user/admin route groups require Options.Authenticator",
 		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetCustomer}}) },
 	)
+	require.PanicsWithError(t,
+		"embedded billing: user/admin route groups require Options.Authenticator",
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantSettings}}) },
+	)
 	require.NotPanics(t, func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetWebhooks}}) })
 }
 
@@ -142,6 +146,24 @@ func TestEmbeddedDefaultExcludesMerchantAPI(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admit", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestEmbeddedMerchantSettingsOptInMountsSettingsRoutes(t *testing.T) {
+	s := &Server{
+		cfg:           &config.Config{Captcha: &config.CaptchaConfig{}},
+		runtime:       &app.Runtime{},
+		authenticator: stubAuthenticator{},
+	}
+
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantSettings}})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
@@ -159,5 +181,7 @@ func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
 
 func TestEmbeddedRouteSetPresets(t *testing.T) {
 	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetMerchantAPI)
+	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetMerchantSettings)
 	require.Contains(t, StandaloneDefaultRouteSets, RouteSetMerchantAPI)
+	require.Contains(t, StandaloneDefaultRouteSets, RouteSetMerchantSettings)
 }

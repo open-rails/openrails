@@ -18,8 +18,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		PermMerchantPaymentProvidersUpdate,
 		PermMerchantCatalogRead,
 		PermMerchantCatalogUpdate,
-		PermMerchantCustomersRead,
-		PermMerchantCustomersUpdate,
+		PermMerchantCustomerSettingsRead,
+		PermMerchantCustomerSettingsUpdate,
 		PermMerchantPaymentsRead,
 		PermMerchantPaymentsRefund,
 		PermMerchantSubscriptionsRead,
@@ -27,8 +27,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		PermMerchantAdmissionsCreate,
 		PermMerchantUsageRead,
 		PermMerchantRepairAlertsRead,
-		PermOrgSpendDelegationsRead,
-		PermOrgSpendDelegationsUpdate,
+		PermCustomerSpendDelegationsRead,
+		PermCustomerSpendDelegationsUpdate,
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {
@@ -69,6 +69,8 @@ func TestCatalog_HardCutsOldOrgMerchantPermissions(t *testing.T) {
 		"org:secrets:read",
 		"org:configuration:read",
 		"org:metrics:read",
+		"merchant:customers:read",
+		"merchant:customers:update",
 	}
 	names := map[string]bool{}
 	for _, name := range CatalogNames() {
@@ -77,9 +79,6 @@ func TestCatalog_HardCutsOldOrgMerchantPermissions(t *testing.T) {
 	for _, name := range old {
 		if names[name] {
 			t.Fatalf("old OpenRails org permission %q must not be in the #554 catalog", name)
-		}
-		if IsDelegatedPermission(name) {
-			t.Fatalf("old OpenRails org permission %q must not satisfy delegated permission checks", name)
 		}
 	}
 }
@@ -140,7 +139,7 @@ func TestAnyLiveAPIKey(t *testing.T) {
 	}
 }
 
-func TestOperatorRolePermissions_AreOrgOnly(t *testing.T) {
+func TestOperatorRolePermissions_ExcludePlatformAndApexGrants(t *testing.T) {
 	for _, p := range OperatorRolePermissions() {
 		if strings.HasPrefix(p, "platform:") {
 			t.Fatalf("operator role must NOT include platform permission %q", p)
@@ -161,16 +160,16 @@ func TestAdmissionCreatePermission_GateSemantics(t *testing.T) {
 	}
 
 	// A customer-write key without admission authority fails the spend gate.
-	writeOnly := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersUpdate}}
+	writeOnly := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomerSettingsUpdate}}
 	if writeOnly.HasPermission(PermMerchantAdmissionsCreate) {
-		t.Fatalf("merchant:customers:update must NOT imply merchant:admissions:create")
+		t.Fatalf("merchant:customer-settings:update must NOT imply merchant:admissions:create")
 	}
-	if !writeOnly.HasPermission(PermMerchantCustomersUpdate) {
+	if !writeOnly.HasPermission(PermMerchantCustomerSettingsUpdate) {
 		t.Fatalf("write-only API key must still pass the write gate")
 	}
 
 	// An API key holding merchant:admissions:create passes the spend gate.
-	spender := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersUpdate, PermMerchantAdmissionsCreate}}
+	spender := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomerSettingsUpdate, PermMerchantAdmissionsCreate}}
 	if !spender.HasPermission(PermMerchantAdmissionsCreate) {
 		t.Fatalf("API key holding %q must pass the spend gate", PermMerchantAdmissionsCreate)
 	}
@@ -181,10 +180,10 @@ func TestAdmissionCreatePermission_GateSemantics(t *testing.T) {
 	}
 }
 
-func TestCatalogNames_AreOrgOnly(t *testing.T) {
+func TestCatalogNames_ExcludePlatformPermissions(t *testing.T) {
 	for _, p := range CatalogNames() {
 		if strings.HasPrefix(p, "platform:") {
-			t.Fatalf("org catalog must not include platform permission %q", p)
+			t.Fatalf("OpenRails app catalog must not include platform permission %q", p)
 		}
 	}
 }
@@ -200,9 +199,8 @@ func TestCatalogNames_AreOrgOnly(t *testing.T) {
 // the merchant (org⇄merchant 1:1). The ONE namespace an org owner can never hold is
 // the separate `platform:` layer. So the surviving invariant is: every catalog
 // permission must be namespaced and must NOT be `platform:`, or a merchant owner
-// cannot exercise it. This passes today (all `org:`) and keeps passing after the
-// rename to `merchant:`, while still catching a `platform:` leak or an unnamespaced
-// perm. (#554/#100)
+// cannot exercise it. This catches a `platform:` leak or an unnamespaced perm.
+// (#554/#100)
 func TestCatalogPermissionsCoveredByOwnerGrant(t *testing.T) {
 	platformNS := strings.SplitN(authcore.PlatformSuperAdminGrant, ":", 2)[0] // "platform"
 	for _, name := range CatalogNames() {
@@ -212,7 +210,7 @@ func TestCatalogPermissionsCoveredByOwnerGrant(t *testing.T) {
 		}
 		if ns == platformNS {
 			t.Fatalf("catalog permission %q is in the %q: layer, which no org owner can ever hold; "+
-				"OpenRails org-scoped perms must be org: or an app namespace like merchant: (#554/#100)", name, platformNS)
+				"OpenRails org-scoped perms must be app namespaces like merchant: or customer: (#554/#100)", name, platformNS)
 		}
 	}
 }

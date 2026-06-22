@@ -14049,3 +14049,49 @@ The #371 CardAbuseGuard (internal/modules/abuse/card_abuse.go), middleware subje
 **Status:** COMPLETE 2026-06-21: stale tracker item. The old cleanup failure mode is gone in the current tree and the five named tier/lifecycle tests now pass. Verified with `go test -tags=integration ./tests -run 'Test(CardAbuse_DO_NOT_MATCH|TierGroupDetection|EntitlementChangesOnTierChange|ScheduledDowngrade|RenewMembershipDuplicateTransactionIsNoOp|LifecycleServiceUsesMockClock)$'`.
 
 TestTierGroupDetection, TestEntitlementChangesOnTierChange, TestScheduledDowngrade, TestRenewMembershipDuplicateTransactionIsNoOp, TestLifecycleServiceUsesMockClock fail identically on origin/master (bun era) and on the sqlc-migration branch — verified via worktree runs on 2026-06-10 during #334 final verification, so they are NOT migration regressions. Observed modes: duplicate key on uq_subscriptions_tenant_subject_tier_group_active across subtests (CleanupSubscriptionsForUser resolves non-UUID test user ids to uuid.Nil via identity.TenantSubjectIDFromString, so per-user cleanup deletes nothing), and mock-clock/lifecycle assertion failures. Distinct from the admin_* family (#333). Suspect shared-suite state + the broken per-user cleanup; fix the cleanup to resolve the tenant subject through billing.tenant_subjects (issuer 'openrails:legacy-user') instead of pure-parsing.
+
+---
+
+# #559: merchant-payment-provider-config-api
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-21. `/v1/merchant/payment-providers` is mounted under the #555 merchant action surface with `merchant:payment-providers:read` for GET and `merchant:payment-providers:update` for PUT/DELETE. The service stores configs in `provider_accounts` plus provider-account-scoped secrets, validates supplied credentials before writing, redacts all credential values in responses, disables/delete-removes configs from future primary lookup, and keeps Solana `private_key` platform-owned/non-merchant-writable. Direct secret-name CRUD is hard-cut: no `/v1/merchant/secrets/*`, and the legacy delegated `/v1/admin/secrets/*` handlers/routes are removed. Validation: `go test ./internal/http/routes ./internal/http/routes/ginroutes ./internal/merchants ./internal/http/handlers ./pkg/catalog`; `go test -tags=integration ./internal/integrationharness -run 'TestStandaloneMerchantCatalog(RoutesHTTP|ApplyOptionsOverHTTP|PublishHTTP)|TestStandaloneMerchantPaymentProviderConfigHTTP' -count=1 -v`.
+
+Replace flat secret-name CRUD with `/v1/merchant/payment-providers/*` (list/read/PUT/DELETE), provider in the path and environment in the body/query, gated by `merchant:payment-providers:*` (#554). Updates are atomic: validate supplied credentials against the provider, then store only on success. Status is returned as redacted field metadata, never plaintext. See parent #552 "Merchant Route Contracts".
+
+## Tasks
+
+- [x] Implement route-agnostic handlers for `GET /v1/merchant/payment-providers`, `GET/PUT/DELETE /v1/merchant/payment-providers/:provider`; keep `provider_accounts` as internal storage only.
+- [x] Validate supplied credentials against the provider before storage; never persist on validation failure (no separate `/validate` route).
+- [x] Return credential status as `{configured, last_validated_at?}`; never return plaintext.
+- [x] Support test/live environments explicitly; enforce one active config per `{merchant, provider, environment}`.
+- [x] Cover current provider fields: Stripe, NMI/Mobius, CCBill, Solana (Solana private key stays platform-owned, not merchant-writable).
+- [x] Delete direct `/v1/merchant/secrets/*` CRUD (hard cut); keep provider-account-scoped secret storage internal.
+- [x] Tests: invalid credentials are not persisted; responses never leak plaintext; delete/disable removes a provider from future use.
+
+## Acceptance
+
+- Providers are configured through provider routes with redacted field status.
+- Invalid credentials are never persisted.
+- Direct secret-name CRUD is gone.
+
+---
+
+# #560: merchant-catalog-publish-over-http
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-21. `/v1/merchant/catalog` is mounted under the #555 merchant action surface with read/update permission split: product/price/drift reads require `merchant:catalog:read`; product/price writes, drift refresh, and `POST /v1/merchant/catalog/publish` require `merchant:catalog:update`. Publish accepts the inner single-merchant `{catalog:{...}}` manifest, validates it, computes `catalog.Plan`, stays plan-only by default, and mutates only with explicit `insert`, `overwrite`, or `prune`. The primary merchant surface has no per-object reconcile routes, no `/drift/reconcile-all`, and no `/orphans`/`/stripe/orphans` aliases. Validation: `go test ./internal/http/routes ./internal/merchants ./internal/http/handlers ./pkg/catalog`; `go test -tags=integration ./internal/integrationharness -run 'TestStandaloneMerchantCatalog(RoutesHTTP|ApplyOptionsOverHTTP|PublishHTTP)|TestStandaloneMerchantPaymentProviderConfigHTTP' -count=1 -v`.
+
+Expose catalog-as-code over HTTP with the same plan/apply engine as `openrails push-merchant-catalog`, gated by `merchant:catalog:*` (#554). The route is single-merchant (merchant from auth) and plan-only by default; mutation requires explicit `insert`, `overwrite`, or `prune`. Product/price writes auto-enqueue provider sync. See parent #552 "Catalog".
+
+## Tasks
+
+- [x] Implement catalog product/price CRUD + activate/deactivate under `/v1/merchant/catalog/*`; writes use the existing catalog service path with provider sync behavior (no per-object reconcile routes).
+- [x] Add route-agnostic `POST /v1/merchant/catalog/publish` handler reusing the CLI plan/apply engine; body is the inner single-merchant manifest (no `catalogs[]` wrapper); plan-only by default; mutation needs explicit `insert` / `overwrite` / `prune`.
+- [x] Add `GET /v1/merchant/catalog/drift` (incl. `?kind=orphan`) and `POST /v1/merchant/catalog/drift/refresh`; no separate `/orphans` route.
+- [x] Tests: plan-only vs mutating modes against the same engine as the CLI; product/price CRUD route coverage remains on the canonical merchant surface.
+
+## Acceptance
+
+- Catalog publish/apply works over both CLI and HTTP on one shared engine with plan-only-by-default semantics.
+- No per-object reconcile routes in the primary surface.

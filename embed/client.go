@@ -905,6 +905,34 @@ func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails
 	return out
 }
 
+func wireProductAccessRecords(recs []billingservice.ProductAccessRecord) []openrails.ProductAccessGrant {
+	out := make([]openrails.ProductAccessGrant, 0, len(recs))
+	for _, r := range recs {
+		rec := openrails.ProductAccessGrant{
+			ID:           r.ID.String(),
+			CustomerID:   r.CustomerID.String(),
+			ProductID:    r.ProductID.String(),
+			ProductSlug:  r.ProductSlug,
+			ProductName:  r.ProductName,
+			SourceType:   r.SourceType,
+			SourceID:     r.SourceID,
+			Status:       r.Status,
+			StartsAt:     r.StartsAt,
+			EndsAt:       r.EndsAt,
+			RevokedAt:    r.RevokedAt,
+			RevokeReason: r.RevokeReason,
+			CreatedAt:    r.CreatedAt,
+			UpdatedAt:    r.UpdatedAt,
+		}
+		if r.PaymentID != nil {
+			paymentID := r.PaymentID.String()
+			rec.PaymentID = &paymentID
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
 // ListActiveEntitlements transcribes
 // handlers.ServiceGetExternalSubjectEntitlements (entitlements.go): trim +
 // dedupe, cap, one query, an entry per requested subject. The service-credential
@@ -944,6 +972,39 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, subjects []str
 	return out, nil
 }
 
+// ListEntitlements transcribes the single-subject form of
+// handlers.ServiceGetExternalSubjectEntitlements.
+func (c *localClient) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]openrails.EntitlementRecord, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, invalidErr("subjects required")
+	}
+	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at)
+	if err != nil {
+		return nil, err
+	}
+	return out[subject], nil
+}
+
+// HasEntitlement checks one entitlement from the single-subject entitlement
+// lookup.
+func (c *localClient) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return false, invalidErr("entitlement required")
+	}
+	records, err := c.ListEntitlements(ctx, subject, at)
+	if err != nil {
+		return false, err
+	}
+	for _, rec := range records {
+		if rec.Entitlement == entitlement {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ListCustomersWithEntitlement transcribes
 // handlers.ServiceGetCustomersWithEntitlement (entitlements.go): trim,
 // require entitlement, default page size, and keyset pagination to completion.
@@ -969,6 +1030,39 @@ func (c *localClient) ListCustomersWithEntitlement(ctx context.Context, entitlem
 		afterID = ids[len(ids)-1]
 	}
 	return all, nil
+}
+
+// ListProductAccess transcribes handlers.ServiceGetUserProductAccess.
+func (c *localClient) ListProductAccess(ctx context.Context, subject string) ([]openrails.ProductAccessGrant, error) {
+	ctx = c.ensureTenant(ctx)
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, invalidErr("user_id is required")
+	}
+	records, err := c.svc.ListProductAccess(ctx, subject)
+	if err != nil {
+		return nil, internalErr("failed to list accessible products")
+	}
+	return wireProductAccessRecords(records), nil
+}
+
+// HasProductAccess transcribes handlers.ServiceGetUserProductAccess with
+// ?product_id=...
+func (c *localClient) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
+	ctx = c.ensureTenant(ctx)
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return false, invalidErr("user_id is required")
+	}
+	id, err := uuid.Parse(strings.TrimSpace(productID))
+	if err != nil {
+		return false, invalidErr("invalid product_id format")
+	}
+	has, err := c.svc.HasProductAccess(ctx, subject, id)
+	if err != nil {
+		return false, internalErr("failed to check product access")
+	}
+	return has, nil
 }
 
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue

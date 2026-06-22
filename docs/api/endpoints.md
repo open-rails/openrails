@@ -39,9 +39,9 @@ List endpoints use a Stripe-like envelope:
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub`. Embedded: the host's configured AuthKit/user bearer is adapted to the same customer principal. |
-| Delegated billing-admin routes (`/v1/admin/*`) | Same delegated JWT shape, with browser-safe `org:*` permissions |
+| Delegated billing-admin routes (`/v1/admin/*`) | Same delegated JWT shape; requested permissions are bounded by the signing remote application's stored AuthKit authority |
 | User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
-| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `org:*` permission (see Service API section) |
+| Merchant API (`/v1/merchant/*`, same public port) | `Authorization: Bearer <generated API key, first-party service JWT, delegated JWT, or user access token>`; each route requires a `merchant:*` permission |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 Delegated JWTs and machine credentials are intentionally different credentials.
@@ -58,8 +58,8 @@ Delegated JWT examples:
   signed by its registered issuer with `aud: "openrails-app"` and
   `delegated_sub: "<canonical-user-id>"`. `/v1/me/*` acts only on that subject.
 - Cozy Art billing-admin membership UI: an admin browser token is signed by the
-  Cozy issuer with `delegated_sub: "<admin-subject>"` and
-  browser-safe `org:*` permissions for `/v1/admin/*`.
+  Cozy issuer with `delegated_sub: "<admin-subject>"`; AuthKit bounds requested
+  permissions to that issuer's stored authority for `/v1/admin/*`.
 - Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
   subject is the upstream merchant/company subject to read its own balance
   through browser/direct OpenRails routes. Backend

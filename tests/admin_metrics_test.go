@@ -154,7 +154,7 @@ func TestAdminMetricsFolded(t *testing.T) {
 func TestAdminMetrics_RequiresMetricsRead(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000004",
-		[]string{controlplane.PermMerchantCustomersRead})
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	req, _ := http.NewRequest("GET", "/v1/admin/metrics?granularity=day", nil)
 	req.Header.Set("Authorization", "Bearer host-credential")

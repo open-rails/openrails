@@ -85,11 +85,12 @@ type HandlerOptions = embedded.HTTPHandlerOptions
 type RouteSet = embedded.RouteSet
 
 const (
-	RouteSetPublicCatalog = embedded.RouteSetPublicCatalog
-	RouteSetCustomer      = embedded.RouteSetCustomer
-	RouteSetMerchantAdmin = embedded.RouteSetMerchantAdmin
-	RouteSetMerchantAPI   = embedded.RouteSetMerchantAPI
-	RouteSetWebhooks      = embedded.RouteSetWebhooks
+	RouteSetCheckout         = embedded.RouteSetCheckout
+	RouteSetCustomer         = embedded.RouteSetCustomer
+	RouteSetMerchantAdmin    = embedded.RouteSetMerchantAdmin
+	RouteSetMerchantSettings = embedded.RouteSetMerchantSettings
+	RouteSetMerchantAPI      = embedded.RouteSetMerchantAPI
+	RouteSetWebhooks         = embedded.RouteSetWebhooks
 )
 
 var (

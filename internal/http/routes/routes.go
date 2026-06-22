@@ -38,8 +38,8 @@ type Options struct {
 	// DelegatedResolver validates browser-direct delegated access tokens — a
 	// merchant's federated merchant-signed JWT for one of its admin users
 	// (#259). The control plane satisfies it in standalone mode; nil disables the
-	// delegated path on merchant action routes (#555). Only browser-safe
-	// `merchant:*` permissions are ever honored on a delegated token.
+	// delegated path on merchant routes (#555/#564). Permissions are bounded by
+	// AuthKit to the signing remote application's stored authority.
 	DelegatedResolver DelegatedResolver
 }
 
@@ -60,6 +60,10 @@ type serviceJWTResolver interface {
 
 type remoteApplicationResolver interface {
 	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
+}
+
+type merchantOrgResolver interface {
+	ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error)
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
@@ -139,168 +143,102 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
 }
 
-// RegisterServiceRoutes mounts the server-to-server billing surface on a
-// merchant-scoped route group authenticated by OpenRails-issued merchant API
-// keys or service JWTs.
+// RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
+// merchant permissions, not credential type (#564).
 func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	group := rr.Group("", opts.serviceCredentialRequiredMW())
+	group := rr
+	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
-		group = group.Group("", middleware.MerchantDBConnMW(rt.DB))
+		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
+	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
+	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
+	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantAdmissionsCreate)}, dbMW...)
 
 	group.Handle(http.MethodPost, "/customers/entitlements:batch",
 		h(httphandlers.ServiceGetExternalSubjectEntitlements),
-		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
+		readMW...,
 	)
 
 	customers := group.Group("/customers/:customer_id")
 	customers.Handle(http.MethodGet, "/entitlements",
 		h(httphandlers.ServiceGetCustomerEntitlements),
-		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
+		readMW...,
 	)
 
 	entitlements := group.Group("/entitlements")
 	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
 		h(httphandlers.ServiceGetCustomersWithEntitlement),
-		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
+		readMW...,
 	)
 
 	users := group.Group("/users/:user_id")
 	users.Handle(http.MethodGet, "/product-access",
 		h(httphandlers.ServiceGetUserProductAccess),
-		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
+		readMW...,
 	)
 
 	invokers := group.Group("/invokers/:invoker")
 	invokers.Handle(http.MethodGet, "/credits",
 		h(httphandlers.ServiceGetInvokerCredits),
-		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
+		readMW...,
 	)
 
 	credits := group.Group("/credits")
-	creditsSpend := opts.servicePermissionMW(controlplane.PermMerchantAdmissionsCreate)
-	creditsWrite := opts.servicePermissionMW(controlplane.PermMerchantCustomersUpdate)
-	creditsRead := opts.servicePermissionMW(controlplane.PermMerchantCustomersRead)
 
-	group.Handle(http.MethodPost, "/admit", h(httphandlers.ServiceAdmit), creditsWrite, creditsSpend)
-	group.Handle(http.MethodPost, "/admit/batch", h(httphandlers.ServiceAdmitBatch), creditsWrite, creditsSpend)
-	group.Handle(http.MethodGet, "/budget", h(httphandlers.ServiceGetBudget), creditsRead)
-	group.Handle(http.MethodPut, "/payer-spend-limits", h(httphandlers.ServiceSetPayerSpendLimits), creditsWrite)
-	group.Handle(http.MethodPut, "/tier-schedules", h(httphandlers.ServiceSetTierSchedule), creditsWrite)
-	group.Handle(http.MethodGet, "/merchant-configuration",
-		h(httphandlers.ServiceGetMerchantConfiguration),
-		opts.servicePermissionMW(controlplane.PermMerchantSettingsRead),
-	)
-	group.Handle(http.MethodPut, "/merchant-configuration",
-		h(httphandlers.ServiceSetMerchantConfiguration),
-		opts.servicePermissionMW(controlplane.PermMerchantSettingsUpdate),
-	)
-	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), creditsRead)
-	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), creditsWrite)
-	group.Handle(http.MethodGet, "/abuse-usage", h(httphandlers.ServiceAbuseUsage), creditsRead)
-	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), creditsWrite)
-	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), creditsRead)
-	group.Handle(http.MethodPut, "/invoker-spend-limits", h(httphandlers.ServiceSetInvokerSpendLimits), creditsWrite)
-	group.Handle(http.MethodGet, "/invoker-spend-limits", h(httphandlers.ServiceGetInvokerSpendLimits), creditsRead)
+	group.Handle(http.MethodPost, "/admit", h(httphandlers.ServiceAdmit), admissionMW...)
+	group.Handle(http.MethodPost, "/admit/batch", h(httphandlers.ServiceAdmitBatch), admissionMW...)
+	group.Handle(http.MethodGet, "/budget", h(httphandlers.ServiceGetBudget), readMW...)
+	group.Handle(http.MethodPut, "/payer-spend-limits", h(httphandlers.ServiceSetPayerSpendLimits), writeMW...)
+	group.Handle(http.MethodPut, "/tier-schedules", h(httphandlers.ServiceSetTierSchedule), writeMW...)
+	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), readMW...)
+	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
+	group.Handle(http.MethodGet, "/abuse-usage", h(httphandlers.ServiceAbuseUsage), readMW...)
+	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
+	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
+	group.Handle(http.MethodPut, "/invoker-spend-limits", h(httphandlers.ServiceSetInvokerSpendLimits), writeMW...)
+	group.Handle(http.MethodGet, "/invoker-spend-limits", h(httphandlers.ServiceGetInvokerSpendLimits), readMW...)
 
-	credits.Handle(http.MethodGet, "/balance", h(httphandlers.ServiceGetCreditsBalance), creditsRead)
-	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), creditsWrite)
-	credits.Handle(http.MethodPost, "/withdraw", h(httphandlers.ServiceWithdrawCredits), creditsWrite)
-	credits.Handle(http.MethodPost, "/holds/:id/capture", h(httphandlers.ServiceCaptureHold), creditsWrite, creditsSpend)
-	credits.Handle(http.MethodPost, "/holds/:id/release", h(httphandlers.ServiceReleaseHold), creditsWrite)
-	credits.Handle(http.MethodPost, "/usage/rollup", h(httphandlers.ServiceUsageRollup), creditsRead)
-	credits.Handle(http.MethodPost, "/usage/resource-revenue", h(httphandlers.ServiceResourceRevenue), creditsRead)
-	credits.Handle(http.MethodGet, "/transactions/lookup", h(httphandlers.ServiceLookupCreditTransaction), creditsRead)
-	credits.Handle(http.MethodPut, "/account-settings", h(httphandlers.ServiceSetCreditAccountSettings), creditsWrite)
-	credits.Handle(http.MethodGet, "/account-settings", h(httphandlers.ServiceGetCreditAccountSettings), creditsRead)
-	credits.Handle(http.MethodGet, "/transactions", h(httphandlers.ServiceListCustomerCreditTransactions), creditsRead)
-}
-
-func (opts Options) serviceCredentialRequiredMW() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if opts.ServiceCredentialResolver == nil {
-				r.AbortJSON(http.StatusInternalServerError, "API key authentication not configured")
-				return
-			}
-			token := ""
-			if r != nil && r.Request != nil {
-				token = bearerToken(r.Request.Header.Get("Authorization"))
-			}
-			if token == "" {
-				r.AbortJSON(http.StatusUnauthorized, "API key bearer token required")
-				return
-			}
-			resolved, handled := opts.resolveServiceCredential(r)
-			if handled && resolved == nil {
-				return
-			}
-			if resolved == nil {
-				r.AbortJSON(http.StatusUnauthorized, "service_credential_invalid")
-				return
-			}
-			if r.Request != nil {
-				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
-			}
-			r.Set("openrails.merchant_id", resolved.MerchantID)
-			r.Set("openrails.service_credential", resolved)
-			r.Set("openrails.service_credential_authkit_org_slug", resolved.OwnerOrgSlug)
-			next(r)
-		}
-	}
-}
-
-func (opts Options) servicePermissionMW(perm string) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			resolved, ok := serviceCredentialFromRequest(r)
-			if !ok {
-				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
-				return
-			}
-			if !resolved.HasPermission(perm) {
-				r.AbortJSON(http.StatusForbidden, "permission_required")
-				return
-			}
-			next(r)
-		}
-	}
-}
-
-func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, bool) {
-	if r == nil {
-		return nil, false
-	}
-	v, ok := r.Get("openrails.service_credential")
-	if !ok {
-		return nil, false
-	}
-	resolved, ok := v.(*controlplane.ResolvedServiceCredential)
-	return resolved, ok && resolved != nil
+	credits.Handle(http.MethodGet, "/balance", h(httphandlers.ServiceGetCreditsBalance), readMW...)
+	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), writeMW...)
+	credits.Handle(http.MethodPost, "/withdraw", h(httphandlers.ServiceWithdrawCredits), writeMW...)
+	credits.Handle(http.MethodPost, "/holds/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)
+	credits.Handle(http.MethodPost, "/holds/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
+	credits.Handle(http.MethodPost, "/usage/rollup", h(httphandlers.ServiceUsageRollup), readMW...)
+	credits.Handle(http.MethodPost, "/usage/resource-revenue", h(httphandlers.ServiceResourceRevenue), readMW...)
+	credits.Handle(http.MethodGet, "/transactions/lookup", h(httphandlers.ServiceLookupCreditTransaction), readMW...)
+	credits.Handle(http.MethodPut, "/account-settings", h(httphandlers.ServiceSetCreditAccountSettings), writeMW...)
+	credits.Handle(http.MethodGet, "/account-settings", h(httphandlers.ServiceGetCreditAccountSettings), readMW...)
+	credits.Handle(http.MethodGet, "/transactions", h(httphandlers.ServiceListCustomerCreditTransactions), readMW...)
 }
 
 // #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
 // admin API is the delegated issuer-owner surface (ginroutes.RegisterAdminRoutes,
-// browser-safe `org:` permissions). The dropped features (provider-intents, reconcile,
+// merchant-scoped permissions). The dropped features (provider-intents, reconcile,
 // solana recurring plans, entitlement-features) live only on the dead surface and
 // are removed; product-access moves to the delegated surface (#528 increment 4).
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	mw := []router.Middleware{
-		opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate),
-	}
+	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
-		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
+		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
+	registerMerchantSupportRoutes(rr, opts, dbMW...)
+}
 
-	group := rr.Group("", mw...)
-	registerCatalogActionRoutes(group.Group("/catalog"))
+func RegisterMerchantSettingsRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	var dbMW []router.Middleware
+	if rt != nil && rt.DB != nil {
+		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
+	}
+	registerCatalogActionRoutes(rr.Group("/catalog"), opts, dbMW...)
+	registerPaymentProviderActionRoutes(rr.Group("/payment-providers"), opts, dbMW...)
 }
 
 func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			if resolved, handled := opts.resolveServiceCredential(r); handled {
+			if resolved, handled := opts.resolveServiceCredential(r, opts.Authenticator != nil); handled {
 				if resolved == nil {
 					return
 				}
@@ -312,40 +250,48 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
 				}
 				r.Set("openrails.service_credential", resolved)
+				r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
 				next(r)
 				return
 			}
 
-			// Browser-direct delegated access token (#555): a merchant admin's
-			// federated merchant-signed JWT. Only browser-safe `merchant:*` perms
-			// are honored — a delegated token can never carry a machine/operator
-			// grant (IsDelegatedPermission gate), and the merchant is pinned from
-			// the verified token, never the URL.
+			// Browser-direct delegated access token (#564): a merchant admin's
+			// remote-app-signed JWT. AuthKit has already bounded permissions to
+			// the signer's stored authority, so gate purely on the permission; the
+			// merchant is pinned from the verified token, never the URL.
 			if opts.DelegatedResolver != nil && r.Request != nil {
 				if token := bearerToken(r.Request.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
 					resolved, err := opts.DelegatedResolver.ResolveDelegated(r.Request.Context(), token, r.Request.Header.Get("Origin"))
 					if err != nil {
-						r.AbortJSON(http.StatusUnauthorized, "delegated_token_invalid")
+						if opts.Authenticator == nil || !errors.Is(err, controlplane.ErrDelegatedInvalid) {
+							r.AbortJSON(http.StatusUnauthorized, "delegated_token_invalid")
+							return
+						}
+					} else {
+						if !resolved.HasPermission(perm) {
+							r.AbortJSON(http.StatusForbidden, "permission_required")
+							return
+						}
+						r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
+						r.Set("openrails.merchant_id", resolved.MerchantID)
+						r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
+						r.SetUserContext(billingauth.UserContext{
+							UserID:        resolved.DelegatedSubject,
+							Email:         resolved.Email,
+							EmailVerified: resolved.EmailVerified,
+							Username:      resolved.Username,
+							Org:           resolved.Merchant,
+						})
+						next(r)
 						return
 					}
-					if !controlplane.IsDelegatedPermission(perm) || !resolved.HasPermission(perm) {
-						r.AbortJSON(http.StatusForbidden, "permission_required")
-						return
-					}
-					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
-					r.Set("openrails.merchant_id", resolved.MerchantID)
-					r.SetUserContext(billingauth.UserContext{
-						UserID:        resolved.DelegatedSubject,
-						Email:         resolved.Email,
-						EmailVerified: resolved.EmailVerified,
-						Username:      resolved.Username,
-						Org:           resolved.Merchant,
-					})
-					next(r)
-					return
 				}
 			}
 
+			if opts.Authenticator == nil {
+				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
+				return
+			}
 			uc, ok := opts.authenticateUser(r)
 			if !ok {
 				return
@@ -363,6 +309,22 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 				r.AbortJSON(http.StatusForbidden, "permission_required")
 				return
 			}
+			if r.Request != nil {
+				if _, ok := merchant.FromContext(r.Request.Context()); !ok {
+					resolver, ok := opts.AdminPermissionChecker.(merchantOrgResolver)
+					if !ok {
+						r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
+						return
+					}
+					mid, _, err := resolver.ResolveMerchantForOrg(r.Request.Context(), uc.Org)
+					if err != nil {
+						r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
+						return
+					}
+					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), mid))
+				}
+			}
+			r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
 			next(r)
 		}
 	}
@@ -387,7 +349,7 @@ func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserCo
 	return uc, true
 }
 
-func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, bool) {
+func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, bool) {
 	resolver := opts.ServiceCredentialResolver
 	if resolver == nil || r == nil || r.Request == nil {
 		return nil, false
@@ -411,6 +373,9 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlpl
 		resolved, err := raResolver.ResolveRemoteApplication(r.Request.Context(), token)
 		if err == nil {
 			return resolved, true
+		}
+		if allowJWTFallthrough && errors.Is(err, controlplane.ErrDelegatedInvalid) {
+			return nil, false
 		}
 		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
 			writeServiceCredentialError(r, err)
@@ -450,41 +415,78 @@ func writeServiceCredentialError(r *httprequest.Request, err error) {
 	}
 }
 
-func registerCatalogActionRoutes(catalog router.Router) {
+func registerCatalogActionRoutes(catalog router.Router, opts Options, dbMW ...router.Middleware) {
+	read := opts.merchantActionPermissionMW(controlplane.PermMerchantCatalogRead)
+	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
+	readMW := append([]router.Middleware{read}, dbMW...)
+	writeMW := append([]router.Middleware{write}, dbMW...)
+
 	products := catalog.Group("/products")
-	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct))
-	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts))
-	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct))
-	products.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductBySlug))
-	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct))
-	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct))
-	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct))
-	products.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcileProduct))
+	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)
+	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts), readMW...)
+	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct), readMW...)
+	products.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductBySlug), readMW...)
+	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct), writeMW...)
+	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct), writeMW...)
+	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct), writeMW...)
 
 	prices := catalog.Group("/prices")
-	prices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice))
-	prices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices))
-	prices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice))
-	prices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice))
-	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice))
-	prices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice))
-	prices.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcilePrice))
+	prices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice), writeMW...)
+	prices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices), readMW...)
+	prices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice), readMW...)
+	prices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice), writeMW...)
+	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice), writeMW...)
+	prices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice), writeMW...)
 
-	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
-	// these endpoints never mutate Stripe, NMI, or the catalog rows. Operators
-	// resolve drift via the per-price reconcile action above. CCBill is never
-	// reconciled (no catalog-list API), so it never appears in these surfaces.
-	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift))
-	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift))
-	// INTENTIONAL ALIAS (#534): /drift/reconcile-all is the spec-named on-demand
-	// synchronous pull and deliberately maps to the SAME AdminRefreshCatalogDrift
-	// handler as /drift/refresh — it is NOT a duplicate to reconcile away. If you
-	// ever split them, keep them permission-symmetric.
-	catalog.Handle(http.MethodPost, "/drift/reconcile-all", h(httphandlers.AdminRefreshCatalogDrift))
-	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
-	// the operator-friendly convenience alias scoped to Stripe.
-	catalog.Handle(http.MethodGet, "/orphans", h(httphandlers.AdminListCatalogOrphans))
-	catalog.Handle(http.MethodGet, "/stripe/orphans", h(httphandlers.AdminListStripeOrphans))
+	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift), readMW...)
+	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
+	catalog.Handle(http.MethodPost, "/publish", h(httphandlers.MerchantPublishCatalog), writeMW...)
+}
+
+func registerPaymentProviderActionRoutes(providers router.Router, opts Options, dbMW ...router.Middleware) {
+	read := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersRead)
+	write := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersUpdate)
+	readMW := append([]router.Middleware{read}, dbMW...)
+	writeMW := append([]router.Middleware{write}, dbMW...)
+
+	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
+	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
+	providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
+	providers.Handle(http.MethodDelete, "/:provider", h(httphandlers.MerchantDeletePaymentProvider), writeMW...)
+}
+
+func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
+	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
+	customerWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
+	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
+	payRefund := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRefund)}, dbMW...)
+	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsRead)}, dbMW...)
+	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsUpdate)}, dbMW...)
+	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantRepairAlertsRead)}, dbMW...)
+
+	customers := rr.Group("/customers/:customer_id")
+	customers.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserBillingProfile), customerRead...)
+	customers.Handle(http.MethodGet, "/payment-methods", h(httphandlers.GetAdminUserPaymentMethods), customerRead...)
+	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
+	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), customerWrite...)
+	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), customerWrite...)
+	customers.Handle(http.MethodDelete, "/entitlements/:id", h(httphandlers.RevokeAdminEntitlement), customerWrite...)
+	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess), customerWrite...)
+	customers.Handle(http.MethodDelete, "/product-access/:id", h(httphandlers.RevokeAdminProductAccess), customerWrite...)
+
+	payments := rr.Group("/payments")
+	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)
+	payments.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminPayment), payRead...)
+	payments.Handle(http.MethodPost, "/:id/refunds", h(httphandlers.AdminRefundPayment), payRefund...)
+
+	subs := rr.Group("/subscriptions")
+	subs.Handle(http.MethodGet, "", h(httphandlers.GetAdminSubscriptions), subRead...)
+	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminSubscription), subRead...)
+	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.AdminCancelSubscription), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
+	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
+
+	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 }
 
 // RegisterWebhookRoutes mounts the legacy configured-merchant webhook surface.

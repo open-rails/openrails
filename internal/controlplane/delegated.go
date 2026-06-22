@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -49,9 +48,9 @@ type ResolvedDelegated struct {
 	// was pinned from (every delegated token is FEDERATED merchant-signed, #259).
 	// Used for audit and issuer/subject attribution (#246).
 	Issuer string
-	// Permissions are optional for self-service tokens. When present, they must be
-	// browser-safe `org:` merchant-admin permissions (#259), never
-	// service/operator/platform grants.
+	// Permissions is the token's claim, already bounded by AuthKit's verifier to the
+	// signing remote-app's stored authority (#564): an over-claim rejects the token,
+	// so this is a subset the signer is entitled to grant. Empty for self-service.
 	Permissions []string
 	// Email/Username are optional non-authoritative identity fields from delegated
 	// token attributes. They are for hosted checkout/contact metadata only;
@@ -106,13 +105,11 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 	return c.delegatedVerifier
 }
 
-// newDelegatedVerifier builds the delegated-access-token Verifier seeded with
-// this control plane's delegated browser verifier: the canonical `openrails`
-// audience and a permissions validator that rejects any permission outside the
-// browser-safe merchant-admin catalog (issue #259). Empty permissions are valid
-// for customer self-service routes.
-// VerifyDelegatedAccess additionally enforces AuthKit's delegated access token
-// profile + the no-`sub`/`delegated_sub`-present invariant.
+// newDelegatedVerifier builds the delegated-access-token Verifier for the canonical
+// `openrails` audience. It applies NO OpenRails permission allowlist (#564);
+// AuthKit's verifier already bounds the claim to the signer's stored authority
+// (an over-claim rejects the token). VerifyDelegatedAccess enforces AuthKit's
+// delegated-token profile + the no-`sub`/`delegated_sub`-present invariant.
 //
 // FEDERATED merchant issuers (issue #259) are loaded by reloadDelegatedIssuers
 // (AddIssuer with JWKS-URL fetching), so at runtime the verifier trusts every
@@ -127,19 +124,10 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 	// (merchant-signed); the merchant issuers + their JWKS are loaded from the registry
 	// by reloadDelegatedIssuers after construction. There is no control-plane
 	// self-issuer seed — OpenRails never signs delegated tokens itself.
+	// #564: no OpenRails browser-safe allowlist. AuthKit bounds any permission
+	// claim against the signing remote-app's live stored authority.
 	v := authhttp.NewVerifier(
 		authhttp.WithAPIKeyPrefix(tokenPrefix),
-		// Enforce that every supplied permission on a browser token belongs to the
-		// browser-safe merchant-admin catalog (issue #259). Permissionless tokens
-		// are valid for customer self-service routes.
-		authhttp.WithPermissions(func(permissions []string) error {
-			for _, p := range permissions {
-				if !IsDelegatedPermission(p) {
-					return fmt.Errorf("permission %q is not a browser-safe org: permission", p)
-				}
-			}
-			return nil
-		}),
 	)
 	return v, nil
 }
@@ -149,8 +137,8 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 //
 //   - verifies signature/issuer/audience/expiry and requires it to be an
 //     AuthKit delegated access token (`delegated_sub` present, NO `sub`),
-//   - enforces that every supplied `permissions` entry is in the merchant-admin
-//     browser catalog (#259), never a service/operator/platform grant,
+//   - relies on AuthKit's verifier to bound the `permissions` claim to the signing
+//     remote-app's stored authority (#564); an over-claim rejects the token,
 //   - resolves the OpenRails merchant from the VALIDATED `iss` via the issuer
 //     registry (issuer is globally unique -> pins exactly one merchant). Tokens
 //     carry NO merchant claims (authkit v0.23.0 issuer-only profile); the
@@ -225,6 +213,9 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 		return nil, err
 	}
 
+	// principal.Permissions is ALREADY bounded by AuthKit's verifier to the signing
+	// remote-app's stored authority (#564): an over-claim rejects the token before
+	// we get here, so what survives is a subset the signer is entitled to grant.
 	return &ResolvedDelegated{
 		Merchant:             tslug,
 		MerchantID:           tid,

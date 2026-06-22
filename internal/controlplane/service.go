@@ -142,7 +142,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		ExpectedAudiences: []string{"openrails"},
 		APIKeyPrefix:      APIKeyPrefix,
 		Environment:       strings.TrimSpace(cfg.Env),
-		Permissions: Catalog(),
+		Permissions:       Catalog(),
 		// OpenRails declares NO org roles of its own (#543). Merchant-admin
 		// authority comes from AuthKit's built-in `owner` role for human admins,
 		// and from direct permission-scoped API keys for server-to-server
@@ -168,7 +168,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
 	// `openrails` audience. Customer self-service tokens may be permissionless;
-	// any supplied permissions must be browser-safe merchant-admin grants.
+	// any supplied permissions are bounded by the signing remote application's
+	// stored authority in AuthKit.
 	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)

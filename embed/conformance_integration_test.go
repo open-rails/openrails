@@ -37,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 )
 
 // --- normalized observations ------------------------------------------------
@@ -205,6 +206,15 @@ type obsAccount struct {
 	PayerMatches          bool
 }
 
+type obsProductAccess struct {
+	ProductMatches bool
+	CustomerIDSet  bool
+	ProductSlugSet bool
+	SourceType     string
+	Status         string
+	HasPaymentID   bool
+}
+
 // scriptResult is everything one transport observed. The two transports'
 // results must be require.Equal.
 type scriptResult struct {
@@ -252,10 +262,18 @@ type scriptResult struct {
 
 	// Entitlements by external (issuer, subjects) identity — always batch (#354).
 	Entitlements              []obsEntitlement
+	SingleEntitlements        []obsEntitlement
+	HasEntitlement            bool
+	HasMissingEntitlement     bool
 	EntitlementsUnknownEmpty  bool
 	EntitlementsKeyCount      int
 	ErrEntitlementsNoSubjects obsErr
 	ErrEntitlementsOverCap    obsErr
+
+	ProductAccess         []obsProductAccess
+	HasProductAccess      bool
+	HasNoProductAccess    bool
+	ErrProductAccessBadID obsErr
 }
 
 type obsEntitlement struct {
@@ -309,6 +327,7 @@ type scriptEnv struct {
 	// openrails.customers row) for the entitlements steps.
 	issuer  string
 	subject string
+	product uuid.UUID
 }
 
 // runScript executes the identical operation sequence through one client and
@@ -623,6 +642,15 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		[]string{env.subject, " " + env.subject, "ghost-" + env.subject}, time.Time{})
 	require.NoError(t, err, "%s entitlements", env.side)
 	r.Entitlements = observeEntitlements(ents[env.subject], env.payer)
+	singleEnts, err := c.ListEntitlements(ctx, env.subject, time.Time{})
+	require.NoError(t, err, "%s single entitlements", env.side)
+	r.SingleEntitlements = observeEntitlements(singleEnts, env.payer)
+	hasEntitlement, err := c.HasEntitlement(ctx, env.subject, "premium", time.Time{})
+	require.NoError(t, err, "%s has entitlement", env.side)
+	r.HasEntitlement = hasEntitlement
+	hasMissingEntitlement, err := c.HasEntitlement(ctx, env.subject, "missing", time.Time{})
+	require.NoError(t, err, "%s has missing entitlement", env.side)
+	r.HasMissingEntitlement = hasMissingEntitlement
 	ghostRecs, ghostPresent := ents["ghost-"+env.subject]
 	r.EntitlementsUnknownEmpty = ghostPresent && len(ghostRecs) == 0
 	r.EntitlementsKeyCount = len(ents)
@@ -634,6 +662,16 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	}
 	_, err = c.ListActiveEntitlements(ctx, overCap, time.Time{})
 	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)
+
+	productAccess, err := c.ListProductAccess(ctx, env.subject)
+	require.NoError(t, err, "%s product access", env.side)
+	r.ProductAccess = observeProductAccess(productAccess, env.product)
+	r.HasProductAccess, err = c.HasProductAccess(ctx, env.subject, env.product.String())
+	require.NoError(t, err, "%s has product access", env.side)
+	r.HasNoProductAccess, err = c.HasProductAccess(ctx, env.subject, uuid.NewString())
+	require.NoError(t, err, "%s has missing product access", env.side)
+	_, err = c.HasProductAccess(ctx, env.subject, "not-a-uuid")
+	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
 
 	// 21) Hierarchical budget-scope policies on the unified client (#473): write a
 	// subject self cap + a (subject, role) pool + a platform cap through all three
@@ -733,6 +771,21 @@ func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
 	}
 }
 
+func observeProductAccess(grants []openrails.ProductAccessGrant, productID uuid.UUID) []obsProductAccess {
+	out := make([]obsProductAccess, 0, len(grants))
+	for _, g := range grants {
+		out = append(out, obsProductAccess{
+			ProductMatches: g.ProductID == productID.String(),
+			CustomerIDSet:  g.CustomerID != "",
+			ProductSlugSet: g.ProductSlug != "",
+			SourceType:     g.SourceType,
+			Status:         g.Status,
+			HasPaymentID:   g.PaymentID != nil,
+		})
+	}
+	return out
+}
+
 func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	ctx := context.Background()
 
@@ -750,17 +803,16 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"
-	newPayer := func(side string) (uuid.UUID, string) {
-		subject := side + "-" + uuid.New().String()
-		// #491: customers carries the (merchant, issuer, subject) org-less natural
-		// key behind a uuidv7 surrogate id; seed by the natural key and read the
-		// minted id back so the external-subject entitlements lookup resolves.
-		var id uuid.UUID
-		err := pool.QueryRow(ctx, `
-			INSERT INTO openrails.customers (merchant_id, issuer, subject, created_at, last_seen_at)
-			VALUES ($1, $2, $3, now(), now())
-			RETURNING id`,
-			dbtest.TestMerchantID.UUID(), issuer, subject).Scan(&id)
+	productAccessSvc := productaccess.NewService(dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)))
+	newPayer := func(side string) (uuid.UUID, string, uuid.UUID) {
+		id := uuid.New()
+		subject := id.String()
+		// The external subject is UUID-only (#364) and product-access grants FK the
+		// customer id, so this fixture pins customer.id == subject UUID.
+		_, err := pool.Exec(ctx, `
+			INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
+			VALUES ($1, $2, $3, $4, now(), now())`,
+			id, dbtest.TestMerchantID.UUID(), issuer, subject)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
@@ -768,10 +820,23 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
 			uuid.New(), dbtest.TestMerchantID.UUID(), id, uuid.New())
 		require.NoError(t, err)
-		return id, subject
+		productID := uuid.New()
+		_, err = pool.Exec(ctx, `
+			INSERT INTO openrails.products (id, merchant_id, slug, display_name)
+			VALUES ($1, $2, $3, $4)`,
+			productID, dbtest.TestMerchantID.UUID(), "conf-product-"+side+"-"+productID.String(), "Conformance Product "+side)
+		require.NoError(t, err)
+		_, _, err = productAccessSvc.GrantProductAccess(dbtest.WithTestMerchant(ctx), productaccess.GrantParams{
+			UserID:     subject,
+			ProductID:  productID,
+			SourceType: models.ProductAccessSourceAdmin,
+			SourceID:   "conformance:" + side + ":" + productID.String(),
+		})
+		require.NoError(t, err)
+		return id, subject, productID
 	}
-	payerEmbedded, subjectEmbedded := newPayer("embedded")
-	payerStandalone, subjectStandalone := newPayer("standalone")
+	payerEmbedded, subjectEmbedded, productEmbedded := newPayer("embedded")
+	payerStandalone, subjectStandalone, productStandalone := newPayer("standalone")
 
 	from := time.Now().Add(-time.Hour).UTC()
 	to := time.Now().Add(time.Hour).UTC()
@@ -779,12 +844,12 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	resEmbedded := runScript(t, ctx, embeddedClient, scriptEnv{
 		payer: payerEmbedded, invoker: "user:conf", currency: currency,
 		resource: "ep-embedded", side: "embedded", from: from, to: to,
-		pool: pool, issuer: issuer, subject: subjectEmbedded,
+		pool: pool, issuer: issuer, subject: subjectEmbedded, product: productEmbedded,
 	})
 	resStandalone := runScript(t, ctx, standaloneClient, scriptEnv{
 		payer: payerStandalone, invoker: "user:conf", currency: currency,
 		resource: "ep-standalone", side: "standalone", from: from, to: to,
-		pool: pool, issuer: issuer, subject: subjectStandalone,
+		pool: pool, issuer: issuer, subject: subjectStandalone, product: productStandalone,
 	})
 
 	// THE assertion: identical observable behavior across the two real surfaces.

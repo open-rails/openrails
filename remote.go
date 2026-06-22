@@ -531,6 +531,39 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, 
 	return out, nil
 }
 
+// ListEntitlements implements Client as the single-subject form of
+// ListActiveEntitlements.
+func (c *remote) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, fmt.Errorf("openrails: subject is required")
+	}
+	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at)
+	if err != nil {
+		return nil, err
+	}
+	return out[subject], nil
+}
+
+// HasEntitlement implements Client by checking the single-subject entitlement
+// list returned from /v1/merchant/customers/entitlements:batch.
+func (c *remote) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return false, fmt.Errorf("openrails: entitlement is required")
+	}
+	records, err := c.ListEntitlements(ctx, subject, at)
+	if err != nil {
+		return false, err
+	}
+	for _, rec := range records {
+		if rec.Entitlement == entitlement {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ListCustomersWithEntitlement implements Client (handler
 // ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
 // route to completion.
@@ -565,6 +598,41 @@ func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 		cursor = out.NextCursor
 	}
 	return all, nil
+}
+
+// ListProductAccess implements Client (handler ServiceGetUserProductAccess).
+func (c *remote) ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, fmt.Errorf("openrails: subject is required")
+	}
+	var out []ProductAccessGrant
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/users/"+url.PathEscape(subject)+"/product-access", nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []ProductAccessGrant{}
+	}
+	return out, nil
+}
+
+// HasProductAccess implements Client (handler ServiceGetUserProductAccess with
+// ?product_id=...).
+func (c *remote) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
+	subject = strings.TrimSpace(subject)
+	productID = strings.TrimSpace(productID)
+	switch {
+	case subject == "":
+		return false, fmt.Errorf("openrails: subject is required")
+	case productID == "":
+		return false, fmt.Errorf("openrails: product_id is required")
+	}
+	path := "/v1/merchant/users/" + url.PathEscape(subject) + "/product-access?product_id=" + url.QueryEscape(productID)
+	var out ProductAccessCheck
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return false, err
+	}
+	return out.HasAccess, nil
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).

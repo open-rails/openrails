@@ -32,13 +32,13 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	catalogToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-writer-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogUpdate},
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	readOnlyToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-denied-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomersRead},
+		[]string{controlplane.PermMerchantCustomerSettingsRead},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 
@@ -84,7 +84,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	token := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-apply-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogUpdate},
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	applier := httpCatalogApplier{t: t, baseURL: surface.BaseURL, token: token}
@@ -169,6 +169,98 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	var archived billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &archived))
 	require.Equal(t, models.CatalogStatusArchived, archived.Status)
+}
+
+func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+
+	token := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-publish-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+	)
+	deniedToken := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-publish-denied-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+	)
+
+	groupSlug := "publish-group-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productSlug := "publish-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		TierGroups: []catalog.TierGroup{{
+			Slug: groupSlug,
+			Products: []catalog.Product{{
+				Slug:        productSlug,
+				DisplayName: "Publish Product",
+				Description: "published through the live merchant catalog route",
+				TierRank:    1,
+				Prices: []catalog.Price{{
+					UnitAmount:    1499,
+					Currency:      "usd",
+					Interval:      "month",
+					IntervalCount: 1,
+				}},
+			}},
+		}},
+	}
+	require.NoError(t, manifest.Validate())
+
+	deniedStatus, deniedBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", deniedToken, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusForbidden, deniedStatus, string(deniedBody))
+
+	planStatus, planBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+	})
+	require.Equal(t, http.StatusOK, planStatus, string(planBody))
+	var planned struct {
+		Plan   *catalog.ApplyPlan   `json:"plan"`
+		Result *catalog.ApplyResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(planBody, &planned))
+	require.NotNil(t, planned.Plan)
+	require.Nil(t, planned.Result)
+
+	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&active_only=true"
+	missingStatus, missingBody := requestJSON(t, http.MethodGet, listURL, token, nil)
+	require.Equal(t, http.StatusOK, missingStatus, string(missingBody))
+	var missingPage struct {
+		Items []billingservice.CatalogProduct `json:"items"`
+		Total int64                           `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(missingBody, &missingPage))
+	for _, item := range missingPage.Items {
+		require.NotEqual(t, productSlug, item.Slug)
+	}
+
+	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
+	var applied struct {
+		Plan   *catalog.ApplyPlan   `json:"plan"`
+		Result *catalog.ApplyResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(applyBody, &applied))
+	require.NotNil(t, applied.Plan)
+	require.NotNil(t, applied.Result)
+	require.Equal(t, 1, applied.Result.ProductsCreated)
+	require.Equal(t, 1, applied.Result.PricesCreated)
+
+	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	require.Equal(t, http.StatusOK, foundStatus, string(foundBody))
+	var product billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(foundBody, &product))
+	require.Equal(t, productSlug, product.Slug)
 }
 
 func requestJSON(t *testing.T, method, url, token string, body any) (int, []byte) {

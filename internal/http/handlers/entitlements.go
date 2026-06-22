@@ -54,11 +54,11 @@ type ServiceEntitlementRecord struct {
 }
 
 type adminUserEntitlementsPath struct {
-	UserID string `uri:"user_id" binding:"required"`
+	UserID string `uri:"customer_id" binding:"required"`
 }
 
 type adminEntitlementPath struct {
-	UserID        string `uri:"user_id" binding:"required"`
+	UserID        string `uri:"customer_id" binding:"required"`
 	EntitlementID string `uri:"id" binding:"required"`
 }
 

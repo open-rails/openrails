@@ -39,11 +39,11 @@ type productAccessPath struct {
 }
 
 type adminUserProductAccessPath struct {
-	UserID string `uri:"user_id" binding:"required"`
+	UserID string `uri:"customer_id" binding:"required"`
 }
 
 type adminProductAccessGrantPath struct {
-	UserID  string `uri:"user_id" binding:"required"`
+	UserID  string `uri:"customer_id" binding:"required"`
 	GrantID string `uri:"id" binding:"required"`
 }
 
