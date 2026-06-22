@@ -361,8 +361,7 @@ type RouteSet string
 const (
 	RouteSetCheckout          RouteSet = "checkout"           // buyer-facing products/prices/config + checkout/pay flows
 	RouteSetCustomer          RouteSet = "customer"           // /me/* browser self-service
-	RouteSetMerchantDashboard RouteSet = "merchant_dashboard" // /admin/* merchant dashboard/customer/payment/subscription ops
-	RouteSetMerchantCatalog   RouteSet = "merchant_catalog"   // /merchant/catalog/* catalog/product/price ops
+	RouteSetMerchantDashboard RouteSet = "merchant_dashboard" // human merchant UI: /admin/* + /merchant/catalog/*
 	RouteSetMerchantAPI       RouteSet = "merchant_api"       // machine-to-machine API; embedded opt-in only
 	RouteSetWebhooks          RouteSet = "webhooks"           // processor callbacks
 )
@@ -371,7 +370,6 @@ var EmbeddedDefaultRouteSets = []RouteSet{
 	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantDashboard,
-	RouteSetMerchantCatalog,
 	RouteSetWebhooks,
 }
 
@@ -379,17 +377,19 @@ var StandaloneDefaultRouteSets = []RouteSet{
 	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantDashboard,
-	RouteSetMerchantCatalog,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }
 ```
 
-Lazy rule: embedded defaults exclude `RouteSetMerchantAPI` because the host can
-call OpenRails' Go service directly. Hosts may opt in when they intentionally
-want HTTP loopback parity or expose a remote-compatible API surface. Do not keep
-`public_catalog` as a separate route set: product/price/config discovery is part
-of the buyer-facing checkout surface.
+Deployment rule: standalone mounts every route set. Embedded mounts every
+browser/dashboard/webhook route set and skips only `RouteSetMerchantAPI` by
+default because the host can call OpenRails' Go service directly. Hosts may opt
+in when they intentionally want HTTP loopback parity or expose a
+remote-compatible API surface. Do not keep `public_catalog` as a separate route
+set: product/price/config discovery is part of the buyer-facing checkout
+surface. Do not keep `merchant_catalog` as a separate route set: catalog
+management is part of the human merchant dashboard surface.
 
 ## Customer Self-Service Route Recut
 
@@ -918,7 +918,7 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 - [ ] Mirror those as Go library methods (`ListEntitlements`, `HasEntitlement`, `ListEntitlementsBatch`, `ListProductAccess`, `HasProductAccess`, `GetBalance`) with HTTP-aligned names/shapes.
 - [ ] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; drop `issuer` (merchant/org from auth, subjects from body).
 - [ ] Split customer-forward lookups from directory/filter reverse lookups (`GET /v1/merchant/entitlements/:name/customers`) in both HTTP and Go.
-- [~] Update Doujins / Tensorhub / Cozy Art call sites to the new paths/principal; bump in lockstep. ASSESSED 2026-06-21: all three use the OpenRails Go SDK (`openrails.NewRemote`), NOT raw `/v1/service` paths — the `/v1/service`->`/v1/merchant` move is internal to `remote.go`, so no path edits in consumers. The only breaking SDK signature is `Client.ListActiveEntitlements` (dropped `issuer`). **Tensorhub** calls Admit/Capture/Release/GetTier/Deposit/... (all unchanged) and does NOT call `ListActiveEntitlements` -> ZERO code changes, a clean `go.mod` bump only. **Doujins/Cozy-Art** must drop the `issuer` arg IFF they call `ListActiveEntitlements`. REMAINING (deploy step, not code): tag an OpenRails release (master = v0.47.0 + #554/#555 + in-flight #559-561; on authkit v0.44.0) and bump each consumer's `go.mod`.
+- [~] Update Doujins / Tensorhub / Cozy Art call sites to the new paths/principal; bump in lockstep. ASSESSED 2026-06-21: all three use the OpenRails Go SDK (`openrails.NewRemote`), NOT raw `/v1/service` paths — the `/v1/service`->`/v1/merchant` move is internal to `remote.go`, so no path edits in consumers. The only breaking SDK signature is `Client.ListActiveEntitlements` (dropped `issuer`). **Tensorhub** calls Admit/Capture/Release/GetTier/Deposit/... (all unchanged) and does NOT call `ListActiveEntitlements` -> ZERO code changes, a clean `go.mod` bump only. **Doujins/Cozy-Art** must drop the `issuer` arg IFF they call `ListActiveEntitlements`. RELEASED 2026-06-21: tagged + pushed **OpenRails v0.48.0** (on authkit v0.44.0). **Tensorhub** bumped to v0.48.0 and VALIDATED green (build + openrailsclient/api tests; its test mock servers moved `/v1/service`->`/v1/merchant`; no production code change) — staged in the tensorhub tree, not pushed (its remote diverged + carries unrelated WIP). Doujins/Cozy-Art `go.mod` bumps remain (mechanical) when those repos are next touched.
 - [ ] Tests: each credential type passes the same gate; `issuer` is rejected; unknown subjects return `[]`; HTTP and Go return matching shapes.
 
 ## Acceptance
@@ -933,25 +933,24 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 # #556: embedded-route-set-presets
 
 **Completed:** no
-**Status:** REOPENED 2026-06-21: the first pass removed boolean flags, but the route-set names are still dishonest/incomplete. `public_catalog` and `customer` currently share one old user-route registration, and `/me/*` + `/admin/*` are still standalone-only Gin mounts. Recut the route sets to match actual product surfaces: `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, `merchant_api`, and `webhooks`. Embedded defaults should expose real OpenRails browser/dashboard routes directly and exclude only machine-to-machine `merchant_api`.
+**Status:** REOPENED 2026-06-21: the first pass removed boolean flags, but the route-set names are still dishonest/incomplete. `public_catalog` and `customer` currently share one old user-route registration, and `/me/*` + `/admin/*` are still standalone-only Gin mounts. Recut the route sets to match actual deployment surfaces: `checkout`, `customer`, `merchant_dashboard`, `merchant_api`, and `webhooks`. `merchant_dashboard` includes both `/admin/*` and human catalog management under `/merchant/catalog/*`. Standalone mounts every route set; embedded defaults expose real OpenRails browser/dashboard routes directly and exclude only machine-to-machine `merchant_api`.
 
 Replace the embedded `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans with named `RouteSet` values + presets so hosts can see exactly what mounts. Embedded defaults exclude host-internal machine HTTP routes (the host calls the Go service directly); standalone includes them. See parent #552 "Embedded Route Group API".
 
 ## Tasks
 
 - [x] Define a `RouteSet` type and replace the old boolean handler options.
-- [ ] Replace the current canonical sets with: `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, `merchant_api`, and `webhooks`.
+- [ ] Replace the current canonical sets with: `checkout`, `customer`, `merchant_dashboard`, `merchant_api`, and `webhooks`.
 - [ ] Collapse old `public_catalog` into `checkout`; `checkout` owns products/prices/config discovery plus checkout/pay flows.
 - [ ] Rename self-service `/me/*` route grouping to `customer`.
-- [ ] Add `merchant_dashboard` for `/admin/*` browser delegated merchant dashboard routes.
-- [ ] Rename narrow catalog/operator actions to `merchant_catalog` for `/merchant/catalog/*`.
-- [ ] Keep `merchant_api` machine-to-machine only; embedded default excludes it, standalone includes it.
+- [ ] Add `merchant_dashboard` for human merchant UI routes: `/admin/*` browser delegated dashboard routes plus `/merchant/catalog/*` catalog/product/price operations.
+- [ ] Keep `merchant_api` machine-to-machine only; embedded default excludes it, standalone mounts it.
 - [ ] Make `/me/*` and `/admin/*` available through embedded route-set mounting instead of standalone-only Gin registration.
-- [ ] Define `EmbeddedDefaultRouteSets` as `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, and `webhooks`.
+- [ ] Define `EmbeddedDefaultRouteSets` as `checkout`, `customer`, `merchant_dashboard`, and `webhooks`.
 - [ ] Define `StandaloneDefaultRouteSets` as embedded default plus `merchant_api`.
 - [ ] Mount route groups by RouteSet; let hosts opt into `RouteSetMerchantAPI` for HTTP loopback parity.
 - [x] Migrate embedded hosts (Cozy Art, Tensorhub) off the boolean flags (hard cut); delete the booleans.
-- [ ] Tests: embedded default mounts checkout/customer/merchant-dashboard/merchant-catalog/webhooks; embedded default does not mount machine API; standalone does; opt-in adds machine API.
+- [ ] Tests: embedded default mounts checkout/customer/merchant-dashboard/webhooks; embedded default does not mount machine API; standalone does; opt-in adds machine API.
 - [ ] Integration test through a real `httptest.NewServer` HTTP client/server proving embedded route-set defaults and opt-in behavior.
 
 ## Acceptance
@@ -959,8 +958,9 @@ Replace the embedded `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans
 - Hosts declare route sets, not booleans.
 - Route-set names map to product surfaces, not implementation leftovers.
 - Embedded default exposes real OpenRails browser/dashboard routes directly, with no host proxy routes needed.
-- Embedded default has no host-internal machine HTTP routes; standalone does.
+- Standalone mounts every route set; embedded default skips only host-internal machine HTTP routes.
 - `public_catalog` is gone as a standalone route set; buyer catalog discovery lives under `checkout`.
+- `merchant_catalog` is gone as a standalone route set; catalog operations live under `merchant_dashboard`.
 
 ---
 
