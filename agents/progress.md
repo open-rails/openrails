@@ -13,8 +13,8 @@ next_id: 569
 
 # #568: cycle-free entitlements wiring for embedded billing — read-client split (A) + post-construction hook (B)
 
-**Completed:** no
-**Status:** PLANNED 2026-06-22 (Claude). Retires the `deferredEntitlements` holder workaround now carried by doujins + hentai0 after the authkit v0.47.0 hardcut (#108) removed chainable `WithX`. Two FIRST-CLASS host options; maintainer PREFERS Option B. Option B has an authkit dependency (a sanctioned post-construction entitlements setter — track on the authkit side, bump authkit before openrails ships B).
+**Completed:** yes
+**Status:** DONE 2026-06-22 (Claude) via Option B. The authkit dependency shipped as authkit #112 (`SetEntitlementsProvider`, authkit v0.48.0). The holder is now removed from BOTH hosts with NO openrails-package change: each builds auth → builds the embedded engine → `authSvc.SetEntitlementsProvider(engine.EntitlementsProvider())` before serving. doujins dropped its `deferredEntitlements` holder; hentai0 dropped the `SetClient`/atomic late-bind (its `OpenRailsEntitlementsProvider` now takes the client at construction). Option A (split an auth-free `openrailsembed.NewClient` read-client from `NewEngine`) and the optional openrails-side `AttachEntitlements` sugar were NOT needed and remain PARKED — open a fresh issue if a host ever wants pure-constructor wiring instead of the sanctioned post-construction setter.
 
 ## Background: the embedding cycle
 Embedding OpenRails billing in a host creates a bidirectional dependency:
