@@ -5,11 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	authcore "github.com/open-rails/authkit/core"
-	authhttp "github.com/open-rails/authkit/http"
-
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrRemoteApplicationNotConfigured indicates the control plane has no verifier
@@ -73,24 +69,24 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		return nil, ErrNotRemoteApplicationToken
 	}
 
-	// #481: authorize by the principal's role on a merchant's owner_org_id. The
-	// principal's STORED org memberships (Claims.Org slug) name the owning
-	// AuthKit org; resolve the merchant it owns. Authority is the resolved
-	// role/perms, never the token's self-claims.
-	mid, mslug, ownerOrgID, err := c.merchantForRemoteApplication(ctx, cl)
+	// #567: authorize by the remote_application's controlling permission-group.
+	// The validated `iss` -> remote_application -> its merchant group resolves the
+	// merchant; authority is the principal's STORED group-role perms (Permissions),
+	// never the token's self-claims.
+	mid, mslug, groupID, groupRef, _, err := c.merchantForIssuer(ctx, cl.Issuer)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedServiceCredential{
-		OwnerOrgID:   ownerOrgID,
-		OwnerOrgSlug: strings.TrimSpace(cl.Org),
-		MerchantID:   mid,
-		MerchantSlug: mslug,
-		Permissions:  append([]string(nil), cl.Permissions...),
+		OwnerGroupID:  groupID,
+		OwnerGroupRef: groupRef,
+		MerchantID:    mid,
+		MerchantSlug:  mslug,
+		Permissions:   append([]string(nil), cl.Permissions...),
 		// A remote application carries merchant-wide authority over the merchant
-		// its owning org owns; scope it to that merchant resource so subject-scope
-		// checks (AllowsCustomer) behave like a merchant-wide credential.
+		// its controlling group owns; scope it to that merchant resource so
+		// subject-scope checks (AllowsCustomer) behave like a merchant-wide credential.
 		Resources: []authcore.APIKeyResource{MerchantResource(mid)},
 	}, nil
 }
@@ -101,36 +97,4 @@ func isRemoteApplicationWrongType(err error) bool {
 	}
 	msg := strings.TrimSpace(err.Error())
 	return msg == "access_token_wrong_typ" || msg == "delegated_access_wrong_typ"
-}
-
-// merchantForRemoteApplication resolves the OpenRails merchant a remote application
-// administers (#481), by ROLE on the owning AuthKit org: the principal's
-// STORED org memberships -> the AuthKit org uuid -> the merchant whose
-// owner_org_id is that uuid. Returns the merchant id/slug and the resolved
-// owner_org_id (the caller's authority anchor). Fails closed when no
-// membership owns an active merchant.
-func (c *ControlPlane) merchantForRemoteApplication(ctx context.Context, cl authhttp.Claims) (merchant.ID, string, string, error) {
-	if c == nil || c.Core() == nil || c.pool == nil {
-		return merchant.ID{}, "", "", errors.New("controlplane: control plane unavailable for remote_application resolution")
-	}
-
-	// The principal's assigned org slug(s). Claims.Org is the first
-	// membership; AuthKit surfaces a single membership as Org. Resolve its
-	// AuthKit uuid, then the merchant owned by it.
-	slug := strings.TrimSpace(cl.Org)
-	if slug == "" {
-		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
-	}
-	t, err := c.Core().ResolveOrgBySlug(ctx, slug)
-	if err != nil || t == nil {
-		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
-	}
-	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
-	}
-	if err != nil {
-		return merchant.ID{}, "", "", err
-	}
-	return mid, mslug, t.ID, nil
 }

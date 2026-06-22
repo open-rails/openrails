@@ -20,10 +20,10 @@ func TestResolvedServiceCredential_HasPermission(t *testing.T) {
 }
 
 func TestResolvedServiceCredential_ApexGrantDoesNotBypassPermissionChecks(t *testing.T) {
-	r := &ResolvedServiceCredential{Permissions: []string{authcore.OrgOwnerGrant}}
+	r := &ResolvedServiceCredential{Permissions: []string{"root:*"}}
 	for _, p := range CatalogNames() {
 		if r.HasPermission(p) {
-			t.Errorf("apex grant %q must not bypass exact check for %q", authcore.OrgOwnerGrant, p)
+			t.Errorf("apex grant %q must not bypass exact check for %q", "root:*", p)
 		}
 	}
 }

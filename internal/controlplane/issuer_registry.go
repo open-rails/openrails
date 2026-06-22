@@ -25,7 +25,7 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
 	}
-	return c.delegatedVerifier.LoadRemoteApplications(ctx, delegatedVerifierEnricher{Service: c.Core()}, c.delegatedAudiences)
+	return c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences)
 }
 
 // ReloadRemoteApplications re-syncs the verifier's in-memory issuer registry with
@@ -49,14 +49,16 @@ func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error)
 }
 
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
-// act on (#481). The chain is role-based, never identity: validated `iss` ->
-// AuthKit remote_application -> its owning org -> the merchant namespace owned by
-// that org (`merchants.owner_org_id`). `owner_org_id` is unique when non-null, so
-// this is a direct lookup rather than a membership scan.
+// act on (#567). The chain is group-based, never identity: validated `iss` ->
+// AuthKit remote_application -> its controlling permission-group id (the merchant
+// group) -> the merchant directory row whose recorded controlling group id
+// matches (`merchants.owner_org_id`, repurposed under #567 to hold the merchant
+// permission-group's internal id, NOT an org uuid).
 //
-// Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, controls no
-// org, or that org owns no active merchant (fail closed).
-func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, ownerOrgID, ownerOrgSlug, remoteApplicationID string, err error) {
+// Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, is attached
+// to no group, or that group is no active merchant (fail closed). The returned
+// groupID/groupRef pair replaces the old (ownerOrgID, ownerOrgSlug).
+func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, groupID, groupRef, remoteApplicationID string, err error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
@@ -69,25 +71,18 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 	if err != nil || ra == nil || !ra.Enabled {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
-	if strings.TrimSpace(ra.OrgID) == "" {
+	// RemoteApplication.OrgID carries the controlling permission_group_id (#111):
+	// the merchant group this issuer signs for. Empty => attached to nothing.
+	groupID = strings.TrimSpace(ra.OrgID)
+	if groupID == "" {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
-	org, err := c.Core().ResolveOrgByID(ctx, ra.OrgID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
-		}
-		return merchant.ID{}, "", "", "", "", err
-	}
-	if org == nil {
-		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
-	}
-	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, org.ID)
+	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
 	if err != nil {
 		return merchant.ID{}, "", "", "", "", err
 	}
-	return mid, mslug, org.ID, org.Slug, ra.ID, nil
+	return mid, mslug, groupID, mslug, ra.ID, nil
 }

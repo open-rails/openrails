@@ -19,7 +19,8 @@ import (
 const (
 	// ServiceCredentialContextKey holds the *controlplane.ResolvedServiceCredential for the request.
 	ServiceCredentialContextKey = "openrails.service_credential"
-	// ServiceCredentialOwnerOrgSlugContextKey holds the owning AuthKit org slug.
+	// ServiceCredentialOwnerOrgSlugContextKey holds the merchant permission-group's
+	// resource ref (the merchant slug) the credential is nested under (#567).
 	ServiceCredentialOwnerOrgSlugContextKey = "openrails.service_credential_authkit_org_slug"
 )
 
@@ -109,7 +110,7 @@ func ServiceCredentialRequired(resolver ServiceCredentialResolver) gin.HandlerFu
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("openrails.merchant_id", resolved.MerchantID)
 		c.Set(ServiceCredentialContextKey, resolved)
-		c.Set(ServiceCredentialOwnerOrgSlugContextKey, resolved.OwnerOrgSlug)
+		c.Set(ServiceCredentialOwnerOrgSlugContextKey, resolved.OwnerGroupRef)
 		c.Set(PrincipalContextKey, principalFromServiceCredential(resolved, credentialType))
 
 		c.Next()

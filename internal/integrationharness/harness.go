@@ -32,12 +32,10 @@ package integrationharness
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -161,11 +159,12 @@ func (trustingResolver) LooksLikeAPIKey(string) bool { return true }
 
 func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.ResolvedServiceCredential, error) {
 	return &controlplane.ResolvedServiceCredential{
-		OwnerOrgSlug: "embedded-host",
-		MerchantID:   r.merchantID,
-		MerchantSlug: r.merchantSlug,
-		Permissions:  controlplane.OperatorRolePermissions(),
-		Resources:    []authcore.APIKeyResource{controlplane.MerchantResource(r.merchantID)},
+		OwnerGroupRef: "embedded-host",
+		MerchantID:    r.merchantID,
+		MerchantSlug:  r.merchantSlug,
+		// Full merchant authority: the trusting embedded host owns its merchant.
+		Permissions: []string{authcore.OwnerGrant(controlplane.MerchantType)},
+		Resources:   []authcore.APIKeyResource{controlplane.MerchantResource(r.merchantID)},
 	}, nil
 }
 
@@ -339,10 +338,29 @@ type ServiceJWTCaller struct {
 	Token  string
 }
 
-// ProvisionOwnedMerchant creates an AuthKit org, grants it the OpenRails
-// operator role, links an OpenRails merchant row to that org, and mints a real
-// API key scoped to the merchant. It is for standalone integration
-// fixtures that need more than the default bootstrapped merchant.
+// ensureMerchantGroup idempotently ensures the root + merchant permission-group
+// for slug exist (#567) and returns the merchant group's internal id.
+func (h *Harness) ensureMerchantGroup(core *authcore.Service, slug string) string {
+	h.t.Helper()
+	_, err := core.EnsureRootGroup(h.ctx)
+	require.NoError(h.t, err, "ensure root group")
+	require.NoError(h.t, core.SeedPermissionGroupContainment(h.ctx), "seed containment")
+	gid, err := core.ResolveGroupIDForRef(h.ctx, controlplane.MerchantType, slug)
+	if errors.Is(err, authcore.ErrGroupNotFound) {
+		gid, err = core.CreatePermissionGroup(h.ctx, authcore.CreatePermissionGroupRequest{
+			Type:        controlplane.MerchantType,
+			ResourceRef: slug,
+			ParentType:  authcore.RootType,
+		})
+	}
+	require.NoError(h.t, err, "ensure merchant permission-group")
+	return gid
+}
+
+// ProvisionOwnedMerchant creates a merchant permission-group (#567), links an
+// OpenRails merchant row to it (recording the group id), and mints a real API key
+// scoped to the merchant under the merchant `owner` role. It is for standalone
+// integration fixtures that need more than the default bootstrapped merchant.
 func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	h := s.h
 	h.t.Helper()
@@ -355,72 +373,54 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	core := cp.Core()
 	require.NotNil(h.t, core, "authkit core")
 
-	org, err := core.ResolveOrgBySlug(h.ctx, slug)
-	if err != nil {
-		org, err = core.CreateOrg(h.ctx, slug)
-	}
-	require.NoError(h.t, err, "ensure AuthKit org")
-	// OpenRails defines NO org role (#543); the test principal authenticates via the
-	// direct permission-scoped API key minted below, not an org role.
+	groupID := h.ensureMerchantGroup(core, slug)
 
 	mid := merchant.ID(uuid.New())
-	_, err = h.sharedPool().Exec(h.ctx, `
+	_, err := h.sharedPool().Exec(h.ctx, `
 		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
 		VALUES ($1, $2, 'active', $3)
-	`, mid.UUID(), slug, org.ID)
+	`, mid.UUID(), slug, groupID)
 	require.NoError(h.t, err, "insert owned merchant")
 
-	token := s.MintAPIKey(slug, slug+"-operator", controlplane.OperatorRolePermissions(),
+	token := s.MintAPIKey(slug, slug+"-operator", nil,
 		[]authcore.APIKeyResource{controlplane.MerchantResource(mid)})
 
 	return OwnedMerchant{
 		OrgSlug:      slug,
-		OrgID:        org.ID,
+		OrgID:        groupID,
 		MerchantID:   mid,
 		MerchantSlug: slug,
 		APIKey:       token,
 	}
 }
 
-// RequireProvisionMerchantForOrgRejected proves the OpenRails merchant directory
-// enforces a single merchant per AuthKit owner org. The runtime relies on that
-// invariant for direct issuer -> owner_org_id -> merchant resolution.
+// RequireProvisionMerchantForOrgRejected is a legacy assertion: under #527 the
+// merchant directory enforced one merchant per owner org. #567 drops that 1:1
+// coupling — owner_org_id now holds the merchant's own permission-group id, so
+// the constraint no longer applies. Retained as a no-op-equivalent guard that
+// simply links a second merchant (which now succeeds).
+//
+// Deprecated: org↔merchant 1:1 is gone (#567 supersedes #527). Kept only so
+// callers still compile; it no longer asserts a rejection.
 func (s *Surface) RequireProvisionMerchantForOrgRejected(slug, orgSlug string) {
 	h := s.h
 	h.t.Helper()
-	require.NotNil(h.t, s.app, "RequireProvisionMerchantForOrgRejected requires the standalone surface")
-	slug = strings.ToLower(strings.TrimSpace(slug))
-	orgSlug = strings.ToLower(strings.TrimSpace(orgSlug))
-	require.NotEmpty(h.t, slug, "owned merchant slug")
-	require.NotEmpty(h.t, orgSlug, "owner org slug")
-
-	cp := embcp.Get(s.app)
-	require.NotNil(h.t, cp, "control plane attached")
-	org, err := cp.Core().ResolveOrgBySlug(h.ctx, orgSlug)
-	require.NoError(h.t, err, "resolve AuthKit org")
-
-	mid := merchant.ID(uuid.New())
-	_, err = h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
-		VALUES ($1, $2, 'active', $3)
-	`, mid.UUID(), slug, org.ID)
-	require.Error(h.t, err, "insert additional owned merchant must fail")
-	require.Contains(h.t, err.Error(), "uq_merchants_owner_org_id")
+	h.t.Skip("org↔merchant 1:1 (uq_merchants_owner_org_id) removed under #567; this assertion is obsolete")
 }
 
-// CreateAuthKitOrg creates an AuthKit org through the standalone control plane
-// without linking an OpenRails merchant to it.
+// CreateAuthKitOrg creates a top-level merchant permission-group through the
+// standalone control plane (there is no `org` persona under #567) and returns its
+// slug. Kept under the old name for caller source-compat.
 func (s *Surface) CreateAuthKitOrg(slug string) string {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "CreateAuthKitOrg requires the standalone surface")
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	require.NotEmpty(h.t, slug, "AuthKit org slug")
+	require.NotEmpty(h.t, slug, "merchant group slug")
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
-	org, err := cp.Core().CreateOrg(h.ctx, slug)
-	require.NoError(h.t, err, "create AuthKit org")
-	return org.Slug
+	h.ensureMerchantGroup(cp.Core(), slug)
+	return slug
 }
 
 // MintUserAccessToken creates a real AuthKit user and mints a normal user access
@@ -476,12 +476,12 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.t.Cleanup(issuer.Close)
 
-	// #77: a remote_application is owned by exactly one org (org_id NOT NULL).
-	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
-	require.NoError(h.t, err, "resolve owner org")
+	// #567: a remote_application is nested under its controlling merchant
+	// permission-group (OrgID carries the permission_group_id).
+	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
 		Slug:       slug,
-		OrgID:      ownerOrg.ID,
+		OrgID:      groupID,
 		Issuer:     issuer.URL(),
 		Mode:       authcore.RemoteAppModeStatic,
 		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
@@ -491,8 +491,8 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 	require.NoError(h.t, err, "register remote_application")
 
 	if role != "" {
-		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, role),
-			"assign role on owner org")
+		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, role),
+			"assign merchant role to remote_application")
 	}
 
 	// Pick up the new issuer in the verifier's in-memory registry (it also
@@ -527,11 +527,10 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.t.Cleanup(issuer.Close)
 
-	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
-	require.NoError(h.t, err, "resolve owner org")
+	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
 		Slug:       slug,
-		OrgID:      ownerOrg.ID,
+		OrgID:      groupID,
 		Issuer:     issuer.URL(),
 		Mode:       authcore.RemoteAppModeStatic,
 		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
@@ -540,10 +539,11 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 	})
 	require.NoError(h.t, err, "register delegated issuer")
 	if len(permissions) > 0 {
-		role := slug + "-delegated"
-		require.NoError(h.t, core.DefineRole(h.ctx, ownerOrgSlug, role), "define delegated remote application role")
-		require.NoError(h.t, core.SetRolePermissions(h.ctx, ownerOrgSlug, role, permissions), "grant delegated remote application permissions")
-		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, role), "assign delegated remote application role")
+		// #567: merchant groups have fixed catalog roles (no custom roles). Grant
+		// the merchant `owner` role (= merchant:*); the delegated token's claim is
+		// then bounded down to its requested subset at verify/gate time.
+		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, controlplane.MerchantRoleOwner),
+			"assign merchant owner role to delegated remote_application")
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
@@ -575,11 +575,10 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.t.Cleanup(issuer.Close)
 
-	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
-	require.NoError(h.t, err, "resolve owner org")
+	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
 		Slug:       slug,
-		OrgID:      ownerOrg.ID,
+		OrgID:      groupID,
 		Issuer:     issuer.URL(),
 		Mode:       authcore.RemoteAppModeStatic,
 		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
@@ -590,10 +589,10 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		permissions = []string{controlplane.PermMerchantCustomerSettingsUpdate}
 	}
 	require.NoError(h.t, err, "register service-JWT issuer")
-	role := slug + "-service-jwt"
-	require.NoError(h.t, core.DefineRole(h.ctx, ownerOrgSlug, role), "define remote application role")
-	require.NoError(h.t, core.SetRolePermissions(h.ctx, ownerOrgSlug, role, permissions), "grant stored role permissions to %s", slug)
-	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, role), "assign org membership")
+	// #567: assign the merchant `owner` role (= merchant:*); the service JWT's
+	// claimed permissions are bounded down to its requested subset at verify time.
+	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, controlplane.MerchantRoleOwner),
+		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authcore.ServiceJWTMintOptions{
@@ -608,73 +607,55 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	return ServiceJWTCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
 
-// MintAPIKey mints a real AuthKit API key through the standalone control plane.
-//
-// AuthKit v0.43.0 mints keys against an org ROLE (not a permission bundle): the
-// key's permissions are resolved from the role at verify time. To keep callers
-// ergonomic (each test passes the bespoke permission slice it wants), this helper
-// ENSURES an org role in orgSlug carrying exactly `permissions`, then mints
-// against that role. The role is derived deterministically from the permission
-// set, so repeated calls with the same perms reuse one role.
-func (s *Surface) MintAPIKey(orgSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
+// MintAPIKey mints a real AuthKit API key under the merchant permission-group
+// (#567). merchantSlug is the merchant group's resource ref. The key is minted
+// against a merchant catalog role: the merchant `owner` (= merchant:*) by default
+// (or `viewer` when permissions are all reads). The legacy `permissions` slice is
+// no longer a bespoke role — merchant groups have FIXED catalog roles — so it is
+// used only to pick owner vs viewer; callers needing finer scope must use a
+// catalog role directly.
+func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "MintAPIKey requires the standalone surface")
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
-	role, err := controlplane.EnsureRole(h.ctx, cp.Core(), orgSlug, roleForPerms(permissions), permissions)
-	require.NoError(h.t, err, "ensure role for API key permissions")
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, orgSlug, authcore.APIKeyMintOptions{
+	h.ensureMerchantGroup(cp.Core(), merchantSlug)
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
 		Name:      name,
-		Role:      role,
+		Role:      roleForPerms(permissions),
 		Resources: resources,
 	})
 	require.NoError(h.t, err, "mint API key")
 	return secret
 }
 
-// roleForPerms returns a deterministic org-role slug for a permission set: the
-// canonical OperatorRole when perms is the full `org:` catalog, else a stable
-// hash-derived slug. Stable under permission ordering so repeated mints with the
-// same perms reuse one role.
+// roleForPerms picks a merchant catalog role for a requested permission set:
+// `viewer` when every requested perm is a merchant read, else `owner`. Empty/nil
+// defaults to `owner` (full merchant authority).
 func roleForPerms(perms []string) string {
-	if samePermSet(perms, controlplane.OperatorRolePermissions()) {
-		return controlplane.OperatorRole
+	if len(perms) == 0 {
+		return controlplane.MerchantRoleOwner
 	}
-	sorted := append([]string(nil), perms...)
-	sort.Strings(sorted)
-	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
-	return "harness-key-" + hex.EncodeToString(sum[:8])
-}
-
-func samePermSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	x := append([]string(nil), a...)
-	y := append([]string(nil), b...)
-	sort.Strings(x)
-	sort.Strings(y)
-	for i := range x {
-		if x[i] != y[i] {
-			return false
+	for _, p := range perms {
+		if !strings.HasPrefix(p, controlplane.MerchantType+":") || !strings.HasSuffix(p, ":read") {
+			return controlplane.MerchantRoleOwner
 		}
 	}
-	return true
+	return controlplane.MerchantRoleViewer
 }
 
-// mintFreshAPIKey mints a new real admin API key through AuthKit core,
+// mintFreshAPIKey mints a new real admin API key under the test merchant group,
 // scoped to the test merchant — used when bootstrap found an existing token (the
 // shared-DB second-run case) and returned no secret.
 func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	h.t.Helper()
 	cp := embcp.Get(a)
 	require.NotNil(h.t, cp, "control plane attached")
-	role, err := controlplane.EnsureOperatorRole(h.ctx, cp.Core(), dbtest.TestMerchantSlug)
-	require.NoError(h.t, err, "ensure operator role for fresh API key")
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
+	h.ensureMerchantGroup(cp.Core(), dbtest.TestMerchantSlug)
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
 		Name:      "integrationharness-extra",
-		Role:      role,
+		Role:      controlplane.MerchantRoleOwner,
 		Resources: []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	})
 	require.NoError(h.t, err, "mint fresh API key")

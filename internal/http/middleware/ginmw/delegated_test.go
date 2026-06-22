@@ -107,15 +107,16 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
-	// Delegated browser tokens must NOT honor a broad merchant-owner grant. A token carrying
-	// `org:*` (which should never happen - verify rejects it - but is asserted
-	// here for the gate itself) does not satisfy a concrete admin permission gate.
+	// Delegated browser tokens must NOT cross persona namespaces. A token carrying a
+	// foreign-persona apex glob (`root:*`) does not satisfy a concrete merchant
+	// permission gate — reach != capability (#567): the glob is namespace-anchored
+	// and covers no `merchant:` perm.
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Merchant:         "operator",
 			MerchantID:       dbtest.TestMerchantID,
 			DelegatedSubject: "user-123",
-			Permissions:      []string{authcore.OrgOwnerGrant},
+			Permissions:      []string{"root:*"},
 		},
 	}
 	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantCustomerSettingsRead)

@@ -28,28 +28,28 @@ const (
 // ResolvedServiceCredential is the common authorization result for
 // merchant-scoped programmatic credentials: OpenRails-issued shared-secret API
 // keys, first-party service JWTs, and AuthKit remote-application self tokens.
-// It carries everything route authorization needs: the calling AuthKit org that
-// owns the merchant, the resolved OpenRails merchant, and the granted permission
-// strings.
+// It carries everything route authorization needs: the resolved OpenRails
+// merchant and the granted permission strings.
 //
-// #481: the merchant is NOT the caller's identity. The caller is an AuthKit
-// principal (user OR remote_application); its authority over the merchant comes
-// from a ROLE on the merchant's owner_org_id (the owning org), never from an
-// identity-equation with the merchant.
+// #567: a merchant IS a top-level permission-group (`type=merchant`,
+// `resourceRef=merchant-slug`). A programmatic credential is minted/nested under
+// that merchant group; its authority over the merchant is its assigned group
+// role (resolved to `merchant:*` perms), never an org identity-equation.
 type ResolvedServiceCredential struct {
-	// OwnerOrgID is the AuthKit org uuid that owns/administers the
-	// merchant — the caller's authority anchor (#481). Resolved by AuthKit's
-	// opaque API-key lookup (the key's owning org) or the issuer ->
-	// remote_application -> org mapping on the JWT credential paths.
-	OwnerOrgID string
-	// OwnerOrgSlug is that owning org's slug (presentation/audit only).
-	OwnerOrgSlug string
+	// OwnerGroupID is the internal id of the merchant permission-group the
+	// credential is nested under (#567) — the caller's authority anchor. For API
+	// keys this is the group the key resolves to; for JWT paths it is the merchant
+	// group resolved from the issuer's controlling group.
+	OwnerGroupID string
+	// OwnerGroupRef is that merchant group's resource ref (the merchant slug),
+	// presentation/audit only.
+	OwnerGroupRef string
 	// MerchantID is the OpenRails merchant (#480) the credential administers.
 	MerchantID merchant.ID
 	// MerchantSlug is the resolved merchant's slug.
 	MerchantSlug string
 	// Permissions is the credential's granted OpenRails permission set
-	// (`org:` permissions for merchant-local API keys).
+	// (`merchant:` permissions resolved from the group role).
 	Permissions []string
 	// Resources is the credential's OpenRails resource scope.
 	// OpenRails interprets only ResourceKindMerchant and ResourceKindCustomer;
@@ -150,14 +150,16 @@ func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
 // ResolveAPIKey validates a presented shared-secret API key end-to-end:
 //
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
-//   - resolves key id + secret hash via AuthKit core (owning org, permissions,
-//     expiry, revocation) — returns authcore.ErrAccessTokenExpired /
-//     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
-//   - resolves the merchant the caller administers by ROLE (#481): the merchant
-//     whose owner_org_id is the caller's AuthKit org. Ownership (who
-//     administers), not identity — the merchant is never "equal to" the org.
+//   - resolves key id + secret hash via AuthKit core (controlling permission
+//     group, role-resolved permissions, expiry, revocation) — returns
+//     authcore.ErrAccessTokenExpired / ErrAccessTokenRevoked /
+//     ErrInvalidAccessToken on those conditions,
+//   - resolves the merchant the credential administers from its OpenRails
+//     resource scope (#567): the key is minted under the merchant permission-group
+//     carrying a ResourceKindMerchant resource = the merchant id. The merchant is
+//     read from that resource, never from an org identity-equation.
 //
-// A caller whose AuthKit org owns no active merchant yields
+// A key carrying no merchant resource scope yields
 // ErrServiceCredentialMerchantUnresolved so the caller can reject the request.
 func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.Core() == nil {
@@ -173,10 +175,11 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 		return nil, err
 	}
 
-	// #481: authorize by the caller's role on the merchant's owner_org_id. The
-	// owning AuthKit org administers its merchant(s); resolve the merchant via
-	// that ownership link, never via an identity-equation.
-	mid, mslug, err := c.merchantForOwnerOrg(ctx, resolved.OrgID)
+	// #567: the merchant is the key's ResourceKindMerchant scope. Resolve and
+	// validate it against the live directory (active merchant) so a stale/deleted
+	// merchant fails closed; this also rejects any cross-merchant or unknown-kind
+	// resource the key might carry.
+	mid, mslug, err := c.merchantFromResources(ctx, resolved.Resources)
 	if err != nil {
 		return nil, err
 	}
@@ -185,13 +188,38 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 	}
 
 	return &ResolvedServiceCredential{
-		OwnerOrgID:   resolved.OrgID,
-		OwnerOrgSlug: resolved.OrgSlug,
-		MerchantID:   mid,
-		MerchantSlug: mslug,
-		Permissions:  resolved.Permissions,
-		Resources:    resolved.Resources,
+		OwnerGroupID:  resolved.OrgID,
+		OwnerGroupRef: mslug,
+		MerchantID:    mid,
+		MerchantSlug:  mslug,
+		Permissions:   resolved.Permissions,
+		Resources:     resolved.Resources,
 	}, nil
+}
+
+// merchantFromResources resolves the single ResourceKindMerchant id carried by a
+// credential's resource scope to the live OpenRails merchant directory row
+// (active only). Fails closed when no merchant resource is present or the
+// merchant is missing/inactive.
+func (c *ControlPlane) merchantFromResources(ctx context.Context, resources []authcore.APIKeyResource) (merchant.ID, string, error) {
+	var ref string
+	for _, r := range resources {
+		if strings.TrimSpace(r.Kind) == ResourceKindMerchant {
+			ref = strings.TrimSpace(r.ID)
+			break
+		}
+	}
+	if ref == "" {
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+	}
+	mid, mslug, _, err := c.MerchantScope(ctx, ref)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+	}
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	return mid, mslug, nil
 }
 
 // ErrServiceCredentialMerchantUnresolved indicates the caller's owning AuthKit org

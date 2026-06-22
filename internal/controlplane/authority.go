@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	authcore "github.com/open-rails/authkit/core"
+
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -13,57 +15,62 @@ import (
 // explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
-// HasAdminPermission reports whether the given user holds perm in the caller's
-// OWN AuthKit org according to LIVE AuthKit effective-permission state (not
-// stale JWT claims). Merchant-local authority is `org:` authority in the
-// caller's merchant org.
+// HasAdminPermission reports whether the given user holds perm in the named
+// MERCHANT permission-group according to LIVE AuthKit group state (not stale JWT
+// claims). Under the permission-group model (#567) merchant-admin authority is a
+// role on the merchant group (`type=merchant`, `resourceRef=merchantRef`); the
+// merchant `owner` auto-holds `merchant:*`.
 //
-// orgSlug is the caller's org. An empty slug yields no authority (there is
-// no operator-org fallback): the caller must present an org context.
-func (c *ControlPlane) HasAdminPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error) {
+// merchantRef is the merchant slug (the group's resource ref). An empty ref
+// yields no authority (there is no operator fallback): the caller must present a
+// merchant context.
+func (c *ControlPlane) HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	slug := strings.ToLower(strings.TrimSpace(orgSlug))
-	if slug == "" {
+	ref := strings.ToLower(strings.TrimSpace(merchantRef))
+	if ref == "" {
 		return false, nil
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false, nil
 	}
-	return c.Core().HasPermission(ctx, slug, userID, strings.TrimSpace(perm))
+	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, MerchantType, ref, strings.TrimSpace(perm))
 }
 
-// ResolveMerchantForOrg resolves the merchant owned by an AuthKit org slug.
-// Route auth uses it after a live org permission check so user-session merchant
-// routes pin the same merchant context as API-key and delegated JWT principals.
+// ResolveMerchantForOrg resolves a merchant by its reference (the merchant slug,
+// the merchant group's resource ref). Route auth uses it after a live merchant
+// permission check so user-session merchant routes pin the same merchant context
+// as API-key and delegated JWT principals.
+//
+// The parameter is named orgSlug for source compatibility with the route seam,
+// but under #567 it is the merchant slug — there is no org persona.
 func (c *ControlPlane) ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
 		return merchant.ID{}, "", ErrNoControlPlane
 	}
-	slug := strings.ToLower(strings.TrimSpace(orgSlug))
-	if slug == "" {
+	ref := strings.ToLower(strings.TrimSpace(orgSlug))
+	if ref == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	org, err := c.Core().ResolveOrgBySlug(ctx, slug)
+	mid, mslug, _, err := c.MerchantScope(ctx, ref)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
-	return c.merchantForOwnerOrg(ctx, org.ID)
+	return mid, mslug, nil
 }
 
-// IsAdmin reports whether the user holds a broad merchant-owner grant in their
-// own AuthKit org via live AuthKit state.
-func (c *ControlPlane) IsAdmin(ctx context.Context, orgSlug, userID string) (bool, error) {
-	perms, err := c.Core().EffectivePermissions(ctx, orgSlug, userID)
-	if err != nil {
-		return false, err
+// IsAdmin reports whether the user holds any merchant-staff grant in the named
+// merchant group via live AuthKit state (a proxy: it tests the broadest
+// merchant read perm the owner/viewer/support all hold).
+func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) (bool, error) {
+	if c == nil || c.Core() == nil {
+		return false, ErrNoControlPlane
 	}
-	for _, p := range perms {
-		if strings.HasPrefix(p, "org:") {
-			return true, nil
-		}
+	ref := strings.ToLower(strings.TrimSpace(merchantRef))
+	if ref == "" {
+		return false, nil
 	}
-	return false, nil
+	return c.Core().Can(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, MerchantType, ref, PermMerchantSettingsRead)
 }

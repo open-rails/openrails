@@ -102,17 +102,6 @@ func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer
 	return nil, authcore.ErrRemoteApplicationNotFound
 }
 
-func (s delegatedRemoteAppSource) ResolveRemoteApplicationAuthority(_ context.Context, appID string) ([]authcore.OrgMembership, []string, error) {
-	for i := range s {
-		if s[i].ID == appID {
-			// #564: the test remote-app's stored authority is the full catalog;
-			// ResolveDelegated intersects the token claim against this.
-			return nil, CatalogNames(), nil
-		}
-	}
-	return nil, nil, authcore.ErrRemoteApplicationNotFound
-}
-
 func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -179,16 +168,26 @@ func TestDelegatedVerify_CarriesInAuthorityPermIncludingAdmit(t *testing.T) {
 	require.Contains(t, dp.Permissions, PermMerchantAdmissionsCreate)
 }
 
-// #564 (reject, not drop): a claim BEYOND the signer's stored authority rejects the
-// whole token — AuthKit fails loud rather than silently dropping the excess perm.
-func TestDelegatedVerify_RejectsOverClaimBeyondSignerAuthority(t *testing.T) {
+// #567 (authkit v0.50.0 permission-group hard cut): the delegated `permissions`
+// bound against the signer's STORED authority no longer happens at this
+// verifier seam — the org-membership-backed authority resolver was removed and
+// its permission-group replacement is wired at the core/enricher seam (see
+// authkit verify/verifier.go resolveRemoteApplicationSelf). A bare verifier
+// (no WithService enricher, as newTestDelegatedVerifier builds) therefore carries
+// the claim through verbatim; OpenRails' route gate is what bounds it via the
+// glob-aware HasPermission check on every credential type (#565). This test pins
+// the new contract: a foreign-persona claim verifies (it is not bounded here) and
+// is surfaced for the route gate to reject.
+func TestDelegatedVerify_CarriesClaimForRouteGateBound(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	// org:* is not in the remote-app's stored authority (the OpenRails catalog).
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{authcore.OrgOwnerGrant},
+		Permissions: []string{"root:*"},
 	})
-	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err, "a perm beyond the signer's authority must reject the whole token")
+	_, dp, err := v.VerifyDelegatedAccess(tok)
+	require.NoError(t, err, "without a WithService enricher the verifier does not bound the claim (#567)")
+	require.Contains(t, dp.Permissions, "root:*")
+	// The OpenRails gate denies it: a foreign-persona glob covers no merchant perm.
+	require.False(t, (&ResolvedDelegated{Permissions: dp.Permissions}).HasPermission(PermMerchantAdmissionsCreate))
 }
 
 func TestDelegatedVerify_RejectsExpired(t *testing.T) {
@@ -213,12 +212,12 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 	require.Error(t, verr, "expired delegated token must be rejected")
 }
 
-// HARD CUT (#361, authkit v0.23.0): the issuer-only delegated-token profile.
-// Org identity is the validated `iss` ONLY; a token still carrying an `org_id`
-// uuid claim is rejected outright — there is no legacy-acceptance window.
-// (MintDelegatedAccessToken can no longer write the claim, so this signs the
-// forbidden shape by hand.)
-func TestDelegatedVerify_RejectsOrgIDClaim(t *testing.T) {
+// #567 (authkit v0.50.0 permission-group hard cut): there is NO `org` persona, so
+// a delegated token's legacy `org_id`/`org` claims are INERT — they name nothing
+// the verifier interprets and never leak into the principal. (Pre-v0.50 authkit
+// rejected them under the issuer-only profile; the rejection is gone with the org
+// concept itself. Merchant identity is the validated `iss` -> merchant group.)
+func TestDelegatedVerify_OrgIDClaimIsInert(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	hs := signer.(jwtkit.HeaderSigner)
 	now := time.Now()
@@ -234,13 +233,15 @@ func TestDelegatedVerify_RejectsOrgIDClaim(t *testing.T) {
 		map[string]any{"typ": authhttp.DelegatedAccessTokenType},
 	)
 	require.NoError(t, err)
-	_, _, verr := v.VerifyDelegatedAccess(tok)
-	require.Error(t, verr, "a delegated token carrying an org_id claim must be rejected (issuer-only hard cut)")
+	cl, dp, verr := v.VerifyDelegatedAccess(tok)
+	require.NoError(t, verr, "an org_id claim is inert under the permission-group model (#567)")
+	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
+	require.Empty(t, cl.UserID, "still no normal sub")
 }
 
-// Twin of the org_id rejection: the `org` slug claim is equally forbidden.
-// Tokens carry NO org claims of any kind.
-func TestDelegatedVerify_RejectsOrgClaim(t *testing.T) {
+// Twin of the org_id case: an `org` slug claim is equally inert. Tokens carry no
+// org concept; identity is the validated issuer.
+func TestDelegatedVerify_OrgClaimIsInert(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	hs := signer.(jwtkit.HeaderSigner)
 	now := time.Now()
@@ -256,8 +257,9 @@ func TestDelegatedVerify_RejectsOrgClaim(t *testing.T) {
 		map[string]any{"typ": authhttp.DelegatedAccessTokenType},
 	)
 	require.NoError(t, err)
-	_, _, verr := v.VerifyDelegatedAccess(tok)
-	require.Error(t, verr, "a delegated token carrying an org slug claim must be rejected (issuer-only hard cut)")
+	_, dp, verr := v.VerifyDelegatedAccess(tok)
+	require.NoError(t, verr, "an org slug claim is inert under the permission-group model (#567)")
+	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
 }
 
 func TestDelegatedVerify_RejectsServiceCredential(t *testing.T) {

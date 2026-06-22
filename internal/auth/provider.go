@@ -69,10 +69,11 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		SessionID:       cl.SessionID,
 		Roles:           cl.Roles,
 		Entitlements:    cl.Entitlements,
-		// Operator-org admin authority (#224, hardcut): the org slug +
-		// org-scoped roles carried in the AuthKit claims are the ONLY admin
-		// authority path now that the legacy global-admin DB fallback is removed.
-		Org:      cl.Org,
-		OrgRoles: cl.OrgRoles,
+		// #567: the permission-group model has NO `org` persona, so a user access
+		// token carries no org slug/org-roles. Merchant-admin authority is a role
+		// on the merchant permission-group, evaluated live by HasAdminPermission
+		// against the merchant the route resolves — not read from the token. Org is
+		// left empty here; it is populated only on the in-process/delegated paths
+		// that bind an explicit merchant (see routes/ginmw).
 	}
 }

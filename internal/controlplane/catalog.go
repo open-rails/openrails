@@ -20,16 +20,105 @@
 package controlplane
 
 import (
-	"context"
-	"errors"
-	"fmt"
+	"strings"
 
 	authcore "github.com/open-rails/authkit/core"
 )
 
-// Permission is an OpenRails permission definition. AuthKit owns `org:`/`platform:`;
+// Permission is an OpenRails permission definition. AuthKit owns `root:`;
 // OpenRails defines its app resources in `merchant:*` and `customer:*`.
 type Permission = authcore.PermissionDef
+
+// Permission-group personas (#567). OpenRails declares exactly TWO flat
+// top-level group types under the intrinsic `root` type:
+//
+//   - MerchantType — a merchant IS a top-level permission-group (child of root,
+//     no parent org). Staff roles owner/support/viewer; holds `merchant:*`.
+//   - CustomerType — every payer is a `customer` group (child of root). Roles
+//     owner/member; holds `customer:*`. Universal — there is NO org-vs-individual
+//     split; every customer can delegate the spending of its balance.
+//
+// Both are addressed by (type, resourceRef): the merchant slug for MerchantType,
+// the customer uuid string for CustomerType. There is NO `org` persona.
+const (
+	MerchantType = "merchant"
+	CustomerType = "customer"
+
+	// Merchant staff roles (#567). owner is auto-seeded by authkit (= `merchant:*`).
+	MerchantRoleOwner   = "owner"
+	MerchantRoleSupport = "support"
+	MerchantRoleViewer  = "viewer"
+
+	// Customer roles (#567). owner is auto-seeded by authkit (= `customer:*`).
+	CustomerRoleOwner  = "owner"
+	CustomerRoleMember = "member"
+)
+
+// Groups returns the OpenRails permission-group type catalog (#567): the two
+// flat top-level personas (`merchant`, `customer`) declared under `root`. Fixed
+// catalogs, AllowCustomRoles=false (custom roles + deep hierarchy are tensorhub's
+// domain). authkit injects the intrinsic `root` type and auto-seeds each type's
+// `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.Groups.
+func Groups() []authcore.GroupTypeDef {
+	return []authcore.GroupTypeDef{
+		{
+			Name:             MerchantType,
+			AllowedParents:   []string{authcore.RootType},
+			AllowCustomRoles: false,
+			// authkit auto-generates the staff/credential MANAGEMENT routes from
+			// this profile (members, api-keys, remote-applications). OpenRails
+			// mounts these and builds none of them (#567).
+			Routes: authcore.ManagementProfile{
+				MemberAssignment:      true,
+				APIKeyMinting:         true,
+				RemoteAppRegistration: true,
+			},
+			Roles: []authcore.RoleDef{
+				// owner (= merchant:*) is auto-seeded; declared elsewhere implicitly.
+				{
+					Name: MerchantRoleSupport,
+					Permissions: []string{
+						PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate,
+						PermMerchantPaymentsRead, PermMerchantPaymentsRefund,
+						PermMerchantSubscriptionsRead, PermMerchantSubscriptionsUpdate,
+						PermMerchantUsageRead, PermMerchantRepairAlertsRead,
+					},
+				},
+				{
+					Name: MerchantRoleViewer,
+					// Read-only: every merchant:*:read. Finance / audit / analyst.
+					Permissions: []string{
+						PermMerchantSettingsRead, PermMerchantPaymentProvidersRead,
+						PermMerchantCatalogRead, PermMerchantCustomerSettingsRead,
+						PermMerchantPaymentsRead, PermMerchantSubscriptionsRead,
+						PermMerchantUsageRead, PermMerchantRepairAlertsRead,
+					},
+				},
+			},
+		},
+		{
+			Name:             CustomerType,
+			AllowedParents:   []string{authcore.RootType},
+			AllowCustomRoles: false,
+			Routes: authcore.ManagementProfile{
+				MemberAssignment: true,
+				APIKeyMinting:    true,
+			},
+			Roles: []authcore.RoleDef{
+				// owner (= customer:*) is auto-seeded.
+				{
+					Name: CustomerRoleMember,
+					// A delegated spender: read-only on the balance surface; spend is
+					// bounded by the spend-delegation budget window assigned to them.
+					Permissions: []string{
+						PermCustomerBalanceRead,
+						PermCustomerSpendDelegationsRead,
+					},
+				},
+			},
+		},
+	}
+}
 
 // OpenRails permissions (#554), evaluated in the AuthKit org that owns the merchant
 // (org<->merchant 1:1). `merchant:*` is the seller hat, `customer:*` the buyer hat
@@ -114,59 +203,28 @@ func CatalogNames() []string {
 
 // Admin-role identity.
 //
-// OpenRails defines/seeds NO org role of its own (#543): merchant-admin authority
-// comes from AuthKit's built-in `owner` role for human admins (OwnerRole, holds
-// `org:*`) and from direct permission-scoped API keys for server-to-server
-// automation. `OperatorRole` survives only as a test-fixture name; production
-// never defines it in an org.
+// HARD CUT (#567): under the permission-group model OpenRails declares the
+// `merchant`/`customer` type catalogs (see Groups); authkit auto-seeds each
+// type's `owner` role (= `<type>:*`). A merchant admin is the merchant group
+// `owner`; server-to-server automation mints an API key under the merchant group
+// against the `owner` role (which resolves to `merchant:*` at verify time).
 const (
-	// OwnerRole is AuthKit's built-in, reserved org-owner role (core's hardcoded
-	// "owner"). With OwnerOwnsAppResources enabled, AuthKit expands the owner's
-	// `org:*` grant over OpenRails app namespaces (`merchant:*`, `customer:*`), so
-	// the org owner can perform every merchant/customer-treasury operation.
-	// OpenRails does NOT define this role; it only ASSIGNS it to the bootstrap admin.
-	OwnerRole = "owner"
-
-	// OperatorRole is a legacy role name retained for TEST FIXTURES only. OpenRails
-	// no longer seeds or declares it in any org (#543).
-	OperatorRole = "openrails-operator"
+	// OwnerRole is the auto-seeded owner role authkit ships for every group type
+	// (= `<type>:*`). The merchant `owner` holds `merchant:*`; the customer
+	// `owner` holds `customer:*`. OpenRails does NOT define this role; it only
+	// ASSIGNS it (the bootstrap admin) or MINTS against it.
+	OwnerRole = authcore.OwnerRoleName
 )
 
-// OperatorRolePermissions returns the full OpenRails app catalog permission
-// set. It is NOT a role: it is used to DIRECT-SCOPE the admin API key (a key
-// carries permissions, not a role) and by test fixtures. See CatalogNames.
-func OperatorRolePermissions() []string {
-	return CatalogNames()
-}
-
-// EnsureRole idempotently ensures an org role exists with exactly the given
-// permission set, returning the canonical role slug to mint against. AuthKit
-// v0.43.0 mints API keys with a single org ROLE (not a permission bundle): the
-// key's effective permissions are resolved from the role at verify time. So any
-// caller that wants a bespoke permission set must first DEFINE a role carrying
-// those perms, then mint with that role slug.
-//
-// Both steps are idempotent: DefineRole is INSERT ... ON CONFLICT DO NOTHING,
-// SetRolePermissions replaces the role's permission set. perms must be concrete
-// OpenRails catalog tokens (no wildcards / reserved-write tokens), so
-// OperatorRolePermissions() and its subsets are always valid.
-func EnsureRole(ctx context.Context, core *authcore.Service, orgSlug, role string, perms []string) (string, error) {
-	if core == nil {
-		return "", errors.New("controlplane: nil core service")
+// MerchantOwnerRolePermissions returns the full `merchant:*` catalog permission
+// set — what the merchant `owner` role resolves to. Used by test fixtures and to
+// describe the deployment admin key's authority. See CatalogNames.
+func MerchantOwnerRolePermissions() []string {
+	out := make([]string, 0, len(catalogEntries))
+	for _, e := range catalogEntries {
+		if strings.HasPrefix(e.Name, MerchantType+":") {
+			out = append(out, e.Name)
+		}
 	}
-	if err := core.DefineRole(ctx, orgSlug, role); err != nil {
-		return "", fmt.Errorf("controlplane: define role %q in org %q: %w", role, orgSlug, err)
-	}
-	if err := core.SetRolePermissions(ctx, orgSlug, role, perms); err != nil {
-		return "", fmt.Errorf("controlplane: set permissions on role %q in org %q: %w", role, orgSlug, err)
-	}
-	return role, nil
-}
-
-// EnsureOperatorRole idempotently ensures the OpenRails operator role
-// (OperatorRole) exists in the org carrying the full OpenRails app catalog
-// (OperatorRolePermissions). It is the role an admin/deployment API key is minted
-// against under the v0.43.0 role-unified mint model. Returns the role slug.
-func EnsureOperatorRole(ctx context.Context, core *authcore.Service, orgSlug string) (string, error) {
-	return EnsureRole(ctx, core, orgSlug, OperatorRole, OperatorRolePermissions())
+	return out
 }

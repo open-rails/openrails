@@ -148,22 +148,22 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		Environment: strings.TrimSpace(cfg.Env),
 		RBAC: authcore.RBACConfig{
 			Permissions: Catalog(),
-			// OpenRails declares NO org roles of its own (#543). Merchant-admin
-			// authority comes from AuthKit's built-in `owner` role for human admins,
-			// and from direct permission-scoped API keys for server-to-server
-			// automation. OwnerOwnsAppResources makes the owner's apex grant cover
-			// OpenRails' app-defined resource namespaces too (e.g. `merchant:*`), not
-			// just `org:*` — owning the org owns the merchant (org⇄merchant 1:1, #554/#100).
-			OwnerOwnsAppResources: true,
-			DefaultRoles:          nil,
+			// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
+			// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
+			// and `customer` (owner/member, `customer:*`). There is NO `org` persona,
+			// and no org⇄merchant coupling. Each type's `owner` role is auto-seeded
+			// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
+			// its own namespace directly; the flat case needs no cross-namespace grant).
+			Groups:       Groups(),
+			DefaultRoles: nil,
 		},
-		// Private standalone posture: no public user self-registration, no public
-		// org onboarding/management. Embedded bootstrap/core calls
-		// (CreateOrg/AssignRole/MintAPIKey) are unaffected. Hosted products
-		// opt in with WithHostedPosture; no config/env knob opens this in standalone.
+		// Private standalone posture: no public user self-registration. Embedded
+		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)
+		// are unaffected. Hosted products opt in with WithHostedPosture; no
+		// config/env knob opens this in standalone. (#567: there is no `org`
+		// persona, so there is no org-registration mode.)
 		Registration: authcore.RegistrationConfig{
 			NativeUserMode: registrationMode(lockedRegistration),
-			OrgMode:        registrationMode(lockedRegistration),
 		},
 	}
 
@@ -183,10 +183,12 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 
 	// Wire AuthKit's core as the verifier's enrichment + remote_application source
-	// so it can lazy-load any single issuer on first use (#481). Keep remote-app
-	// authority as raw grant tokens; OpenRails gates them with its own
+	// so it can lazy-load any single issuer on first use (#481). *core.Service
+	// satisfies verify.Enricher directly under the permission-group model (#567):
+	// remote-app authority is resolved as the additive walk-up of the app's group
+	// roles, kept as raw grant tokens; OpenRails gates them with its own
 	// namespace-glob matcher on every credential type (#565).
-	delegatedVerifier.WithService(delegatedVerifierEnricher{Service: authSvc.Core()})
+	delegatedVerifier.WithService(authSvc.Core())
 
 	cp2 := &ControlPlane{
 		cfg:                cfg,

@@ -48,7 +48,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	crossScopedAPIKey := standalone.MintAPIKey(
 		merchantB.OrgSlug,
 		"or502-cross-api-key",
-		controlplane.OperatorRolePermissions(),
+		nil, // #567: MintAPIKey now mints the merchant owner role (full merchant:*)
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedAPIKey, uuid.New(), 10)
@@ -61,7 +61,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	orphanToken := standalone.MintAPIKey(
 		orphanOrg,
 		"or502-orphan-API-key",
-		controlplane.OperatorRolePermissions(),
+		nil, // #567: MintAPIKey now mints the merchant owner role (full merchant:*)
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, orphanToken, uuid.New(), 10)

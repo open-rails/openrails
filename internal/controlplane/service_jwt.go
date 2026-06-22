@@ -28,21 +28,21 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, err
 	}
 
-	// The validated issuer (remote_application) resolves, via the org it
-	// controls, to the merchant namespace that org owns (#500). That merchant is
-	// the token's only reachable resource scope. raID is the AuthKit
+	// The validated issuer (remote_application) resolves, via the merchant
+	// permission-group it controls, to the merchant namespace (#567). That
+	// merchant is the token's only reachable resource scope. raID is the AuthKit
 	// remote_application UUID used to look up stored authority below.
-	mid, mslug, ownerOrgID, ownerOrgSlug, raID, err := c.merchantForIssuer(ctx, principal.Issuer)
+	mid, mslug, ownerGroupID, ownerGroupRef, raID, err := c.merchantForIssuer(ctx, principal.Issuer)
 	if err != nil {
 		return nil, err
 	}
 
 	// BND-C1: intersect the token's self-asserted permissions against the
-	// remote_application's STORED authority. A service JWT may only DOWN-SCOPE
-	// its stored grants, never widen them. This prevents a merchant from minting
-	// a token that claims `org:*` (or any other permission not explicitly
-	// granted to their remote_application).
-	_, storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
+	// remote_application's STORED authority (the additive walk-up of its merchant
+	// group roles, #567). A service JWT may only DOWN-SCOPE its stored grants,
+	// never widen them — a merchant cannot mint a token claiming a permission its
+	// remote_application was never granted.
+	storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: cannot resolve authority for issuer %s: %w", principal.Issuer, err)
 	}
@@ -64,12 +64,12 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	}
 
 	return &ResolvedServiceCredential{
-		OwnerOrgID:   ownerOrgID,
-		OwnerOrgSlug: ownerOrgSlug,
-		MerchantID:   mid,
-		MerchantSlug: mslug,
-		Permissions:  permissions,
-		Resources:    resources,
+		OwnerGroupID:  ownerGroupID,
+		OwnerGroupRef: ownerGroupRef,
+		MerchantID:    mid,
+		MerchantSlug:  mslug,
+		Permissions:   permissions,
+		Resources:     resources,
 	}, nil
 }
 

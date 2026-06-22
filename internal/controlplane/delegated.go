@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -178,38 +177,6 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 		authhttp.WithAPIKeyPrefix(tokenPrefix),
 	)
 	return v, nil
-}
-
-type delegatedVerifierEnricher struct {
-	*authcore.Service
-}
-
-func (e delegatedVerifierEnricher) ResolveRemoteApplicationAuthority(ctx context.Context, appID string) ([]authcore.OrgMembership, []string, error) {
-	memberships, err := e.Service.RemoteApplicationOrgRoles(ctx, appID)
-	if err != nil {
-		return nil, nil, err
-	}
-	grants := map[string]struct{}{}
-	for _, membership := range memberships {
-		for _, role := range membership.Roles {
-			perms, err := e.Service.GetRolePermissions(ctx, membership.Org, role)
-			if err != nil {
-				return nil, nil, err
-			}
-			for _, perm := range perms {
-				perm = strings.TrimSpace(perm)
-				if perm != "" {
-					grants[perm] = struct{}{}
-				}
-			}
-		}
-	}
-	out := make([]string, 0, len(grants))
-	for perm := range grants {
-		out = append(out, perm)
-	}
-	sort.Strings(out)
-	return memberships, out, nil
 }
 
 // ResolveDelegated validates a presented delegated access token end-to-end for

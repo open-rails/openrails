@@ -45,7 +45,7 @@ func newServiceCredentialTestRouter(resolver ServiceCredentialResolver, perm str
 	r.GET("/svc", ServiceCredentialRequired(resolver), RequirePermission(perm), func(c *gin.Context) {
 		resolved, _ := ServiceCredentialFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
-		c.JSON(http.StatusOK, gin.H{"authkit_org": resolved.OwnerOrgSlug, "merchant": tid.String()})
+		c.JSON(http.StatusOK, gin.H{"authkit_org": resolved.OwnerGroupRef, "merchant": tid.String()})
 	})
 	return r
 }
@@ -65,7 +65,7 @@ func TestRequireServiceCredentialCustomerScope(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "operator",
+			OwnerGroupRef: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			Permissions:  []string{controlplane.PermMerchantAdmissionsCreate},
 			Resources: []authcore.APIKeyResource{
@@ -102,7 +102,7 @@ func TestServiceCredentialRequired_SucceedsForCorrectMerchantAndPermission(t *te
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "operator",
+			OwnerGroupRef: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			MerchantSlug: dbtest.TestMerchantSlug,
 			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
@@ -118,7 +118,7 @@ func TestServiceCredentialRequired_SucceedsForServiceJWT(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: false,
 		serviceJWTResolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "cozy-art",
+			OwnerGroupRef: "cozy-art",
 			MerchantID:   dbtest.TestMerchantID,
 			MerchantSlug: dbtest.TestMerchantSlug,
 			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
@@ -134,9 +134,9 @@ func TestServiceCredentialRequired_ApexGrantDoesNotBypassGate(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "operator",
+			OwnerGroupRef: "operator",
 			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{authcore.OrgOwnerGrant},
+			Permissions:  []string{"root:*"},
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
@@ -148,7 +148,7 @@ func TestServiceCredentialRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "operator",
+			OwnerGroupRef: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			Permissions:  []string{controlplane.PermMerchantCustomerSettingsRead}, // read only
 		},
@@ -163,7 +163,7 @@ func TestServiceCredentialRequired_DeniesUnknownPermissionSet(t *testing.T) {
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
-			OwnerOrgSlug: "operator",
+			OwnerGroupRef: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			Permissions:  []string{"openrails:something:unknown"},
 		},

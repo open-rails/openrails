@@ -123,7 +123,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	remoteA := surface.RegisterRemoteApplication(
 		"iso-ra-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
-		controlplane.OperatorRole,
+		controlplane.MerchantRoleOwner,
 	)
 	b := surface.ProvisionOwnedMerchant("iso-ra-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
@@ -262,18 +262,18 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 	core := cp.Core()
 	require.NotNil(t, core, "authkit core")
 
-	mintUserToken := func(role string, perms []string) string {
+	// #567: merchant groups have FIXED catalog roles (owner/support/viewer; no
+	// custom roles). The helper maps the requested permission set onto a catalog
+	// role: all-reads -> viewer, otherwise -> owner. The `role` arg is now ignored.
+	mintUserToken := func(_ string, perms []string) string {
 		t.Helper()
 		username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
 		email := username + "@example.com"
 		user, err := core.CreateUser(ctx, email, username)
 		require.NoError(t, err, "create user")
-		require.NoError(t, core.AddMember(ctx, dbtest.TestMerchantSlug, user.ID), "add user to merchant org")
-		require.NoError(t, core.DefineRole(ctx, dbtest.TestMerchantSlug, role), "define role")
-		require.NoError(t, core.SetRolePermissions(ctx, dbtest.TestMerchantSlug, role, perms), "set role permissions")
-		require.NoError(t, core.AssignRole(ctx, dbtest.TestMerchantSlug, user.ID, role), "assign role")
-		token, _, err := core.IssueAccessToken(ctx, user.ID, email, map[string]any{"org": dbtest.TestMerchantSlug})
-		require.NoError(t, err, "issue active-org access token")
+		require.NoError(t, core.AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, roleForPerms(perms)), "assign merchant role")
+		token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
+		require.NoError(t, err, "issue access token")
 		return token
 	}
 
@@ -403,8 +403,9 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	email := username + "@example.com"
 	user, err := core.CreateUser(ctx, email, username)
 	require.NoError(t, err, "create merchant admin user")
-	require.NoError(t, core.AddMember(ctx, dbtest.TestMerchantSlug, user.ID), "add user to merchant org")
-	require.NoError(t, core.AssignRole(ctx, dbtest.TestMerchantSlug, user.ID, controlplane.OperatorRole), "assign per-merchant admin role")
+	// #567: assign the merchant `owner` role directly in the merchant group (no
+	// separate org membership step).
+	require.NoError(t, core.AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner), "assign merchant admin role")
 	token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
 	require.NoError(t, err, "issue merchant admin user access token")
 

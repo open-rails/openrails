@@ -98,19 +98,24 @@ func TestCatalog_IsACopy(t *testing.T) {
 	}
 }
 
-func TestOperatorRolePermissions_AreOrgCatalog(t *testing.T) {
-	perms := OperatorRolePermissions()
-	names := CatalogNames()
-	if len(perms) != len(names) {
-		t.Fatalf("operator role perms = %d, want catalog = %d", len(perms), len(names))
+func TestMerchantOwnerRolePermissions_AreMerchantCatalog(t *testing.T) {
+	// #567: the merchant owner role resolves to the `merchant:*` subset of the
+	// catalog (the customer treasury perms belong to the customer persona, not the
+	// merchant owner).
+	perms := MerchantOwnerRolePermissions()
+	if len(perms) == 0 {
+		t.Fatal("merchant owner role perms must be non-empty")
 	}
-	set := map[string]bool{}
+	catalog := map[string]bool{}
+	for _, n := range CatalogNames() {
+		catalog[n] = true
+	}
 	for _, p := range perms {
-		set[p] = true
-	}
-	for _, n := range names {
-		if !set[n] {
-			t.Errorf("operator role missing catalog permission %q", n)
+		if !strings.HasPrefix(p, MerchantType+":") {
+			t.Errorf("merchant owner perm %q must be in the merchant: namespace", p)
+		}
+		if !catalog[p] {
+			t.Errorf("merchant owner perm %q is not a catalog permission", p)
 		}
 	}
 }
@@ -143,14 +148,15 @@ func TestAnyLiveAPIKey(t *testing.T) {
 	}
 }
 
-func TestOperatorRolePermissions_ExcludePlatformAndApexGrants(t *testing.T) {
-	for _, p := range OperatorRolePermissions() {
+func TestMerchantOwnerRolePermissions_ExcludePlatformAndApexGrants(t *testing.T) {
+	for _, p := range MerchantOwnerRolePermissions() {
 		if strings.HasPrefix(p, "platform:") {
-			t.Fatalf("operator role must NOT include platform permission %q", p)
+			t.Fatalf("merchant owner role must NOT include platform permission %q", p)
 		}
 	}
-	if contains(OperatorRolePermissions(), authcore.OrgOwnerGrant) {
-		t.Fatalf("operator role must not include apex grant %q", authcore.OrgOwnerGrant)
+	// A foreign-persona apex glob must never appear in the concrete catalog.
+	if contains(MerchantOwnerRolePermissions(), "root:*") {
+		t.Fatalf("merchant owner role must not include apex grant %q", "root:*")
 	}
 }
 
@@ -158,9 +164,9 @@ func TestOperatorRolePermissions_ExcludePlatformAndApexGrants(t *testing.T) {
 // the operator role holds merchant:admissions:create by default, and an API key
 // WITHOUT it fails the admission gate while still passing customer writes.
 func TestAdmissionCreatePermission_GateSemantics(t *testing.T) {
-	// Default-grant: the operator role includes merchant:admissions:create.
-	if !contains(OperatorRolePermissions(), PermMerchantAdmissionsCreate) {
-		t.Fatalf("operator role must include %q (default member grant, #246)", PermMerchantAdmissionsCreate)
+	// Default-grant: the merchant owner role includes merchant:admissions:create.
+	if !contains(MerchantOwnerRolePermissions(), PermMerchantAdmissionsCreate) {
+		t.Fatalf("merchant owner role must include %q (default owner grant, #246)", PermMerchantAdmissionsCreate)
 	}
 
 	// A customer-write key without admission authority fails the spend gate.
@@ -178,9 +184,9 @@ func TestAdmissionCreatePermission_GateSemantics(t *testing.T) {
 		t.Fatalf("API key holding %q must pass the spend gate", PermMerchantAdmissionsCreate)
 	}
 
-	admin := &ResolvedServiceCredential{Permissions: []string{authcore.OrgOwnerGrant}}
+	admin := &ResolvedServiceCredential{Permissions: []string{"root:*"}}
 	if admin.HasPermission(PermMerchantAdmissionsCreate) {
-		t.Fatalf("apex grant %q must not bypass exact spend gate", authcore.OrgOwnerGrant)
+		t.Fatalf("foreign-persona apex grant %q must not bypass merchant spend gate", "root:*")
 	}
 }
 
@@ -193,20 +199,16 @@ func TestCatalogNames_ExcludePlatformPermissions(t *testing.T) {
 }
 
 // TestCatalogPermissionsCoveredByOwnerGrant guards every catalog permission against
-// a merchant-owner lockout — correct both before and after the #554 `merchant:*`
-// rename.
+// a persona-owner lockout under the permission-group model (#567).
 //
-// The owner-coverage fix now exists (AuthKit #100): OpenRails sets
-// authcore OwnerOwnsAppResources (see internal/controlplane/service.go), so the
-// bootstrapped org owner's apex grant covers `org:*` PLUS one `<ns>:*` glob for
-// every app namespace OpenRails declares (e.g. `merchant:*`) — owning the org owns
-// the merchant (org⇄merchant 1:1). The ONE namespace an org owner can never hold is
-// the separate `platform:` layer. So the surviving invariant is: every catalog
-// permission must be namespaced and must NOT be `platform:`, or a merchant owner
+// Each type's `owner` role auto-holds `<type>:*` (authkit), so a merchant owner
+// holds `merchant:*` and a customer owner holds `customer:*` — owner-grant
+// coverage is namespace-anchored. The ONE namespace no type owner can ever hold
+// is the separate `platform:` layer. So the surviving invariant is: every catalog
+// permission must be namespaced and must NOT be `platform:`, or its persona owner
 // cannot exercise it. This catches a `platform:` leak or an unnamespaced perm.
-// (#554/#100)
 func TestCatalogPermissionsCoveredByOwnerGrant(t *testing.T) {
-	platformNS := strings.SplitN(authcore.PlatformSuperAdminGrant, ":", 2)[0] // "platform"
+	const platformNS = "platform"
 	for _, name := range CatalogNames() {
 		ns := strings.SplitN(name, ":", 2)[0]
 		if ns == "" || ns == name {

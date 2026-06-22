@@ -56,11 +56,11 @@ func (s stubServiceCredentialResolver) ResolveServiceJWT(_ context.Context, toke
 
 func (s stubServiceCredentialResolver) resolved() (*controlplane.ResolvedServiceCredential, error) {
 	return &controlplane.ResolvedServiceCredential{
-		OwnerOrgSlug: "operator",
-		MerchantID:   dbtest.TestMerchantID,
-		MerchantSlug: dbtest.TestMerchantSlug,
-		Permissions:  s.permissions,
-		Resources:    s.resources,
+		OwnerGroupRef: dbtest.TestMerchantSlug,
+		MerchantID:    dbtest.TestMerchantID,
+		MerchantSlug:  dbtest.TestMerchantSlug,
+		Permissions:   s.permissions,
+		Resources:     s.resources,
 	}, nil
 }
 

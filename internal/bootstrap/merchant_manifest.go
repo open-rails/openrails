@@ -255,8 +255,8 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 			return nil, err
 		}
 	} else if req.ControlPlane != nil && mt.Issuer != nil && req.Options.Overwrite {
-		if _, err := provisionMerchantOrg(ctx, req.ControlPlane, mt); err != nil {
-			return nil, fmt.Errorf("merchant bootstrap: update backing org/issuer for %q: %w", mt.Slug, err)
+		if _, err := provisionMerchantGroup(ctx, req.ControlPlane, mt); err != nil {
+			return nil, fmt.Errorf("merchant bootstrap: update merchant group/issuer for %q: %w", mt.Slug, err)
 		}
 	}
 
@@ -287,12 +287,13 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 		return tn, nil
 	}
 
-	// #527: each standalone merchant has a dedicated backing org (slug-derived,
-	// 1:1). When the merchant declares an issuer, AuthKit registers it as owner
-	// so host-app delegated tokens administer this merchant only.
-	org, err := provisionMerchantOrg(ctx, cp, mt)
+	// #567: the merchant IS a top-level permission-group (child of root, no parent
+	// org). When the merchant declares an issuer, AuthKit registers it as a
+	// remote_application nested under the merchant group with the `owner` role so
+	// host-app delegated tokens administer this merchant only.
+	groupID, err := provisionMerchantGroup(ctx, cp, mt)
 	if err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: provision backing org/issuer for %q: %w", mt.Slug, err)
+		return nil, fmt.Errorf("merchant bootstrap: provision merchant group/issuer for %q: %w", mt.Slug, err)
 	}
 	svc, err := merchants.NewService(cp.Pool(), nil)
 	if err != nil {
@@ -300,7 +301,7 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 	}
 	tn, err := svc.Provision(ctx, merchants.ProvisionRequest{
 		Slug:       mt.Slug,
-		OwnerOrgID: org.ID,
+		OwnerOrgID: groupID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: provision %q: %w", mt.Slug, err)
@@ -853,42 +854,70 @@ func stringPtrIfNotEmpty(v string) *string {
 	return &v
 }
 
-// provisionMerchantOrg ensures the merchant's dedicated backing org exists and,
-// when the merchant declares an issuer, registers it as the org OWNER (wildcard
-// authority over this one merchant). The org slug is derived deterministically
-// from the merchant slug (1:1 backing org). Idempotent: re-applying converges
-// the org + issuer state. (#527)
-func provisionMerchantOrg(ctx context.Context, cp *controlplane.ControlPlane, mt ManifestMerchant) (*authcore.Org, error) {
+// provisionMerchantGroup ensures the merchant's top-level permission-group exists
+// (`type=merchant`, `resourceRef=slug`, child of `root`; NO parent org — #567) and,
+// when the merchant declares an issuer, registers that issuer as a
+// remote_application nested under the merchant group and grants it the merchant
+// `owner` role (full `merchant:*` authority, scoped to this merchant alone since
+// federated authority claims are stripped). Idempotent: re-applying converges the
+// group + issuer state. Returns the merchant group's internal id.
+func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, mt ManifestMerchant) (string, error) {
 	slug := merchant.NormalizeSlug(mt.Slug)
 	if slug == "" {
-		return nil, fmt.Errorf("merchant slug is required")
+		return "", fmt.Errorf("merchant slug is required")
 	}
-	// #548: the merchant's backing org has the SAME slug (1:1). Validate the
-	// merchant slug as a legal org slug up front for a clear error.
+	// #548: validate the merchant slug as a legal slug up front for a clear error.
 	if err := merchant.ValidateSlug(slug); err != nil {
-		return nil, err
+		return "", err
 	}
-	req := authcore.OrgProvisionRequest{Slug: slug}
+	core := cp.Core()
+	if core == nil {
+		return "", fmt.Errorf("merchant bootstrap: control plane core unavailable")
+	}
+
+	// Ensure the root group + containment exist before creating typed groups.
+	if _, err := core.EnsureRootGroup(ctx); err != nil {
+		return "", fmt.Errorf("merchant bootstrap: ensure root group: %w", err)
+	}
+	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
+		return "", fmt.Errorf("merchant bootstrap: seed containment: %w", err)
+	}
+
+	// Idempotently create the merchant permission-group (resolve, else create).
+	groupID, err := core.ResolveGroupIDForRef(ctx, controlplane.MerchantType, slug)
+	if errors.Is(err, authcore.ErrGroupNotFound) {
+		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
+			Type:        controlplane.MerchantType,
+			ResourceRef: slug,
+			ParentType:  authcore.RootType,
+		})
+		if err != nil {
+			return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)
+	}
+
+	// Register the merchant's federated issuer as a remote_application nested
+	// under the merchant group, then grant it the merchant `owner` role.
 	if mt.Issuer != nil {
-		req.Issuers = []authcore.OrgProvisionIssuer{manifestIssuerToProvision(slug, mt.Issuer)}
+		ra := manifestIssuerToRemoteApplication(slug, groupID, mt.Issuer)
+		stored, err := core.UpsertRemoteApplication(ctx, ra)
+		if err != nil {
+			return "", fmt.Errorf("merchant bootstrap: register issuer for %q: %w", slug, err)
+		}
+		if err := core.AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
+			return "", fmt.Errorf("merchant bootstrap: grant issuer owner role for %q: %w", slug, err)
+		}
 	}
-	res, err := cp.Core().ProvisionOrg(ctx, req, nil)
-	if err != nil {
-		return nil, err
-	}
-	// #548 hard guard: the backing org slug MUST equal the merchant slug. Reject a
-	// divergence rather than silently linking a mis-slugged org.
-	if res.Org.Slug != slug {
-		return nil, fmt.Errorf("merchant bootstrap: backing org slug %q != merchant slug %q (#548: merchant.slug must equal backing-org.slug)", res.Org.Slug, slug)
-	}
-	return &res.Org, nil
+
+	return groupID, nil
 }
 
-// manifestIssuerToProvision maps a merchant's manifest issuer onto an AuthKit
-// remote_application registration, assigning it the `owner` role on the
-// merchant's org (#527: the issuer IS the merchant owner — full authority, but
-// scoped to this merchant alone since federated authority claims are stripped).
-func manifestIssuerToProvision(merchantSlug string, iss *ManifestIssuer) authcore.OrgProvisionIssuer {
+// manifestIssuerToRemoteApplication maps a merchant's manifest issuer onto an
+// AuthKit remote_application registration nested under the merchant group
+// (groupID carried in the OrgID field, retained authbase name — #567).
+func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *ManifestIssuer) authcore.RemoteApplication {
 	appSlug := strings.TrimSpace(iss.Slug)
 	if appSlug == "" {
 		appSlug = merchantSlug + "-app"
@@ -901,15 +930,16 @@ func manifestIssuerToProvision(merchantSlug string, iss *ManifestIssuer) authcor
 	if len(audiences) == 0 {
 		audiences = []string{"openrails"}
 	}
-	return authcore.OrgProvisionIssuer{
+	return authcore.RemoteApplication{
 		Slug:           appSlug,
+		OrgID:          groupID, // controlling permission_group_id (#111)
 		Issuer:         strings.TrimSpace(iss.URI),
 		JWKSURI:        strings.TrimSpace(iss.JWKSURI),
 		Mode:           mode,
 		PublicKeys:     iss.PublicKeys,
 		Audiences:      audiences,
 		AllowedOrigins: cleanStrings(iss.AllowedOrigins),
-		Role:           "owner",
+		Enabled:        true,
 	}
 }
 

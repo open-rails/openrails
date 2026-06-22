@@ -4,7 +4,6 @@ package controlplane
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -124,34 +123,32 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.NotEmpty(t, res1.APIKeySecret)
 	require.NotEmpty(t, res1.BootstrapOrgID)
 
-	// #481: the owning AuthKit org is recorded on the merchant via the
-	// owner_org_id OWNERSHIP link (not an identity-equation, not a slug column).
-	var ownerOrgID string
+	// #567: the merchant permission-group's internal id is recorded on the
+	// merchant directory row via the owner_org_id column (repurposed to hold the
+	// group id, no longer an org uuid).
+	var groupID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT owner_org_id FROM openrails.merchants WHERE id = $1::uuid`,
-		dbtest.TestMerchantID.String()).Scan(&ownerOrgID))
-	require.Equal(t, res1.BootstrapOrgID, ownerOrgID)
+		dbtest.TestMerchantID.String()).Scan(&groupID))
+	require.Equal(t, res1.BootstrapOrgID, groupID)
 
-	// OpenRails seeds NO role of its own (#543): admin authority is the org
-	// `owner` role (AuthKit built-in), which holds `org:*`.
-	perms, err := cp.Core().GetRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
-	require.NoError(t, err)
-	require.Contains(t, perms, authcore.OrgOwnerGrant) // org:*
-	for _, p := range perms {
-		require.Falsef(t, strings.HasPrefix(p, "platform:"), "merchant owner role must not hold platform permission %q", p)
-	}
+	// #567: an admin assigned the merchant `owner` role auto-holds `merchant:*`,
+	// so it can perform any merchant operation (here: admit) but never a
+	// foreign-persona perm.
+	// (No InitialAdminUserID was seeded above, so a fresh owner check uses Can on a
+	// known subject below in TestBootstrap_SeedsPermissionCatalog.)
 
-	// Second run: idempotent. No new org, no new API key.
+	// Second run: idempotent. No new group, no new API key.
 	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
-	require.False(t, res2.OrgCreated, "re-run must not recreate the bootstrap org org")
+	require.False(t, res2.OrgCreated, "re-run must not recreate the merchant group")
 	require.False(t, res2.APIKeyMinted, "re-run must not mint a second API key")
 	require.Empty(t, res2.APIKeySecret)
 	require.Equal(t, res1.BootstrapOrgID, res2.BootstrapOrgID)
 
-	// Exactly one API key exists after two runs.
-	apiKeys, err := cp.Core().ListAPIKeys(ctx, dbtest.TestMerchantSlug)
+	// Exactly one API key exists after two runs (under the merchant group).
+	apiKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
 	require.NoError(t, err)
 	require.Len(t, apiKeys, 1, "exactly one admin API key after two bootstrap runs")
 	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(apiKeys[0].Resources))
@@ -186,35 +183,38 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
+	const adminUser = "00000000-0000-0000-0000-0000000000aa"
+	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
 
-	// The org `owner` role's `org:*` grant effectively expands over every per-org
-	// catalog permission. OpenRails seeds no role of its own (#543).
-	eff, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
+	// #567: the merchant `owner` (auto-holds `merchant:*`) effectively holds every
+	// merchant catalog permission, evaluated via the group walk-up. It never holds
+	// a platform permission.
+	for _, want := range MerchantOwnerRolePermissions() {
+		ok, cerr := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, want)
+		require.NoError(t, cerr)
+		require.Truef(t, ok, "merchant owner should effectively hold %q", want)
+	}
+	platformDenied, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, "platform:merchants:delete")
 	require.NoError(t, err)
-	for _, want := range OperatorRolePermissions() {
-		require.Containsf(t, eff, want, "org owner should effectively hold %q", want)
-	}
-	for _, p := range eff {
-		require.Falsef(t, strings.HasPrefix(p, "platform:"), "org owner effective permissions must not include platform permission %q", p)
-	}
+	require.False(t, platformDenied, "merchant owner must not reach platform permissions")
 
-	// Re-running keeps the grant stable.
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
+	// Re-running keeps the grant stable (owner still holds merchant:*).
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
-	eff2, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
+	stillOwner, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantAdmissionsCreate)
 	require.NoError(t, err)
-	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
+	require.True(t, stillOwner, "merchant owner grant stable across reruns")
 }
 
-// TestMerchantForOwnerOrg exercises the #500 ROLE-BASED merchant resolution
-// merchantForOwnerOrg relies on: the merchant is resolved via the
-// owner_org_id OWNERSHIP link (the AuthKit org that administers it), NOT an
-// identity-equation. It covers the happy path, an unowned credential, an unknown
-// owner, a deleted merchant, and authorizing a SPECIFIC merchant when one org
-// owns TWO merchants.
+// TestMerchantForOwnerOrg exercised the #481/#500 org→merchant ownership link
+// (merchantForOwnerOrg / AuthorizeMerchant). Under #567 a merchant IS its own
+// permission-group and the org↔merchant coupling is gone — API keys resolve their
+// merchant from the key's ResourceKindMerchant scope, not from an owning org. The
+// legacy helpers remain for source-compat but their org-identity premise is
+// obsolete, so this test is retired.
 func TestMerchantForOwnerOrg(t *testing.T) {
+	t.Skip("org→merchant ownership link removed under #567; merchant is resolved from the API key's merchant resource scope")
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)

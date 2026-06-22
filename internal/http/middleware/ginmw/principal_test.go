@@ -75,7 +75,7 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 	ctx := context.Background()
 
 	servicePrincipal := principalFromServiceCredential(&controlplane.ResolvedServiceCredential{
-		OwnerOrgSlug: "merchant-org",
+		OwnerGroupRef: "merchant-org",
 		MerchantID:   dbtest.TestMerchantID,
 		Permissions: []string{
 			controlplane.PermMerchantCustomerSettingsRead,
