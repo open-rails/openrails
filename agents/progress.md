@@ -7,7 +7,38 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 567
+next_id: 568
+
+---
+
+# #567: adopt authkit permission-group model (authkit #111) — org/merchant gates become permission-group checks
+
+**Completed:** no
+**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer — it proves the migration doesn't break the simple two-level case.
+
+## Principle
+OpenRails' resource shape is shallow: org↔merchant is 1:1 (#527) with NO sub-resources (no repos/datasets/endpoints). So adopting authkit's permission-group model is a thin API adoption + rename, NOT a deep hierarchy build. The merchant-owning org becomes a permission-group (`type=org`, child of the root group); BOTH `merchant:*` and `customer:*` roles live in that one group; every `/v1/merchant/*` and `/v1/orgs/:org_id/*` gate evaluates there (parent-walking to the root only for platform admins). No new hierarchy levels in OpenRails.
+
+OpenRails uses **app-defined role catalogs, NOT custom roles**: the fixed `merchant:*` + `customer:*` permission sets (the #554 catalog) are the catalog roles; `owner` required; `AllowCustomRoles=false` — OpenRails merchants do not define their own roles. Custom roles + deep per-resource hierarchy are tensorhub's domain, not OpenRails'.
+
+## Tasks
+- [ ] Bump authkit to the #111 release; adopt the group-scoped authorize signature (`HasAdminPermission(orgSlug,…)` → `Can(principal, perm, group)`), updating `authpolicy.AdminPermissionChecker` + the merchant/org gate middleware (`merchantActionPermissionMW`, `RequirePermission`).
+- [ ] Bootstrap: `CreateOrg` → create a permission-group (type `org`, parent=root); assign the bootstrap admin the `owner` role; mint the admin api-key nested under the group. Keep org↔merchant 1:1 — the merchant's group IS the owning org's group.
+- [ ] Declare OpenRails' fixed per-type role catalog to authkit: the `merchant:*` + `customer:*` perms as catalog roles; `owner` required; `AllowCustomRoles=false`.
+- [ ] `/v1/merchant/*` + `/v1/orgs/:org_id/*` gates resolve perms at the merchant's permission-group; confirm `merchant:*` AND `customer:*` both evaluate there and the owner auto-holds both (generalized `OwnerOwnsAppResources`).
+- [ ] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact).
+- [ ] Platform surface: `platform:merchants:*` operator perms resolve at the root group.
+- [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green.
+- [ ] Update embed + standalone bootstrap; re-run integrationharness + tests/ green.
+
+## Acceptance
+- OpenRails consumes the permission-group API; org-scoped calls are gone in favor of group-scoped.
+- The merchant's permission-group holds `merchant:*` + `customer:*` (fixed catalog, no custom roles); gates evaluate there; owner auto-holds.
+- org↔merchant stays 1:1; no extra hierarchy levels.
+- All existing merchant/customer/admin auth tests + #564 parity stay green against the new authkit.
+
+## Note
+OpenRails is the shallow/simple adopter (no custom roles, no sub-resource hierarchy). It exists in this plan to prove authkit #111 doesn't break the two-level case; the deep features (per-repo groups, custom roles) land in tensorhub.
 
 ---
 
