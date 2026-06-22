@@ -11,17 +11,17 @@ next_id: 568
 
 ---
 
-# #567: adopt authkit permission-group model (authkit #111) — org/merchant gates become permission-group checks
+# #567: adopt authkit permission-group model (authkit #111) — merchant + customer personas (no org)
 
 **Completed:** no
-**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles) — a `merchant` is a top-level permission-group (no owning org), and `org` is repurposed as a customer-created balance-sharing group. Removes the org↔merchant coupling entirely (supersedes #527).
+**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111. OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles). Its two personas are `merchant` (top-level admin group) and `customer` (universal — EVERY customer can delegate spend of their balance; NO 'org customer' vs 'individual' split). There is NO `org` persona in OpenRails. Removes the org↔merchant coupling entirely (supersedes #527).
 
 ## Principle
-OpenRails has **no 'org' that owns a merchant** — that coupling is gone (supersedes #527's `owner_org_id` UNIQUE and the whole org↔merchant link). Instead two FLAT top-level group types under `root`:
-- **A merchant IS a top-level permission-group** (`type=merchant`, child of `root`). Creating a merchant creates the group directly — no parent org, no `owner_org_id`. The group shares administrative control among staff (owner/support/viewer); `merchant:*` lives here; `/v1/merchant/*` gates resolve here.
-- **'org' is repurposed as a customer-created balance-sharing group** (`type=org`, child of `root`). A customer (a payer with an API balance) creates one, funds it, and invites others to spend it under budget windows. It holds `customer:*` (the #566 payer/treasury perms + spend-delegations). This is the ONLY 'org' in OpenRails — customer-initiated, optional, and NOT a merchant owner; `/v1/orgs/:org_id/*` (#566) gates resolve here.
+OpenRails has **NO `org` persona at all** (the old org↔merchant coupling is gone — supersedes #527's `owner_org_id` UNIQUE). Per the `<persona>:<resource>:<action>` naming (authkit #111, persona ≡ type ≡ namespace), OpenRails has exactly two personas — `merchant` and `customer` — both FLAT top-level types under `root`:
+- **`merchant`** — a merchant IS a top-level permission-group (`type=merchant`, child of `root`). Creating a merchant creates the group directly — no parent org, no `owner_org_id`. Staff roles owner/support/viewer; `merchant:*` lives here; `/v1/merchant/*` gates resolve here.
+- **`customer`** — a payer with an API balance. **Every customer is the same `customer` persona — there is NO 'org customer' vs 'individual customer' distinction; ALL customers can delegate the spending of their balance** (configure invoker/member spenders + budget windows). Holds `customer:*` (the #566 payer/treasury perms + spend-delegations). A lone customer is just the `owner`; a co-managed/shared balance adds members. `/v1/me/*` is a customer acting on their own balance; the #566 treasury + delegation routes are the `customer` surface.
 
-So OpenRails' tree is `root → { merchant groups, customer org groups }` — no nesting between them. ('org' is just an app-chosen type name per authkit #111; doujins/hentai0 have no org at all; tensorhub's `org` owns app resources.) `root` is reached only for platform moderation.
+So OpenRails' tree is `root → { merchant groups, customer groups }` — flat, no nesting, and no `org`. (`org` is a *tensorhub* persona, not OpenRails'; doujins/hentai0 have no persona beyond `root`.) `root` is reached only for platform moderation.
 
 **Reach ≠ capability** (authkit #111): `root` can delete/moderate orgs+merchants but cannot run their internals, and a merchant cannot impersonate its customers — enforced by the disjoint per-type catalogs + the no-`*` namespace-anchored-glob rule, not by structural superset.
 
@@ -32,31 +32,31 @@ OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRole
 - `support` — customer-facing ops: `merchant:customer-settings:read|update`, `merchant:payments:read|refund`, `merchant:subscriptions:read|update`, `merchant:usage:read`, `merchant:repair-alerts:read`. (Asymmetry in action: `subscriptions:update` lets support CANCEL a customer's subscription, but the #554 catalog has NO `merchant:subscriptions:create`, so neither support nor owner can create one as the customer.)
 - `viewer` — read-only: every `merchant:*:read`. Finance / audit / analyst.
 
-**`org` type (customer balance-sharing)** — holds `customer:*` ONLY (it does NOT own merchants, so no `merchant:*`):
-- `owner` *(required)* — the customer who created it; full `customer:*` (manage the balance, payment methods, spend-delegations, members).
-- `member` — a delegated spender: may spend the shared balance bounded by the spend-delegation budget window assigned to them (the invoker-spend-limit mechanism); otherwise read-only on the balance.
+**`customer` type (universal — every payer)** — holds `customer:*` ONLY (does NOT own merchants, so no `merchant:*`):
+- `owner` *(required)* — the customer; full `customer:*` (manage the balance, payment methods, invoices, spend-delegations, and any co-managers/members).
+- `member` — a delegated spender: may spend the balance bounded by the spend-delegation budget window assigned to them (the invoker-spend-limit mechanism); otherwise read-only.
 
-`AllowCustomRoles=false`. (Finalize the read/write split alongside #566.)
+`AllowCustomRoles=false`. Every customer has this persona — a lone customer is just the `owner`; a shared/co-managed balance adds members. (Finalize the read/write split alongside #566.)
 
 ## Tasks
 - [ ] Bump authkit to the #111 release; adopt the group-scoped authorize signature (`HasAdminPermission(orgSlug,…)` → `Can(principal, perm, group)`), updating `authpolicy.AdminPermissionChecker` + the merchant/org gate middleware (`merchantActionPermissionMW`, `RequirePermission`).
 - [ ] Merchant creation = create a `merchant` permission-group directly (child of `root`, NO parent org, NO `owner_org_id`); the creator/operator becomes the merchant `owner`; mint the admin api-key nested under the merchant group. Drop the `uq_merchants_owner_org_id` 1:1 index + the org-ownership coupling (#527).
-- [ ] Customer-org: a customer can create a `type=org` permission-group (child of `root`) for balance-sharing; it holds `customer:*`; creator = `owner`, invited people = `member` (delegated spenders). The #566 `/v1/orgs/:org_id/*` routes operate on this group.
-- [ ] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer` (perm sets in Principle); `org` = `owner` (+ any #566 finance split). `owner` required on each.
-- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (`merchant:*`); `/v1/orgs/:org_id/*` gates at the customer **org** group (`customer:*`). The two are INDEPENDENT top-level groups — a merchant `owner` holds only `merchant:*`, a customer-org `owner` only `customer:*`; neither inherits the other (no nesting between them; only `root` is above both).
+- [ ] Customer persona (universal): every payer is a `type=customer` permission-group (child of `root`) holding `customer:*`; `owner` = the customer, `member` = delegated spender. NOT an opt-in 'org' — a lone customer is just the owner; every customer can delegate. Settle the route surface: `/v1/me/*` (incl. `/v1/me/spend-delegations`) for a customer's own balance, plus a named path (e.g. `/v1/customers/:id/*`) for co-managed/shared balances — the old `/v1/orgs/:org_id/*` framing (#566) folds into this.
+- [ ] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer`; `customer` = `owner`/`member`. `owner` required on each.
+- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (`merchant:*`); the customer balance/delegation surface gates at the **customer** group (`customer:*`). The two are INDEPENDENT top-level personas — a merchant `owner` holds only `merchant:*`, a customer `owner` only `customer:*`; neither inherits the other (only `root` is above both).
 - [ ] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact).
 - [ ] Root (operator) surface: `platform:merchants:*` moderation perms resolve at the `root` group — reach ≠ capability (operators delete/restore merchants, never run them).
 - [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green.
 - [ ] Update embed + standalone bootstrap; re-run integrationharness + tests/ green.
 
 ## Acceptance
-- OpenRails consumes the permission-group API; org-scoped calls are gone in favor of group-scoped.
-- A `merchant` is a top-level permission-group (`owner`/`support`/`viewer`, `merchant:*`); a customer `org` is a SEPARATE top-level group (`owner`/`member`, `customer:*`); fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
-- No 'org' owns a merchant (supersedes #527 + drops `owner_org_id`/`uq_merchants_owner_org_id`); the tree is `root → { merchant, customer-org }`, two flat top-level types with no nesting between them.
+- OpenRails consumes the permission-group API; org-scoped calls are gone. OpenRails has NO `org` persona — only `merchant` + `customer`.
+- A `merchant` is a top-level permission-group (`owner`/`support`/`viewer`, `merchant:*`); `customer` is a SEPARATE top-level persona (`owner`/`member`, `customer:*`) held by EVERY payer; fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
+- Every customer (lone or shared) can delegate spend of their balance — no org-vs-individual distinction. No 'org' owns a merchant (supersedes #527; drops `owner_org_id`/`uq_merchants_owner_org_id`). Tree: `root → { merchant, customer }`, flat, no nesting.
 - All existing merchant/customer/admin auth tests + #564 parity stay green against the new authkit.
 
 ## Note
-OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, two flat top-level group types under `root`, no nesting). It proves authkit #111 works for the flat case and that there's no built-in `org`; the deep features (nested per-resource groups, custom roles) land in tensorhub.
+OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, two flat top-level personas — `merchant` + `customer` — under `root`, no nesting, no `org`). It proves authkit #111 works for the flat case and that there's no built-in `org`; the deep features (nested per-resource groups, custom roles, the `org` persona) land in tensorhub.
 
 ---
 
