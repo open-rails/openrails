@@ -14,10 +14,14 @@ next_id: 568
 # #567: adopt authkit permission-group model (authkit #111) — org/merchant gates become permission-group checks
 
 **Completed:** no
-**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles) — it proves the migration works for the simple `root → org → merchant` case and BREAKS the org↔merchant 1:1 (supersedes #527).
+**Status:** PLANNED 2026-06-22 (Claude). DEPENDS ON authkit #111 (org → permission-group). OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles) — a `merchant` is a top-level permission-group (no owning org), and `org` is repurposed as a customer-created balance-sharing group. Removes the org↔merchant coupling entirely (supersedes #527).
 
 ## Principle
-With the permission-group model in place we **break the org↔merchant 1:1** (supersedes #527's UNIQUE owner_org_id): an **org** is a permission-group (`type=org`, child of `root`), and each **merchant** it owns is a **child** permission-group (`type=merchant`) — so one org can own N merchants. `customer:*` (the org-as-payer treasury + spend-delegations, #566) lives on the **org** group; `merchant:*` lives on each **merchant** child. The org owner manages all its merchants via parent walk-up (the `org`-type catalog holds `merchant:*`); each merchant child carries its own staff roles. A merchant has no sub-resources, so OpenRails stays a 3-level tree: `root → org → merchant`. `/v1/merchant/*` gates evaluate at the merchant group, `/v1/orgs/:org_id/*` at the org group, `root` only for platform moderation.
+OpenRails has **no 'org' that owns a merchant** — that coupling is gone (supersedes #527's `owner_org_id` UNIQUE and the whole org↔merchant link). Instead two FLAT top-level group types under `root`:
+- **A merchant IS a top-level permission-group** (`type=merchant`, child of `root`). Creating a merchant creates the group directly — no parent org, no `owner_org_id`. The group shares administrative control among staff (owner/support/viewer); `merchant:*` lives here; `/v1/merchant/*` gates resolve here.
+- **'org' is repurposed as a customer-created balance-sharing group** (`type=org`, child of `root`). A customer (a payer with an API balance) creates one, funds it, and invites others to spend it under budget windows. It holds `customer:*` (the #566 payer/treasury perms + spend-delegations). This is the ONLY 'org' in OpenRails — customer-initiated, optional, and NOT a merchant owner; `/v1/orgs/:org_id/*` (#566) gates resolve here.
+
+So OpenRails' tree is `root → { merchant groups, customer org groups }` — no nesting between them. ('org' is just an app-chosen type name per authkit #111; doujins/hentai0 have no org at all; tensorhub's `org` owns app resources.) `root` is reached only for platform moderation.
 
 **Reach ≠ capability** (authkit #111): `root` can delete/moderate orgs+merchants but cannot run their internals, and a merchant cannot impersonate its customers — enforced by the disjoint per-type catalogs + the no-`*` namespace-anchored-glob rule, not by structural superset.
 
@@ -28,13 +32,18 @@ OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRole
 - `support` — customer-facing ops: `merchant:customer-settings:read|update`, `merchant:payments:read|refund`, `merchant:subscriptions:read|update`, `merchant:usage:read`, `merchant:repair-alerts:read`. (Asymmetry in action: `subscriptions:update` lets support CANCEL a customer's subscription, but the #554 catalog has NO `merchant:subscriptions:create`, so neither support nor owner can create one as the customer.)
 - `viewer` — read-only: every `merchant:*:read`. Finance / audit / analyst.
 
-**`org` type** — `owner` (all `customer:*` incl. spend-delegations, and manages child merchants via `merchant:*`) plus whatever finance/treasury split #566 lands. `AllowCustomRoles=false`.
+**`org` type (customer balance-sharing)** — holds `customer:*` ONLY (it does NOT own merchants, so no `merchant:*`):
+- `owner` *(required)* — the customer who created it; full `customer:*` (manage the balance, payment methods, spend-delegations, members).
+- `member` — a delegated spender: may spend the shared balance bounded by the spend-delegation budget window assigned to them (the invoker-spend-limit mechanism); otherwise read-only on the balance.
+
+`AllowCustomRoles=false`. (Finalize the read/write split alongside #566.)
 
 ## Tasks
 - [ ] Bump authkit to the #111 release; adopt the group-scoped authorize signature (`HasAdminPermission(orgSlug,…)` → `Can(principal, perm, group)`), updating `authpolicy.AdminPermissionChecker` + the merchant/org gate middleware (`merchantActionPermissionMW`, `RequirePermission`).
-- [ ] Bootstrap: create an `org` permission-group (parent=`root`) + a child `merchant` group per owned merchant (N≥1); assign the bootstrap admin the org `owner` role; mint the admin api-key nested under the right group. The org owner reaches its merchants via walk-up (org catalog holds `merchant:*`).
+- [ ] Merchant creation = create a `merchant` permission-group directly (child of `root`, NO parent org, NO `owner_org_id`); the creator/operator becomes the merchant `owner`; mint the admin api-key nested under the merchant group. Drop the `uq_merchants_owner_org_id` 1:1 index + the org-ownership coupling (#527).
+- [ ] Customer-org: a customer can create a `type=org` permission-group (child of `root`) for balance-sharing; it holds `customer:*`; creator = `owner`, invited people = `member` (delegated spenders). The #566 `/v1/orgs/:org_id/*` routes operate on this group.
 - [ ] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer` (perm sets in Principle); `org` = `owner` (+ any #566 finance split). `owner` required on each.
-- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (perm `merchant:*`); `/v1/orgs/:org_id/*` gates resolve at the **org** group (perm `customer:*`). Org owner auto-holds `merchant:*` over its merchant children via walk-up; merchant `owner` auto-holds `merchant:*` on its own group.
+- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (`merchant:*`); `/v1/orgs/:org_id/*` gates at the customer **org** group (`customer:*`). The two are INDEPENDENT top-level groups — a merchant `owner` holds only `merchant:*`, a customer-org `owner` only `customer:*`; neither inherits the other (no nesting between them; only `root` is above both).
 - [ ] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact).
 - [ ] Root (operator) surface: `platform:merchants:*` moderation perms resolve at the `root` group — reach ≠ capability (operators delete/restore merchants, never run them).
 - [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green.
@@ -42,12 +51,12 @@ OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRole
 
 ## Acceptance
 - OpenRails consumes the permission-group API; org-scoped calls are gone in favor of group-scoped.
-- The `merchant` group holds `merchant:*` (roles `owner`/`support`/`viewer`); the `org` group holds `customer:*`; fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
-- org↔merchant 1:1 is broken (supersedes #527): one org owns N merchant child-groups; the tree is `root → org → merchant`.
+- A `merchant` is a top-level permission-group (`owner`/`support`/`viewer`, `merchant:*`); a customer `org` is a SEPARATE top-level group (`owner`/`member`, `customer:*`); fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
+- No 'org' owns a merchant (supersedes #527 + drops `owner_org_id`/`uq_merchants_owner_org_id`); the tree is `root → { merchant, customer-org }`, two flat top-level types with no nesting between them.
 - All existing merchant/customer/admin auth tests + #564 parity stay green against the new authkit.
 
 ## Note
-OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, no sub-resource hierarchy below the merchant). It proves authkit #111 works for the shallow `root → org → merchant` case; the deep features (per-repo groups, custom roles) land in tensorhub.
+OpenRails is the shallow/simple adopter (fixed catalogs, no custom roles, two flat top-level group types under `root`, no nesting). It proves authkit #111 works for the flat case and that there's no built-in `org`; the deep features (nested per-resource groups, custom roles) land in tensorhub.
 
 ---
 
