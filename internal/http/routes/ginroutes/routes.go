@@ -123,21 +123,39 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.POST("/stripe/portal", wrap(httphandlers.CreatePortalSession))
 }
 
-// RegisterOrgTreasuryRoutes mounts the org-as-customer treasury surface. It is
+// RegisterOrgTreasuryRoutes mounts the org-as-PAYER treasury surface. It is
 // deliberately separate from `/me` (personal self-service) and `/merchant`
 // (merchant/seller operations): the same AuthKit org may own a merchant and
 // also act as the paying customer for its own org balance, but those are
 // distinct permission namespaces.
+//
+// An org is a PAYER, not a consumer (#566): it holds a balance, pre-pays, owes
+// in arrears, sets a billing mode, gets invoices, and manages payment methods —
+// but it does NOT own catalog products, entitlements, or personal subscriptions
+// (its MEMBERS consume; the org FUNDS). So this surface mirrors the payer subset
+// of `/v1/me/*` and mounts NONE of the consumer routes.
+//
+// The handlers are SHARED with `/v1/me/*`: OrgTreasuryScopeRequired confirms the
+// :org_id scope and rebinds the acting payer to the org's payable subject, so the
+// same money handlers operate on the org balance — route separation, not handler
+// duplication. Every route is gated by a `customer:*` permission because the org
+// balance is a SHARED resource (unlike `/v1/me`, which is authenticated-self and
+// needs no grant).
 func RegisterOrgTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(delegatedMW)
+	// Scope to :org_id and rebind the acting payer to the org's payable subject
+	// (#566) so the shared /v1/me money handlers operate on the org balance.
+	group.Use(ginmw.OrgTreasuryScopeRequired())
 	if rt != nil && rt.DB != nil {
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
+	// Balance-sharing policy: how the org lets delegated invokers/roles/tiers
+	// draw on its balance (#557).
 	group.GET("/:org_id/spend-delegations",
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
 		wrap(httphandlers.GetOrgSpendDelegations),
@@ -146,4 +164,38 @@ func RegisterOrgTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate),
 		wrap(httphandlers.PutOrgSpendDelegations),
 	)
+
+	// Read the payer's money state: balance, ledger transactions, metered usage,
+	// payment history, and finalized invoices. `status` is intentionally NOT
+	// mounted: the only /me status handler reports subscriptions + entitlements,
+	// which are consumer concepts the org does not own; balance + settings already
+	// expose the payer's account state.
+	read := ginmw.RequirePermission(controlplane.PermCustomerBalanceRead)
+	group.GET("/:org_id/balance", read, wrap(httphandlers.GetMyBalance))
+	group.GET("/:org_id/transactions", read, wrap(httphandlers.GetMyAccountTransactions))
+	group.GET("/:org_id/usage", read, wrap(httphandlers.GetMyUsage))
+	group.GET("/:org_id/payments", read, wrap(httphandlers.GetUserPayments))
+	group.GET("/:org_id/invoices", read, wrap(httphandlers.GetMyInvoices))
+	group.GET("/:org_id/invoices/:id", read, wrap(httphandlers.GetMyInvoice))
+
+	// Set the payer's billing mode (prepaid|arrears) and self-imposed caps. The
+	// shared handler already refuses platform-owned policy fields on this surface.
+	group.PUT("/:org_id/settings",
+		ginmw.RequirePermission(controlplane.PermCustomerBillingUpdate),
+		wrap(httphandlers.SetMyCreditAccountSettings),
+	)
+
+	// Manage the payer's saved payment methods and Stripe billing portal.
+	pmPerm := ginmw.RequirePermission(controlplane.PermCustomerPaymentMethodsUpdate)
+	group.GET("/:org_id/payment-methods", pmPerm, wrap(httphandlers.ListPaymentMethods))
+	group.POST("/:org_id/payment-methods", pmPerm, wrap(httphandlers.CreatePaymentMethod))
+	group.PUT("/:org_id/payment-methods/:id", pmPerm, wrap(httphandlers.UpdatePaymentMethod))
+	group.DELETE("/:org_id/payment-methods/:id", pmPerm, wrap(httphandlers.DeletePaymentMethod))
+	group.POST("/:org_id/stripe/portal", pmPerm, wrap(httphandlers.CreatePortalSession))
+
+	// Pre-pay / load credits onto the org balance via checkout.
+	checkoutPerm := ginmw.RequirePermission(controlplane.PermCustomerCheckoutCreate)
+	group.POST("/:org_id/checkout", checkoutPerm, wrap(httphandlers.CreateCheckoutSession))
+	group.GET("/:org_id/checkout/:id", checkoutPerm, wrap(httphandlers.GetCheckoutSession))
+	group.POST("/:org_id/checkout/:id/confirm", checkoutPerm, wrap(httphandlers.ConfirmCheckoutSession))
 }

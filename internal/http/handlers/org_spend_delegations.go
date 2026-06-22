@@ -125,23 +125,7 @@ func requireOrgTreasuryPrincipal(r *httprequest.Request) (*controlplane.Resolved
 }
 
 func orgIDMatchesResolved(orgID string, resolved *controlplane.ResolvedDelegated) bool {
-	orgID = strings.TrimSpace(orgID)
-	if orgID == "" || resolved == nil {
-		return false
-	}
-	candidates := []string{
-		resolved.Merchant,
-		resolved.MerchantSlug,
-	}
-	if !resolved.MerchantID.IsZero() {
-		candidates = append(candidates, resolved.MerchantID.String())
-	}
-	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate) == orgID {
-			return true
-		}
-	}
-	return false
+	return ginmw.OrgIDMatchesDelegated(orgID, resolved)
 }
 
 func orgTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {

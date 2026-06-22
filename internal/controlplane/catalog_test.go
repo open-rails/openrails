@@ -27,6 +27,10 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		PermMerchantAdmissionsCreate,
 		PermMerchantUsageRead,
 		PermMerchantRepairAlertsRead,
+		PermCustomerBalanceRead,
+		PermCustomerBillingUpdate,
+		PermCustomerPaymentMethodsUpdate,
+		PermCustomerCheckoutCreate,
 		PermCustomerSpendDelegationsRead,
 		PermCustomerSpendDelegationsUpdate,
 	}

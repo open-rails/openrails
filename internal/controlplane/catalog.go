@@ -54,8 +54,16 @@ const (
 	PermMerchantRepairAlertsRead       = "merchant:repair-alerts:read"
 
 	// --- Customer treasury: org acting AS a customer/payer (NOT merchant-owner),
-	// scoped to /v1/orgs/:org_id/spend-delegations. Personal balances are never
-	// delegable. `customer:` is disjoint from `merchant:*` and AuthKit `org:*`. ---
+	// scoped to /v1/orgs/:org_id/*. Personal balances are never delegable.
+	// `customer:` is disjoint from `merchant:*` and AuthKit `org:*`. The payer
+	// surface is split (#566) so a finance reader, a billing-mode setter, a
+	// payment-methods manager, and a credit-loader are distinct grants — coarse:
+	// one permission per role boundary, not per route. ---
+	PermCustomerBalanceRead          = "customer:balance:read"
+	PermCustomerBillingUpdate        = "customer:billing:update"
+	PermCustomerPaymentMethodsUpdate = "customer:payment-methods:update"
+	PermCustomerCheckoutCreate       = "customer:checkout:create"
+
 	PermCustomerSpendDelegationsRead   = "customer:spend-delegations:read"
 	PermCustomerSpendDelegationsUpdate = "customer:spend-delegations:update"
 )
@@ -78,6 +86,10 @@ var catalogEntries = []Permission{
 	{Name: PermMerchantAdmissionsCreate, Description: "Merchant: admission lifecycle — admit, capture, release, and report wasted spend (machine hot path)."},
 	{Name: PermMerchantUsageRead, Description: "Merchant: read usage/revenue rollups and analytics metrics."},
 	{Name: PermMerchantRepairAlertsRead, Description: "Merchant: read ledger/provider repair alerts."},
+	{Name: PermCustomerBalanceRead, Description: "Customer: read the org's balance, transactions, usage, payments, and invoices."},
+	{Name: PermCustomerBillingUpdate, Description: "Customer: set the org's billing mode (prepaid/arrears) and self-imposed spend caps."},
+	{Name: PermCustomerPaymentMethodsUpdate, Description: "Customer: manage the org's saved payment methods and Stripe billing portal."},
+	{Name: PermCustomerCheckoutCreate, Description: "Customer: pre-pay / load credits onto the org balance via checkout."},
 	{Name: PermCustomerSpendDelegationsRead, Description: "Customer: read the org's balance-sharing (spend-delegation) policy."},
 	{Name: PermCustomerSpendDelegationsUpdate, Description: "Customer: replace the org's balance-sharing (spend-delegation) policy."},
 }
