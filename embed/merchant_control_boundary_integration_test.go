@@ -67,11 +67,13 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	status, body = postDepositCredits(t, standalone.BaseURL, orphanToken, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
 
-	// Ordinary user access tokens are not accepted on the server-to-server
-	// merchant-control surface.
+	// #564 (no source discrimination): a user access token IS accepted on the
+	// merchant surface — authority is the user's live org-role perms, not the
+	// credential type. A user with no merchant grant is denied by PERMISSION (403),
+	// never rejected by credential source (was 401).
 	userToken := standalone.MintUserAccessToken("or502-user")
 	status, body = postDepositCredits(t, standalone.BaseURL, userToken, uuid.New(), 10)
-	require.Equal(t, http.StatusUnauthorized, status, body)
+	require.Equal(t, http.StatusForbidden, status, body)
 
 	// JWKS remote_application self-tokens use stored AuthKit org authority. A
 	// principal with the org owner role mutates only its org's merchant; one

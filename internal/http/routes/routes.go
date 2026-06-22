@@ -376,6 +376,16 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFal
 		if err == nil {
 			return resolved, true
 		}
+		// A VERIFIED service JWT that is definitively rejected (cross-merchant
+		// resource scope, or its issuer owns no merchant) must surface as 403 — not
+		// fall through to the delegated/user-session paths, which would mislabel it
+		// 401 access_token_wrong_typ. A wrong-typ (not-a-service-JWT) error still
+		// falls through so delegated/user tokens reach their own resolvers.
+		if errors.Is(err, controlplane.ErrServiceCredentialScopeDenied) ||
+			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
+			writeServiceCredentialError(r, err)
+			return nil, true
+		}
 	}
 	return nil, false
 }
