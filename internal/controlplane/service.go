@@ -243,7 +243,7 @@ func (c *ControlPlane) Pool() *db.Pool {
 }
 
 // SelfHostedPosture reports whether this control plane mounts only the
-// intentional AuthKit route groups (RouteCore + RoutePassword + RouteUser).
+// intentional AuthKit route groups (RoutePublic + RouteSession + RouteUser).
 // Standalone construction never passes WithHostedPosture, so private OpenRails
 // remains locked by default; embedded hosts can opt into hosted posture in code.
 func (c *ControlPlane) SelfHostedPosture() bool {

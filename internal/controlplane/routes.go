@@ -10,20 +10,18 @@ import (
 // It deliberately EXCLUDES the full DefaultAPI surface. We mount only the
 // login/session/user/JWKS-adjacent capabilities OpenRails needs:
 //
-//   - RouteCore: /token, /sessions/current, /logout (authentication).
-//   - RoutePassword: password login + reset (authentication, not registration).
+//   - RoutePublic: public AuthKit discovery.
+//   - RouteSession: login, refresh, logout, password reset.
 //   - RouteUser: self-service account routes (me, sessions, password change).
 //
 // NOT mounted by default in locked-down mode:
 //   - RouteRegister (public user self-registration — disabled in self-hosted).
-//   - RouteOrganizations (public org onboarding/management — owned by OpenRails
-//     product routes + in-process core calls instead).
 //   - RouteAdmin (AuthKit's own admin surface — OpenRails owns admin routes).
-//   - RouteSolana / RouteOIDCBrowser / RouteFederation / 2FA / verification —
-//     opt-in per deployment, not part of the locked-down default.
+//   - RoutePermissionGroups (OpenRails owns domain group management).
+//   - RouteBrowserOIDC (browser redirects mount separately when enabled).
 var IntentionalRouteGroups = []authhttp.RouteGroup{
-	authhttp.RouteCore,
-	authhttp.RoutePassword,
+	authhttp.RoutePublic,
+	authhttp.RouteSession,
 	authhttp.RouteUser,
 }
 
