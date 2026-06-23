@@ -119,8 +119,9 @@ func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor, vaultID string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
-	return seedPaymentMethodRow(t, pool, ctx, payer, processor, pm, vaultID)
+	// One row with the requested processor + vault. (Was double-inserting the
+	// same id via seedPaymentMethod first → duplicate payment_methods_pkey.)
+	return seedPaymentMethodRow(t, pool, ctx, payer, processor, uuid.New(), vaultID)
 }
 
 func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor string, pm uuid.UUID, vaultID string) uuid.UUID {

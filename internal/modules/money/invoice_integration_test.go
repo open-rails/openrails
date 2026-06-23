@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
@@ -81,7 +80,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := uuid.New()
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -145,7 +144,7 @@ func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := uuid.New()
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -196,7 +195,7 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := uuid.New()
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})

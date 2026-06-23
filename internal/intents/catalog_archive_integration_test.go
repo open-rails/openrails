@@ -29,6 +29,10 @@ func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	// The archive intents reference TestMerchant (provider_intents +
+	// external_provider_mutation_logs FK into openrails.merchants), so the merchant
+	// row must exist.
+	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
 	return &archiveFixture{db: dbi, store: NewStore(dbi), api: newFakeStripeCatalogAPI()}
 }
 
