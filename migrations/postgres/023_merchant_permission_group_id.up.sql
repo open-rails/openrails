@@ -18,8 +18,13 @@ DROP INDEX IF EXISTS openrails.uq_merchants_owner_org_id;
 -- 2) Rename the column to its repurposed meaning (the merchant's own group id).
 ALTER TABLE openrails.merchants RENAME COLUMN owner_org_id TO permission_group_id;
 
--- 3) Rename the baseline lookup index to match the column.
-ALTER INDEX openrails.idx_merchants_owner_org_id RENAME TO idx_merchants_permission_group_id;
+-- 3) Create the lookup index on the repurposed column. (The old baseline
+--    idx_merchants_owner_org_id was dropped by migration 016 — it replaced it
+--    with the now-dropped uq_ unique index — so there is nothing to rename;
+--    create a fresh non-unique index for merchant-by-group-id resolution.)
+CREATE INDEX IF NOT EXISTS idx_merchants_permission_group_id
+    ON openrails.merchants USING btree (permission_group_id)
+    WHERE (permission_group_id IS NOT NULL);
 
 -- 4) Refresh the column comment.
 COMMENT ON COLUMN openrails.merchants.permission_group_id IS 'The merchant''s OWN authkit permission-group id (#567 — a merchant is a top-level `merchant` group, child of `root`, with no parent org; supersedes #527''s owner_org_id 1:1 coupling). Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.';
