@@ -1965,9 +1965,11 @@ End state: **NO host hook in either repo**, config-driven authorization througho
 integration suite GREEN.
 - **authkit v0.58.0**: `ResourceScopeAuthorizer` hook removed entirely (no host callbacks).
   build/vet/full-suite green; committed `133a78e`, tagged `v0.58.0`, pushed.
-- **openrails v0.58.0**: resource-scope concept hard-removed (identity = permission group);
-  pinned to authkit v0.58.0; `go build`, `go vet -tags=integration`, and the full integration
-  suite all GREEN (7/7 packages incl. cross-merchant isolation). Landed on master + tag `v0.58.0`.
+- **openrails**: resource-scope concept hard-removed (identity = permission group); full
+  integration suite GREEN (7/7 incl. cross-merchant isolation). Landed master + tag `v0.58.0`,
+  then bumped to authkit **v0.59.0** + added customer-delegation coverage → tag `v0.59.0`.
+- **authkit v0.59.0**: `APIKeyResource.Kind` → `Persona` ({Persona,ID} = a permission-group
+  reference); no consumer used the field. build/vet/full-suite green; tag `v0.59.0`, pushed.
 
 The 6 formerly-failing integration tests were PRE-EXISTING (failed identically on clean v0.56.2)
 and are now fixed: (1) river job-queue helpers queried a stale `openrails.river_job` — River
@@ -1982,7 +1984,7 @@ down-scoping preserved).
 - [x] authkit: REMOVE the `ResourceScopeAuthorizer` hook (config-driven authz, no host callbacks); build/vet/full-suite green; tag v0.58.0.
 - [x] openrails: bump to authkit v0.58.0; full integration suite green; land on master + tag v0.58.0.
 - [x] fix the 6 pre-existing integration failures (river schema ref; self-invoices envelope key; service-JWT glob coverage).
-- [ ] (follow-up, optional) confirm/cover the customer delegation path (members / remote-apps / API keys under the customer permission group, bounded by budget windows enforced OpenRails-side). No code change yet.
-- [ ] (follow-up) authkit still stores opaque `APIKeyResource{Kind,ID}` (now unused by openrails); rename to `{Persona,ID}` or drop entirely once confirmed no consumer (tensorhub) relies on it.
+- [x] customer delegation path: confirmed implemented end-to-end (catalog persona → delegated.go/customer.go identity → customer_spend_delegations.go budget windows → admission/spendgate enforcement). Added `tests/customer_delegation_spend_http_integration_test.go` (`TestCustomerDelegationSpend_HTTP_EndToEnd`): customer sets a $1000/day window via treasury HTTP, delegate's spend within-window allowed, over-window denied (403 `budget_exceeded`), ungranted delegate denied (`delegated_spend_not_allowed`). PASS.
+- [x] authkit: renamed `APIKeyResource.Kind` → `Persona` (a `{Persona,ID}` permission-group reference); confirmed no consumer (doujins/hentai0/openrails) uses the field; tag **v0.59.0**. openrails bumped to authkit v0.59.0.
 
 ---

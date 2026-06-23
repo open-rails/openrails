@@ -19,7 +19,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/core"
 	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -538,14 +537,4 @@ func cozyArtMerchantManifest() *MerchantManifest {
 			DisplayName: "Cozy Art",
 		}},
 	}
-}
-
-func resourceIDs(resources []authcore.APIKeyResource, kind string) []string {
-	out := make([]string, 0, len(resources))
-	for _, r := range resources {
-		if r.Kind == kind {
-			out = append(out, r.ID)
-		}
-	}
-	return out
 }
