@@ -8,7 +8,7 @@ require (
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/goccy/go-yaml v1.18.0
-	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/jackc/pgx/v5 v5.9.2
@@ -18,7 +18,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b
-	github.com/open-rails/authkit v0.54.0
+	github.com/open-rails/authkit v0.56.0
 	github.com/open-rails/migratekit v1.1.0
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
@@ -31,7 +31,11 @@ require (
 )
 
 require (
+	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-webauthn/webauthn v0.17.4 // indirect
+	github.com/go-webauthn/x v0.2.6 // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -47,9 +51,12 @@ require (
 	github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.57.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zitadel/logging v0.7.0 // indirect
 	github.com/zitadel/oidc/v3 v3.47.5 // indirect
 	github.com/zitadel/schema v1.3.2 // indirect

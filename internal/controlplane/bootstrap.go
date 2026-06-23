@@ -92,12 +92,12 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	//    create). The merchant IS the group — `type=merchant`, `resourceRef=slug`,
 	//    parent=root. No parent org. The initial admin (if any) is seeded as owner
 	//    at creation.
-	groupID, err := core.ResolveGroupIDForRef(ctx, MerchantType, slug)
+	groupID, err := core.ResolveGroupIDForSlug(ctx, MerchantType, slug)
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
-			Type:           MerchantType,
-			ResourceRef:    slug,
-			ParentType:     authcore.RootType,
+			Persona:        MerchantType,
+			ResourceSlug:    slug,
+			ParentPersona:   authcore.RootPersona,
 			OwnerSubjectID: strings.TrimSpace(opts.InitialAdminUserID),
 		})
 		if err != nil {

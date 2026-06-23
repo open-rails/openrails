@@ -345,12 +345,12 @@ func (h *Harness) ensureMerchantGroup(core *authcore.Service, slug string) strin
 	_, err := core.EnsureRootGroup(h.ctx)
 	require.NoError(h.t, err, "ensure root group")
 	require.NoError(h.t, core.SeedPermissionGroupContainment(h.ctx), "seed containment")
-	gid, err := core.ResolveGroupIDForRef(h.ctx, controlplane.MerchantType, slug)
+	gid, err := core.ResolveGroupIDForSlug(h.ctx, controlplane.MerchantType, slug)
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		gid, err = core.CreatePermissionGroup(h.ctx, authcore.CreatePermissionGroupRequest{
-			Type:        controlplane.MerchantType,
-			ResourceRef: slug,
-			ParentType:  authcore.RootType,
+			Persona:       controlplane.MerchantType,
+			ResourceSlug:  slug,
+			ParentPersona: authcore.RootPersona,
 		})
 	}
 	require.NoError(h.t, err, "ensure merchant permission-group")
@@ -477,21 +477,21 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 	h.t.Cleanup(issuer.Close)
 
 	// #567: a remote_application is nested under its controlling merchant
-	// permission-group (OrgID carries the permission_group_id).
+	// permission-group (PermissionGroupID carries the permission_group_id).
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
-		Slug:       slug,
-		OrgID:      groupID,
-		Issuer:     issuer.URL(),
-		Mode:       authcore.RemoteAppModeStatic,
-		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:  []string{"openrails"},
-		Enabled:    true,
+		Slug:              slug,
+		PermissionGroupID: groupID,
+		Issuer:            issuer.URL(),
+		Mode:              authcore.RemoteAppModeStatic,
+		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:         []string{"openrails"},
+		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register remote_application")
 
 	if role != "" {
-		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, role),
+		require.NoError(h.t, core.AssignGroupRole(h.ctx, controlplane.MerchantType, ownerOrgSlug, ra.ID, authcore.SubjectKindRemoteApp, role),
 			"assign merchant role to remote_application")
 	}
 
@@ -529,20 +529,20 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
-		Slug:       slug,
-		OrgID:      groupID,
-		Issuer:     issuer.URL(),
-		Mode:       authcore.RemoteAppModeStatic,
-		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:  []string{"openrails"},
-		Enabled:    true,
+		Slug:              slug,
+		PermissionGroupID: groupID,
+		Issuer:            issuer.URL(),
+		Mode:              authcore.RemoteAppModeStatic,
+		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:         []string{"openrails"},
+		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register delegated issuer")
 	if len(permissions) > 0 {
 		// #567: merchant groups have fixed catalog roles (no custom roles). Grant
 		// the merchant `owner` role (= merchant:*); the delegated token's claim is
 		// then bounded down to its requested subset at verify/gate time.
-		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, controlplane.MerchantRoleOwner),
+		require.NoError(h.t, core.AssignGroupRole(h.ctx, controlplane.MerchantType, ownerOrgSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
 			"assign merchant owner role to delegated remote_application")
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
@@ -577,12 +577,12 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
-		Slug:       slug,
-		OrgID:      groupID,
-		Issuer:     issuer.URL(),
-		Mode:       authcore.RemoteAppModeStatic,
-		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:  []string{"openrails"},
+		Slug:              slug,
+		PermissionGroupID: groupID,
+		Issuer:            issuer.URL(),
+		Mode:              authcore.RemoteAppModeStatic,
+		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:         []string{"openrails"},
 		Enabled:    true,
 	})
 	if len(permissions) == 0 {
@@ -591,7 +591,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	require.NoError(h.t, err, "register service-JWT issuer")
 	// #567: assign the merchant `owner` role (= merchant:*); the service JWT's
 	// claimed permissions are bounded down to its requested subset at verify time.
-	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ra.ID, controlplane.MerchantRoleOwner),
+	require.NoError(h.t, core.AssignGroupRole(h.ctx, controlplane.MerchantType, ownerOrgSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
 		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 

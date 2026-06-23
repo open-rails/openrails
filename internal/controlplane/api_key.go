@@ -188,7 +188,7 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 	}
 
 	return &ResolvedServiceCredential{
-		OwnerGroupID:  resolved.OrgID,
+		OwnerGroupID:  resolved.PermissionGroupID,
 		OwnerGroupRef: mslug,
 		MerchantID:    mid,
 		MerchantSlug:  mslug,

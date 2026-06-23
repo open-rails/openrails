@@ -142,7 +142,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	`).Scan(&tenantID, &ownerOrgID))
 
 	// #567: permission_group_id now holds the merchant permission-group's internal id.
-	groupID, err := cp.Core().ResolveGroupIDForRef(ctx, controlplane.MerchantType, "cozy-art")
+	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, controlplane.MerchantType, "cozy-art")
 	require.NoError(t, err)
 	require.Equal(t, groupID, ownerOrgID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
 

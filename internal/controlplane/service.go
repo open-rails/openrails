@@ -154,8 +154,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 			// and no org⇄merchant coupling. Each type's `owner` role is auto-seeded
 			// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
 			// its own namespace directly; the flat case needs no cross-namespace grant).
-			Groups:       Groups(),
-			DefaultRoles: nil,
+			Groups: Groups(),
 		},
 		// Private standalone posture: no public user self-registration. Embedded
 		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)

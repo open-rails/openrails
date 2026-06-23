@@ -59,11 +59,11 @@ const (
 // catalogs, AllowCustomRoles=false (custom roles + deep hierarchy are tensorhub's
 // domain). authkit injects the intrinsic `root` type and auto-seeds each type's
 // `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.Groups.
-func Groups() []authcore.GroupTypeDef {
-	return []authcore.GroupTypeDef{
+func Groups() []authcore.PersonaDef {
+	return []authcore.PersonaDef{
 		{
 			Name:             MerchantType,
-			AllowedParents:   []string{authcore.RootType},
+			AllowedParents:   []string{authcore.RootPersona},
 			AllowCustomRoles: false,
 			// authkit auto-generates the staff/credential MANAGEMENT routes from
 			// this profile (members, api-keys, remote-applications). OpenRails
@@ -98,7 +98,7 @@ func Groups() []authcore.GroupTypeDef {
 		},
 		{
 			Name:             CustomerType,
-			AllowedParents:   []string{authcore.RootType},
+			AllowedParents:   []string{authcore.RootPersona},
 			AllowCustomRoles: false,
 			Routes: authcore.ManagementProfile{
 				MemberAssignment: true,

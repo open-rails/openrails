@@ -71,9 +71,9 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 	if err != nil || ra == nil || !ra.Enabled {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
-	// RemoteApplication.OrgID carries the controlling permission_group_id (#111):
+	// RemoteApplication.PermissionGroupID carries the controlling permission_group_id (#111):
 	// the merchant group this issuer signs for. Empty => attached to nothing.
-	groupID = strings.TrimSpace(ra.OrgID)
+	groupID = strings.TrimSpace(ra.PermissionGroupID)
 	if groupID == "" {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}

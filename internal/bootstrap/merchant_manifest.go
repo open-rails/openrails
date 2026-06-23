@@ -884,12 +884,12 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 	}
 
 	// Idempotently create the merchant permission-group (resolve, else create).
-	groupID, err := core.ResolveGroupIDForRef(ctx, controlplane.MerchantType, slug)
+	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
-			Type:        controlplane.MerchantType,
-			ResourceRef: slug,
-			ParentType:  authcore.RootType,
+			Persona:      controlplane.MerchantType,
+			ResourceSlug: slug,
+			ParentPersona: authcore.RootPersona,
 		})
 		if err != nil {
 			return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
@@ -931,15 +931,15 @@ func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *Manife
 		audiences = []string{"openrails"}
 	}
 	return authcore.RemoteApplication{
-		Slug:           appSlug,
-		OrgID:          groupID, // controlling permission_group_id (#111)
-		Issuer:         strings.TrimSpace(iss.URI),
-		JWKSURI:        strings.TrimSpace(iss.JWKSURI),
-		Mode:           mode,
-		PublicKeys:     iss.PublicKeys,
-		Audiences:      audiences,
-		AllowedOrigins: cleanStrings(iss.AllowedOrigins),
-		Enabled:        true,
+		Slug:              appSlug,
+		PermissionGroupID: groupID,
+		Issuer:            strings.TrimSpace(iss.URI),
+		JWKSURI:           strings.TrimSpace(iss.JWKSURI),
+		Mode:              mode,
+		PublicKeys:        iss.PublicKeys,
+		Audiences:         audiences,
+		AllowedOrigins:    cleanStrings(iss.AllowedOrigins),
+		Enabled:           true,
 	}
 }
 
