@@ -1960,14 +1960,24 @@ authkit resource-scope/hook concept.
   guarantees (it should: the group IS the merchant) and rewrite those assertions accordingly.
 - Final authkit decision: rename-only, or also remove the opaque-resource/hook concept?
 
+## Status 2026-06-23 (Claude)
+openrails-side LANDED on master `5e4fb03b`, tag **v0.57.0** (pushed). openrails now runs on
+authkit v0.57.0 with the resource-scope concept hard-removed (no hook). `go build` + `go vet
+-tags=integration` green; refactored packages — controlplane, integrationharness (incl. the
+cross-merchant isolation suite), ginmw — pass integration. The 6 still-failing integration tests
+(river job-queue setup `openrails.river_job` missing, self-invoices, embed boundary) are
+PRE-EXISTING/environmental — verified to fail identically on clean v0.56.2 — not introduced here.
+The **authkit** hook removal is still OPEN (see below); openrails does not need it (works on
+v0.57.0 as-is by simply not passing resource scopes).
+
 ## Tasks
-- [ ] openrails: drop `Resources` from bootstrap + CLI + harness mints.
-- [ ] openrails: `ResolveAPIKey` resolves merchant from the permission group.
-- [ ] openrails: remove merchant-scoped-to-customer machinery; simplify `AllowsCustomer`.
-- [ ] openrails: update/remove tests that mint resource scopes or assert customer-scope denial.
-- [ ] openrails: confirm/cover the customer-key delegation path (identity from customer group + budget window).
-- [ ] authkit: rename `APIKeyResource.Kind` → `Persona` (+ reconcile with request `Persona`); decide hook/opaque-resource fate; re-tag.
-- [ ] Bump openrails' authkit pin to the new tag (if authkit changes); re-run the full integration suite to green.
-- [ ] Land openrails on master, push + tag.
+- [x] openrails: drop `Resources` from bootstrap + CLI + harness mints.
+- [x] openrails: `ResolveAPIKey` (and service-JWT / remote-app) resolve the merchant from the permission group.
+- [x] openrails: remove merchant-scoped-to-customer machinery; simplify `AllowsCustomer` (merchant-wide).
+- [x] openrails: update tests to the new model; cross-merchant isolation assertions preserved + green.
+- [x] openrails: bump authkit pin to v0.57.0; land on master, push + tag (v0.57.0).
+- [ ] openrails: confirm/cover the customer delegation path (members / remote-apps / API keys under the customer permission group, bounded by budget windows enforced OpenRails-side). No code change yet.
+- [ ] authkit (DEFERRED — supervised): REMOVE the `ResourceScopeAuthorizer` hook + opaque resource-scope concept entirely (config-driven model, no host callbacks). Not done autonomously: authkit source is under concurrent edit and this reverts the shipped v0.57.0 #121 mechanism in a SHARED lib — do it as a focused authkit PR, verify no other consumer (tensorhub) relies on resource scopes, re-tag.
+- [ ] (env, separate) fix the test environment so river migrations (`openrails.river_job`) apply, to get the full integration suite green — pre-existing, unrelated to #569.
 
 ---
