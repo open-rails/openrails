@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -27,13 +26,11 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"provider-admin-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantPaymentProvidersRead, controlplane.PermMerchantPaymentProvidersUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	readToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"provider-reader-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantPaymentProvidersRead},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	// #567: API keys are role-based. A customer-settings:read key maps to the
 	// `support` role, which has NO payment-providers perm — the faithful "lacks
@@ -44,7 +41,6 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"provider-denied-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")

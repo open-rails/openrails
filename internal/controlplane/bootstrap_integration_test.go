@@ -151,31 +151,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	apiKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
 	require.NoError(t, err)
 	require.Len(t, apiKeys, 1, "exactly one admin API key after two bootstrap runs")
-	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(apiKeys[0].Resources))
-	require.Contains(t, resourceIDs(apiKeys[0].Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
 
+	// #569 (hard cut): API-key resource scopes are gone. The bootstrapped key's
+	// merchant identity is the permission group it was minted under, so resolving it
+	// yields the merchant directly — there is no merchant resource scope to assert.
 	resolved, err := cp.ResolveAPIKey(ctx, res1.APIKeySecret)
 	require.NoError(t, err)
 	require.Equal(t, dbtest.TestMerchantID, resolved.MerchantID)
-	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
-}
-
-func resourceKinds(resources []authcore.APIKeyResource) []string {
-	out := make([]string, 0, len(resources))
-	for _, r := range resources {
-		out = append(out, r.Kind)
-	}
-	return out
-}
-
-func resourceIDs(resources []authcore.APIKeyResource, kind string) []string {
-	out := make([]string, 0, len(resources))
-	for _, r := range resources {
-		if r.Kind == kind {
-			out = append(out, r.ID)
-		}
-	}
-	return out
 }
 
 func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
@@ -216,11 +198,12 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 // TestMerchantForOwnerOrg exercised the #481/#500 org→merchant ownership link
 // (merchantForGroupID / AuthorizeMerchant). Under #567 a merchant IS its own
 // permission-group and the org↔merchant coupling is gone — API keys resolve their
-// merchant from the key's ResourceKindMerchant scope, not from an owning org. The
-// legacy helpers remain for source-compat but their org-identity premise is
-// obsolete, so this test is retired.
+// merchant from the permission group the key was minted under (#569 removed the
+// resource-scope mechanism entirely), not from an owning org. The legacy helpers
+// remain for source-compat but their org-identity premise is obsolete, so this
+// test is retired.
 func TestMerchantForOwnerOrg(t *testing.T) {
-	t.Skip("org→merchant ownership link removed under #567; merchant is resolved from the API key's merchant resource scope")
+	t.Skip("org→merchant ownership link removed under #567; merchant is resolved from the permission group the API key was minted under")
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)

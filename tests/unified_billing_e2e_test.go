@@ -43,7 +43,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -82,14 +81,13 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/merchant")
-	// Merchant-wide token (no CustomerResource): AllowsCustomer returns true for
-	// every customer under the merchant, so each test's random payer is in scope.
+	// Merchant-wide token: #569 (hard cut) removed API-key resource scopes, so a
+	// resolved merchant credential is merchant-wide — AllowsCustomer returns true
+	// for every customer under the merchant, so each test's random payer is in scope.
 	resolver := stubServiceCredentialResolver{permissions: []string{
 		controlplane.PermMerchantCustomerSettingsRead,
 		controlplane.PermMerchantCustomerSettingsUpdate,
 		controlplane.PermMerchantAdmissionsCreate,
-	}, resources: []authcore.APIKeyResource{
-		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
 	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
 

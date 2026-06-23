@@ -60,18 +60,19 @@ func doServiceCredentialRequest(r *gin.Engine, withAuth bool) *httptest.Response
 	return w
 }
 
+// TestRequireServiceCredentialCustomerScope asserts the #569 (hard cut) behavior:
+// a resolved merchant credential is MERCHANT-WIDE — the "merchant key scoped to one
+// customer" concept (an APIKeyResource customer scope) was removed, so the gate
+// passes for ANY non-nil payable subject within the credential's merchant. The
+// gate still denies a nil subject and a credential with no resolved merchant.
 func TestRequireServiceCredentialCustomerScope(t *testing.T) {
 	payer := uuid.New()
 	resolver := fakeServiceCredentialResolver{
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "operator",
-			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{controlplane.PermMerchantAdmissionsCreate},
-			Resources: []authcore.APIKeyResource{
-				controlplane.MerchantResource(dbtest.TestMerchantID),
-				controlplane.CustomerResource(payer),
-			},
+			MerchantID:    dbtest.TestMerchantID,
+			Permissions:   []string{controlplane.PermMerchantAdmissionsCreate},
 		},
 	}
 
@@ -86,6 +87,8 @@ func TestRequireServiceCredentialCustomerScope(t *testing.T) {
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
 
+	// #569: a merchant-wide credential now passes for a DIFFERENT subject too (was
+	// 403 under the removed customer-scope narrowing).
 	r = gin.New()
 	r.GET("/svc", ServiceCredentialRequired(resolver), func(c *gin.Context) {
 		if !RequireServiceCredentialCustomerScope(c, uuid.New()) {
@@ -94,8 +97,7 @@ func TestRequireServiceCredentialCustomerScope(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	w = doServiceCredentialRequest(r, true)
-	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "service_credential_customer_scope_denied")
+	require.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestServiceCredentialRequired_SucceedsForCorrectMerchantAndPermission(t *testing.T) {

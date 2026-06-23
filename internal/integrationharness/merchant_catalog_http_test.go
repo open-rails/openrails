@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -33,13 +32,11 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"catalog-writer-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	readOnlyToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-denied-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 
 	productSlug := "catalog-route-" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -82,7 +79,6 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"catalog-apply-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	applier := httpCatalogApplier{t: t, baseURL: surface.BaseURL, token: token}
 
@@ -177,13 +173,11 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"catalog-publish-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	deniedToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-publish-denied-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 
 	groupSlug := "publish-group-" + strings.ReplaceAll(uuid.NewString(), "-", "")

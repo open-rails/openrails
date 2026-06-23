@@ -122,8 +122,11 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	//    controlling permission-group id, keyed by slug) so issuer/credential authz
 	//    can map this merchant -> its group. Returns the OpenRails merchant id the
 	//    admin API key below is resource-scoped to (no default merchant; #480).
-	bootstrapMerchantID, err := c.recordOwnerOrgBySlug(ctx, slug, groupID)
-	if err != nil {
+	// Record the merchant group's permission_group_id on the directory row so
+	// issuer/credential authz can map this merchant -> its group (#567). #569: the
+	// returned merchant id is no longer needed at mint time (identity is the group,
+	// not a resource scope).
+	if _, err := c.recordOwnerOrgBySlug(ctx, slug, groupID); err != nil {
 		return nil, err
 	}
 
@@ -137,9 +140,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		}
 		if !anyLiveAPIKey(existing) {
 			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, MerchantType, slug, authcore.APIKeyMintOptions{
-				Name:      BootstrapAdminAPIKeyName,
-				Role:      MerchantRoleOwner,
-				Resources: []authcore.APIKeyResource{MerchantResource(bootstrapMerchantID)},
+				Name: BootstrapAdminAPIKeyName,
+				Role: MerchantRoleOwner,
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin API key: %w", merr)

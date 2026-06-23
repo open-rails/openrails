@@ -32,7 +32,6 @@ import (
 // public service routes without standing up a full AuthKit control plane.
 type stubServiceCredentialResolver struct {
 	permissions []string
-	resources   []authcore.APIKeyResource
 	serviceJWT  bool
 }
 
@@ -60,7 +59,6 @@ func (s stubServiceCredentialResolver) resolved() (*controlplane.ResolvedService
 		MerchantID:    dbtest.TestMerchantID,
 		MerchantSlug:  dbtest.TestMerchantSlug,
 		Permissions:   s.permissions,
-		Resources:     s.resources,
 	}, nil
 }
 
@@ -138,10 +136,6 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermMerchantCustomerSettingsUpdate,
 			controlplane.PermMerchantAdmissionsCreate,
 			controlplane.PermMerchantCustomerSettingsRead,
-		},
-		resources: []authcore.APIKeyResource{
-			controlplane.MerchantResource(dbtest.TestMerchantID),
-			controlplane.CustomerResource(tenantSubjectID),
 		},
 	}
 	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})

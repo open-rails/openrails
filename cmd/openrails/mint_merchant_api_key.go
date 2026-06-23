@@ -75,7 +75,7 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read merchant flag: %w", err)
 	}
-	merchantID, merchantSlug, merchantResource, err := cp.MerchantScope(ctx, merchantRef)
+	merchantID, merchantSlug, err := cp.MerchantScope(ctx, merchantRef)
 	if err != nil {
 		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
 	}
@@ -85,13 +85,11 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		role = controlplane.MerchantRoleOwner
 	}
 
-	// Mint under the merchant permission-group (type=merchant, ref=merchant slug),
-	// scoped to the merchant resource.
-	resources := []authcore.APIKeyResource{merchantResource}
+	// Mint under the merchant permission-group (type=merchant, ref=merchant slug).
+	// #569 (hard cut): identity is the group; no resource scope.
 	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
-		Name:      name,
-		Role:      role,
-		Resources: resources,
+		Name: name,
+		Role: role,
 	})
 	if err != nil {
 		return fmt.Errorf("mint merchant API key: %w", err)
@@ -106,6 +104,5 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		"api_key":     token,
 		"role":        role,
 		"permissions": apiKey.Permissions,
-		"resources":   apiKey.Resources,
 	})
 }

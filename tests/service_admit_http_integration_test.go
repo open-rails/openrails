@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -55,10 +54,6 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	group := router.Group("/v1/merchant")
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate},
-		resources: []authcore.APIKeyResource{
-			controlplane.MerchantResource(dbtest.TestMerchantID),
-			controlplane.CustomerResource(payerID),
-		},
 	}
 	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
 

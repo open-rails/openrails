@@ -58,14 +58,12 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"iso-a-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	b := surface.ProvisionOwnedMerchant("iso-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 
 	// One shared payer id, used against BOTH merchants.
@@ -130,7 +128,6 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 		b.OrgSlug,
 		"iso-ra-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	payer := uuid.NewString()
 
@@ -173,7 +170,6 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		dbtest.TestMerchantSlug,
 		"admit-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	payer := uuid.NewString()
 	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
@@ -252,7 +248,6 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		dbtest.TestMerchantSlug,
 		"admit-user-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	payer := uuid.NewString()
 	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
@@ -322,7 +317,6 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 		b.OrgSlug,
 		"iso-admin-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	targetUser := uuid.NewString()
 	depositCredits(t, surface.BaseURL, bToken, targetUser, 5000)
@@ -358,7 +352,6 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 		dbtest.TestMerchantSlug,
 		"iso-self-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()

@@ -11,12 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 )
 
@@ -43,18 +41,12 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	assertBalance(t, ctx, merchantBClient, customerB, 2_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	// An API key owned by merchant B's org but explicitly resource-scoped to
-	// merchant A is rejected before any handler mutation.
-	crossScopedAPIKey := standalone.MintAPIKey(
-		merchantB.OrgSlug,
-		"or502-cross-api-key",
-		nil, // #567: MintAPIKey now mints the merchant owner role (full merchant:*)
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
-	)
-	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedAPIKey, uuid.New(), 10)
-	require.Equal(t, http.StatusForbidden, status, body)
-	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
-	assertBalance(t, ctx, merchantBClient, customerB, 2_000)
+	// #569 (hard cut): API-key resource scopes are gone. A key's merchant identity
+	// IS the permission group it was minted under, so a key minted under merchant
+	// B's group can only ever act for merchant B — there is no way to mint a "B key
+	// scoped to merchant A". The former cross-scope rejection sub-case tested a
+	// mechanism that no longer exists; cross-merchant isolation is now proven by the
+	// group-based cases above and below (B's key never reaches merchant A).
 
 	// An AuthKit org with no active OpenRails merchant owns no merchant surface.
 	orphanOrg := standalone.CreateAuthKitOrg("or502-orphan")
@@ -62,7 +54,6 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 		orphanOrg,
 		"or502-orphan-API-key",
 		nil, // #567: MintAPIKey now mints the merchant owner role (full merchant:*)
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, orphanToken, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
@@ -102,16 +93,12 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	assertBalance(t, ctx, merchantBClient, customerB, 9_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	crossScopedServiceJWT := standalone.RegisterServiceJWTIssuer(
-		"or502-jwt-cross",
-		merchantB.OrgSlug,
-		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
-		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
-	)
-	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceJWT.Token, uuid.New(), 10)
-	require.Equal(t, http.StatusForbidden, status, body)
-	assertBalance(t, ctx, merchantBClient, customerB, 9_000)
-	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
+	// #569 (hard cut): a service JWT's self-asserted resources are ignored — its
+	// merchant identity is the permission group its issuer is registered under. A
+	// JWT issued for merchant B can never claim merchant A, so the former
+	// cross-scope rejection sub-case tested a mechanism that no longer exists. The
+	// service-JWT case above (own-merchant success) plus the group-based cases prove
+	// the boundary holds.
 
 	standalone.RequireProvisionMerchantForOrgRejected("or502-b2", merchantB.OrgSlug)
 }

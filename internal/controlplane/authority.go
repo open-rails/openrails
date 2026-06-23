@@ -90,7 +90,7 @@ func (c *ControlPlane) ResolveMerchantForOrg(ctx context.Context, orgSlug string
 	if ref == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	mid, mslug, _, err := c.MerchantScope(ctx, ref)
+	mid, mslug, err := c.MerchantScope(ctx, ref)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}

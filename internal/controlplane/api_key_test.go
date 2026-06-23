@@ -2,10 +2,6 @@ package controlplane
 
 import (
 	"testing"
-
-	authcore "github.com/open-rails/authkit/core"
-
-	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestResolvedServiceCredential_HasPermission(t *testing.T) {
@@ -45,33 +41,13 @@ func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 	}
 }
 
-func TestValidateAPIKeyResourcesRejectsLegacyPayableKinds(t *testing.T) {
-	legacyKinds := []string{
-		"customer_id",
-		"payer_account_id",
-		"account_id",
-		"delegated_user_id",
-		"subject_type",
-		"openrails.payer_account",
-		"openrails.account",
-		"openrails.delegated_user",
-	}
-	for _, kind := range legacyKinds {
-		t.Run(kind, func(t *testing.T) {
-			err := validateAPIKeyResources(dbtest.TestMerchantID, []authcore.APIKeyResource{
-				MerchantResource(dbtest.TestMerchantID),
-				{Kind: kind, ID: "legacy"},
-			})
-			if err != ErrServiceCredentialScopeDenied {
-				t.Fatalf("validateAPIKeyResources(%q) error = %v, want %v", kind, err, ErrServiceCredentialScopeDenied)
-			}
-		})
-	}
-}
+// #569 (hard cut): validateAPIKeyResources and the API-key resource-scope concept
+// were removed. A key's merchant identity is the permission group it was minted
+// under, so there is nothing to validate against a resource scope and the legacy
+// "reject payable-kind resources" test was deleted with that logic.
 
 // Service-JWT authority is no longer an intersection of a requested permission
 // set against a server-side grant. Registering an issuer to a merchant grants that
 // merchant full authority over its own resources; the self-signed token's claims
-// are authoritative, bounded only by validateAPIKeyResources (own-merchant
-// scope). The former intersectPermissions/intersectResources tests were removed
-// with that logic.
+// are authoritative. The former intersectPermissions/intersectResources tests were
+// removed with that logic.

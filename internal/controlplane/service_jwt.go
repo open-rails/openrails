@@ -51,25 +51,14 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, ErrServiceCredentialScopeDenied
 	}
 
-	// Self-assigned resources, defaulting to the resolved merchant when the token
-	// declares none. The wall: every resource must belong to this merchant
-	// (validateAPIKeyResources rejects any cross-merchant or unknown-kind
-	// resource).
-	resources := principal.Resources
-	if len(resources) == 0 {
-		resources = []authcore.APIKeyResource{MerchantResource(mid)}
-	}
-	if err := validateAPIKeyResources(mid, resources); err != nil {
-		return nil, err
-	}
-
+	// #569 (hard cut): merchant identity is the resolved permission group (mid);
+	// there are no resource scopes — the token's self-asserted resources are ignored.
 	return &ResolvedServiceCredential{
 		OwnerGroupID:  ownerGroupID,
 		OwnerGroupRef: ownerGroupRef,
 		MerchantID:    mid,
 		MerchantSlug:  mslug,
 		Permissions:   permissions,
-		Resources:     resources,
 	}, nil
 }
 

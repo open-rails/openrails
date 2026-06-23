@@ -164,7 +164,6 @@ func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.
 		MerchantSlug:  r.merchantSlug,
 		// Full merchant authority: the trusting embedded host owns its merchant.
 		Permissions: []string{authcore.OwnerGrant(controlplane.MerchantType)},
-		Resources:   []authcore.APIKeyResource{controlplane.MerchantResource(r.merchantID)},
 	}, nil
 }
 
@@ -382,8 +381,7 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	`, mid.UUID(), slug, groupID)
 	require.NoError(h.t, err, "insert owned merchant")
 
-	token := s.MintAPIKey(slug, slug+"-operator", nil,
-		[]authcore.APIKeyResource{controlplane.MerchantResource(mid)})
+	token := s.MintAPIKey(slug, slug+"-operator", nil)
 
 	return OwnedMerchant{
 		OrgSlug:      slug,
@@ -614,7 +612,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 // no longer a bespoke role — merchant groups have FIXED catalog roles — so it is
 // used only to pick owner vs viewer; callers needing finer scope must use a
 // catalog role directly.
-func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
+func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string) string {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "MintAPIKey requires the standalone surface")
@@ -622,9 +620,8 @@ func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string, re
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), merchantSlug)
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
-		Name:      name,
-		Role:      roleForPerms(permissions),
-		Resources: resources,
+		Name: name,
+		Role: roleForPerms(permissions),
 	})
 	require.NoError(h.t, err, "mint API key")
 	return secret
@@ -692,9 +689,8 @@ func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), dbtest.TestMerchantSlug)
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
-		Name:      "integrationharness-extra",
-		Role:      controlplane.MerchantRoleOwner,
-		Resources: []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		Name: "integrationharness-extra",
+		Role: controlplane.MerchantRoleOwner,
 	})
 	require.NoError(h.t, err, "mint fresh API key")
 	return secret

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-
-	authcore "github.com/open-rails/authkit/core"
 )
 
 // ErrRemoteApplicationNotConfigured indicates the control plane has no verifier
@@ -94,10 +92,6 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		MerchantID:    mid,
 		MerchantSlug:  mslug,
 		Permissions:   storedPerms,
-		// A remote application carries merchant-wide authority over the merchant
-		// its controlling group owns; scope it to that merchant resource so
-		// subject-scope checks (AllowsCustomer) behave like a merchant-wide credential.
-		Resources: []authcore.APIKeyResource{MerchantResource(mid)},
 	}, nil
 }
 

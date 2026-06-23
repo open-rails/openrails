@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 569
+next_id: 570
 
 ---
 
@@ -1792,3 +1792,182 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 - [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
 - [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
 - [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).
+
+# #569: API-key / remote-application minting authz — identity is the permission group; drop resource-scope hook; rename authkit APIKeyResource.Kind → Persona
+
+**Completed:** no
+
+## Trigger
+
+openrails was bumped to **authkit v0.57.0**. It compiles and unit tests pass, but ~30
+integration tests fail at harness setup with:
+
+```
+controlplane: mint initial admin API key: invalid_resource
+```
+
+Root cause: v0.57.0 shipped authkit's #121 hardening. `MintAPIKeyWithOptions` now calls
+`AuthorizeAPIKeyResources`, which **returns `invalid_resource` when a mint requests resource
+scopes but no `ResourceScopeAuthorizer` is registered** (fail-closed). openrails' control-plane
+bootstrap (and the `mint-merchant-api-key` CLI, and the test harness) mint **merchant-scoped**
+keys (`Resources: [MerchantResource(id)]`) without registering an authorizer → every mint is
+rejected → bootstrap fails → the standalone-surface tests cascade-fail.
+
+This issue records the model we want and the plan to get there. It spans **both** repos.
+
+## The model (the part that was muddied — stating it cleanly)
+
+There are TWO independent authorization dimensions when minting an API key. They were
+conflated; they are not the same thing.
+
+### 1. Actor authorization (role + permission) — authkit already does this NATIVELY. No hook.
+
+The HTTP mint route (`POST /<persona>/<slug>/api-keys`) runs, before minting
+(`authkit http/permission_group_routes.go`):
+
+```
+svc.Can(caller, "user", persona, resource_slug, route.Perm)
+```
+
+That answers "is the caller a member of this group with a role that holds the required
+permission?" — exactly the check we want, with no openrails logic and no hook. The permissions
+(authkit built-ins, auto-generated because the persona's `ManagementProfile` enables the family):
+
+- **Create / revoke a merchant API key:** `merchant:api-keys:manage`
+- **Register / delete a merchant remote application:** `merchant:remote-applications:manage`
+- (List-only: `merchant:api-keys:read` / `merchant:remote-applications:read`.)
+- Generic form: `<persona>:<family>:manage`. Held only by the merchant `owner` role
+  (`merchant:*`, auto-seeded); `support` / `viewer` do NOT include `:api-keys:manage`.
+
+Role no-escalation is also native: a minted key must reference a **catalog role** of the group,
+and its permissions are resolved FROM that role at verify time — the key can't exceed the role.
+
+**Conclusion: nothing about the actor/role/permission decision needs a hook.**
+
+### 2. Resource scope `APIKeyResource{Kind, ID}` — the ONLY thing the hook was ever for.
+
+authkit treats a resource scope's `{Kind, ID}` as **opaque strings** ("AuthKit treats resource
+kinds and IDs as opaque and never interprets their semantics itself"). Because it won't interpret
+them, it can't authorize them — hence the optional `ResourceScopeAuthorizer` hook.
+
+## The OpenRails reality (what the scopes actually are)
+
+- An API key is a way to **verify yourself when performing an action**.
+- A **merchant** key → performs merchant actions (cancel a customer's subscription, push a
+  catalog update). Its identity is the **merchant**, which under #567 **IS a permission group**
+  (`persona=merchant`, slug=merchant-slug).
+- A **customer** group does exactly ONE thing: let other principals **spend the customer's API
+  balance, bounded by budget windows**. The delegates are whatever the customer adds to its group
+  — **members (users), remote applications, and API keys**. Every delegate's identity is the
+  **customer** (`persona=customer`, id=customer-uuid), derived from the group; the **budget
+  window** is an OpenRails concept attached to the delegation and enforced OpenRails-side — it is
+  NOT an authkit resource scope.
+- **"A merchant API key scoped to a customer" does not exist and has no meaning.**
+
+So openrails' `{openrails.customer, <uuid>}` scope carried on a merchant credential
+(`AllowsCustomer`, `CustomerResource`, the customer branch of `validateAPIKeyResources`) models a
+concept that does not exist. It is exercised only by tests; **no production path ever mints a
+customer-scoped key**, so `AllowsCustomer` already returns true in production today.
+
+## The insight that de-muddies everything
+
+A "resource scope" in openrails was always just a **permission-group instance**:
+`{openrails.merchant, id}` = the merchant group; `{openrails.customer, id}` = the customer group.
+But a key is **already minted under** a permission group — so the resource scope **duplicates the
+`permission_group_id` the key already carries.** The principal's identity (merchant or customer)
+can be **derived from the group**, never re-stated as an opaque scope.
+
+This is also why authkit's `APIKeyResource.Kind` should be renamed **`Persona`**: a scope's
+"kind" is really a **persona** (the same vocabulary authkit already uses for permission-group
+types, e.g. `ResourceScopeAuthorizationRequest.Persona`). `{Persona, ID}` is a permission-group
+reference. Naming it `Kind` hid that and made the redundancy invisible.
+
+## Decision
+
+**Guiding principle (the architecture this issue locks in): authkit authorization is
+CONFIG-DRIVEN, never code-driven.** The host application (openrails, tensorhub, …) configures
+authkit with personas, per-persona configuration, and permission definitions; authkit derives
+every authorization decision from that static config at runtime. There are **NO host callbacks /
+hooks**. If config ever cannot express a needed relationship we re-evaluate then — but the
+default is that static per-persona config is sufficient. The `ResourceScopeAuthorizer` is a code
+hook and violates this principle, so it is removed.
+
+- **No hook.** openrails will not register a `ResourceScopeAuthorizer`.
+- **Identity comes from the permission group**, not a resource scope.
+- **Remove the meaningless merchant-key-scoped-to-customer machinery.**
+- **Remove the resource-scope hook from authkit entirely** (`ResourceScopeAuthorizer`,
+  `AuthorizeAPIKeyResources`, `WithResourceScopeAuthorizer`, the `MintAPIKeyWithOptions` call,
+  `ResourceScopeAuthorizationRequest`). A principal's scope IS its permission group, so nothing
+  opaque is left to authorize and the #121 concern becomes moot. The `APIKeyResource{Kind,ID}`
+  concept is renamed to `{Persona,ID}` on its way out (a permission-group reference) or removed
+  outright — either way **no host callback survives in either repo**.
+
+## Required-to-unblock vs. model-cleanup (keep these separate)
+
+**Required to make openrails green against v0.57.0 (openrails-only — authkit needs NO change for
+this):** just stop passing resource scopes on mint and resolve identity from the group. A
+zero-resource mint already passes authkit's check; the `invalid_resource` error only fires when
+resources are present without an authorizer.
+
+**Model cleanup (clarity; can be staged):** the `Kind → Persona` rename in authkit, removing the
+dead customer-on-merchant machinery in openrails, and deciding the long-term fate of the
+authkit resource-scope/hook concept.
+
+## Plan
+
+### authkit (decisive hook removal; NOT required to unblock openrails)
+- REMOVE the resource-scope authorizer hook: `ResourceScopeAuthorizer`,
+  `AuthorizeAPIKeyResources`, `WithResourceScopeAuthorizer`, the call in `MintAPIKeyWithOptions`,
+  and `ResourceScopeAuthorizationRequest`. No host callback remains.
+- The opaque `APIKeyResource` scope concept goes with it (a scope was always a permission-group
+  reference): rename `{Kind,ID}` → `{Persona,ID}` and authorize natively, or drop the resource
+  field outright. Removing it makes #121 moot (no scope to escalate).
+- CAUTION: this reworks a DB-backed subsystem (`service_token_resources`) in a SHARED library and
+  reverts the shipped v0.57.0 security mechanism — verify no other consumer relies on resource
+  scopes before deleting, cut a new authkit version, and bump openrails' pin. Because of that
+  blast radius it is sequenced AFTER the openrails-only unblock (which already removes every
+  hook/scope from openrails and gets the suite green on v0.57.0 as-is).
+
+### openrails (required to unblock + cleanup)
+- Stop passing `Resources` on every mint: `internal/controlplane/bootstrap.go`,
+  `cmd/openrails/mint_merchant_api_key.go`, `internal/integrationharness/harness.go` (`MintAPIKey`).
+- `internal/controlplane/api_key.go` `ResolveAPIKey`: derive the merchant from
+  `resolved.PermissionGroupID` via the existing `merchantForGroupID(...)`, not from
+  `merchantFromResources(...)`.
+- Remove the merchant-scoped-to-customer machinery: `CustomerResource`, the customer branch of
+  `AllowsCustomer`, customer kinds in `validateAPIKeyResources`. Simplify `AllowsCustomer` to
+  "a merchant credential may act for any subject within its merchant" (behavior-preserving — prod
+  never minted a customer scope). Call sites: `internal/http/handlers/service_credits.go`,
+  `internal/http/middleware/ginmw/service_credential.go`.
+- Update/remove the tests that mint resource-scoped keys or assert customer-scope denial via a
+  minted key — at least: `internal/controlplane/api_key_scope_test.go`,
+  `internal/http/middleware/ginmw/service_credential_test.go`,
+  `tests/service_admit_http_integration_test.go`, `tests/service_facade_parity_test.go`,
+  `internal/integrationharness/cross_merchant_isolation_test.go`,
+  `internal/integrationharness/merchant_payment_providers_http_test.go`. (Several `MintAPIKey`
+  callers already pass `nil` resources — those are unaffected.)
+- Confirm the legitimate **customer** API-key path end-to-end: a customer key is minted under the
+  customer permission group (`customer:api-keys:manage`), resolves its customer identity from the
+  group, and its spend is bounded by the budget-window/spend-delegation concept (separate from
+  authkit resource scopes). Add coverage if missing.
+
+## Open questions to resolve while implementing
+- Confirm WHERE OpenRails enforces the spend "budget window" on a customer delegation (member /
+  remote-app / API key). It is OpenRails-side and orthogonal to authkit identity — wire
+  identity-from-group and leave budget enforcement where it already lives.
+- Cross-merchant isolation tests currently lean on the merchant resource scope to prove isolation
+  — confirm that resolving the merchant from the permission group preserves the same isolation
+  guarantees (it should: the group IS the merchant) and rewrite those assertions accordingly.
+- Final authkit decision: rename-only, or also remove the opaque-resource/hook concept?
+
+## Tasks
+- [ ] openrails: drop `Resources` from bootstrap + CLI + harness mints.
+- [ ] openrails: `ResolveAPIKey` resolves merchant from the permission group.
+- [ ] openrails: remove merchant-scoped-to-customer machinery; simplify `AllowsCustomer`.
+- [ ] openrails: update/remove tests that mint resource scopes or assert customer-scope denial.
+- [ ] openrails: confirm/cover the customer-key delegation path (identity from customer group + budget window).
+- [ ] authkit: rename `APIKeyResource.Kind` → `Persona` (+ reconcile with request `Persona`); decide hook/opaque-resource fate; re-tag.
+- [ ] Bump openrails' authkit pin to the new tag (if authkit changes); re-run the full integration suite to green.
+- [ ] Land openrails on master, push + tag.
+
+---
