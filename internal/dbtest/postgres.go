@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -44,7 +45,19 @@ var (
 	sharedDSN       string
 	sharedErr       error
 	sharedContainer testcontainers.Container
+
+	// External-DB mode: the per-run database this process created via
+	// createExternalTestDatabase, and the admin DSN to drop it with on teardown.
+	// (Testcontainer mode tears down the whole container instead.)
+	sharedExternalAdminDSN string
+	sharedExternalDBName   string
 )
+
+// testDBStaleAfter bounds how long an orphaned per-run test database (left by a
+// crashed/killed process whose teardown never ran) may live before the next run
+// reaps it. Generously above the per-package test timeout so a database in
+// active use by a concurrent run is never mistaken for an orphan.
+const testDBStaleAfter = 30 * time.Minute
 
 // RunMain is the TestMain entry point for any package that uses
 // SharedPostgresDSN. It runs the package's tests and then ALWAYS terminates the
@@ -67,6 +80,13 @@ func RunMain(m *testing.M) {
 // started one. It is safe to call when no container was started (e.g. an
 // external OPENRAILS_TEST_DB_URL was used) and idempotent on repeat calls.
 func TerminateShared() {
+	// External-DB mode: drop the per-run database we created so it does not leak
+	// on the shared server (the data dir would otherwise bloat until postgres
+	// startup-fsync times out and the container OOM-kills in a crash loop).
+	if sharedExternalDBName != "" && sharedExternalAdminDSN != "" {
+		dropExternalTestDatabase(sharedExternalAdminDSN, sharedExternalDBName)
+		sharedExternalDBName, sharedExternalAdminDSN = "", ""
+	}
 	if sharedContainer == nil {
 		return
 	}
@@ -76,6 +96,66 @@ func TerminateShared() {
 		fmt.Printf("dbtest: failed to terminate shared postgres container: %v\n", err)
 	}
 	sharedContainer = nil
+}
+
+// dropExternalTestDatabase force-drops a per-run test database on the shared
+// server, terminating any lingering connections. Best-effort.
+func dropExternalTestDatabase(adminDSN, dbName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg, err := pgxpool.ParseConfig(adminDSN)
+	if err != nil {
+		return
+	}
+	cfg.ConnConfig.Config.Database = "postgres"
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return
+	}
+	defer pool.Close()
+	_, _ = pool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+}
+
+// reapStaleTestDatabases drops orphaned per-run test databases left by
+// crashed/killed prior runs whose teardown never ran — both `openrails_it_*`
+// (SharedPostgresDSN) and `openrails_bootstrap_*` (newExternalPostgresTestPool).
+// Only databases older than testDBStaleAfter are reaped, so a database in active
+// use by a concurrent run is never dropped. Best-effort: errors (incl. races
+// with another reaper) are ignored.
+func reapStaleTestDatabases(ctx context.Context, adminPool *pgxpool.Pool) {
+	rows, err := adminPool.Query(ctx, `SELECT datname FROM pg_database WHERE datname LIKE 'openrails\_it\_%' OR datname LIKE 'openrails\_bootstrap\_%'`)
+	if err != nil {
+		return
+	}
+	var stale []string
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) != nil {
+			continue
+		}
+		if testDBIsStale(name) {
+			stale = append(stale, name)
+		}
+	}
+	rows.Close()
+	for _, name := range stale {
+		_, _ = adminPool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
+	}
+}
+
+// testDBIsStale parses the trailing `_<unixnano>` from a per-run test database
+// name and reports whether it is older than testDBStaleAfter. Unparseable names
+// are treated as not stale (never reaped).
+func testDBIsStale(name string) bool {
+	i := strings.LastIndex(name, "_")
+	if i < 0 || i+1 >= len(name) {
+		return false
+	}
+	nano, err := strconv.ParseInt(name[i+1:], 10, 64)
+	if err != nil || nano <= 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, nano)) > testDBStaleAfter
 }
 
 // SharedPostgresDSN returns a DSN to a migrated Postgres shared across all
@@ -164,10 +244,17 @@ func createExternalTestDatabase(ctx context.Context, adminDSN string) (string, e
 	}
 	defer adminPool.Close()
 
+	// Reap orphaned per-run databases from crashed/killed prior runs before
+	// adding another, so the shared server's data dir cannot grow without bound.
+	reapStaleTestDatabases(ctx, adminPool)
+
 	dbName := fmt.Sprintf("openrails_it_%d_%d", os.Getpid(), time.Now().UnixNano())
 	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
 		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
 	}
+	// Record so TerminateShared (invoked by RunMain's TestMain) drops it on exit.
+	sharedExternalAdminDSN = adminDSN
+	sharedExternalDBName = dbName
 
 	// NOTE: pgxpool's Config.ConnString() returns the ORIGINAL string the
 	// config was parsed from — mutating Config.Database does not change it.
