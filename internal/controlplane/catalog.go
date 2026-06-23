@@ -120,11 +120,12 @@ func Groups() []authcore.GroupTypeDef {
 	}
 }
 
-// OpenRails permissions (#554), evaluated in the AuthKit org that owns the merchant
-// (org<->merchant 1:1). `merchant:*` is the seller hat, `customer:*` the buyer hat
-// (the org sharing its OWN balance); the owner auto-holds both via authkit
-// OwnerOwnsAppResources (#100). `/v1/me/*` self-service needs no grant. Coarse: one
-// permission per role boundary, not per route.
+// OpenRails permissions (#554). `merchant:*` is the seller hat (top-level
+// `merchant` permission-group), `customer:*` the buyer hat (top-level `customer`
+// permission-group sharing its OWN balance); the two are DISJOINT top-level
+// personas (#567 — no org↔merchant coupling), each owner auto-holds its own
+// `<persona>:*`. `/v1/me/*` self-service needs no grant. Coarse: one permission
+// per role boundary, not per route.
 const (
 	PermMerchantSettingsRead           = "merchant:settings:read"
 	PermMerchantSettingsUpdate         = "merchant:settings:update"
@@ -142,11 +143,12 @@ const (
 	PermMerchantUsageRead              = "merchant:usage:read"
 	PermMerchantRepairAlertsRead       = "merchant:repair-alerts:read"
 
-	// --- Customer treasury: org acting AS a customer/payer (NOT merchant-owner),
-	// scoped to /v1/orgs/:org_id/*. Personal balances are never delegable.
-	// `customer:` is disjoint from `merchant:*` and AuthKit `org:*`. The payer
-	// surface is split (#566) so a finance reader, a billing-mode setter, a
-	// payment-methods manager, and a credit-loader are distinct grants — coarse:
+	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
+	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Every
+	// customer can delegate spend of its balance — there is no org-vs-individual
+	// distinction. `customer:*` is a top-level persona, disjoint from `merchant:*`.
+	// The payer surface is split (#566) so a finance reader, a billing-mode setter,
+	// a payment-methods manager, and a credit-loader are distinct grants — coarse:
 	// one permission per role boundary, not per route. ---
 	PermCustomerBalanceRead          = "customer:balance:read"
 	PermCustomerBillingUpdate        = "customer:billing:update"
@@ -175,12 +177,12 @@ var catalogEntries = []Permission{
 	{Name: PermMerchantAdmissionsCreate, Description: "Merchant: admission lifecycle — admit, capture, release, and report wasted spend (machine hot path)."},
 	{Name: PermMerchantUsageRead, Description: "Merchant: read usage/revenue rollups and analytics metrics."},
 	{Name: PermMerchantRepairAlertsRead, Description: "Merchant: read ledger/provider repair alerts."},
-	{Name: PermCustomerBalanceRead, Description: "Customer: read the org's balance, transactions, usage, payments, and invoices."},
-	{Name: PermCustomerBillingUpdate, Description: "Customer: set the org's billing mode (prepaid/arrears) and self-imposed spend caps."},
-	{Name: PermCustomerPaymentMethodsUpdate, Description: "Customer: manage the org's saved payment methods and Stripe billing portal."},
-	{Name: PermCustomerCheckoutCreate, Description: "Customer: pre-pay / load credits onto the org balance via checkout."},
-	{Name: PermCustomerSpendDelegationsRead, Description: "Customer: read the org's balance-sharing (spend-delegation) policy."},
-	{Name: PermCustomerSpendDelegationsUpdate, Description: "Customer: replace the org's balance-sharing (spend-delegation) policy."},
+	{Name: PermCustomerBalanceRead, Description: "Customer: read the customer's balance, transactions, usage, payments, and invoices."},
+	{Name: PermCustomerBillingUpdate, Description: "Customer: set the customer's billing mode (prepaid/arrears) and self-imposed spend caps."},
+	{Name: PermCustomerPaymentMethodsUpdate, Description: "Customer: manage the customer's saved payment methods and Stripe billing portal."},
+	{Name: PermCustomerCheckoutCreate, Description: "Customer: pre-pay / load credits onto the customer balance via checkout."},
+	{Name: PermCustomerSpendDelegationsRead, Description: "Customer: read the customer's balance-sharing (spend-delegation) policy."},
+	{Name: PermCustomerSpendDelegationsUpdate, Description: "Customer: replace the customer's balance-sharing (spend-delegation) policy."},
 }
 
 // Catalog returns the OpenRails permission catalog as AuthKit PermissionDefs,

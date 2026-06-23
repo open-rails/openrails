@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug             TEXT NOT NULL UNIQUE,
     status           TEXT NOT NULL DEFAULT 'active',
-    owner_org_id  TEXT,
+    permission_group_id  TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
@@ -178,11 +178,11 @@ func TestProvision_Idempotent(t *testing.T) {
 
 	// #500: provisioning a merchant namespace requires the caller to provide the
 	// durable AuthKit owner org id. The lifecycle service does not mint it.
-	req := ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"}
+	req := ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"}
 	first, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "acme", first.Slug)
-	require.Equal(t, "org-acme", first.OwnerOrgID, "explicit owner-org link recorded (never auto-minted)")
+	require.Equal(t, "org-acme", first.PermissionGroupID, "explicit owner-org link recorded (never auto-minted)")
 
 	// Re-provision: same merchant id, no duplicate row (idempotent).
 	second, err := svc.Provision(ctx, req)
@@ -194,13 +194,13 @@ func TestProvision_Idempotent(t *testing.T) {
 	require.Equal(t, 1, count, "provision must not create a duplicate merchant row")
 
 	_, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
-	require.ErrorIs(t, err, ErrOwnerOrgRequired, "control-plane provisioning must not create an ownerless merchant")
+	require.ErrorIs(t, err, ErrPermissionGroupRequired, "control-plane provisioning must not create an ownerless merchant")
 }
 
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
 	require.NoError(t, err)
 
 	// Seed a merchant-owned row + a secret so the purge has something to remove.
@@ -244,7 +244,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
 	require.NoError(t, err)
 
 	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
@@ -268,7 +268,7 @@ func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
 	require.NoError(t, err)
 
 	// Resolve by slug.

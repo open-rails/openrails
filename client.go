@@ -61,7 +61,7 @@ type AdmissionClient interface {
 type PolicySyncClient interface {
 	GetMerchantSettings(ctx context.Context) (*MerchantSettings, error)
 	SetMerchantSettings(ctx context.Context, settings MerchantSettings) error
-	SetOrgSpendDelegations(ctx context.Context, orgID string, delegations []SpendDelegationInput) error
+	SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error
 }
 
 // AdminFundingClient is the small non-hot-path funding/reporting surface used
@@ -403,7 +403,7 @@ type SpendLimitWindow struct {
 }
 
 // SpendDelegationInput is one payer-owned delegation in
-// /v1/orgs/:org_id/spend-delegations.
+// /v1/customers/:customer_id/spend-delegations.
 type SpendDelegationInput struct {
 	Scope    string             `json:"scope"`
 	ScopeKey string             `json:"scope_key,omitempty"`

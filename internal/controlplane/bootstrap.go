@@ -52,7 +52,7 @@ type BootstrapOptions struct {
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
 // bootstrap merchant (#567): the merchant permission-group exists (a top-level
-// child of `root`, NO parent org, NO owner_org_id coupling), the initial admin is
+// child of `root`, NO parent org, NO owner_org coupling), the initial admin is
 // its `owner` (auto-holds `merchant:*`), the merchant directory row records the
 // merchant group's internal id, and an initial deployment admin API key is
 // optionally minted under the merchant group when none exists.
@@ -118,7 +118,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	res.BootstrapOrgID = groupID
 
 	// 2. Record the merchant group's internal id on the directory row
-	//    (openrails.merchants.owner_org_id, repurposed under #567 to hold the
+	//    (openrails.merchants.permission_group_id, repurposed under #567 to hold the
 	//    controlling permission-group id, keyed by slug) so issuer/credential authz
 	//    can map this merchant -> its group. Returns the OpenRails merchant id the
 	//    admin API key below is resource-scoped to (no default merchant; #480).
@@ -167,7 +167,7 @@ func anyLiveAPIKey(toks []authcore.APIKey) bool {
 }
 
 // recordOwnerOrgBySlug writes the merchant permission-group's internal id onto
-// the bootstrap merchant's directory row (openrails.merchants.owner_org_id,
+// the bootstrap merchant's directory row (openrails.merchants.permission_group_id,
 // repurposed under #567 to hold the controlling group id), keyed by slug, and
 // returns the resolved OpenRails merchant id. openrails.* is OpenRails-owned
 // control-plane state, so this is a direct, idempotent UPDATE ... RETURNING.
@@ -181,7 +181,7 @@ func (c *ControlPlane) recordOwnerOrgBySlug(ctx context.Context, slug, groupID s
 	var idStr string
 	err := c.pool.QueryRow(ctx, `
 		UPDATE openrails.merchants
-		   SET owner_org_id = $2,
+		   SET permission_group_id = $2,
 		       updated_at      = current_timestamp
 		 WHERE lower(slug) = lower($1)
 		   AND deleted_at IS NULL

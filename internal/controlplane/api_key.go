@@ -222,9 +222,9 @@ func (c *ControlPlane) merchantFromResources(ctx context.Context, resources []au
 	return mid, mslug, nil
 }
 
-// ErrServiceCredentialMerchantUnresolved indicates the caller's owning AuthKit org
-// owns no active OpenRails merchant (no openrails.merchants row with that
-// owner_org_id, or the merchant is deleted). Treated as an
+// ErrServiceCredentialMerchantUnresolved indicates the caller's permission group
+// backs no active OpenRails merchant (no openrails.merchants row with that
+// permission_group_id, or the merchant is deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
 var ErrServiceCredentialMerchantUnresolved = errors.New("controlplane: API key caller owns no active merchant")
 
@@ -268,46 +268,44 @@ func hasAnyResourceKind(resources []authcore.APIKeyResource, kind string) bool {
 	return false
 }
 
-// merchantForOwnerOrg resolves the OpenRails merchant a caller administers from
-// its authenticated AuthKit org uuid: the merchant whose owner_org_id equals it.
-// #527 makes owner_org_id UNIQUE on non-null, so this is a deterministic 1:1
-// lookup — one org backs at most one merchant (the org is the controlling
-// organization, the merchant the resource it controls). With that 1:1 link and
-// merchant.slug == backing-org.slug (#548), the backing org is effectively the
-// merchant's AuthKit identity, not merely its administrator. Suspended/deleted
-// merchants are rejected.
-func (c *ControlPlane) merchantForOwnerOrg(ctx context.Context, ownerOrgID string) (merchant.ID, string, error) {
-	ownerOrgID = strings.TrimSpace(ownerOrgID)
+// merchantForGroupID resolves the OpenRails merchant a caller administers from
+// its authenticated authkit permission-group id: the merchant whose
+// permission_group_id equals it (#567 — a merchant IS its own group; was the
+// #527 owner_org 1:1 lookup). With merchant.slug == group slug (#548), the group
+// is effectively the merchant's authkit identity. Suspended/deleted merchants
+// are rejected.
+func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (merchant.ID, string, error) {
+	groupID = strings.TrimSpace(groupID)
 	if c.pool == nil {
 		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
-	if ownerOrgID == "" {
+	if groupID == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	mid, slug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, ownerOrgID)
+	mid, slug, err := c.merchantDirectoryRow(ctx, `permission_group_id = $1`, groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	return mid, slug, err
 }
 
-// AuthorizeMerchant checks that the caller's AuthKit org backs the named merchant:
-// the merchant's owner_org_id must equal the caller's AuthKit org, and the
-// merchant must be active. With the 1:1 link (#527) merchantForOwnerOrg already
-// resolves the org's single merchant; AuthorizeMerchant is the explicit
-// fail-closed gate for any path that NAMES a merchant id directly.
-func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string, mid merchant.ID) error {
-	ownerOrgID = strings.TrimSpace(ownerOrgID)
+// AuthorizeMerchant checks that the caller's permission group backs the named
+// merchant: the merchant's permission_group_id must equal the caller's group id,
+// and the merchant must be active (#567; was the #527 owner_org check).
+// merchantForGroupID resolves the group's merchant; AuthorizeMerchant is the
+// explicit fail-closed gate for any path that NAMES a merchant id directly.
+func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mid merchant.ID) error {
+	groupID = strings.TrimSpace(groupID)
 	if c == nil || c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for merchant authorization")
 	}
-	if ownerOrgID == "" || mid.IsZero() {
+	if groupID == "" || mid.IsZero() {
 		return ErrServiceCredentialMerchantUnresolved
 	}
 	var owner *string
 	var status string
 	err := c.pool.QueryRow(ctx, `
-		SELECT owner_org_id, status
+		SELECT permission_group_id, status
 		  FROM openrails.merchants
 		 WHERE id = $1 AND deleted_at IS NULL
 		 LIMIT 1
@@ -318,7 +316,7 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string,
 		}
 		return err
 	}
-	if status != "active" || owner == nil || strings.TrimSpace(*owner) != ownerOrgID {
+	if status != "active" || owner == nil || strings.TrimSpace(*owner) != groupID {
 		return ErrServiceCredentialScopeDenied
 	}
 	return nil

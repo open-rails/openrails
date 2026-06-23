@@ -17,11 +17,12 @@ import (
 // and the credential profile lives on the resolved Principal.
 const SelfRoutePrefix = "/me"
 
-// OrgRoutePrefix is the canonical org-customer treasury surface. These routes
-// are for an AuthKit org acting as a paying customer over its own org balance,
-// not for merchant/seller administration and not for an individual's personal
-// balance.
-const OrgRoutePrefix = "/orgs"
+// CustomerRoutePrefix is the canonical customer-treasury surface. These routes
+// are for a customer (any payer) acting over its OWN co-managed/shared balance,
+// addressed by the customer's id — not for merchant/seller administration. The
+// caller's own balance lives on the /me surface; this surface is the universal
+// customer persona (#567, supersedes the old /orgs #566 surface).
+const CustomerRoutePrefix = "/customers"
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -123,79 +124,83 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.POST("/stripe/portal", wrap(httphandlers.CreatePortalSession))
 }
 
-// RegisterOrgTreasuryRoutes mounts the org-as-PAYER treasury surface. It is
-// deliberately separate from `/me` (personal self-service) and `/merchant`
-// (merchant/seller operations): the same AuthKit org may own a merchant and
-// also act as the paying customer for its own org balance, but those are
-// distinct permission namespaces.
+// RegisterCustomerTreasuryRoutes mounts the customer-as-PAYER treasury surface
+// (#567, supersedes the org-treasury #566 surface). It is deliberately separate
+// from `/me` (the caller's OWN self-service balance) and `/merchant`
+// (merchant/seller operations): a customer is a distinct top-level persona with
+// its own `customer:*` namespace. The customer surface is addressed by the
+// customer's id (`:customer_id`) so it serves co-managed/shared balances.
 //
-// An org is a PAYER, not a consumer (#566): it holds a balance, pre-pays, owes
-// in arrears, sets a billing mode, gets invoices, and manages payment methods —
-// but it does NOT own catalog products, entitlements, or personal subscriptions
-// (its MEMBERS consume; the org FUNDS). So this surface mirrors the payer subset
-// of `/v1/me/*` and mounts NONE of the consumer routes.
+// A customer is a PAYER, not a consumer (#566/#567): it holds a balance,
+// pre-pays, owes in arrears, sets a billing mode, gets invoices, manages payment
+// methods, and delegates spend of its balance — but it does NOT own catalog
+// products, entitlements, or personal subscriptions (its MEMBERS consume; the
+// customer FUNDS). So this surface mirrors the payer subset of `/v1/me/*` and
+// mounts NONE of the consumer routes.
 //
-// The handlers are SHARED with `/v1/me/*`: OrgTreasuryScopeRequired confirms the
-// :org_id scope and rebinds the acting payer to the org's payable subject, so the
-// same money handlers operate on the org balance — route separation, not handler
-// duplication. Every route is gated by a `customer:*` permission because the org
-// balance is a SHARED resource (unlike `/v1/me`, which is authenticated-self and
-// needs no grant).
-func RegisterOrgTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+// The handlers are SHARED with `/v1/me/*`: CustomerScopeRequired confirms the
+// :customer_id scope and rebinds the acting payer to the customer's payable
+// subject, so the same money handlers operate on the customer balance — route
+// separation, not handler duplication. Every route is gated by a `customer:*`
+// permission because the customer balance may be a SHARED resource (unlike
+// `/v1/me`, which is authenticated-self and needs no grant). Every customer can
+// delegate spend of its balance — there is no org-vs-individual distinction.
+func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(delegatedMW)
-	// Scope to :org_id and rebind the acting payer to the org's payable subject
-	// (#566) so the shared /v1/me money handlers operate on the org balance.
-	group.Use(ginmw.OrgTreasuryScopeRequired())
+	// Scope to :customer_id and rebind the acting payer to the customer's payable
+	// subject (#567) so the shared /v1/me money handlers operate on the customer
+	// balance.
+	group.Use(ginmw.CustomerScopeRequired())
 	if rt != nil && rt.DB != nil {
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	// Balance-sharing policy: how the org lets delegated invokers/roles/tiers
-	// draw on its balance (#557).
-	group.GET("/:org_id/spend-delegations",
+	// Balance-sharing policy: how the customer lets delegated invokers/roles/tiers
+	// draw on its balance (#557). Every customer can delegate spend.
+	group.GET("/:customer_id/spend-delegations",
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
-		wrap(httphandlers.GetOrgSpendDelegations),
+		wrap(httphandlers.GetCustomerSpendDelegations),
 	)
-	group.PUT("/:org_id/spend-delegations",
+	group.PUT("/:customer_id/spend-delegations",
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate),
-		wrap(httphandlers.PutOrgSpendDelegations),
+		wrap(httphandlers.PutCustomerSpendDelegations),
 	)
 
 	// Read the payer's money state: balance, ledger transactions, metered usage,
 	// payment history, and finalized invoices. `status` is intentionally NOT
 	// mounted: the only /me status handler reports subscriptions + entitlements,
-	// which are consumer concepts the org does not own; balance + settings already
-	// expose the payer's account state.
+	// which are consumer concepts the customer does not own; balance + settings
+	// already expose the payer's account state.
 	read := ginmw.RequirePermission(controlplane.PermCustomerBalanceRead)
-	group.GET("/:org_id/balance", read, wrap(httphandlers.GetMyBalance))
-	group.GET("/:org_id/transactions", read, wrap(httphandlers.GetMyAccountTransactions))
-	group.GET("/:org_id/usage", read, wrap(httphandlers.GetMyUsage))
-	group.GET("/:org_id/payments", read, wrap(httphandlers.GetUserPayments))
-	group.GET("/:org_id/invoices", read, wrap(httphandlers.GetMyInvoices))
-	group.GET("/:org_id/invoices/:id", read, wrap(httphandlers.GetMyInvoice))
+	group.GET("/:customer_id/balance", read, wrap(httphandlers.GetMyBalance))
+	group.GET("/:customer_id/transactions", read, wrap(httphandlers.GetMyAccountTransactions))
+	group.GET("/:customer_id/usage", read, wrap(httphandlers.GetMyUsage))
+	group.GET("/:customer_id/payments", read, wrap(httphandlers.GetUserPayments))
+	group.GET("/:customer_id/invoices", read, wrap(httphandlers.GetMyInvoices))
+	group.GET("/:customer_id/invoices/:id", read, wrap(httphandlers.GetMyInvoice))
 
 	// Set the payer's billing mode (prepaid|arrears) and self-imposed caps. The
 	// shared handler already refuses platform-owned policy fields on this surface.
-	group.PUT("/:org_id/settings",
+	group.PUT("/:customer_id/settings",
 		ginmw.RequirePermission(controlplane.PermCustomerBillingUpdate),
 		wrap(httphandlers.SetMyCreditAccountSettings),
 	)
 
 	// Manage the payer's saved payment methods and Stripe billing portal.
 	pmPerm := ginmw.RequirePermission(controlplane.PermCustomerPaymentMethodsUpdate)
-	group.GET("/:org_id/payment-methods", pmPerm, wrap(httphandlers.ListPaymentMethods))
-	group.POST("/:org_id/payment-methods", pmPerm, wrap(httphandlers.CreatePaymentMethod))
-	group.PUT("/:org_id/payment-methods/:id", pmPerm, wrap(httphandlers.UpdatePaymentMethod))
-	group.DELETE("/:org_id/payment-methods/:id", pmPerm, wrap(httphandlers.DeletePaymentMethod))
-	group.POST("/:org_id/stripe/portal", pmPerm, wrap(httphandlers.CreatePortalSession))
+	group.GET("/:customer_id/payment-methods", pmPerm, wrap(httphandlers.ListPaymentMethods))
+	group.POST("/:customer_id/payment-methods", pmPerm, wrap(httphandlers.CreatePaymentMethod))
+	group.PUT("/:customer_id/payment-methods/:id", pmPerm, wrap(httphandlers.UpdatePaymentMethod))
+	group.DELETE("/:customer_id/payment-methods/:id", pmPerm, wrap(httphandlers.DeletePaymentMethod))
+	group.POST("/:customer_id/stripe/portal", pmPerm, wrap(httphandlers.CreatePortalSession))
 
-	// Pre-pay / load credits onto the org balance via checkout.
+	// Pre-pay / load credits onto the customer balance via checkout.
 	checkoutPerm := ginmw.RequirePermission(controlplane.PermCustomerCheckoutCreate)
-	group.POST("/:org_id/checkout", checkoutPerm, wrap(httphandlers.CreateCheckoutSession))
-	group.GET("/:org_id/checkout/:id", checkoutPerm, wrap(httphandlers.GetCheckoutSession))
-	group.POST("/:org_id/checkout/:id/confirm", checkoutPerm, wrap(httphandlers.ConfirmCheckoutSession))
+	group.POST("/:customer_id/checkout", checkoutPerm, wrap(httphandlers.CreateCheckoutSession))
+	group.GET("/:customer_id/checkout/:id", checkoutPerm, wrap(httphandlers.GetCheckoutSession))
+	group.POST("/:customer_id/checkout/:id/confirm", checkoutPerm, wrap(httphandlers.ConfirmCheckoutSession))
 }

@@ -41,9 +41,9 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	svc, err := merchants.NewService(db.WrapPool(pool, ""), secrets)
 	require.NoError(t, err)
 
-	acme, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
+	acme, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
 	require.NoError(t, err)
-	evil, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "evil", OwnerOrgID: "org-evil"})
+	evil, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "evil", PermissionGroupID: "org-evil"})
 	require.NoError(t, err)
 	seedProviderAccount(t, pool, acme.ID.String(), "stripe", "acct_acme")
 	seedProviderAccount(t, pool, evil.ID.String(), "stripe", "acct_evil")
@@ -191,7 +191,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			slug text NOT NULL UNIQUE,
 			status text NOT NULL DEFAULT 'active',
-			owner_org_id text,
+			permission_group_id text,
 			created_at timestamptz NOT NULL DEFAULT current_timestamp,
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
 			deleted_at timestamptz

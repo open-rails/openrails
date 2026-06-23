@@ -646,11 +646,11 @@ func (c *localClient) SetMerchantSettings(ctx context.Context, settings openrail
 	return nil
 }
 
-// SetOrgSpendDelegations transcribes the org treasury spend-delegations replace
-// operation for embedded hosts.
-func (c *localClient) SetOrgSpendDelegations(ctx context.Context, orgID string, delegations []openrails.SpendDelegationInput) error {
+// SetCustomerSpendDelegations transcribes the customer treasury spend-delegations
+// replace operation for embedded hosts (#567).
+func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(orgID, "invalid org_id")
+	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
 		return err
 	}
@@ -669,7 +669,7 @@ func (c *localClient) SetOrgSpendDelegations(ctx context.Context, orgID string, 
 		})
 	}
 	if err := c.svc.ReplaceInvokerSpendLimits(ctx, payer, next); err != nil {
-		return internalErr("set org spend delegations failed")
+		return internalErr("set customer spend delegations failed")
 	}
 	return nil
 }

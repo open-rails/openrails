@@ -24,8 +24,8 @@ import (
 // target, the AuthKit (`profiles`) side is empty — it was never exported (the
 // dump is billing data only) and embedded never created it (#544). `auth recreate`
 // rebuilds the standalone auth scaffolding for every imported merchant: it creates
-// each merchant's backing AuthKit org (slug-derived), records the NEW org id on
-// `merchants.owner_org_id` (replacing any stale embedded host-org id), and
+// each merchant's permission group (slug-derived), records the NEW group id on
+// `merchants.permission_group_id` (#567; replacing any stale embedded id), and
 // optionally mints a fresh deployment admin API key per merchant. It reuses the
 // idempotent control-plane Bootstrap path, so re-running is safe.
 func newAuthCmd() *cobra.Command {

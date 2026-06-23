@@ -29,13 +29,13 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
 	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
 
-	orgGroup := e.Group(StandaloneV1Prefix + httproutes.OrgRoutePrefix)
-	httproutes.RegisterOrgTreasuryRoutes(orgGroup, s.runtime, delegatedMW)
+	customerGroup := e.Group(StandaloneV1Prefix + httproutes.CustomerRoutePrefix)
+	httproutes.RegisterCustomerTreasuryRoutes(customerGroup, s.runtime, delegatedMW)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
-	log.WithField("prefix", StandaloneV1Prefix+httproutes.OrgRoutePrefix).
-		Info("delegated org-treasury API routes registered on public handler")
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.CustomerRoutePrefix).
+		Info("delegated customer-treasury API routes registered on public handler")
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the

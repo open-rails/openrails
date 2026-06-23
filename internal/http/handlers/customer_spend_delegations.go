@@ -17,12 +17,12 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-type orgSpendDelegationsDocument struct {
-	CustomerID  string               `json:"customer_id,omitempty"`
-	Delegations []orgSpendDelegation `json:"delegations"`
+type customerSpendDelegationsDocument struct {
+	CustomerID  string                    `json:"customer_id,omitempty"`
+	Delegations []customerSpendDelegation `json:"delegations"`
 }
 
-type orgSpendDelegation struct {
+type customerSpendDelegation struct {
 	Scope      string                      `json:"scope"`
 	ScopeKey   string                      `json:"scope_key"`
 	RoleID     string                      `json:"role_id,omitempty"`
@@ -30,17 +30,18 @@ type orgSpendDelegation struct {
 	Windows    []models.BudgetWindowPolicy `json:"windows"`
 }
 
-// GetOrgSpendDelegations returns the org-customer policy for sharing the org's
-// own payable balance. The payer is forced to the resolved merchant/org id; the
-// request never accepts a customer_id, so personal user balances are not
-// delegable through this surface.
-func GetOrgSpendDelegations(r *httprequest.Request) {
-	resolved, ok := requireOrgTreasuryPrincipal(r)
+// GetCustomerSpendDelegations returns the customer policy for sharing the
+// customer's own payable balance. The payer is forced to the resolved
+// customer/merchant id; the request never accepts a body customer_id (it is
+// taken from the :customer_id path scope). Every customer can delegate spend of
+// its balance.
+func GetCustomerSpendDelegations(r *httprequest.Request) {
+	resolved, ok := requireCustomerTreasuryPrincipal(r)
 	if !ok {
 		return
 	}
 
-	store, payer, ok := orgTreasuryStore(r, resolved)
+	store, payer, ok := customerTreasuryStore(r, resolved)
 	if !ok {
 		return
 	}
@@ -49,31 +50,31 @@ func GetOrgSpendDelegations(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "spend delegation lookup failed")
 		return
 	}
-	r.SuccessJSON(orgSpendDelegationsDocument{Delegations: orgSpendDelegationsFromRows(rows)})
+	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(rows)})
 }
 
-// PutOrgSpendDelegations replaces the org-customer policy document.
-func PutOrgSpendDelegations(r *httprequest.Request) {
-	resolved, ok := requireOrgTreasuryPrincipal(r)
+// PutCustomerSpendDelegations replaces the customer policy document.
+func PutCustomerSpendDelegations(r *httprequest.Request) {
+	resolved, ok := requireCustomerTreasuryPrincipal(r)
 	if !ok {
 		return
 	}
 
-	var doc orgSpendDelegationsDocument
+	var doc customerSpendDelegationsDocument
 	if !r.BindJSON(&doc) {
 		return
 	}
 	if strings.TrimSpace(doc.CustomerID) != "" {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id is not allowed on org spend delegations")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id is not allowed in the body; it is taken from the path scope")
 		return
 	}
-	next, err := validateOrgSpendDelegations(doc.Delegations)
+	next, err := validateCustomerSpendDelegations(doc.Delegations)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	store, payer, ok := orgTreasuryStore(r, resolved)
+	store, payer, ok := customerTreasuryStore(r, resolved)
 	if !ok {
 		return
 	}
@@ -103,10 +104,10 @@ func PutOrgSpendDelegations(r *httprequest.Request) {
 		}
 	}
 
-	r.SuccessJSON(orgSpendDelegationsDocument{Delegations: orgSpendDelegationsFromRows(next)})
+	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(next)})
 }
 
-func requireOrgTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {
+func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {
 	v, ok := r.Get(ginmw.DelegatedContextKey)
 	if !ok {
 		r.ErrorJSON(http.StatusUnauthorized, "delegated principal required")
@@ -117,18 +118,18 @@ func requireOrgTreasuryPrincipal(r *httprequest.Request) (*controlplane.Resolved
 		r.ErrorJSON(http.StatusUnauthorized, "delegated principal required")
 		return nil, false
 	}
-	if !orgIDMatchesResolved(r.Param("org_id"), resolved) {
-		r.ErrorJSON(http.StatusForbidden, "org_scope_mismatch")
+	if !customerIDMatchesResolved(r.Param("customer_id"), resolved) {
+		r.ErrorJSON(http.StatusForbidden, "customer_scope_mismatch")
 		return nil, false
 	}
 	return resolved, true
 }
 
-func orgIDMatchesResolved(orgID string, resolved *controlplane.ResolvedDelegated) bool {
-	return ginmw.OrgIDMatchesDelegated(orgID, resolved)
+func customerIDMatchesResolved(customerID string, resolved *controlplane.ResolvedDelegated) bool {
+	return ginmw.CustomerIDMatchesDelegated(customerID, resolved)
 }
 
-func orgTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {
+func customerTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {
 	if r.State == nil || r.State.DB == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return nil, identity.CustomerID(uuid.Nil), false
@@ -140,7 +141,7 @@ func orgTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDel
 	return admission.NewInvokerSpendLimitStore(r.State.DB), identity.CustomerID(resolved.MerchantID.UUID()), true
 }
 
-func validateOrgSpendDelegations(in []orgSpendDelegation) ([]admission.InvokerSpendLimit, error) {
+func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]admission.InvokerSpendLimit, error) {
 	out := make([]admission.InvokerSpendLimit, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
 	for i, row := range in {
@@ -189,10 +190,10 @@ func validateOrgSpendDelegations(in []orgSpendDelegation) ([]admission.InvokerSp
 	return out, nil
 }
 
-func orgSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []orgSpendDelegation {
-	out := make([]orgSpendDelegation, 0, len(rows))
+func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []customerSpendDelegation {
+	out := make([]customerSpendDelegation, 0, len(rows))
 	for _, row := range rows {
-		delegation := orgSpendDelegation{
+		delegation := customerSpendDelegation{
 			Scope:    budgets.NormalizeScope(row.Scope),
 			ScopeKey: row.ScopeKey,
 			Windows:  row.Windows,

@@ -25,12 +25,13 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// #566 org-as-PAYER treasury surface, exercised over HTTP against a real
-// database. The org reads its OWN balance/ledger/usage/invoices, configures its
-// caps, manages payment methods, and pre-pays — all scoped to the org's payable
-// subject (the merchant/org uuid), gated by customer:* permissions, with NO
-// consumer routes mounted. The shared /v1/me money handlers operate on the org
-// balance because OrgTreasuryScopeRequired rebinds the acting payer to the org.
+// #567 customer-as-PAYER treasury surface, exercised over HTTP against a real
+// database. The customer reads its OWN balance/ledger/usage/invoices, configures
+// its caps, manages payment methods, and pre-pays — all scoped to the customer's
+// payable subject (the customer/merchant uuid), gated by customer:* permissions,
+// with NO consumer routes mounted. The shared /v1/me money handlers operate on
+// the customer balance because CustomerScopeRequired rebinds the acting payer to
+// the customer.
 
 // allCustomerTreasuryPerms is the full payer-surface grant.
 var allCustomerTreasuryPerms = []string{
@@ -42,26 +43,26 @@ var allCustomerTreasuryPerms = []string{
 	controlplane.PermCustomerSpendDelegationsUpdate,
 }
 
-// newOrgTreasuryServer mounts the org-treasury surface behind a host-seam
+// newCustomerTreasuryServer mounts the org-treasury surface behind a host-seam
 // principal carrying perms. The principal's MerchantID is always the test org;
 // subject is irrelevant on this surface (the payer is rebound to the org), so a
 // random subject proves the rebind is what scopes the balance.
-func newOrgTreasuryServer(t *testing.T, suite *TestContainerSuite, perms []string) *httptest.Server {
+func newCustomerTreasuryServer(t *testing.T, suite *TestContainerSuite, perms []string) *httptest.Server {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	ginroutes.RegisterOrgTreasuryRoutes(router.Group("/v1/orgs"), suite.App.Runtime,
+	ginroutes.RegisterCustomerTreasuryRoutes(router.Group("/v1/customers"), suite.App.Runtime,
 		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: uuid.NewString(), perms: perms}))
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-func orgPath(suffix string) string {
-	return "/v1/orgs/" + dbtest.TestMerchantSlug + suffix
+func customerPath(suffix string) string {
+	return "/v1/customers/" + dbtest.TestMerchantSlug + suffix
 }
 
-func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
+func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -73,10 +74,10 @@ func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	const currency = "EUR"
 	orgPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
 
-	srv := newOrgTreasuryServer(t, suite, allCustomerTreasuryPerms)
+	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 
 	// Baseline balance for the org payer in this currency, read over HTTP.
-	before := getOrgBalance(t, srv, currency)
+	before := getCustomerBalance(t, srv, currency)
 
 	// Org loads credits (the post-confirmation effect of a checkout pre-pay).
 	depositID := uuid.New()
@@ -92,11 +93,11 @@ func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	require.NoError(t, err)
 
 	// --- GET balance: reflects the org payer's loaded credits, NOT an individual. ---
-	require.EqualValues(t, before+deposit, getOrgBalance(t, srv, currency),
+	require.EqualValues(t, before+deposit, getCustomerBalance(t, srv, currency),
 		"org balance must reflect credits loaded onto the org payable subject")
 
 	// --- GET transactions: the newest entry is this org deposit, keyed to the org. ---
-	resp := requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath("/transactions?currency="+currency+"&limit=5"), nil)
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/transactions?currency="+currency+"&limit=5"), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	txns := decodeJSONObject(t, resp.body)
 	list, ok := txns["transactions"].([]any)
@@ -109,7 +110,7 @@ func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 
 	// --- PUT settings: the org sets self-imposed caps (billing mode stays
 	// merchant-granted — the shared handler refuses platform policy fields). ---
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodPut, orgPath("/settings"), map[string]any{
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/settings"), map[string]any{
 		"currency":            currency,
 		"max_spend_per_day":   1_000_000,
 		"max_spend_per_month": 9_000_000,
@@ -128,13 +129,13 @@ func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		"/invoices",
 		"/payment-methods",
 	} {
-		resp = requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath(p), nil)
+		resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath(p), nil)
 		require.Equal(t, http.StatusOK, resp.status, "GET %s: %s", p, resp.body)
 	}
 
 	// --- PUT + GET spend-delegations: the org's balance-sharing policy. ---
 	invoker := uuid.NewString()
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodPut, orgPath("/spend-delegations"), map[string]any{
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
 		"delegations": []map[string]any{{
 			"scope":     "invoker",
 			"scope_key": invoker,
@@ -142,19 +143,19 @@ func TestOrgTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		}},
 	})
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath("/spend-delegations"), nil)
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/spend-delegations"), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	require.Len(t, decodeDelegations(t, resp.body), 1)
 }
 
-func TestOrgTreasuryPayerSurface_PermissionSplit(t *testing.T) {
+func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
 	// A read-only finance persona: customer:balance:read ONLY.
-	srv := newOrgTreasuryServer(t, suite, []string{controlplane.PermCustomerBalanceRead})
+	srv := newCustomerTreasuryServer(t, suite, []string{controlplane.PermCustomerBalanceRead})
 
 	// Reads are allowed.
-	resp := requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath("/balance?currency=USD"), nil)
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/balance?currency=USD"), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
 	// Every write/spend route is forbidden — distinct grants, not one bundle.
@@ -168,34 +169,35 @@ func TestOrgTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},
 	}
 	for _, f := range forbidden {
-		resp = requestOrgTreasuryJSON(t, srv, f.method, orgPath(f.path), f.body)
+		resp = requestCustomerTreasuryJSON(t, srv, f.method, customerPath(f.path), f.body)
 		require.Equal(t, http.StatusForbidden, resp.status, "%s %s must require its own customer:* grant: %s", f.method, f.path, resp.body)
 	}
 }
 
-func TestOrgTreasuryPayerSurface_MerchantTokenAndCrossOrgRejected(t *testing.T) {
+func TestCustomerTreasuryPayerSurface_MerchantTokenAndCrossCustomerRejected(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
 	// Namespace separation: a merchant-only (seller hat) token holds NO customer:*
-	// grant, so it cannot reach any org-payer route.
-	merchantSrv := newOrgTreasuryServer(t, suite, []string{
+	// grant, so it cannot reach any customer-payer route.
+	merchantSrv := newCustomerTreasuryServer(t, suite, []string{
 		controlplane.PermMerchantSettingsRead,
 		controlplane.PermMerchantCatalogUpdate,
 	})
-	resp := requestOrgTreasuryJSON(t, merchantSrv, http.MethodGet, orgPath("/balance?currency=USD"), nil)
+	resp := requestCustomerTreasuryJSON(t, merchantSrv, http.MethodGet, customerPath("/balance?currency=USD"), nil)
 	require.Equal(t, http.StatusForbidden, resp.status, "merchant:* token must not reach a customer:* route: %s", resp.body)
 
-	// Cross-org: a fully-granted customer token may act ONLY on its OWN org. The
-	// host principal resolves to the test org, so a different :org_id is a 403.
-	orgSrv := newOrgTreasuryServer(t, suite, allCustomerTreasuryPerms)
-	resp = requestOrgTreasuryJSON(t, orgSrv, http.MethodGet, "/v1/orgs/"+uuid.NewString()+"/balance?currency=USD", nil)
-	require.Equal(t, http.StatusForbidden, resp.status, "cross-org access must be org_scope_mismatch: %s", resp.body)
+	// Cross-customer: a fully-granted customer token may act ONLY on its OWN
+	// balance. The host principal resolves to the test customer, so a different
+	// :customer_id is a 403.
+	customerSrv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
+	resp = requestCustomerTreasuryJSON(t, customerSrv, http.MethodGet, "/v1/customers/"+uuid.NewString()+"/balance?currency=USD", nil)
+	require.Equal(t, http.StatusForbidden, resp.status, "cross-customer access must be customer_scope_mismatch: %s", resp.body)
 }
 
-func TestOrgTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
+func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	// Full customer grant — proving the routes are ABSENT, not merely forbidden.
-	srv := newOrgTreasuryServer(t, suite, allCustomerTreasuryPerms)
+	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 
 	for _, p := range []string{
 		"/products",
@@ -204,16 +206,16 @@ func TestOrgTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 		"/subscriptions",
 		"/notifications",
 	} {
-		resp := requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath(p), nil)
+		resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath(p), nil)
 		require.Equal(t, http.StatusNotFound, resp.status, "consumer route %s must not exist on the org surface: %s", p, resp.body)
 	}
 }
 
-// TestOrgTreasuryPayer_DelegatedDrawDownE2E is the Tensorhub use-case: the org
+// TestCustomerTreasuryPayer_DelegatedDrawDownE2E is the Tensorhub use-case: the org
 // loads credits, sets a per-invoker spend-delegation window over HTTP, and a
 // delegated invoker draws the ORG balance down THROUGH that window while a
 // second invoker is independently metered (per-invoker, not pooled — #563).
-func TestOrgTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
+func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	orgPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
@@ -239,14 +241,14 @@ func TestOrgTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 			"DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", orgPayer.UUID())
 	})
 
-	srv := newOrgTreasuryServer(t, suite, allCustomerTreasuryPerms)
+	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 
 	// The org confirms its loaded balance over HTTP.
-	require.GreaterOrEqual(t, getOrgBalance(t, srv, money.DefaultCurrency), int64(1_000_000_000))
+	require.GreaterOrEqual(t, getCustomerBalance(t, srv, money.DefaultCurrency), int64(1_000_000_000))
 
 	// The org grants alice a $1000-per-day window — over HTTP, the real surface.
 	alice := "user:alice"
-	resp := requestOrgTreasuryJSON(t, srv, http.MethodPut, orgPath("/spend-delegations"), map[string]any{
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
 		"delegations": []map[string]any{{
 			"scope":     "invoker",
 			"scope_key": alice,
@@ -293,9 +295,9 @@ func TestOrgTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	require.Equal(t, admission.DenyDelegatedSpendNotAllowed, bob.DenyCode)
 }
 
-func getOrgBalance(t *testing.T, srv *httptest.Server, currency string) int64 {
+func getCustomerBalance(t *testing.T, srv *httptest.Server, currency string) int64 {
 	t.Helper()
-	resp := requestOrgTreasuryJSON(t, srv, http.MethodGet, orgPath("/balance?currency="+currency), nil)
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/balance?currency="+currency), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	body := decodeJSONObject(t, resp.body)
 	amt, ok := body["balance_amount"].(float64)

@@ -365,7 +365,7 @@ ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
 
 ### 4. Browser self-service in embedded mode (one credential)
 
-The browser-direct self-service surface (`/v1/me/*`, `/v1/orgs/:org_id/*`) exists in
+The browser-direct self-service surface (`/v1/me/*`, `/v1/customers/:customer_id/*`) exists in
 embedded mode too — authenticated by **your** credential, not a delegated token. Implement
 `billingauth.DelegatedAuthenticator`: verify the request however you like, then return the
 explicitly mapped principal:

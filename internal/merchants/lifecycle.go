@@ -22,28 +22,28 @@ const (
 
 // Merchant is the directory view of a row in openrails.merchants.
 type Merchant struct {
-	ID         merchant.ID
-	Slug       string
-	Status     MerchantStatus
-	OwnerOrgID string // AuthKit org that owns/administers this merchant namespace (#500).
+	ID                merchant.ID
+	Slug              string
+	Status            MerchantStatus
+	PermissionGroupID string // The merchant's own authkit permission-group id (#567; was owner_org_id, the #500 org link).
 }
 
 // ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
 	// Slug is the stable merchant slug (used in routes and merchant resolution).
 	Slug string `json:"slug"`
-	// OwnerOrgID is the AuthKit org uuid that owns/administers this merchant
-	// namespace (#500 ownership link, NOT identity). Required for control-plane
-	// provisioning; embedded/no-AuthKit registration uses internal/db.RegisterMerchant.
-	OwnerOrgID string `json:"owner_org_id"`
+	// PermissionGroupID is the merchant's own authkit permission-group id (#567;
+	// was the #500 owner-org link). Required for control-plane provisioning;
+	// embedded/no-AuthKit registration uses internal/db.RegisterMerchant.
+	PermissionGroupID string `json:"permission_group_id"`
 }
 
 // ErrMerchantNotFound indicates no openrails.merchants row matched.
 var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 
-// ErrOwnerOrgRequired indicates control-plane merchant provisioning tried to
-// create a merchant namespace without its durable AuthKit org owner.
-var ErrOwnerOrgRequired = errors.New("merchants: owner org required")
+// ErrPermissionGroupRequired indicates control-plane merchant provisioning
+// tried to create a merchant namespace without its authkit permission-group id.
+var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
 
 // ErrExportRequired is returned by Delete when no completed export exists for the
 // merchant (export-before-delete is enforced).
@@ -100,19 +100,19 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
-	ownerOrgID := strings.TrimSpace(req.OwnerOrgID)
-	if ownerOrgID == "" {
-		return nil, ErrOwnerOrgRequired
+	groupID := strings.TrimSpace(req.PermissionGroupID)
+	if groupID == "" {
+		return nil, ErrPermissionGroupRequired
 	}
 
 	// 1. Upsert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps the
-	//    existing row, then we re-read so provision is idempotent. The AuthKit org
-	//    owner is resolved/created by the caller and recorded here.
+	//    existing row, then we re-read so provision is idempotent. The merchant's
+	//    permission-group id is resolved/created by the caller and recorded here.
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (slug, status, owner_org_id)
+		INSERT INTO openrails.merchants (slug, status, permission_group_id)
 		VALUES ($1, 'active', NULLIF($2,''))
 		ON CONFLICT (slug) DO NOTHING
-	`, slug, ownerOrgID)
+	`, slug, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
 	}
@@ -122,16 +122,16 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 		return nil, err
 	}
 
-	// 2. Record the explicit owner-org ownership link (#500): the AuthKit org
-	//    that administers this merchant namespace. Idempotent.
+	// 2. Record the merchant's own permission-group id (#567; was the #500
+	//    owner-org link). Idempotent.
 	if _, uerr := s.pool.Exec(ctx, `
 			UPDATE openrails.merchants
-			   SET owner_org_id = $2, updated_at = current_timestamp
-			 WHERE id = $1::uuid AND owner_org_id IS DISTINCT FROM $2
-		`, t.ID.String(), ownerOrgID); uerr != nil {
-		return nil, fmt.Errorf("merchants: record owner org on merchant: %w", uerr)
+			   SET permission_group_id = $2, updated_at = current_timestamp
+			 WHERE id = $1::uuid AND permission_group_id IS DISTINCT FROM $2
+		`, t.ID.String(), groupID); uerr != nil {
+		return nil, fmt.Errorf("merchants: record permission group on merchant: %w", uerr)
 	}
-	t.OwnerOrgID = ownerOrgID
+	t.PermissionGroupID = groupID
 
 	return s.merchantBySlug(ctx, slug)
 }
@@ -183,7 +183,7 @@ func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-const merchantSelectCols = `id::text, slug, status, COALESCE(owner_org_id,'')`
+const merchantSelectCols = `id::text, slug, status, COALESCE(permission_group_id,'')`
 
 func scanMerchant(row pgx.Row) (*Merchant, error) {
 	var (
@@ -191,7 +191,7 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 		idStr  string
 		status string
 	)
-	if err := row.Scan(&idStr, &t.Slug, &status, &t.OwnerOrgID); err != nil {
+	if err := row.Scan(&idStr, &t.Slug, &status, &t.PermissionGroupID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMerchantNotFound
 		}

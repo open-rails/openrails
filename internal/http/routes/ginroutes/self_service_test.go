@@ -69,12 +69,12 @@ func newSelfRouterWithResolver(t *testing.T, resolver ginmw.DelegatedResolver) *
 	return e
 }
 
-func newOrgTreasuryRouter(t *testing.T, perms []string) *gin.Engine {
+func newCustomerTreasuryRouter(t *testing.T, perms []string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/orgs")
-	RegisterOrgTreasuryRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	group := e.Group("/v1/customers")
+	RegisterCustomerTreasuryRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
 	return e
 }
 
@@ -147,30 +147,30 @@ func TestSelfService_RejectsServiceCredential(t *testing.T) {
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }
 
-func TestOrgTreasurySpendDelegationsMountedAndGated(t *testing.T) {
-	e := newOrgTreasuryRouter(t, nil)
-	w := doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", false)
+func TestCustomerTreasurySpendDelegationsMountedAndGated(t *testing.T) {
+	e := newCustomerTreasuryRouter(t, nil)
+	w := doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 
-	e = newOrgTreasuryRouter(t, []string{controlplane.PermMerchantCustomerSettingsRead})
-	w = doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", true)
+	e = newCustomerTreasuryRouter(t, []string{controlplane.PermMerchantCustomerSettingsRead})
+	w = doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "merchant:* must not satisfy customer treasury")
 
-	e = newOrgTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsRead})
-	w = doSelf(e, http.MethodGet, "/v1/orgs/other-org/spend-delegations", true)
-	require.Equal(t, http.StatusForbidden, w.Code, "caller must be scoped to the org in the path")
+	e = newCustomerTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsRead})
+	w = doSelf(e, http.MethodGet, "/v1/customers/other-customer/spend-delegations", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "caller must be scoped to the customer in the path")
 
-	w = doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", true)
+	w = doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", true)
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	w = doSelf(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", true)
+	w = doSelf(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy update")
 }
 
-func TestOrgTreasurySpendDelegationsRejectPersonalCustomerID(t *testing.T) {
-	e := newOrgTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsUpdate})
+func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
+	e := newCustomerTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsUpdate})
 	body := `{
 		"customer_id": "11111111-1111-1111-1111-111111111111",
 		"delegations": [{
@@ -179,7 +179,7 @@ func TestOrgTreasurySpendDelegationsRejectPersonalCustomerID(t *testing.T) {
 			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
 		}]
 	}`
-	w := doSelfBearerBody(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", "delegated.jwt.token", body)
+	w := doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", "delegated.jwt.token", body)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "customer_id")
 
@@ -191,7 +191,7 @@ func TestOrgTreasurySpendDelegationsRejectPersonalCustomerID(t *testing.T) {
 			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
 		}]
 	}`
-	w = doSelfBearerBody(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", "delegated.jwt.token", body)
+	w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", "delegated.jwt.token", body)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "customer_id")
 }

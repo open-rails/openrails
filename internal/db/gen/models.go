@@ -442,11 +442,11 @@ type OpenrailsMerchant struct {
 	// Stable merchant slug used in merchant-scoped routes and resolution.
 	Slug   string
 	Status string
-	// OWNERSHIP FK to the AuthKit org that backs this merchant (#527). One merchant <-> one backing org (UNIQUE on non-null). NULL in embedded (no AuthKit). Injective, not bijective: most orgs have no merchant.
-	OwnerOrgID *string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  *time.Time
+	// The merchant's OWN authkit permission-group id (#567 — a merchant is a top-level `merchant` group, child of `root`, with no parent org; supersedes #527's owner_org_id 1:1 coupling). Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.
+	PermissionGroupID *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.

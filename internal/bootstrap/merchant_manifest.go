@@ -158,7 +158,7 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // ProvisionMerchant is the single OpenRails merchant-provisioning boundary
 // (#527). Standalone calls it with a control plane, which creates/ensures the
 // backing AuthKit org and optional issuer-as-owner before recording
-// owner_org_id. Embedded calls it with only Database, which registers an
+// permission_group_id. Embedded calls it with only Database, which registers an
 // ownerless merchant row and applies the same profile/provider-account
 // configuration path without touching AuthKit or startup bootstrap markers.
 type ProvisionMerchantRequest struct {
@@ -270,7 +270,7 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 	if cp == nil {
 		// Embedded: OpenRails runs no AuthKit, so it creates/records no backing org.
 		// The merchant's backing org is the host's AuthKit org of the SAME slug
-		// (#541 — merchant slug == org slug, 1:1); owner_org_id stays NULL here and
+		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
 		// is set only in standalone, where OpenRails owns the org.
 		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug})
 		if err != nil {
@@ -300,8 +300,8 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 		return nil, err
 	}
 	tn, err := svc.Provision(ctx, merchants.ProvisionRequest{
-		Slug:       mt.Slug,
-		OwnerOrgID: groupID,
+		Slug:              mt.Slug,
+		PermissionGroupID: groupID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: provision %q: %w", mt.Slug, err)
@@ -315,15 +315,15 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (
 		return nil, false, fmt.Errorf("merchant slug is required")
 	}
 	var (
-		id         string
-		status     string
-		ownerOrgID *string
+		id                string
+		status            string
+		permissionGroupID *string
 	)
 	err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, status, owner_org_id
+		SELECT id::text, status, permission_group_id
 		  FROM openrails.merchants
 		 WHERE slug = $1
-	`, slug).Scan(&id, &status, &ownerOrgID)
+	`, slug).Scan(&id, &status, &permissionGroupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -335,14 +335,14 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (
 		return nil, false, err
 	}
 	owner := ""
-	if ownerOrgID != nil {
-		owner = *ownerOrgID
+	if permissionGroupID != nil {
+		owner = *permissionGroupID
 	}
 	return &merchants.Merchant{
-		ID:         merchantID,
-		Slug:       slug,
-		Status:     merchants.MerchantStatus(status),
-		OwnerOrgID: owner,
+		ID:                merchantID,
+		Slug:              slug,
+		Status:            merchants.MerchantStatus(status),
+		PermissionGroupID: owner,
 	}, true, nil
 }
 

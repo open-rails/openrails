@@ -29,8 +29,8 @@ import (
 // Routes are served at the CANONICAL embedded paths, alongside the
 // NewHTTPHandler surface:
 //
-//	/billing/v1/me/*            (RegisterSelfServiceRoutes)
-//	/billing/v1/orgs/:org_id/*  (RegisterOrgTreasuryRoutes)
+//	/billing/v1/me/*                      (RegisterSelfServiceRoutes)
+//	/billing/v1/customers/:customer_id/*  (RegisterCustomerTreasuryRoutes)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
 // can route this subtree to this handler and everything else to the
@@ -100,7 +100,7 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	delegatedMW := ginmw.DelegatedPrincipalRequired(authn)
 	base := engine.Group(embedhttp.EmbeddedV1Prefix)
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
-	ginroutes.RegisterOrgTreasuryRoutes(base.Group(ginroutes.OrgRoutePrefix), rt, delegatedMW)
+	ginroutes.RegisterCustomerTreasuryRoutes(base.Group(ginroutes.CustomerRoutePrefix), rt, delegatedMW)
 
 	// OpenRails-native rate-limiting + captcha on the embedded self-service
 	// surface, matching the base NewHTTPHandler chain so an embedded

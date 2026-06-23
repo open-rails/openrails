@@ -38,7 +38,7 @@ func LooksLikeJWT(token string) bool {
 // `iss` (its registered remote_application -> assigned org roles + direct
 // permissions); the token's own self-claimed permissions/roles are IGNORED. The
 // merchant the caller administers is resolved by ROLE on the merchant's
-// owner_org_id (#481), never by an identity-equation.
+// permission_group_id (#481/#567), never by an identity-equation.
 //
 // Returns:
 //   - ErrNotRemoteApplicationToken when the token verifies but is not a

@@ -13,9 +13,10 @@ import (
 //
 //  1. No core table may reference the standalone-only AuthKit `profiles` schema.
 //     A cross-schema FK would break a standalone→embedded move (where `profiles`
-//     is absent) and couple portable billing data to auth state. The merchant↔org
-//     link is `merchants.owner_org_id`, deliberately a bare `text` column with NO
-//     FK (#544/#541) — that is the ONLY permitted cross-mode reference.
+//     is absent) and couple portable billing data to auth state. The merchant's
+//     permission-group link is `merchants.permission_group_id` (#567; was
+//     owner_org_id), deliberately a bare `text` column with NO FK (#544/#541) —
+//     that is the ONLY permitted cross-mode reference.
 //
 //  2. River job-queue tables (`river_*`) must never be created by these
 //     migrations. River is runtime/infra state, lives in `public` (#545,
@@ -47,7 +48,7 @@ func TestPortabilityInvariant(t *testing.T) {
 		sql := string(content)
 
 		if loc := authFKRe.FindString(sql); loc != "" {
-			t.Errorf("%s: foreign key into the auth schema (%q) — core billing tables must not reference `profiles`/`authkit` (#544). The only cross-mode link is merchants.owner_org_id (text, no FK).", name, loc)
+			t.Errorf("%s: foreign key into the auth schema (%q) — core billing tables must not reference `profiles`/`authkit` (#544). The only cross-mode link is merchants.permission_group_id (text, no FK).", name, loc)
 		}
 		if loc := riverTableRe.FindString(sql); loc != "" {
 			t.Errorf("%s: creates a River table (%q) — River lives in `public` and is managed by rivermigrate, never authored in OpenRails migrations (#545).", name, loc)

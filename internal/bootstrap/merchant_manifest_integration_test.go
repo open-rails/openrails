@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug                TEXT NOT NULL UNIQUE,
     status              TEXT NOT NULL DEFAULT 'active',
-    owner_org_id     TEXT,
+    permission_group_id     TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at          TIMESTAMPTZ
@@ -136,12 +136,12 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 
 	var tenantID, ownerOrgID string
 	require.NoError(t, pool.QueryRow(ctx, `
-			SELECT id::text, owner_org_id
+			SELECT id::text, permission_group_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&tenantID, &ownerOrgID))
 
-	// #567: owner_org_id now holds the merchant permission-group's internal id.
+	// #567: permission_group_id now holds the merchant permission-group's internal id.
 	groupID, err := cp.Core().ResolveGroupIDForRef(ctx, controlplane.MerchantType, "cozy-art")
 	require.NoError(t, err)
 	require.Equal(t, groupID, ownerOrgID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
@@ -149,7 +149,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
-			SELECT owner_org_id
+			SELECT permission_group_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&ownerOrgID))

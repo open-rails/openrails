@@ -23,12 +23,12 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
+func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	suite := setupTestSuite(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	ginroutes.RegisterOrgTreasuryRoutes(router.Group("/v1/orgs"), suite.App.Runtime,
+	ginroutes.RegisterCustomerTreasuryRoutes(router.Group("/v1/customers"), suite.App.Runtime,
 		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
@@ -67,10 +67,10 @@ func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 			},
 		},
 	}}
-	resp := requestOrgTreasuryJSON(t, srv, http.MethodPut, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations", firstDoc)
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", firstDoc)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodGet, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations", nil)
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	require.Len(t, decodeDelegations(t, resp.body), 3)
 
@@ -83,7 +83,7 @@ func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 			},
 		},
 	}}
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodPut, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations", secondDoc)
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", secondDoc)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -97,17 +97,17 @@ func TestOrgTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	require.Len(t, stored[0].Windows, 1)
 	require.EqualValues(t, 500, stored[0].Windows[0].Limit)
 
-	resp = requestOrgTreasuryJSON(t, srv, http.MethodPut, "/v1/orgs/"+dbtest.TestMerchantSlug+"/spend-delegations",
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations",
 		map[string]any{"customer_id": uuid.NewString(), "delegations": []map[string]any{}})
 	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
 }
 
-type orgTreasuryResponse struct {
+type customerTreasuryResponse struct {
 	status int
 	body   string
 }
 
-func requestOrgTreasuryJSON(t *testing.T, srv *httptest.Server, method, path string, body any) orgTreasuryResponse {
+func requestCustomerTreasuryJSON(t *testing.T, srv *httptest.Server, method, path string, body any) customerTreasuryResponse {
 	t.Helper()
 	var rdr io.Reader
 	if body != nil {
@@ -124,7 +124,7 @@ func requestOrgTreasuryJSON(t *testing.T, srv *httptest.Server, method, path str
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	return orgTreasuryResponse{status: resp.StatusCode, body: string(data)}
+	return customerTreasuryResponse{status: resp.StatusCode, body: string(data)}
 }
 
 func decodeDelegations(t *testing.T, body string) []any {

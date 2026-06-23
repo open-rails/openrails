@@ -18,7 +18,7 @@
 //     Boots the actual standalone gin server (internal/bootstrap/ginboot +
 //     internal/http, the same graph cmd/openrails run-server uses) with the
 //     OpenRails-owned AuthKit control plane attached, provisions the merchant via
-//     the REAL control-plane bootstrap (links owner_org_id + mints a real
+//     the REAL control-plane bootstrap (links permission_group_id + mints a real
 //     admin API key through AuthKit core), and authenticates the client
 //     with that real token. The /v1/merchant/* requests are resolved by the real
 //     ServiceCredentialRequired -> control plane ResolveAPIKey -> AuthKit core
@@ -214,7 +214,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // StartStandalone boots Server 2: the REAL standalone gin server (ginboot.NewServer
 // -> internal/http, the cmd/openrails run-server graph) over the shared Postgres +
 // Redis with the OpenRails control plane attached, then provisions the merchant
-// through the REAL control-plane bootstrap (links owner_org_id + mints a real
+// through the REAL control-plane bootstrap (links permission_group_id + mints a real
 // admin API key via AuthKit core) and returns a Surface whose client
 // authenticates with that real token. The /v1/merchant/* path is authenticated by
 // the real ServiceCredentialRequired -> ResolveAPIKey -> AuthKit core chain
@@ -232,7 +232,7 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	h.t.Helper()
 
-	// The merchant directory row must exist before bootstrap links owner_org_id
+	// The merchant directory row must exist before bootstrap links permission_group_id
 	// onto it (#480: no default merchant).
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
@@ -257,7 +257,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	h.t.Cleanup(func() { _ = app.Close(context.Background()) })
 
 	// Real control-plane bootstrap: ensures the operator AuthKit org + role, links
-	// the merchant's owner_org_id to it, and mints a REAL admin API key
+	// the merchant's permission_group_id to it, and mints a REAL admin API key
 	// scoped to the merchant — the production provisioning path (cmd/openrails
 	// run-server does the same at boot). MintInitialAPIKey returns the
 	// one-time secret we hand to the client.
@@ -377,7 +377,7 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 
 	mid := merchant.ID(uuid.New())
 	_, err := h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
 		VALUES ($1, $2, 'active', $3)
 	`, mid.UUID(), slug, groupID)
 	require.NoError(h.t, err, "insert owned merchant")
@@ -396,7 +396,7 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 
 // RequireProvisionMerchantForOrgRejected is a legacy assertion: under #527 the
 // merchant directory enforced one merchant per owner org. #567 drops that 1:1
-// coupling — owner_org_id now holds the merchant's own permission-group id, so
+// coupling — permission_group_id now holds the merchant's own permission-group id, so
 // the constraint no longer applies. Retained as a no-op-equivalent guard that
 // simply links a second merchant (which now succeeds).
 //

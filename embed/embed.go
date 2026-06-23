@@ -32,7 +32,7 @@ import (
 // credentials supplies a billingauth.DelegatedAuthenticator returning the
 // explicitly mapped {tenant, subject, permissions} principal, and the
 // standalone gin handler (pkg/embedded/gin.StandaloneHandler over Runtime.Embedded())
-// mounts /v1/me/* + /v1/orgs/* authenticated by it — no control
+// mounts /v1/me/* + /v1/customers/* authenticated by it — no control
 // plane required. For example:
 //
 //	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
@@ -149,10 +149,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	// Idempotently provision the bound merchant (a billing bucket) from the
 	// explicit embedded construction option through the same #527 merchant
 	// provisioning boundary used by standalone manifests. Embedded OpenRails runs
-	// NO AuthKit here and creates no AuthKit objects; the merchant's backing org is
-	// the host's AuthKit org of the SAME slug (#541 — merchant slug == org slug,
-	// 1:1), so OpenRails neither creates nor records it (owner_org_id stays NULL in
-	// embedded, set only in standalone where OpenRails owns the org).
+	// NO AuthKit here and creates no AuthKit objects; the merchant's permission
+	// group is the host's group of the SAME slug (#541 — merchant slug == group
+	// slug), so OpenRails neither creates nor records it (permission_group_id stays
+	// NULL in embedded, set only in standalone where OpenRails owns the group).
 	var boundMerchant merchant.ID
 	if opts.Merchant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {

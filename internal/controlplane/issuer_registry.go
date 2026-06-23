@@ -52,7 +52,7 @@ func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error)
 // act on (#567). The chain is group-based, never identity: validated `iss` ->
 // AuthKit remote_application -> its controlling permission-group id (the merchant
 // group) -> the merchant directory row whose recorded controlling group id
-// matches (`merchants.owner_org_id`, repurposed under #567 to hold the merchant
+// matches (`merchants.permission_group_id`, repurposed under #567 to hold the merchant
 // permission-group's internal id, NOT an org uuid).
 //
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, is attached
@@ -77,7 +77,7 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 	if groupID == "" {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
-	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, groupID)
+	mid, mslug, err := c.merchantDirectoryRow(ctx, `permission_group_id = $1`, groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
