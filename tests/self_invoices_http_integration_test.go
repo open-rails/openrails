@@ -59,7 +59,7 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	listBody := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 1, listBody["total"], w.Body.String())
-	rows, ok := listBody["data"].([]any)
+	rows, ok := listBody["invoices"].([]any)
 	require.True(t, ok, w.Body.String())
 	require.Len(t, rows, 1)
 	listed, ok := rows[0].(map[string]any)

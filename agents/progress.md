@@ -1960,24 +1960,29 @@ authkit resource-scope/hook concept.
   guarantees (it should: the group IS the merchant) and rewrite those assertions accordingly.
 - Final authkit decision: rename-only, or also remove the opaque-resource/hook concept?
 
-## Status 2026-06-23 (Claude)
-openrails-side LANDED on master `5e4fb03b`, tag **v0.57.0** (pushed). openrails now runs on
-authkit v0.57.0 with the resource-scope concept hard-removed (no hook). `go build` + `go vet
--tags=integration` green; refactored packages — controlplane, integrationharness (incl. the
-cross-merchant isolation suite), ginmw — pass integration. The 6 still-failing integration tests
-(river job-queue setup `openrails.river_job` missing, self-invoices, embed boundary) are
-PRE-EXISTING/environmental — verified to fail identically on clean v0.56.2 — not introduced here.
-The **authkit** hook removal is still OPEN (see below); openrails does not need it (works on
-v0.57.0 as-is by simply not passing resource scopes).
+## Status 2026-06-23 (Claude) — COMPLETE
+End state: **NO host hook in either repo**, config-driven authorization throughout, full
+integration suite GREEN.
+- **authkit v0.58.0**: `ResourceScopeAuthorizer` hook removed entirely (no host callbacks).
+  build/vet/full-suite green; committed `133a78e`, tagged `v0.58.0`, pushed.
+- **openrails v0.58.0**: resource-scope concept hard-removed (identity = permission group);
+  pinned to authkit v0.58.0; `go build`, `go vet -tags=integration`, and the full integration
+  suite all GREEN (7/7 packages incl. cross-merchant isolation). Landed on master + tag `v0.58.0`.
+
+The 6 formerly-failing integration tests were PRE-EXISTING (failed identically on clean v0.56.2)
+and are now fixed: (1) river job-queue helpers queried a stale `openrails.river_job` — River
+moved to the `public` schema (#545), helpers now use `config.RiverSchema`; (2) self-invoices test
+read the wrong list-envelope key (`data` → `invoices`); (3) embed boundary exposed a REAL product
+bug — service-JWT `intersectPermissions` used exact-match, so an owner's `merchant:*` grant didn't
+cover a concrete claimed perm → now uses `authbase.PermMatches` glob coverage (strict
+down-scoping preserved).
 
 ## Tasks
-- [x] openrails: drop `Resources` from bootstrap + CLI + harness mints.
-- [x] openrails: `ResolveAPIKey` (and service-JWT / remote-app) resolve the merchant from the permission group.
-- [x] openrails: remove merchant-scoped-to-customer machinery; simplify `AllowsCustomer` (merchant-wide).
-- [x] openrails: update tests to the new model; cross-merchant isolation assertions preserved + green.
-- [x] openrails: bump authkit pin to v0.57.0; land on master, push + tag (v0.57.0).
-- [ ] openrails: confirm/cover the customer delegation path (members / remote-apps / API keys under the customer permission group, bounded by budget windows enforced OpenRails-side). No code change yet.
-- [ ] authkit (DEFERRED — supervised): REMOVE the `ResourceScopeAuthorizer` hook + opaque resource-scope concept entirely (config-driven model, no host callbacks). Not done autonomously: authkit source is under concurrent edit and this reverts the shipped v0.57.0 #121 mechanism in a SHARED lib — do it as a focused authkit PR, verify no other consumer (tensorhub) relies on resource scopes, re-tag.
-- [ ] (env, separate) fix the test environment so river migrations (`openrails.river_job`) apply, to get the full integration suite green — pre-existing, unrelated to #569.
+- [x] openrails: drop Resources from mints; resolve merchant from the permission group (API key / service-JWT / remote-app); remove merchant-scoped-to-customer machinery; `AllowsCustomer` merchant-wide; tests updated (cross-merchant isolation preserved + green).
+- [x] authkit: REMOVE the `ResourceScopeAuthorizer` hook (config-driven authz, no host callbacks); build/vet/full-suite green; tag v0.58.0.
+- [x] openrails: bump to authkit v0.58.0; full integration suite green; land on master + tag v0.58.0.
+- [x] fix the 6 pre-existing integration failures (river schema ref; self-invoices envelope key; service-JWT glob coverage).
+- [ ] (follow-up, optional) confirm/cover the customer delegation path (members / remote-apps / API keys under the customer permission group, bounded by budget windows enforced OpenRails-side). No code change yet.
+- [ ] (follow-up) authkit still stores opaque `APIKeyResource{Kind,ID}` (now unused by openrails); rename to `{Persona,ID}` or drop entirely once confirmed no consumer (tensorhub) relies on it.
 
 ---

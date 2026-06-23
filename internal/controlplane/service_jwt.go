@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/authkit/authbase"
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 )
@@ -62,20 +63,29 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	}, nil
 }
 
-// intersectPermissions returns the elements of claimed that also appear in
-// stored. Order follows claimed so the caller gets its preferred subset.
+// intersectPermissions returns the elements of claimed that are COVERED by the
+// stored authority, under AuthKit's namespace-anchored glob semantics
+// (authbase.PermMatches). A stored grant may be a wildcard pattern — the merchant
+// `owner` role resolves to the single token `merchant:*` (#567) — so a claimed
+// concrete permission like `merchant:customer-settings:update` must be matched by
+// COVERAGE, not exact string equality, or every owner-backed service JWT is
+// wrongly denied (its stored authority is the wildcard, never the concrete perm).
+//
+// This is still strict down-scoping: a claim survives ONLY if some stored grant
+// token covers it, so a token can never widen beyond its issuer's stored grants
+// (a narrow stored grant can't cover a broader claim). Order follows claimed so
+// the caller gets its preferred subset.
 func intersectPermissions(claimed, stored []string) []string {
 	if len(stored) == 0 || len(claimed) == 0 {
 		return nil
 	}
-	grant := make(map[string]bool, len(stored))
-	for _, p := range stored {
-		grant[p] = true
-	}
 	out := make([]string, 0, len(claimed))
-	for _, p := range claimed {
-		if grant[p] {
-			out = append(out, p)
+	for _, c := range claimed {
+		for _, g := range stored {
+			if authbase.PermMatches(g, c) {
+				out = append(out, c)
+				break
+			}
 		}
 	}
 	return out
