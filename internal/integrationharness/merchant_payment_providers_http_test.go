@@ -35,10 +35,15 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 		[]string{controlplane.PermMerchantPaymentProvidersRead},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
+	// #567: API keys are role-based. A customer-settings:read key maps to the
+	// `support` role, which has NO payment-providers perm — the faithful "lacks
+	// payment-provider access" principal under the fixed catalog roles (there is
+	// no role holding catalog:read in isolation; catalog:read would widen to
+	// viewer, which does carry payment-providers:read).
 	deniedToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"provider-denied-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead},
+		[]string{controlplane.PermMerchantCustomerSettingsRead},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 

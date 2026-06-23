@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for migratekit
+	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -71,6 +72,12 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 	`)
 	require.NoError(t, err)
 
+	// #567: openrails migrations have cross-schema FKs/triggers into AuthKit's
+	// `profiles` schema, so apply AuthKit migrations first (same order as the
+	// production migrate.RunPostgres stack). Applying the openrails FS alone fails.
+	authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
+	require.NoError(t, err)
+	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").ApplyMigrations(ctx, authMigrations))
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	m := migratekit.NewPostgres(sqlDB, "openrails")

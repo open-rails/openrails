@@ -630,19 +630,57 @@ func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string, re
 	return secret
 }
 
-// roleForPerms picks a merchant catalog role for a requested permission set:
-// `viewer` when every requested perm is a merchant read, else `owner`. Empty/nil
-// defaults to `owner` (full merchant authority).
+// roleForPerms maps a requested permission set onto one of the merchant's FIXED
+// catalog roles (owner/support/viewer; #567 — API keys are role-based, authkit
+// dropped per-key perms in #95). Rules: empty -> owner; ANY write (non-:read)
+// perm -> owner (writes imply broad service authority); an all-reads set -> the
+// NARROWEST catalog role whose perms cover every requested read (support before
+// viewer), else owner. Narrowest-covering is what lets a customer-settings:read
+// key be denied catalog (-> support, which lacks catalog:read) instead of being
+// widened to viewer.
 func roleForPerms(perms []string) string {
 	if len(perms) == 0 {
 		return controlplane.MerchantRoleOwner
 	}
 	for _, p := range perms {
-		if !strings.HasPrefix(p, controlplane.MerchantType+":") || !strings.HasSuffix(p, ":read") {
+		if !strings.HasSuffix(p, ":read") {
 			return controlplane.MerchantRoleOwner
 		}
 	}
-	return controlplane.MerchantRoleViewer
+	cat := merchantRoleCatalog()
+	for _, role := range []string{controlplane.MerchantRoleSupport, controlplane.MerchantRoleViewer} {
+		if permsCovered(cat[role], perms) {
+			return role
+		}
+	}
+	return controlplane.MerchantRoleOwner
+}
+
+// merchantRoleCatalog maps each declared merchant catalog role to its permission set.
+func merchantRoleCatalog() map[string][]string {
+	out := map[string][]string{}
+	for _, gt := range controlplane.Groups() {
+		if gt.Name == controlplane.MerchantType {
+			for _, r := range gt.Roles {
+				out[r.Name] = r.Permissions
+			}
+		}
+	}
+	return out
+}
+
+// permsCovered reports whether every requested perm is in have.
+func permsCovered(have, want []string) bool {
+	set := make(map[string]bool, len(have))
+	for _, h := range have {
+		set[h] = true
+	}
+	for _, w := range want {
+		if !set[w] {
+			return false
+		}
+	}
+	return true
 }
 
 // mintFreshAPIKey mints a new real admin API key under the test merchant group,

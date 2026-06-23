@@ -71,9 +71,19 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 
 	// #567: authorize by the remote_application's controlling permission-group.
 	// The validated `iss` -> remote_application -> its merchant group resolves the
-	// merchant; authority is the principal's STORED group-role perms (Permissions),
-	// never the token's self-claims.
-	mid, mslug, groupID, groupRef, _, err := c.merchantForIssuer(ctx, cl.Issuer)
+	// merchant; authority is the principal's STORED group-role perms, never the
+	// token's self-claims.
+	mid, mslug, groupID, groupRef, raID, err := c.merchantForIssuer(ctx, cl.Issuer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve the remote_application's STORED authority LIVE from its member roles
+	// on the controlling merchant group — never the token's self-asserted
+	// `permissions` claim (which is ignored). A principal with no stored role has
+	// no authority even if its token claims perms (the self-JWT cross-merchant
+	// isolation guarantee).
+	storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +93,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		OwnerGroupRef: groupRef,
 		MerchantID:    mid,
 		MerchantSlug:  mslug,
-		Permissions:   append([]string(nil), cl.Permissions...),
+		Permissions:   storedPerms,
 		// A remote application carries merchant-wide authority over the merchant
 		// its controlling group owns; scope it to that merchant resource so
 		// subject-scope checks (AllowsCustomer) behave like a merchant-wide credential.

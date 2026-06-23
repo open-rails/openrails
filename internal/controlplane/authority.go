@@ -39,6 +39,42 @@ func (c *ControlPlane) HasAdminPermission(ctx context.Context, merchantRef, user
 	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, MerchantType, ref, strings.TrimSpace(perm))
 }
 
+// ErrMerchantAmbiguous is returned by MerchantForUser when a user is a member of
+// more than one merchant group: the active merchant cannot be inferred from
+// membership alone and the caller must present an explicit merchant selector.
+var ErrMerchantAmbiguous = errors.New("controlplane: user belongs to multiple merchants")
+
+// MerchantForUser resolves the merchant a user session is acting on from the
+// user's LIVE merchant-group membership (#567: a user access token carries no
+// org/merchant claim, so /v1/merchant routes resolve the merchant from the
+// permission-group the user belongs to). Returns the merchant slug (the group's
+// resource ref) when the user is a member of exactly one merchant group, "" when
+// the user belongs to none, or ErrMerchantAmbiguous when more than one.
+func (c *ControlPlane) MerchantForUser(ctx context.Context, userID string) (string, error) {
+	if c == nil || c.Core() == nil {
+		return "", ErrNoControlPlane
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", nil
+	}
+	memberships, err := c.Core().ListSubjectGroups(ctx, userID, authcore.SubjectKindUser)
+	if err != nil {
+		return "", err
+	}
+	var ref string
+	for _, m := range memberships {
+		if m.Persona != MerchantType || strings.TrimSpace(m.ResourceRef) == "" {
+			continue
+		}
+		if ref != "" && !strings.EqualFold(ref, m.ResourceRef) {
+			return "", ErrMerchantAmbiguous
+		}
+		ref = m.ResourceRef
+	}
+	return ref, nil
+}
+
 // ResolveMerchantForOrg resolves a merchant by its reference (the merchant slug,
 // the merchant group's resource ref). Route auth uses it after a live merchant
 // permission check so user-session merchant routes pin the same merchant context

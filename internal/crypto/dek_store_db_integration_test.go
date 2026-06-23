@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
+	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -66,6 +67,13 @@ func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 		CREATE EXTENSION IF NOT EXISTS btree_gist;
 	`)
 	require.NoError(t, err)
+	// openrails migrations have cross-schema FKs/triggers into AuthKit's
+	// `profiles` schema (#567), so apply the AuthKit migrations first — the same
+	// order the production migrate.RunPostgres stack uses. Applying the openrails
+	// FS alone fails ("profiles.* / openrails.money_settings does not exist").
+	authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
+	require.NoError(t, err)
+	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").ApplyMigrations(ctx, authMigrations))
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	require.NoError(t, migratekit.NewPostgres(sqlDB, "openrails").ApplyMigrations(ctx, migrations))

@@ -75,6 +75,13 @@ type merchantOrgResolver interface {
 	ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error)
 }
 
+// merchantUserResolver resolves the merchant a user session is acting on from
+// the user's merchant-group membership. User access tokens carry no merchant
+// claim under #567, so /v1/merchant routes infer it from membership.
+type merchantUserResolver interface {
+	MerchantForUser(ctx context.Context, userID string) (string, error)
+}
+
 // requiredMW builds the neutral "authentication required" middleware for the
 // embedded surface. It authenticates via opts.Authenticator, aborts 401 on
 // failure, and pins the resulting UserContext on the request context (the single
@@ -331,6 +338,22 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			if opts.AdminPermissionChecker == nil {
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
+			}
+			// #567: a user access token carries no merchant claim (uc.Org is empty);
+			// resolve the merchant the session is acting on from the user's
+			// merchant-group membership, then gate + pin context against THAT merchant.
+			if strings.TrimSpace(uc.Org) == "" {
+				resolver, ok := opts.AdminPermissionChecker.(merchantUserResolver)
+				if !ok {
+					r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
+					return
+				}
+				ref, rerr := resolver.MerchantForUser(r.Request.Context(), uc.UserID)
+				if rerr != nil || strings.TrimSpace(ref) == "" {
+					r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
+					return
+				}
+				uc.Org = ref
 			}
 			allowed, err := opts.AdminPermissionChecker.HasAdminPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
 			if err != nil {

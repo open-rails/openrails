@@ -183,8 +183,14 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	const adminUser = "00000000-0000-0000-0000-0000000000aa"
-	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
+	// #567: a subject_kind='user' role assignment requires a real profiles.users
+	// row (authkit v0.50.0 trg_group_assignment_subject_fk trigger). Create the
+	// admin as a real user before bootstrapping it as the merchant owner — the
+	// production path bootstraps an already-registered admin.
+	adminRec, err := cp.Core().CreateUser(ctx, "bootstrap-admin@example.test", "bootstrapadmin")
+	require.NoError(t, err)
+	adminUser := adminRec.ID
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
 
 	// #567: the merchant `owner` (auto-holds `merchant:*`) effectively holds every
