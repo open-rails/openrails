@@ -15,13 +15,13 @@ import (
 const createEntitlementFeature = `-- name: CreateEntitlementFeature :one
 
 INSERT INTO openrails.entitlement_features (
-    id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at
+    id, merchant_id, lookup_key, name, metadata, created_at, updated_at
 ) VALUES (
-    COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    $5::uuid,
-    $1, $2, $3, $6,
-    COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    COALESCE(NULLIF($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
+    $4::uuid,
+    $1, $2, $5,
+    COALESCE(NULLIF($6::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 RETURNING id
 `
@@ -29,7 +29,6 @@ RETURNING id
 type CreateEntitlementFeatureParams struct {
 	LookupKey  string
 	Name       string
-	Active     bool
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Metadata   []byte
@@ -42,7 +41,6 @@ func (q *Queries) CreateEntitlementFeature(ctx context.Context, arg CreateEntitl
 	row := q.db.QueryRow(ctx, createEntitlementFeature,
 		arg.LookupKey,
 		arg.Name,
-		arg.Active,
 		arg.ID,
 		arg.MerchantID,
 		arg.Metadata,
@@ -114,7 +112,7 @@ func (q *Queries) DeleteProductEntitlementFeature(ctx context.Context, arg Delet
 }
 
 const getEntitlementFeatureByID = `-- name: GetEntitlementFeatureByID :one
-SELECT id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
+SELECT id, merchant_id, lookup_key, name, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.id = $1 AND ef.merchant_id = $2
 `
 
@@ -131,7 +129,6 @@ func (q *Queries) GetEntitlementFeatureByID(ctx context.Context, arg GetEntitlem
 		&i.MerchantID,
 		&i.LookupKey,
 		&i.Name,
-		&i.Active,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -140,7 +137,7 @@ func (q *Queries) GetEntitlementFeatureByID(ctx context.Context, arg GetEntitlem
 }
 
 const getEntitlementFeatureByLookupKey = `-- name: GetEntitlementFeatureByLookupKey :one
-SELECT id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
+SELECT id, merchant_id, lookup_key, name, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.lookup_key = $1 AND ef.merchant_id = $2
 `
 
@@ -157,7 +154,6 @@ func (q *Queries) GetEntitlementFeatureByLookupKey(ctx context.Context, arg GetE
 		&i.MerchantID,
 		&i.LookupKey,
 		&i.Name,
-		&i.Active,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -192,7 +188,7 @@ func (q *Queries) GetProductEntitlementFeatureByID(ctx context.Context, arg GetP
 }
 
 const listEntitlementFeatures = `-- name: ListEntitlementFeatures :many
-SELECT id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
+SELECT id, merchant_id, lookup_key, name, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.merchant_id = $1
 ORDER BY ef.created_at DESC
 `
@@ -211,7 +207,6 @@ func (q *Queries) ListEntitlementFeatures(ctx context.Context, merchantID uuid.U
 			&i.MerchantID,
 			&i.LookupKey,
 			&i.Name,
-			&i.Active,
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -227,7 +222,7 @@ func (q *Queries) ListEntitlementFeatures(ctx context.Context, merchantID uuid.U
 }
 
 const listEntitlementFeaturesByLookupKeys = `-- name: ListEntitlementFeaturesByLookupKeys :many
-SELECT id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
+SELECT id, merchant_id, lookup_key, name, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.merchant_id = $1
   AND ef.lookup_key = ANY($2::text[])
 `
@@ -251,7 +246,6 @@ func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg L
 			&i.MerchantID,
 			&i.LookupKey,
 			&i.Name,
-			&i.Active,
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -267,7 +261,7 @@ func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg L
 }
 
 const listProductEntitlementFeatures = `-- name: ListProductEntitlementFeatures :many
-SELECT pef.id, pef.merchant_id, pef.product_id, pef.entitlement_feature_id, pef.duration_days, pef.metadata, pef.created_at, pef.updated_at, ef.id, ef.merchant_id, ef.lookup_key, ef.name, ef.active, ef.metadata, ef.created_at, ef.updated_at
+SELECT pef.id, pef.merchant_id, pef.product_id, pef.entitlement_feature_id, pef.duration_days, pef.metadata, pef.created_at, pef.updated_at, ef.id, ef.merchant_id, ef.lookup_key, ef.name, ef.metadata, ef.created_at, ef.updated_at
 FROM openrails.product_entitlement_features pef
 JOIN openrails.entitlement_features ef ON ef.id = pef.entitlement_feature_id
 WHERE pef.product_id = $1 AND pef.merchant_id = $2
@@ -306,7 +300,6 @@ func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListPr
 			&i.OpenrailsEntitlementFeature.MerchantID,
 			&i.OpenrailsEntitlementFeature.LookupKey,
 			&i.OpenrailsEntitlementFeature.Name,
-			&i.OpenrailsEntitlementFeature.Active,
 			&i.OpenrailsEntitlementFeature.Metadata,
 			&i.OpenrailsEntitlementFeature.CreatedAt,
 			&i.OpenrailsEntitlementFeature.UpdatedAt,
@@ -324,16 +317,14 @@ func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListPr
 const updateEntitlementFeature = `-- name: UpdateEntitlementFeature :execrows
 UPDATE openrails.entitlement_features ef SET
     name = $2,
-    active = $3,
-    metadata = $4,
-    updated_at = $5
-WHERE ef.id = $1 AND ef.merchant_id = $6
+    metadata = $3,
+    updated_at = $4
+WHERE ef.id = $1 AND ef.merchant_id = $5
 `
 
 type UpdateEntitlementFeatureParams struct {
 	ID         uuid.UUID
 	Name       string
-	Active     bool
 	Metadata   []byte
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
@@ -343,7 +334,6 @@ func (q *Queries) UpdateEntitlementFeature(ctx context.Context, arg UpdateEntitl
 	result, err := q.db.Exec(ctx, updateEntitlementFeature,
 		arg.ID,
 		arg.Name,
-		arg.Active,
 		arg.Metadata,
 		arg.UpdatedAt,
 		arg.MerchantID,

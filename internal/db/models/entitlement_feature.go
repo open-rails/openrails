@@ -22,7 +22,6 @@ type EntitlementFeature struct {
 
 	LookupKey string         `json:"lookup_key"`
 	Name      string         `json:"name"`
-	Active    bool           `json:"active"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`

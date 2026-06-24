@@ -48,7 +48,6 @@ func (s *FeatureService) now() time.Time {
 type CreateFeatureParams struct {
 	LookupKey string
 	Name      string
-	Active    *bool
 	Metadata  map[string]any
 }
 
@@ -65,15 +64,10 @@ func (s *FeatureService) CreateFeature(ctx context.Context, p CreateFeatureParam
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	active := true
-	if p.Active != nil {
-		active = *p.Active
-	}
 	now := s.now()
 	f := &models.EntitlementFeature{
 		LookupKey: lookupKey,
 		Name:      name,
-		Active:    active,
 		Metadata:  p.Metadata,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -103,11 +97,10 @@ func (s *FeatureService) GetFeature(ctx context.Context, id uuid.UUID) (*models.
 // UpdateFeatureParams is the input for updating a feature's mutable fields.
 type UpdateFeatureParams struct {
 	Name     *string
-	Active   *bool
 	Metadata map[string]any
 }
 
-// UpdateFeature applies name/active/metadata changes to an existing feature.
+// UpdateFeature applies name/metadata changes to an existing feature.
 func (s *FeatureService) UpdateFeature(ctx context.Context, id uuid.UUID, p UpdateFeatureParams) (*models.EntitlementFeature, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("feature service not initialized")
@@ -122,9 +115,6 @@ func (s *FeatureService) UpdateFeature(ctx context.Context, id uuid.UUID, p Upda
 			return nil, fmt.Errorf("name cannot be empty")
 		}
 		f.Name = name
-	}
-	if p.Active != nil {
-		f.Active = *p.Active
 	}
 	if p.Metadata != nil {
 		f.Metadata = p.Metadata

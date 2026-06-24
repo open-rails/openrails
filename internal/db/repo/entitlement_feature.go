@@ -43,7 +43,6 @@ func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.Entit
 		MerchantID: f.MerchantID,
 		LookupKey:  f.LookupKey,
 		Name:       f.Name,
-		Active:     f.Active,
 		CreatedAt:  f.CreatedAt,
 		UpdatedAt:  f.UpdatedAt,
 	}
@@ -87,7 +86,6 @@ func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.En
 		MerchantID: f.MerchantID,
 		LookupKey:  f.LookupKey,
 		Name:       f.Name,
-		Active:     f.Active,
 		Metadata:   meta,
 		CreatedAt:  f.CreatedAt,
 		UpdatedAt:  f.UpdatedAt,
@@ -99,7 +97,7 @@ func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.En
 	return nil
 }
 
-// UpdateFeature updates a feature's mutable fields (name, active, metadata).
+// UpdateFeature updates a feature's mutable fields (name, metadata).
 func (r *EntitlementFeatureRepo) UpdateFeature(ctx context.Context, f *models.EntitlementFeature) error {
 	meta, err := toJSONB(f.Metadata)
 	if err != nil {
@@ -112,7 +110,6 @@ func (r *EntitlementFeatureRepo) UpdateFeature(ctx context.Context, f *models.En
 	rows, err := r.db.Gen(ctx).UpdateEntitlementFeature(ctx, gen.UpdateEntitlementFeatureParams{
 		ID:         f.ID,
 		Name:       f.Name,
-		Active:     f.Active,
 		Metadata:   meta,
 		UpdatedAt:  updateTimestamp(f.UpdatedAt),
 		MerchantID: tid,

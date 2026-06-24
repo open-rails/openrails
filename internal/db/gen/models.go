@@ -256,7 +256,6 @@ type OpenrailsEntitlementFeature struct {
 	MerchantID uuid.UUID
 	LookupKey  string
 	Name       string
-	Active     bool
 	Metadata   []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time

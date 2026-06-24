@@ -2,11 +2,11 @@
 
 -- name: CreateEntitlementFeature :one
 INSERT INTO openrails.entitlement_features (
-    id, merchant_id, lookup_key, name, active, metadata, created_at, updated_at
+    id, merchant_id, lookup_key, name, metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
     sqlc.arg(merchant_id)::uuid,
-    $1, $2, $3, sqlc.narg(metadata),
+    $1, $2, sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
@@ -15,7 +15,6 @@ RETURNING id;
 -- name: UpdateEntitlementFeature :execrows
 UPDATE openrails.entitlement_features ef SET
     name = $2,
-    active = $3,
     metadata = sqlc.narg(metadata),
     updated_at = sqlc.arg(updated_at)
 WHERE ef.id = $1 AND ef.merchant_id = sqlc.arg(merchant_id);

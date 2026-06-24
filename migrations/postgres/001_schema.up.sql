@@ -312,7 +312,6 @@ CREATE TABLE openrails.entitlement_features (
     merchant_id uuid NOT NULL,
     lookup_key text NOT NULL,
     name text NOT NULL,
-    active boolean DEFAULT true NOT NULL,
     metadata jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
