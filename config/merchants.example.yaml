@@ -24,7 +24,6 @@ merchants:
     issuer:
       uri: https://local-stack.example
       jwks_uri: https://local-stack.example/.well-known/jwks.json
-      audiences: [openrails]
       allowed_origins:
         - https://local-stack.example
 

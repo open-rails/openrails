@@ -86,8 +86,6 @@ type ManifestIssuer struct {
 	JWKSURI string `yaml:"jwks_uri,omitempty"`
 	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI.
 	PublicKeys []authcore.RemoteAppKey `yaml:"public_keys,omitempty"`
-	// Audiences the issuer's tokens must carry (defaults to ["openrails"]).
-	Audiences []string `yaml:"audiences,omitempty"`
 	// AllowedOrigins is the browser Origin allow-list for delegated requests.
 	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
 	// Slug overrides the remote_application slug (defaults to "<merchant>-app").
@@ -926,10 +924,6 @@ func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *Manife
 	if len(iss.PublicKeys) > 0 {
 		mode = authcore.RemoteAppModeStatic
 	}
-	audiences := cleanStrings(iss.Audiences)
-	if len(audiences) == 0 {
-		audiences = []string{"openrails"}
-	}
 	return authcore.RemoteApplication{
 		Slug:              appSlug,
 		PermissionGroupID: groupID,
@@ -937,7 +931,6 @@ func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *Manife
 		JWKSURI:           strings.TrimSpace(iss.JWKSURI),
 		Mode:              mode,
 		PublicKeys:        iss.PublicKeys,
-		Audiences:         audiences,
 		AllowedOrigins:    cleanStrings(iss.AllowedOrigins),
 		Enabled:           true,
 	}

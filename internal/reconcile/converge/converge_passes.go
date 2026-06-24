@@ -38,36 +38,21 @@ type derivePass struct{ e *ConvergeEngine }
 
 func (*derivePass) Plane() string { return "DERIVE" }
 func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// DERIVE is inherently per-customer (grants belong to a customer). A
-	// customer-scoped Converge checks that one customer; a merchant-scoped
-	// Converge (the sweep) fans out over every customer holding a grant. The
-	// per-subscription scope has no extra DERIVE beyond its customer, so it
-	// defers to the customer.
-	if scope.Customer != nil {
-		return p.runForCustomer(ctx, scope, *scope.Customer)
-	}
-	if scope.Subscription != nil {
+	// DERIVE belongs to a customer (grants belong to a customer). A customer-scoped
+	// Converge checks that one customer; the merchant-scoped sweep checks every
+	// grant in ONE set query per check (#575 — `customer` nil), not one query per
+	// grant-holder. Per-subscription scope has no extra DERIVE beyond its customer,
+	// so it defers to the customer-scope run.
+	if scope.Customer == nil && scope.Subscription != nil {
 		return nil, nil // subscription-scope DERIVE rides on its customer-scope run
 	}
-	customers, err := p.e.DB.Gen(ctx).ListCustomerIDsWithGrants(ctx, scope.Merchant.UUID())
-	if err != nil {
-		return nil, fmt.Errorf("derive: enumerate customers with grants: %w", err)
-	}
-	var out []ConvergeFinding
-	for i := range customers {
-		f, err := p.runForCustomer(ctx, scope, customers[i])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, f...)
-	}
-	return out, nil
+	return p.runScope(ctx, scope, scope.Customer) // nil customer => merchant-wide sweep
 }
 
-// runForCustomer runs the DERIVE checks for a single customer (the unit of
-// derivation). Both the inline customer-scoped path and the merchant-wide sweep
-// funnel through here, so the checks can never diverge between the two.
-func (p *derivePass) runForCustomer(ctx context.Context, scope Scope, customer uuid.UUID) ([]ConvergeFinding, error) {
+// runScope runs the DERIVE checks for one customer (`customer` non-nil) or the
+// whole merchant (`customer` nil — the sweep). Both paths funnel through the same
+// set queries, so the checks can never diverge between inline and sweep.
+func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.UUID) ([]ConvergeFinding, error) {
 	// derive.grant_effect.missing — every live grant has its derived effect
 	// (entitlement windows / credit deposit). Repair = MaterializeGrant (#514,
 	// idempotent). The remaining DERIVE checks (grant.*, grant_effect.mismatch)

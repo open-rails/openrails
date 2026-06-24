@@ -30,7 +30,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
 
 	customerGroup := e.Group(StandaloneV1Prefix + httproutes.CustomerRoutePrefix)
-	httproutes.RegisterCustomerTreasuryRoutes(customerGroup, s.runtime, delegatedMW)
+	httproutes.RegisterCustomerTreasuryRoutes(customerGroup, s.runtime, delegatedMW, ginmw.EnsureCustomerPermissionGroup(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")

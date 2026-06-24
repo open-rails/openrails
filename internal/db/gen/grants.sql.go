@@ -529,11 +529,86 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 	return items, nil
 }
 
-const listLiveGrantsWithRefundedPaymentByCustomer = `-- name: ListLiveGrantsWithRefundedPaymentByCustomer :many
+const listLiveGrantsMissingEffects = `-- name: ListLiveGrantsMissingEffects :many
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND (
+    (g.kind = 'entitlement' AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+                 COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb)) AS feat
+        WHERE NOT EXISTS (
+            SELECT 1 FROM openrails.entitlements e
+            WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
+              AND e.entitlement = feat AND e.deleted_at IS NULL)))
+    OR
+    (g.kind = 'credit' AND NOT EXISTS (
+        SELECT 1 FROM openrails.ledger_transfers lt
+        WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
+  )
+ORDER BY g.created_at
+`
+
+type ListLiveGrantsMissingEffectsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
+
+// #511/#575 DERIVE `derive.grant_effect.missing` as a single set query: live
+// (un-terminated) entitlement/credit grants whose derived effect is NOT fully
+// materialized. Mirrors the Go isMaterialized exactly — entitlement: some spec
+// feature has no entitlement row (deleted_at IS NULL, revoked rows still count as
+// materialized); credit: no #512 deposit transfer. ownership has no effect (never
+// flagged). customer_id nullable: NULL = merchant-wide sweep. Repair =
+// MaterializeGrant (idempotent), so re-running converges to empty.
+func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLiveGrantsMissingEffectsParams) ([]OpenrailsGrant, error) {
+	rows, err := q.db.Query(ctx, listLiveGrantsMissingEffects, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsGrant
+	for rows.Next() {
+		var i OpenrailsGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Kind,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.Event,
+			&i.SupersedesID,
+			&i.SpecSnapshot,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Amount,
+			&i.Currency,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiveGrantsWithRefundedPayment = `-- name: ListLiveGrantsWithRefundedPayment :many
 SELECT g.id, g.kind, g.payment_id
 FROM openrails.grants g
 WHERE g.merchant_id = $1::uuid
-  AND g.customer_id = $2::uuid
+  AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
   AND g.payment_id IS NOT NULL
   AND NOT EXISTS (
@@ -547,12 +622,12 @@ WHERE g.merchant_id = $1::uuid
 ORDER BY g.id
 `
 
-type ListLiveGrantsWithRefundedPaymentByCustomerParams struct {
+type ListLiveGrantsWithRefundedPaymentParams struct {
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+	CustomerID *uuid.UUID
 }
 
-type ListLiveGrantsWithRefundedPaymentByCustomerRow struct {
+type ListLiveGrantsWithRefundedPaymentRow struct {
 	ID        uuid.UUID
 	Kind      string
 	PaymentID *uuid.UUID
@@ -563,15 +638,16 @@ type ListLiveGrantsWithRefundedPaymentByCustomerRow struct {
 // back, access is still live). Surface-only ADMIN: a refund that intentionally
 // keeps access (goodwill) is legitimate, so an operator decides; the source
 // (refund) is a PRESENT recorded fact, so this is NOT confirmed-absence-gated.
-func (q *Queries) ListLiveGrantsWithRefundedPaymentByCustomer(ctx context.Context, arg ListLiveGrantsWithRefundedPaymentByCustomerParams) ([]ListLiveGrantsWithRefundedPaymentByCustomerRow, error) {
-	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPaymentByCustomer, arg.MerchantID, arg.CustomerID)
+// customer_id is nullable (#575): NULL = merchant-wide sweep.
+func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg ListLiveGrantsWithRefundedPaymentParams) ([]ListLiveGrantsWithRefundedPaymentRow, error) {
+	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPayment, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListLiveGrantsWithRefundedPaymentByCustomerRow
+	var items []ListLiveGrantsWithRefundedPaymentRow
 	for rows.Next() {
-		var i ListLiveGrantsWithRefundedPaymentByCustomerRow
+		var i ListLiveGrantsWithRefundedPaymentRow
 		if err := rows.Scan(&i.ID, &i.Kind, &i.PaymentID); err != nil {
 			return nil, err
 		}
@@ -759,13 +835,13 @@ func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendable
 	return items, nil
 }
 
-const listUngrantedGrantablePaymentsByCustomer = `-- name: ListUngrantedGrantablePaymentsByCustomer :many
+const listUngrantedGrantablePayments = `-- name: ListUngrantedGrantablePayments :many
 SELECT p.id, p.amount, p.currency
 FROM openrails.payments p
 JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
-  AND p.customer_id = $2::uuid
+  AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
@@ -781,12 +857,12 @@ WHERE p.merchant_id = $1::uuid
 ORDER BY p.id
 `
 
-type ListUngrantedGrantablePaymentsByCustomerParams struct {
+type ListUngrantedGrantablePaymentsParams struct {
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+	CustomerID *uuid.UUID
 }
 
-type ListUngrantedGrantablePaymentsByCustomerRow struct {
+type ListUngrantedGrantablePaymentsRow struct {
 	ID       uuid.UUID
 	Amount   int64
 	Currency string
@@ -802,16 +878,94 @@ type ListUngrantedGrantablePaymentsByCustomerRow struct {
 // refund rows are negative-amount (amount > 0 excludes them); a refunded purchase
 // still has its `grant` event (existence, not liveness), so it is not flagged.
 // Surface-only ADMIN: auto-granting re-runs derive-1 (owned by the purchase path).
-func (q *Queries) ListUngrantedGrantablePaymentsByCustomer(ctx context.Context, arg ListUngrantedGrantablePaymentsByCustomerParams) ([]ListUngrantedGrantablePaymentsByCustomerRow, error) {
-	rows, err := q.db.Query(ctx, listUngrantedGrantablePaymentsByCustomer, arg.MerchantID, arg.CustomerID)
+// customer_id is nullable (#575): the inline customer-scoped path passes it (fast
+// indexed seek); the merchant-wide convergence sweep passes NULL (one anti-join
+// over the whole merchant instead of one query per grant-holder).
+func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUngrantedGrantablePaymentsParams) ([]ListUngrantedGrantablePaymentsRow, error) {
+	rows, err := q.db.Query(ctx, listUngrantedGrantablePayments, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListUngrantedGrantablePaymentsByCustomerRow
+	var items []ListUngrantedGrantablePaymentsRow
 	for rows.Next() {
-		var i ListUngrantedGrantablePaymentsByCustomerRow
+		var i ListUngrantedGrantablePaymentsRow
 		if err := rows.Scan(&i.ID, &i.Amount, &i.Currency); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnretractedTerminations = `-- name: ListUnretractedTerminations :many
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
+  AND g.event = 'grant'
+  AND EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND (
+    (g.kind = 'entitlement' AND EXISTS (
+        SELECT 1 FROM openrails.entitlements e
+        WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
+          AND e.revoked_at IS NULL AND e.deleted_at IS NULL))
+    OR
+    (g.kind = 'credit' AND (
+        g.amount - COALESCE((
+            SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+            WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
+              AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
+        ), 0)) > 0)
+  )
+ORDER BY g.created_at
+`
+
+type ListUnretractedTerminationsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
+
+// #511/#575 DERIVE `derive.grant_effect.excess` as a single set query: TERMINATED
+// grants whose derived effect is still live (a revoke/expire recorded but its
+// retraction never propagated). Mirrors Go IsGrantTerminated + effectStillLive —
+// entitlement: a non-revoked, non-deleted entitlement row; credit: lot remainder
+// (amount − spend/expire/revoke transfers) > 0. customer_id nullable: NULL =
+// merchant-wide sweep. Repair = MaterializeGrant (retracts) — idempotent.
+func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnretractedTerminationsParams) ([]OpenrailsGrant, error) {
+	rows, err := q.db.Query(ctx, listUnretractedTerminations, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsGrant
+	for rows.Next() {
+		var i OpenrailsGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Kind,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.Event,
+			&i.SupersedesID,
+			&i.SpecSnapshot,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Amount,
+			&i.Currency,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

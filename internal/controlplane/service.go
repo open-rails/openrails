@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -166,7 +167,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		},
 	}
 
-	authSvc, err := authhttp.NewServer(coreCfg, pool)
+	var cp2 *ControlPlane
+	authSvc, err := authhttp.NewServer(coreCfg, pool,
+		authhttp.WithPermissionGroupAuthorizer(func(r *http.Request, subjectID, persona, instanceSlug, perm string) (bool, error) {
+			if cp2 == nil {
+				return false, errors.New("controlplane: permission-group authorizer unavailable")
+			}
+			return cp2.AuthorizePermissionGroupRoute(r.Context(), subjectID, persona, instanceSlug, perm)
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
@@ -189,7 +198,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// namespace-glob matcher on every credential type (#565).
 	delegatedVerifier.WithService(authSvc.Core())
 
-	cp2 := &ControlPlane{
+	cp2 = &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
 		hosted:             options.hosted,

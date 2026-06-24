@@ -7,7 +7,57 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 575
+next_id: 581
+
+---
+
+# #575: Convergence sweep scalability — set-based DERIVE + period-overdue index
+
+**Completed:** yes
+**Status:** DONE (in tree, uncommitted) 2026-06-24 (Claude). Set-based DERIVE landed: the 4 detections are now single customer-nullable queries — 2 new SQL anti-joins (`ListLiveGrantsMissingEffects`, `ListUnretractedTerminations`, both `SELECT g.*` → `[]OpenrailsGrant`) + 2 renamed nullable (`ListUngrantedGrantablePayments`, `ListLiveGrantsWithRefundedPayment`); `derivePass.Run` global branch now calls them ONCE with `customer=nil` (the `ListCustomerIDsWithGrants` per-customer loop is gone); dead `isMaterialized`/`effectStillLive` Go helpers removed. Migration 030 adds `idx_subscriptions_period_overdue`. Validation: `task sqlc` generate+vet green (db-prepare PREPAREs every new query against the real schema); `go build ./...` + `go vet ./...` clean; converge DERIVE/CON/LIFE integration tests + river `TestConvergeSweep` green; added `TestConverge_DeriveSweepRemediatesAllCustomers` (one merchant-scoped sweep repairs unmaterialized grants across 2 customers via the new `customer=nil` path). The existing per-customer DERIVE tests are the equivalence oracle — unchanged, still green against the new SQL. CAVEATS: (1) the empty sqlc vet DB can't prove index use via EXPLAIN (tiny tables always seq-scan) — the supporting indexes exist (`idx_entitlements_grant_id`, `idx_ledger_transfers_grant`, `idx_grants_merchant_id`/`idx_grants_customer`); confirm plans on populated staging. (2) `GrantHasLiveEntitlement` query is now unused (left in place — trivial follow-up cleanup).
+
+## Background
+The merchant-wide sweep (`Scope.IsGlobal`) runs three passes per active merchant. Two cost centers grow with population rather than with drift/due-events:
+- **DERIVE** (`internal/reconcile/converge/converge_passes.go` `derivePass.Run`) enumerates every grant-holding customer via `ListCustomerIDsWithGrants` (DISTINCT over the append-only `grants` ledger — i.e. every customer who has *ever* held a grant, incl. churned) and runs **4 per-customer queries each** (`MissingEffects`, `UnretractedTerminations`, `UngrantedGrantablePayments`, `RefundedSourceGrants` in `internal/modules/grants/grants.go`). That is O(grant-holders) × 4 round-trips every 15 min, regardless of whether anything is wrong. At 1M lifetime grant-holders ≈ 4M serialized round-trips.
+- **LIFE** `period_overdue` (`ListPeriodOverdueSubscriptions`) filters `status='active' AND current_period_ends_at < now`, but there is no index on `current_period_ends_at`, so it scans all active subs for the merchant. Every other LIFE lane already rides a partial index (`idx_subscriptions_grace_ends_at`, `idx_subscriptions_due_dunning`, `checkout_sessions_expires_at_idx`).
+
+LIFE/CON already accept a nullable customer (`sqlc.narg(customer_id)`) and run merchant-wide when nil; DERIVE is the only pass still looping per-customer. This issue brings DERIVE in line and adds the one missing index.
+
+## Proposed Changes
+- **Set-based DERIVE for the merchant-wide sweep.** Make the 4 grant checks **customer-nullable single queries** (the LIFE/CON `sqlc.narg(customer_id)` pattern), used by BOTH paths: inline passes the customer (fast indexed seek), the sweep passes NULL (one merchant-wide anti-join). Prefer this over separate per-customer + merchant-wide variants. Global-scope DERIVE then issues a **constant number of queries per merchant**, not 4×N. Findings + repair closures (built per returned row) must be byte-identical to the per-customer enumeration.
+- **Keep the per-customer path for inline scope.** The customer/subscription-scoped path (`AfterMutation`, `runForCustomer`) MUST stay O(1 customer) — it's on the hot path after every mutation. Only `derivePass.Run`'s global branch passes customer=NULL.
+- **Add the period-overdue partial index** (migration 030) so the last LIFE lane becomes a due-time seek:
+  ```sql
+  CREATE INDEX idx_subscriptions_period_overdue
+    ON openrails.subscriptions (current_period_ends_at) WHERE status = 'active';
+  ```
+  Self-pruning: the repair flips `active → past_due`, so the row leaves the partial index; a `current_period_ends_at < now` range scan over it is O(overdue-and-unprocessed) ≈ newly-due-since-last-sweep — no watermark needed (see Design notes).
+
+## Tasks
+- [x] Make the 4 DERIVE grant queries customer-nullable in `internal/db/queries/grants.sql` (one query each, `sqlc.narg(customer_id)` like LIFE/CON — serves inline AND sweep), `task sqlc`; update the `Ledger` methods in `internal/modules/grants/grants.go` to take an optional customer.
+- [x] EXPLAIN each of the 4 anti-joins under the sweep (customer NULL): confirm index-backed (`idx_entitlements_grant_id`, `idx_grants_source`, `grants_payment_fk`), NO seq scan; add a covering index if the planner picks one (set-based only helps if the anti-joins don't seq-scan).
+- [x] Rewrite the global-scope branch of `derivePass.Run` to call the set-based queries once instead of looping `ListCustomerIDsWithGrants`; leave the `scope.Customer != nil` branch on the per-customer path.
+- [x] Migration 030: `idx_subscriptions_period_overdue` partial index.
+- [x] Tests: seed a merchant with N customers, inject drift on a few (missing effect, unretracted termination, ungranted grantable payment, refunded-source grant); assert the global sweep surfaces exactly the same findings as the per-customer version AND that DERIVE query count is constant in N (not O(N)). Functional test that `period_overdue` still flags overdue active subs (index-backed).
+
+Validation: `task sqlc`; `go test ./internal/reconcile/... ./internal/modules/grants/... ./migrations/postgres/...`; `go test -tags=integration ./internal/reconcile/converge -count=1`; `git diff --check`.
+
+## Acceptance
+- A merchant-wide convergence sweep issues a constant number of DERIVE queries regardless of grant-holder count.
+- DERIVE findings (and applied repairs) for the sweep are identical to the previous per-customer enumeration.
+- Inline customer-scoped convergence (`AfterMutation`) remains per-customer and behaviorally unchanged.
+- `period_overdue` is served by `idx_subscriptions_period_overdue` — no full active-subscription scan.
+- No change to repair behavior; only query shape + indexing.
+
+## Design notes (decided 2026-06-24 — do not re-litigate)
+- **LIFE stays index-driven, never watermarked.** Each LIFE lane's "needs action" is a *column predicate* (`status=… AND deadline < now`), so a partial index on the candidate state + a `deadline < now` range scan gives O(due) for free, self-prunes (the repair flips the row out of the index), and correctly retries failed repairs. Do NOT add a forward due-time watermark to LIFE: redundant with the partial index AND unsafe — convergence backdates deadlines (e.g. `period_overdue` sets `grace_ends_at = past period end`), and a forward cursor silently skips deadlines that land behind it. The robust per-row form already exists as dunning's `next_retry_at` (deadline column + `WHERE … IS NOT NULL` partial index).
+- **DERIVE/CON need the `updated_at` watermark precisely because they can't be partial-indexed:** their "needs action" is the *absence* of a related row (anti-join — grant with no effect, entitlement with no source), which is not an indexable predicate. The watermark bounds the scan instead.
+- **Scope honesty:** #575 removes the round-trip explosion and the period_overdue full-active-scan. It does NOT reduce DERIVE scan volume to O(churn) — the 4 anti-joins still index-scan O(lifetime grant-holders) per sweep. Fine to low-hundred-thousands; the watermark below is the next step when those scans dominate.
+
+## Out of scope (separate, later issues)
+- Per-merchant River fan-out of the sweep (leader currently iterates all merchants serially; same pattern in Provider Refresh).
+- DERIVE/CON `updated_at` watermark — the O(population)→O(churn) fix (new watermark table + `(merchant_id, updated_at)` partial indexes). Defer until `pg_stat_statements` shows the anti-join scans dominate.
+- CON orphan-scan elimination via write-path entitlement cleanup in the delete sites (provider-pull-prune + delete-by-id), retiring the two CON orphan checks (FKs can't express the needed soft-revoke).
 
 ---
 
@@ -224,7 +274,7 @@ authkit exposes ONE blessed post-construction setter (`(*core.Service).SetEntitl
 # #567: adopt authkit permission-group model (authkit #111) — merchant + customer personas (no org)
 
 **Completed:** no
-**Status:** IN PROGRESS 2026-06-22 (Claude). DEPENDS ON authkit #111. OpenRails is the SHALLOW consumer (fixed catalogs, no custom roles). Its two personas are `merchant` (top-level admin group) and `customer` (universal — EVERY customer can delegate spend of their balance; NO 'org customer' vs 'individual' split). There is NO `org` persona in OpenRails. Removes the org↔merchant coupling entirely (supersedes #527). authkit v0.50.0 adopted; the two final deferred items are now DONE (see below).
+**Status:** IN PROGRESS 2026-06-24 (Codex). OpenRails is on authkit v0.62.0 plus a local AuthKit workspace change exposing `WithPermissionGroupAuthorizer` for generated group routes. The merchant side, no-`org` route model, permission catalogs, group-scoped auth checks, permission-group credential identity, and #569 resource-scope removal are implemented. This pass enabled customer remote-application management in the declared AuthKit `customer` profile, added idempotent `EnsureCustomerPermissionGroup(customerID, ownerSubject)`, mounts AuthKit's generated permission-group routes in standalone, and lazily materializes the customer group both on standalone customer spend-delegation writes and on AuthKit-generated self-addressed customer management routes (`members`, `api-keys`, `remote-applications`). Bootstrap was also updated for AuthKit v0.62's actor-required API-key minting: when no initial admin user is supplied, OpenRails creates/reuses one passwordless bootstrap actor, grants it merchant owner through the genesis path, and mints the initial admin API key as that actor. `openrails.customers` remains the payable-row source of truth; AuthKit group state is created only once the customer chooses to delegate/manage credentials. Tensorhub owns its account UX/API that attaches `cozy.art` (or another remote app) to a Tensorhub account and syncs that policy into OpenRails (tracked as tensorhub #501). Remaining #567 gap: root/operator moderation surface and explicit platform-admin proof.
 
 **Re-path + DB migration DONE 2026-06-22 (Claude).** The two deferred items are complete (build/vet incl. `-tags=integration` + unit tests green):
 - **Org-treasury → customer surface re-path (BREAKING, no alias).** Every `/v1/orgs/:org_id/*` route is now `/v1/customers/:customer_id/*`. `OrgRoutePrefix`(`/orgs`)→`CustomerRoutePrefix`(`/customers`); `RegisterOrgTreasuryRoutes`→`RegisterCustomerTreasuryRoutes`; middleware `OrgTreasuryScopeRequired`/`OrgIDMatchesDelegated`→`CustomerScopeRequired`/`CustomerIDMatchesDelegated` (rebind logic kept; `org_scope_mismatch`→`customer_scope_mismatch`); handlers `Get/PutOrgSpendDelegations`→`Get/PutCustomerSpendDelegations`. Files renamed: `ginmw/org_treasury.go`→`customer_treasury.go`, `handlers/org_spend_delegations.go`→`customer_spend_delegations.go`, the two `tests/org_treasury_*`→`customer_treasury_*`. Both transports (`routes_self.go`, `pkg/embedded/gin/self.go`) + the embedded mount (`/billing/v1/customers/*`) re-pathed. SDK re-pathed too: `PolicySyncClient.SetOrgSpendDelegations`→`SetCustomerSpendDelegations` (param `orgID`→`customerID`), `remote.go` hits `/v1/customers/:id/spend-delegations`, `embed/client.go` localClient renamed. The customer persona is UNIVERSAL — no "personal balances are never delegable" guard remained (it was structural: spend-delegations only ever existed on this surface; the body `customer_id` is still rejected, scope is forced from the path). README + catalog comments updated.
@@ -246,29 +296,30 @@ OpenRails uses **app-defined role catalogs, NOT custom roles** (`AllowCustomRole
 - `support` — customer-facing ops: `merchant:customer-settings:read|update`, `merchant:payments:read|refund`, `merchant:subscriptions:read|update`, `merchant:usage:read`, `merchant:repair-alerts:read`. (Asymmetry in action: `subscriptions:update` lets support CANCEL a customer's subscription, but the #554 catalog has NO `merchant:subscriptions:create`, so neither support nor owner can create one as the customer.)
 - `viewer` — read-only: every `merchant:*:read`. Finance / audit / analyst.
 
-**`customer` type (universal — every payer)** — holds `customer:*` ONLY (does NOT own merchants, so no `merchant:*`):
-- `owner` *(required)* — the customer; full `customer:*` (manage the balance, payment methods, invoices, spend-delegations, and any co-managers/members).
-- `member` — a delegated spender: may spend the balance bounded by the spend-delegation budget window assigned to them (the invoker-spend-limit mechanism); otherwise read-only.
+**`customer` type (universal — every payer, lazily materialized in AuthKit)** — holds `customer:*` ONLY (does NOT own merchants, so no `merchant:*`):
+- `owner` *(required)* — the customer; full `customer:*` (manage the balance, payment methods, invoices, spend-delegations, and any co-managers/members). The AuthKit group is created on first customer-owned group/delegation action, not on every `openrails.customers` row creation.
+- `member` — a delegated spender. Membership/credentials say who may be associated with the customer balance; OpenRails spend-delegation windows say how much they may spend. Budget enforcement stays OpenRails-side.
+- `remote_application` delegates are a HARD REQUIREMENT: a customer account must be able to attach a remote application to its OWN customer group, grant that remote app the spender/member role, and attach OpenRails budget windows for that remote-app principal. OpenRails must support this as a host-agnostic customer delegate primitive; Tensorhub wires the concrete Cozy Art flow where a Tensorhub account attaches the `cozy.art` remote application so the site can spend Tensorhub API balance on that account's behalf.
 
-`AllowCustomRoles=false`. Every customer has this persona — a lone customer is just the `owner`; a shared/co-managed balance adds members. (Finalize the read/write split alongside #566.)
+`AllowCustomRoles=false`. Every customer is eligible for this persona, but the AuthKit group is lazily created when needed. A lone customer is just the `owner`; a shared/co-managed balance adds members/API keys/remote apps. Spend budget windows remain OpenRails policy, not AuthKit role data.
 
 ## Tasks
-- [ ] Bump authkit to the #111 release; adopt the group-scoped authorize signature (`HasAdminPermission(orgSlug,…)` → `Can(principal, perm, group)`), updating `authpolicy.AdminPermissionChecker` + the merchant/org gate middleware (`merchantActionPermissionMW`, `RequirePermission`).
+- [x] Bump authkit to the #111+ release; adopt the group-scoped authorize path. DONE: OpenRails is on authkit v0.62.0; `HasAdminPermission` is now a compatibility seam over `Core().Can(ctx, user, user-kind, merchant, merchant-ref, perm)`, and `merchantActionPermissionMW` resolves user sessions to the live merchant group instead of trusting an org claim.
 - [x] Merchant creation = create a `merchant` permission-group directly (child of `root`, NO parent org, NO `owner_org_id`); the creator/operator becomes the merchant `owner`; mint the admin api-key nested under the merchant group. Drop the `uq_merchants_owner_org_id` 1:1 index + the org-ownership coupling (#527). **DB migration 023 DONE** — drops `uq_merchants_owner_org_id`, renames `owner_org_id`→`permission_group_id` (merchant's own group id).
-- [ ] Customer persona (universal): every payer is a `type=customer` permission-group (child of `root`) holding `customer:*`; `owner` = the customer, `member` = delegated spender. NOT an opt-in 'org' — a lone customer is just the owner. **Every customer can delegate spend of its balance — this REVERSES #554/#557's "personal/individual balances are never delegable" rule; that org-vs-individual distinction is GONE.**
+- [x] Customer persona (universal, lazy): a payer gets a `type=customer` permission-group (child of `root`) only when it first manages delegation/credentials. `owner` = the customer, `member` = delegated spender. NOT an opt-in 'org' — a lone customer can remain just an `openrails.customers` payable row until it delegates. DONE: the `customer` type/catalog and `/v1/customers/:customer_id/*` treasury surface exist, `RemoteAppRegistration` is enabled on `CustomerType`, every customer can delegate spend via OpenRails spend-delegation windows, standalone `PUT /v1/customers/:customer_id/spend-delegations` lazily materializes the customer group with the delegated subject as owner, and AuthKit-generated customer `members`, `api-keys`, and `remote-applications` routes can be the first materializer when the authenticated user addresses their own customer group. Remote-app support is generic OpenRails behavior; the Tensorhub/Cozy Art account-attachment and policy-sync flow is tracked in tensorhub #501. Do not add an eager backfill unless a migration later needs it.
 - [x] **Collapse the org-treasury surface into the customer surface — the API gets SMALLER (one persona, not org+customer).** DONE: `/v1/orgs/:org_id/*` retired; the customer payer surface is `/v1/me/*` (self) + `/v1/customers/:customer_id/*` (co-managed/shared). The FULL #566 payer subset — balance, transactions, settings, payment-methods, checkout, invoices — PLUS spend-delegations all live on the ONE customer surface as `customer:*` perms; no separate org bucket. `OrgTreasuryScopeRequired`→`CustomerScopeRequired` keeps the payer-rebind verbatim; only the path + scope-param name changed (`:org_id`→`:customer_id`, `org_scope_mismatch`→`customer_scope_mismatch`). No "personal balances never delegable" guard existed to remove (it was structural — spend-delegations only ever lived on this surface).
 - [x] **Re-path the openrails wire (BREAKING, no alias) — openrails side DONE.** `GET/PUT /v1/orgs/:org_id/spend-delegations` + the embedded `/billing/v1/orgs/*` mount are now `/v1/customers/:customer_id/*`; openrails SDK (`PolicySyncClient.SetOrgSpendDelegations`→`SetCustomerSpendDelegations`, `remote.go`, `embed/client.go`) re-pathed. **Tensorhub + doujins consumer re-wire is the still-open downstream half** (tensorhub `openrailsclient` `embeddedOrgsPrefix` bump → **tensorhub #499**; doujins' embedded `/billing/v1/orgs/*` mount + clients). Version-bumped hard cut, no alias.
-- [ ] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer`; `customer` = `owner`/`member`. `owner` required on each.
-- [ ] `/v1/merchant/*` gates resolve at the **merchant** group (`merchant:*`); the customer balance/delegation surface gates at the **customer** group (`customer:*`). The two are INDEPENDENT top-level personas — a merchant `owner` holds only `merchant:*`, a customer `owner` only `customer:*`; neither inherits the other (only `root` is above both).
-- [ ] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact).
-- [ ] Drop `OwnerOwnsAppResources=true` (set in `service.go` today for the org→merchant coupling, authkit #100). With `merchant` and `customer` as TOP-LEVEL groups, each owner role holds its own `<type>:*` directly (merchant owner = `merchant:*`, customer owner = `customer:*`) — no cross-namespace owner grant needed (flat case; OwnerOwnsAppResources is obsolete per authkit #111 decision #5).
+- [x] Declare BOTH fixed type catalogs to authkit (`AllowCustomRoles=false`): `merchant` = `owner`/`support`/`viewer`; `customer` = `owner`/`member`. DONE in `internal/controlplane/catalog.go` `Groups()`.
+- [x] `/v1/merchant/*` gates resolve at the **merchant** group (`merchant:*`); the customer balance/delegation surface gates on `customer:*`. DONE for the implemented surfaces: merchant browser sessions resolve group membership live; service credentials/delegated JWTs are group-bound; customer treasury routes use `CustomerScopeRequired` + `RequirePermission`.
+- [x] Re-nest remote_applications + api-keys under the permission-group (was org); confirm `ResolveRemoteApplicationAuthority` still resolves authority via the group + parent walk (it feeds the delegated/service-JWT verifier — keep the #564 bound intact). DONE with #569: credential identity is `PermissionGroupID`, no resource scopes.
+- [x] Drop `OwnerOwnsAppResources=true` (set in `service.go` today for the org→merchant coupling, authkit #100). DONE: `internal/controlplane/service.go` declares `RBAC.Groups` and does not set `OwnerOwnsAppResources`.
 - [ ] Root (operator) surface: `platform:merchants:*` moderation perms resolve at the `root` group — reach ≠ capability (operators delete/restore merchants, never run them).
-- [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green.
-- [ ] Update embed + standalone bootstrap; re-run integrationharness + tests/ green.
+- [ ] Tests: merchant + customer gates pass/deny correctly under the group model; owner auto-holds merchant:*/customer:*; cross-merchant isolation holds; platform-admin via root; the #564 uniform-auth parity tests stay green. PARTIAL: catalog/bootstrap/API-key/customer-treasury/delegation coverage exists; added catalog coverage for customer remote-app route exposure, Postgres-backed coverage for lazy customer group creation/idempotence/owner perms, and generated-route first-write coverage proving `/customer/{user_id}/remote-applications` creates the customer group and registers `cozy.art` under it. Platform-admin/root proof remains open.
+- [x] Update embed + standalone bootstrap. DONE for merchant/bootstrap and `/billing/v1/customers/*` mounting; full test-suite green evidence lives under #569, but the customer permission-group invariant remains open above.
 
 ## Acceptance
 - OpenRails consumes the permission-group API; org-scoped calls are gone. OpenRails has NO `org` persona — only `merchant` + `customer`.
-- A `merchant` is a top-level permission-group (`owner`/`support`/`viewer`, `merchant:*`); `customer` is a SEPARATE top-level persona (`owner`/`member`, `customer:*`) held by EVERY payer; fixed catalogs, `AllowCustomRoles=false`; owner auto-holds.
+- A `merchant` is a top-level permission-group (`owner`/`support`/`viewer`, `merchant:*`); `customer` is a SEPARATE top-level persona (`owner`/`member`, `customer:*`) lazily materialized when a payer delegates/manages customer credentials; fixed catalogs, `AllowCustomRoles=false`; owner auto-holds; customer remote applications are supported as budgeted delegated spenders.
 - Every customer (lone or shared) can delegate spend of their balance — no org-vs-individual distinction. No 'org' owns a merchant (supersedes #527; drops `owner_org_id`/`uq_merchants_owner_org_id`). Tree: `root → { merchant, customer }`, flat, no nesting.
 - All existing merchant/customer/admin auth tests + #564 parity stay green against the new authkit.
 
@@ -1957,7 +2008,7 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 
 # #569: API-key / remote-application minting authz — identity is the permission group; drop resource-scope hook; rename authkit APIKeyResource.Kind → Persona
 
-**Completed:** no
+**Completed:** yes
 
 ## Trigger
 

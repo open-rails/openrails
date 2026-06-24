@@ -3,7 +3,11 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"strings"
@@ -193,6 +197,110 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	stillOwner, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantAdmissionsCreate)
 	require.NoError(t, err)
 	require.True(t, stillOwner, "merchant owner grant stable across reruns")
+}
+
+func TestEnsureCustomerPermissionGroup_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newTestControlPlane(t, pool)
+
+	owner, err := cp.Core().CreateUser(ctx, "customer-owner@example.test", "customerowner")
+	require.NoError(t, err)
+	customerID := owner.ID
+
+	groupID, err := cp.EnsureCustomerPermissionGroup(ctx, customerID, owner.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, groupID)
+
+	canSpend, err := cp.Core().Can(ctx, owner.ID, authcore.SubjectKindUser, CustomerType, customerID, PermCustomerSpendDelegationsUpdate)
+	require.NoError(t, err)
+	require.True(t, canSpend, "customer owner should hold customer:*")
+	canMerchant, err := cp.Core().Can(ctx, owner.ID, authcore.SubjectKindUser, CustomerType, customerID, PermMerchantAdmissionsCreate)
+	require.NoError(t, err)
+	require.False(t, canMerchant, "customer owner must not hold merchant perms")
+
+	again, err := cp.EnsureCustomerPermissionGroup(ctx, customerID, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, groupID, again)
+}
+
+func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newTestControlPlane(t, pool)
+
+	owner, err := cp.Core().CreateUser(ctx, "customer-remote-app-owner@example.test", "customerremoteappowner")
+	require.NoError(t, err)
+	customerID := owner.ID
+
+	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
+	require.ErrorIs(t, err, authcore.ErrGroupNotFound)
+
+	token, _, err := cp.Core().IssueAccessToken(ctx, owner.ID, "customer-remote-app-owner@example.test", nil)
+	require.NoError(t, err)
+
+	mux := http.NewServeMux()
+	for _, spec := range cp.RouteSpecs() {
+		mux.Handle(spec.Method+" "+spec.Path, spec.Handler)
+	}
+
+	body := map[string]any{
+		"slug":            "cozy-art-ci",
+		"issuer":          "https://cozy.art",
+		"jwks_uri":        "https://cozy.art/.well-known/jwks.json",
+		"allowed_origins": []string{"https://cozy.art"},
+		"enabled":         true,
+	}
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/customer/"+customerID+"/remote-applications", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
+	require.NoError(t, err)
+	require.NotEmpty(t, groupID)
+	app, err := cp.Core().GetRemoteApplication(ctx, "https://cozy.art")
+	require.NoError(t, err)
+	require.Equal(t, groupID, app.PermissionGroupID)
+	require.Equal(t, "https://cozy.art", app.Issuer)
+	require.Equal(t, "cozy-art-ci", app.Slug)
+}
+
+func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newTestControlPlane(t, pool)
+
+	merchantOwner, err := cp.Core().CreateUser(ctx, "merchant-owner@example.test", "merchantowner")
+	require.NoError(t, err)
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{
+		BootstrapOrgSlug:   dbtest.TestMerchantSlug,
+		InitialAdminUserID: merchantOwner.ID,
+		MintInitialAPIKey:  false,
+	})
+	require.NoError(t, err)
+
+	rootOperator, err := cp.Core().CreateUser(ctx, "root-operator@example.test", "rootoperator")
+	require.NoError(t, err)
+	require.NoError(t, cp.Core().AssignGroupRole(ctx, authcore.RootPersona, "", rootOperator.ID, authcore.SubjectKindUser, authcore.OwnerRoleName))
+
+	canModerateMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
+	require.NoError(t, err)
+	require.True(t, canModerateMerchant, "root owner should hold root moderation authority")
+	canRunMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantSettingsUpdate)
+	require.NoError(t, err)
+	require.False(t, canRunMerchant, "root authority must not imply merchant internals")
+
+	merchantCanRunMerchant, err := cp.Core().Can(ctx, merchantOwner.ID, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantSettingsUpdate)
+	require.NoError(t, err)
+	require.True(t, merchantCanRunMerchant, "merchant owner should hold merchant:*")
+	merchantCanModerateRoot, err := cp.Core().Can(ctx, merchantOwner.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
+	require.NoError(t, err)
+	require.False(t, merchantCanModerateRoot, "merchant owner must not hold root moderation perms")
 }
 
 // TestMerchantForOwnerOrg exercised the #481/#500 org→merchant ownership link

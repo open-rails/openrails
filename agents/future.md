@@ -1261,3 +1261,209 @@ or consistency math. DERIVE/LIFE/CON then clean up consequences through append-o
 
 - None of these block the engine's correctness: access is read off entitlement windows, money off the ledger, and the sweep + inline hooks already converge all drift. These improve coverage breadth (CON), durability of the remote-cancel side-effect (LIFE action), and code tidiness (pull framing).
 - Design reference: `docs/consistency-invariants.md` §5 (the check catalogue) + §9 (construction-guaranteed invariants that are intentionally NOT runtime checks).
+
+---
+
+# #576: pluggable tax / VAT (host-supplied TaxCalculator + invoice tax lines + VAT-ID capture)
+
+**Completed:** no — planned.
+
+OpenRails has **zero** tax support today (grep: the only `tax` references are passive parsing of provider webhook payload fields in `internal/modules/webhooks/types.go`; no tax rates, no calculation, no tax line items, no VAT-ID handling). For our headline verticals this is a **legal** gap, not just a feature gap: EU VAT-MOSS on digital/adult goods is mandatory, and high-risk merchants are precisely the ones who cannot quietly skip it. Origin: billing-system design comparison vs Lago + UniBee (2026-06-24).
+
+## Design principle
+
+Do **not** build Avalara/Anrok/Stripe-Tax in core. Follow OpenRails' established "bring your own X via interface" philosophy (`billingauth.Authenticator`, `DeliverEmail`): add a host-supplied **`TaxCalculator`** seam, keep core thin, let the host wire a real engine or native rate tables. Lago integrates Anrok/Avalara + VIES exactly this way; UniBee has a pluggable `VATGateway` (VatSense/Vatstack). Default = no calculator wired → no tax (today's behavior is unchanged; tax is opt-in).
+
+## Target Model
+
+- A framework-neutral `TaxCalculator` interface (alongside `pkg/billingauth`): input = customer location/country, VAT-ID (+ validation status), line items, amounts, currency, merchant, B2B/B2C; output = tax lines (jurisdiction, rate, amount, tax code, reverse-charge flag) or an explicit "not configured / zero" result.
+- Called at **two** points: checkout/quote (estimate, may be advisory) and **invoice finalization** (authoritative, snapshotted).
+- Tax is computed **per-line in the row/invoice currency** — never cross-currency (consistent with the FX-forbidden double-entry ledger; no conversion).
+- **VAT-ID capture + validation**: store the customer VAT number; validate via a host-supplied validator (VIES for EU); snapshot the validation result + reverse-charge determination onto the invoice (mirrors UniBee's `VatVerifyData` snapshot). B2B cross-border EU → reverse-charge zero-rate with a note line.
+- **Versioned document math**: snapshot rate + amount onto the invoice at finalization; historical documents are never recomputed when the calculator or rates change.
+- Consider an invoice `tax_status` (`pending|succeeded|failed`) gating finalization when the calculator is async (Lago does this); fail-closed.
+
+## Tasks
+
+- [ ] Define the `TaxCalculator` interface + a built-in no-op (zero-tax) default and an embedded/standalone wiring point on the same seam as `Authenticator`/`DeliverEmail`.
+- [ ] Add tax breakdown to `invoice_items` / `invoices.line_items` jsonb + a `tax_total` aggregate column; enforce `total = subtotal − discounts + tax_total`.
+- [ ] Add customer VAT-ID storage + a host-supplied validation hook; snapshot the verify result + reverse-charge flag onto the invoice.
+- [ ] Decide tax-inclusive vs tax-exclusive pricing (prices are ex-tax minor-unit amounts today) and a per-merchant default tax behavior.
+- [ ] Wire tax into checkout quote + invoice finalization; leave the admission/spendgate hot path untouched (admission is credit-headroom, not invoicing).
+- [ ] Integration tests: EU B2C standard-rate, EU B2B reverse-charge, non-EU zero, calculator-not-wired = no tax.
+
+## Open Questions
+
+- Native rate table in core, or fully host-side? (lean fully host-side; ship no rates.)
+- Tax-inclusive pricing support, or exclusive-only initially?
+- Async-tax finalization gating — needed now, or only once a real async provider is wired?
+
+## Acceptance
+
+- A host can supply a `TaxCalculator`; invoices carry correct tax line items + totals; VAT-ID + reverse-charge are captured and snapshotted; with no calculator wired, behavior is identical to today.
+
+---
+
+# #577: coupons / discounts — first-class object (definition + redemption ledger, checkout & renewal modifier)
+
+**Completed:** no — planned.
+
+Today the only discount mechanism is three free-text columns on `payments` (`discount_code` / `discount_reason` / `discount_metadata`) — a manual price-override annotation set at purchase time (`internal/modules/checkout/purchase_service.go`, `payments/register_purchase.go`). There is no coupon object, no validation, no redemption tracking, no percentage/recurring logic. Promo codes / first-month-free / %-off are conversion table-stakes for the SaaS, adult-subscription, and storefront verticals. Origin: design comparison vs Lago + UniBee (2026-06-24).
+
+## Design principle
+
+Steal **UniBee's** model specifically (it's richer than Lago's and maps cleanly onto our immutable-price design): a coupon **definition** table + a per-user **redemption ledger** (`merchant_discount_code` + `merchant_user_discount_code`). The coupon is a **checkout-time + renewal-time modifier** — the canonical `prices` row is untouched; the coupon adjusts the charged amount and writes a redemption row. It is NOT a price mutation and NOT a new price object. The engine lives OpenRails-side so it works uniformly across NMI/CCBill/Solana (which have no native coupon concept), consistent with "OpenRails owns the billing semantics across rails"; optionally map to Stripe Coupon/promotion_code for Stripe-hosted checkout.
+
+## Target Model
+
+- **Definition**: percentage vs fixed-amount; `once | recurring | forever` (+ duration); validity window; active flag; per-merchant.
+- **Scoping / gates** (UniBee-rich): user-scope (`all | new-customers-only | renewals-only`), upgrade-only / upgrade-longer-only, plan allow/exclude lists, per-subscription / per-cycle / per-user redemption limits, total-quantity-limited code pools.
+- **Fixed-amount + currency**: because the ledger forbids cross-currency FX, fixed-amount coupons are **defined per-currency** (or single-currency-scoped) — do **not** cross-convert the way UniBee does. Percentage coupons are currency-agnostic. (Call this out — it's the one place UniBee's model doesn't port.)
+- **Application points**: checkout/first charge (`internal/modules/checkout/service.go`); `RenewMembership` (`internal/modules/subscriptions/lifecycle_service.go`) for recurring coupons; tier-change checkout for upgrade-only gates.
+- **Redemption ledger**: one row per application (coupon, customer, subscription, invoice/payment, amount discounted, cycle index). Supersedes/back-fills the free-text `discount_*` columns; powers "remaining redemptions", "applied N of M cycles", and history-discount-aware proration.
+- **Proration interplay**: a discounted sub changing tier must credit back the **discounted** historical amount, not list price (UniBee's `ComputeHistoryDiscountAmount`); wire into the existing checkout proration.
+- **Invoice/versioning**: discount as a negative line item + `discount_total`; snapshot the computation; version the application logic so historical documents stay stable. Ordering vs tax (#576): decide discount-before-tax vs after (Lago has a `before_taxes` flag — pick one default, make it explicit).
+
+## Tasks
+
+- [ ] Schema: coupon-definition table + redemption-ledger table (both `(merchant_id, …)`-scoped, RLS).
+- [ ] Validation/redeem service: gate checks (user-scope, plan allow/exclude, limits, window, quantity pool) → applicable discount amount.
+- [ ] Apply at checkout + `RenewMembership` + tier-change; write redemption rows; make proration history-discount-aware.
+- [ ] Add `discount_total` + discount line items to invoices; define discount-vs-tax ordering with #576.
+- [ ] Migrate/retire the free-text `discount_*` columns (keep as denormalized annotation or drop).
+- [ ] Integration tests: %-off recurring, fixed-amount per-currency, new-customers-only rejection on renewal, upgrade-only gate, redemption-limit exhaustion, discounted-tier-change proration.
+
+## Open Questions
+
+- Stacking (multiple coupons per sub)? — recommend **no stacking** initially.
+- Interaction with existing promo-credit/wallet discounting — coupon vs credit precedence.
+- First-month-free modeled as a coupon vs a trial?
+- Discount before or after tax (#576) as the default.
+
+## Acceptance
+
+- Merchants can define coupons with UniBee-class scoping; redemptions are ledgered and limit-enforced; discounts apply at checkout and on recurring renewals across all rails; proration credits the discounted amount; historical documents are stable.
+
+---
+
+# #578: credit notes — projection over refunded/reversed invoices (no new document engine)
+
+**Completed:** no — planned.
+
+OpenRails has refunds (negative `payments` rows referencing `refunded_payment_id`) and `voided`/`uncollectible` invoices, but **no credit-note document**. Many jurisdictions require a credit note (not merely a refund record) to reverse VAT — so this pairs with #576. Origin: design comparison vs UniBee (2026-06-24).
+
+## Design principle
+
+Steal **UniBee's** trick: **no separate table** — a credit note is a **projection/view** over already-reversed/refunded invoices (their `ConvertInvoiceToCreditNoteDetail`, rendered with a "Reversed" status). OpenRails' invoicing is already arrears/statement-shaped, so this is a presentation layer over data we already hold (`invoices` + `invoice_items` + refund payment rows). The **only** genuinely new state is a per-merchant credit-note number sequence (compliance needs its own numbering).
+
+## Target Model
+
+- Derive a credit-note document from: original invoice ref, credited line items, refunded amount, reason, issued-at, sequential credit-note number.
+- **Issued when**: (a) a payment is refunded against an invoice; (b) an invoice is voided **after** being (partially) paid; (c) an explicit credit/adjustment is applied. A voided **unpaid** invoice needs no credit note (no money moved).
+- **Tax reversal**: when #576 lands, the credit note must reverse the tax lines too (snapshot the reversed tax).
+- **Numbering**: dedicated per-merchant credit-note sequence (mirror invoice numbering); the one new piece of durable state.
+- **Surface**: `/v1/me/credit-notes[/:id]` (delegated read) + merchant admin list; JSON/statement projection consistent with the invoice statement shape. PDF is out of scope here (OpenRails has no PDF gen; route document artifacts through #512 S3 report-artifacts if/when needed).
+- Postgres invoice/payment data stays the source of truth; the credit note is derived except for its number.
+
+## Tasks
+
+- [ ] Add a per-merchant credit-note number sequence.
+- [ ] Projection/service deriving credit-note detail from invoice + refund/void data.
+- [ ] `/v1/me/credit-notes` delegated read + merchant admin list.
+- [ ] Tie tax reversal to #576 when present.
+- [ ] Integration tests: full refund, partial refund, void-after-paid, void-unpaid (no credit note).
+
+## Open Questions
+
+- Line-level (partial) credit notes, or whole-invoice only initially?
+- Numbering reset cadence (annual vs continuous)?
+
+## Acceptance
+
+- A refund or paid-invoice void yields a numbered credit-note document (derived, not a new ledger), readable on the self-service + admin surfaces, with tax reversed once #576 exists.
+
+---
+
+# #579: client-facing `Idempotency-Key` header on public mutating routes
+
+**Completed:** no — planned.
+
+OpenRails' **internal** idempotency is strong (`IdempotencyService` op-keys, natural-key dedup, idempotent intents + spendgate, 90-day TTL — well ahead of UniBee, which has none). What's missing is the **Stripe-style client-facing `Idempotency-Key` HTTP header** on public POSTs so integrators can safely retry without duplicate side-effects — the contract API clients expect. Origin: design comparison vs Lago (2026-06-24).
+
+## Target Model
+
+- Middleware on mutating public routes: read `Idempotency-Key`, store `(merchant[, subject], key, request fingerprint) → captured response` and **replay** the stored response on retry within a TTL.
+- **Conflict** (same key, different request body) → 409/422; **in-flight** duplicate → 409 "request in progress".
+- Back it with the existing `IdempotencyService` (it already does op-key + dedup + TTL); the new work is the HTTP-header layer + response capture/replay.
+- Header is **optional** (Stripe-style) — absent key = today's behavior. Where a natural idempotency key already exists (e.g. admissions on `(type, source, id)`), the header layers on top / both are honored.
+- Applies in embedded mode to mounted routes too.
+
+## Tasks
+
+- [ ] Idempotency middleware (header parse, fingerprint, store, replay, conflict/in-flight handling) over `IdempotencyService`.
+- [ ] Apply to checkout, charge, subscription create/cancel, payment-method, tier-change routes; document which routes honor it.
+- [ ] Define TTL (Stripe uses 24h), key scoping (merchant + optionally subject), and response-size limits.
+- [ ] Integration tests: retry replays identical response, same-key-different-body conflict, concurrent in-flight, key-scoped to merchant.
+
+## Open Questions
+
+- TTL length (24h default?).
+- Response-replay storage size cap + what to do when exceeded.
+- Precedence/interaction where a natural idempotency key already protects the route.
+
+## Acceptance
+
+- Public mutating routes accept an optional `Idempotency-Key`; a retried request with the same key replays the original response and causes no duplicate side-effect; mismatched reuse is rejected; absent header preserves current behavior.
+
+---
+
+# #580: SPECULATIVE — event-handler subscriptions for async, non-user-initiated billing occurrences ("notify me when X, so I can do Y")
+
+**Completed:** no — **speculative; not needed now.** File only; do not build until a concrete merchant need appears.
+
+## Context / why this is deliberately deferred
+
+OpenRails is a **pull-from-source-of-truth** system by design: consumer apps query OpenRails as the authority for state (entitlements, balance, "is a rebill due"), and the delegated-token path even lets the app's **frontend** query directly without its own backend in the loop. This is the right spine, and an outbound event/webhook feed must **not** erode it — pushing *state* invites apps to keep a local replica and get it wrong, which is exactly what the entitlement-timeline-as-truth design avoids. Decided against a general outbound-webhook feature on these grounds (2026-06-24 design comparison vs Lago/UniBee).
+
+This issue captures the **one narrow seam** pull does not cover, named so it's dismissed deliberately rather than by omission.
+
+## The seam (and ONLY this seam)
+
+**App-domain side-effects that must fire promptly and exactly-once in reaction to an *async, non-user-initiated* billing occurrence.** Examples:
+- deprovision a Discord role the moment a 3am rebill **fails**,
+- kick off a fulfillment workflow on a one-time purchase,
+- post to the ops Slack channel on a **chargeback**.
+
+The distinction is **occurrence** (something happened at an instant; a side-effect must run) vs **state** (what is true now). Pull serves state perfectly; it does not proactively serve occurrences.
+
+## Explicitly NOT in scope (covered already)
+
+- **State / access checks** — pull is correct; push would be an anti-pattern.
+- **User-initiated changes** — the frontend pulls on checkout-return and sees new state instantly; no event needed.
+- **Transactional email** — OpenRails already owns this via `DeliverEmail` / `notification_queue`.
+- **Correctness of access decisions on async changes** — already fine: the *next* pull reads truth. The only thing missing is the app reacting *at the instant* of the event instead of at next pull, and even that has a **pull fallback**: a periodic reconcile poll. So this is a latency/convenience improvement, **not** a correctness gap.
+
+## Possible shapes (if ever built)
+
+- **Embedded apps**: in-process **event-handler registration** — a Go subscriber/callback on the normalized event stream OpenRails already produces. The taxonomy exists today (`internal/modules/analytics/event_log_service.go` already mints `subscription_created/cancelled/past_due`, `payment_*`, refund, chargeback…); these events are generated and logged but currently have nowhere to go.
+- **Remote / standalone apps**: a per-app **outbound signed event delivery** with an event-type allowlist + durable delivery queue — reuse the **intent-ledger pattern** (durable outbox, leased claims, retries, replay). If built: sign with a **per-endpoint secret, never the API key** (the mistake UniBee made), and scope strictly to occurrence events, never state snapshots.
+
+## Why wait
+
+- Building it risks tempting integrators back into stale local mirrors unless carefully scoped to occurrences-not-state.
+- The pull spine + periodic reconcile poll already keeps everything correct; only sub-minute *reaction* to async events is improved.
+- Worth building only when a concrete merchant needs prompt exactly-once reaction to async, non-user-initiated events.
+
+## Tasks (only if revived)
+
+- [ ] Confirm a concrete merchant use case requiring sub-minute reaction to an async occurrence (not satisfiable by poll+reconcile).
+- [ ] Decide embedded in-process handler vs remote outbound delivery (or both).
+- [ ] Define the occurrence event catalog exposed (subset of `event_log_service` types) — occurrences only, no state payloads.
+- [ ] For remote: durable delivery queue on the intent-ledger pattern, per-endpoint secret signing, event-type allowlist, replay.
+- [ ] Exactly-once / at-least-once + idempotent-handler contract; delivery ordering guarantees.
+
+## Open Questions
+
+- Does any real merchant need this, or does poll+reconcile suffice indefinitely?
+- Delivery semantics (at-least-once + idempotency key on the event) and ordering.
+- How to keep the surface occurrence-only so it can't be abused as a state-replication channel.

@@ -20,7 +20,6 @@ merchants:
     issuer:
       uri: https://auth.cozy.art
       jwks_uri: https://auth.cozy.art/.well-known/jwks.json
-      audiences: [openrails]
     profile:
       display_name: Cozy Art Billing
       logo_url: https://cdn.example/logo.png

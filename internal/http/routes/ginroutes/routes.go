@@ -145,7 +145,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 // permission because the customer balance may be a SHARED resource (unlike
 // `/v1/me`, which is authenticated-self and needs no grant). Every customer can
 // delegate spend of its balance — there is no org-vs-individual distinction.
-func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, writeMW ...gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -165,10 +165,11 @@ func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, del
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
 		wrap(httphandlers.GetCustomerSpendDelegations),
 	)
-	group.PUT("/:customer_id/spend-delegations",
+	putSpendDelegations := append([]gin.HandlerFunc{
 		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate),
-		wrap(httphandlers.PutCustomerSpendDelegations),
-	)
+	}, writeMW...)
+	putSpendDelegations = append(putSpendDelegations, wrap(httphandlers.PutCustomerSpendDelegations))
+	group.PUT("/:customer_id/spend-delegations", putSpendDelegations...)
 
 	// Read the payer's money state: balance, ledger transactions, metered usage,
 	// payment history, and finalized invoices. `status` is intentionally NOT

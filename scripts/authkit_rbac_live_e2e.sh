@@ -166,8 +166,6 @@ merchants:
     issuer:
       uri: $ISS_A
       slug: $APP_A
-      audiences:
-        - openrails
       allowed_origins:
         - $ORIGIN_A
       public_keys:
@@ -198,14 +196,13 @@ WITH org_row AS (
 ),
 remote_app AS (
   INSERT INTO profiles.remote_applications
-    (slug, org_id, issuer, jwks_uri, mode, public_keys, audiences, allowed_origins, enabled)
+    (slug, org_id, issuer, jwks_uri, mode, public_keys, allowed_origins, enabled)
   SELECT :'app_b',
          org_id,
          :'iss_b',
          '',
          'static',
          jsonb_build_array(jsonb_build_object('kid', :'kid_b', 'public_key_pem', :'public_b')),
-         ARRAY['openrails']::text[],
          ARRAY[:'origin_b']::text[],
          true
     FROM org_row
@@ -215,7 +212,6 @@ remote_app AS (
         jwks_uri = EXCLUDED.jwks_uri,
         mode = EXCLUDED.mode,
         public_keys = EXCLUDED.public_keys,
-        audiences = EXCLUDED.audiences,
         allowed_origins = EXCLUDED.allowed_origins,
         enabled = EXCLUDED.enabled,
         updated_at = now()

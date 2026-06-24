@@ -81,3 +81,27 @@ func CustomerScopeRequired() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// EnsureCustomerPermissionGroup materializes the AuthKit customer group on the
+// first customer-owned write that manages spend delegation/credentials.
+func EnsureCustomerPermissionGroup(cp *controlplane.ControlPlane) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		resolved, ok := DelegatedFromGin(c)
+		if !ok || resolved == nil {
+			response.UnauthorizedWithMessage(c, "delegated principal required")
+			c.Abort()
+			return
+		}
+		if cp == nil {
+			response.InternalError(c, "customer control plane unavailable")
+			c.Abort()
+			return
+		}
+		if _, err := cp.EnsureCustomerPermissionGroup(c.Request.Context(), c.Param("customer_id"), resolved.DelegatedSubject); err != nil {
+			response.InternalError(c, "customer permission-group ensure failed")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

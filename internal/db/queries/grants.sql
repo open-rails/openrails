@@ -197,13 +197,16 @@ ORDER BY customer_id;
 -- refund rows are negative-amount (amount > 0 excludes them); a refunded purchase
 -- still has its `grant` event (existence, not liveness), so it is not flagged.
 -- Surface-only ADMIN: auto-granting re-runs derive-1 (owned by the purchase path).
--- name: ListUngrantedGrantablePaymentsByCustomer :many
+-- customer_id is nullable (#575): the inline customer-scoped path passes it (fast
+-- indexed seek); the merchant-wide convergence sweep passes NULL (one anti-join
+-- over the whole merchant instead of one query per grant-holder).
+-- name: ListUngrantedGrantablePayments :many
 SELECT p.id, p.amount, p.currency
 FROM openrails.payments p
 JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND p.customer_id = sqlc.arg(customer_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
@@ -223,11 +226,12 @@ ORDER BY p.id;
 -- back, access is still live). Surface-only ADMIN: a refund that intentionally
 -- keeps access (goodwill) is legitimate, so an operator decides; the source
 -- (refund) is a PRESENT recorded fact, so this is NOT confirmed-absence-gated.
--- name: ListLiveGrantsWithRefundedPaymentByCustomer :many
+-- customer_id is nullable (#575): NULL = merchant-wide sweep.
+-- name: ListLiveGrantsWithRefundedPayment :many
 SELECT g.id, g.kind, g.payment_id
 FROM openrails.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
   AND g.event = 'grant'
   AND g.payment_id IS NOT NULL
   AND NOT EXISTS (
@@ -239,6 +243,68 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.status = 'refunded'
   )
 ORDER BY g.id;
+
+-- #511/#575 DERIVE `derive.grant_effect.missing` as a single set query: live
+-- (un-terminated) entitlement/credit grants whose derived effect is NOT fully
+-- materialized. Mirrors the Go isMaterialized exactly — entitlement: some spec
+-- feature has no entitlement row (deleted_at IS NULL, revoked rows still count as
+-- materialized); credit: no #512 deposit transfer. ownership has no effect (never
+-- flagged). customer_id nullable: NULL = merchant-wide sweep. Repair =
+-- MaterializeGrant (idempotent), so re-running converges to empty.
+-- name: ListLiveGrantsMissingEffects :many
+SELECT g.* FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND (
+    (g.kind = 'entitlement' AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+                 COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb)) AS feat
+        WHERE NOT EXISTS (
+            SELECT 1 FROM openrails.entitlements e
+            WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
+              AND e.entitlement = feat AND e.deleted_at IS NULL)))
+    OR
+    (g.kind = 'credit' AND NOT EXISTS (
+        SELECT 1 FROM openrails.ledger_transfers lt
+        WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
+  )
+ORDER BY g.created_at;
+
+-- #511/#575 DERIVE `derive.grant_effect.excess` as a single set query: TERMINATED
+-- grants whose derived effect is still live (a revoke/expire recorded but its
+-- retraction never propagated). Mirrors Go IsGrantTerminated + effectStillLive —
+-- entitlement: a non-revoked, non-deleted entitlement row; credit: lot remainder
+-- (amount − spend/expire/revoke transfers) > 0. customer_id nullable: NULL =
+-- merchant-wide sweep. Repair = MaterializeGrant (retracts) — idempotent.
+-- name: ListUnretractedTerminations :many
+SELECT g.* FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
+  AND g.event = 'grant'
+  AND EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND (
+    (g.kind = 'entitlement' AND EXISTS (
+        SELECT 1 FROM openrails.entitlements e
+        WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
+          AND e.revoked_at IS NULL AND e.deleted_at IS NULL))
+    OR
+    (g.kind = 'credit' AND (
+        g.amount - COALESCE((
+            SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+            WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
+              AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
+        ), 0)) > 0)
+  )
+ORDER BY g.created_at;
 
 -- #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
 -- payment, so a refund/chargeback can revoke product access for that payment.

@@ -14,6 +14,10 @@ import (
 )
 
 const BootstrapAdminAPIKeyName = "openrails-bootstrap-admin"
+const (
+	bootstrapAPIKeyActorEmail    = "openrails-bootstrap@localhost.invalid"
+	bootstrapAPIKeyActorUsername = "openrailsbootstrap"
+)
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
@@ -139,9 +143,22 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			return nil, fmt.Errorf("controlplane: list admin API keys: %w", lerr)
 		}
 		if !anyLiveAPIKey(existing) {
+			createdBy := strings.TrimSpace(opts.InitialAdminUserID)
+			if createdBy == "" {
+				createdBy, err = c.ensureBootstrapAPIKeyActor(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if aerr := core.AssignGroupRole(ctx, MerchantType, slug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
+					return nil, fmt.Errorf("controlplane: assign bootstrap api-key actor owner: %w", aerr)
+				}
+			}
 			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, MerchantType, slug, authcore.APIKeyMintOptions{
 				Name: BootstrapAdminAPIKeyName,
 				Role: MerchantRoleOwner,
+				// AuthKit v0.62 enforces no-escalation on API-key mints. Bootstrap
+				// supplies a genesis owner actor instead of weakening runtime authz.
+				CreatedBy: createdBy,
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin API key: %w", merr)
@@ -155,6 +172,26 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	return res, nil
+}
+
+func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, error) {
+	core := c.Core()
+	if core == nil {
+		return "", errors.New("controlplane: core service unavailable")
+	}
+	if u, err := core.GetUserByUsername(ctx, bootstrapAPIKeyActorUsername); err == nil {
+		return u.ID, nil
+	} else if !errors.Is(err, authcore.ErrUserNotFound) && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("controlplane: lookup bootstrap api-key actor: %w", err)
+	}
+	u, err := core.CreateUser(ctx, bootstrapAPIKeyActorEmail, bootstrapAPIKeyActorUsername)
+	if err != nil {
+		if existing, gerr := core.GetUserByEmail(ctx, bootstrapAPIKeyActorEmail); gerr == nil {
+			return existing.ID, nil
+		}
+		return "", fmt.Errorf("controlplane: create bootstrap api-key actor: %w", err)
+	}
+	return u.ID, nil
 }
 
 // anyLiveAPIKey reports whether the merchant group already has at least one

@@ -98,6 +98,18 @@ func TestCatalog_IsACopy(t *testing.T) {
 	}
 }
 
+func TestGroups_CustomerExposesRemoteApplications(t *testing.T) {
+	for _, group := range Groups() {
+		if group.Name == CustomerType {
+			if !group.Routes.RemoteAppRegistration {
+				t.Fatal("customer groups must expose remote_application registration")
+			}
+			return
+		}
+	}
+	t.Fatal("customer group persona missing")
+}
+
 func TestMerchantOwnerRolePermissions_AreMerchantCatalog(t *testing.T) {
 	// #567: the merchant owner role resolves to the `merchant:*` subset of the
 	// catalog (the customer treasury perms belong to the customer persona, not the

@@ -296,3 +296,78 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		return nil
 	}))
 }
+
+// #575: the merchant-wide sweep (Scope.Customer == nil) runs DERIVE as ONE
+// set query per check across ALL grant-holders — not one query per customer.
+// Seed the same drift (an unmaterialized credit grant) on TWO customers, run a
+// single merchant-scoped Converge, and assert it detects + auto-repairs BOTH —
+// proving the customer=nil enumeration matches the per-customer path across the
+// whole merchant. Guards the new set-based branch.
+func TestConverge_DeriveSweepRemediatesAllCustomers(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	cur := "TC" + uuid.NewString()[:6]
+	e := NewConvergeEngine(appDB)
+
+	var customers, grantIDs []uuid.UUID
+
+	deposited := func(ctx context.Context, gid uuid.UUID) bool {
+		dep, err := appDB.Gen(ctx).GrantCreditDeposited(ctx, gen.GrantCreditDepositedParams{MerchantID: merchantID, GrantID: gid})
+		require.NoError(t, err)
+		return dep
+	}
+
+	// Seed two distinct customers, each with an un-materialized credit grant.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		for i := 0; i < 2; i++ {
+			c := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+			amt := int64(5000)
+			g, err := grants.New(appDB.Gen(ctx), merchantID).Grant(ctx, grants.GrantInput{
+				Customer: c, Kind: grants.Credit, Source: grants.Purchase,
+				SourceID: "pay_" + uuid.NewString()[:8], Amount: &amt, Currency: &cur,
+			})
+			require.NoError(t, err)
+			require.False(t, deposited(ctx, g.ID), "precondition: customer %d effect not yet materialized", i)
+			customers = append(customers, c)
+			grantIDs = append(grantIDs, g.ID)
+		}
+		return nil
+	}))
+
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			for i := range customers {
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantIDs[i].String())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
+			}
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+			return nil
+		})
+	})
+
+	// Merchant-scoped sweep (Customer nil): one DERIVE pass over the whole merchant.
+	// Assertions are pollution-robust (the shared merchant may carry other tests'
+	// rows): prove MY two grants went unmaterialized → materialized via the sweep,
+	// and that the sweep auto-fixed at least them.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID})
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, res.AutoFixed, 2, "sweep auto-repairs both customers' missing effects")
+		for i := range grantIDs {
+			require.True(t, deposited(ctx, grantIDs[i]), "sweep materialized customer %d's credit deposit", i)
+		}
+		return nil
+	}))
+
+	// Idempotent: a second sweep leaves both materialized (no re-fire / no clawback).
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID})
+		require.NoError(t, err)
+		for i := range grantIDs {
+			require.True(t, deposited(ctx, grantIDs[i]), "customer %d stays materialized after a second sweep", i)
+		}
+		return nil
+	}))
+}

@@ -8,21 +8,25 @@ import (
 // intentionally exposes in locked-down / self-hosted mode (issue #224 task 4).
 //
 // It deliberately EXCLUDES the full DefaultAPI surface. We mount only the
-// login/session/user/JWKS-adjacent capabilities OpenRails needs:
+// login/session/user/JWKS-adjacent capabilities and declared group-management
+// routes OpenRails needs:
 //
 //   - RoutePublic: public AuthKit discovery.
 //   - RouteSession: login, refresh, logout, password reset.
 //   - RouteUser: self-service account routes (me, sessions, password change).
+//   - RoutePermissionGroups: declared merchant/customer member, API-key, and
+//     remote-application management routes; AuthKit gates every route through
+//     the OpenRails permission-group authorizer.
 //
 // NOT mounted by default in locked-down mode:
 //   - RouteRegister (public user self-registration — disabled in self-hosted).
 //   - RouteAdmin (AuthKit's own admin surface — OpenRails owns admin routes).
-//   - RoutePermissionGroups (OpenRails owns domain group management).
 //   - RouteBrowserOIDC (browser redirects mount separately when enabled).
 var IntentionalRouteGroups = []authhttp.RouteGroup{
 	authhttp.RoutePublic,
 	authhttp.RouteSession,
 	authhttp.RouteUser,
+	authhttp.RoutePermissionGroups,
 }
 
 // MountedRouteGroups returns the AuthKit route groups this control plane mounts.

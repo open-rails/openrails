@@ -236,11 +236,11 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
 	cfg := &config.Config{
-		Env:     "dev",
+		Env:      "dev",
 		TestMode: true,
-		Host:    "127.0.0.1",
-		Port:    0, // ephemeral; we serve via httptest below
-		DB:      &config.DBConfig{URL: appDSN},
+		Host:     "127.0.0.1",
+		Port:     0, // ephemeral; we serve via httptest below
+		DB:       &config.DBConfig{URL: appDSN},
 		Auth: &config.AuthConfig{
 			// The control plane's own AuthKit issuer.
 			Issuer: "https://controlplane.openrails.test",
@@ -483,7 +483,6 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 		Issuer:            issuer.URL(),
 		Mode:              authcore.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:         []string{"openrails"},
 		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register remote_application")
@@ -532,7 +531,6 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 		Issuer:            issuer.URL(),
 		Mode:              authcore.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:         []string{"openrails"},
 		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register delegated issuer")
@@ -580,7 +578,6 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Issuer:            issuer.URL(),
 		Mode:              authcore.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
-		Audiences:         []string{"openrails"},
 		Enabled:           true,
 	})
 	if len(permissions) == 0 {
@@ -619,9 +616,11 @@ func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string) st
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), merchantSlug)
+	createdBy := h.ensureAPIKeyActor(cp, merchantSlug)
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
-		Name: name,
-		Role: roleForPerms(permissions),
+		Name:      name,
+		Role:      roleForPerms(permissions),
+		CreatedBy: createdBy,
 	})
 	require.NoError(h.t, err, "mint API key")
 	return secret
@@ -688,12 +687,36 @@ func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	cp := embcp.Get(a)
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), dbtest.TestMerchantSlug)
+	createdBy := h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug)
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
-		Name: "integrationharness-extra",
-		Role: controlplane.MerchantRoleOwner,
+		Name:      "integrationharness-extra",
+		Role:      controlplane.MerchantRoleOwner,
+		CreatedBy: createdBy,
 	})
 	require.NoError(h.t, err, "mint fresh API key")
 	return secret
+}
+
+func (h *Harness) ensureAPIKeyActor(cp *controlplane.ControlPlane, merchantSlug string) string {
+	h.t.Helper()
+	username := "openrailsci" + strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, strings.ToLower(strings.TrimSpace(merchantSlug)))
+	if username == "openrailsci" {
+		username = "openrailscitest"
+	}
+	email := username + "@example.test"
+	user, err := cp.Core().GetUserByUsername(h.ctx, username)
+	if err != nil {
+		user, err = cp.Core().CreateUser(h.ctx, email, username)
+	}
+	require.NoError(h.t, err, "ensure API-key actor")
+	require.NoError(h.t, cp.Core().AssignGroupRole(h.ctx, controlplane.MerchantType, merchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner),
+		"assign API-key actor merchant owner")
+	return user.ID
 }
 
 func testIssuerRemoteAppKeys(t *testing.T, issuer *authtesting.TestIssuer) []authcore.RemoteAppKey {

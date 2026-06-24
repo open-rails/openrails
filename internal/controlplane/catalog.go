@@ -101,8 +101,9 @@ func Groups() []authcore.PersonaDef {
 			AllowedParents:   []string{authcore.RootPersona},
 			AllowCustomRoles: false,
 			Routes: authcore.ManagementProfile{
-				MemberAssignment: true,
-				APIKeyMinting:    true,
+				MemberAssignment:      true,
+				APIKeyMinting:         true,
+				RemoteAppRegistration: true,
 			},
 			Roles: []authcore.RoleDef{
 				// owner (= customer:*) is auto-seeded.
