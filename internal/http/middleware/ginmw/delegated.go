@@ -128,11 +128,13 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 // handler and admin RequirePermission gate works unchanged.
 //
 // EXPLICIT MAPPING — NO FALLBACKS: the principal must carry the resolved
-// merchant id and subject. A principal with an empty/unparseable merchant, an
-// empty subject, or any permission outside the delegated browser admin catalog
-// is rejected (401, fail closed), so a host can never smuggle a
-// service/operator/platform grant onto the browser surface. Permissions are
-// optional for self-service routes.
+// merchant id and subject; an empty/unparseable merchant or empty subject is
+// rejected (401, fail closed). For the in-process host path the embedding host
+// is TRUSTED, so its supplied permissions are authoritative and are NOT filtered
+// against an allowlist (#564) — the host is responsible for not granting more
+// than it intends. (Real signed delegated tokens are separately bounded by
+// AuthKit at verify time; see internal/controlplane/delegated.go and
+// docs/principal-boundary-audit.md.) Permissions are optional for self-service routes.
 func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if authn == nil {

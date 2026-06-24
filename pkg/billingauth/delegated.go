@@ -45,10 +45,11 @@ type DelegatedPrincipal struct {
 	// same audit slot as a delegated token's validated `iss`.
 	Issuer string
 
-	// Permissions are optional for self-service routes. When present, they must
-	// come from the browser-safe `org:*` merchant-admin set; OpenRails rejects
-	// platform/unknown grants, mirroring the verify-time gate on real delegated
-	// tokens.
+	// Permissions are optional for self-service routes. For an in-process host
+	// principal the embedding host is TRUSTED, so these permissions are accepted
+	// as authoritative and are NOT filtered against an allowlist (#564); the host
+	// must not supply more than it intends. (Signed delegated tokens on the
+	// standalone wire path are separately bounded by AuthKit at verify time.)
 	Permissions []string
 
 	// Email / EmailVerified / Username are optional non-authoritative contact
