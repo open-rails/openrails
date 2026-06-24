@@ -8,6 +8,11 @@ import (
 
 // Merchant-owned tables that the consolidated schema must scope by merchant_id
 // (issue #223). Kept in sync with the merchant_isolation policies in 001.
+// Updated after squashing 001..029: removed tables that were dropped during the
+// migration chain (budget_inflight_holds, budget_window_state, money_transactions,
+// money_blocks, money_spend_limits, money_windows) and added tables added in
+// later migrations (external_provider_mutation_logs, grants, ledger_accounts,
+// ledger_transfers, provider_accounts, provider_refresh_watermarks, reconciliation_state).
 var merchantOwnedTables = []string{
 	"customers",
 	"merchant_deks",
@@ -31,8 +36,14 @@ var merchantOwnedTables = []string{
 	"notification_queue",
 	"payment_blocklist",
 	"processor_customers",
-	"budget_inflight_holds",
-	"budget_window_state",
+	"external_provider_mutation_logs",
+	"grants",
+	"ledger_accounts",
+	"ledger_transfers",
+	"provider_accounts",
+	"provider_intents",
+	"provider_refresh_watermarks",
+	"reconciliation_state",
 	// #472: money ledger replaced the credit_* tables. money_balances dropped (#491).
 	"invoker_spend_limits",
 	"payer_spend_limits",
@@ -42,12 +53,7 @@ var merchantOwnedTables = []string{
 	"catalog_drift_events",
 	"reconciliation_runs",
 	"reconciliation_findings",
-	"provider_intents",
-	"money_transactions",
-	"money_blocks",
 	"money_settings",
-	"money_spend_limits",
-	"money_windows",
 	"custom_credit_types",
 }
 
@@ -213,23 +219,27 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 func TestConsolidatedSchemaUsesMerchantOwnerOrg(t *testing.T) {
 	c := loadSchema001(t)
 
+	// owner_org_id was renamed to permission_group_id in migration 023 (#567).
+	// The consolidated baseline reflects the final schema: permission_group_id.
 	for _, want := range []string{
-		"owner_org_id text",
-		"idx_merchants_owner_org_id",
-		"COMMENT ON COLUMN openrails.merchants.owner_org_id",
+		"permission_group_id text",
+		"idx_merchants_permission_group_id",
+		"COMMENT ON COLUMN openrails.merchants.permission_group_id",
 	} {
 		if !strings.Contains(c, want) {
-			t.Errorf("001 schema missing merchant owner org invariant %q", want)
+			t.Errorf("001 schema missing merchant permission group invariant %q", want)
 		}
 	}
 	for _, forbidden := range []string{
 		"owner_tenant_id",
 		"idx_merchants_owner_tenant_id",
+		// owner_org_id as a column definition (not as a historical reference in comments)
+		"owner_org_id text",
 		"UNIQUE INDEX idx_merchants_owner_org_id",
 		"UNIQUE (owner_org_id)",
 	} {
 		if strings.Contains(c, forbidden) {
-			t.Errorf("001 schema must not keep legacy or one-merchant-per-org owner artifact %q", forbidden)
+			t.Errorf("001 schema must not keep legacy owner artifact %q", forbidden)
 		}
 	}
 }
