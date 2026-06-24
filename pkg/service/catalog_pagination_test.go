@@ -4,11 +4,11 @@ import "testing"
 
 func TestClampCatalogPage(t *testing.T) {
 	tests := []struct {
-		name         string
-		limit        int
-		offset       int
-		wantLimit    int
-		wantOffset   int
+		name       string
+		limit      int
+		offset     int
+		wantLimit  int
+		wantOffset int
 	}{
 		{
 			name:       "zero limit defaults to 100",
