@@ -73,6 +73,10 @@ type AdminFundingClient interface {
 	// SetCreditLimit sets the admin-managed arrears credit line for a payer in one
 	// currency. A zero limit removes the credit line.
 	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
+	// GetCreditLimit reads the admin-managed arrears credit line for a payer in one
+	// currency (0 = no credit line). Read counterpart of SetCreditLimit (#489); the
+	// limit is not surfaced by GetCreditAccount/settings, hence its own call.
+	GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error)
 	// UsageRollup returns grouped spend aggregates for a payer and currency over
 	// [from, to]. groupBy selects the aggregation dimension (e.g. "resource", "invoker").
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)

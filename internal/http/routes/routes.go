@@ -209,6 +209,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), readMW...)
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
+	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
 
 	admissions := group.Group("/admissions")
 	admissions.Handle(http.MethodPost, "/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)

@@ -292,6 +292,20 @@ func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil)
 }
 
+// GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
+func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
+	q := url.Values{}
+	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("currency", normalizeCurrency(currency))
+	var resp struct {
+		CreditLimitAmount int64 `json:"credit_limit_amount"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credit-limit?"+q.Encode(), nil, &resp); err != nil {
+		return 0, err
+	}
+	return resp.CreditLimitAmount, nil
+}
+
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
