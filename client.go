@@ -142,17 +142,17 @@ func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 // promotions, money-in settlement). Amount is in the currency's internal
 // precision.
 type DepositCreditsRequest struct {
-	CustomerID  *CustomerID
-	Invoker     string
-	Currency    string
+	CustomerID *CustomerID
+	Invoker    string
+	Currency   string
 	// Amount is the deposit size in the currency's internal precision (e.g. cents for USD).
 	Amount int64
 	// Source identifies the system of record for this deposit (e.g. "stripe", "manual").
 	Source string
 	// SourceID is the idempotency key for the deposit within the Source namespace.
 	// Duplicate (Source, SourceID) pairs are rejected, preventing double-deposits.
-	SourceID  *uuid.UUID
-	ExpiresAt *time.Time
+	SourceID    *uuid.UUID
+	ExpiresAt   *time.Time
 	Description string
 }
 
