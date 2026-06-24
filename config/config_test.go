@@ -213,6 +213,46 @@ merchant_cors:
 	require.ErrorContains(t, err, "merchant_cors was removed")
 }
 
+func TestLoad_RejectsRenamedTestModeConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+test_mode: true
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "test_env")
+}
+
+func TestLoad_RejectsRenamedTestModeEnv(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	_, err := Load("nonexistent-config.yaml")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "test_env")
+}
+
+func TestLoad_IgnoresPrivatePortConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+private_port: 8060
+`), 0o600))
+
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+}
+
+func TestLoad_IgnoresPrivatePortEnv(t *testing.T) {
+	t.Setenv("PRIVATE_PORT", "8060")
+
+	cfg, err := Load("nonexistent-config.yaml")
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+}
+
 func TestLoad_IgnoresRemovedStoreConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

@@ -1339,7 +1339,11 @@ func Load(configPath string) (*Config, error) {
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
 	}
+	if k.Exists("test_mode") || os.Getenv("TEST_MODE") != "" {
+		return nil, fmt.Errorf("test_mode was renamed to test_env (#355): set test_env (env TEST_ENV) — sandbox vs live is the test_env axis; a stale test_mode would silently no-op")
+	}
 
+	ignoredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
 	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
 	ignoredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
 	ignoredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
@@ -1386,6 +1390,9 @@ func Load(configPath string) (*Config, error) {
 	}
 	if ignoredControlPlaneLegacy {
 		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")
+	}
+	if ignoredPrivatePort {
+		log.Warn("ignoring private_port: OpenRails serves a single HTTP listener; there is no separate internal port")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
