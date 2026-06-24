@@ -134,10 +134,10 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 	if err != nil {
 		return nil, err
 	}
-	// Use global test_env for CCBill IP allowlist bypass.
-	isTestEnv := cfg.IsTestEnv()
+	// Use global test_mode for CCBill IP allowlist bypass.
+	isTestMode := cfg.IsTestMode()
 
-	if !isTestEnv {
+	if !isTestMode {
 		// Verify CCBill webhook comes from authorized IP ranges
 		if !iputil.IsValidCCBillIP(req.ClientIP) {
 			log.WithFields(log.Fields{

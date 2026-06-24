@@ -43,16 +43,16 @@ func main() {
 				}
 			}
 
-			// --test-env mirrors --mode: overwrite the TEST_ENV env var before
+			// --test-mode mirrors --mode: overwrite the TEST_MODE env var before
 			// Load so flag beats env beats yaml. Only applied when the flag was
-			// passed explicitly, so an unset flag never clobbers TEST_ENV.
-			if cmd.Flags().Changed("test-env") {
-				testEnv, err := cmd.Flags().GetBool("test-env")
+			// passed explicitly, so an unset flag never clobbers TEST_MODE.
+			if cmd.Flags().Changed("test-mode") {
+				testMode, err := cmd.Flags().GetBool("test-mode")
 				if err != nil {
-					return fmt.Errorf("failed to get test-env flag: %w", err)
+					return fmt.Errorf("failed to get test-mode flag: %w", err)
 				}
-				if err := os.Setenv("TEST_ENV", strconv.FormatBool(testEnv)); err != nil {
-					return fmt.Errorf("failed to apply --test-env: %w", err)
+				if err := os.Setenv("TEST_MODE", strconv.FormatBool(testMode)); err != nil {
+					return fmt.Errorf("failed to apply --test-mode: %w", err)
 				}
 			}
 
@@ -72,7 +72,7 @@ func main() {
 	rootCmd.PersistentFlags().
 		String("mode", "", "Operating mode (behavior): full | limited | readonly (overrides MODE env and config.yaml; required outside development)")
 	rootCmd.PersistentFlags().
-		Bool("test-env", false, "Use sandbox processor credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_ENV env and config.yaml; development only")
+		Bool("test-mode", false, "Use sandbox processor credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
 
 	serverCmd := &cobra.Command{
 		Use:     "run-server",

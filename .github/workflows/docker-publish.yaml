@@ -68,7 +68,7 @@ jobs:
         run: |
           docker run --rm --network host \
             -e ENV=development \
-            -e TEST_ENV=true \
+            -e TEST_MODE=true \
             -e DB_HOST=127.0.0.1 \
             -e DB_PORT=5434 \
             -e DB_DATABASE=openrails_db \
@@ -84,7 +84,7 @@ jobs:
         run: |
           cid="$(docker run -d --network host \
             -e ENV=development \
-            -e TEST_ENV=true \
+            -e TEST_MODE=true \
             -e PORT=3053 \
             -e API_URL=http://127.0.0.1:3053 \
             -e AUTH_ISSUER=http://127.0.0.1:3053 \

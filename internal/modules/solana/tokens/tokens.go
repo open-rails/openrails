@@ -148,7 +148,7 @@ const (
 )
 
 // ClassifyPricing applies the MAINNET pricing policy to one
-// configured token. It is never consulted on devnet (test_env): devnet money
+// configured token. It is never consulted on devnet (test_mode): devnet money
 // is fake and has no pricing requirements at all.
 func ClassifyPricing(symbol, mint string) (TokenPricing, StablecoinInfo) {
 	normalized := strings.ToUpper(strings.TrimSpace(symbol))

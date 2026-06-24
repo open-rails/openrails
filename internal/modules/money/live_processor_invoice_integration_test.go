@@ -64,7 +64,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestEnv: true},
+		Config: &config.Config{Env: "dev", TestMode: true},
 		Processors: config.ProcessorSet{
 			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: secretKey},
 		},
@@ -149,8 +149,8 @@ func requireLiveProcessorTest(t *testing.T) {
 	if strings.TrimSpace(os.Getenv(liveProcessorOptIn)) != "1" {
 		t.Skipf("%s=1 is required for live processor invoice tests", liveProcessorOptIn)
 	}
-	if !isTruthy(os.Getenv("TEST_ENV")) && !isTruthy(os.Getenv("OPENRAILS_TEST_ENV")) {
-		t.Fatalf("TEST_ENV=true is required for live processor invoice tests")
+	if !isTruthy(os.Getenv("TEST_MODE")) && !isTruthy(os.Getenv("OPENRAILS_TEST_MODE")) {
+		t.Fatalf("TEST_MODE=true is required for live processor invoice tests")
 	}
 }
 

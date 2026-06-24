@@ -367,7 +367,7 @@ func catalogNMIClients(cfg *config.Config, processors config.ProcessorSet, enabl
 		if providerKey == "" || procConfig == nil || strings.TrimSpace(procConfig.SecurityKey) == "" {
 			continue
 		}
-		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestEnv())
+		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestMode())
 		if err != nil {
 			log.WithError(err).WithField("provider", providerKey).Warn("NMI catalog client unavailable")
 			continue

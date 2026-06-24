@@ -210,10 +210,10 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	require.Equal(t, "merchant-sub", parsed.Query().Get("clientSubacc"))
 }
 
-func checkoutProcessorConfig(testEnv bool) *config.Config {
+func checkoutProcessorConfig(testMode bool) *config.Config {
 	return &config.Config{
 		Mode:    config.ModeFull,
-		TestEnv: testEnv,
+		TestMode: testMode,
 	}
 }
 

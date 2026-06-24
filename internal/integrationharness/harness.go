@@ -237,7 +237,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 
 	cfg := &config.Config{
 		Env:     "dev",
-		TestEnv: true,
+		TestMode: true,
 		Host:    "127.0.0.1",
 		Port:    0, // ephemeral; we serve via httptest below
 		DB:      &config.DBConfig{URL: appDSN},

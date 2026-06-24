@@ -234,7 +234,7 @@ services:
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"
-      TEST_ENV: "${TEST_ENV:-true}"
+      TEST_MODE: "${TEST_MODE:-true}"
       PORT: "3053"
       API_URL: "${API_URL:-http://localhost:3053}"
       AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"

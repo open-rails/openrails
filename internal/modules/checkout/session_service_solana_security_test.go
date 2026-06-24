@@ -300,7 +300,7 @@ const (
 
 func testSolanaCheckoutConfig() *config.Config {
 	return &config.Config{
-		TestEnv: true,
+		TestMode: true,
 	}
 }
 

@@ -252,10 +252,10 @@ func (r vaultPerMerchantProviderSecretResolver) PrimaryProviderAccountSecretName
 	return name, err == nil, err
 }
 
-func vaultTestConfig(testEnv bool) *config.Config {
+func vaultTestConfig(testMode bool) *config.Config {
 	return &config.Config{
 		Mode:    config.ModeFull,
-		TestEnv: testEnv,
+		TestMode: testMode,
 	}
 }
 

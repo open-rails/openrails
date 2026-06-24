@@ -720,7 +720,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 		if !ok {
 			return manifestProviderIdentity{}, fmt.Errorf("provider account nmi account_id is required unless secrets.production_key/security_key is present for profile discovery")
 		}
-		client, err := nmi.NewClient("bootstrap-"+providerType, &config.NMIProviderSettings{SecurityKey: key}, cfg != nil && cfg.IsTestEnv())
+		client, err := nmi.NewClient("bootstrap-"+providerType, &config.NMIProviderSettings{SecurityKey: key}, cfg != nil && cfg.IsTestMode())
 		if err != nil {
 			return manifestProviderIdentity{}, fmt.Errorf("build nmi identity client: %w", err)
 		}

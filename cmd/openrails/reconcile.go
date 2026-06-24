@@ -163,7 +163,7 @@ func reconcileNMIClients(cfg *config.Config, processors config.ProcessorSet) (ma
 		if strings.TrimSpace(procConfig.SecurityKey) == "" {
 			return nil, fmt.Errorf("nmi provider %q security key is required for reconciliation", providerKey)
 		}
-		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestEnv())
+		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestMode())
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func reconcileCCBillDataLink(cfg *config.Config, processors config.ProcessorSet)
 		return nil, nil
 	}
 	ccbillConfig := proc.ToCCBillConfig()
-	ccbillConfig.TestMode = cfg.IsTestEnv()
+	ccbillConfig.TestMode = cfg.IsTestMode()
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }
 
@@ -195,7 +195,7 @@ func reconcileSolanaRPC(cfg *config.Config, processors config.ProcessorSet) (*so
 		return nil, nil
 	}
 	network := "mainnet"
-	if cfg.IsTestEnv() {
+	if cfg.IsTestMode() {
 		network = "devnet"
 	}
 	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{

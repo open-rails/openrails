@@ -106,7 +106,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			}
 			proc.Type = config.ProcessorTypeNMI
 			proc.SecurityKey = value
-			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestEnv())
+			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
 		} else if s.scopedProviderSecretsEnabled() {
 			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
 		}
@@ -118,7 +118,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		}
 	}
 	if proc := s.processorConfig(provider); proc != nil && processors.IsNMIBacked(provider) {
-		return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestEnv())
+		return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
 	}
 	return nil, fmt.Errorf("missing client")
 }
@@ -128,7 +128,7 @@ func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 	if err != nil {
 		return nil, err
 	}
-	return ccbill.NewClient(cfg, s.Config != nil && s.Config.IsTestEnv()), nil
+	return ccbill.NewClient(cfg, s.Config != nil && s.Config.IsTestMode()), nil
 }
 
 func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {

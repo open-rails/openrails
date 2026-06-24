@@ -278,7 +278,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 }
 
 func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	testMode := s != nil && s.Config != nil && s.Config.IsTestEnv()
+	testMode := s != nil && s.Config != nil && s.Config.IsTestMode()
 	if s != nil && s.newNMIClient != nil {
 		return s.newNMIClient(provider, cfg, testMode)
 	}

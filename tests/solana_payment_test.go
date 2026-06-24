@@ -68,7 +68,7 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 		Type:            config.ProcessorTypeSolana,
 		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 		Tokens:          solanatokens.DefaultDevnetTokens(),
-		// RPCEndpoint and Network are derived from test_env
+		// RPCEndpoint and Network are derived from test_mode
 	}
 
 	return suite, token, userID

@@ -95,7 +95,7 @@ func NewSolanaPayPoller(
 		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Network))
 		if solanaNetwork == "" {
 			solanaNetwork = "mainnet"
-			if cfg.IsTestEnv() {
+			if cfg.IsTestMode() {
 				solanaNetwork = "devnet"
 			}
 		}

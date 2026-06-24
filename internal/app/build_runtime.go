@@ -80,11 +80,11 @@ type runtimeOverrides struct {
 	Processors config.ProcessorSet
 }
 
-// effectiveSolanaNetwork derives the Solana network purely from the test_env
-// axis — devnet under test_env, mainnet otherwise. There is deliberately no
-// override knob (#349): test_env already answers the question.
+// effectiveSolanaNetwork derives the Solana network purely from the test_mode
+// axis — devnet under test_mode, mainnet otherwise. There is deliberately no
+// override knob (#349): test_mode already answers the question.
 func effectiveSolanaNetwork(cfg *config.Config) string {
-	if cfg != nil && cfg.IsTestEnv() {
+	if cfg != nil && cfg.IsTestMode() {
 		return "devnet"
 	}
 	return "mainnet"
@@ -95,7 +95,7 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 // tokens that cannot function are dropped with a loud warning, mirroring the
 // "recipient_wallet not configured; Solana payments disabled" pattern:
 //
-//   - devnet (test_env): NO pricing requirements at all — devnet money is fake.
+//   - devnet (test_mode): NO pricing requirements at all — devnet money is fake.
 //   - mainnet, Pyth feed exists for the symbol: feed pricing (for stablecoins
 //     the feed is the depeg failsafe).
 //   - mainnet, known USD-pegged stablecoin mint without a feed: kept, priced
@@ -158,7 +158,7 @@ func configureSolanaProcessor(cfg *config.Config, processors config.ProcessorSet
 	return nil
 }
 
-// devnetParityPriceProvider wraps the Pyth client under test_env (#360).
+// devnetParityPriceProvider wraps the Pyth client under test_mode (#360).
 // Devnet money is fake and a devnet deployment must never require Hermes:
 // feed-backed symbols are still priced via Hermes when it is reachable
 // (realistic SOL quotes), but ANY failure — missing feed, network error,
@@ -552,7 +552,7 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			log.Warnf("nmi provider '%s' webhook secret is not configured; signature validation will be disabled", providerKey)
 		}
 
-		client, err := nmi.NewClient(providerKey, settings, cfg.IsTestEnv())
+		client, err := nmi.NewClient(providerKey, settings, cfg.IsTestMode())
 		if err != nil {
 			return nil, err
 		}
@@ -561,7 +561,7 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 		clients[providerKey] = client
 	}
 
-	// #348: test_env guarantees sandbox money, but NMI accounts are
+	// #348: test_mode guarantees sandbox money, but NMI accounts are
 	// undetectable by configuration (sandbox hits the same gateway URL, the key
 	// carries no marker). Probe instead: only a simulating account can approve
 	// the non-issued test card, so a decline proves PRODUCTION credentials —
@@ -574,7 +574,7 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 	// paying one declined auth per restart); a fresh 'simulated' verdict skips
 	// the probe. A rotated key or a stale verdict always re-probes, and cache
 	// failures degrade to probing.
-	if cfg.IsTestEnv() {
+	if cfg.IsTestMode() {
 		for providerKey, client := range clients {
 			if client.SecurityKey == "" {
 				continue // unconfigured dev client, nothing to verify
@@ -583,7 +583,7 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			if verdict, checkedAt, ok := lookupProbeVerdict(database, providerKey, keyHash); ok {
 				switch probeCacheDecision(verdict, checkedAt, time.Now()) {
 				case probeCacheRefuseBoot:
-					return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_env is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_env)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
+					return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_mode)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
 				case probeCacheSkipProbe:
 					log.Infof("processor %q: NMI account verified as simulating (cached probe verdict from %s; #348 probe cooldown, no probe sent)", providerKey, checkedAt.UTC().Format(time.RFC3339))
 					continue
@@ -593,14 +593,14 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			switch result {
 			case nmi.ProbeLive:
 				storeProbeVerdict(database, providerKey, keyHash, probeVerdictLive)
-				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_env is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_env)", providerKey)
+				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_mode)", providerKey)
 			case nmi.ProbeSimulated:
 				storeProbeVerdict(database, providerKey, keyHash, probeVerdictSimulated)
 				log.Infof("processor %q: NMI account verified as simulating (test env)", providerKey)
 			default:
 				// Indeterminate verdicts are never cached: the next boot
 				// re-probes once the transport/credential issue clears.
-				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_env", providerKey)
+				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode", providerKey)
 			}
 		}
 	}
@@ -640,7 +640,7 @@ func createCCBillClient(cfg *config.Config, processors config.ProcessorSet) *ccb
 		return nil
 	}
 
-	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestEnv())
+	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
 }
 
 func createCCBillRESTClient(processors config.ProcessorSet) *ccbill.RESTClient {
@@ -662,7 +662,7 @@ func createCCBillDataLinkClient(cfg *config.Config, processors config.ProcessorS
 	}
 
 	ccbillConfig := ccbillProc.ToCCBillConfig()
-	ccbillConfig.TestMode = cfg.IsTestEnv()
+	ccbillConfig.TestMode = cfg.IsTestMode()
 	client := ccbill.NewDataLinkClient(ccbillConfig)
 	if err := client.ValidateConfig(); err != nil {
 		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")

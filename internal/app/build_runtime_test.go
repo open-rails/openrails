@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateCCBillDataLinkClientPropagatesTestEnv(t *testing.T) {
+func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
-	cfg.TestEnv = true
+	cfg.TestMode = true
 	processors := config.ProcessorSet{
 		"ccbill": {
 			ClientAccNum:     "945280",
@@ -62,11 +62,11 @@ func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
 // feed check. These tests pin the degrade-not-die policy matrix.
 // ----------------------------------------------------------------------------
 
-func solanaCfg(t *testing.T, testEnv bool, tokens map[string]config.TokenConfig) (*config.Config, config.ProcessorSet) {
+func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.ProcessorSet) {
 	t.Helper()
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
-	cfg.TestEnv = testEnv
+	cfg.TestMode = testMode
 	processors := config.ProcessorSet{
 		"solana": {Tokens: tokens},
 	}

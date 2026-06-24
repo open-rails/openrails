@@ -202,10 +202,10 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	suite.Config = &config.Config{
 		Env: "dev",
 		// Sandbox semantics MUST be explicit (#355): the dev default is now
-		// live credentials + mode=full, so the suite sets test_env=true to keep
+		// live credentials + mode=full, so the suite sets test_mode=true to keep
 		// processors on their sandbox environments (and the NMI demo-key boot
 		// probe working).
-		TestEnv: true,
+		TestMode: true,
 		Host:    "localhost",
 		Port:    8080, // Fixed port for shared test suite
 		DB: &config.DBConfig{
@@ -596,7 +596,7 @@ func (suite *TestContainerSuite) resetNMIClients() {
 	clients := make(map[string]*nmi.NMIClient)
 	for name, proc := range suite.Processors.GetNMIProcessors() {
 		settings := proc.ToNMIProviderSettings(name)
-		client, err := nmi.NewClient(name, settings, suite.Config.IsTestEnv())
+		client, err := nmi.NewClient(name, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
 		client.ReadOnly = suite.Config.IsProviderReadOnly()
 		clients[name] = client

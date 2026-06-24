@@ -57,7 +57,7 @@ type Config struct {
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
 	// Mode is the behavior dial (#346, #355): how much OpenRails is allowed to
-	// do against payment providers. It is independent from TestEnv. One of:
+	// do against payment providers. It is independent from TestMode. One of:
 	//   - "full":     normal operation
 	//   - "limited":  no system-initiated provider writes
 	//   - "readonly": no provider writes
@@ -65,7 +65,7 @@ type Config struct {
 	// mode is REQUIRED (Validate refuses to boot without one).
 	Mode string `koanf:"mode,omitempty"`
 
-	// TestEnv is the sandbox-credential axis (#355), orthogonal to Mode. When
+	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode. When
 	// true, every processor routes to its sandbox environment AND the
 	// credential guarantees attach: a live Stripe key (sk_live_/rk_live_)
 	// refuses to boot, configured NMI accounts are probed at boot (a decline
@@ -73,10 +73,10 @@ type Config struct {
 	// the boot), CCBill uses the sandbox URL, and Solana derives devnet.
 	// When omitted, defaults to sandbox in development and live outside it
 	// (Load sets this fail-closed; see #355) — so a local boot is sandbox by
-	// default and a prod boot is live by default. test_env=true is rejected
-	// outside env=development — sandbox money is dev-only. Set test_env=false
+	// default and a prod boot is live by default. test_mode=true is rejected
+	// outside env=development — sandbox money is dev-only. Set test_mode=false
 	// explicitly to run live credentials locally.
-	TestEnv bool `koanf:"test_env,omitempty"`
+	TestMode bool `koanf:"test_mode,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
 	// Used for generating URLs (e.g., Solana Pay transaction_request URLs).
@@ -363,9 +363,9 @@ type ProcessorConfig struct {
 	// primary RPC and the public endpoints are the fallback chain; without one,
 	// the public chain alone serves. One key, zero endpoint plumbing.
 	HeliusAPIKey string `koanf:"helius_api_key"`
-	// Network is DERIVED from the test_env axis at startup (devnet under
-	// test_env, mainnet otherwise) — it is deliberately NOT configurable
-	// (#349): test_env already answers the question, and a second selector
+	// Network is DERIVED from the test_mode axis at startup (devnet under
+	// test_mode, mainnet otherwise) — it is deliberately NOT configurable
+	// (#349): test_mode already answers the question, and a second selector
 	// could only contradict it.
 	Network         string                 `koanf:"-"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
@@ -444,7 +444,7 @@ func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSetting
 		SecurityKey:     p.SecurityKey,
 		TokenizationKey: p.TokenizationKey,
 		WebhookSecret:   p.WebhookSecret,
-		TestMode:        false, // Will be set by caller based on test_env
+		TestMode:        false, // Will be set by caller based on test_mode
 	}
 }
 
@@ -520,7 +520,7 @@ type TokenConfig struct {
 type RateLimitsConfig map[string]*RateLimit
 
 // Operating modes (#346, #355) — see Config.Mode. The former mode=test is
-// gone (sandbox is the orthogonal test_env axis) and "production" is renamed
+// gone (sandbox is the orthogonal test_mode axis) and "production" is renamed
 // "full".
 const (
 	ModeFull     = "full"
@@ -688,8 +688,8 @@ func Validate(cfg *Config) error {
 	if !isDev {
 		// Sandbox credentials are dev-only (#355): a production deployment
 		// must never boot pointed at sandbox processors.
-		if cfg.TestEnv {
-			return fmt.Errorf("test_env=true is not allowed outside development")
+		if cfg.TestMode {
+			return fmt.Errorf("test_mode=true is not allowed outside development")
 		}
 		// Outside development the operating mode must be declared explicitly —
 		// "I forgot to set it" must never silently pick a behavior.
@@ -764,8 +764,8 @@ func validateEncryption(cfg *EncryptionConfig) error {
 	return nil
 }
 
-// validateStripeKeyForTestEnv checks if the Stripe API key prefix matches the
-// test_env axis. If there's a mismatch, it logs a warning and clears the key to
+// validateStripeKeyForTestMode checks if the Stripe API key prefix matches the
+// test_mode axis. If there's a mismatch, it logs a warning and clears the key to
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
 func ValidateProcessorSet(cfg *Config, processors ProcessorSet) error {
@@ -779,10 +779,10 @@ func ValidateProcessorSet(cfg *Config, processors ProcessorSet) error {
 	if err := validateProcessors(cfg, processors, isDev); err != nil {
 		return fmt.Errorf("processors validation failed: %w", err)
 	}
-	return validateStripeKeyForTestEnv(cfg, processors)
+	return validateStripeKeyForTestMode(cfg, processors)
 }
 
-func validateStripeKeyForTestEnv(cfg *Config, processors ProcessorSet) error {
+func validateStripeKeyForTestMode(cfg *Config, processors ProcessorSet) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
@@ -801,15 +801,15 @@ func validateStripeKeyForTestEnv(cfg *Config, processors ProcessorSet) error {
 		isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
 		isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
 
-		if cfg.IsTestEnv() && isLiveKey {
+		if cfg.IsTestMode() && isLiveKey {
 			// Hard guarantee (#347): the sandbox environment must never hold a live
-			// key — a mistakenly-test-enved production system would otherwise carry
+			// key — a mistakenly-test-modeed production system would otherwise carry
 			// a credential that can move real money.
-			return fmt.Errorf("stripe processor %q: live key (sk_live_/rk_live_) is not allowed when test_env is enabled; use a test key or unset test_env", strings.ToLower(strings.TrimSpace(name)))
+			return fmt.Errorf("stripe processor %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
 		}
-		if !cfg.IsTestEnv() && isTestKey {
-			log.Warnf("⚠️  Stripe test key provided for processor %q but test_env is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
-			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_env=true for sandbox testing")
+		if !cfg.IsTestMode() && isTestKey {
+			log.Warnf("⚠️  Stripe test key provided for processor %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
+			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=true for sandbox testing")
 			stripeProc.SecretKey = ""
 		}
 	}
@@ -1049,14 +1049,14 @@ func (cfg *Config) GetMode() string {
 	return mode
 }
 
-// IsTestEnv returns true if payment processors should use sandbox/test
+// IsTestMode returns true if payment processors should use sandbox/test
 // environments and the sandbox-credential guarantees apply (#355): Stripe
 // live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
 // Orthogonal to Mode (pure behavior). When unset, Load defaults it to sandbox
-// in development and live outside it (#355); Validate rejects test_env=true
+// in development and live outside it (#355); Validate rejects test_mode=true
 // outside development.
-func (cfg *Config) IsTestEnv() bool {
-	return cfg.TestEnv
+func (cfg *Config) IsTestMode() bool {
+	return cfg.TestMode
 }
 
 // IsLimitedMode returns true if proactive payment-provider operations
@@ -1265,9 +1265,9 @@ func Load(configPath string) (*Config, error) {
 			return "api_url"
 		}
 
-		// Special case: TEST_ENV -> test_env (top-level bool, not nested test.env)
-		if s == "test_env" {
-			return "test_env"
+		// Special case: TEST_MODE -> test_mode (top-level bool, not nested test.env)
+		if s == "test_mode" {
+			return "test_mode"
 		}
 
 		// Canonical Vault env vars: VAULT_ADDR is HashiCorp's standard name for
@@ -1339,9 +1339,6 @@ func Load(configPath string) (*Config, error) {
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
 	}
-	if k.Exists("test_mode") || os.Getenv("TEST_MODE") != "" {
-		return nil, fmt.Errorf("test_mode was renamed to test_env (#355): set test_env (env TEST_ENV) — sandbox vs live is the test_env axis; a stale test_mode would silently no-op")
-	}
 
 	ignoredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
 	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
@@ -1404,18 +1401,18 @@ func Load(configPath string) (*Config, error) {
 	// migration, but they no longer participate in runtime configuration. Keep
 	// Load permissive while ensuring the returned struct reflects the supported
 	// infrastructure-only config surface.
-	// Sandbox-by-default in development (#355): when test_env is not explicitly
+	// Sandbox-by-default in development (#355): when test_mode is not explicitly
 	// provided, a dev-like boot defaults to sandbox credentials so a local run
 	// can never accidentally move real money against live processor credentials
 	// — the dangerous case is silent ("forgot to set it"), so the safe value is
 	// the one you get by omission. Outside development the default stays live
-	// (false), and an explicit test_env=true is still rejected by Validate: prod
+	// (false), and an explicit test_mode=true is still rejected by Validate: prod
 	// opts into live only by omission and can never opt into sandbox. To run
-	// live locally, set test_env=false explicitly (env TEST_ENV=false, flag
-	// --test-env=false). This only governs standalone Load(); embedded hosts
+	// live locally, set test_mode=false explicitly (env TEST_MODE=false, flag
+	// --test-mode=false). This only governs standalone Load(); embedded hosts
 	// build the Config programmatically and supply their own value.
-	if !k.Exists("test_env") {
-		cfg.TestEnv = cfg.IsDev()
+	if !k.Exists("test_mode") {
+		cfg.TestMode = cfg.IsDev()
 	}
 
 	// The control plane is mandatory in standalone mode (#469). In development
@@ -1478,7 +1475,7 @@ func ConfigureProcessGlobals(cfg *Config) error {
 // OpenRails processes. Keep this out of Load so one-off CLIs do not look like
 // they started the payment server.
 func LogStartupStatus(cfg *Config) {
-	logTestEnvStatus(cfg)
+	logTestModeStatus(cfg)
 	logOperatingModeStatus(cfg)
 }
 
@@ -1498,10 +1495,10 @@ func logOperatingModeStatus(cfg *Config) {
 	}
 }
 
-// logTestEnvStatus logs the credential environment at startup.
+// logTestModeStatus logs the credential environment at startup.
 // This helps operators confirm whether they're on sandbox or live credentials.
-func logTestEnvStatus(cfg *Config) {
-	if cfg.IsTestEnv() {
+func logTestModeStatus(cfg *Config) {
+	if cfg.IsTestMode() {
 		log.Warn("⚠️  TEST ENV ENABLED - No real charges will be processed")
 		log.Info("   Payment providers will use sandbox/test environments:")
 		log.Info("   - NMI: secure.networkmerchants.com with test-mode transactions")
@@ -1513,10 +1510,10 @@ func logTestEnvStatus(cfg *Config) {
 		log.Info("   Payment providers will use production environments")
 
 		// Warn if running real charges in dev environment. This only happens when
-		// TEST_ENV=false is set explicitly; omitted test_env defaults to sandbox in dev.
+		// TEST_MODE=false is set explicitly; omitted test_mode defaults to sandbox in dev.
 		if cfg.IsDev() {
 			log.Warn("⚠️  Real payment processing enabled in dev environment")
-			log.Warn("   Set test_env=true (env TEST_ENV=true, flag --test-env) to use sandbox environments")
+			log.Warn("   Set test_mode=true (env TEST_MODE=true, flag --test-mode) to use sandbox environments")
 		}
 	}
 }

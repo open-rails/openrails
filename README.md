@@ -417,7 +417,7 @@ or your own tooling instead — admin routes without a permission checker fail c
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** the live `openrails:admin` permission evaluated at request time in
   the caller's own org (see embedded guide §5). Never derived from role names.
-- **Sandbox vs live:** `TEST_ENV=true` routes every processor to its test/sandbox
+- **Sandbox vs live:** `TEST_MODE=true` routes every processor to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
   card. It defaults on in development, must be explicit for live local runs, and is
   rejected outside development (see Operating modes below).
@@ -436,7 +436,7 @@ Two orthogonal settings:
 - **`mode`** (yaml) / `MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml) —
   the pure **behavior** dial: how much OpenRails may do against the payment providers.
   One of `full | limited | readonly`.
-- **`test_env`** (yaml) / `TEST_ENV` (env) / `--test-env` (CLI flag) — the
+- **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
   **credential** axis: `true` enforces sandbox processor credentials. Default `false`.
 
 | `MODE=` | What runs |
@@ -445,9 +445,9 @@ Two orthogonal settings:
 | `limited` | **Reactive-only provider writes.** Nothing system-initiated touches a provider: no dunning charges, no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Local dunning decisions still materialize: stale past-due subscriptions cancel/downgrade locally, and in-window charges become parked system-origin intents. Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
 | `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. For reconciliation/forensics boots. |
 
-### `test_env` — sandbox credentials, orthogonal to mode
+### `test_mode` — sandbox credentials, orthogonal to mode
 
-`TEST_ENV=true` is sandbox money with whatever behavior `mode` selects (typically
+`TEST_MODE=true` is sandbox money with whatever behavior `mode` selects (typically
 `full`): every processor routes to its test/sandbox environment, and the **credential
 guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
 configured NMI account is probed at boot with one auth on the non-issued test card —
@@ -458,12 +458,12 @@ verdicts are cached for 12h in `billing.probe_verdicts` keyed by sha256 of the k
 crash-looping supervisor pays one declined auth total, not one per restart — a fresh
 `simulated` verdict skips the probe, and a rotated key or stale verdict always
 re-probes (cache failures degrade to probing); CCBill uses
-`sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_env=true` is
+`sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_mode=true` is
 **rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
-is exactly `TEST_ENV=true` + `MODE=full`.
+is exactly `TEST_MODE=true` + `MODE=full`.
 
-At a glance — what each mode permits (the `test_env` axis applies orthogonally: with
-`TEST_ENV=true` the same matrix holds against sandbox processors, so no real money can
+At a glance — what each mode permits (the `test_mode` axis applies orthogonally: with
+`TEST_MODE=true` the same matrix holds against sandbox processors, so no real money can
 move in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
@@ -487,7 +487,7 @@ usable; `readonly` = reconciliation/forensics boots that must only observe.
 `mode` is **required outside development** (the server refuses to boot without one);
 unset in dev defaults to `full`. **Behavior change (#355):** the dev default is now
 **live credentials + full behavior** — a dev boot with real processor credentials in
-`.env` and no flags will move real money. Set `TEST_ENV=true` (or `--test-env`) for the
+`.env` and no flags will move real money. Set `TEST_MODE=true` (or `--test-mode`) for the
 old sandbox-by-default behavior. The old `mode=test` and `mode=production` values and
 the `test_mode` boolean no longer exist.
 

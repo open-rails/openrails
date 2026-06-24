@@ -88,7 +88,7 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface; deliver this event to /v1/merchants/{merchant}/webhooks/{provider}")
 		return
 	}
-	isTestEnv := r.State.Config.IsTestEnv()
+	isTestMode := r.State.Config.IsTestMode()
 	if processors.IsNMIBacked(provider) {
 		if enqueueNMIWebhook(r, provider, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
@@ -97,7 +97,7 @@ func Webhook(r *httprequest.Request) {
 	}
 	switch provider {
 	case subscriptions.ProcessorCCBill:
-		if !isTestEnv {
+		if !isTestMode {
 			if !iputil.IsValidCCBillIP(clientIP) {
 				log.WithFields(log.Fields{"client_ip": clientIP, "processor": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
 				r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
@@ -174,7 +174,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	}
 	if provider == subscriptions.ProcessorCCBill {
 		clientIP := r.GetRemoteIP()
-		if r.State.Config != nil && !r.State.Config.IsTestEnv() && !iputil.IsValidCCBillIP(clientIP) {
+		if r.State.Config != nil && !r.State.Config.IsTestMode() && !iputil.IsValidCCBillIP(clientIP) {
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return
 		}
