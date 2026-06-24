@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -786,4 +787,58 @@ func TestRateLimitsPartialOverrideKeepsDefaults(t *testing.T) {
 	require.NotNil(t, rl["subscribe"], "untouched endpoints keep their defaults")
 	require.Equal(t, 20, rl["subscribe"].RequestsPerMinute)
 	require.NotNil(t, rl["default"])
+}
+
+func TestValidateEncryption(t *testing.T) {
+	valid32Key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	valid16Key := base64.StdEncoding.EncodeToString(make([]byte, 16))
+
+	tests := []struct {
+		name      string
+		cfg       *EncryptionConfig
+		wantError string
+	}{
+		{
+			name:      "nil config — encryption disabled, no error",
+			cfg:       nil,
+			wantError: "",
+		},
+		{
+			name:      "empty MasterKey — encryption disabled, no error",
+			cfg:       &EncryptionConfig{MasterKey: ""},
+			wantError: "",
+		},
+		{
+			name:      "whitespace-only MasterKey — treated as empty, no error",
+			cfg:       &EncryptionConfig{MasterKey: "   "},
+			wantError: "",
+		},
+		{
+			name:      "valid 32-byte base64 key — no error",
+			cfg:       &EncryptionConfig{MasterKey: valid32Key},
+			wantError: "",
+		},
+		{
+			name:      "non-base64 string — error",
+			cfg:       &EncryptionConfig{MasterKey: "not!base64!"},
+			wantError: "must be valid base64",
+		},
+		{
+			name:      "valid base64 of wrong length (16 bytes) — error",
+			cfg:       &EncryptionConfig{MasterKey: valid16Key},
+			wantError: "must decode to 32 bytes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEncryption(tt.cfg)
+			if tt.wantError == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantError)
+			}
+		})
+	}
 }

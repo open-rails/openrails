@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -717,6 +718,10 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
+	if err := validateEncryption(cfg.Encryption); err != nil {
+		return fmt.Errorf("encryption config validation failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -737,6 +742,24 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	secretKey := strings.TrimSpace(cfg.SecretKey) != ""
 	if siteKey != secretKey {
 		return fmt.Errorf("captcha requires BOTH site_key and secret_key (set both to enable, neither to disable)")
+	}
+	return nil
+}
+
+// validateEncryption fails fast on a malformed at-rest encryption master key.
+// An empty key is a legitimate state (encryption disabled) but is surfaced as a
+// warning so the plaintext-storage downgrade is never silent (#227).
+func validateEncryption(cfg *EncryptionConfig) error {
+	if cfg == nil || strings.TrimSpace(cfg.MasterKey) == "" {
+		log.Warn("encryption.master_key not set; per-merchant secrets are stored WITHOUT at-rest encryption")
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(cfg.MasterKey))
+	if err != nil {
+		return fmt.Errorf("encryption.master_key must be valid base64: %w", err)
+	}
+	if len(raw) != 32 {
+		return fmt.Errorf("encryption.master_key must decode to 32 bytes (AES-256); got %d", len(raw))
 	}
 	return nil
 }
