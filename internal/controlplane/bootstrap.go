@@ -96,8 +96,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
 			Persona:        MerchantType,
-			ResourceSlug:    slug,
-			ParentPersona:   authcore.RootPersona,
+			InstanceSlug:   slug,
+			ParentPersona:  authcore.RootPersona,
 			OwnerSubjectID: strings.TrimSpace(opts.InitialAdminUserID),
 		})
 		if err != nil {

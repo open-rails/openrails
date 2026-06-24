@@ -348,7 +348,7 @@ func (h *Harness) ensureMerchantGroup(core *authcore.Service, slug string) strin
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		gid, err = core.CreatePermissionGroup(h.ctx, authcore.CreatePermissionGroupRequest{
 			Persona:       controlplane.MerchantType,
-			ResourceSlug:  slug,
+			InstanceSlug:  slug,
 			ParentPersona: authcore.RootPersona,
 		})
 	}
@@ -581,7 +581,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Mode:              authcore.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Audiences:         []string{"openrails"},
-		Enabled:    true,
+		Enabled:           true,
 	})
 	if len(permissions) == 0 {
 		permissions = []string{controlplane.PermMerchantCustomerSettingsUpdate}

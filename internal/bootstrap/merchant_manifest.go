@@ -887,8 +887,8 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
 	if errors.Is(err, authcore.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
-			Persona:      controlplane.MerchantType,
-			ResourceSlug: slug,
+			Persona:       controlplane.MerchantType,
+			InstanceSlug:  slug,
 			ParentPersona: authcore.RootPersona,
 		})
 		if err != nil {

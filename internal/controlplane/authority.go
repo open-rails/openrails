@@ -64,13 +64,13 @@ func (c *ControlPlane) MerchantForUser(ctx context.Context, userID string) (stri
 	}
 	var ref string
 	for _, m := range memberships {
-		if m.Persona != MerchantType || strings.TrimSpace(m.ResourceSlug) == "" {
+		if m.Persona != MerchantType || strings.TrimSpace(m.InstanceSlug) == "" {
 			continue
 		}
-		if ref != "" && !strings.EqualFold(ref, m.ResourceSlug) {
+		if ref != "" && !strings.EqualFold(ref, m.InstanceSlug) {
 			return "", ErrMerchantAmbiguous
 		}
-		ref = m.ResourceSlug
+		ref = m.InstanceSlug
 	}
 	return ref, nil
 }
