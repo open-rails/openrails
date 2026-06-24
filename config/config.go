@@ -850,7 +850,7 @@ func validateProcessors(cfg *Config, processors ProcessorSet, isDev bool) error 
 				return err
 			}
 		case ProcessorTypeSolana:
-			if err := validateSolanaProcessor(name, proc); err != nil {
+			if err := validateSolanaProcessor(name, proc, isDev); err != nil {
 				return err
 			}
 		default:
@@ -871,7 +871,7 @@ func validateNMIProcessor(name string, proc *ProcessorConfig, isDev bool) error 
 	}
 
 	if strings.TrimSpace(proc.WebhookSecret) == "" {
-		log.Warnf("processor '%s' (nmi): webhook_secret not configured; signature verification disabled", name)
+		return fmt.Errorf("processor '%s' (nmi): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
 	}
 
 	return nil
@@ -908,6 +908,9 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 	}
 
 	if strings.TrimSpace(proc.WebhookSecret) == "" {
+		if !isDev {
+			return fmt.Errorf("processor '%s' (stripe): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
+		}
 		log.Warnf("processor '%s' (stripe): webhook_secret not configured; signature verification disabled", name)
 	}
 
@@ -917,8 +920,11 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 // validateSolanaProcessor validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaProcessor.
-func validateSolanaProcessor(name string, proc *ProcessorConfig) error {
+func validateSolanaProcessor(name string, proc *ProcessorConfig, isDev bool) error {
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
+		if !isDev {
+			return fmt.Errorf("processor '%s' (solana): recipient_wallet is required outside development (Solana payments cannot be processed without it)", name)
+		}
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
 	}
 

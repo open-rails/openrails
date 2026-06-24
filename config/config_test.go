@@ -647,6 +647,96 @@ func TestStripeLiveKeyRejectedInTestEnv(t *testing.T) {
 	require.Equal(t, "", processors2["stripe"].SecretKey)
 }
 
+// TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret (and,
+// for Solana, a missing recipient_wallet) is a hard boot error in production but
+// only a warning in development.
+func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
+	prodCfg := func() *Config {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "production"
+		return cfg
+	}
+	devCfg := func() *Config {
+		return GetDefaultBillingConfig() // Env: "development" → isDev=true
+	}
+
+	tests := []struct {
+		name      string
+		cfg       *Config
+		processor *ProcessorConfig
+		wantError bool
+	}{
+		// Stripe: missing webhook_secret
+		{
+			name:      "stripe/missing webhook_secret in dev → no error",
+			cfg:       devCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_test_dummy", WebhookSecret: ""},
+			wantError: false,
+		},
+		{
+			name:      "stripe/missing webhook_secret in prod → error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: ""},
+			wantError: true,
+		},
+		{
+			name:      "stripe/present webhook_secret in prod → no error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"},
+			wantError: false,
+		},
+		// Solana: missing recipient_wallet
+		{
+			name:      "solana/missing recipient_wallet in dev → no error",
+			cfg:       devCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: ""},
+			wantError: false,
+		},
+		{
+			name:      "solana/missing recipient_wallet in prod → error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: ""},
+			wantError: true,
+		},
+		{
+			name:      "solana/present recipient_wallet in prod → no error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: "wallet_test_dummy"},
+			wantError: false,
+		},
+		// NMI: missing webhook_secret (security_key also required outside dev)
+		{
+			name:      "nmi/missing webhook_secret in dev → no error",
+			cfg:       devCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			wantError: false,
+		},
+		{
+			name:      "nmi/missing webhook_secret in prod → error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			wantError: true,
+		},
+		{
+			name:      "nmi/present webhook_secret in prod → no error",
+			cfg:       prodCfg(),
+			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateProcessorSet(tt.cfg, ProcessorSet{"p": tt.processor})
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 // TestDBConfig_SchemaName covers the issue #165 schema accessor: default `billing`,
 // normalization (trim + lower-case), and nil-safety.
 func TestDBConfig_SchemaName(t *testing.T) {
