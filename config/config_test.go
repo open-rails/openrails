@@ -292,11 +292,11 @@ func TestLoad_AuthIssuerFromEnv(t *testing.T) {
 	require.Equal(t, "https://billing.example.com/", cfg.Auth.Issuer)
 }
 
-func TestLoad_IgnoresProcessorConfigFile(t *testing.T) {
+func TestLoad_IgnoresRailConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	err := os.WriteFile(cfgPath, []byte(`
-processors:
+rails:
   acme:
     security_key: test-key
 `), 0o600)
@@ -307,11 +307,11 @@ processors:
 	require.NotNil(t, cfg)
 }
 
-func TestLoad_IgnoresProcessorConfigEnv(t *testing.T) {
-	t.Setenv("PROCESSORS_MOBIUS_TYPE", "")
-	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_KEY", "")
-	t.Setenv("PROCESSORS_MOBIUS_WEBHOOK_SECRET", "")
-	t.Setenv("PROCESSORS_MOBIUS_SECURITY_KEY", "test-key")
+func TestLoad_IgnoresRailConfigEnv(t *testing.T) {
+	t.Setenv("RAILS_MOBIUS_TYPE", "")
+	t.Setenv("RAILS_MOBIUS_TOKENIZATION_KEY", "")
+	t.Setenv("RAILS_MOBIUS_WEBHOOK_SECRET", "")
+	t.Setenv("RAILS_MOBIUS_SECURITY_KEY", "test-key")
 
 	cfg, err := Load("nonexistent-config.yaml")
 	require.NoError(t, err)
@@ -544,15 +544,15 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 	})
 }
 
-// stripeTestModeConfig builds a minimal Config plus in-memory ProcessorSet with a
-// single Stripe processor carrying the given secret key and test_mode setting.
-func stripeTestModeConfig(secretKey string, testMode bool) (*Config, ProcessorSet) {
+// stripeTestModeConfig builds a minimal Config plus in-memory RailSet with a
+// single Stripe rail carrying the given secret key and test_mode setting.
+func stripeTestModeConfig(secretKey string, testMode bool) (*Config, RailSet) {
 	return &Config{
-			Mode:    ModeFull,
+			Mode:     ModeFull,
 			TestMode: testMode,
-		}, ProcessorSet{
+		}, RailSet{
 			"stripe": {
-				Type:      string(ProcessorTypeStripe),
+				Type:      string(RailTypeStripe),
 				SecretKey: secretKey,
 			},
 		}
@@ -561,110 +561,110 @@ func stripeTestModeConfig(secretKey string, testMode bool) (*Config, ProcessorSe
 func TestValidateStripeKeyForTestMode(t *testing.T) {
 	// Standard secret keys (sk_*)
 	t.Run("sk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("sk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, processors), "live key in test env must refuse to boot")
+		cfg, rails := stripeTestModeConfig("sk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "live key in test env must refuse to boot")
 	})
 
 	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("sk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Equal(t, "sk_test_abc123", processors["stripe"].SecretKey, "test key in test env should be kept")
+		cfg, rails := stripeTestModeConfig("sk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Equal(t, "sk_test_abc123", rails["stripe"].SecretKey, "test key in test env should be kept")
 	})
 
 	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("sk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Empty(t, processors["stripe"].SecretKey, "test key in live env should be disabled")
+		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Empty(t, rails["stripe"].SecretKey, "test key in live env should be disabled")
 	})
 
 	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("sk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Equal(t, "sk_live_abc123", processors["stripe"].SecretKey, "live key in live env should be kept")
+		cfg, rails := stripeTestModeConfig("sk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Equal(t, "sk_live_abc123", rails["stripe"].SecretKey, "live key in live env should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
 	t.Run("rk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("rk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, processors), "restricted live key in test env must refuse to boot")
+		cfg, rails := stripeTestModeConfig("rk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "restricted live key in test env must refuse to boot")
 	})
 
 	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("rk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Equal(t, "rk_test_abc123", processors["stripe"].SecretKey, "restricted test key in test env should be kept")
+		cfg, rails := stripeTestModeConfig("rk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Equal(t, "rk_test_abc123", rails["stripe"].SecretKey, "restricted test key in test env should be kept")
 	})
 
 	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("rk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Empty(t, processors["stripe"].SecretKey, "restricted test key in live env should be disabled")
+		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Empty(t, rails["stripe"].SecretKey, "restricted test key in live env should be disabled")
 	})
 
 	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg, processors := stripeTestModeConfig("rk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		assert.Equal(t, "rk_live_abc123", processors["stripe"].SecretKey, "restricted live key in live env should be kept")
+		cfg, rails := stripeTestModeConfig("rk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.Equal(t, "rk_live_abc123", rails["stripe"].SecretKey, "restricted live key in live env should be kept")
 	})
 
-	t.Run("validates every stripe processor", func(t *testing.T) {
+	t.Run("validates every stripe rail", func(t *testing.T) {
 		cfg := &Config{Mode: ModeFull, TestMode: false}
-		processors := ProcessorSet{
-			"stripe_primary": {Type: ProcessorTypeStripe, SecretKey: "sk_live_primary"},
-			"stripe_legacy":  {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_test_legacy"},
+		rails := RailSet{
+			"stripe_primary": {Type: RailTypeStripe, SecretKey: "sk_live_primary"},
+			"stripe_legacy":  {Type: RailTypeStripe, Role: RailRoleLegacy, SecretKey: "sk_test_legacy"},
 		}
-		require.NoError(t, validateStripeKeyForTestMode(cfg, processors))
-		require.Equal(t, "sk_live_primary", processors["stripe_primary"].SecretKey)
-		require.Empty(t, processors["stripe_legacy"].SecretKey)
+		require.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		require.Equal(t, "sk_live_primary", rails["stripe_primary"].SecretKey)
+		require.Empty(t, rails["stripe_legacy"].SecretKey)
 	})
 }
 
-func TestPrimaryProcessorByType(t *testing.T) {
-	processors := ProcessorSet{
-		"stripe_old": {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_live_old"},
-		"stripe_new": {Type: ProcessorTypeStripe, SecretKey: "sk_live_new"},
-		"mobius":     {Type: ProcessorTypeNMI, SecurityKey: "sec"},
+func TestPrimaryRailByType(t *testing.T) {
+	rails := RailSet{
+		"stripe_old": {Type: RailTypeStripe, Role: RailRoleLegacy, SecretKey: "sk_live_old"},
+		"stripe_new": {Type: RailTypeStripe, SecretKey: "sk_live_new"},
+		"mobius":     {Type: RailTypeNMI, SecurityKey: "sec"},
 	}
-	key, proc, err := processors.PrimaryProcessorByType(ProcessorTypeStripe)
+	key, proc, err := rails.PrimaryRailByType(RailTypeStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.SecretKey)
-	require.Equal(t, proc, processors.GetStripeProcessor())
+	require.Equal(t, proc, rails.GetStripeRail())
 
-	processors["stripe_other"] = &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_other"}
-	_, _, err = processors.PrimaryProcessorByType(ProcessorTypeStripe)
-	require.ErrorContains(t, err, "multiple primary processors")
-	require.ErrorContains(t, ValidateProcessorSet(&Config{Mode: ModeFull}, ProcessorSet{
-		"stripe_a": {Type: ProcessorTypeStripe, SecretKey: "sk_live_a"},
-		"stripe_b": {Type: ProcessorTypeStripe, SecretKey: "sk_live_b"},
-	}), "multiple primary processors")
+	rails["stripe_other"] = &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_other"}
+	_, _, err = rails.PrimaryRailByType(RailTypeStripe)
+	require.ErrorContains(t, err, "multiple primary rails")
+	require.ErrorContains(t, ValidateRailSet(&Config{Mode: ModeFull}, RailSet{
+		"stripe_a": {Type: RailTypeStripe, SecretKey: "sk_live_a"},
+		"stripe_b": {Type: RailTypeStripe, SecretKey: "sk_live_b"},
+	}), "multiple primary rails")
 }
 
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.TestMode = true
-	processors := ProcessorSet{
+	rails := RailSet{
 		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
 	}
-	require.Error(t, ValidateProcessorSet(cfg, processors))
+	require.Error(t, ValidateRailSet(cfg, rails))
 
 	// test key in the test env is fine
-	processors["stripe"].SecretKey = "sk_test_abc123"
-	require.NoError(t, ValidateProcessorSet(cfg, processors))
+	rails["stripe"].SecretKey = "sk_test_abc123"
+	require.NoError(t, ValidateRailSet(cfg, rails))
 
 	// test key with live credentials expected: disabled with a warning, not fatal
 	cfg2 := GetDefaultBillingConfig()
 	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg2.Mode = ModeLimited
-	processors2 := ProcessorSet{
+	rails2 := RailSet{
 		"stripe": {
 			Type:      "stripe",
 			SecretKey: "sk_test_abc123",
 		},
 	}
-	require.NoError(t, ValidateProcessorSet(cfg2, processors2))
-	require.Equal(t, "", processors2["stripe"].SecretKey)
+	require.NoError(t, ValidateRailSet(cfg2, rails2))
+	require.Equal(t, "", rails2["stripe"].SecretKey)
 }
 
 // TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret (and,
@@ -683,71 +683,71 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       *Config
-		processor *ProcessorConfig
+		rail      *RailConfig
 		wantError bool
 	}{
 		// Stripe: missing webhook_secret
 		{
 			name:      "stripe/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_test_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_test_dummy", WebhookSecret: ""},
 			wantError: false,
 		},
 		{
 			name:      "stripe/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: ""},
 			wantError: true,
 		},
 		{
 			name:      "stripe/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"},
 			wantError: false,
 		},
 		// Solana: missing recipient_wallet
 		{
 			name:      "solana/missing recipient_wallet in dev → no error",
 			cfg:       devCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: ""},
+			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: ""},
 			wantError: false,
 		},
 		{
 			name:      "solana/missing recipient_wallet in prod → error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: ""},
+			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: ""},
 			wantError: true,
 		},
 		{
 			name:      "solana/present recipient_wallet in prod → no error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeSolana, RecipientWallet: "wallet_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: "wallet_test_dummy"},
 			wantError: false,
 		},
 		// NMI: missing webhook_secret (security_key also required outside dev)
 		{
 			name:      "nmi/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
 			wantError: false,
 		},
 		{
 			name:      "nmi/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
 			wantError: true,
 		},
 		{
 			name:      "nmi/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			processor: &ProcessorConfig{Type: ProcessorTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"},
 			wantError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateProcessorSet(tt.cfg, ProcessorSet{"p": tt.processor})
+			err := ValidateRailSet(tt.cfg, RailSet{"p": tt.rail})
 			if tt.wantError {
 				require.Error(t, err)
 			} else {

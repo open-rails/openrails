@@ -18,7 +18,7 @@ import (
 type fakeCustomerStore struct {
 	getID     string
 	getErr    error
-	upserted  []string // "userID|processor|customerID"
+	upserted  []string // "userID|rail|customerID"
 	upsertErr error
 	getCalls  int
 }
@@ -28,8 +28,8 @@ func (f *fakeCustomerStore) GetCustomerID(_ context.Context, _, _ string) (strin
 	return f.getID, f.getErr
 }
 
-func (f *fakeCustomerStore) Upsert(_ context.Context, userID, processor, customerID string) error {
-	f.upserted = append(f.upserted, userID+"|"+processor+"|"+customerID)
+func (f *fakeCustomerStore) Upsert(_ context.Context, userID, rail, customerID string) error {
+	f.upserted = append(f.upserted, userID+"|"+rail+"|"+customerID)
 	return f.upsertErr
 }
 

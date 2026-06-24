@@ -14,7 +14,7 @@ import (
 
 // SolanaSubscriptionRef identifies one locally-known on-chain subscription:
 // the subscription PDA (which is also the local
-// subscriptions.processor_subscription_id for solana memberships) and its
+// subscriptions.rail_subscription_id for solana memberships) and its
 // plan PDA. The caller supplies these from openrails.solana_subscriptions.
 type SolanaSubscriptionRef struct {
 	SubscriptionPDA  string
@@ -147,9 +147,9 @@ func (f *SolanaFetcher) fetchSubscription(ctx context.Context, ref SolanaSubscri
 	}
 
 	sub := RemoteSubscription{
-		ProcessorSubscriptionID: ref.SubscriptionPDA,
-		CustomerID:              ref.SubscriberWallet,
-		PlanID:                  ref.PlanPDA,
+		RailSubscriptionID: ref.SubscriptionPDA,
+		CustomerID:         ref.SubscriberWallet,
+		PlanID:             ref.PlanPDA,
 	}
 	if len(data) == 0 {
 		// The program closes the subscription account on cancel; absence of a

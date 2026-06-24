@@ -12,7 +12,7 @@ import (
 // cancelled-as-expired subscription it lines up THREE evidence sources
 // (decision 2026-06-11 — forensics are generic OpenRails functionality):
 //
-//  1. "provider" — the processor's own charge-attempt timeline (declines
+//  1. "provider" — the rail's own charge-attempt timeline (declines
 //     included), from the fetcher's transaction snapshot;
 //  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
 //     next_retry_at), imported from legacy by the migration;
@@ -23,7 +23,7 @@ import (
 type DunningForensics struct {
 	Provider              Provider `json:"provider"`
 	SubscriptionsExamined int      `json:"subscriptions_examined"`
-	// NeverAttempted: the processor recorded declines but local dunning never
+	// NeverAttempted: the rail recorded declines but local dunning never
 	// acted (retry fields frozen/null) — "dunning never ran".
 	NeverAttempted int `json:"never_attempted"`
 	// AttemptedExhausted: local dunning acted and gave up (attempts > 0, no
@@ -31,7 +31,7 @@ type DunningForensics struct {
 	AttemptedExhausted int `json:"attempted_and_exhausted"`
 	// AttemptedInProgress: local dunning acted and still has a retry queued.
 	AttemptedInProgress int `json:"attempted_in_progress"`
-	// NoRemoteDeclines: neither the processor nor local dunning shows
+	// NoRemoteDeclines: neither the rail nor local dunning shows
 	// attempts in the examined window.
 	NoRemoteDeclines int `json:"no_remote_declines"`
 	// LastLocalDunningAction is the newest last_retry_at across the examined
@@ -67,18 +67,18 @@ type TimelineEvent struct {
 
 // DunningSubscriptionReport is one subscription's cross-referenced timeline.
 type DunningSubscriptionReport struct {
-	SubscriptionID          string     `json:"subscription_id"`
-	ProcessorSubscriptionID string     `json:"processor_subscription_id,omitempty"`
-	Status                  string     `json:"status"`
-	CancelType              string     `json:"cancel_type,omitempty"`
-	RetryAttempts           int        `json:"retry_attempts"`
-	LastRetryAt             *time.Time `json:"last_retry_at,omitempty"`
-	NextRetryAt             *time.Time `json:"next_retry_at,omitempty"`
-	RemoteDeclines          int        `json:"remote_declines"`
-	RemoteSuccesses         int        `json:"remote_successes"`
-	FirstDeclineAt          *time.Time `json:"first_decline_at,omitempty"`
-	LastDeclineAt           *time.Time `json:"last_decline_at,omitempty"`
-	DeclineReasons          []string   `json:"decline_reasons,omitempty"`
+	SubscriptionID     string     `json:"subscription_id"`
+	RailSubscriptionID string     `json:"rail_subscription_id,omitempty"`
+	Status             string     `json:"status"`
+	CancelType         string     `json:"cancel_type,omitempty"`
+	RetryAttempts      int        `json:"retry_attempts"`
+	LastRetryAt        *time.Time `json:"last_retry_at,omitempty"`
+	NextRetryAt        *time.Time `json:"next_retry_at,omitempty"`
+	RemoteDeclines     int        `json:"remote_declines"`
+	RemoteSuccesses    int        `json:"remote_successes"`
+	FirstDeclineAt     *time.Time `json:"first_decline_at,omitempty"`
+	LastDeclineAt      *time.Time `json:"last_decline_at,omitempty"`
+	DeclineReasons     []string   `json:"decline_reasons,omitempty"`
 	// History (ClickHouse analytics events incl. imported legacy):
 	HistoryEvents    int        `json:"history_events,omitempty"`
 	HistoryFailures  int        `json:"history_failures,omitempty"`
@@ -187,7 +187,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 	}
 
 	// Third source: analytics history events, correlated by local
-	// subscription id first, processor subscription id second.
+	// subscription id first, rail subscription id second.
 	historyCorrelated := 0
 	for i := range history {
 		ev := &history[i]
@@ -195,8 +195,8 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		if ev.SubscriptionID != nil {
 			sub = idx.byID[*ev.SubscriptionID]
 		}
-		if sub == nil && ev.ProcessorSubscriptionID != "" {
-			sub = idx.byPSID[ev.ProcessorSubscriptionID]
+		if sub == nil && ev.RailSubscriptionID != "" {
+			sub = idx.byPSID[ev.RailSubscriptionID]
 		}
 		if sub == nil {
 			continue
@@ -222,11 +222,11 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 			tl.lastHistAttemptAt = &at
 		}
 		detail := ev.Status
-		if ev.ProcessorTransactionID != "" {
+		if ev.RailTransactionID != "" {
 			if detail != "" {
 				detail += " "
 			}
-			detail += ev.ProcessorTransactionID
+			detail += ev.RailTransactionID
 		}
 		tl.events = append(tl.events, TimelineEvent{
 			At: at, Source: "history", Kind: ev.EventType, Detail: strings.TrimSpace(detail),
@@ -254,13 +254,13 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 
 		tl := timelines[s.ID.String()]
 		line := DunningSubscriptionReport{
-			SubscriptionID:          s.ID.String(),
-			ProcessorSubscriptionID: s.ProcessorSubscriptionID,
-			Status:                  s.Status,
-			CancelType:              s.CancelType,
-			RetryAttempts:           s.RetryAttempts,
-			LastRetryAt:             s.LastRetryAt,
-			NextRetryAt:             s.NextRetryAt,
+			SubscriptionID:     s.ID.String(),
+			RailSubscriptionID: s.RailSubscriptionID,
+			Status:             s.Status,
+			CancelType:         s.CancelType,
+			RetryAttempts:      s.RetryAttempts,
+			LastRetryAt:        s.LastRetryAt,
+			NextRetryAt:        s.NextRetryAt,
 		}
 		var events []TimelineEvent
 		if tl != nil {

@@ -19,7 +19,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
-		processors:               testSolanaCheckoutProcessors(),
+		rails:                    testSolanaCheckoutRails(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -45,7 +45,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
-		processors:               testSolanaCheckoutProcessors(),
+		rails:                    testSolanaCheckoutRails(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -71,7 +71,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
-		processors:               testSolanaCheckoutProcessors(),
+		rails:                    testSolanaCheckoutRails(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -83,7 +83,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 		Amount:     1000,
 		Currency:   "usd",
 		Reference:  &ref,
-		ProcessorState: map[string]any{
+		RailState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,
 			"recipient":    testRecipientWallet,
@@ -102,7 +102,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
-		processors:               testSolanaCheckoutProcessors(),
+		rails:                    testSolanaCheckoutRails(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -118,7 +118,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			Amount:     1000,
 			Currency:   "usd",
 			Reference:  &ref,
-			ProcessorState: map[string]any{
+			RailState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
 				"token_amount": uint64(1234567),
@@ -141,7 +141,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			PriceID:    uuid.New(),
 			Amount:     1000,
 			Currency:   "usd",
-			ProcessorState: map[string]any{
+			RailState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
 				"token_amount": uint64(1234567),
@@ -168,21 +168,21 @@ func TestIsSolanaTransferRequestFlow(t *testing.T) {
 		{
 			name: "empty session defaults to transfer request",
 			session: &models.CheckoutSession{
-				ProcessorState: map[string]any{},
+				RailState: map[string]any{},
 			},
 			want: true,
 		},
 		{
 			name: "explicit transfer request",
 			session: &models.CheckoutSession{
-				ProcessorState: map[string]any{"flow": "transfer_request"},
+				RailState: map[string]any{"flow": "transfer_request"},
 			},
 			want: true,
 		},
 		{
 			name: "transaction request is false",
 			session: &models.CheckoutSession{
-				ProcessorState: map[string]any{"flow": "transaction_request"},
+				RailState: map[string]any{"flow": "transaction_request"},
 			},
 			want: false,
 		},
@@ -234,12 +234,12 @@ func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *
 			cfg := testSolanaCheckoutConfig()
 			cfg.APIURL = tc.apiURL
 
-			svc := &CheckoutSessionService{config: cfg, processors: testSolanaCheckoutProcessors()}
+			svc := &CheckoutSessionService{config: cfg, rails: testSolanaCheckoutRails()}
 			session := &models.CheckoutSession{
-				ID:        uuid.New(),
-				Status:    models.CheckoutSessionStatusRequiresAction,
-				Processor: models.ProcessorSolana,
-				ProcessorState: map[string]any{
+				ID:     uuid.New(),
+				Status: models.CheckoutSessionStatusRequiresAction,
+				Rail:   models.RailSolana,
+				RailState: map[string]any{
 					"flow": "transaction_request",
 				},
 			}
@@ -265,7 +265,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 		Amount:     10000,
 		Currency:   "usd",
 		Reference:  &ref,
-		ProcessorState: map[string]any{
+		RailState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,
 			"token_amount": uint64(100_000_000),
@@ -286,7 +286,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	require.Equal(t, int64(10000), req.Amount)
 	require.Equal(t, "usd", req.Currency)
 
-	session.ProcessorState["token_amount"] = uint64(1_000_000)
+	session.RailState["token_amount"] = uint64(1_000_000)
 	req, err = solanaBuildRequestFromSession(session, "payer_wallet", "USDC")
 	require.NoError(t, err)
 	require.Equal(t, uint64(1_000_000), req.TokenAmount)
@@ -304,10 +304,10 @@ func testSolanaCheckoutConfig() *config.Config {
 	}
 }
 
-func testSolanaCheckoutProcessors() config.ProcessorSet {
-	return config.ProcessorSet{
+func testSolanaCheckoutRails() config.RailSet {
+	return config.RailSet{
 		"solana": {
-			Type:            config.ProcessorTypeSolana,
+			Type:            config.RailTypeSolana,
 			Network:         "devnet",
 			RecipientWallet: testRecipientWallet,
 			Tokens: map[string]config.TokenConfig{

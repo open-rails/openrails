@@ -22,12 +22,12 @@ func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
 
 func NewNMICollectionAdapters(clients map[string]*nmi.NMIClient) map[string]CollectionAdapter {
 	adapters := make(map[string]CollectionAdapter, len(clients))
-	for processor, client := range clients {
-		processor = normalizeProcessor(processor)
-		if processor == "" || client == nil {
+	for rail, client := range clients {
+		rail = normalizeRail(rail)
+		if rail == "" || client == nil {
 			continue
 		}
-		adapters[processor] = NewNMICollectionAdapter(client)
+		adapters[rail] = NewNMICollectionAdapter(client)
 	}
 	return adapters
 }
@@ -43,7 +43,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 	if req.AmountCents <= 0 {
 		return ChargeResult{}, fmt.Errorf("amount_cents must be positive")
 	}
-	processor := normalizeProcessor(method.Processor)
+	rail := normalizeRail(method.Rail)
 	currency := normalizeCurrency(req.Currency)
 	if currency == "" {
 		currency = DefaultCurrency
@@ -66,7 +66,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 			code := nmiFailureCode(vaultErr)
 			message := vaultErr.Error()
 			return ChargeResult{
-				Processor:      processor,
+				Rail:           rail,
 				Declined:       true,
 				FailureCode:    &code,
 				FailureMessage: &message,
@@ -75,7 +75,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 		return ChargeResult{}, err
 	}
 	return ChargeResult{
-		Processor:     processor,
+		Rail:          rail,
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 	}, nil
 }

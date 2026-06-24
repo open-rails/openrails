@@ -26,15 +26,15 @@ import (
 type AccountType string
 
 const (
-	CustomerBalance   AccountType = "customer_balance"
-	PlatformRevenue   AccountType = "platform_revenue"
-	ProcessorClearing AccountType = "processor_clearing"
-	ArrearsLiability  AccountType = "arrears_liability"
-	ExpiredCredits    AccountType = "expired_credits"
+	CustomerBalance  AccountType = "customer_balance"
+	PlatformRevenue  AccountType = "platform_revenue"
+	RailClearing     AccountType = "processor_clearing"
+	ArrearsLiability AccountType = "arrears_liability"
+	ExpiredCredits   AccountType = "expired_credits"
 	// RevokedCredits holds the unspent remainder clawed back when a credit grant
 	// is revoked (distinct from ExpiredCredits = time-lapse). The money is frozen
 	// here (recoverable/reversible), not refunded; a refund moves it out to
-	// ProcessorClearing. (#514, see docs/consistency-invariants.md §11 decision 4.)
+	// RailClearing. (#514, see docs/consistency-invariants.md §11 decision 4.)
 	RevokedCredits AccountType = "revoked_credits"
 	FXLiquidity    AccountType = "fx_liquidity"
 	World          AccountType = "world"
@@ -192,11 +192,11 @@ func (l *Ledger) Conservation(ctx context.Context, currency string) (int64, erro
 
 // --- flow constructors: the standard money movements as transfer pairs --------
 
-// Deposit credits the customer's balance from the processor-clearing account
+// Deposit credits the customer's balance from the rail-clearing account
 // (DR processor_clearing / CR customer_balance). grantID attributes the deposit
 // to its #514 credit lot (uuid.Nil for a non-lot deposit).
 func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string, grantID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, ProcessorClearing, currency)
+	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
 	}
@@ -276,7 +276,7 @@ func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency st
 // PayOwed settles accrued arrears via an external charge (DR processor_clearing /
 // CR arrears_liability), bringing the liability account back toward zero.
 func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, ProcessorClearing, currency)
+	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
 	}

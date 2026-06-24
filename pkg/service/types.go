@@ -101,7 +101,7 @@ type CreateCheckoutSessionRequest struct {
 
 // CheckoutPayment specifies payment details for checkout.
 type CheckoutPayment struct {
-	Processor       string // "mobius", "ccbill", "solana", "stripe"
+	Rail            string // "mobius", "ccbill", "solana", "stripe"
 	PaymentMethodID string // For returning customers with saved payment methods
 	PaymentToken    string // For new card tokenization (NMI Collect.js)
 
@@ -142,7 +142,7 @@ type CheckoutSession struct {
 	ExpiresAt      int64 // Unix epoch seconds
 	Created        int64 // Unix epoch seconds
 	Metadata       map[string]string
-	ProcessorData  map[string]any // Processor-specific response data
+	RailData       map[string]any // Rail-specific response data
 }
 
 // ConfirmCheckoutSessionRequest specifies checkout confirmation parameters.
@@ -152,7 +152,7 @@ type ConfirmCheckoutSessionRequest struct {
 
 // ConfirmPayment specifies payment confirmation details (primarily for Solana).
 type ConfirmPayment struct {
-	Processor string // Must match session processor
+	Rail      string // Must match session rail
 	Signature string // Solana transaction signature
 	Wallet    string // Solana wallet that signed
 }
@@ -179,21 +179,21 @@ type GetSubscriptionsOptions struct {
 
 // Subscription represents a user subscription.
 type Subscription struct {
-	ID                      string
-	Status                  string // "pending", "active", "past_due", "cancelled"
-	Processor               string // "mobius", "ccbill", "solana", "stripe"
-	ProcessorSubscriptionID string
-	StartedAt               int64  // Unix epoch seconds
-	EndedAt                 *int64 // Unix epoch seconds (nil if active)
-	CurrentPeriodStartsAt   *int64 // Unix epoch seconds
-	CurrentPeriodEndsAt     *int64 // Unix epoch seconds
-	CancelledAt             *int64 // Unix epoch seconds
-	CancelType              *string
-	CancelFeedback          *string
-	Created                 int64 // Unix epoch seconds
-	Updated                 int64 // Unix epoch seconds
-	Price                   *Price
-	PaymentMethod           *PaymentMethodSummary
+	ID                    string
+	Status                string // "pending", "active", "past_due", "cancelled"
+	Rail                  string // "mobius", "ccbill", "solana", "stripe"
+	RailSubscriptionID    string
+	StartedAt             int64  // Unix epoch seconds
+	EndedAt               *int64 // Unix epoch seconds (nil if active)
+	CurrentPeriodStartsAt *int64 // Unix epoch seconds
+	CurrentPeriodEndsAt   *int64 // Unix epoch seconds
+	CancelledAt           *int64 // Unix epoch seconds
+	CancelType            *string
+	CancelFeedback        *string
+	Created               int64 // Unix epoch seconds
+	Updated               int64 // Unix epoch seconds
+	Price                 *Price
+	PaymentMethod         *PaymentMethodSummary
 
 	// Resumability surface (issues 215/216). These are derived from the single
 	// shared predicate so library and HTTP consumers agree.
@@ -269,8 +269,8 @@ type GetPaymentsOptions struct {
 	UserID string
 	// SubscriptionID filters by subscription.
 	SubscriptionID *uuid.UUID
-	// Processor filters by payment processor.
-	Processor string
+	// Rail filters by payment rail.
+	Rail string
 	// StartDate filters payments after this date.
 	StartDate *time.Time
 	// EndDate filters payments before this date.
@@ -287,7 +287,7 @@ type Payment struct {
 	UserID          string
 	SubscriptionID  *string
 	PaymentMethodID *string
-	Processor       string
+	Rail            string
 	TransactionID   string
 	Refunded        bool
 	Created         int64 // Unix epoch seconds
@@ -298,7 +298,7 @@ type Payment struct {
 // RefundPaymentRequest specifies refund parameters.
 type RefundPaymentRequest struct {
 	Amount              int64  // Amount in cents to refund
-	RefundTransactionID string // Processor's refund transaction ID
+	RefundTransactionID string // Rail's refund transaction ID
 }
 
 // -------------------------------- Payment Methods --------------------------------
@@ -312,7 +312,7 @@ type GetPaymentMethodsOptions struct {
 type PaymentMethod struct {
 	ID             string
 	Type           string // "card"
-	Processor      string // "mobius", "ccbill", "stripe", etc.
+	Rail           string // "mobius", "ccbill", "stripe", etc.
 	Created        int64  // Unix epoch seconds
 	FailureReason  *string
 	BillingDetails *BillingDetails
@@ -322,8 +322,8 @@ type PaymentMethod struct {
 
 // PaymentMethodSummary is a minimal payment method reference.
 type PaymentMethodSummary struct {
-	ID        string
-	Processor string
+	ID   string
+	Rail string
 }
 
 // BillingDetails contains billing address information.
@@ -479,9 +479,9 @@ type StripePortalSession struct {
 // AdminGetSubscriptionsOptions specifies admin filters for listing subscriptions.
 type AdminGetSubscriptionsOptions struct {
 	PaginationOptions
-	UserID    string
-	Status    string
-	Processor string
+	UserID string
+	Status string
+	Rail   string
 }
 
 // AdminGetPaymentsOptions specifies admin filters for listing payments.
@@ -489,7 +489,7 @@ type AdminGetPaymentsOptions struct {
 	PaginationOptions
 	UserID         string
 	SubscriptionID *uuid.UUID
-	Processor      string
+	Rail           string
 	StartDate      *time.Time
 	EndDate        *time.Time
 }
@@ -524,7 +524,7 @@ type AdminCreateOffChannelPaymentRequest struct {
 	Amount        int64
 	Currency      string
 	TransactionID string
-	Processor     string
+	Rail          string
 	Note          string
 }
 
@@ -585,15 +585,15 @@ type SubscriptionSeries struct {
 	Data     []SubscriptionDataPoint
 }
 
-// ProcessorMetrics contains per-processor breakdown.
-type ProcessorMetrics struct {
-	Currency   string
-	Processors map[string]ProcessorMetric
+// RailMetrics contains per-rail breakdown.
+type RailMetrics struct {
+	Currency string
+	Rails    map[string]RailMetric
 }
 
-// ProcessorMetric contains metrics for a single processor.
-type ProcessorMetric struct {
-	Processor    string
+// RailMetric contains metrics for a single rail.
+type RailMetric struct {
+	Rail         string
 	Transactions int64
 	GrossVolume  int64
 	NetVolume    int64

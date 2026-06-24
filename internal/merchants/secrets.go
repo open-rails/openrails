@@ -1,5 +1,5 @@
 // Package merchants implements merchant provisioning, lifecycle, per-merchant
-// processor credentials, and webhook routing for OpenRails' merchant platform
+// rail credentials, and webhook routing for OpenRails' merchant platform
 // (issue #225). It builds on the #223 merchant primitive (pkg/merchant +
 // openrails.merchants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the

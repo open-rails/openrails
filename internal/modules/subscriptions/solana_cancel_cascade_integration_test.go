@@ -172,7 +172,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		PriceID:               &subPriceID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		Status:                string(models.StatusActive),
-		Processor:             string(models.ProcessorSolana),
+		Rail:                  string(models.RailSolana),
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
 		StartedAt:             now,

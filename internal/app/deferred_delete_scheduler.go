@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -68,12 +68,12 @@ func (s *intentDeferredDeleteScheduler) ScheduleNMIDelete(ctx context.Context, u
 	}
 	_, err = s.store.Enqueue(ctx, intents.EnqueueParams{
 		MerchantID:     sub.MerchantID,
-		Provider:       strings.ToLower(sub.Processor),
+		Provider:       strings.ToLower(sub.Rail),
 		IntentType:     intents.TypeNMIDeleteSubscription,
 		SubscriptionID: &subscriptionID,
 		Payload: intents.NMIDeletePayload{
-			UserID:                  userID,
-			ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
+			UserID:             userID,
+			RailSubscriptionID: sub.RailSubscriptionID,
 		},
 		IdempotencyKey: intents.NMIDeleteIdempotencyKey(subscriptionID),
 		NextAttemptAt:  runAt.UTC(),
@@ -136,12 +136,12 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 
 	converted := 0
 	for _, sub := range rows {
-		if !processors.IsNMIBackedProcessor(models.Processor(sub.Processor)) {
+		if !rails.IsNMIBackedRail(models.Rail(sub.Rail)) {
 			// Only NMI-backed paths set the marker; skip defensively (the
 			// marker stays discoverable for #107 reconciliation).
 			log.WithFields(log.Fields{
 				"subscription_id": sub.ID,
-				"processor":       sub.Processor,
+				"rail":            sub.Rail,
 			}).Warn("Deferred-delete marker sweep: skipping non-NMI-backed subscription with deletion marker")
 			continue
 		}
@@ -152,12 +152,12 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 		subID := sub.ID
 		_, err := store.Enqueue(ctx, intents.EnqueueParams{
 			MerchantID:     sub.MerchantID,
-			Provider:       strings.ToLower(sub.Processor),
+			Provider:       strings.ToLower(sub.Rail),
 			IntentType:     intents.TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
 			Payload: intents.NMIDeletePayload{
-				UserID:                  sub.CustomerID.String(),
-				ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
+				UserID:             sub.CustomerID.String(),
+				RailSubscriptionID: sub.RailSubscriptionID,
 			},
 			IdempotencyKey: intents.NMIDeleteIdempotencyKey(subID),
 			NextAttemptAt:  runAt,

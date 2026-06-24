@@ -70,16 +70,16 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorStripe),
-		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
-		CurrentPeriodStartsAt:   &now,
-		CurrentPeriodEndsAt:     &periodEnd,
-		StartedAt:               now,
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailStripe),
+		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   &periodEnd,
+		StartedAt:             now,
 	})
 	require.NoError(t, err)
 
@@ -188,16 +188,16 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorStripe),
-		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
-		CurrentPeriodStartsAt:   &now,
-		CurrentPeriodEndsAt:     &periodEnd,
-		StartedAt:               now,
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailStripe),
+		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   &periodEnd,
+		StartedAt:             now,
 	})
 	require.NoError(t, err)
 

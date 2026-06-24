@@ -424,7 +424,7 @@ func (q *Queries) InsertInvoiceItem(ctx context.Context, arg InsertInvoiceItemPa
 const insertInvoicePayment = `-- name: InsertInvoicePayment :exec
 INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, money_transaction_id,
-    currency, amount, status, processor, processor_payment_id,
+    currency, amount, status, rail, rail_payment_id,
     failure_code, failure_message, attempted_at, settled_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
@@ -443,8 +443,8 @@ type InsertInvoicePaymentParams struct {
 	Currency           string
 	Amount             int64
 	Status             string
-	Processor          *string
-	ProcessorPaymentID *string
+	Rail               *string
+	RailPaymentID      *string
 	FailureCode        *string
 	FailureMessage     *string
 	AttemptedAt        time.Time
@@ -463,8 +463,8 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.Currency,
 		arg.Amount,
 		arg.Status,
-		arg.Processor,
-		arg.ProcessorPaymentID,
+		arg.Rail,
+		arg.RailPaymentID,
 		arg.FailureCode,
 		arg.FailureMessage,
 		arg.AttemptedAt,

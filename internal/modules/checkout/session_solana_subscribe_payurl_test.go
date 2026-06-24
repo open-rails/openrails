@@ -18,7 +18,7 @@ func TestSessionToResponse_SolanaPayURLForAllModes(t *testing.T) {
 
 	cfg := testSolanaCheckoutConfig()
 	cfg.APIURL = "https://api.test.com"
-	svc := &CheckoutSessionService{config: cfg, processors: testSolanaCheckoutProcessors()}
+	svc := &CheckoutSessionService{config: cfg, rails: testSolanaCheckoutRails()}
 
 	cases := []struct {
 		name  string
@@ -63,11 +63,11 @@ func TestSessionToResponse_SolanaPayURLForAllModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			session := &models.CheckoutSession{
-				ID:             uuid.New(),
-				Status:         models.CheckoutSessionStatusRequiresAction,
-				Processor:      models.ProcessorSolana,
-				Mode:           tc.mode,
-				ProcessorState: tc.state,
+				ID:        uuid.New(),
+				Status:    models.CheckoutSessionStatusRequiresAction,
+				Rail:      models.RailSolana,
+				Mode:      tc.mode,
+				RailState: tc.state,
 			}
 			resp := svc.sessionToResponse(session)
 			require.NotNil(t, resp)
@@ -87,9 +87,9 @@ func TestSolanaSessionUsesPayURL(t *testing.T) {
 
 	mk := func(mode models.CheckoutSessionMode, flow string) *models.CheckoutSession {
 		return &models.CheckoutSession{
-			Processor:      models.ProcessorSolana,
-			Mode:           mode,
-			ProcessorState: map[string]any{"flow": flow},
+			Rail:      models.RailSolana,
+			Mode:      mode,
+			RailState: map[string]any{"flow": flow},
 		}
 	}
 
@@ -100,11 +100,11 @@ func TestSolanaSessionUsesPayURL(t *testing.T) {
 	require.False(t, solanaSessionUsesPayURL(mk(models.CheckoutSessionModeSubscription, "subscription")))
 	require.False(t, solanaSessionUsesPayURL(nil))
 
-	// Non-solana processor never gets a solana pay url even if state looks similar.
+	// Non-solana rail never gets a solana pay url even if state looks similar.
 	nonSolana := &models.CheckoutSession{
-		Processor:      models.ProcessorStripe,
-		Mode:           models.CheckoutSessionModeSubscription,
-		ProcessorState: map[string]any{"flow": "transaction_request"},
+		Rail:      models.RailStripe,
+		Mode:      models.CheckoutSessionModeSubscription,
+		RailState: map[string]any{"flow": "transaction_request"},
 	}
 	require.False(t, solanaSessionUsesPayURL(nonSolana))
 }

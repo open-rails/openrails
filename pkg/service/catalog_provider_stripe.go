@@ -43,7 +43,7 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) PendingAction {
 // against, so the ids are stored as operator-owned.
 func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
-	priceID := strings.TrimSpace(link[models.ProcessorKeyStripePriceID])
+	priceID := strings.TrimSpace(link[models.RailKeyStripePriceID])
 	if priceID == "" {
 		// A Stripe price_id (price_xxx) is STRIPE-GENERATED: it cannot be created
 		// at an operator-chosen id, so a price_id link must already exist. The
@@ -67,17 +67,17 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		return nil, fmt.Errorf("stripe link requires provider_links.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
 	}
 	out := map[string]string{
-		models.ProcessorKeyStripePriceID: priceID,
+		models.RailKeyStripePriceID: priceID,
 	}
-	suppliedProductID := strings.TrimSpace(link[models.ProcessorKeyStripeProductID])
+	suppliedProductID := strings.TrimSpace(link[models.RailKeyStripeProductID])
 	if suppliedProductID != "" {
-		out[models.ProcessorKeyStripeProductID] = suppliedProductID
+		out[models.RailKeyStripeProductID] = suppliedProductID
 	}
 
 	if !a.stripeConfigured() {
 		return out, nil
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Processors: a.svc.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -109,7 +109,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		return nil, fmt.Errorf("stripe price %q belongs to product %q, not the linked product %q", priceID, remoteProduct, suppliedProductID)
 	}
 	if suppliedProductID == "" && remoteProduct != "" {
-		out[models.ProcessorKeyStripeProductID] = remoteProduct
+		out[models.RailKeyStripeProductID] = remoteProduct
 	}
 	if lk := strings.TrimSpace(remote.LookupKey); lk != "" {
 		out[providerLookupKey] = lk
@@ -122,7 +122,7 @@ func (a *stripeAdapter) stripeConfigured() bool {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return false
 	}
-	stripeProc := a.svc.rt.Processors.GetStripeProcessor()
+	stripeProc := a.svc.rt.Rails.GetStripeRail()
 	return stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != ""
 }
 
@@ -144,18 +144,18 @@ func (a *stripeAdapter) stripeConfigured() bool {
 //     new one carrying openrails_price_key (+ informational openrails_price_id)
 //     and the lookup_key.
 //
-// Returns the canonical ids to persist on processors["stripe"].
+// Returns the canonical ids to persist on rails["stripe"].
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		// Same error string used by stripe_catalog.go so callers can detect
 		// the "not configured" case via substring (Verify, etc).
 		return nil, errPendingManualLink
 	}
-	stripeProc := a.svc.rt.Processors.GetStripeProcessor()
+	stripeProc := a.svc.rt.Rails.GetStripeRail()
 	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil, errPendingManualLink
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Processors: a.svc.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 
 	productSlug := strings.TrimSpace(in.ProductSlug)
 	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
@@ -232,8 +232,8 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	ids := map[string]string{
-		models.ProcessorKeyStripePriceID:   stripePriceID,
-		models.ProcessorKeyStripeProductID: stripeProductID,
+		models.RailKeyStripePriceID:   stripePriceID,
+		models.RailKeyStripeProductID: stripeProductID,
 	}
 	if lookup := strings.TrimSpace(in.LookupKey); lookup != "" {
 		ids[providerLookupKey] = lookup
@@ -247,15 +247,15 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
-	stripeProc := a.svc.rt.Processors.GetStripeProcessor()
+	stripeProc := a.svc.rt.Rails.GetStripeRail()
 	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
-	priceID := strings.TrimSpace(ids[models.ProcessorKeyStripePriceID])
+	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
 	if priceID == "" {
-		return nil, false, fmt.Errorf("stripe price_id missing on local processors map")
+		return nil, false, fmt.Errorf("stripe price_id missing on local rails map")
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Processors: a.svc.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -299,7 +299,7 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, false, nil
 	}
-	stripeProc := a.svc.rt.Processors.GetStripeProcessor()
+	stripeProc := a.svc.rt.Rails.GetStripeRail()
 	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil, false, false, nil
 	}
@@ -307,7 +307,7 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 	if stripeProductID == "" {
 		return nil, false, true, fmt.Errorf("stripe_product_id required")
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Processors: a.svc.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 	remote, err := stripeSvc.RetrieveProduct(ctx, stripeProductID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -347,15 +347,15 @@ func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutab
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil
 	}
-	stripeProc := a.svc.rt.Processors.GetStripeProcessor()
+	stripeProc := a.svc.rt.Rails.GetStripeRail()
 	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil
 	}
-	priceID := strings.TrimSpace(ids[models.ProcessorKeyStripePriceID])
+	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
 	if priceID == "" {
 		return nil
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Processors: a.svc.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 	params := catalog.UpdatePriceParams{}
 	if mutable.IsActive != nil {
 		active := *mutable.IsActive

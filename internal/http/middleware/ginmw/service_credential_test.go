@@ -105,9 +105,9 @@ func TestServiceCredentialRequired_SucceedsForCorrectMerchantAndPermission(t *te
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "operator",
-			MerchantID:   dbtest.TestMerchantID,
-			MerchantSlug: dbtest.TestMerchantSlug,
-			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
+			MerchantID:    dbtest.TestMerchantID,
+			MerchantSlug:  dbtest.TestMerchantSlug,
+			Permissions:   []string{controlplane.PermMerchantCustomerSettingsUpdate},
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
@@ -121,9 +121,9 @@ func TestServiceCredentialRequired_SucceedsForServiceJWT(t *testing.T) {
 		looksLikeAPIKey: false,
 		serviceJWTResolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "cozy-art",
-			MerchantID:   dbtest.TestMerchantID,
-			MerchantSlug: dbtest.TestMerchantSlug,
-			Permissions:  []string{controlplane.PermMerchantCustomerSettingsUpdate},
+			MerchantID:    dbtest.TestMerchantID,
+			MerchantSlug:  dbtest.TestMerchantSlug,
+			Permissions:   []string{controlplane.PermMerchantCustomerSettingsUpdate},
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
@@ -137,8 +137,8 @@ func TestServiceCredentialRequired_ApexGrantDoesNotBypassGate(t *testing.T) {
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "operator",
-			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{"root:*"},
+			MerchantID:    dbtest.TestMerchantID,
+			Permissions:   []string{"root:*"},
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
@@ -151,8 +151,8 @@ func TestServiceCredentialRequired_DeniesMissingPermission(t *testing.T) {
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "operator",
-			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{controlplane.PermMerchantCustomerSettingsRead}, // read only
+			MerchantID:    dbtest.TestMerchantID,
+			Permissions:   []string{controlplane.PermMerchantCustomerSettingsRead}, // read only
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
@@ -166,8 +166,8 @@ func TestServiceCredentialRequired_DeniesUnknownPermissionSet(t *testing.T) {
 		looksLikeAPIKey: true,
 		resolved: &controlplane.ResolvedServiceCredential{
 			OwnerGroupRef: "operator",
-			MerchantID:   dbtest.TestMerchantID,
-			Permissions:  []string{"openrails:something:unknown"},
+			MerchantID:    dbtest.TestMerchantID,
+			Permissions:   []string{"openrails:something:unknown"},
 		},
 	}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)

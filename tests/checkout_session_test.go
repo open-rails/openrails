@@ -22,7 +22,7 @@ func TestCheckoutSessionRequiresAuth(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor": "mobius",
+			"rail": "mobius",
 		},
 	}
 	jsonBody, _ := json.Marshal(body)
@@ -50,7 +50,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":     "mobius",
+			"rail":          "mobius",
 			"payment_token": "tok_test_123",
 			"email":         email,
 			"first_name":    "Test",
@@ -82,7 +82,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 
 	payment, ok := resp["payment"].(map[string]any)
 	require.True(t, ok, "payment should be an object")
-	assert.Equal(t, "mobius", payment["processor"], "Processor should be mobius")
+	assert.Equal(t, "mobius", payment["rail"], "Rail should be mobius")
 	assert.NotEmpty(t, payment["transaction_id"], "Should include transaction_id")
 }
 
@@ -94,7 +94,7 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":    "solana",
+			"rail":         "solana",
 			"token_symbol": "USDC",
 			"flow":         "transfer_request",
 		},
@@ -118,7 +118,7 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 
 	payment, ok := resp["payment"].(map[string]any)
 	require.True(t, ok, "payment should be an object")
-	assert.Equal(t, "solana", payment["processor"], "Processor should be solana")
+	assert.Equal(t, "solana", payment["rail"], "Rail should be solana")
 	assert.NotEmpty(t, payment["reference"], "Should include reference")
 	assert.NotEmpty(t, payment["transaction_url"], "Should include transaction_url")
 }
@@ -137,7 +137,7 @@ func TestCheckoutSessionCCBillRedirect(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":  "ccbill",
+			"rail":       "ccbill",
 			"email":      email,
 			"first_name": "Test",
 			"last_name":  "User",
@@ -167,7 +167,7 @@ func TestCheckoutSessionCCBillRedirect(t *testing.T) {
 
 	payment, ok := resp["payment"].(map[string]any)
 	require.True(t, ok, "payment should be an object")
-	assert.Equal(t, "ccbill", payment["processor"], "Processor should be ccbill")
+	assert.Equal(t, "ccbill", payment["rail"], "Rail should be ccbill")
 	assert.NotEmpty(t, payment["redirect_url"], "Should include redirect_url")
 }
 
@@ -183,7 +183,7 @@ func TestCheckoutSessionMobiusTokenXOR(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":         "mobius",
+			"rail":              "mobius",
 			"payment_token":     "tok_test_123",
 			"payment_method_id": "pm_123",
 		},

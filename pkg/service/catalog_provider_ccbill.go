@@ -43,14 +43,14 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 // (the one provider in the shared model without remote link validation).
 func (a *ccbillAdapter) Attach(_ context.Context, link map[string]string, _ autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
-	formName := strings.TrimSpace(link[models.ProcessorKeyCCBillFormName])
-	flexID := strings.TrimSpace(link[models.ProcessorKeyCCBillFlexID])
+	formName := strings.TrimSpace(link[models.RailKeyCCBillFormName])
+	flexID := strings.TrimSpace(link[models.RailKeyCCBillFlexID])
 	if formName == "" || flexID == "" {
 		return nil, fmt.Errorf("ccbill link requires provider_links.ccbill.form_name and flex_id")
 	}
 	return map[string]string{
-		models.ProcessorKeyCCBillFormName: formName,
-		models.ProcessorKeyCCBillFlexID:   flexID,
+		models.RailKeyCCBillFormName: formName,
+		models.RailKeyCCBillFlexID:   flexID,
 	}, nil
 }
 

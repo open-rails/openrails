@@ -154,7 +154,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 
 	now := time.Date(2026, time.May, 18, 13, 28, 21, 0, time.UTC)
 	fakeClock := clockwork.NewFakeClockAt(now)
-	provider := string(models.ProcessorMobius)
+	provider := string(models.RailMobius)
 	planID := "premium_test_" + uuid.New().String()
 	providerSubID := "nmi_sub_" + uuid.New().String()
 	transactionID := "txn_" + uuid.New().String()
@@ -184,10 +184,10 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	})
 	require.NoError(t, err)
 
-	processorsJSON, err := json.Marshal(map[string]map[string]string{
+	railsJSON, err := json.Marshal(map[string]map[string]string{
 		provider: {
-			models.ProcessorKeyPlanID:   planID,
-			models.ProcessorKeyProvider: provider,
+			models.RailKeyPlanID:   planID,
+			models.RailKeyProvider: provider,
 		},
 	})
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		Currency:         "USD",
 		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingCycleDays,
-		Processors:       processorsJSON,
+		Rails:            railsJSON,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -223,8 +223,8 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		PriceID:                  &priceID,
 		EntitlementsSpecSnapshot: snapshotJSON,
 		Status:                   string(models.StatusPending),
-		Processor:                string(models.ProcessorMobius),
-		ProcessorSubscriptionID:  providerSubID,
+		Rail:                     string(models.RailMobius),
+		RailSubscriptionID:       providerSubID,
 		StartedAt:                now,
 		GatewayResponse:          metadataBytes,
 		CreatedAt:                now,
@@ -274,7 +274,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 			PriceService:                 priceSvc,
 			ProductService:               productSvc,
 			Data:                         NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMIAddSubscription), EventBody: body},
-			Processor:                    provider,
+			Rail:                         provider,
 			SubscriptionService:          subscriptionSvc,
 			PaymentService:               paymentSvc,
 			SubscriptionLifecycleService: lifecycleSvc,

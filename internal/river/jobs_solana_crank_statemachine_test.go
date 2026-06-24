@@ -228,7 +228,7 @@ func TestCrankStateMachine_SuccessMultiRebill(t *testing.T) {
 	require.NotNil(t, h.life.lastRenew)
 	require.Equal(t, smFiatAmount, h.life.lastRenew.Amount)
 	require.Equal(t, smFiatCurrency, h.life.lastRenew.Currency)
-	require.Equal(t, models.ProcessorSolana, h.life.lastRenew.Processor)
+	require.Equal(t, models.RailSolana, h.life.lastRenew.Rail)
 }
 
 // recoverable decline (insufficient USDC, SPL token Custom:1): route to dunning
@@ -261,7 +261,7 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 
 		// the recorded decline code is the shared InsufficientFunds vocabulary.
 		require.NotNil(t, h.life.lastFail)
-		require.Equal(t, models.ProcessorSolana, h.life.lastFail.Processor)
+		require.Equal(t, models.RailSolana, h.life.lastFail.Rail)
 
 		h.clock.Advance(gap)
 	}

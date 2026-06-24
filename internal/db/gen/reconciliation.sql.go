@@ -782,7 +782,7 @@ type ReconcileAdoptPaymentMethodParams struct {
 	ID         uuid.UUID
 }
 
-// PS-7: adopt the processor's vault metadata for a stored payment method.
+// PS-7: adopt the rail's vault metadata for a stored payment method.
 func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg ReconcileAdoptPaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileAdoptPaymentMethod, arg.LastFour, arg.ExpiryDate, arg.ID)
 	if err != nil {
@@ -810,7 +810,7 @@ type ReconcileAdoptSubscriptionStatusParams struct {
 	ID             uuid.UUID
 }
 
-// PS-3: adopt the processor's declared status/periods. Only non-terminal
+// PS-3: adopt the rail's declared status/periods. Only non-terminal
 // targets route here (terminal remote states go through the cancel applier);
 // past_due adoption requires a period end (chk_past_due_has_period_end),
 // guarded by the engine.
@@ -829,11 +829,11 @@ func (q *Queries) ReconcileAdoptSubscriptionStatus(ctx context.Context, arg Reco
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
-    $2, $3::openrails.processor_type,
+    $2, $3::openrails.rail_type,
     $4, $5, $5,
     $6,
     'completed', $7, $8,
@@ -846,7 +846,7 @@ ON CONFLICT DO NOTHING
 type ReconcileBackfillPaymentParams struct {
 	MerchantID        uuid.UUID
 	PriceID           uuid.UUID
-	Processor         OpenrailsProcessorType
+	Rail              OpenrailsRailType
 	TransactionID     string
 	Amount            int64
 	Currency          string
@@ -857,13 +857,13 @@ type ReconcileBackfillPaymentParams struct {
 	ProviderAccountID *uuid.UUID
 }
 
-// PS-4: backfill a processor charge that has no local payment record.
-// Dedupe rides the uq_payments_merchant_processor_transaction identity.
+// PS-4: backfill a rail charge that has no local payment record.
+// Dedupe rides the uq_payments_merchant_rail_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
 		arg.MerchantID,
 		arg.PriceID,
-		arg.Processor,
+		arg.Rail,
 		arg.TransactionID,
 		arg.Amount,
 		arg.Currency,
@@ -905,7 +905,7 @@ type ReconcileCancelSubscriptionLocalParams struct {
 // ============================================================================
 // Enforce appliers: idempotent LOCAL writes only (never a provider call)
 // ============================================================================
-// PS-2: the processor says this subscription is dead -> cancel locally.
+// PS-2: the rail says this subscription is dead -> cancel locally.
 // Clears the retry schedule (chk_cancelled_no_retry_schedule) and revokes via
 // the companion entitlement query. 0 rows on a re-run = already converged.
 func (q *Queries) ReconcileCancelSubscriptionLocal(ctx context.Context, arg ReconcileCancelSubscriptionLocalParams) (int64, error) {
@@ -970,42 +970,42 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 	return result.RowsAffected(), nil
 }
 
-const reconcileListPaymentMethodsByProcessors = `-- name: ReconcileListPaymentMethodsByProcessors :many
-SELECT id, customer_id, processor, vault_id, last_four, card_type,
+const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
+SELECT id, customer_id, rail, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
-WHERE processor = ANY ($1::text[])
+WHERE rail = ANY ($1::text[])
   AND ($2::uuid IS NULL OR provider_account_id = $2::uuid)
 `
 
-type ReconcileListPaymentMethodsByProcessorsParams struct {
-	Processors        []string
+type ReconcileListPaymentMethodsByRailsParams struct {
+	Rails             []string
 	ProviderAccountID *uuid.UUID
 }
 
-type ReconcileListPaymentMethodsByProcessorsRow struct {
+type ReconcileListPaymentMethodsByRailsRow struct {
 	ID         uuid.UUID
 	CustomerID uuid.UUID
-	Processor  string
+	Rail       string
 	VaultID    string
 	LastFour   *string
 	CardType   *string
 	ExpiryDate *string
 }
 
-func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, arg ReconcileListPaymentMethodsByProcessorsParams) ([]ReconcileListPaymentMethodsByProcessorsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByProcessors, arg.Processors, arg.ProviderAccountID)
+func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReconcileListPaymentMethodsByProcessorsRow
+	var items []ReconcileListPaymentMethodsByRailsRow
 	for rows.Next() {
-		var i ReconcileListPaymentMethodsByProcessorsRow
+		var i ReconcileListPaymentMethodsByRailsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CustomerID,
-			&i.Processor,
+			&i.Rail,
 			&i.VaultID,
 			&i.LastFour,
 			&i.CardType,
@@ -1022,16 +1022,16 @@ func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, a
 }
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, customer_id, processor, transaction_id, amount, status,
+SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
-WHERE processor::text = ANY ($1::text[])
+WHERE rail::text = ANY ($1::text[])
   AND transaction_id = ANY ($2::text[])
   AND ($3::uuid IS NULL OR provider_account_id = $3::uuid)
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
-	Processors        []string
+	Rails             []string
 	TransactionIds    []string
 	ProviderAccountID *uuid.UUID
 }
@@ -1039,7 +1039,7 @@ type ReconcileListPaymentsByTransactionIDsParams struct {
 type ReconcileListPaymentsByTransactionIDsRow struct {
 	ID                uuid.UUID
 	CustomerID        uuid.UUID
-	Processor         OpenrailsProcessorType
+	Rail              OpenrailsRailType
 	TransactionID     string
 	Amount            int64
 	Status            OpenrailsPurchaseStatus
@@ -1049,7 +1049,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Processors, arg.TransactionIds, arg.ProviderAccountID)
+	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Rails, arg.TransactionIds, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,7 +1060,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 		if err := rows.Scan(
 			&i.ID,
 			&i.CustomerID,
-			&i.Processor,
+			&i.Rail,
 			&i.TransactionID,
 			&i.Amount,
 			&i.Status,
@@ -1078,36 +1078,36 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 	return items, nil
 }
 
-const reconcileListPricesWithProcessors = `-- name: ReconcileListPricesWithProcessors :many
-SELECT id, product_id, amount, currency, billing_cycle_days, status, processors
+const reconcileListPricesWithRails = `-- name: ReconcileListPricesWithRails :many
+SELECT id, product_id, amount, currency, billing_cycle_days, status, rails
 FROM openrails.prices
-WHERE processors IS NOT NULL
+WHERE rails IS NOT NULL
   AND status <> 'draft'
 `
 
-type ReconcileListPricesWithProcessorsRow struct {
+type ReconcileListPricesWithRailsRow struct {
 	ID               uuid.UUID
 	ProductID        uuid.UUID
 	Amount           int64
 	Currency         string
 	BillingCycleDays *int32
 	Status           string
-	Processors       []byte
+	Rails            []byte
 }
 
-// Billable prices with their processor link blobs (provider_links): the PS-1
-// materializer maps a remote plan id onto the local price whose processors
+// Billable prices with their rail link blobs (provider_links): the PS-1
+// materializer maps a remote plan id onto the local price whose rails
 // jsonb carries that id under the provider's key. Draft prices are excluded
 // (not billable); archived prices stay (grandfathered subscriptions bill them).
-func (q *Queries) ReconcileListPricesWithProcessors(ctx context.Context) ([]ReconcileListPricesWithProcessorsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPricesWithProcessors)
+func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]ReconcileListPricesWithRailsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPricesWithRails)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReconcileListPricesWithProcessorsRow
+	var items []ReconcileListPricesWithRailsRow
 	for rows.Next() {
-		var i ReconcileListPricesWithProcessorsRow
+		var i ReconcileListPricesWithRailsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
@@ -1115,7 +1115,7 @@ func (q *Queries) ReconcileListPricesWithProcessors(ctx context.Context) ([]Reco
 			&i.Currency,
 			&i.BillingCycleDays,
 			&i.Status,
-			&i.Processors,
+			&i.Rails,
 		); err != nil {
 			return nil, err
 		}
@@ -1163,7 +1163,7 @@ SELECT ent.id, ent.customer_id, ent.entitlement, ent.source_id,
        ent.start_at, ent.end_at
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
-WHERE sub.processor = ANY ($1::text[])
+WHERE sub.rail = ANY ($1::text[])
   AND ($2::uuid IS NULL OR sub.provider_account_id = $2::uuid)
   AND ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
@@ -1171,7 +1171,7 @@ WHERE sub.processor = ANY ($1::text[])
 `
 
 type ReconcileListSubscriptionEntitlementsParams struct {
-	Processors        []string
+	Rails             []string
 	ProviderAccountID *uuid.UUID
 }
 
@@ -1188,7 +1188,7 @@ type ReconcileListSubscriptionEntitlementsRow struct {
 // Grace windows and admin grants are deliberately excluded: only
 // subscription-sourced entitlements are reconciled (PS-9).
 func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, arg ReconcileListSubscriptionEntitlementsParams) ([]ReconcileListSubscriptionEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionEntitlements, arg.Processors, arg.ProviderAccountID)
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionEntitlements, arg.Rails, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1214,32 +1214,32 @@ func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, arg
 	return items, nil
 }
 
-const reconcileListSubscriptionsByProcessors = `-- name: ReconcileListSubscriptionsByProcessors :many
+const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
-SELECT id, customer_id, price_id, product_id, status, processor,
-       processor_subscription_id, user_email, payment_method_id,
+SELECT id, customer_id, price_id, product_id, status, rail,
+       rail_subscription_id, user_email, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
-WHERE processor = ANY ($1::text[])
+WHERE rail = ANY ($1::text[])
   AND ($2::uuid IS NULL OR provider_account_id = $2::uuid)
 `
 
-type ReconcileListSubscriptionsByProcessorsParams struct {
-	Processors        []string
+type ReconcileListSubscriptionsByRailsParams struct {
+	Rails             []string
 	ProviderAccountID *uuid.UUID
 }
 
-type ReconcileListSubscriptionsByProcessorsRow struct {
+type ReconcileListSubscriptionsByRailsRow struct {
 	ID                       uuid.UUID
 	CustomerID               uuid.UUID
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
 	Status                   OpenrailsSubscriptionStatus
-	Processor                string
-	ProcessorSubscriptionID  string
+	Rail                     string
+	RailSubscriptionID       string
 	UserEmail                *string
 	PaymentMethodID          *uuid.UUID
 	CurrentPeriodStartsAt    *time.Time
@@ -1259,23 +1259,23 @@ type ReconcileListSubscriptionsByProcessorsRow struct {
 // ============================================================================
 // Local-state reads for the diff engine
 // ============================================================================
-func (q *Queries) ReconcileListSubscriptionsByProcessors(ctx context.Context, arg ReconcileListSubscriptionsByProcessorsParams) ([]ReconcileListSubscriptionsByProcessorsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByProcessors, arg.Processors, arg.ProviderAccountID)
+func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg ReconcileListSubscriptionsByRailsParams) ([]ReconcileListSubscriptionsByRailsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.Rails, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReconcileListSubscriptionsByProcessorsRow
+	var items []ReconcileListSubscriptionsByRailsRow
 	for rows.Next() {
-		var i ReconcileListSubscriptionsByProcessorsRow
+		var i ReconcileListSubscriptionsByRailsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CustomerID,
 			&i.PriceID,
 			&i.ProductID,
 			&i.Status,
-			&i.Processor,
-			&i.ProcessorSubscriptionID,
+			&i.Rail,
+			&i.RailSubscriptionID,
 			&i.UserEmail,
 			&i.PaymentMethodID,
 			&i.CurrentPeriodStartsAt,
@@ -1317,7 +1317,7 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID
 
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    merchant_id, price_id, product_id, status, processor, processor_subscription_id,
+    merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, credits_spec_snapshot, customer_id, provider_account_id
 )
@@ -1333,26 +1333,26 @@ JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
-      WHERE s.processor_subscription_id = $4
-        AND s.processor = ANY ($12::text[])
+      WHERE s.rail_subscription_id = $4
+        AND s.rail = ANY ($12::text[])
         AND ($10::uuid IS NULL OR s.provider_account_id = $10::uuid)
   )
 RETURNING id, entitlements_spec_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
-	MerchantID              uuid.UUID
-	Status                  OpenrailsSubscriptionStatus
-	Processor               string
-	ProcessorSubscriptionID string
-	UserEmail               *string
-	PeriodStartsAt          *time.Time
-	PeriodEndsAt            *time.Time
-	StartedAt               *time.Time
-	CustomerID              uuid.UUID
-	ProviderAccountID       *uuid.UUID
-	PriceID                 uuid.UUID
-	Processors              []string
+	MerchantID         uuid.UUID
+	Status             OpenrailsSubscriptionStatus
+	Rail               string
+	RailSubscriptionID string
+	UserEmail          *string
+	PeriodStartsAt     *time.Time
+	PeriodEndsAt       *time.Time
+	StartedAt          *time.Time
+	CustomerID         uuid.UUID
+	ProviderAccountID  *uuid.UUID
+	PriceID            uuid.UUID
+	Rails              []string
 }
 
 type ReconcileMaterializeSubscriptionRow struct {
@@ -1361,18 +1361,18 @@ type ReconcileMaterializeSubscriptionRow struct {
 }
 
 // PS-1 materialization (bootstrap mode, --materialize): create the local
-// subscription for a processor subscription that resolved unambiguously to an
+// subscription for a rail subscription that resolved unambiguously to an
 // identity and a price. The entitlements/credits specs snapshot from the
 // product exactly like a normal signup, so the subscription-sourced
 // entitlement path works unchanged. Idempotent: a second run inserts nothing
-// when any subscription already carries the processor subscription id (zero
+// when any subscription already carries the rail subscription id (zero
 // rows returned = already materialized).
 func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg ReconcileMaterializeSubscriptionParams) ([]ReconcileMaterializeSubscriptionRow, error) {
 	rows, err := q.db.Query(ctx, reconcileMaterializeSubscription,
 		arg.MerchantID,
 		arg.Status,
-		arg.Processor,
-		arg.ProcessorSubscriptionID,
+		arg.Rail,
+		arg.RailSubscriptionID,
 		arg.UserEmail,
 		arg.PeriodStartsAt,
 		arg.PeriodEndsAt,
@@ -1380,7 +1380,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.CustomerID,
 		arg.ProviderAccountID,
 		arg.PriceID,
-		arg.Processors,
+		arg.Rails,
 	)
 	if err != nil {
 		return nil, err
@@ -1402,12 +1402,12 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
-    $2, $3::openrails.processor_type,
+    $2, $3::openrails.rail_type,
     $4, $5, $5,
     $6,
     'completed', $7, $8,
@@ -1421,7 +1421,7 @@ ON CONFLICT DO NOTHING
 type ReconcileRecordRefundParams struct {
 	MerchantID        uuid.UUID
 	PriceID           uuid.UUID
-	Processor         OpenrailsProcessorType
+	Rail              OpenrailsRailType
 	TransactionID     string
 	Amount            int64
 	Currency          string
@@ -1433,13 +1433,13 @@ type ReconcileRecordRefundParams struct {
 	ProviderAccountID *uuid.UUID
 }
 
-// PS-5: record a processor refund that is missing locally as a negative-
+// PS-5: record a rail refund that is missing locally as a negative-
 // amount payment row linked to the refunded payment. Same dedupe identity.
 func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecordRefundParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileRecordRefund,
 		arg.MerchantID,
 		arg.PriceID,
-		arg.Processor,
+		arg.Rail,
 		arg.TransactionID,
 		arg.Amount,
 		arg.Currency,

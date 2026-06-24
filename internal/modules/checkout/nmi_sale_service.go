@@ -59,7 +59,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	const idempOp = "nmi_sale"
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
-		return nil, errors.New("processor is required")
+		return nil, errors.New("rail is required")
 	}
 
 	client, err := s.nmiClient(ctx, provider)
@@ -139,7 +139,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		ID:            uuidutil.NewV7(),
 		CustomerID:    customerID,
 		PriceID:       price.ID,
-		Processor:     models.Processor(provider),
+		Rail:          models.Rail(provider),
 		TransactionID: attemptTransactionID,
 		Amount:        price.Amount,
 		ListAmount:    price.Amount,
@@ -192,7 +192,7 @@ func (s *CheckoutNMISaleService) completeNMISaleRegistration(ctx context.Context
 	result, err := s.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        user.ID,
 		PriceID:       price.ID,
-		Processor:     provider,
+		Rail:          provider,
 		TransactionID: transactionID,
 		Amount:        price.Amount,
 		Currency:      price.Currency,

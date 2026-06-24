@@ -113,7 +113,7 @@ func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmai
 		reasonBlurb = "We've processed your refund and closed the associated premium membership."
 	case PremiumEndReasonAdmin:
 		reasonBlurb = "Our support team closed this subscription."
-	case PremiumEndReasonProcessor:
+	case PremiumEndReasonRail:
 		reasonBlurb = "Your payment provider confirmed this cancellation, so we've closed the membership."
 	}
 

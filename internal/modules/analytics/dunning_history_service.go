@@ -48,15 +48,15 @@ type DunningHistoryEvent struct {
 	// Table is the source table: payment_events or subscription_events.
 	Table     string
 	EventType string
-	Processor string
+	Rail      string
 	// SubscriptionID is the LOCAL openrails.subscriptions uuid when the writer
 	// knew it (imported legacy events carry the migrated subscription's id).
-	SubscriptionID          *uuid.UUID
-	ProcessorSubscriptionID *string
-	ProcessorTransactionID  *string
-	Status                  string
-	Amount                  *float64
-	Timestamp               time.Time
+	SubscriptionID     *uuid.UUID
+	RailSubscriptionID *string
+	RailTransactionID  *string
+	Status             string
+	Amount             *float64
+	Timestamp          time.Time
 }
 
 // defaultDunningHistoryLimit bounds one forensics read; deep history is the
@@ -64,13 +64,13 @@ type DunningHistoryEvent struct {
 const defaultDunningHistoryLimit = 100000
 
 // ListDunningHistory returns the merchant's payment + subscription events for
-// the given processors, oldest first. Zero since/until leave the window
+// the given rails, oldest first. Zero since/until leave the window
 // unbounded on that side (legacy history predates any reconcile window).
-func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processors []string, since, until time.Time, limit int) ([]DunningHistoryEvent, error) {
+func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, rails []string, since, until time.Time, limit int) ([]DunningHistoryEvent, error) {
 	if !s.Configured() {
 		return nil, fmt.Errorf("clickhouse not configured")
 	}
-	if len(processors) == 0 {
+	if len(rails) == 0 {
 		return nil, nil
 	}
 	if limit <= 0 || limit > defaultDunningHistoryLimit {
@@ -89,7 +89,7 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
 	tenantID := tid.String()
 
 	window := ""
-	args := []any{tenantID, processors, tenantID, processors}
+	args := []any{tenantID, rails, tenantID, rails}
 	// The window predicates are appended symmetrically to both UNION branches.
 	var windowArgs []any
 	if !since.IsZero() {
@@ -102,34 +102,34 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
 	}
 
 	query := `
-        SELECT source, event_type, processor, subscription_id,
-               processor_subscription_id, processor_transaction_id, status,
+        SELECT source, event_type, rail, subscription_id,
+               rail_subscription_id, rail_transaction_id, status,
                amount, timestamp
         FROM (
             SELECT 'payment_events' AS source,
-                   event_type, processor, subscription_id,
-                   CAST(NULL, 'Nullable(String)') AS processor_subscription_id,
-                   processor_transaction_id,
+                   event_type, rail, subscription_id,
+                   CAST(NULL, 'Nullable(String)') AS rail_subscription_id,
+                   rail_transaction_id,
                    '' AS status,
                    toFloat64(amount) AS amount,
                    timestamp
             FROM payment_events
-            WHERE merchant_id = ? AND processor IN (?)` + window + `
+            WHERE merchant_id = ? AND rail IN (?)` + window + `
             UNION ALL
             SELECT 'subscription_events' AS source,
-                   event_type, processor, subscription_id,
-                   processor_subscription_id,
-                   processor_transaction_id,
+                   event_type, rail, subscription_id,
+                   rail_subscription_id,
+                   rail_transaction_id,
                    status,
                    toNullable(toFloat64(price_amount)) AS amount,
                    timestamp
             FROM subscription_events
-            WHERE merchant_id = ? AND processor IN (?)` + window + `
+            WHERE merchant_id = ? AND rail IN (?)` + window + `
         )
         ORDER BY timestamp ASC
         LIMIT ?`
 
-	// Interleave: merchant+processors (+window) for branch 1, same for branch 2.
+	// Interleave: merchant+rails (+window) for branch 1, same for branch 2.
 	allArgs := make([]any, 0, len(args)+2*len(windowArgs)+1)
 	allArgs = append(allArgs, args[0], args[1])
 	allArgs = append(allArgs, windowArgs...)
@@ -146,9 +146,9 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
 	var out []DunningHistoryEvent
 	for rows.Next() {
 		var ev DunningHistoryEvent
-		if err := rows.Scan(&ev.Table, &ev.EventType, &ev.Processor,
-			&ev.SubscriptionID, &ev.ProcessorSubscriptionID,
-			&ev.ProcessorTransactionID, &ev.Status, &ev.Amount,
+		if err := rows.Scan(&ev.Table, &ev.EventType, &ev.Rail,
+			&ev.SubscriptionID, &ev.RailSubscriptionID,
+			&ev.RailTransactionID, &ev.Status, &ev.Amount,
 			&ev.Timestamp); err != nil {
 			return nil, fmt.Errorf("scan dunning history row: %w", err)
 		}

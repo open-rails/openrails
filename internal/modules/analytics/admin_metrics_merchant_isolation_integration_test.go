@@ -97,15 +97,15 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 	merchantB := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 
 	day := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
-	// Merchant A: 1000 sub revenue, 2 new subs, processor "ccbill".
+	// Merchant A: 1000 sub revenue, 2 new subs, rail "ccbill".
 	seedDailyMetric(t, ctx, conn, day, "usd", merchantA, dailySeed{
 		subRevenue: 1000, newSubs: 2, paymentsSuccessful: 2,
-		activeEnd: 5, cancellationsUser: 1, processor: "ccbill",
+		activeEnd: 5, cancellationsUser: 1, rail: "ccbill",
 	})
 	// Merchant B: deliberately different magnitudes so any leak is obvious.
 	seedDailyMetric(t, ctx, conn, day, "usd", merchantB, dailySeed{
 		subRevenue: 9999, newSubs: 7, paymentsSuccessful: 7,
-		activeEnd: 42, cancellationsUser: 3, processor: "nmi",
+		activeEnd: 42, cancellationsUser: 3, rail: "nmi",
 	})
 
 	svc := &AdminMetricsService{cfg: &config.ClickHouseConfig{ClientAddr: clientAddr, Database: dbName, Username: dbUser, Password: dbPass}}
@@ -154,15 +154,15 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 		t.Fatalf("GetSubscriptionSeries(A) new subs = %d, want 2 (merchant B leaked)", newSubs)
 	}
 
-	// --- Processor metrics ---
-	procs, err := svc.GetProcessorMetrics(ctxA, rng, "usd")
+	// --- Rail metrics ---
+	procs, err := svc.GetRailMetrics(ctxA, rng, "usd")
 	if err != nil {
-		t.Fatalf("GetProcessorMetrics(A): %v", err)
+		t.Fatalf("GetRailMetrics(A): %v", err)
 	}
 	for _, pr := range procs {
-		for _, p := range pr.Processors {
-			if p.Processor == "nmi" {
-				t.Fatalf("GetProcessorMetrics(A) leaked merchant B processor 'nmi'")
+		for _, p := range pr.Rails {
+			if p.Rail == "nmi" {
+				t.Fatalf("GetRailMetrics(A) leaked merchant B rail 'nmi'")
 			}
 		}
 	}
@@ -254,7 +254,7 @@ CREATE TABLE daily_metrics (
     pending_count_end Int64,
     mrr_cents Int64,
     entitlements_granted Nullable(Int64),
-    processor Nested (
+    rail Nested (
         name String,
         active_subscriptions Int64,
         new_subscriptions Int64,
@@ -281,7 +281,7 @@ type dailySeed struct {
 	paymentsSuccessful int64
 	activeEnd          int64
 	cancellationsUser  int64
-	processor          string
+	rail               string
 }
 
 func seedDailyMetric(t *testing.T, ctx context.Context, conn driver.Conn, day time.Time, currency string, merchantID merchant.ID, s dailySeed) {
@@ -294,10 +294,10 @@ func seedDailyMetric(t *testing.T, ctx context.Context, conn driver.Conn, day ti
         new_subscriptions, scheduled_starts,
         cancellations_user, cancellations_merchant, cancellations_expired, cancellations_chargeback,
         reactivations, active_count_end, past_due_count_end, pending_count_end, mrr_cents, entitlements_granted,
-        processor.name, processor.active_subscriptions, processor.new_subscriptions, processor.cancellations,
-        processor.revenue_total_cents, processor.revenue_subscription_cents, processor.revenue_one_time_cents,
-        processor.revenue_refunds_cents, processor.revenue_chargebacks_cents,
-        processor.payments_successful, processor.payments_failed
+        rail.name, rail.active_subscriptions, rail.new_subscriptions, rail.cancellations,
+        rail.revenue_total_cents, rail.revenue_subscription_cents, rail.revenue_one_time_cents,
+        rail.revenue_refunds_cents, rail.revenue_chargebacks_cents,
+        rail.payments_successful, rail.payments_failed
     ) VALUES`)
 	if err != nil {
 		t.Fatalf("prepare batch: %v", err)
@@ -312,7 +312,7 @@ func seedDailyMetric(t *testing.T, ctx context.Context, conn driver.Conn, day ti
 		s.newSubs, &scheduled,
 		s.cancellationsUser, int64(0), int64(0), int64(0),
 		int64(0), s.activeEnd, int64(0), int64(0), int64(0), &ent,
-		[]string{s.processor}, []int64{s.activeEnd}, []int64{s.newSubs}, []int64{s.cancellationsUser},
+		[]string{s.rail}, []int64{s.activeEnd}, []int64{s.newSubs}, []int64{s.cancellationsUser},
 		[]int64{s.subRevenue}, []int64{s.subRevenue}, []int64{0},
 		[]int64{0}, []int64{0},
 		[]int64{s.paymentsSuccessful}, []int64{0},

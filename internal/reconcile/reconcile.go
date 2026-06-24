@@ -1,9 +1,9 @@
 // Package reconcile compares local OpenRails billing state against the payment
-// processors as the source of truth (#107). It is the sibling of internal/audit:
-// audit checks internal DB consistency, reconcile checks local-vs-processor
+// rails as the source of truth (#107). It is the sibling of internal/audit:
+// audit checks internal DB consistency, reconcile checks local-vs-rail
 // drift.
 //
-// This file defines phase 1 of #107: the per-provider ProcessorFetcher
+// This file defines phase 1 of #107: the per-provider RailFetcher
 // interface and the normalized RemoteSnapshot model every fetcher produces.
 // The diff engine, findings persistence, enforce appliers, and admin surfaces
 // are phase 2 and deliberately absent.
@@ -11,7 +11,7 @@
 // HARD CONSTRAINT: fetchers are read-only by construction. They are built
 // exclusively on query/report/list APIs (NMI query.php, CCBill DataLink
 // exports, Stripe GETs through the stripeapi read-only choke point, Solana RPC
-// account reads) and never perform a processor mutation.
+// account reads) and never perform a rail mutation.
 package reconcile
 
 import (
@@ -22,8 +22,8 @@ import (
 	"time"
 )
 
-// Provider identifies the payment processor a snapshot came from. Values match
-// the processor names used elsewhere in OpenRails (models.Processor*).
+// Provider identifies the payment rail a snapshot came from. Values match
+// the rail names used elsewhere in OpenRails (models.Rail*).
 type Provider string
 
 const (
@@ -69,18 +69,18 @@ type Capabilities struct {
 	Vault         bool `json:"vault"`
 }
 
-// RemoteSubscription is one subscription as the processor declares it.
+// RemoteSubscription is one subscription as the rail declares it.
 type RemoteSubscription struct {
-	// ProcessorSubscriptionID is the processor-side subscription identifier
+	// RailSubscriptionID is the rail-side subscription identifier
 	// (NMI subscription_id, CCBill subscription id, Stripe sub_..., Solana
-	// subscription PDA). Matches local subscriptions.processor_subscription_id.
-	ProcessorSubscriptionID string `json:"processor_subscription_id"`
+	// subscription PDA). Matches local subscriptions.rail_subscription_id.
+	RailSubscriptionID string `json:"rail_subscription_id"`
 	// Status is the normalized state; RawStatus preserves the provider's
 	// literal status string (empty when the provider has no status field and
 	// the status was inferred — see each fetcher's notes).
 	Status    SubscriptionStatus `json:"status"`
 	RawStatus string             `json:"raw_status,omitempty"`
-	// CustomerID is the processor's customer/vault identifier when the
+	// CustomerID is the rail's customer/vault identifier when the
 	// provider has one (NMI customer_vault_id, Stripe cus_..., Solana
 	// subscriber wallet). Empty for CCBill (no vault concept exposed).
 	CustomerID string `json:"customer_id,omitempty"`
@@ -88,10 +88,10 @@ type RemoteSubscription struct {
 	// populated when the provider exposes them.
 	Email    string `json:"email,omitempty"`
 	Username string `json:"username,omitempty"`
-	// PlanID is the processor-side plan/price identifier (NMI plan_id, Stripe
+	// PlanID is the rail-side plan/price identifier (NMI plan_id, Stripe
 	// price id, Solana plan PDA). Maps to local prices via provider_links.
 	PlanID string `json:"plan_id,omitempty"`
-	// NextBillingAt / LastBilledAt are the processor's declared billing
+	// NextBillingAt / LastBilledAt are the rail's declared billing
 	// timestamps, nil when unknown.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 	LastBilledAt  *time.Time `json:"last_billed_at,omitempty"`
@@ -105,13 +105,13 @@ type RemoteSubscription struct {
 	Raw json.RawMessage `json:"raw,omitempty"`
 }
 
-// RemoteTransaction is one charge-level event as the processor declares it.
+// RemoteTransaction is one charge-level event as the rail declares it.
 type RemoteTransaction struct {
-	// TransactionID is the processor transaction identifier (NMI
+	// TransactionID is the rail transaction identifier (NMI
 	// transaction_id, CCBill transaction id, Stripe ch_/re_/dp_..., Solana tx
 	// signature).
 	TransactionID string `json:"transaction_id"`
-	// SubscriptionID links to the processor subscription when the provider
+	// SubscriptionID links to the rail subscription when the provider
 	// exposes the linkage; empty otherwise (see fetcher notes).
 	SubscriptionID string          `json:"subscription_id,omitempty"`
 	Type           TransactionType `json:"type"`
@@ -121,15 +121,15 @@ type RemoteTransaction struct {
 	AmountCents int64     `json:"amount_cents"`
 	Currency    string    `json:"currency,omitempty"`
 	OccurredAt  time.Time `json:"occurred_at"`
-	// DeclineReason carries the processor's failure/decline text for declined
+	// DeclineReason carries the rail's failure/decline text for declined
 	// attempts; it is the raw material for the dunning-forensics report.
 	DeclineReason string          `json:"decline_reason,omitempty"`
 	Raw           json.RawMessage `json:"raw,omitempty"`
 }
 
-// RemoteVaultEntry is one stored payment method as the processor declares it.
+// RemoteVaultEntry is one stored payment method as the rail declares it.
 type RemoteVaultEntry struct {
-	// CustomerVaultID is the processor vault/customer identifier.
+	// CustomerVaultID is the rail vault/customer identifier.
 	CustomerVaultID string `json:"customer_vault_id"`
 	// CardLast4 / CardExpiry (MMYY) are populated when the provider exposes
 	// masked card data.
@@ -193,10 +193,10 @@ type FetchParams struct {
 	AccountID         string
 }
 
-// ProcessorFetcher pulls a provider's declared state into a RemoteSnapshot.
+// RailFetcher pulls a provider's declared state into a RemoteSnapshot.
 // Implementations MUST be read-only: query/report/list APIs only, never a
 // mutation.
-type ProcessorFetcher interface {
+type RailFetcher interface {
 	Name() string
 	Capabilities() Capabilities
 	Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error)
@@ -210,14 +210,14 @@ type ProviderKeyer interface {
 }
 
 type keyedFetcher struct {
-	ProcessorFetcher
+	RailFetcher
 	key string
 }
 
 func (f keyedFetcher) ProviderKey() string { return f.key }
 
 // ProviderKeyFor returns the configured provider key behind a fetcher.
-func ProviderKeyFor(provider Provider, fetcher ProcessorFetcher) string {
+func ProviderKeyFor(provider Provider, fetcher RailFetcher) string {
 	if k, ok := fetcher.(ProviderKeyer); ok {
 		if key := strings.ToLower(strings.TrimSpace(k.ProviderKey())); key != "" {
 			return key

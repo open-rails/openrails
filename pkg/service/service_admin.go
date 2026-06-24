@@ -42,9 +42,9 @@ func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscr
 		Limit:  limit,
 		Offset: offset,
 		Filters: subscriptions.GetSubscriptionsFilters{
-			UserID:    opts.UserID,
-			Status:    opts.Status,
-			Processor: opts.Processor,
+			UserID: opts.UserID,
+			Status: opts.Status,
+			Rail:   opts.Rail,
 		},
 	}
 
@@ -118,8 +118,8 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 	}
 
 	filters := payments.GetPaymentsFilters{
-		UserID:    opts.UserID,
-		Processor: opts.Processor,
+		UserID: opts.UserID,
+		Rail:   opts.Rail,
 	}
 	if opts.SubscriptionID != nil {
 		filters.SubscriptionID = opts.SubscriptionID.String()
@@ -242,8 +242,8 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 	if req.TransactionID == "" {
 		return nil, fmt.Errorf("transaction_id required")
 	}
-	if req.Processor == "" {
-		return nil, fmt.Errorf("processor required")
+	if req.Rail == "" {
+		return nil, fmt.Errorf("rail required")
 	}
 
 	// Parse price ID if provided
@@ -264,7 +264,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 		ListAmount:    req.Amount,
 		Currency:      strings.ToLower(currency),
 		TransactionID: req.TransactionID,
-		Processor:     models.Processor(req.Processor),
+		Rail:          models.Rail(req.Rail),
 		PurchasedAt:   now,
 		CreatedAt:     now,
 	}
@@ -507,9 +507,9 @@ func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts Metrics
 	return svc.GetSubscriptionSeries(ctx, dateRange, opts.Granularity, opts.Currency)
 }
 
-// AdminGetMetricsProcessors returns per-processor metrics.
-// Returns the raw ProcessorMetricsResponse slice from the internal service.
-func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOptions) ([]analytics.ProcessorMetricsResponse, error) {
+// AdminGetMetricsRails returns per-rail metrics.
+// Returns the raw RailMetricsResponse slice from the internal service.
+func (s *Service) AdminGetMetricsRails(ctx context.Context, opts MetricsOptions) ([]analytics.RailMetricsResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
@@ -521,7 +521,7 @@ func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOpt
 		End:   opts.DateRange.End,
 	}
 
-	return svc.GetProcessorMetrics(ctx, dateRange, opts.Currency)
+	return svc.GetRailMetrics(ctx, dateRange, opts.Currency)
 }
 
 // AdminGetMetricsChurn returns churn analysis data.
@@ -549,13 +549,13 @@ func adminSubscriptionFromResponse(resp *subscriptions.AdminSubscriptionResponse
 	}
 	sub := resp.Subscription
 	result := Subscription{
-		ID:                      api.FormatSubscriptionID(sub.ID),
-		Status:                  string(sub.Status),
-		Processor:               string(sub.Processor),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		StartedAt:               api.ToUnix(sub.StartedAt),
-		Created:                 api.ToUnix(sub.CreatedAt),
-		Updated:                 api.ToUnix(sub.UpdatedAt),
+		ID:                 api.FormatSubscriptionID(sub.ID),
+		Status:             string(sub.Status),
+		Rail:               string(sub.Rail),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		StartedAt:          api.ToUnix(sub.StartedAt),
+		Created:            api.ToUnix(sub.CreatedAt),
+		Updated:            api.ToUnix(sub.UpdatedAt),
 	}
 	if sub.EndedAt != nil && !sub.EndedAt.IsZero() {
 		ts := sub.EndedAt.Unix()
@@ -594,13 +594,13 @@ func adminSubscriptionFromResponse(resp *subscriptions.AdminSubscriptionResponse
 
 func adminSubscriptionFromModel(sub *models.Subscription) Subscription {
 	result := Subscription{
-		ID:                      api.FormatSubscriptionID(sub.ID),
-		Status:                  string(sub.Status),
-		Processor:               string(sub.Processor),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		StartedAt:               api.ToUnix(sub.StartedAt),
-		Created:                 api.ToUnix(sub.CreatedAt),
-		Updated:                 api.ToUnix(sub.UpdatedAt),
+		ID:                 api.FormatSubscriptionID(sub.ID),
+		Status:             string(sub.Status),
+		Rail:               string(sub.Rail),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		StartedAt:          api.ToUnix(sub.StartedAt),
+		Created:            api.ToUnix(sub.CreatedAt),
+		Updated:            api.ToUnix(sub.UpdatedAt),
 	}
 	if sub.EndedAt != nil && !sub.EndedAt.IsZero() {
 		ts := sub.EndedAt.Unix()

@@ -67,10 +67,10 @@ if connections reset).
 
 ### 4. Drive the subscribe → confirm → cancel flow
 Browser (host apps) or API directly:
-1. `POST /v1/me/checkout` `{price_id, mode:"subscription", payment:{processor:"solana", wallet}}`
+1. `POST /v1/me/checkout` `{price_id, mode:"subscription", payment:{rail:"solana", wallet}}`
    → `next_action: solana_sign_transactions [base64...]`.
 2. Wallet signs + sends each tx (first-timer: init then subscribe).
-3. `POST /v1/me/checkout/:id/confirm` `{payment:{processor:"solana", wallet, signature}}`
+3. `POST /v1/me/checkout/:id/confirm` `{payment:{rail:"solana", wallet, signature}}`
    → verifies the on-chain subscription, first crank, creates membership.
 4. Cancel: `POST /v1/me/subscriptions/:id/cancel` (soft cancel → cranker stops).
 
@@ -120,13 +120,13 @@ Identical to the full-stack steps above:
 2. Pick **Solana / wallet** as the payment method and connect the devnet wallet
    (the subscriber keypair from step 0).
 3. Click **Subscribe**. The frontend calls
-   `POST /v1/me/checkout {mode:"subscription", payment:{processor:"solana"}}`
+   `POST /v1/me/checkout {mode:"subscription", payment:{rail:"solana"}}`
    and receives `next_action: solana_sign_transactions [base64...]` (first-timer:
    init-authority **then** subscribe).
 4. The wallet adapter pops up one approval **per transaction** — **Approve each**.
    Watch the popup show the program + USDC token accounts.
 5. The UI submits the signed txns and calls
-   `POST /v1/me/checkout/:id/confirm {payment:{processor:"solana", wallet, signature}}`.
+   `POST /v1/me/checkout/:id/confirm {payment:{rail:"solana", wallet, signature}}`.
    This verifies the on-chain subscription, runs the first crank (pulls USDC),
    and creates the membership.
 6. **Cancel:** open the subscription in the account UI and click **Cancel**

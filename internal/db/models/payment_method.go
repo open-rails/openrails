@@ -6,18 +6,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// PaymentMethod represents a stored payment method across multiple processors
-// This replaces processor-specific payment method tables
+// PaymentMethod represents a stored payment method across multiple rails
+// This replaces rail-specific payment method tables
 type PaymentMethod struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
-	Processor  Processor `json:"processor"` // Processor: mobius, ccbill, solana
+	Rail       Rail      `json:"rail"` // Rail: mobius, ccbill, solana
 
-	// Processor-specific vault/payment method identifiers
-	VaultID              string  `json:"-"` // Primary identifier in processor's system
+	// Rail-specific vault/payment method identifiers
+	VaultID              string  `json:"-"` // Primary identifier in rail's system
 	BillingID            *string `json:"-"` // Secondary identifier (e.g., subscription ID)
 	InitialTransactionID string  `json:"-"` // Transaction that created this vault
 

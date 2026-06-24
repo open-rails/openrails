@@ -168,10 +168,10 @@ func TestVerifyOrBindPrimaryProviderAccountStripeUsesHTTPAccountIdentity(t *test
 	}))
 	defer srv.Close()
 
-	processors := config.ProcessorSet{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_original"},
+	rails := config.RailSet{
+		"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_original"},
 	}
-	resolver := NewRuntimeProviderAccounts(&config.Config{}, processors, nil)
+	resolver := NewRuntimeProviderAccounts(&config.Config{}, rails, nil)
 	resolver.StripeBaseURL = srv.URL
 	store := NewStore(dbi).WithProviderAccounts(resolver)
 
@@ -181,12 +181,12 @@ func TestVerifyOrBindPrimaryProviderAccountStripeUsesHTTPAccountIdentity(t *test
 	require.Equal(t, "acct_original", bound.AccountID)
 	require.Equal(t, "primary", bound.Role)
 
-	processors["stripe"].SecretKey = "sk_test_rotated"
+	rails["stripe"].SecretKey = "sk_test_rotated"
 	rotated, err := store.VerifyOrBindPrimaryProviderAccount(ctx, merchantID, "stripe")
 	require.NoError(t, err, "key rotation inside the same Stripe account should not create a mismatch")
 	require.Equal(t, bound.ID, rotated.ID)
 
-	processors["stripe"].SecretKey = "sk_test_other"
+	rails["stripe"].SecretKey = "sk_test_other"
 	other, err := store.VerifyOrBindPrimaryProviderAccount(ctx, merchantID, "stripe")
 	require.NoError(t, err, "different Stripe account returned by /v1/account should be recorded and promoted")
 	require.Equal(t, "acct_other", other.AccountID)

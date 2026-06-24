@@ -22,9 +22,9 @@ caused an action when that differs from the payable subject.
 | `billing.entitlements`, `models.Entitlement`, entitlement repo/service | `user_id text` | `tenant_subject_id uuid`; timeline uniqueness/exclusion becomes `(tenant_id, tenant_subject_id, entitlement, period)`. |
 | `billing.subscriptions`, `models.Subscription`, subscription services | `user_id text` | `tenant_subject_id uuid`; tier-group uniqueness becomes `(tenant_id, tenant_subject_id, tier_group)` for active/pending/past_due rows. |
 | `billing.checkout_sessions`, `models.CheckoutSession` | `user_id text` | `tenant_subject_id uuid`; request contracts accept tenant subject, not host user id. |
-| `billing.payments`, `models.Payment` | `user_id text` | `tenant_subject_id uuid`; processor transaction lookup remains processor-owned metadata. |
-| `billing.payment_methods`, `models.PaymentMethod` | `user_id text` | `tenant_subject_id uuid`; vault uniqueness becomes `(tenant_id, tenant_subject_id, vault_id)` plus processor vault uniqueness. |
-| `billing.processor_customers`, `models.ProcessorCustomer` | `user_id text` | `tenant_subject_id uuid`; customer mapping keyed by `(tenant_id, tenant_subject_id, processor)`. |
+| `billing.payments`, `models.Payment` | `user_id text` | `tenant_subject_id uuid`; rail transaction lookup remains rail-owned metadata. |
+| `billing.payment_methods`, `models.PaymentMethod` | `user_id text` | `tenant_subject_id uuid`; vault uniqueness becomes `(tenant_id, tenant_subject_id, vault_id)` plus rail vault uniqueness. |
+| `billing.rail_customers`, `models.RailCustomer` | `user_id text` | `tenant_subject_id uuid`; customer mapping keyed by `(tenant_id, tenant_subject_id, rail)`. |
 | `billing.admin_grants`, `models.AdminGrant` | `user_id text` | `tenant_subject_id uuid` when the grant is payable/entitlement-bearing; retain separate actor fields only for audit. |
 | `billing.product_access_grants`, `models.ProductAccessGrant` | `user_id text` | `tenant_subject_id uuid`; service/admin routes should use tenant-subject paths or bodies. |
 | `billing.notification_queue`, `models.NotificationQueue` | `user_id text` | `tenant_subject_id uuid` plus delivery metadata if notifications stay in OpenRails. |

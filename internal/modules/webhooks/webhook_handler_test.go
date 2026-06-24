@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Each processor's representative sample payloads must normalize to the right
+// Each rail's representative sample payloads must normalize to the right
 // unified WebhookEvent (issue #296, task 3).
 
 func TestStripeHandlerNormalize(t *testing.T) {
@@ -62,15 +62,15 @@ func TestStripeHandlerNormalize(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ev, err := h.Normalize(&WebhookMessage{Processor: "stripe", Payload: []byte(tc.payload)})
+			ev, err := h.Normalize(&WebhookMessage{Rail: "stripe", Payload: []byte(tc.payload)})
 			if err != nil {
 				t.Fatalf("Normalize: %v", err)
 			}
 			if ev.Type != tc.wantType {
 				t.Errorf("Type = %q, want %q", ev.Type, tc.wantType)
 			}
-			if ev.ProcessorRef != tc.wantRef {
-				t.Errorf("ProcessorRef = %q, want %q", ev.ProcessorRef, tc.wantRef)
+			if ev.RailRef != tc.wantRef {
+				t.Errorf("RailRef = %q, want %q", ev.RailRef, tc.wantRef)
 			}
 			if tc.wantSubRef != "" && ev.SubscriptionRef != tc.wantSubRef {
 				t.Errorf("SubscriptionRef = %q, want %q", ev.SubscriptionRef, tc.wantSubRef)
@@ -84,8 +84,8 @@ func TestStripeHandlerNormalize(t *testing.T) {
 			if tc.wantOccured != 0 && ev.OccurredAt.Unix() != tc.wantOccured {
 				t.Errorf("OccurredAt = %d, want %d", ev.OccurredAt.Unix(), tc.wantOccured)
 			}
-			if ev.Processor != "stripe" {
-				t.Errorf("Processor = %q, want stripe", ev.Processor)
+			if ev.Rail != "stripe" {
+				t.Errorf("Rail = %q, want stripe", ev.Rail)
 			}
 			if string(ev.Raw) != tc.payload {
 				t.Errorf("Raw not preserved")
@@ -135,21 +135,21 @@ func TestNMIHandlerNormalize(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ev, err := h.Normalize(&WebhookMessage{Processor: "mobius", Payload: []byte(tc.payload)})
+			ev, err := h.Normalize(&WebhookMessage{Rail: "mobius", Payload: []byte(tc.payload)})
 			if err != nil {
 				t.Fatalf("Normalize: %v", err)
 			}
 			if ev.Type != tc.wantType {
 				t.Errorf("Type = %q, want %q", ev.Type, tc.wantType)
 			}
-			if ev.ProcessorRef != tc.wantRef {
-				t.Errorf("ProcessorRef = %q, want %q", ev.ProcessorRef, tc.wantRef)
+			if ev.RailRef != tc.wantRef {
+				t.Errorf("RailRef = %q, want %q", ev.RailRef, tc.wantRef)
 			}
 			if tc.wantSubRef != "" && ev.SubscriptionRef != tc.wantSubRef {
 				t.Errorf("SubscriptionRef = %q, want %q", ev.SubscriptionRef, tc.wantSubRef)
 			}
-			if ev.Processor != "mobius" {
-				t.Errorf("Processor = %q, want mobius", ev.Processor)
+			if ev.Rail != "mobius" {
+				t.Errorf("Rail = %q, want mobius", ev.Rail)
 			}
 		})
 	}
@@ -202,7 +202,7 @@ func TestCCBillHandlerNormalize(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ev, err := h.Normalize(&WebhookMessage{
-				Processor: "ccbill", EventID: tc.eventID, EventType: tc.eventType, Payload: []byte(tc.payload),
+				Rail: "ccbill", EventID: tc.eventID, EventType: tc.eventType, Payload: []byte(tc.payload),
 			})
 			if err != nil {
 				t.Fatalf("Normalize: %v", err)
@@ -210,8 +210,8 @@ func TestCCBillHandlerNormalize(t *testing.T) {
 			if ev.Type != tc.wantType {
 				t.Errorf("Type = %q, want %q", ev.Type, tc.wantType)
 			}
-			if ev.ProcessorRef != tc.wantRef {
-				t.Errorf("ProcessorRef = %q, want %q", ev.ProcessorRef, tc.wantRef)
+			if ev.RailRef != tc.wantRef {
+				t.Errorf("RailRef = %q, want %q", ev.RailRef, tc.wantRef)
 			}
 			if ev.SubscriptionRef != tc.wantSubRef {
 				t.Errorf("SubscriptionRef = %q, want %q", ev.SubscriptionRef, tc.wantSubRef)
@@ -231,7 +231,7 @@ func TestWebhookHandlerRegistry(t *testing.T) {
 			t.Errorf("Handler(%q) = not found, want found", proc)
 		}
 	}
-	if h, ok := reg.Handler("mobius"); !ok || h.Processor() != "nmi" {
+	if h, ok := reg.Handler("mobius"); !ok || h.Rail() != "nmi" {
 		t.Errorf("Handler(mobius) should resolve to the nmi handler")
 	}
 	if _, ok := reg.Handler("paypal"); ok {
@@ -251,10 +251,10 @@ func TestStripeHandlerVerify(t *testing.T) {
 	// tolerance 0 disables the timestamp window so the fixed ts stays valid.
 	h := StripeWebhookHandler{Secret: secret, Tolerance: 0}
 
-	if err := h.Verify(&WebhookMessage{Processor: "stripe", Signature: header, Payload: payload}); err != nil {
+	if err := h.Verify(&WebhookMessage{Rail: "stripe", Signature: header, Payload: payload}); err != nil {
 		t.Fatalf("Verify(valid) = %v, want nil", err)
 	}
-	if err := h.Verify(&WebhookMessage{Processor: "stripe", Signature: header, Payload: []byte(`{"tampered":true}`)}); err == nil {
+	if err := h.Verify(&WebhookMessage{Rail: "stripe", Signature: header, Payload: []byte(`{"tampered":true}`)}); err == nil {
 		t.Fatalf("Verify(tampered) = nil, want error")
 	}
 }
@@ -269,10 +269,10 @@ func TestNMIHandlerVerify(t *testing.T) {
 	header := fmt.Sprintf("t=%s,s=%s", ts, sig)
 
 	h := NMIWebhookHandler{SecretFor: func(string) string { return secret }}
-	if err := h.Verify(&WebhookMessage{Processor: "mobius", Signature: header, Payload: payload}); err != nil {
+	if err := h.Verify(&WebhookMessage{Rail: "mobius", Signature: header, Payload: payload}); err != nil {
 		t.Fatalf("Verify(valid) = %v, want nil", err)
 	}
-	if err := h.Verify(&WebhookMessage{Processor: "mobius", Signature: header, Payload: []byte(`x`)}); err == nil {
+	if err := h.Verify(&WebhookMessage{Rail: "mobius", Signature: header, Payload: []byte(`x`)}); err == nil {
 		t.Fatalf("Verify(tampered) = nil, want error")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -76,7 +76,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	if !processors.IsNMIBackedProcessor(subscription.Processor) {
+	if !rails.IsNMIBackedRail(subscription.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed subscriptions can have their payment method updated")
 		return
 	}
@@ -102,27 +102,27 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		}
 	}
 
-	if !processors.IsNMIBackedProcessor(paymentMethod.Processor) {
+	if !rails.IsNMIBackedRail(paymentMethod.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be used")
 		return
 	}
-	if !processors.SameProcessor(paymentMethod.Processor, subscription.Processor) {
+	if !rails.SameRail(paymentMethod.Rail, subscription.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different payment provider")
 		return
 	}
 
-	processorName := string(subscription.Processor)
-	nmiClient, ok := r.State.NMIClients[processorName]
+	railName := string(subscription.Rail)
+	nmiClient, ok := r.State.NMIClients[railName]
 	if !ok {
-		log.WithField("processor", processorName).Error("NMI client not found for processor")
-		r.ErrorJSON(http.StatusServiceUnavailable, "Payment processor not available")
+		log.WithField("rail", railName).Error("NMI client not found for rail")
+		r.ErrorJSON(http.StatusServiceUnavailable, "Payment rail not available")
 		return
 	}
 
-	err = nmiClient.UpdateSubscriptionPaymentSource(subscription.ProcessorSubscriptionID, paymentMethod.VaultID)
+	err = nmiClient.UpdateSubscriptionPaymentSource(subscription.RailSubscriptionID, paymentMethod.VaultID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "processor_subscription": subscription.ProcessorSubscriptionID, "new_vault_id": paymentMethod.VaultID, "payment_method_id": paymentMethod.ID}).Error("Failed to update subscription payment source with NMI")
-		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment processor")
+		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.VaultID, "payment_method_id": paymentMethod.ID}).Error("Failed to update subscription payment source with NMI")
+		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
 		return
 	}
 
@@ -136,7 +136,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	log.WithFields(log.Fields{"subscription_id": subscription.ID, "processor_subscription": subscription.ProcessorSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
+	log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
 
 	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
 }

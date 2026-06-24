@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
@@ -54,7 +54,7 @@ const (
 	// delete is needed: it is already gone.
 	livenessOutcomeCancelled
 	// livenessOutcomeSkipped: not probeable this pass (missing period end,
-	// stripe prober unavailable, unknown processor).
+	// stripe prober unavailable, unknown rail).
 	livenessOutcomeSkipped
 )
 
@@ -97,11 +97,11 @@ type SubscriptionLivenessWorker struct {
 	river.WorkerDefaults[SubscriptionLivenessArgs]
 	DB              *db.DB
 	Config          *config.Config
-	Processors      config.ProcessorSet
+	Rails           config.RailSet
 	Clock           clockwork.Clock
 	NMIClients      map[string]*nmi.NMIClient
 	EventLogService *analytics.EventLogService
-	// DeferDelete schedules the processor-side delete when a probe outcome
+	// DeferDelete schedules the rail-side delete when a probe outcome
 	// terminally cancels an NMI-backed subscription that still exists
 	// remotely (hard decline). Routed through the one shared #344 mechanism
 	// (intent-ledger governed); nil leaves the remote sub for reconciliation.
@@ -137,9 +137,9 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 	// lapsed past the probe slack with no payment recorded for the boundary.
 	// past_due rows are dunning's, excluded by the query. Re-derived every
 	// pass, so unreachable providers are retried for free.
-	cohortProcessors := append(processors.GetNMIBackedProcessorsList(), string(models.ProcessorStripe))
+	cohortRails := append(rails.GetNMIBackedRailsList(), string(models.RailStripe))
 	cutoff := w.now().UTC().Add(-subscriptions.LivenessProbeSlack)
-	cohort, err := repo.NewSubscriptionRepo(w.DB).ListSilentLapsed(ctx, cohortProcessors, cutoff)
+	cohort, err := repo.NewSubscriptionRepo(w.DB).ListSilentLapsed(ctx, cohortRails, cutoff)
 	if err != nil {
 		return fmt.Errorf("query silent lapsed subscriptions: %w", err)
 	}
@@ -233,7 +233,7 @@ type livenessDeps struct {
 func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, sub *models.Subscription, deps *livenessDeps) livenessOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
-	if sub.Processor == models.ProcessorStripe {
+	if sub.Rail == models.RailStripe {
 		periodEnd := time.Time{}
 		if sub.CurrentPeriodEndsAt != nil {
 			periodEnd = sub.CurrentPeriodEndsAt.UTC()
@@ -241,37 +241,37 @@ func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, su
 		return w.probeStripe(ctx, logEntry, sub, periodEnd, deps)
 	}
 
-	provider := resolveSubscriptionProcessor(sub)
-	if provider == "" || !processors.IsNMIBackedProcessor(models.Processor(provider)) {
-		logEntry.WithField("processor", string(sub.Processor)).Warn("Liveness: unsupported processor in cohort; skipping")
+	provider := resolveSubscriptionRail(sub)
+	if provider == "" || !rails.IsNMIBackedRail(models.Rail(provider)) {
+		logEntry.WithField("rail", string(sub.Rail)).Warn("Liveness: unsupported rail in cohort; skipping")
 		return livenessOutcomeSkipped
 	}
 	client := w.NMIClients[provider]
 	if client == nil {
-		logEntry.WithField("processor", provider).Warn("Liveness: NMI client not configured; will retry next pass")
+		logEntry.WithField("rail", provider).Warn("Liveness: NMI client not configured; will retry next pass")
 		return livenessOutcomeUnreachable
 	}
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		return w.probeNMIUnknownPeriod(ctx, logEntry, sub, models.Processor(provider), client, deps)
+		return w.probeNMIUnknownPeriod(ctx, logEntry, sub, models.Rail(provider), client, deps)
 	}
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
-	return w.probeNMI(ctx, logEntry, sub, models.Processor(provider), client, periodEnd, deps)
+	return w.probeNMI(ctx, logEntry, sub, models.Rail(provider), client, periodEnd, deps)
 }
 
 func (w *SubscriptionLivenessWorker) probeNMIUnknownPeriod(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	processor models.Processor,
+	rail models.Rail,
 	client *nmi.NMIClient,
 	deps *livenessDeps,
 ) livenessOutcome {
-	liveness, err := client.GetRecurringLiveness(sub.ProcessorSubscriptionID)
+	liveness, err := client.GetRecurringLiveness(sub.RailSubscriptionID)
 	if err != nil {
 		logEntry.WithError(err).Warn("Liveness: NMI recurring probe failed for missing-period subscription; will retry next pass")
 		return livenessOutcomeUnreachable
 	}
-	return w.convergeNMILiveness(ctx, logEntry, sub, processor, liveness, deps)
+	return w.convergeNMILiveness(ctx, logEntry, sub, rail, liveness, deps)
 }
 
 // probeNMI runs the two read-only NMI lookups and converges:
@@ -282,7 +282,7 @@ func (w *SubscriptionLivenessWorker) probeNMI(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	processor models.Processor,
+	rail models.Rail,
 	client *nmi.NMIClient,
 	periodEnd time.Time,
 	deps *livenessDeps,
@@ -299,9 +299,9 @@ func (w *SubscriptionLivenessWorker) probeNMI(
 		// sale repair: payment backfilled exactly once (CreateIfNotExists on
 		// the transaction id), entitlements granted, grace revoked + renewed.
 		return w.repairChargedPeriod(ctx, logEntry, sub, deps, &subscriptions.RenewMembershipParams{
-			Processor:               processor,
-			ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-			TransactionID:           probe.SuccessTransactionID,
+			Rail:               rail,
+			RailSubscriptionID: sub.RailSubscriptionID,
+			TransactionID:      probe.SuccessTransactionID,
 		})
 	}
 
@@ -321,7 +321,7 @@ func (w *SubscriptionLivenessWorker) probeNMI(
 			failureCode = &code
 		}
 		if err := deps.lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      processor,
+			Rail:           rail,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 			FailureCode:    failureCode,
@@ -338,27 +338,27 @@ func (w *SubscriptionLivenessWorker) probeNMI(
 	}
 
 	// No charge attempt found for the period — ask the recurring report.
-	liveness, err := client.GetRecurringLiveness(sub.ProcessorSubscriptionID)
+	liveness, err := client.GetRecurringLiveness(sub.RailSubscriptionID)
 	if err != nil {
 		logEntry.WithError(err).Warn("Liveness: NMI recurring probe failed; will retry next pass")
 		return livenessOutcomeUnreachable
 	}
 
-	return w.convergeNMILiveness(ctx, logEntry, sub, processor, liveness, deps)
+	return w.convergeNMILiveness(ctx, logEntry, sub, rail, liveness, deps)
 }
 
 func (w *SubscriptionLivenessWorker) convergeNMILiveness(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	processor models.Processor,
+	rail models.Rail,
 	liveness nmi.RecurringLiveness,
 	deps *livenessDeps,
 ) livenessOutcome {
 	if !liveness.Found {
 		reason := "silent lapse: remote recurring subscription no longer exists at provider"
 		if err := deps.lifecycleRemoteGone.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      processor,
+			Rail:           rail,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 			Terminal:       true,
@@ -387,7 +387,7 @@ func (w *SubscriptionLivenessWorker) convergeNMILiveness(
 	// without a charge.
 	reason := "silent lapse: remote recurring record stalled (no charge attempt found, next charge date not in the future)"
 	if err := deps.lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      processor,
+		Rail:           rail,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}); err != nil {
@@ -414,7 +414,7 @@ func (w *SubscriptionLivenessWorker) probeStripe(
 		logEntry.Warn("Liveness: stripe prober unavailable (stripe not configured); skipping")
 		return livenessOutcomeSkipped
 	}
-	rec, err := prober.ProbeSubscription(ctx, sub.ProcessorSubscriptionID)
+	rec, err := prober.ProbeSubscription(ctx, sub.RailSubscriptionID)
 	if err != nil {
 		logEntry.WithError(err).Warn("Liveness: stripe probe failed; will retry next pass")
 		return livenessOutcomeUnreachable
@@ -424,7 +424,7 @@ func (w *SubscriptionLivenessWorker) probeStripe(
 	case !rec.Found, rec.Status == "canceled", rec.Status == "incomplete_expired":
 		reason := fmt.Sprintf("silent lapse: stripe subscription terminal at provider (status=%s, found=%t)", rec.Status, rec.Found)
 		if err := deps.lifecycleRemoteGone.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorStripe,
+			Rail:           models.RailStripe,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 			Terminal:       true,
@@ -441,7 +441,7 @@ func (w *SubscriptionLivenessWorker) probeStripe(
 		// retries — the local past_due only gates entitlement renewal.
 		reason := fmt.Sprintf("silent lapse: stripe subscription %s at provider", rec.Status)
 		if err := deps.lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorStripe,
+			Rail:           models.RailStripe,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 		}); err != nil {
@@ -457,14 +457,14 @@ func (w *SubscriptionLivenessWorker) probeStripe(
 			// missed invoice.paid. Repair with the remote period and the
 			// webhook-compatible transaction id, so a late webhook dedupes.
 			return w.repairChargedPeriod(ctx, logEntry, sub, deps, &subscriptions.RenewMembershipParams{
-				Processor:               models.ProcessorStripe,
-				ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-				CurrentPeriodStartsAt:   zeroTimePtrLiveness(rec.CurrentPeriodStart),
-				CurrentPeriodEndsAt:     zeroTimePtrLiveness(rec.CurrentPeriodEnd),
-				TransactionID:           rec.LatestInvoiceTransactionID,
-				Amount:                  rec.LatestInvoiceAmountPaid,
-				AmountProvided:          true,
-				Currency:                rec.LatestInvoiceCurrency,
+				Rail:                  models.RailStripe,
+				RailSubscriptionID:    sub.RailSubscriptionID,
+				CurrentPeriodStartsAt: zeroTimePtrLiveness(rec.CurrentPeriodStart),
+				CurrentPeriodEndsAt:   zeroTimePtrLiveness(rec.CurrentPeriodEnd),
+				TransactionID:         rec.LatestInvoiceTransactionID,
+				Amount:                rec.LatestInvoiceAmountPaid,
+				AmountProvided:        true,
+				Currency:              rec.LatestInvoiceCurrency,
 			})
 		}
 		if rec.CurrentPeriodEnd.After(w.now().UTC()) {
@@ -571,16 +571,16 @@ func (w *SubscriptionLivenessWorker) adoptRemotePeriodEnd(
 	return livenessOutcomeAdopted
 }
 
-// stripeProber returns the injected prober or self-assembles one from processors
+// stripeProber returns the injected prober or self-assembles one from rails
 // (nil when Stripe is not configured).
 func (w *SubscriptionLivenessWorker) stripeProber() subscriptions.StripeLivenessProber {
 	if w.StripeProber != nil {
 		return w.StripeProber
 	}
-	if w.Processors == nil {
+	if w.Rails == nil {
 		return nil
 	}
-	prober, err := subscriptions.NewStripeLivenessProber(w.Processors)
+	prober, err := subscriptions.NewStripeLivenessProber(w.Rails)
 	if err != nil {
 		return nil
 	}

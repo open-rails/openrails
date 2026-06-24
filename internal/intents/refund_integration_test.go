@@ -114,7 +114,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		productID, "refund-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
 		priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
+	exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
 	      VALUES ($1, $2, 'mobius', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
 		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
 
@@ -399,16 +399,16 @@ func stripeIntegrationConfig(mode string) *config.Config {
 	}
 }
 
-func stripeIntegrationProcessors() config.ProcessorSet {
-	return config.ProcessorSet{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+func stripeIntegrationRails() config.RailSet {
+	return config.RailSet{
+		"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
 	}
 }
 
 func (fx refundFixture) stripeRunner(cfg *config.Config, baseURL string) *Runner {
-	processors := stripeIntegrationProcessors()
-	handler := NewStripeRefundHandler(fx.db, cfg, processors, nil)
-	handler.Stripe = &subscriptions.StripeRefundService{Config: cfg, Processors: processors, BaseURL: baseURL}
+	rails := stripeIntegrationRails()
+	handler := NewStripeRefundHandler(fx.db, cfg, rails, nil)
+	handler.Stripe = &subscriptions.StripeRefundService{Config: cfg, Rails: rails, BaseURL: baseURL}
 	return &Runner{Store: fx.store, Registry: NewRegistry(handler), Config: cfg}
 }
 

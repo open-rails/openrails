@@ -58,15 +58,15 @@ func TestRefundIdempotencyKeysAreContentAddressed(t *testing.T) {
 		StripeRefundIntentIdempotencyKey("ch_1", 500, "fraudulent"))
 }
 
-func TestRefundIntentForRoutesByProcessor(t *testing.T) {
-	stripePayment := &models.Payment{Processor: models.ProcessorStripe}
+func TestRefundIntentForRoutesByRail(t *testing.T) {
+	stripePayment := &models.Payment{Rail: models.RailStripe}
 	typ, provider, key, err := RefundIntentFor(stripePayment, "ch_1", 500, "")
 	require.NoError(t, err)
 	assert.Equal(t, TypeStripeRefund, typ)
 	assert.Equal(t, "stripe", provider)
 	assert.Equal(t, StripeRefundIntentIdempotencyKey("ch_1", 500, ""), key)
 
-	nmiPayment := &models.Payment{Processor: models.ProcessorMobius}
+	nmiPayment := &models.Payment{Rail: models.RailMobius}
 	typ, provider, key, err = RefundIntentFor(nmiPayment, "txn_1", 500, "ignored for nmi")
 	require.NoError(t, err)
 	assert.Equal(t, TypeNMIRefund, typ)
@@ -217,9 +217,9 @@ func stripeTestConfig() *config.Config {
 	return &config.Config{}
 }
 
-func stripeTestProcessors() config.ProcessorSet {
-	return config.ProcessorSet{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+func stripeTestRails() config.RailSet {
+	return config.RailSet{
+		"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
 	}
 }
 
@@ -238,7 +238,7 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 		// The create errors retryably so the (DB-backed) finalize is never
 		// reached; the provider call must still have carried the key.
 		fake := &fakeStripeRefundAPI{createErr: &subscriptions.StripeAPICallError{StatusCode: 429, Message: "slow down"}}
-		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 		h.Stripe = fake
 		intent := refundIntent(t, TypeStripeRefund, payload)
 		intent.IdempotencyKey = "the-intent-key"
@@ -248,7 +248,7 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 
 	t.Run("rate limit is retryable", func(t *testing.T) {
 		fake := &fakeStripeRefundAPI{createErr: &subscriptions.StripeAPICallError{StatusCode: 429, Message: "slow down"}}
-		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 		h.Stripe = fake
 		out := h.Execute(context.Background(), refundIntent(t, TypeStripeRefund, payload))
 		assert.Equal(t, OutcomeRetryable, out.Class)
@@ -256,7 +256,7 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 
 	t.Run("server error is ambiguous", func(t *testing.T) {
 		fake := &fakeStripeRefundAPI{createErr: &subscriptions.StripeAPICallError{StatusCode: 500, Message: "boom"}}
-		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 		h.Stripe = fake
 		out := h.Execute(context.Background(), refundIntent(t, TypeStripeRefund, payload))
 		assert.Equal(t, OutcomeAmbiguous, out.Class, "a 5xx MAY have created the refund; verify, never blind-retry")
@@ -264,7 +264,7 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 
 	t.Run("transport error is ambiguous", func(t *testing.T) {
 		fake := &fakeStripeRefundAPI{createErr: assert.AnError}
-		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 		h.Stripe = fake
 		out := h.Execute(context.Background(), refundIntent(t, TypeStripeRefund, payload))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
@@ -273,7 +273,7 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 
 func TestStripeRefundVerifyNotFoundMeansNotExecuted(t *testing.T) {
 	fake := &fakeStripeRefundAPI{findFound: false}
-	h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+	h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 	h.Stripe = fake
 	out := h.Verify(context.Background(), refundIntent(t, TypeStripeRefund, testRefundPayload()))
 	assert.Equal(t, OutcomeRetryable, out.Class, "a clean miss proves the refund never executed; the executor may retry")
@@ -281,7 +281,7 @@ func TestStripeRefundVerifyNotFoundMeansNotExecuted(t *testing.T) {
 
 func TestStripeRefundVerifyReadFailureStaysAmbiguous(t *testing.T) {
 	fake := &fakeStripeRefundAPI{findErr: assert.AnError}
-	h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestProcessors(), nil)
+	h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
 	h.Stripe = fake
 	out := h.Verify(context.Background(), refundIntent(t, TypeStripeRefund, testRefundPayload()))
 	assert.Equal(t, OutcomeAmbiguous, out.Class)

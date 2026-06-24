@@ -8,48 +8,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRequireNMIPlanForProcessor_UsesProviderSpecificConfig(t *testing.T) {
+func TestRequireNMIPlanForRail_UsesProviderSpecificConfig(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"acme": {
-				models.ProcessorKeyPlanID: "plan_acme_123",
+				models.RailKeyPlanID: "plan_acme_123",
 			},
 		},
 	}
 
-	planID, err := requireNMIPlanForProcessor(price, "acme")
+	planID, err := requireNMIPlanForRail(price, "acme")
 	require.NoError(t, err)
 	require.Equal(t, "plan_acme_123", planID)
 }
 
-func TestRequireNMIPlanForProcessor_RejectsProviderFromDifferentProcessorSlot(t *testing.T) {
+func TestRequireNMIPlanForRail_RejectsProviderFromDifferentRailSlot(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"mobius": {
-				models.ProcessorKeyPlanID:   "mobius_plan_456",
-				models.ProcessorKeyProvider: "acme",
+				models.RailKeyPlanID:   "mobius_plan_456",
+				models.RailKeyProvider: "acme",
 			},
 		},
 	}
 
-	_, err := requireNMIPlanForProcessor(price, "acme")
+	_, err := requireNMIPlanForRail(price, "acme")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing NMI plan configuration")
 }
 
-func TestRequireNMIPlanForProcessor_RejectsMissingProviderConfig(t *testing.T) {
+func TestRequireNMIPlanForRail_RejectsMissingProviderConfig(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"mobius": {
-				models.ProcessorKeyPlanID: "plan_mobius_only",
+				models.RailKeyPlanID: "plan_mobius_only",
 			},
 		},
 	}
 
-	_, err := requireNMIPlanForProcessor(price, "acme")
+	_, err := requireNMIPlanForRail(price, "acme")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing NMI plan configuration")
 }

@@ -53,11 +53,11 @@ SELECT count(*) FROM openrails.notification_queue WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsNotificationQueue :exec
 DELETE FROM openrails.notification_queue WHERE merchant_id = $1;
 
--- name: CountMerchantRowsProcessorCustomers :one
-SELECT count(*) FROM openrails.processor_customers WHERE merchant_id = $1;
+-- name: CountMerchantRowsRailCustomers :one
+SELECT count(*) FROM openrails.rail_customers WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsProcessorCustomers :exec
-DELETE FROM openrails.processor_customers WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsRailCustomers :exec
+DELETE FROM openrails.rail_customers WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsCheckoutSessions :one
 SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1;

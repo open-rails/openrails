@@ -52,9 +52,9 @@ type Runtime struct {
 	// resolved per-credential. OpenRails is multi-merchant either way.
 	ConfiguredMerchant merchant.ID
 
-	// Processors is the temporary in-memory provider credential bridge for
+	// Rails is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
-	Processors config.ProcessorSet
+	Rails config.RailSet
 
 	Clock            clockwork.Clock
 	HealthManager    *health.ServiceHealthManager
@@ -89,10 +89,10 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
-	AdmissionPolicyCache     *admission.PolicyCache
-	MoneyCharger             money.Charger
-	ProcessorCustomerService *payments.ProcessorCustomerService
-	Merchants                *merchants.Service
+	AdmissionPolicyCache *admission.PolicyCache
+	MoneyCharger         money.Charger
+	RailCustomerService  *payments.RailCustomerService
+	Merchants            *merchants.Service
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
@@ -146,7 +146,7 @@ type Runtime struct {
 	// nmi_delete_subscription intents on the provider intent ledger (no River
 	// producer involved); the scheduled intent executor drains them. The
 	// dunning worker threads it into its per-run lifecycle so terminal
-	// cancellations schedule the processor-side delete through the ONE
+	// cancellations schedule the rail-side delete through the ONE
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
@@ -164,7 +164,7 @@ type Runtime struct {
 // account.
 func (r *Runtime) ProviderAccounts() intents.ProviderAccountResolver {
 	r.intentProviderAccountsOnce.Do(func() {
-		r.intentProviderAccounts = intents.NewRuntimeProviderAccountsWithDB(r.Config, r.Processors, r.NMIClients, r.DB)
+		r.intentProviderAccounts = intents.NewRuntimeProviderAccountsWithDB(r.Config, r.Rails, r.NMIClients, r.DB)
 	})
 	return r.intentProviderAccounts
 }
@@ -278,7 +278,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	}
 
 	// Start Solana Pay poller if configured (regardless of River setup).
-	if r.SolanaPayPoller != nil && r.Processors.GetSolanaProcessor() != nil {
+	if r.SolanaPayPoller != nil && r.Rails.GetSolanaRail() != nil {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 

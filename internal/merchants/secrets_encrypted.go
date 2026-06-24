@@ -16,7 +16,7 @@ import (
 // only ciphertext, so a DB/Vault dump never exposes plaintext credentials.
 //
 // This is the layer that applies #227 per-merchant encryption-at-rest to the #225
-// per-merchant processor credential store. It is wired ONLY when an encryptor is
+// per-merchant rail credential store. It is wired ONLY when an encryptor is
 // enabled (a master key is configured); otherwise the plain store is used as
 // before (back-compat / self-hosted-without-encryption).
 type encryptedSecretStore struct {

@@ -20,7 +20,7 @@ import (
 // program (solana-program/subscriptions, De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44).
 // A recurring Solana price is a merchant-published on-chain Plan: AutoCreate signs
 // create_plan with the merchant's key (via the runtime's SolanaPlanService) and
-// stores the plan handle in processors["solana"]. Verify reads the Plan account
+// stores the plan handle in rails["solana"]. Verify reads the Plan account
 // back and diffs its immutable terms (amount / period / mint) for drift.
 //
 //   - AutoCreate: publish (or idempotently attach to) the on-chain plan. Requires a
@@ -34,7 +34,7 @@ import (
 //     subscriptions while existing on-chain subscriptions continue (grandfathered).
 type solanaAdapter struct{ svc *Service }
 
-// Solana processor-config keys (mirror recurring.PlanHandle.ToProcessorConfig).
+// Solana rail-config keys (mirror recurring.PlanHandle.ToRailConfig).
 const (
 	solanaKeyPlanPDA         = "plan_pda"
 	solanaKeyPlanID          = "plan_id"
@@ -121,11 +121,11 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if err != nil {
 		return nil, fmt.Errorf("solana publish plan: %w", err)
 	}
-	return handle.ToProcessorConfig(), nil
+	return handle.ToRailConfig(), nil
 }
 
 // findExistingPlan checks whether the price's deterministic plan PDA already holds
-// a decodable Plan account, and if so returns its processor-config map (attach).
+// a decodable Plan account, and if so returns its rail-config map (attach).
 // Best-effort: any read/decode failure returns found=false so AutoCreate proceeds
 // to publish (a genuinely-occupied PDA then surfaces as a loud create_plan error).
 func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid merchant.ID, planID uint64, symbol string) (map[string]string, bool) {
@@ -158,7 +158,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 		CreatedAt:       acct.CreatedAt,
 		MerchantAddress: merchant.String(),
 	}
-	return handle.ToProcessorConfig(), true
+	return handle.ToRailConfig(), true
 }
 
 // Attach stores an operator-supplied existing on-chain plan handle. When the
@@ -246,7 +246,7 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 	}
 	pdaStr := strings.TrimSpace(ids[solanaKeyPlanPDA])
 	if pdaStr == "" {
-		return nil, false, fmt.Errorf("solana plan_pda missing on local processors map")
+		return nil, false, fmt.Errorf("solana plan_pda missing on local rails map")
 	}
 	pda, err := solanago.PublicKeyFromBase58(pdaStr)
 	if err != nil {

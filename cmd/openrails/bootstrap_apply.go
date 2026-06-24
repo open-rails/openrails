@@ -248,7 +248,7 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 
 // applyPushBootstrapManifest reconciles OpenRails/AuthKit control-plane
 // authority. It intentionally does not touch merchant config, merchant secrets,
-// catalog/provider state, or remote processors.
+// catalog/provider state, or remote rails.
 func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
 	if manifest == nil {
 		return nil

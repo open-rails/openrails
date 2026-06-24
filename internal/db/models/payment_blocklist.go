@@ -21,7 +21,7 @@ type PaymentBlocklistEntry struct {
 	// Nil/zero means a merchant-wide block.
 	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
 	// Kind is the kind of identifier blocked:
-	// card_fingerprint | processor_customer | email | ip.
+	// card_fingerprint | rail_customer | email | ip.
 	Kind string `json:"kind"`
 	// Value is the blocked identifier value.
 	Value string `json:"value"`

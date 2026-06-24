@@ -106,13 +106,13 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(retryUserID)
 	nextRetry := mockClock.Now().Add(time.Hour)
 	retryAttempts := 1
-	processorSubID := "clock-dunning-" + uuid.New().String()[:8]
+	railSubID := "clock-dunning-" + uuid.New().String()[:8]
 	suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:          retryUserID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
-		ProcessorSubID:  processorSubID,
+		Rail:            models.RailMobius,
+		RailSubID:       railSubID,
 		PeriodStart:     mockClock.Now().Add(-30 * 24 * time.Hour),
 		PeriodEnd:       mockClock.Now().Add(-time.Hour),
 		RetryAttempts:   &retryAttempts,
@@ -122,11 +122,11 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	countDueRetries := func() int {
 		return suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.subscriptions sub
-			WHERE sub.processor = $1
+			WHERE sub.rail = $1
 			  AND sub.customer_id = $2
 			  AND sub.status = $3
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $4`,
-			string(models.ProcessorMobius), retryCustomerID,
+			string(models.RailMobius), retryCustomerID,
 			string(models.StatusPastDue), mockClock.Now())
 	}
 	assert.Equal(t, 0, countDueRetries())
@@ -140,7 +140,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		UserID:      cancelUserID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Processor:   models.ProcessorMobius,
+		Rail:        models.RailMobius,
 		PeriodStart: cancelStart,
 		PeriodEnd:   cancelPeriodEnd,
 	})
@@ -219,7 +219,7 @@ func TestSubscriptionExpiryWithMockClock(t *testing.T) {
 			UserID:      userID,
 			PriceID:     priceID,
 			Status:      "active",
-			Processor:   "mobius",
+			Rail:        "mobius",
 			PeriodStart: startDate,
 			PeriodEnd:   endDate,
 		})
@@ -259,9 +259,9 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 
 		// Create membership through the lifecycle service
 		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorMobius,
+			UserID:  userID,
+			PriceID: priceID,
+			Rail:    models.RailMobius,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, sub)
@@ -284,14 +284,14 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		mockClock := suite.SetMockClock(initialTime)
 
 		userID := uuid.New().String()
-		processorSubID := "test-cancel-" + uuid.New().String()
+		railSubID := "test-cancel-" + uuid.New().String()
 
 		// Create subscription
 		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-			UserID:                  userID,
-			PriceID:                 priceID,
-			Processor:               models.ProcessorMobius,
-			ProcessorSubscriptionID: &processorSubID,
+			UserID:             userID,
+			PriceID:            priceID,
+			Rail:               models.RailMobius,
+			RailSubscriptionID: &railSubID,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, sub)

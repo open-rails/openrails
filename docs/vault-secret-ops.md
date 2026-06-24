@@ -1,6 +1,6 @@
 # Vault per-merchant secrets — ops runbook (#251)
 
-OpenRails resolves per-merchant processor secrets (Stripe keys, webhook signing
+OpenRails resolves per-merchant rail secrets (Stripe keys, webhook signing
 secrets, Solana keys) through `merchants.MerchantSecretStore`, addressed by
 `(merchant_id, name)` in code. Vault stores use the stable merchant slug in the
 physical path so manual operator writes are deterministic and readable. Three

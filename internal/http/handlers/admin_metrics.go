@@ -27,7 +27,7 @@ import (
 // of record; a ClickHouse outage degrades this dashboard but never blocks openrails.
 
 // GetAdminMetrics returns the merchant's billing analytics in one response:
-// {summary, revenue, subscriptions, processors, churn}.
+// {summary, revenue, subscriptions, rails, churn}.
 func GetAdminMetrics(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
@@ -54,7 +54,7 @@ func GetAdminMetrics(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	processors, err := svc.GetProcessorMetrics(ctx, rng, currency)
+	rails, err := svc.GetRailMetrics(ctx, rng, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -76,7 +76,7 @@ func GetAdminMetrics(r *httprequest.Request) {
 	if out["subscriptions"], ok = resolveMetricSection(r, subscriptions, currency); !ok {
 		return
 	}
-	if out["processors"], ok = resolveMetricSection(r, processors, currency); !ok {
+	if out["rails"], ok = resolveMetricSection(r, rails, currency); !ok {
 		return
 	}
 	if out["churn"], ok = resolveMetricSection(r, churn, currency); !ok {

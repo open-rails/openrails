@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -24,7 +24,7 @@ type providerAccountSecretResolver interface {
 }
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
-// checkout money paths. Static processor config remains available only when no
+// checkout money paths. Static rail config remains available only when no
 // provider-account resolver is configured; once scoped provider accounts are in
 // use, missing scoped secrets fail closed instead of falling back across
 // accounts.
@@ -97,14 +97,14 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		secretKey = "production_key"
 	}
 	if secretKey != "" {
-		if value, ok, err := s.merchantProviderSecret(ctx, config.ProcessorTypeNMI, "live", secretKey); err != nil {
+		if value, ok, err := s.merchantProviderSecret(ctx, config.RailTypeNMI, "live", secretKey); err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		} else if ok {
-			proc := cloneProcessorConfig(s.processorConfig(provider))
+			proc := cloneRailConfig(s.railConfig(provider))
 			if proc == nil {
-				proc = &config.ProcessorConfig{Type: config.ProcessorTypeNMI}
+				proc = &config.RailConfig{Type: config.RailTypeNMI}
 			}
-			proc.Type = config.ProcessorTypeNMI
+			proc.Type = config.RailTypeNMI
 			proc.SecurityKey = value
 			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
 		} else if s.scopedProviderSecretsEnabled() {
@@ -117,7 +117,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			return client, nil
 		}
 	}
-	if proc := s.processorConfig(provider); proc != nil && processors.IsNMIBacked(provider) {
+	if proc := s.railConfig(provider); proc != nil && rails.IsNMIBacked(provider) {
 		return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
 	}
 	return nil, fmt.Errorf("missing client")
@@ -132,7 +132,7 @@ func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 }
 
 func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {
-	baseProc := s.processorConfig("ccbill")
+	baseProc := s.railConfig("ccbill")
 	var base *config.CCBillConfig
 	if baseProc != nil {
 		base = baseProc.ToCCBillConfig()
@@ -140,7 +140,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 		base = &config.CCBillConfig{}
 	}
 
-	value, ok, err := s.merchantProviderSecret(ctx, config.ProcessorTypeCCBill, "live", "account_config")
+	value, ok, err := s.merchantProviderSecret(ctx, config.RailTypeCCBill, "live", "account_config")
 	if err != nil {
 		return nil, fmt.Errorf("load merchant CCBill secret: %w", err)
 	}
@@ -156,19 +156,19 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 	}
 
 	if baseProc == nil {
-		return nil, errors.New("ccbill processor config is required")
+		return nil, errors.New("ccbill rail config is required")
 	}
 	return base, nil
 }
 
-func (s *CheckoutService) processorConfig(name string) *config.ProcessorConfig {
-	if s == nil || s.Processors == nil {
+func (s *CheckoutService) railConfig(name string) *config.RailConfig {
+	if s == nil || s.Rails == nil {
 		return nil
 	}
-	return s.Processors.GetProcessor(name)
+	return s.Rails.GetRail(name)
 }
 
-func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {
+func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 	if in == nil {
 		return nil
 	}

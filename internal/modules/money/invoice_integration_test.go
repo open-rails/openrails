@@ -80,7 +80,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -144,7 +144,7 @@ func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -195,7 +195,7 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -277,7 +277,7 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(SUM(amount), 0)
 		FROM openrails.invoice_payments
-		WHERE invoice_id = $1 AND status = 'settled' AND processor = 'manual'
+		WHERE invoice_id = $1 AND status = 'settled' AND rail = 'manual'
 	`, inv.ID).Scan(&paymentCount, &paymentSum))
 	require.Equal(t, 2, paymentCount)
 	require.Equal(t, int64(500), paymentSum)

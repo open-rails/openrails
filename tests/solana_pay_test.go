@@ -33,7 +33,7 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 		body := map[string]any{
 			"price_id": priceID.String(),
 			"payment": map[string]any{
-				"processor":    "solana",
+				"rail":         "solana",
 				"token_symbol": "USDC",
 				"flow":         "transaction_request",
 			},
@@ -57,7 +57,7 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 
 		payment, ok := resp["payment"].(map[string]any)
 		require.True(t, ok, "payment should be an object")
-		assert.Equal(t, "solana", payment["processor"])
+		assert.Equal(t, "solana", payment["rail"])
 
 		// Verify URL format: solana:https://...
 		nextAction, ok := resp["next_action"].(map[string]any)
@@ -87,7 +87,7 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 		body := map[string]any{
 			"price_id": priceID.String(),
 			"payment": map[string]any{
-				"processor":    "solana",
+				"rail":         "solana",
 				"token_symbol": "USDC",
 				"flow":         "transaction_request",
 			},
@@ -158,7 +158,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		body := map[string]any{
 			"price_id": priceID.String(),
 			"payment": map[string]any{
-				"processor":    "solana",
+				"rail":         "solana",
 				"token_symbol": "USDC",
 				"flow":         "transaction_request",
 			},
@@ -191,7 +191,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		body := map[string]any{
 			"price_id": mobiusPriceID.String(),
 			"payment": map[string]any{
-				"processor":     "mobius",
+				"rail":          "mobius",
 				"payment_token": "tok_test_123",
 				"email":         "test@example.com",
 				"first_name":    "Test",
@@ -207,7 +207,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 
 		// Use mock NMI to allow this request to succeed
 		suiteWithNMI, _ := SetupSuiteWithMockNMI(t)
-		suiteWithNMI.Processors["solana"] = suite.Processors["solana"]
+		suiteWithNMI.Rails["solana"] = suite.Rails["solana"]
 		products2 := suiteWithNMI.SeedProducts()
 		mobiusPriceID2 := products2[0].Prices[0].ID
 
@@ -247,7 +247,7 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":    "solana",
+			"rail":         "solana",
 			"token_symbol": "USDC",
 			"flow":         "transfer_request",
 		},
@@ -271,7 +271,7 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 
 	payment, ok := resp["payment"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "solana", payment["processor"])
+	assert.Equal(t, "solana", payment["rail"])
 	assert.NotEmpty(t, payment["reference"], "Should include reference")
 	assert.NotEmpty(t, payment["transaction_url"], "Should include transaction_url")
 

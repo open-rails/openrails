@@ -17,7 +17,7 @@ var (
 )
 
 type CheckoutSessionPaymentRequest struct {
-	Processor       string
+	Rail            string
 	PaymentMethodID string
 	PaymentToken    string
 	TokenSymbol     string
@@ -54,14 +54,14 @@ type CheckoutSessionCreateRequest struct {
 
 	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
 	// Stripe Checkout, supplied by the caller (frontend, which knows its own
-	// origin). Empty for non-Stripe processors. Threaded onto the CheckoutRequest
+	// origin). Empty for non-Stripe rails. Threaded onto the CheckoutRequest
 	// in initializeCheckoutSession; processStripeSubscription/Payment require them.
 	SuccessURL string
 	CancelURL  string
 }
 
 type CheckoutSessionConfirmPayment struct {
-	Processor string
+	Rail      string
 	Signature string
 	Wallet    string
 }
@@ -87,7 +87,7 @@ type CheckoutSessionNextAction struct {
 }
 
 type CheckoutSessionPaymentResponse struct {
-	Processor      string `json:"processor"`
+	Rail           string `json:"rail"`
 	Reference      string `json:"reference,omitempty"`
 	TransactionURL string `json:"transaction_url,omitempty"`
 	SolanaPayURL   string `json:"solana_pay_url,omitempty"`

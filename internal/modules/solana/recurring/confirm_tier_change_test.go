@@ -134,12 +134,12 @@ func TestConfirmTierChange_Upgrade_MirrorsNewAndCancelsOld(t *testing.T) {
 	if life.cancelCalls != 1 {
 		t.Fatalf("expected one CancelMembership (old), got %d", life.cancelCalls)
 	}
-	// New membership: processor solana, processor_subscription_id = new PDA.
-	if life.created.Processor != models.ProcessorSolana {
-		t.Fatalf("new membership processor = %v, want solana", life.created.Processor)
+	// New membership: rail solana, rail_subscription_id = new PDA.
+	if life.created.Rail != models.RailSolana {
+		t.Fatalf("new membership rail = %v, want solana", life.created.Rail)
 	}
-	if life.created.ProcessorSubscriptionID == nil || *life.created.ProcessorSubscriptionID != "NEWPDA" {
-		t.Fatalf("new membership processor_subscription_id = %v, want NEWPDA", life.created.ProcessorSubscriptionID)
+	if life.created.RailSubscriptionID == nil || *life.created.RailSubscriptionID != "NEWPDA" {
+		t.Fatalf("new membership rail_subscription_id = %v, want NEWPDA", life.created.RailSubscriptionID)
 	}
 	// Old membership cancelled immediately.
 	if life.cancelled.SubscriptionID == nil || *life.cancelled.SubscriptionID != oldRow.SubscriptionID {

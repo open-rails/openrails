@@ -38,7 +38,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Processors: r.Processors, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574): always-on provider truth refresh. It wraps the
@@ -47,7 +47,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderRefreshWorker{
 		DB:                  r.DB,
 		Config:              r.Config,
-		Processors:          r.Processors,
+		Rails:               r.Rails,
 		Clock:               clock,
 		NMIClients:          r.NMIClients,
 		CCBillDataLink:      r.CCBillDataLink,
@@ -63,7 +63,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.SubscriptionLivenessWorker{
 		DB:              r.DB,
 		Config:          r.Config,
-		Processors:      r.Processors,
+		Rails:           r.Rails,
 		Clock:           clock,
 		NMIClients:      r.NMIClients,
 		EventLogService: r.EventLogService,
@@ -75,7 +75,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add ccbill reconcile worker: %w", err)
 	}
 	// Webhook processing is now synchronous-only - no background workers needed.
-	// Payment processors (CCBill, NMI) retry failed webhooks from their end.
+	// Payment rails (CCBill, NMI) retry failed webhooks from their end.
 	if err := river.AddWorkerSafely(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
@@ -103,7 +103,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
-		Processors:                   r.Processors,
+		Rails:                        r.Rails,
 		UserSubscriptionService:      r.UserSubscriptionService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
@@ -113,7 +113,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.ResumeSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
-		Processors:                   r.Processors,
+		Rails:                        r.Rails,
 		EntitlementService:           r.EntitlementService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
@@ -151,14 +151,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.CatalogReconciliationPullWorker{
 		DB:         r.DB,
 		Config:     r.Config,
-		Processors: r.Processors,
+		Rails:      r.Rails,
 		NMIClients: r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
 	// Credit money-in + reconciliation workers (#239/#240/#241/#243/#508). The
 	// auto-top-up and invoice workers share the configured off-session charger;
-	// when it is nil they log-and-skip until processor wiring is attached.
+	// when it is nil they log-and-skip until rail wiring is attached.
 	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
 		Money: r.MoneyService,
 	}); err != nil {
@@ -229,10 +229,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	return intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
-		intents.NewStripeRefundHandler(r.DB, r.Config, r.Processors, clock),
+		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),
-		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Processors, clock),
-		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Processors, clock),
+		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Rails, clock),
+		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
 	)
 }
@@ -346,7 +346,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Webhook retry job removed - webhooks are now processed synchronously only.
-	// Payment processors (CCBill, NMI) will retry failed webhooks from their end.
+	// Payment rails (CCBill, NMI) will retry failed webhooks from their end.
 
 	// Every minute: drain due provider intents (#358 — the ACTION pipeline;
 	// deliberately scheduled, unlike reconcile runs which stay manual).

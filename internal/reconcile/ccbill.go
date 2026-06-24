@@ -117,12 +117,12 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 
 func normalizeCCBillActiveMember(rec ccbill.CCBillRecord) RemoteSubscription {
 	sub := RemoteSubscription{
-		ProcessorSubscriptionID: rec.SubscriptionID,
-		Status:                  SubscriptionStatusActive,
-		RawStatus:               strings.TrimSpace(rec.Status),
-		Email:                   strings.TrimSpace(rec.Email),
-		Username:                strings.TrimSpace(rec.Username),
-		Currency:                "USD",
+		RailSubscriptionID: rec.SubscriptionID,
+		Status:             SubscriptionStatusActive,
+		RawStatus:          strings.TrimSpace(rec.Status),
+		Email:              strings.TrimSpace(rec.Email),
+		Username:           strings.TrimSpace(rec.Username),
+		Currency:           "USD",
 		Raw: rawJSON(map[string]any{
 			"source": "ccbill_activemembers",
 			"record": rec,
@@ -143,11 +143,11 @@ func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription
 		status = SubscriptionStatusExpired
 	}
 	return RemoteSubscription{
-		ProcessorSubscriptionID: row.SubscriptionID(),
-		Status:                  status,
-		RawStatus:               string(row.TransactionType),
-		Currency:                "USD",
-		Raw:                     ccbillRowRaw(row),
+		RailSubscriptionID: row.SubscriptionID(),
+		Status:             status,
+		RawStatus:          string(row.TransactionType),
+		Currency:           "USD",
+		Raw:                ccbillRowRaw(row),
 	}
 }
 

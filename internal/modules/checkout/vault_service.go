@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -36,10 +36,10 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 			return "", nil, fmt.Errorf("invalid payment method: %w", err)
 		}
 
-		if !processors.IsNMIBackedProcessor(pm.Processor) {
+		if !rails.IsNMIBackedRail(pm.Rail) {
 			return "", nil, errors.New("payment method is not compatible with card payments")
 		}
-		if !processors.SameProcessor(pm.Processor, models.Processor(provider)) {
+		if !rails.SameRail(pm.Rail, models.Rail(provider)) {
 			return "", nil, errors.New("payment method belongs to a different payment provider")
 		}
 

@@ -11,10 +11,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// localProcessorNames maps a reconcile Provider onto the processor name(s)
+// localRailNames maps a reconcile Provider onto the rail name(s)
 // used by local billing rows. NMI subscriptions historically carry either
 // "mobius" (the branded gateway) or "nmi".
-func localProcessorNames(p Provider) []string {
+func localRailNames(p Provider) []string {
 	switch p {
 	case ProviderNMI:
 		return []string{"nmi", "mobius"}
@@ -32,26 +32,26 @@ func localProcessorNames(p Provider) []string {
 // LocalSubscription is the slice of openrails.subscriptions the diff engine
 // consumes.
 type LocalSubscription struct {
-	ID                      uuid.UUID
-	CustomerID              uuid.UUID
-	PriceID                 *uuid.UUID
-	ProductID               uuid.UUID
-	Status                  string
-	Processor               string
-	ProcessorSubscriptionID string
-	UserEmail               string
-	PaymentMethodID         *uuid.UUID
-	CurrentPeriodStartsAt   *time.Time
-	CurrentPeriodEndsAt     *time.Time
-	StartedAt               time.Time
-	EndedAt                 *time.Time
-	CancelledAt             *time.Time
-	CancelType              string
-	DeletionScheduledAt     *time.Time
-	TierGroup               string
-	LastRetryAt             *time.Time
-	RetryAttempts           int
-	NextRetryAt             *time.Time
+	ID                    uuid.UUID
+	CustomerID            uuid.UUID
+	PriceID               *uuid.UUID
+	ProductID             uuid.UUID
+	Status                string
+	Rail                  string
+	RailSubscriptionID    string
+	UserEmail             string
+	PaymentMethodID       *uuid.UUID
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	StartedAt             time.Time
+	EndedAt               *time.Time
+	CancelledAt           *time.Time
+	CancelType            string
+	DeletionScheduledAt   *time.Time
+	TierGroup             string
+	LastRetryAt           *time.Time
+	RetryAttempts         int
+	NextRetryAt           *time.Time
 	// EntitlementNames are the keys of entitlements_spec_snapshot — the
 	// entitlements this subscription is supposed to grant.
 	EntitlementNames []string
@@ -71,7 +71,7 @@ func (s *LocalSubscription) IsLive() bool {
 type LocalPayment struct {
 	ID                uuid.UUID
 	CustomerID        uuid.UUID
-	Processor         string
+	Rail              string
 	TransactionID     string
 	AmountCents       int64
 	Status            string
@@ -95,7 +95,7 @@ type LocalEntitlement struct {
 type LocalPaymentMethod struct {
 	ID         uuid.UUID
 	CustomerID uuid.UUID
-	Processor  string
+	Rail       string
 	VaultID    string
 	LastFour   string
 	CardType   string
@@ -103,7 +103,7 @@ type LocalPaymentMethod struct {
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
-// the catalog provider_links (processors jsonb) map remote plan ids onto
+// the catalog provider_links (rails jsonb) map remote plan ids onto
 // local prices.
 type LocalPrice struct {
 	ID               uuid.UUID
@@ -112,9 +112,9 @@ type LocalPrice struct {
 	Currency         string
 	BillingCycleDays *int
 	Status           string
-	// Processors is the provider-links blob: processor name -> config map
+	// Rails is the provider-links blob: rail name -> config map
 	// (plan_id / price_id / ...), as written by catalog bootstrap.
-	Processors map[string]map[string]string
+	Rails map[string]map[string]string
 }
 
 // LocalState is one provider's local billing state, loaded merchant-scoped.
@@ -123,14 +123,14 @@ type LocalState struct {
 	Entitlements   []LocalEntitlement
 	PaymentMethods []LocalPaymentMethod
 	// Prices are the billable prices carrying provider links (all providers;
-	// the diff filters by the provider's local processor names).
+	// the diff filters by the provider's local rail names).
 	Prices []LocalPrice
 }
 
 // LocalStateLoader loads the local rows the diff engine compares against a
 // provider snapshot. PaymentsByTransactionIDs is queried separately (bounded
 // by the snapshot's transaction set rather than a date window, so clock skew
-// between us and the processor can not fake a missing payment).
+// between us and the rail can not fake a missing payment).
 type LocalStateLoader interface {
 	Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error)
 	PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
@@ -145,13 +145,13 @@ type PGLocalStateLoader struct {
 var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
 
 func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error) {
-	names := localProcessorNames(provider)
+	names := localRailNames(provider)
 	q := l.DB.Gen(ctx)
 
 	state := &LocalState{}
 
-	subs, err := q.ReconcileListSubscriptionsByProcessors(ctx, gen.ReconcileListSubscriptionsByProcessorsParams{
-		Processors:        names,
+	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
+		Rails:             names,
 		ProviderAccountID: providerAccountID,
 	})
 	if err != nil {
@@ -159,22 +159,22 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	}
 	for _, row := range subs {
 		s := LocalSubscription{
-			ID:                      row.ID,
-			CustomerID:              row.CustomerID,
-			PriceID:                 row.PriceID,
-			ProductID:               row.ProductID,
-			Status:                  string(row.Status),
-			Processor:               row.Processor,
-			ProcessorSubscriptionID: row.ProcessorSubscriptionID,
-			PaymentMethodID:         row.PaymentMethodID,
-			CurrentPeriodStartsAt:   row.CurrentPeriodStartsAt,
-			CurrentPeriodEndsAt:     row.CurrentPeriodEndsAt,
-			StartedAt:               row.StartedAt,
-			EndedAt:                 row.EndedAt,
-			CancelledAt:             row.CancelledAt,
-			DeletionScheduledAt:     row.DeletionScheduledAt,
-			LastRetryAt:             row.LastRetryAt,
-			NextRetryAt:             row.NextRetryAt,
+			ID:                    row.ID,
+			CustomerID:            row.CustomerID,
+			PriceID:               row.PriceID,
+			ProductID:             row.ProductID,
+			Status:                string(row.Status),
+			Rail:                  row.Rail,
+			RailSubscriptionID:    row.RailSubscriptionID,
+			PaymentMethodID:       row.PaymentMethodID,
+			CurrentPeriodStartsAt: row.CurrentPeriodStartsAt,
+			CurrentPeriodEndsAt:   row.CurrentPeriodEndsAt,
+			StartedAt:             row.StartedAt,
+			EndedAt:               row.EndedAt,
+			CancelledAt:           row.CancelledAt,
+			DeletionScheduledAt:   row.DeletionScheduledAt,
+			LastRetryAt:           row.LastRetryAt,
+			NextRetryAt:           row.NextRetryAt,
 		}
 		if row.UserEmail != nil {
 			s.UserEmail = *row.UserEmail
@@ -200,7 +200,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	}
 
 	ents, err := q.ReconcileListSubscriptionEntitlements(ctx, gen.ReconcileListSubscriptionEntitlementsParams{
-		Processors:        names,
+		Rails:             names,
 		ProviderAccountID: providerAccountID,
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 		})
 	}
 
-	prices, err := q.ReconcileListPricesWithProcessors(ctx)
+	prices, err := q.ReconcileListPricesWithRails(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -233,16 +233,16 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 			days := int(*row.BillingCycleDays)
 			p.BillingCycleDays = &days
 		}
-		if len(row.Processors) > 0 {
+		if len(row.Rails) > 0 {
 			// Tolerate malformed blobs: a price whose links can't decode simply
 			// never matches a remote plan (PS-1 stays requires_review).
-			_ = json.Unmarshal(row.Processors, &p.Processors)
+			_ = json.Unmarshal(row.Rails, &p.Rails)
 		}
 		state.Prices = append(state.Prices, p)
 	}
 
-	pms, err := q.ReconcileListPaymentMethodsByProcessors(ctx, gen.ReconcileListPaymentMethodsByProcessorsParams{
-		Processors:        names,
+	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
+		Rails:             names,
 		ProviderAccountID: providerAccountID,
 	})
 	if err != nil {
@@ -252,7 +252,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 		pm := LocalPaymentMethod{
 			ID:         row.ID,
 			CustomerID: row.CustomerID,
-			Processor:  row.Processor,
+			Rail:       row.Rail,
 			VaultID:    row.VaultID,
 		}
 		if row.LastFour != nil {
@@ -275,7 +275,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
-		Processors:        localProcessorNames(provider),
+		Rails:             localRailNames(provider),
 		ProviderAccountID: providerAccountID,
 		TransactionIds:    transactionIDs,
 	})
@@ -287,7 +287,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		p := LocalPayment{
 			ID:                row.ID,
 			CustomerID:        row.CustomerID,
-			Processor:         string(row.Processor),
+			Rail:              string(row.Rail),
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount,
 			Status:            string(row.Status),

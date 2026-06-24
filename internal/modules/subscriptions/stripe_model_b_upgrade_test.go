@@ -26,7 +26,7 @@ func TestUpdateSubscriptionPrice_ModelBUpgradeRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"sub_123"}`))
 	})
 
-	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
+	svc := &StripeService{Config: testStripeConfig(), Rails: testStripeRails()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	// These are exactly the args the checkout upgrade branch passes.

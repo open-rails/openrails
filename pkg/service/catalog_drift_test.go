@@ -94,24 +94,24 @@ func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
 func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
 	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
 	if stripePriceID != "" || stripeProductID != "" {
-		p.Processors = map[string]map[string]string{"stripe": {}}
+		p.Rails = map[string]map[string]string{"stripe": {}}
 		if stripePriceID != "" {
-			p.Processors["stripe"][models.ProcessorKeyStripePriceID] = stripePriceID
+			p.Rails["stripe"][models.RailKeyStripePriceID] = stripePriceID
 		}
 		if stripeProductID != "" {
-			p.Processors["stripe"][models.ProcessorKeyStripeProductID] = stripeProductID
+			p.Rails["stripe"][models.RailKeyStripeProductID] = stripeProductID
 		}
 	}
 	return p
 }
 
 // nmiPrice builds an OpenRails price linked to an NMI plan via the mobius
-// processor map.
+// rail map.
 func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *models.Price {
 	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
 	if planID != "" {
-		p.Processors = map[string]map[string]string{
-			string(models.ProcessorMobius): {models.ProcessorKeyPlanID: planID, models.ProcessorKeyProvider: "mobius"},
+		p.Rails = map[string]map[string]string{
+			string(models.RailMobius): {models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
 		}
 	}
 	return p

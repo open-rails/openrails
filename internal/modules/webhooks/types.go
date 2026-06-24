@@ -154,7 +154,7 @@ type NMIRecurringEventBody struct {
 	OrderID           Stringish          `json:"order_id"`
 	Plan              *NMIPlan           `json:"plan"`
 	PONumber          Stringish          `json:"ponumber"`
-	ProcessorID       Stringish          `json:"processor_id"`
+	RailID            Stringish          `json:"processor_id"`
 	RemainingPayments Stringish          `json:"remaining_payments"`
 	Shipping          Stringish          `json:"shipping"`
 	SubscriptionType  Stringish          `json:"subscription_type"`
@@ -172,7 +172,7 @@ type NMITransactionEventBody struct {
 	OrderID               Stringish             `json:"order_id"`
 	OrderDescription      Stringish             `json:"order_description"`
 	PONumber              Stringish             `json:"ponumber"`
-	ProcessorID           Stringish             `json:"processor_id"`
+	RailID                Stringish             `json:"processor_id"`
 	CustomerID            Stringish             `json:"customerid"`
 	CustomerTaxID         Stringish             `json:"customertaxid"`
 	CustomerVaultID       Stringish             `json:"customer_vault_id"`
@@ -230,14 +230,14 @@ type NMIACUEventBody struct {
 // This makes automatic subscription termination impossible without additional API lookups
 type NMIChargebackBatchEventBody struct {
 	Merchant         *NMIMerchant         `json:"merchant"`
-	Processor        *NMIProcessorRef     `json:"processor"`
+	Rail             *NMIRailRef          `json:"processor"`
 	Batch            *NMIChargebackBatch  `json:"batch"`
 	Count            int                  `json:"count"`
 	ChargebackAmount string               `json:"chargeback_amount"`
 	Chargebacks      []NMIChargebackEntry `json:"chargebacks"`
 }
 
-type NMIProcessorRef struct {
+type NMIRailRef struct {
 	ID   Stringish `json:"id"`
 	Name Stringish `json:"name"`
 	Type Stringish `json:"type"`
@@ -275,8 +275,8 @@ type NMIAction struct {
 	Response                      Stringish `json:"response"`
 	ResponseCode                  Stringish `json:"response_code"`
 	ResponseText                  string    `json:"response_text"`
-	ProcessorResponseText         string    `json:"processor_response_text"`
-	ProcessorResponseCode         string    `json:"processor_response_code"`
+	RailResponseText              string    `json:"processor_response_text"`
+	RailResponseCode              string    `json:"rail_response_code"`
 	NetworkTokenUsed              bool      `json:"network_token_used"`
 	NetworkTokenCryptogramCreated bool      `json:"network_token_cryptogram_created"`
 	DeviceLicenseNumber           string    `json:"device_license_number"`

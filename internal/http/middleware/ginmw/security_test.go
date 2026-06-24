@@ -15,7 +15,7 @@ func TestBodyLimitAppliesToWebhookRoutes(t *testing.T) {
 	t.Parallel()
 
 	// Webhook routes are no longer exempt from the global body limit; it acts as
-	// a backstop in addition to the tighter per-processor caps in the handlers.
+	// a backstop in addition to the tighter per-rail caps in the handlers.
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(BodyLimit(8))

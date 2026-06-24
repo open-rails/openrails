@@ -15,7 +15,7 @@ const (
 	PremiumEndReasonChargeback PremiumEndReason = "chargeback"
 	PremiumEndReasonRefund     PremiumEndReason = "refund"
 	PremiumEndReasonAdmin      PremiumEndReason = "admin"
-	PremiumEndReasonProcessor  PremiumEndReason = "processor_cancel"
+	PremiumEndReasonRail       PremiumEndReason = "rail_cancel"
 	PremiumEndReasonUnknown    PremiumEndReason = "unknown"
 )
 
@@ -31,8 +31,8 @@ func ParsePremiumEndReason(value string) PremiumEndReason {
 		return PremiumEndReasonRefund
 	case string(PremiumEndReasonAdmin):
 		return PremiumEndReasonAdmin
-	case string(PremiumEndReasonProcessor):
-		return PremiumEndReasonProcessor
+	case string(PremiumEndReasonRail):
+		return PremiumEndReasonRail
 	default:
 		return PremiumEndReasonUnknown
 	}

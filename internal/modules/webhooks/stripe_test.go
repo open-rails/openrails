@@ -112,15 +112,15 @@ func TestStripeInvoicePreviewShapeParsing(t *testing.T) {
 	// parent.subscription_details.subscription. handleInvoicePaid bails ("missing
 	// subscription id") without this fallback — the root cause of purchases
 	// sticking on Free.
-	if got := inv.processorSubscriptionID(); got != "sub_test" {
-		t.Fatalf("processorSubscriptionID() from parent = %q, want sub_test", got)
+	if got := inv.railSubscriptionID(); got != "sub_test" {
+		t.Fatalf("railSubscriptionID() from parent = %q, want sub_test", got)
 	}
 }
 
-func TestStripeInvoiceProcessorSubscriptionID(t *testing.T) {
+func TestStripeInvoiceRailSubscriptionID(t *testing.T) {
 	// Classic/snapshot shape: top-level subscription is used.
 	classic := stripeInvoice{Subscription: "sub_classic"}
-	if got := classic.processorSubscriptionID(); got != "sub_classic" {
+	if got := classic.railSubscriptionID(); got != "sub_classic" {
 		t.Fatalf("classic: got %q, want sub_classic", got)
 	}
 
@@ -131,14 +131,14 @@ func TestStripeInvoiceProcessorSubscriptionID(t *testing.T) {
     }`), &preview); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got := preview.processorSubscriptionID(); got != "sub_preview" {
+	if got := preview.railSubscriptionID(); got != "sub_preview" {
 		t.Fatalf("preview: got %q, want sub_preview", got)
 	}
 
 	// Top-level wins when both are present.
 	both := stripeInvoice{Subscription: "sub_top"}
 	both.Parent.SubscriptionDetails.Subscription = "sub_parent"
-	if got := both.processorSubscriptionID(); got != "sub_top" {
+	if got := both.railSubscriptionID(); got != "sub_top" {
 		t.Fatalf("both: got %q, want sub_top (top-level wins)", got)
 	}
 }
@@ -232,8 +232,8 @@ func TestParseCheckoutSessionIDUsesEffectiveMetadata(t *testing.T) {
 func TestWebhookDispatcher_RejectsUnsignedStripeJob(t *testing.T) {
 	d := &WebhookDispatcher{}
 	err := d.Process(context.Background(), &WebhookMessage{
-		Processor: "stripe",
-		Payload:   []byte(`{"id":"evt_1","type":"invoice.paid","data":{"object":{}}}`),
+		Rail:    "stripe",
+		Payload: []byte(`{"id":"evt_1","type":"invoice.paid","data":{"object":{}}}`),
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -247,7 +247,7 @@ func TestWebhookDispatcher_UsesPreviouslyVerifiedStripePayload(t *testing.T) {
 	verified := true
 	d := &WebhookDispatcher{}
 	err := d.Process(context.Background(), &WebhookMessage{
-		Processor:      "stripe",
+		Rail:           "stripe",
 		Payload:        []byte(`{"id":"evt_1","type":"unhandled.event","data":{"object":{}}}`),
 		SignatureValid: &verified,
 	})

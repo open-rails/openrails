@@ -37,7 +37,7 @@ import (
 // over fetched inputs so they are unit-testable without a Stripe/NMI account or
 // a database. The DB I/O (fetch local rows, persist events, dedupe) is layered
 // on top, and a single pass runs both providers (each independently skipped if
-// that processor is unconfigured).
+// that rail is unconfigured).
 
 // stripeProductLister is the subset of StripeCatalogService the loop needs.
 // Defining it as an interface lets unit tests inject fixture pages without a
@@ -522,17 +522,17 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 				snap.priceByContentKey[ck] = pr
 			}
 		}
-		if stripe := pr.Processors["stripe"]; stripe != nil {
-			if id := strings.TrimSpace(stripe[models.ProcessorKeyStripePriceID]); id != "" {
+		if stripe := pr.Rails["stripe"]; stripe != nil {
+			if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
 				snap.stripePriceIDs[id] = pr.ID.String()
 			}
-			if id := strings.TrimSpace(stripe[models.ProcessorKeyStripeProductID]); id != "" {
+			if id := strings.TrimSpace(stripe[models.RailKeyStripeProductID]); id != "" {
 				// Map back to the OpenRails product the price belongs to.
 				snap.stripeProductIDs[id] = pr.ProductID.String()
 			}
 		}
-		if mobius := pr.Processors[string(models.ProcessorMobius)]; mobius != nil {
-			if planID := strings.TrimSpace(mobius[models.ProcessorKeyPlanID]); planID != "" {
+		if mobius := pr.Rails[string(models.RailMobius)]; mobius != nil {
+			if planID := strings.TrimSpace(mobius[models.RailKeyPlanID]); planID != "" {
 				snap.nmiPlanIDByOpenRailsPrice[pr.ID.String()] = planID
 			}
 		}
@@ -583,7 +583,7 @@ func fetchNMIPlans(lister nmiPlanLister) ([]nmiPlan, error) {
 // RunCatalogReconciliation performs one full pull-and-diff pass across both the
 // Stripe and NMI catalogs, diffs them against OpenRails, and persists drift
 // events (inserting new divergences, auto-resolving ones that have disappeared).
-// Each provider pass is independently skipped when that processor is
+// Each provider pass is independently skipped when that rail is
 // unconfigured. It is idempotent — a second consecutive run with no underlying
 // change inserts zero new rows. Alert-only: it never mutates Stripe, NMI, or the
 // catalog rows.
@@ -595,8 +595,8 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 
 	var stripeLister stripeProductLister
 	if s.rt != nil {
-		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
-			stripeLister = &catalog.StripeCatalogService{Config: cfg, Processors: s.rt.Processors}
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.SecretKey != "" {
+			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
 		}
 	}
 
@@ -694,7 +694,7 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 }
 
 // computeSolanaCatalogDrift checks every OpenRails price that carries an on-chain
-// Solana plan handle (processors["solana"]), reading the Plan account back from
+// Solana plan handle (rails["solana"]), reading the Plan account back from
 // chain and recording drift. Unlike Stripe/NMI there is no remote catalog to
 // enumerate (the Subscriptions program has no list API), so this is a
 // per-stored-price verification, and there is no orphan kind. It reuses the solana
@@ -705,7 +705,7 @@ func (s *Service) computeSolanaCatalogDrift(ctx context.Context, snap localCatal
 	var events []models.CatalogDriftEvent
 	scanned := 0
 	for _, pr := range snap.priceByID {
-		cfg := pr.Processors[string(models.ProcessorSolana)]
+		cfg := pr.Rails[string(models.RailSolana)]
 		if len(cfg) == 0 {
 			continue
 		}

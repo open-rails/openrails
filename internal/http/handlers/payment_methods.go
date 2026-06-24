@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -147,7 +147,7 @@ type paymentMethodResponse struct {
 	ID             string                       `json:"id"`
 	Object         string                       `json:"object"`
 	Type           string                       `json:"type"`
-	Processor      string                       `json:"processor"`
+	Rail           string                       `json:"rail"`
 	Customer       *string                      `json:"customer,omitempty"`
 	BillingDetails *paymentMethodBillingDetails `json:"billing_details,omitempty"`
 	Card           *paymentMethodCardDetails    `json:"card,omitempty"`
@@ -219,7 +219,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	if err != nil {
 		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
+			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
 		var vaultErr *vault.VaultError
@@ -339,7 +339,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		}
 	}
 
-	if !processors.IsNMIBackedProcessor(pm.Processor) {
+	if !rails.IsNMIBackedRail(pm.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be updated")
 		return
 	}
@@ -371,7 +371,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
+			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to update payment method")
@@ -502,7 +502,7 @@ func DeletePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID, "processor": paymentMethod.Processor}).Info("Payment method successfully deleted")
+	log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID, "rail": paymentMethod.Rail}).Info("Payment method successfully deleted")
 
 	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method deleted successfully"})
 }
@@ -531,7 +531,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod) paymentMethodResponse {
 		ID:             api.FormatPaymentMethodID(pm.ID),
 		Object:         "payment_method",
 		Type:           "card",
-		Processor:      string(pm.Processor),
+		Rail:           string(pm.Rail),
 		BillingDetails: paymentMethodBillingDetailsFromMetadata(metadata),
 		Card:           card,
 		Created:        api.ToUnix(pm.CreatedAt),

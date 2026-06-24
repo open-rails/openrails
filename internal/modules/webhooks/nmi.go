@@ -32,7 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const NMIProcessorName string = "NMI"
+const NMIRailName string = "NMI"
 
 type NMIWebhookService struct {
 	DB                           *db.DB
@@ -40,7 +40,7 @@ type NMIWebhookService struct {
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	Data                         NMIWebhookEvent
-	Processor                    string
+	Rail                         string
 	NMIClient                    *nmi.NMIClient
 	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
@@ -59,12 +59,12 @@ func (s *NMIWebhookService) now() time.Time {
 	return time.Now()
 }
 
-func (s *NMIWebhookService) normalizedProcessor() (string, error) {
-	processor := strings.TrimSpace(strings.ToLower(s.Processor))
-	if processor == "" {
-		return "", errors.New("nmi webhook processor is required")
+func (s *NMIWebhookService) normalizedRail() (string, error) {
+	rail := strings.TrimSpace(strings.ToLower(s.Rail))
+	if rail == "" {
+		return "", errors.New("nmi webhook rail is required")
 	}
-	return processor, nil
+	return rail, nil
 }
 
 type NMIWebhookEventType = string
@@ -194,16 +194,16 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	}
 
 	// Primary lookup: provider/external subscription ID as sent by NMI.
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, ref)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, s.Rail, ref)
 	if err == nil {
 		return subscription, nil
 	} else if !repo.IsNotFound(err) {
-		return nil, fmt.Errorf("load subscription by processor subscription ID: %w", err)
+		return nil, fmt.Errorf("load subscription by rail subscription ID: %w", err)
 	}
 
 	// NMI transaction.sale.success may only include the original order/PO.
 	// Resolve those references through local subscription metadata before granting access.
-	subscription, err = s.SubscriptionService.GetByProcessorMetadataValue(ctx, provider, "order_id", ref)
+	subscription, err = s.SubscriptionService.GetByRailMetadataValue(ctx, provider, "order_id", ref)
 	if err == nil {
 		return subscription, nil
 	}
@@ -219,7 +219,7 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 		if lookupErr == nil && attempt != nil {
 			providerSubID := strings.TrimSpace(fmt.Sprint(attempt.Metadata["provider_subscription_id"]))
 			if providerSubID != "" {
-				return s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubID)
+				return s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, providerSubID)
 			}
 		}
 	}
@@ -392,7 +392,7 @@ func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, u
 }
 
 // logSubscriptionEvent emits a subscription event with full pricing/status context.
-func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *models.Subscription, eventType analytics.PaymentEventType, processorTransactionID *string, metadata map[string]interface{}, overrideStatus *models.SubscriptionStatus, overrideCancel *models.CancelType) {
+func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *models.Subscription, eventType analytics.PaymentEventType, railTransactionID *string, metadata map[string]interface{}, overrideStatus *models.SubscriptionStatus, overrideCancel *models.CancelType) {
 	if s.EventLogService == nil || sub == nil {
 		return
 	}
@@ -412,8 +412,8 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 	priceAmount, priceCurrency, billingDays, productID, priceID := priceSnapshotFromSubscription(sub)
 
 	var procSubID *string
-	if sub.ProcessorSubscriptionID != "" {
-		procSubID = &sub.ProcessorSubscriptionID
+	if sub.RailSubscriptionID != "" {
+		procSubID = &sub.RailSubscriptionID
 	}
 
 	if metadata == nil {
@@ -421,22 +421,22 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 	}
 
 	event := analytics.SubscriptionEventData{
-		EventID:                 uuidutil.NewV7(),
-		SubscriptionID:          sub.ID,
-		UserID:                  sub.CustomerID.String(),
-		EventType:               eventType,
-		Status:                  string(status),
-		CancelType:              cancelType,
-		PriceAmount:             priceAmount,
-		PriceCurrency:           priceCurrency,
-		BillingCycleDays:        billingDays,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Processor:               s.Processor,
-		ProcessorSubscriptionID: procSubID,
-		ProcessorTransactionID:  processorTransactionID,
-		Metadata:                analytics.CreateMetadataJSON(metadata),
-		Timestamp:               s.now().UTC(),
+		EventID:            uuidutil.NewV7(),
+		SubscriptionID:     sub.ID,
+		UserID:             sub.CustomerID.String(),
+		EventType:          eventType,
+		Status:             string(status),
+		CancelType:         cancelType,
+		PriceAmount:        priceAmount,
+		PriceCurrency:      priceCurrency,
+		BillingCycleDays:   billingDays,
+		ProductID:          productID,
+		PriceID:            priceID,
+		Rail:               s.Rail,
+		RailSubscriptionID: procSubID,
+		RailTransactionID:  railTransactionID,
+		Metadata:           analytics.CreateMetadataJSON(metadata),
+		Timestamp:          s.now().UTC(),
 	}
 
 	if err := s.EventLogService.LogSubscriptionEvent(ctx, event); err != nil {
@@ -454,7 +454,7 @@ func (s *NMIWebhookService) HandleNMIWebhook(ctx context.Context) error {
 			ctx,
 			s.Data.EventID,
 			s.Data.EventType,
-			models.Processor(s.Processor),
+			models.Rail(s.Rail),
 			s.Data,
 			s.handleWebhook,
 		)
@@ -497,7 +497,7 @@ func (s *NMIWebhookService) handleWebhook(ctx context.Context) error {
 
 	default:
 		log.WithContext(ctx).WithFields(log.Fields{
-			"processor":  s.Processor,
+			"rail":       s.Rail,
 			"event_type": s.Data.EventType,
 		}).Warn("Unsupported NMI webhook event type")
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("unsupported event type: %s", s.Data.EventType))
@@ -522,7 +522,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return newNMIBillingError(ErrorTypeNMIValidation, "Missing subscription ID", map[string]interface{}{}, nil)
 	}
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -551,19 +551,19 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return fmt.Errorf("failed to find price for NMI plan ID %s: %w", nmiPlanID, err)
 	}
 
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, s.Rail, nmiSubID)
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_reference": nmiSubID,
 			"provider":               provider,
-		}).WithError(err).Error("Failed to load subscription for processor ID")
-		return fmt.Errorf("failed to load subscription for processor ID %s: %w", nmiSubID, err)
+		}).WithError(err).Error("Failed to load subscription for rail ID")
+		return fmt.Errorf("failed to load subscription for rail ID %s: %w", nmiSubID, err)
 	}
 
 	if subscription.Status != models.StatusPending {
 		log.WithContext(ctx).
 			WithField("subscription_id", subscription.ID).
-			WithField("processor_subscription_id", nmiSubID).
+			WithField("rail_subscription_id", nmiSubID).
 			Info("Subscription already activated; skipping add event")
 		return nil
 	}
@@ -574,19 +574,19 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 	}
 	if transactionID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"processor_subscription_id": nmiSubID,
-			"next_charge_date":          body.NextChargeDate.Trimmed(),
-			"processor":                 provider,
+			"subscription_id":      subscription.ID,
+			"rail_subscription_id": nmiSubID,
+			"next_charge_date":     body.NextChargeDate.Trimmed(),
+			"rail":                 provider,
 		}).Info("NMI subscription add recorded without settled transaction metadata; waiting for transaction.sale.success before activation")
 		return nil
 	}
 	if delayedStart := nmiFutureDelayedStart(subscription.Metadata, s.now().UTC()); delayedStart != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"processor_subscription_id": nmiSubID,
-			"delayed_start":             delayedStart.UTC().Format(time.RFC3339),
-			"processor":                 provider,
+			"subscription_id":      subscription.ID,
+			"rail_subscription_id": nmiSubID,
+			"delayed_start":        delayedStart.UTC().Format(time.RFC3339),
+			"rail":                 provider,
 		}).Info("NMI subscription add has settled transaction metadata but checkout delayed_start is in the future; keeping pending")
 		return nil
 	}
@@ -598,26 +598,26 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 	}
 
 	if _, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		PriceID:                 subscription.PriceID,
-		UserID:                  subscription.CustomerID.String(),
-		Processor:               models.Processor(provider),
-		ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
-		UserEmail:               subscription.UserEmail,
-		CurrentPeriodEndsAt:     currentPeriodEndsAt,
-		TransactionID:           transactionID,
-		Amount:                  price.Amount,
-		AmountProvided:          true,
-		Currency:                price.Currency,
+		PriceID:             subscription.PriceID,
+		UserID:              subscription.CustomerID.String(),
+		Rail:                models.Rail(provider),
+		RailSubscriptionID:  &subscription.RailSubscriptionID,
+		UserEmail:           subscription.UserEmail,
+		CurrentPeriodEndsAt: currentPeriodEndsAt,
+		TransactionID:       transactionID,
+		Amount:              price.Amount,
+		AmountProvided:      true,
+		Currency:            price.Currency,
 	}); err != nil {
 		return fmt.Errorf("activate NMI subscription from add event: %w", err)
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           subscription.ID,
-		"processor_subscription_id": nmiSubID,
-		"processor":                 provider,
-		"transaction_id":            transactionID,
-		"next_charge_date":          body.NextChargeDate.Trimmed(),
+		"subscription_id":      subscription.ID,
+		"rail_subscription_id": nmiSubID,
+		"rail":                 provider,
+		"transaction_id":       transactionID,
+		"next_charge_date":     body.NextChargeDate.Trimmed(),
 	}).Info("NMI subscription activated from add event with settled transaction metadata")
 	return nil
 }
@@ -669,7 +669,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		return err
 	}
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -682,16 +682,16 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		return newNMIBillingError(ErrorTypeNMIValidation, "Missing subscription ID", map[string]interface{}{}, nil)
 	}
 
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, s.Rail, nmiSubID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			log.WithContext(ctx).
-				WithField("processor_subscription_id", nmiSubID).
+				WithField("rail_subscription_id", nmiSubID).
 				Warn("Received NMI delete for unknown subscription; ignoring")
 			return nil
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
-			"processor_subscription_id": nmiSubID,
+			"rail_subscription_id": nmiSubID,
 		}).WithError(err).Error("Failed to load subscription for delete event")
 		return fmt.Errorf("failed to get subscription: %w", err)
 	}
@@ -699,32 +699,32 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 	if subscription.Status == models.StatusCancelled {
 		log.WithContext(ctx).
 			WithField("subscription_id", subscription.ID).
-			WithField("processor_subscription_id", nmiSubID).
+			WithField("rail_subscription_id", nmiSubID).
 			Info("Subscription already cancelled; skipping NMI delete event")
 		return nil
 	}
 
 	cancelFeedback := "Cancelled via NMI webhook"
-	processor := models.Processor(provider)
+	rail := models.Rail(provider)
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           subscription.ID,
-		"processor_subscription_id": nmiSubID,
-		"user_id":                   subscription.CustomerID.String(),
+		"subscription_id":      subscription.ID,
+		"rail_subscription_id": nmiSubID,
+		"user_id":              subscription.CustomerID.String(),
 	}).Info("Cancelling subscription via NMI delete event")
 	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-		RevokeAccess:            false, // User keeps access until period end
-		Processor:               &processor,
-		ProcessorSubscriptionID: &nmiSubID,
-		CancelFeedback:          &cancelFeedback,
-		SubscriptionID:          &subscription.ID,
-		CancelType:              models.CancelTypeMerchant,
+		RevokeAccess:       false, // User keeps access until period end
+		Rail:               &rail,
+		RailSubscriptionID: &nmiSubID,
+		CancelFeedback:     &cancelFeedback,
+		SubscriptionID:     &subscription.ID,
+		CancelType:         models.CancelTypeMerchant,
 	}); err != nil {
 		return fmt.Errorf("failed to cancel subscription: %w", err)
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           subscription.ID,
-		"processor_subscription_id": nmiSubID,
+		"subscription_id":      subscription.ID,
+		"rail_subscription_id": nmiSubID,
 	}).Info("Subscription cancelled via NMI delete event")
 
 	if s.EventLogService != nil {
@@ -732,7 +732,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		statusCancelled := models.StatusCancelled
 		metadata := map[string]interface{}{
 			"event_type":      s.Data.EventType,
-			"processor":       provider,
+			"rail":            provider,
 			"previous_status": string(subscription.Status),
 			"status_after":    string(statusCancelled),
 		}
@@ -753,7 +753,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		return err
 	}
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -805,7 +805,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		// the transaction is already recorded, this is a duplicate notification
 		// — acknowledge it instead of surfacing a webhook error.
 		if s.PaymentService != nil {
-			if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(provider), txnID); lookupErr == nil && existing != nil {
+			if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(provider), txnID); lookupErr == nil && existing != nil {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_reference": nmiSubID,
 					"subscription_status":    string(subscription.Status),
@@ -858,11 +858,11 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	case models.StatusPending:
 		if delayedStart := nmiFutureDelayedStart(subscription.Metadata, s.now().UTC()); delayedStart != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id":           subscription.ID,
-				"processor_subscription_id": subscription.ProcessorSubscriptionID,
-				"transaction_id":            txnID,
-				"delayed_start":             delayedStart.UTC().Format(time.RFC3339),
-				"processor":                 provider,
+				"subscription_id":      subscription.ID,
+				"rail_subscription_id": subscription.RailSubscriptionID,
+				"transaction_id":       txnID,
+				"delayed_start":        delayedStart.UTC().Format(time.RFC3339),
+				"rail":                 provider,
 			}).Info("NMI transaction success has checkout delayed_start in the future; keeping subscription pending")
 			return nil
 		}
@@ -883,7 +883,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":             subscription.ID,
-			"processor_subscription_id":   subscription.ProcessorSubscriptionID,
+			"rail_subscription_id":        subscription.RailSubscriptionID,
 			"transaction_id":              txnID,
 			"amount_cents":                amountCents,
 			"currency":                    currencyValue,
@@ -893,22 +893,22 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}).Info("Activating pending subscription from NMI transaction success")
 
 		_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-			PriceID:                 subscription.PriceID,
-			UserID:                  subscription.CustomerID.String(),
-			Processor:               models.Processor(provider),
-			ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
-			UserEmail:               subscription.UserEmail,
-			TransactionID:           txnID,
-			Amount:                  amountCents,
-			AmountProvided:          true,
-			Currency:                currencyValue,
+			PriceID:            subscription.PriceID,
+			UserID:             subscription.CustomerID.String(),
+			Rail:               models.Rail(provider),
+			RailSubscriptionID: &subscription.RailSubscriptionID,
+			UserEmail:          subscription.UserEmail,
+			TransactionID:      txnID,
+			Amount:             amountCents,
+			AmountProvided:     true,
+			Currency:           currencyValue,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}
 
 		if s.MoneyService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
+			updated, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for initial credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -924,10 +924,10 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"processor_subscription_id": subscription.ProcessorSubscriptionID,
-			"transaction_id":            txnID,
-			"user_id":                   subscription.CustomerID.String(),
+			"subscription_id":      subscription.ID,
+			"rail_subscription_id": subscription.RailSubscriptionID,
+			"transaction_id":       txnID,
+			"user_id":              subscription.CustomerID.String(),
 		}).Info("Subscription activated via NMI transaction success")
 
 		processed = true
@@ -936,7 +936,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	default:
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":             subscription.ID,
-			"processor_subscription_id":   subscription.ProcessorSubscriptionID,
+			"rail_subscription_id":        subscription.RailSubscriptionID,
 			"transaction_id":              txnID,
 			"amount_cents":                amountCents,
 			"currency":                    currencyValue,
@@ -947,17 +947,17 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		// RenewMembership now creates the Payment record internally
 		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor:               models.Processor(provider),
-			ProcessorSubscriptionID: nmiSubID,
-			TransactionID:           txnID,
-			Amount:                  amountCents,
-			AmountProvided:          true,
-			Currency:                currencyValue,
+			Rail:               models.Rail(provider),
+			RailSubscriptionID: nmiSubID,
+			TransactionID:      txnID,
+			Amount:             amountCents,
+			AmountProvided:     true,
+			Currency:           currencyValue,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"subscription_id":             subscription.ID,
-					"processor_subscription_id":   subscription.ProcessorSubscriptionID,
+					"rail_subscription_id":        subscription.RailSubscriptionID,
 					"transaction_id":              txnID,
 					"subscription_lifecycle_step": "renew_membership",
 				}).Warn("Blocked terminal -> active transition for delayed NMI success event")
@@ -967,7 +967,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.MoneyService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
+			updated, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for renewal credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -983,10 +983,10 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"processor_subscription_id": subscription.ProcessorSubscriptionID,
-			"transaction_id":            txnID,
-			"user_id":                   subscription.CustomerID.String(),
+			"subscription_id":      subscription.ID,
+			"rail_subscription_id": subscription.RailSubscriptionID,
+			"transaction_id":       txnID,
+			"user_id":              subscription.CustomerID.String(),
 		}).Info("Subscription renewed via NMI transaction success")
 
 		processed = true
@@ -1001,7 +1001,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			"event_type":      s.Data.EventType,
 			"action_source":   actionSource,
 			"previous_status": string(prevStatus),
-			"processor":       provider,
+			"rail":            provider,
 		}
 		if txnID != "" {
 			metadata["transaction_id"] = txnID
@@ -1046,7 +1046,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
-			Processor:      s.Processor,
+			Rail:           s.Rail,
 			Amount:         amountPtr,
 			Currency:       currencyValue,
 			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{}),
@@ -1055,7 +1055,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			Timestamp:      s.now().UTC(),
 		}
 		if txnID != "" {
-			paymentEvent.ProcessorTransactionID = &txnID
+			paymentEvent.RailTransactionID = &txnID
 		}
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEvent); err != nil {
 			log.WithContext(ctx).WithError(err).Error("Failed to log NMI payment event")
@@ -1075,7 +1075,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		return err
 	}
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -1109,13 +1109,13 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		subscription, fetchErr = s.resolveSubscriptionFromReference(ctx, provider, nmiSubID)
 		if fetchErr != nil && !repo.IsNotFound(fetchErr) {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"processor_subscription_id": nmiSubID,
+				"rail_subscription_id": nmiSubID,
 			}).WithError(fetchErr).Error("Failed to load subscription for transaction failure event")
 			return fmt.Errorf("failed to load subscription for transaction event: %w", fetchErr)
 		}
 		if repo.IsNotFound(fetchErr) {
 			log.WithContext(ctx).
-				WithField("processor_subscription_id", nmiSubID).
+				WithField("rail_subscription_id", nmiSubID).
 				Warn("Received NMI failure event for unknown subscription; ignoring")
 			return nil
 		}
@@ -1154,7 +1154,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 	}
 
 	logFields := log.Fields{
-		"processor_subscription_id": nmiSubID,
+		"rail_subscription_id": nmiSubID,
 	}
 	if failureReason != nil && *failureReason != "" {
 		logFields["failure_reason"] = *failureReason
@@ -1165,7 +1165,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 	log.WithContext(ctx).WithFields(logFields).Warn("Marking subscription as failed due to NMI transaction failure")
 
 	if s.PaymentService != nil && subscription != nil && txnID != "" {
-		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), txnID)
+		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(s.Rail), txnID)
 		if err != nil && !repo.IsNotFound(err) {
 			return fmt.Errorf("failed to fetch existing payment for transaction: %w", err)
 		}
@@ -1204,7 +1204,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 				CustomerID:     subscription.CustomerID,
 				PriceID:        subscription.PriceID,
 				SubscriptionID: &subscription.ID,
-				Processor:      models.Processor(s.Processor),
+				Rail:           models.Rail(s.Rail),
 				TransactionID:  txnID,
 				Amount:         amountCents,
 				ListAmount:     listAmount,
@@ -1223,7 +1223,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 
 	if subscription != nil {
 		if err := s.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.Processor(s.Processor),
+			Rail:           models.Rail(s.Rail),
 			SubscriptionID: &subscription.ID,
 			FailureReason:  failureReason,
 			FailureCode:    failureCode,
@@ -1231,20 +1231,20 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			return fmt.Errorf("failed to mark subscription as failed: %w", err)
 		}
 
-		log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).Info("Subscription marked as failed for NMI transaction failure")
+		log.WithContext(ctx).WithField("rail_subscription_id", nmiSubID).Info("Subscription marked as failed for NMI transaction failure")
 	}
 	if s.EventLogService != nil && subscription != nil {
 		if updated, err := s.SubscriptionService.GetByID(ctx, subscription.ID); err == nil {
 			subscription = updated
 		} else if err != nil && !repo.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
+			log.WithContext(ctx).WithError(err).WithField("rail_subscription_id", nmiSubID).
 				Warn("Failed to refresh subscription after failure flow; logging with stale status")
 		}
 
 		metadata := map[string]interface{}{
 			"event_type":      s.Data.EventType,
 			"previous_status": string(prevStatus),
-			"processor":       provider,
+			"rail":            provider,
 		}
 		if failureReason != nil && *failureReason != "" {
 			metadata["failure_reason"] = *failureReason
@@ -1272,7 +1272,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventChargeFailure,
-			Processor:      s.Processor,
+			Rail:           s.Rail,
 			Amount:         amountPtr,
 			Currency:       currency,
 			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{}),
@@ -1281,7 +1281,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			Timestamp:      s.now().UTC(),
 		}
 		if txnID != "" {
-			paymentEvent.ProcessorTransactionID = &txnID
+			paymentEvent.RailTransactionID = &txnID
 		}
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEvent); err != nil {
 			log.WithContext(ctx).WithError(err).Error("Failed to log NMI payment failure event")
@@ -1304,7 +1304,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		s.logSubscriptionEvent(ctx, subscription, eventType, txnPtr, metadata, &statusAfter, cancelOverride)
 	} else if subscription == nil {
 		log.WithContext(ctx).
-			WithField("processor_subscription_id", nmiSubID).
+			WithField("rail_subscription_id", nmiSubID).
 			Warn("Unable to log NMI payment failure event because subscription record was not found")
 	}
 
@@ -1337,15 +1337,15 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 }
 
 type nmiChargebackMatch struct {
-	PaymentID               uuid.UUID
-	PaymentTransactionID    string
-	SubscriptionID          uuid.UUID
-	ProcessorSubscriptionID string
-	UserID                  string
-	AmountCents             int64
-	Currency                string
-	PurchasedAt             time.Time
-	CardLast4               string
+	PaymentID            uuid.UUID
+	PaymentTransactionID string
+	SubscriptionID       uuid.UUID
+	RailSubscriptionID   string
+	UserID               string
+	AmountCents          int64
+	Currency             string
+	PurchasedAt          time.Time
+	CardLast4            string
 }
 
 func normalizeNMIChargebackLast4(raw string) string {
@@ -1521,7 +1521,7 @@ func splitNMIChargebackReason(rawReason, rawReasonCode string) (string, string) 
 	return reasonCode, reason
 }
 
-func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, processor string, cb NMIChargebackEntry) (*nmiChargebackMatch, map[string]interface{}, error) {
+func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rail string, cb NMIChargebackEntry) (*nmiChargebackMatch, map[string]interface{}, error) {
 	meta := map[string]interface{}{
 		"reconciliation_status": "unmatched",
 	}
@@ -1557,7 +1557,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	}
 
 	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{
-		Processor:   gen.OpenrailsProcessorType(processor),
+		Rail:        gen.OpenrailsRailType(rail),
 		AmountCents: amountCents,
 		Last4:       last4,
 		FromAt:      targetTs.Add(-7 * 24 * time.Hour),
@@ -1573,14 +1573,14 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	matches := make([]nmiChargebackMatch, 0, len(rows))
 	for _, r := range rows {
 		m := nmiChargebackMatch{
-			PaymentID:               r.PaymentID,
-			PaymentTransactionID:    r.PaymentTransactionID,
-			ProcessorSubscriptionID: r.ProcessorSubscriptionID,
-			UserID:                  r.UserID,
-			AmountCents:             r.AmountCents,
-			Currency:                r.Currency,
-			PurchasedAt:             r.PurchasedAt,
-			CardLast4:               r.CardLast4,
+			PaymentID:            r.PaymentID,
+			PaymentTransactionID: r.PaymentTransactionID,
+			RailSubscriptionID:   r.RailSubscriptionID,
+			UserID:               r.UserID,
+			AmountCents:          r.AmountCents,
+			Currency:             r.Currency,
+			PurchasedAt:          r.PurchasedAt,
+			CardLast4:            r.CardLast4,
 		}
 		if r.SubscriptionID != nil {
 			m.SubscriptionID = *r.SubscriptionID
@@ -1601,7 +1601,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	meta["matched_payment_id"] = match.PaymentID.String()
 	meta["matched_transaction_id"] = match.PaymentTransactionID
 	meta["matched_subscription_id"] = match.SubscriptionID.String()
-	meta["matched_processor_subscription_id"] = match.ProcessorSubscriptionID
+	meta["matched_rail_subscription_id"] = match.RailSubscriptionID
 	meta["matched_user_id"] = match.UserID
 	meta["matched_payment_purchased_at"] = match.PurchasedAt.Format(time.RFC3339)
 	meta["matched_amount_cents"] = match.AmountCents
@@ -1625,7 +1625,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			chargebackEventData := analytics.ChargebackEventData{
 				EventID:   uuidutil.NewV7(),
 				EventType: analytics.PaymentEventBatchProcessed,
-				Processor: s.Processor,
+				Rail:      s.Rail,
 				BatchID:   s.Data.EventID,
 				Status:    "completed",
 				Metadata:  analytics.CreateMetadataJSON(map[string]interface{}{"parse_error": err.Error()}),
@@ -1640,7 +1640,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 	now := s.now()
 	batchID := s.Data.EventID
-	processor, err := s.normalizedProcessor()
+	rail, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -1684,7 +1684,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			amountPtr = &cbAmount
 		}
 
-		match, reconcileMeta, reconcileErr := s.reconcileNMIChargebackEntry(ctx, processor, cb)
+		match, reconcileMeta, reconcileErr := s.reconcileNMIChargebackEntry(ctx, rail, cb)
 		if reconcileErr != nil {
 			reconcileErrors++
 			cbMetadata["reconciliation_status"] = "error"
@@ -1699,7 +1699,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		var (
 			subscriptionID          *uuid.UUID
 			userID                  *string
-			processorTransactionID  *string
+			railTransactionID       *string
 			entryLedgerErr          error
 			chargebackTransactionID string
 		)
@@ -1719,7 +1719,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 			if match.PaymentTransactionID != "" {
 				txn := match.PaymentTransactionID
-				processorTransactionID = &txn
+				railTransactionID = &txn
 			}
 			if s.PaymentService == nil {
 				reconcileErrors++
@@ -1732,7 +1732,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				}
 			} else {
 				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
-				if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(processor), chargebackTransactionID); lookupErr == nil && existing != nil {
+				if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(rail), chargebackTransactionID); lookupErr == nil && existing != nil {
 					cbMetadata["chargeback_payment_status"] = "already_recorded"
 				} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 					reconcileErrors++
@@ -1801,17 +1801,17 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							reasonCodeDisplay,
 							strings.TrimSpace(cb.ID.Trimmed()),
 						)
-						proc := models.Processor(processor)
-						subProcID := strings.TrimSpace(match.ProcessorSubscriptionID)
+						proc := models.Rail(rail)
+						subProcID := strings.TrimSpace(match.RailSubscriptionID)
 						params := &subscriptions.CancelMembershipParams{
 							RevokeAccess:   true,
-							Processor:      &proc,
+							Rail:           &proc,
 							SubscriptionID: &match.SubscriptionID,
 							CancelType:     models.CancelTypeChargeback,
 							CancelFeedback: &feedback,
 						}
 						if subProcID != "" {
-							params.ProcessorSubscriptionID = &subProcID
+							params.RailSubscriptionID = &subProcID
 						}
 						if err := s.SubscriptionLifecycleService.CancelMembership(ctx, params); err != nil {
 							reconcileErrors++
@@ -1839,7 +1839,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
 				}
 				if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
-					Provider:          processor,
+					Provider:          rail,
 					Operation:         "chargeback_reversal",
 					TransactionID:     alertTransactionID,
 					UserID:            match.UserID,
@@ -1849,7 +1849,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					Metadata: map[string]any{
 						"batch_id":                        batchID,
 						"chargeback_id":                   cb.ID.Trimmed(),
-						"processor_subscription_id":       match.ProcessorSubscriptionID,
+						"rail_subscription_id":            match.RailSubscriptionID,
 						"original_payment_transaction_id": match.PaymentTransactionID,
 					},
 				}); err != nil {
@@ -1868,21 +1868,21 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 		if s.EventLogService != nil {
 			cbEventData := analytics.ChargebackEventData{
-				EventID:                uuidutil.NewV7(),
-				ChargebackID:           cb.ID.Trimmed(),
-				BatchID:                batchID,
-				SubscriptionID:         subscriptionID,
-				UserID:                 userID,
-				EventType:              analytics.PaymentEventChargeback,
-				Processor:              s.Processor,
-				ProcessorTransactionID: processorTransactionID,
-				Amount:                 amountPtr,
-				Currency:               "",
-				ChargebackType:         "chargeback",
-				Reason:                 reasonText,
-				Status:                 cbStatus,
-				Metadata:               analytics.CreateMetadataJSON(cbMetadata),
-				Timestamp:              now,
+				EventID:           uuidutil.NewV7(),
+				ChargebackID:      cb.ID.Trimmed(),
+				BatchID:           batchID,
+				SubscriptionID:    subscriptionID,
+				UserID:            userID,
+				EventType:         analytics.PaymentEventChargeback,
+				Rail:              s.Rail,
+				RailTransactionID: railTransactionID,
+				Amount:            amountPtr,
+				Currency:          "",
+				ChargebackType:    "chargeback",
+				Reason:            reasonText,
+				Status:            cbStatus,
+				Metadata:          analytics.CreateMetadataJSON(cbMetadata),
+				Timestamp:         now,
 			}
 			if err := s.EventLogService.LogChargebackEvent(ctx, cbEventData); err != nil {
 				log.WithContext(ctx).
@@ -1896,7 +1896,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 	if s.EventLogService != nil {
 		batchMetadata := map[string]interface{}{
 			"batch_type":         "chargeback",
-			"event_source":       s.Processor,
+			"event_source":       s.Rail,
 			"batch_status":       "completed",
 			"chargeback_count":   chargebackCount,
 			"reconciled_count":   reconciledCount,
@@ -1910,14 +1910,14 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		} else if strings.TrimSpace(body.ChargebackAmount) != "" {
 			batchMetadata["total_amount"] = strings.TrimSpace(body.ChargebackAmount)
 		}
-		if body.Processor != nil {
-			batchMetadata["processor_id"] = body.Processor.ID.Trimmed()
-			batchMetadata["processor_name"] = body.Processor.Name.Trimmed()
+		if body.Rail != nil {
+			batchMetadata["processor_id"] = body.Rail.ID.Trimmed()
+			batchMetadata["rail_name"] = body.Rail.Name.Trimmed()
 		}
 		chargebackEventData := analytics.ChargebackEventData{
 			EventID:   uuidutil.NewV7(),
 			EventType: analytics.PaymentEventBatchProcessed,
-			Processor: s.Processor,
+			Rail:      s.Rail,
 			BatchID:   batchID,
 			Status:    "completed",
 			Metadata:  analytics.CreateMetadataJSON(batchMetadata),
@@ -1979,7 +1979,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	}
 	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -1987,13 +1987,13 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// Try to find subscription - refund may be for a subscription payment
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
+		subscription, err = s.SubscriptionService.GetByRailSubscriptionID(ctx, s.Rail, nmiSubID)
 		if err != nil && !repo.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
-				Warn("Failed to look up subscription for refund (by processor_subscription_id)")
+			log.WithContext(ctx).WithError(err).WithField("rail_subscription_id", nmiSubID).
+				Warn("Failed to look up subscription for refund (by rail_subscription_id)")
 		} else if repo.IsNotFound(err) {
-			log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).
-				Warn("Received refund for unknown subscription (by processor_subscription_id); continuing without lifecycle actions")
+			log.WithContext(ctx).WithField("rail_subscription_id", nmiSubID).
+				Warn("Received refund for unknown subscription (by rail_subscription_id); continuing without lifecycle actions")
 		}
 	}
 
@@ -2017,8 +2017,8 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// Persist refund in the payments ledger as a negative payment linked to the original payment.
 	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
 	if s.PaymentService != nil && subscription != nil && txnID != "" && refundAmountCents > 0 {
-		processor := models.Processor(s.Processor)
-		existingRefund, lookupErr := s.PaymentService.GetByTransactionID(ctx, processor, txnID)
+		rail := models.Rail(s.Rail)
+		existingRefund, lookupErr := s.PaymentService.GetByTransactionID(ctx, rail, txnID)
 		switch {
 		case lookupErr == nil && existingRefund != nil:
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -2034,7 +2034,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			var originalLookupErr error
 
 			if originalTxnID != "" && originalTxnID != txnID {
-				originalPayment, originalLookupErr = s.PaymentService.GetByTransactionID(ctx, processor, originalTxnID)
+				originalPayment, originalLookupErr = s.PaymentService.GetByTransactionID(ctx, rail, originalTxnID)
 				if originalLookupErr != nil && !repo.IsNotFound(originalLookupErr) {
 					log.WithContext(ctx).WithError(originalLookupErr).WithField("original_transaction_id", originalTxnID).
 						Warn("Failed to resolve original payment by transaction ID for refund")
@@ -2081,23 +2081,23 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}).Warn("Terminating subscription due to significant refund (>=80%)")
 
 		// Use lifecycle service to cancel membership with immediate revocation
-		processor := models.Processor(s.Processor)
+		rail := models.Rail(s.Rail)
 		cancelReason := "Refund processed"
 
 		if s.SubscriptionLifecycleService != nil {
 			if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-				Processor:               &processor,
-				ProcessorSubscriptionID: &nmiSubID,
-				SubscriptionID:          &subscription.ID,
-				CancelType:              models.CancelTypeMerchant,
-				CancelFeedback:          &cancelReason,
-				RevokeAccess:            true,
+				Rail:               &rail,
+				RailSubscriptionID: &nmiSubID,
+				SubscriptionID:     &subscription.ID,
+				CancelType:         models.CancelTypeMerchant,
+				CancelFeedback:     &cancelReason,
+				RevokeAccess:       true,
 			}); err != nil {
 				log.WithContext(ctx).WithError(err).Error("Failed to cancel membership after refund")
 			} else {
 				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id":           subscription.ID,
-					"processor_subscription_id": nmiSubID,
+					"subscription_id":      subscription.ID,
+					"rail_subscription_id": nmiSubID,
 				}).Info("Subscription cancelled after refund meet threshold")
 				if s.EventLogService != nil {
 					statusCancelled := models.StatusCancelled
@@ -2106,7 +2106,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 						"event_type":           s.Data.EventType,
 						"refund_amount":        refundAmount,
 						"subscription_id":      subscription.ID.String(),
-						"processor":            provider,
+						"rail":                 provider,
 						"status_after":         string(statusCancelled),
 						"previous_status":      string(subscription.Status),
 						"cancelled_via_refund": shouldTerminate,
@@ -2126,7 +2126,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		currencyValue := normalizeNMICurrencyValue(transactionCurrency(body), fallbackCurrency)
 		metadata := map[string]interface{}{
 			"transaction_id":          txnID,
-			"processor":               s.Processor,
+			"rail":                    s.Rail,
 			"event_source":            "webhook",
 			"refund_amount":           refundAmount,
 			"subscription_terminated": shouldTerminate,
@@ -2138,7 +2138,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventRefund,
-			Processor:      s.Processor,
+			Rail:           s.Rail,
 			Amount:         &negativeAmount,
 			Currency:       currencyValue,
 			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
@@ -2147,7 +2147,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			Timestamp:      now.UTC(),
 		}
 		if txnID != "" {
-			paymentEventData.ProcessorTransactionID = &txnID
+			paymentEventData.RailTransactionID = &txnID
 		}
 
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
@@ -2181,7 +2181,7 @@ func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id": txnID,
-			"processor":      s.Processor,
+			"rail":           s.Rail,
 			"event_source":   "webhook",
 			"failure":        true,
 		}
@@ -2189,14 +2189,14 @@ func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
 		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuidutil.NewV7(),
 			EventType:     analytics.PaymentEventRefundFailure,
-			Processor:     s.Processor,
+			Rail:          s.Rail,
 			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"refund_failure": true}),
 			WebhookSource: "webhook",
 			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
-			paymentEventData.ProcessorTransactionID = &txnID
+			paymentEventData.RailTransactionID = &txnID
 		}
 
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
@@ -2222,7 +2222,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	txnID := body.TransactionID.Trimmed()
 	nmiSubID := transactionSubscriptionID(body)
 
-	provider, err := s.normalizedProcessor()
+	provider, err := s.normalizedRail()
 	if err != nil {
 		return err
 	}
@@ -2230,21 +2230,21 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	// Try to find subscription
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
+		subscription, err = s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
 		if err != nil && !repo.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
+			log.WithContext(ctx).WithError(err).WithField("rail_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for void")
 		}
 	}
 	var voidedSubscriptionID *uuid.UUID
 	if s.PaymentService != nil && txnID != "" {
-		originalPayment, paymentErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), txnID)
+		originalPayment, paymentErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(s.Rail), txnID)
 		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
 			reversalID := "void:" + txnID
-			if existingVoid, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), reversalID); lookupErr == nil && existingVoid != nil {
+			if existingVoid, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(s.Rail), reversalID); lookupErr == nil && existingVoid != nil {
 				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("NMI void reversal already recorded")
 			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
@@ -2272,11 +2272,11 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		}
 	}
 	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		processor := models.Processor(s.Processor)
+		rail := models.Rail(s.Rail)
 		reason := "NMI void processed"
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: voidedSubscriptionID,
-			Processor:      &processor,
+			Rail:           &rail,
 			CancelType:     models.CancelTypeMerchant,
 			CancelFeedback: &reason,
 			RevokeAccess:   true,
@@ -2289,21 +2289,21 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id": txnID,
-			"processor":      provider,
+			"rail":           provider,
 			"event_source":   "webhook",
 		}
 
 		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuidutil.NewV7(),
 			EventType:     analytics.PaymentEventVoid,
-			Processor:     provider,
+			Rail:          provider,
 			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
 			WebhookSource: "webhook",
 			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
-			paymentEventData.ProcessorTransactionID = &txnID
+			paymentEventData.RailTransactionID = &txnID
 		}
 		if subscription != nil {
 			paymentEventData.SubscriptionID = &subscription.ID
@@ -2336,7 +2336,7 @@ func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id": txnID,
-			"processor":      s.Processor,
+			"rail":           s.Rail,
 			"event_source":   "webhook",
 			"failure":        true,
 		}
@@ -2344,14 +2344,14 @@ func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
 		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuidutil.NewV7(),
 			EventType:     analytics.PaymentEventVoidFailure,
-			Processor:     s.Processor,
+			Rail:          s.Rail,
 			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void_failure": true}),
 			WebhookSource: "webhook",
 			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
-			paymentEventData.ProcessorTransactionID = &txnID
+			paymentEventData.RailTransactionID = &txnID
 		}
 
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {

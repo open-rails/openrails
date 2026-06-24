@@ -7,7 +7,7 @@ OpenRails is perfect for:
 - Digital Storefronts: Your users buy videos / courses / downloads individually. Define your own products + prices; we manage ownership-records. Build your own Shopify, Gumroad, etc.
 - Video Games: in-game transactions.
 
-OpenRails supports many payment processors:
+OpenRails supports many payment rails:
 
 - Stripe
 - Any NMI-compatible payment-gateway (PaymentCloud, PayKings, SoarPay, Zen Payments, Corepay, etc.; there are literally thousands of these companies).
@@ -237,8 +237,8 @@ permissions.
 
 ### 4. Webhooks
 
-Point each payment processor's webhook at OpenRails directly (Stripe/NMI/CCBill →
-OpenRails, not through your app). OpenRails verifies processor signatures, updates
+Point each payment rail's webhook at OpenRails directly (Stripe/NMI/CCBill →
+OpenRails, not through your app). OpenRails verifies rail signatures, updates
 subscriptions/entitlements, and your app just reads the results. See
 [docs/cloudflared-webhooks.md](docs/cloudflared-webhooks.md) for exposing webhooks in dev.
 
@@ -329,7 +329,7 @@ cfg.RateLimits = &config.RateLimitsConfig{
     "checkout":  {RequestsPerMinute: 10},   // tight: deters card-testing
     "subscribe": {RequestsPerMinute: 20},
     "payment":   {RequestsPerMinute: 40},
-    "webhook":   {RequestsPerMinute: 1200}, // per source IP; absorbs processor bursts
+    "webhook":   {RequestsPerMinute: 1200}, // per source IP; absorbs rail bursts
 }
 // Optional captcha escalation on extreme abuse (needs your Turnstile/reCAPTCHA keys):
 // cfg.Captcha = &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile,
@@ -417,7 +417,7 @@ or your own tooling instead — admin routes without a permission checker fail c
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** the live `openrails:admin` permission evaluated at request time in
   the caller's own org (see embedded guide §5). Never derived from role names.
-- **Sandbox vs live:** `TEST_MODE=true` routes every processor to its test/sandbox
+- **Sandbox vs live:** `TEST_MODE=true` routes every rail to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
   card. It defaults on in development, must be explicit for live local runs, and is
   rejected outside development (see Operating modes below).
@@ -437,18 +437,18 @@ Two orthogonal settings:
   the pure **behavior** dial: how much OpenRails may do against the payment providers.
   One of `full | limited | readonly`.
 - **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
-  **credential** axis: `true` enforces sandbox processor credentials. Default `false`.
+  **credential** axis: `true` enforces sandbox rail credentials. Default `false`.
 
 | `MODE=` | What runs |
 |---|---|
 | `full` | Full behavior — charges, dunning, deletes all run. |
-| `limited` | **Reactive-only provider writes.** Nothing system-initiated touches a provider: no dunning charges, no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Local dunning decisions still materialize: stale past-due subscriptions cancel/downgrade locally, and in-window charges become parked system-origin intents. Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
+| `limited` | **Reactive-only provider writes.** Nothing system-initiated touches a provider: no dunning charges, no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Local dunning decisions still materialize: stale past-due subscriptions cancel/downgrade locally, and in-window charges become parked system-origin intents. Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their rail-side delete), resumes, refunds, webhooks. |
 | `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. For reconciliation/forensics boots. |
 
 ### `test_mode` — sandbox credentials, orthogonal to mode
 
 `TEST_MODE=true` is sandbox money with whatever behavior `mode` selects (typically
-`full`): every processor routes to its test/sandbox environment, and the **credential
+`full`): every rail routes to its test/sandbox environment, and the **credential
 guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
 configured NMI account is probed at boot with one auth on the non-issued test card —
 only a simulator can approve it, so a decline proves a live account and refuses the boot
@@ -463,7 +463,7 @@ re-probes (cache failures degrade to probing); CCBill uses
 is exactly `TEST_MODE=true` + `MODE=full`.
 
 At a glance — what each mode permits (the `test_mode` axis applies orthogonally: with
-`TEST_MODE=true` the same matrix holds against sandbox processors, so no real money can
+`TEST_MODE=true` the same matrix holds against sandbox rails, so no real money can
 move in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
@@ -471,7 +471,7 @@ move in any mode):
 | Real money can move | ✅ | ✅ | ❌ (writes blocked) |
 | User checkout / charge | ✅ | ✅ | ❌ fails loudly |
 | Card/vault save, tier change, resume, refund | ✅ | ✅ | ❌ |
-| User/admin cancel → processor-side delete | ✅ | ✅ | ❌ marker left for replay |
+| User/admin cancel → rail-side delete | ✅ | ✅ | ❌ marker left for replay |
 | Dunning charges + window-expiry cancellations | ✅ | ❌ runs dry | ❌ |
 | Auto-top-ups, arrears collection, Solana pulls | ✅ | ❌ | ❌ |
 | Catalog provider-object writes (`push-merchant-catalog`) | ✅ | ❌ deferred | ❌ deferred |
@@ -486,7 +486,7 @@ usable; `readonly` = reconciliation/forensics boots that must only observe.
 
 `mode` is **required outside development** (the server refuses to boot without one);
 unset in dev defaults to `full`. **Behavior change (#355):** the dev default is now
-**live credentials + full behavior** — a dev boot with real processor credentials in
+**live credentials + full behavior** — a dev boot with real rail credentials in
 `.env` and no flags will move real money. Set `TEST_MODE=true` (or `--test-mode`) for the
 old sandbox-by-default behavior. The old `mode=test` and `mode=production` values and
 the `test_mode` boolean no longer exist.
@@ -523,7 +523,7 @@ leave state for the next pass. Runs under `full` and `limited`; skipped under
 
 ### Safe boot with production credentials
 
-Booting against real processor accounts (e.g. a migration cutover or reconciliation run),
+Booting against real rail accounts (e.g. a migration cutover or reconciliation run),
 set **before first start** — imported stale `past_due` subscriptions are immediately "due"
 and full-behavior modes would start charging them within hours:
 
@@ -533,7 +533,7 @@ MODE=limited
 
 (or `MODE=readonly` for a strictly-observing boot where even user checkouts must fail.)
 
-Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and restart —
+Exit path, in order: (1) unset `DISABLE_RAIL_SUBSCRIPTION_DELETIONS` and restart —
 deletes skipped while the switch was on parked as pending intents on the provider intent
 ledger (#358) and the scheduled intent executor drains them; (2) once converged,
 set `MODE=full` — dunning resumes, and the derived staleness window guarantees the stale
@@ -569,7 +569,7 @@ convergence is always on. Findings carry a self-describing four-plane slug —
 references) — replacing the old `PS-*` / `P-E-*` codes. The model and the full
 taxonomy live in [docs/consistency-invariants.md](docs/consistency-invariants.md).
 
-**`pull-provider`** — pull the payment processors' state (the source of truth for
+**`pull-provider`** — pull the payment rails' state (the source of truth for
 observed charges / refunds / disputes / subscription / vault state) into the local
 mirror, then run one idempotent `Converge` pass. Safety-first: a bare
 `pull-provider` is a **DRY-RUN** (discovers divergences, logs, writes nothing);
@@ -644,7 +644,7 @@ against months-old charges, but review is cheap and irreversible mistakes aren't
 **2. What never fires automatically — the admin findings queue.** Findings whose
 fix requires a *remote* mutation or a judgment call (`pull.subscription.missing`
 ghost subscriptions, `pull.dispute.chargeback`, `consistency.duplicate.subscription`
-needing cancel + refund at the processor, a `derive.grant.excess` refunded-payment
+needing cancel + refund at the rail, a `derive.grant.excess` refunded-payment
 grant) are queued for a human and stay `admin_pending` (or `held`, behind the
 confirmed-absence gate) until acted on. Raising the mode does nothing to this
 queue — that is the safety design, not an oversight:
@@ -655,14 +655,14 @@ openrails pull-provider report --merchant=<slug>   # open + admin-pending + held
 # No public HTTP route is exposed for this queue in core OpenRails.
 ```
 
-Work the queue by doing the remote action yourself at the processor (cancel, refund,
+Work the queue by doing the remote action yourself at the rail (cancel, refund,
 investigate), then `ack` the finding with notes; `dismiss` records a false positive.
 The next pull + Converge independently verifies reality converged.
 
 ## Documentation
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
-- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails pull-provider` (dry-run by default; `--overwrite`/`--prune` + post-pull Converge): the manual batch truth-pull that overwrites the local mirror from the payment processors and converges local state (#107/#511; never writes to a provider).
+- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails pull-provider` (dry-run by default; `--overwrite`/`--prune` + post-pull Converge): the manual batch truth-pull that overwrites the local mirror from the payment rails and converges local state (#107/#511; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
 - **Merchant provisioning & API keys:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)

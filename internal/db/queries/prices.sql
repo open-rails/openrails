@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, status, amount, currency,
-    billing_cycle_days, processors, created_at, updated_at
+    billing_cycle_days, rails, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,
-    sqlc.narg(billing_cycle_days), sqlc.narg(processors),
+    sqlc.narg(billing_cycle_days), sqlc.narg(rails),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -78,16 +78,16 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 -- providers the legacy "nmi" key is also consulted.
 SELECT * FROM openrails.prices price
 WHERE price.status <> 'draft'
-  AND (price.processors -> sqlc.arg(provider)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
+  AND (price.rails -> sqlc.arg(provider)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
        OR (sqlc.arg(include_nmi_fallback)::boolean
-           AND price.processors -> 'nmi' ->> 'plan_id' = sqlc.arg(plan_id)::text))
+           AND price.rails -> 'nmi' ->> 'plan_id' = sqlc.arg(plan_id)::text))
 LIMIT 1;
 
 -- name: GetPriceWithProductByCCBillPriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.processors -> 'ccbill' ->> 'flex_id' = sqlc.arg(flex_id)::text
+WHERE price.rails -> 'ccbill' ->> 'flex_id' = sqlc.arg(flex_id)::text
   AND price.status <> 'draft'
 LIMIT 1;
 
@@ -95,7 +95,7 @@ LIMIT 1;
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.processors -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
+WHERE price.rails -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
   AND price.status <> 'draft'
 LIMIT 1;
 
@@ -106,7 +106,7 @@ UPDATE openrails.prices SET
     amount = $4,
     currency = $5,
     billing_cycle_days = sqlc.narg(billing_cycle_days),
-    processors = sqlc.narg(processors),
+    rails = sqlc.narg(rails),
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1;
 

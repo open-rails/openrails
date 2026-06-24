@@ -15,7 +15,7 @@ func TestAssertActiveTransitionAllowed_BlocksChargebackCancelType(t *testing.T) 
 
 	svc := &SubscriptionLifecycleService{}
 	cancelType := models.CancelTypeChargeback
-	sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
+	sub := &models.Subscription{ID: uuid.New(), Rail: models.RailCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "renewal", false)
 	require.Error(t, err)
@@ -30,7 +30,7 @@ func TestAssertActiveTransitionAllowed_BlocksUserAndMerchantCancelTypes(t *testi
 		cancelType := cancelType
 		t.Run(string(cancelType), func(t *testing.T) {
 			t.Parallel()
-			sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorStripe, Status: models.StatusCancelled, CancelType: &cancelType}
+			sub := &models.Subscription{ID: uuid.New(), Rail: models.RailStripe, Status: models.StatusCancelled, CancelType: &cancelType}
 
 			err := svc.assertActiveTransitionAllowed(context.Background(), sub, "renewal", false)
 			require.Error(t, err)
@@ -46,9 +46,9 @@ func TestReactivateMembership_RequiresFuturePaidThroughDate(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Hour)
 
 	_, err := svc.ReactivateMembership(context.Background(), &ReactivateMembershipParams{
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: "sub_123",
-		CurrentPeriodEndsAt:     &past,
+		Rail:                models.RailCCBill,
+		RailSubscriptionID:  "sub_123",
+		CurrentPeriodEndsAt: &past,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reactivation requires a future paid-through period end")
@@ -59,7 +59,7 @@ func TestAssertActiveTransitionAllowed_IgnoresChargebackFeedbackWithoutCancelTyp
 
 	svc := &SubscriptionLifecycleService{}
 	feedback := "CHARGEBACK: unauthorized"
-	sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorCCBill, Status: models.StatusCancelled, CancelFeedback: &feedback}
+	sub := &models.Subscription{ID: uuid.New(), Rail: models.RailCCBill, Status: models.StatusCancelled, CancelFeedback: &feedback}
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "reactivation", false)
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestAssertActiveTransitionAllowed_AllowsExpiredCancelType(t *testing.T) {
 
 	svc := &SubscriptionLifecycleService{}
 	cancelType := models.CancelTypeExpired
-	sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
+	sub := &models.Subscription{ID: uuid.New(), Rail: models.RailCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "reactivation", false)
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestAssertActiveTransitionAllowed_AllowsOverride(t *testing.T) {
 
 	svc := &SubscriptionLifecycleService{}
 	cancelType := models.CancelTypeChargeback
-	sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
+	sub := &models.Subscription{ID: uuid.New(), Rail: models.RailCCBill, Status: models.StatusCancelled, CancelType: &cancelType}
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "reactivation", true)
 	require.NoError(t, err)

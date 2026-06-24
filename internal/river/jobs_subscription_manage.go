@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
@@ -44,7 +44,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Processors                   config.ProcessorSet
+	Rails                        config.RailSet
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -98,16 +98,16 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,
-		"processor":       sub.Processor,
+		"rail":            sub.Rail,
 	}).Info("processing subscription cancellation")
 
-	switch sub.Processor {
-	case models.ProcessorStripe:
+	switch sub.Rail {
+	case models.RailStripe:
 		if w.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
-		stripeSvc := &subscriptions.StripeService{Config: w.Config, Processors: w.Processors}
-		if err := stripeSvc.CancelSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
+		stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
 			return err
 		}
 		var feedback *string
@@ -143,7 +143,7 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Processors                   config.ProcessorSet
+	Rails                        config.RailSet
 	EntitlementService           *entitlements.EntitlementService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -207,7 +207,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		log.WithContext(ctx).WithFields(log.Fields{
 			"user_id":         userID,
 			"subscription_id": sub.ID,
-			"processor":       sub.Processor,
+			"rail":            sub.Rail,
 			"status":          sub.Status,
 		}).Info("subscription not resumable; skipping resume")
 		return nil
@@ -216,12 +216,12 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,
-		"processor":       sub.Processor,
+		"rail":            sub.Rail,
 	}).Info("processing subscription resume")
 
-	if sub.Processor == models.ProcessorStripe {
-		stripeSvc := &subscriptions.StripeService{Config: w.Config, Processors: w.Processors}
-		if err := stripeSvc.ResumeSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
+	if sub.Rail == models.RailStripe {
+		stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+		if err := stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
 			return err
 		}
 
@@ -236,9 +236,9 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		return nil
 	}
 
-	if processors.IsNMIBackedProcessor(sub.Processor) {
+	if rails.IsNMIBackedRail(sub.Rail) {
 		// NMI in-window resume (issue 216). The NMI subscription was never
-		// deleted (the delete was deferred), so no processor-side call is needed.
+		// deleted (the delete was deferred), so no rail-side call is needed.
 		// We (1) supersede the pending deferred-delete intent on the ledger
 		// (#358) so it cannot fire, then (2) restore the subscription + paid
 		// entitlement window via ReactivateMembership, and (3) clear
@@ -257,9 +257,9 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 
 		periodEnd := sub.CurrentPeriodEndsAt
 		reactivated, err := w.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
-			Processor:               sub.Processor,
-			ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-			CurrentPeriodEndsAt:     periodEnd,
+			Rail:                sub.Rail,
+			RailSubscriptionID:  sub.RailSubscriptionID,
+			CurrentPeriodEndsAt: periodEnd,
 			// This is an authorized user-initiated undo within the open window.
 			// A user-cancelled subscription is "terminal" per the lifecycle guard,
 			// so we explicitly allow the terminal->active transition here. The
@@ -283,8 +283,8 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id": sub.ID,
-		"processor":       sub.Processor,
-	}).Warn("resumable subscription with unsupported processor path")
+		"rail":            sub.Rail,
+	}).Warn("resumable subscription with unsupported rail path")
 	return nil
 }
 

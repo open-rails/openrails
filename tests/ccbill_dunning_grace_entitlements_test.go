@@ -51,14 +51,14 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "NewSaleSuccess", newSale)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(subID)
+		sub := suite.GetSubscriptionByRailID(subID)
 		return sub != nil && sub.Status == models.StatusActive && sub.CurrentPeriodEndsAt != nil
 	}, 10*time.Second, 200*time.Millisecond)
 
-	sub := suite.GetSubscriptionByProcessorID(subID)
+	sub := suite.GetSubscriptionByRailID(subID)
 	require.NotNil(t, sub)
 	require.Equal(t, userID, sub.CustomerID.String())
-	require.Equal(t, models.ProcessorCCBill, sub.Processor)
+	require.Equal(t, models.RailCCBill, sub.Rail)
 
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(paidTermEndTS), "current_period_ends_at should match nextRenewalDate + timestamp time-of-day")
@@ -77,11 +77,11 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "RenewalFailure", renewalFailure)
 
 	require.Eventually(t, func() bool {
-		s := suite.GetSubscriptionByProcessorID(subID)
+		s := suite.GetSubscriptionByRailID(subID)
 		return s != nil && s.Status == models.StatusPastDue && s.NextRetryAt != nil && s.NextRetryAt.Equal(nextRetryAt)
 	}, 10*time.Second, 200*time.Millisecond)
 
-	sub = suite.GetSubscriptionByProcessorID(subID)
+	sub = suite.GetSubscriptionByRailID(subID)
 	require.NotNil(t, sub)
 	require.Equal(t, models.StatusPastDue, sub.Status)
 	require.NotNil(t, sub.NextRetryAt)
@@ -107,11 +107,11 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "RenewalSuccess", renewalSuccess)
 
 	require.Eventually(t, func() bool {
-		s := suite.GetSubscriptionByProcessorID(subID)
+		s := suite.GetSubscriptionByRailID(subID)
 		return s != nil && s.Status == models.StatusActive && s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Equal(newPaidTermEndTS)
 	}, 10*time.Second, 200*time.Millisecond)
 
-	sub = suite.GetSubscriptionByProcessorID(subID)
+	sub = suite.GetSubscriptionByRailID(subID)
 	require.Equal(t, models.StatusActive, sub.Status)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(newPaidTermEndTS))
@@ -149,11 +149,11 @@ func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "NewSaleSuccess", newSale)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(subID)
+		sub := suite.GetSubscriptionByRailID(subID)
 		return sub != nil && sub.Status == models.StatusActive && sub.CurrentPeriodEndsAt != nil
 	}, 10*time.Second, 200*time.Millisecond)
 
-	sub := suite.GetSubscriptionByProcessorID(subID)
+	sub := suite.GetSubscriptionByRailID(subID)
 	require.NotNil(t, sub)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(paidTermEndTS))
@@ -167,11 +167,11 @@ func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "Cancellation", cancel)
 
 	require.Eventually(t, func() bool {
-		s := suite.GetSubscriptionByProcessorID(subID)
+		s := suite.GetSubscriptionByRailID(subID)
 		return s != nil && s.Status == models.StatusCancelled && s.EndedAt != nil && s.EndedAt.Equal(paidTermEndTS)
 	}, 10*time.Second, 200*time.Millisecond)
 
-	sub = suite.GetSubscriptionByProcessorID(subID)
+	sub = suite.GetSubscriptionByRailID(subID)
 	require.Equal(t, models.StatusCancelled, sub.Status)
 	require.NotNil(t, sub.EndedAt)
 	require.True(t, sub.EndedAt.Equal(paidTermEndTS), "ended_at should be set to paid term end for period-end cancellation")

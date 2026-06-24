@@ -24,18 +24,18 @@ func seedMetricsData(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID)
 	t.Helper()
 	userID := uuid.New().String()
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: "metrics-" + uuid.NewString()[:8],
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailMobius,
+		RailSubID: "metrics-" + uuid.NewString()[:8],
 	})
 
 	suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		Amount:         999,
 		TransactionID:  "txn-" + uuid.NewString()[:8],
 	})
@@ -69,10 +69,10 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
         new_subscriptions, scheduled_starts,
         cancellations_user, cancellations_merchant, cancellations_expired, cancellations_chargeback,
         reactivations, active_count_end, past_due_count_end, pending_count_end, mrr_cents, entitlements_granted,
-        processor.name, processor.active_subscriptions, processor.new_subscriptions, processor.cancellations,
-        processor.revenue_total_cents, processor.revenue_subscription_cents, processor.revenue_one_time_cents,
-        processor.revenue_refunds_cents, processor.revenue_chargebacks_cents,
-        processor.payments_successful, processor.payments_failed
+        rail.name, rail.active_subscriptions, rail.new_subscriptions, rail.cancellations,
+        rail.revenue_total_cents, rail.revenue_subscription_cents, rail.revenue_one_time_cents,
+        rail.revenue_refunds_cents, rail.revenue_chargebacks_cents,
+        rail.payments_successful, rail.payments_failed
     ) VALUES`)
 	require.NoError(t, err)
 
@@ -86,7 +86,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 		int64(1), &scheduled,
 		int64(0), int64(0), int64(0), int64(0),
 		int64(0), int64(1), int64(0), int64(0), amount, &entitlements,
-		[]string{string(models.ProcessorMobius)}, []int64{1}, []int64{1}, []int64{0},
+		[]string{string(models.RailMobius)}, []int64{1}, []int64{1}, []int64{0},
 		[]int64{amount}, []int64{amount}, []int64{0},
 		[]int64{0}, []int64{0},
 		[]int64{1}, []int64{0},
@@ -95,7 +95,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 }
 
 // TestAdminMetricsFolded exercises the #528 folded GET /v1/merchant/metrics endpoint
-// (was /metrics/{summary,revenue,subscriptions,processors,churn}). With a single
+// (was /metrics/{summary,revenue,subscriptions,rails,churn}). With a single
 // currency present each section is a bare object; the response carries all five
 // sections in one document. Authorized by merchant:usage:read.
 func TestAdminMetricsFolded(t *testing.T) {
@@ -136,11 +136,11 @@ func TestAdminMetricsFolded(t *testing.T) {
 	require.True(t, ok, "subscriptions should include buckets array: %s", w.Body.String())
 	assert.NotEmpty(t, subBuckets)
 
-	// processors section
-	processors, ok := resp["processors"].(map[string]any)
-	require.True(t, ok, "response must carry a processors object")
-	procList, ok := processors["processors"].([]any)
-	require.True(t, ok, "processors should include processors array: %s", w.Body.String())
+	// rails section
+	rails, ok := resp["rails"].(map[string]any)
+	require.True(t, ok, "response must carry a rails object")
+	procList, ok := rails["rails"].([]any)
+	require.True(t, ok, "rails should include rails array: %s", w.Body.String())
 	assert.NotEmpty(t, procList)
 
 	// churn section

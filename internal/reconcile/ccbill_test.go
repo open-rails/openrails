@@ -79,7 +79,7 @@ func TestCCBillFetcher_Fetch(t *testing.T) {
 	// Subscriptions: 1 active roster entry + cancellation + expiry events.
 	require.Len(t, snap.Subscriptions, 3)
 	active := snap.Subscriptions[0]
-	require.Equal(t, "0125217202000000017", active.ProcessorSubscriptionID)
+	require.Equal(t, "0125217202000000017", active.RailSubscriptionID)
 	require.Equal(t, SubscriptionStatusActive, active.Status)
 	require.Equal(t, "1", active.RawStatus)
 	require.Equal(t, "u1@example.com", active.Email)
@@ -88,7 +88,7 @@ func TestCCBillFetcher_Fetch(t *testing.T) {
 	require.Equal(t, time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), *active.NextBillingAt)
 
 	cancelled := snap.Subscriptions[1]
-	require.Equal(t, "0999000000000000001", cancelled.ProcessorSubscriptionID)
+	require.Equal(t, "0999000000000000001", cancelled.RailSubscriptionID)
 	require.Equal(t, SubscriptionStatusCancelled, cancelled.Status)
 	require.Equal(t, "CANCELLATION", cancelled.RawStatus)
 
@@ -131,7 +131,7 @@ func TestCCBillFetcher_SubscriptionIDFilterAppliedClientSide(t *testing.T) {
 	snap, err := (&CCBillFetcher{DataLink: dl}).Fetch(context.Background(), FetchParams{SubscriptionID: "111"})
 	require.NoError(t, err)
 	require.Len(t, snap.Subscriptions, 1)
-	require.Equal(t, "111", snap.Subscriptions[0].ProcessorSubscriptionID)
+	require.Equal(t, "111", snap.Subscriptions[0].RailSubscriptionID)
 	require.Len(t, snap.Transactions, 1)
 	require.Equal(t, "111", snap.Transactions[0].SubscriptionID)
 }

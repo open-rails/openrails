@@ -113,7 +113,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 	      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
-	        (id, price_id, product_id, status, processor, processor_subscription_id,
+	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id)
 	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9, $10)`,
@@ -139,7 +139,7 @@ func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Ti
 		Provider:       "mobius",
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,
-		Payload:        NMIDeletePayload{UserID: fx.userID.String(), ProcessorSubscriptionID: fx.psid},
+		Payload:        NMIDeletePayload{UserID: fx.userID.String(), RailSubscriptionID: fx.psid},
 		IdempotencyKey: NMIDeleteIdempotencyKey(fx.subID),
 		NextAttemptAt:  dueAt,
 		Origin:         origin,

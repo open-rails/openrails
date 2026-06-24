@@ -8,10 +8,10 @@
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND provider_account_id = sqlc.arg(provider_account_id)::uuid
-  AND processor_subscription_id <> ''
+  AND rail_subscription_id <> ''
   AND (
     COALESCE(cardinality(sqlc.arg(present_ids)::text[]), 0) = 0
-    OR processor_subscription_id <> ALL(sqlc.arg(present_ids)::text[])
+    OR rail_subscription_id <> ALL(sqlc.arg(present_ids)::text[])
   );
 
 -- name: ListExcessPaymentsForProviderAccount :many

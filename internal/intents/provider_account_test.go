@@ -158,10 +158,10 @@ func TestRuntimeProviderAccountsStripe(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	processors := config.ProcessorSet{
+	rails := config.RailSet{
 		"stripe": {Type: "stripe", SecretKey: "sk_test_aaa"},
 	}
-	resolver := NewRuntimeProviderAccounts(&config.Config{}, processors, nil)
+	resolver := NewRuntimeProviderAccounts(&config.Config{}, rails, nil)
 	resolver.StripeBaseURL = srv.URL
 
 	ctx := context.Background()
@@ -175,14 +175,14 @@ func TestRuntimeProviderAccountsStripe(t *testing.T) {
 	assert.Equal(t, int64(1), calls.Load())
 
 	// Same-account key rotation: refetch, same account id, no false park.
-	processors["stripe"].SecretKey = "sk_test_bbb"
+	rails["stripe"].SecretKey = "sk_test_bbb"
 	account2, ok := resolver.ResolveProviderAccount(ctx, "stripe")
 	require.True(t, ok)
 	assert.Equal(t, account.AccountID, account2.AccountID)
 	assert.Equal(t, int64(2), calls.Load())
 
 	// Fetch failure -> ok=false (guard skipped), not an error.
-	processors["stripe"].SecretKey = "rk_live_denied"
+	rails["stripe"].SecretKey = "rk_live_denied"
 	_, ok = resolver.ResolveProviderAccount(ctx, "stripe")
 	assert.False(t, ok)
 

@@ -1,14 +1,14 @@
 // Package declinecode defines a standardized billing failure/decline vocabulary
-// shared across every payment processor (card + Solana), so a rebill failure is
+// shared across every payment rail (card + Solana), so a rebill failure is
 // reported the same way regardless of rail — exactly how Stripe/NMI expose a
 // stable `decline_code`.
 //
 // The codes align with Stripe's decline_code taxonomy and OpenRails' existing
 // NMI localization IDs (see internal/integrations/nmi/client.go), so the
-// new Solana cranker speaks the same language the card processors already do.
+// new Solana cranker speaks the same language the card rails already do.
 package declinecode
 
-// Code is a stable, processor-agnostic decline/failure code. String-valued (like
+// Code is a stable, rail-agnostic decline/failure code. String-valued (like
 // Stripe's decline_code), recorded on the subscription failure + surfaced to
 // operators/analytics. Solana cranks map their on-chain program errors onto
 // these; cards map their gateway response codes onto these.
@@ -20,11 +20,11 @@ const (
 	InsufficientFunds Code = "insufficient_funds"
 
 	// CommunicationError — a transient transport/availability problem reaching the
-	// processor (card: gateway comms; Solana: RPC/network, or the cranker wallet
+	// rail (card: gateway comms; Solana: RPC/network, or the cranker wallet
 	// out of SOL gas). Operational -> retry, never dun the subscriber.
 	CommunicationError Code = "communication_error"
 
-	// ProcessingError — a generic processor-side error not otherwise classified.
+	// ProcessingError — a generic rail-side error not otherwise classified.
 	ProcessingError Code = "processing_error"
 
 	// DeclinedStopRecurring — the authorization to bill has been withdrawn (card:
@@ -33,7 +33,7 @@ const (
 	DeclinedStopRecurring Code = "declined_stop_all_recurring_payments"
 
 	// DuplicateTransaction — this period was already charged (card: duplicate at
-	// processor, NMI 430; Solana: amount_pulled_in_period already at the plan cap).
+	// rail, NMI 430; Solana: amount_pulled_in_period already at the plan cap).
 	// Idempotent -> treat as already-paid, advance, do not re-charge or dun.
 	DuplicateTransaction Code = "duplicate_transaction"
 

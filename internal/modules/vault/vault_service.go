@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -30,7 +30,7 @@ type VaultService struct {
 	MerchantSecrets      merchantSecretGetter
 	ProviderSecrets      providerAccountSecretResolver
 	Config               *config.Config
-	Processors           config.ProcessorSet
+	Rails                config.RailSet
 	DB                   *db.DB
 	clock                clockwork.Clock
 	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
@@ -147,13 +147,13 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, processors config.ProcessorSet, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.RailSet, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
 		NMIClients:           nmiClients,
 		Config:               cfg,
-		Processors:           processors,
+		Rails:                rails,
 		DB:                   dbx,
 		clock:                timeutil.FirstClock(clocks...),
 	}
@@ -161,14 +161,14 @@ func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClient
 
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod
 func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
-	processor := strings.TrimSpace(strings.ToLower(req.Provider))
-	if processor == "" {
+	rail := strings.TrimSpace(strings.ToLower(req.Provider))
+	if rail == "" {
 		return nil, errors.New("provider is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, processor)
+	client, err := s.resolveNMIClient(ctx, rail)
 	if err != nil {
-		return nil, fmt.Errorf("processor '%s' is not configured: %w", processor, err)
+		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
 
 	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
@@ -204,7 +204,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	pm := &models.PaymentMethod{
 		ID:                   uuidutil.NewV7(),
 		CustomerID:           identity.CustomerIDFromString(userID).UUID(),
-		Processor:            models.Processor(processor),
+		Rail:                 models.Rail(rail),
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
@@ -241,7 +241,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 		if err != nil {
 			return nil, err
 		}
-		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, config.ProcessorTypeNMI, "live", secretKey)
+		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, config.RailTypeNMI, "live", secretKey)
 		if err != nil {
 			return nil, fmt.Errorf("resolve merchant NMI secret: %w", err)
 		}
@@ -255,11 +255,11 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 			}
 			return nil, errors.New("missing scoped merchant NMI secret for provider account")
 		} else if value := strings.TrimSpace(sec.Value); value != "" {
-			proc := cloneProcessorConfig(s.processorConfig(provider))
+			proc := cloneRailConfig(s.railConfig(provider))
 			if proc == nil {
-				proc = &config.ProcessorConfig{Type: config.ProcessorTypeNMI}
+				proc = &config.RailConfig{Type: config.RailTypeNMI}
 			}
-			proc.Type = config.ProcessorTypeNMI
+			proc.Type = config.RailTypeNMI
 			proc.SecurityKey = value
 			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
 		}
@@ -271,7 +271,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 			return client, nil
 		}
 	}
-	if proc := s.processorConfig(provider); proc != nil && processors.IsNMIBacked(provider) {
+	if proc := s.railConfig(provider); proc != nil && rails.IsNMIBacked(provider) {
 		return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
 	}
 	return nil, errors.New("missing client")
@@ -285,14 +285,14 @@ func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSe
 	return nmi.NewClient(provider, cfg, testMode)
 }
 
-func (s *VaultService) processorConfig(name string) *config.ProcessorConfig {
+func (s *VaultService) railConfig(name string) *config.RailConfig {
 	if s == nil {
 		return nil
 	}
-	return s.Processors.GetProcessor(name)
+	return s.Rails.GetRail(name)
 }
 
-func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {
+func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 	if in == nil {
 		return nil
 	}
@@ -374,15 +374,15 @@ func stringPtrOrNil(value string) *string {
 
 // UpdateVault updates vault in NMI and updates local record timestamp
 func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod, req *UpdateVaultRequest) (*models.PaymentMethod, error) {
-	// Use processor from the payment method.
-	processor := strings.ToLower(string(pm.Processor))
-	if processor == "" {
-		return nil, errors.New("payment method processor is required")
+	// Use rail from the payment method.
+	rail := strings.ToLower(string(pm.Rail))
+	if rail == "" {
+		return nil, errors.New("payment method rail is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, processor)
+	client, err := s.resolveNMIClient(ctx, rail)
 	if err != nil {
-		return nil, fmt.Errorf("processor '%s' is not configured: %w", processor, err)
+		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
 
 	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.VaultID}
@@ -484,15 +484,15 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return fmt.Errorf("cannot delete vault: %d active subscription(s) are using this payment method", activeCount)
 	}
 
-	// Use processor from the payment method
-	processor := strings.ToLower(string(pm.Processor))
-	if processor == "" {
-		return errors.New("payment method processor is required")
+	// Use rail from the payment method
+	rail := strings.ToLower(string(pm.Rail))
+	if rail == "" {
+		return errors.New("payment method rail is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, processor)
+	client, err := s.resolveNMIClient(ctx, rail)
 	if err != nil {
-		return fmt.Errorf("processor '%s' is not configured: %w", processor, err)
+		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
 
 	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.VaultID}); err != nil {

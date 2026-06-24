@@ -14,7 +14,7 @@ type TierChangeRequest struct {
 
 var (
 	ErrTierChangeNoSubscription = errors.New("no active subscription found")
-	ErrTierChangeNotSupported   = errors.New("tier change not supported for this processor")
+	ErrTierChangeNotSupported   = errors.New("tier change not supported for this rail")
 	ErrTierChangeBlocked        = errors.New("tier change blocked")
 	ErrTierChangePending        = errors.New("tier change already pending")
 	ErrTierChangeSameProduct    = errors.New("already on this plan")

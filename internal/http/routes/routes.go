@@ -573,7 +573,7 @@ func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // RegisterMerchantWebhookRoutes mounts the CANONICAL merchant-scoped webhook surface
 // (POST /merchants/:merchant/webhooks/:provider, issue #529) — the active inbound
 // webhook surface for every deployment. One handler (httphandlers.MerchantWebhook,
-// Stripe + NMI-backed processors + CCBill) is shared by both the standalone gin server and the
+// Stripe + NMI-backed rails + CCBill) is shared by both the standalone gin server and the
 // embedded mux, so the two cannot drift.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))

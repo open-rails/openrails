@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -64,12 +64,12 @@ type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB                 *db.DB
 	Config             *config.Config
-	Processors         config.ProcessorSet
+	Rails              config.RailSet
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
 	IdempotencyService *idempotency.IdempotencyService
-	// DeferDelete schedules the processor-side delete for terminal
+	// DeferDelete schedules the rail-side delete for terminal
 	// cancellations (#344). Threaded into the per-run lifecycle so window
 	// expiry and retry exhaustion stop the remote NMI subscription via
 	// the ONE scheduled mechanism (kill-switch governed at execution). nil in
@@ -91,7 +91,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	providerAccounts := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Processors, w.NMIClients, w.DB)
+	providerAccounts := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Rails, w.NMIClients, w.DB)
 	runner := &intents.Runner{
 		Store: intents.NewStore(w.DB).WithProviderAccounts(providerAccounts),
 		Registry: intents.NewRegistry(
@@ -145,8 +145,8 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 	// Query all due past_due NMI-backed subscriptions
 	// Use w.now() instead of SQL NOW() to support time mocking in tests
-	nmiProcessors := processors.GetNMIBackedProcessorsList()
-	dueSubscriptions, err := repo.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiProcessors, w.now())
+	nmiRails := rails.GetNMIBackedRailsList()
+	dueSubscriptions, err := repo.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiRails, w.now())
 	if err != nil {
 		return fmt.Errorf("query due subscriptions: %w", err)
 	}
@@ -237,7 +237,7 @@ func (w *DunningWorker) processSubscription(
 ) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
-	provider := resolveSubscriptionProcessor(sub)
+	provider := resolveSubscriptionRail(sub)
 	client := w.NMIClients[provider] // may be nil; only required for charging
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
@@ -246,14 +246,14 @@ func (w *DunningWorker) processSubscription(
 	}
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
-	processor := models.Processor(provider)
+	rail := models.Rail(provider)
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
 	// one day of slack — see subscriptions.DunningWindow). Anything
 	// older (e.g. months-stale subscriptions imported from a legacy system)
 	// must never be surprise-charged — cancel + downgrade instead, and the
-	// processor-side subscription is stopped via the scheduled deferred-delete
+	// rail-side subscription is stopped via the scheduled deferred-delete
 	// mechanism so NMI quits retrying it. A sub-4-day cycle derives a ZERO
 	// window: any past_due daily sub is immediately terminal here.
 	cycleDays := subscriptions.BillingCycleDaysOf(sub.Price)
@@ -268,11 +268,11 @@ func (w *DunningWorker) processSubscription(
 	}
 	window := subscriptions.DunningWindow(cycleDays)
 	if w.now().UTC().After(periodEnd.Add(window)) {
-		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, processor, periodEnd, window)
+		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, rail, periodEnd, window)
 	}
 
 	if client == nil {
-		logEntry.WithField("processor", provider).Warn("NMI client not configured for provider; skipping")
+		logEntry.WithField("rail", provider).Warn("NMI client not configured for provider; skipping")
 		return dunningOutcomeFailed
 	}
 
@@ -308,7 +308,7 @@ func (w *DunningWorker) processSubscription(
 			Payload: intents.ManualRebillPayload{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
-				Processor:      provider,
+				Rail:           provider,
 				OrderReference: orderReference,
 				Attempt:        attemptOrdinal,
 			},
@@ -347,7 +347,7 @@ func (w *DunningWorker) processSubscription(
 	if pm == nil || pm.VaultID == "" || pm.BillingID == nil || *pm.BillingID == "" {
 		reason := "payment method unavailable for rebill"
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      processor,
+			Rail:           rail,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 		}); err != nil {
@@ -380,7 +380,7 @@ func (w *DunningWorker) processSubscription(
 		Payload: intents.ManualRebillPayload{
 			SubscriptionID: sub.ID,
 			PeriodEnd:      periodEnd,
-			Processor:      provider,
+			Rail:           provider,
 			OrderReference: orderReference,
 			Attempt:        attemptOrdinal,
 		},
@@ -405,7 +405,7 @@ func (w *DunningWorker) processSubscription(
 		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
 			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
 			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, moneySvc, processor, txnID)
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, moneySvc, rail, txnID)
 		}
 		logEntry.Info("Dunning: rebill successful")
 		return dunningOutcomeSucceeded
@@ -414,7 +414,7 @@ func (w *DunningWorker) processSubscription(
 		// Declined (now, or durably on an earlier pass — the evidence carries
 		// the response code either way): classify and apply the failure
 		// policy. The next scheduled retry derives a fresh attempt ordinal.
-		return w.applyDeclinedRebill(ctx, logEntry, sub, lifecycle, processor, intent)
+		return w.applyDeclinedRebill(ctx, logEntry, sub, lifecycle, rail, intent)
 
 	case intents.StatusUnknownNeedsVerify:
 		// Exactly the old markManualRebillUnknown posture: no lifecycle
@@ -447,7 +447,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 	logEntry *log.Entry,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
-	processor models.Processor,
+	rail models.Rail,
 	intent gen.OpenrailsProviderIntent,
 ) dunningOutcome {
 	reason := normalize.FromPtr(intent.LastFailureReason)
@@ -476,7 +476,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 	}
 
 	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      processor,
+		Rail:           rail,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 		FailureCode:    failureCode,
@@ -519,7 +519,7 @@ func manualRebillEvidenceResponseCode(intent gen.OpenrailsProviderIntent) int {
 
 // expireWindowedSubscription handles a past_due subscription whose missed rebill
 // is older than the dunning window: terminal cancellation + entitlement
-// revocation WITHOUT a charge. The processor-side delete is NOT performed
+// revocation WITHOUT a charge. The rail-side delete is NOT performed
 // inline — FailMembership(Terminal) persists the deletion marker and schedules
 // the deferred NMI delete through the one shared mechanism (#344), which the
 // deletion kill switch governs at execution time.
@@ -528,13 +528,13 @@ func (w *DunningWorker) expireWindowedSubscription(
 	logEntry *log.Entry,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
-	processor models.Processor,
+	rail models.Rail,
 	periodEnd time.Time,
 	window time.Duration,
 ) dunningOutcome {
 	reason := fmt.Sprintf("dunning window expired: rebill was due %s, window is %s", periodEnd.Format(time.RFC3339), window)
 	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      processor,
+		Rail:           rail,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 		Terminal:       true,
@@ -557,7 +557,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
 	moneySvc *money.MoneyService,
-	processor models.Processor,
+	rail models.Rail,
 	transactionID string,
 ) dunningOutcome {
 	var amount int64
@@ -572,11 +572,11 @@ func (w *DunningWorker) applySuccessfulRebill(
 
 	// Success: renew membership window and persist payment in the lifecycle flow.
 	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               processor,
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		TransactionID:           transactionID,
-		Amount:                  amount,
-		Currency:                currency,
+		Rail:               rail,
+		RailSubscriptionID: sub.RailSubscriptionID,
+		TransactionID:      transactionID,
+		Amount:             amount,
+		Currency:           currency,
 	}); err != nil {
 		logEntry.WithError(err).Error("renew membership after successful rebill")
 		return dunningOutcomeFailed
@@ -630,36 +630,36 @@ func rebillOrderReference(sub *models.Subscription) string {
 	return fmt.Sprintf("rebill-%s-%d", sub.ID, sub.CurrentPeriodEndsAt.UTC().Unix())
 }
 
-func resolveSubscriptionProcessor(sub *models.Subscription) string {
+func resolveSubscriptionRail(sub *models.Subscription) string {
 	if sub == nil {
 		return ""
 	}
 
-	// Use processor field directly
-	if p := normalizeProcessor(sub.Processor); p != "" {
+	// Use rail field directly
+	if p := normalizeRail(sub.Rail); p != "" {
 		return p
 	}
 	if sub.PaymentMethod != nil {
-		if p := normalizeProcessor(sub.PaymentMethod.Processor); p != "" {
+		if p := normalizeRail(sub.PaymentMethod.Rail); p != "" {
 			return p
 		}
 	}
 	return ""
 }
 
-func normalizeProcessor(value interface{}) string {
+func normalizeRail(value interface{}) string {
 	switch v := value.(type) {
 	case *string:
 		if v == nil {
 			return ""
 		}
-		return normalizeProcessor(*v)
+		return normalizeRail(*v)
 	case string:
 		return normalize.Lower(v)
-	case models.Processor:
-		// Subscription.Processor and PaymentMethod.Processor are the named type
-		// models.Processor (type Processor string), which does NOT match `case
-		// string` in a Go type switch. Without this case resolveSubscriptionProcessor
+	case models.Rail:
+		// Subscription.Rail and PaymentMethod.Rail are the named type
+		// models.Rail (type Rail string), which does NOT match `case
+		// string` in a Go type switch. Without this case resolveSubscriptionRail
 		// returns "" for every subscription, so NMIClients[""] is nil and NMI
 		// dunning rebills are silently skipped (caught by the dunning integration test).
 		return normalize.Lower(string(v))

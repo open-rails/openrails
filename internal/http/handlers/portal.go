@@ -19,7 +19,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	customerID, err := r.State.ProcessorCustomerService.GetCustomerID(r.Request.Context(), user.ID, "stripe")
+	customerID, err := r.State.RailCustomerService.GetCustomerID(r.Request.Context(), user.ID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		r.ErrorJSON(http.StatusNotFound, "stripe customer not found")
 		return
@@ -30,7 +30,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		return
 	}
 	returnURL += "/account"
-	service := &subscriptions.StripePortalService{Config: r.State.Config, Processors: r.State.Processors}
+	service := &subscriptions.StripePortalService{Config: r.State.Config, Rails: r.State.Rails}
 	urlStr, err := service.CreatePortalSession(r.Request.Context(), customerID, returnURL)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

@@ -113,8 +113,8 @@ func mutationRecordsForFinding(provider Provider, findingID uuid.UUID, f *Findin
 				rowID = id
 			}
 		}
-		out = add(out, "subscriptions", "insert", rowID, a.Materialize.ProcessorSubscriptionID, "materialized_subscription_id", 1)
-		out = add(out, "entitlements", "insert", "", a.Materialize.ProcessorSubscriptionID, "entitlements_granted", 0)
+		out = add(out, "subscriptions", "insert", rowID, a.Materialize.RailSubscriptionID, "materialized_subscription_id", 1)
+		out = add(out, "entitlements", "insert", "", a.Materialize.RailSubscriptionID, "entitlements_granted", 0)
 		if a.Materialize.Backfill != nil {
 			out = add(out, "payments", "insert", "", a.Materialize.Backfill.TransactionID, "payment_backfilled", 1)
 		}

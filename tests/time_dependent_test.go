@@ -239,7 +239,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Processor:   models.ProcessorMobius,
+		Rail:        models.RailMobius,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -348,7 +348,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Processor:   models.ProcessorMobius,
+		Rail:        models.RailMobius,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -439,13 +439,13 @@ func TestDunningRetrySchedule(t *testing.T) {
 	// Create a past_due subscription with next_retry_at 3 days in the future
 	nextRetry := startTime.Add(3 * 24 * time.Hour) // Retry scheduled for 3 days from now
 	retryAttempts := 1
-	processorSubID := "test-dunning-schedule-" + uuid.New().String()[:8]
+	railSubID := "test-dunning-schedule-" + uuid.New().String()[:8]
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
-		ProcessorSubID:  processorSubID,
+		Rail:            models.RailMobius,
+		RailSubID:       railSubID,
 		PeriodStart:     startTime.Add(-30 * 24 * time.Hour), // Started 30 days ago
 		PeriodEnd:       startTime.Add(-1 * time.Hour),       // Just expired
 		RetryAttempts:   &retryAttempts,
@@ -457,10 +457,10 @@ func TestDunningRetrySchedule(t *testing.T) {
 	countDueSubscriptions := func(clock clockwork.Clock) int {
 		return suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.subscriptions sub
-			WHERE sub.processor = $1
+			WHERE sub.rail = $1
 			  AND sub.status = $2
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3`,
-			string(models.ProcessorMobius), string(models.StatusPastDue), clock.Now())
+			string(models.RailMobius), string(models.StatusPastDue), clock.Now())
 	}
 
 	t.Run("subscription is past_due with scheduled retry", func(t *testing.T) {
@@ -525,22 +525,22 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	userID := uuid.New().String()
-	processorSubID := "test-dunning-max-" + uuid.New().String()[:8]
+	railSubID := "test-dunning-max-" + uuid.New().String()[:8]
 
 	// Create a subscription at max retries (one more failure = cancelled).
 	// Monthly billing cycle -> 5 failures total (#359).
 	retryAttempts := subscriptions.DunningMaxFailures(30) - 1 // One retry left
 	nextRetry := startTime
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusPastDue,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: processorSubID,
-		PeriodStart:    startTime.Add(-30 * 24 * time.Hour),
-		PeriodEnd:      startTime.Add(-1 * time.Hour),
-		RetryAttempts:  &retryAttempts,
-		NextRetryAt:    &nextRetry,
+		UserID:        userID,
+		PriceID:       priceID,
+		Status:        models.StatusPastDue,
+		Rail:          models.RailMobius,
+		RailSubID:     railSubID,
+		PeriodStart:   startTime.Add(-30 * 24 * time.Hour),
+		PeriodEnd:     startTime.Add(-1 * time.Hour),
+		RetryAttempts: &retryAttempts,
+		NextRetryAt:   &nextRetry,
 	})
 
 	// Create an indefinite entitlement linked to the subscription
@@ -575,7 +575,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		failureReason := "Card declined"
 		failureCode := "05"
 		err := lifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorMobius,
+			Rail:           models.RailMobius,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &failureReason,
 			FailureCode:    &failureCode,
@@ -631,22 +631,22 @@ func TestDunningSuccessReactivates(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	userID := uuid.New().String()
-	processorSubID := "test-dunning-success-" + uuid.New().String()[:8]
+	railSubID := "test-dunning-success-" + uuid.New().String()[:8]
 
 	// Create a past_due subscription with period that just expired
 	retryAttempts := 2
 	nextRetry := startTime
 	originalPeriodEnd := startTime.Add(-1 * time.Hour) // Just expired (1 hour before startTime)
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusPastDue,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: processorSubID,
-		PeriodStart:    startTime.Add(-30 * 24 * time.Hour),
-		PeriodEnd:      originalPeriodEnd,
-		RetryAttempts:  &retryAttempts,
-		NextRetryAt:    &nextRetry,
+		UserID:        userID,
+		PriceID:       priceID,
+		Status:        models.StatusPastDue,
+		Rail:          models.RailMobius,
+		RailSubID:     railSubID,
+		PeriodStart:   startTime.Add(-30 * 24 * time.Hour),
+		PeriodEnd:     originalPeriodEnd,
+		RetryAttempts: &retryAttempts,
+		NextRetryAt:   &nextRetry,
 	})
 
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
@@ -665,9 +665,9 @@ func TestDunningSuccessReactivates(t *testing.T) {
 		// Simulate successful rebill via RenewMembership
 		// RenewMembership uses the mock clock for period calculations
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor:               models.ProcessorMobius,
-			ProcessorSubscriptionID: processorSubID,
-			TransactionID:           "rebill-" + uuid.NewString(),
+			Rail:               models.RailMobius,
+			RailSubscriptionID: railSubID,
+			TransactionID:      "rebill-" + uuid.NewString(),
 		})
 		require.NoError(t, err)
 
@@ -738,19 +738,19 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	userID := uuid.New().String()
-	processorSubID := "test-renewal-clock-" + uuid.New().String()[:8]
+	railSubID := "test-renewal-clock-" + uuid.New().String()[:8]
 
 	// Create subscription that started 30 days ago and is about to expire
 	periodStart := startTime.Add(-30 * 24 * time.Hour)
 	periodEnd := startTime.Add(-1 * time.Hour) // Just expired
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: processorSubID,
-		PeriodStart:    periodStart,
-		PeriodEnd:      periodEnd,
+		UserID:      userID,
+		PriceID:     priceID,
+		Status:      models.StatusActive,
+		Rail:        models.RailMobius,
+		RailSubID:   railSubID,
+		PeriodStart: periodStart,
+		PeriodEnd:   periodEnd,
 	})
 
 	originalPeriodEnd := sub.CurrentPeriodEndsAt
@@ -766,9 +766,9 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 	t.Run("renewal extends period by billing cycle days", func(t *testing.T) {
 		// Simulate renewal webhook
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor:               models.ProcessorMobius,
-			ProcessorSubscriptionID: processorSubID,
-			TransactionID:           "renewal-" + uuid.NewString(),
+			Rail:               models.RailMobius,
+			RailSubscriptionID: railSubID,
+			TransactionID:      "renewal-" + uuid.NewString(),
 		})
 		require.NoError(t, err)
 
@@ -832,7 +832,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			ID:            uuid.New(),
 			CustomerID:    suite.ensureCustomer(ctx, userID),
 			PriceID:       priceID,
-			Processor:     models.ProcessorMobius,
+			Rail:          models.RailMobius,
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
@@ -857,7 +857,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			ID:            uuid.New(),
 			CustomerID:    suite.ensureCustomer(ctx, userID),
 			PriceID:       priceID,
-			Processor:     models.ProcessorMobius,
+			Rail:          models.RailMobius,
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
@@ -898,7 +898,7 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Processor:   models.ProcessorMobius,
+		Rail:        models.RailMobius,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -963,18 +963,18 @@ func TestCancellationTimestamp(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	userID := uuid.New().String()
-	processorSubID := "test-cancel-ts-" + uuid.New().String()[:8]
+	railSubID := "test-cancel-ts-" + uuid.New().String()[:8]
 
 	// Create an active subscription
 	periodEnd := cancelTime.Add(15 * 24 * time.Hour) // 15 days remaining
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: processorSubID,
-		PeriodStart:    cancelTime.Add(-15 * 24 * time.Hour),
-		PeriodEnd:      periodEnd,
+		UserID:      userID,
+		PriceID:     priceID,
+		Status:      models.StatusActive,
+		Rail:        models.RailMobius,
+		RailSubID:   railSubID,
+		PeriodStart: cancelTime.Add(-15 * 24 * time.Hour),
+		PeriodEnd:   periodEnd,
 	})
 
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
@@ -996,15 +996,15 @@ func TestCancellationTimestamp(t *testing.T) {
 
 	t.Run("advancing clock and cancelling another subscription", func(t *testing.T) {
 		// Create another subscription
-		processorSubID2 := "test-cancel-ts-2-" + uuid.New().String()[:8]
+		railSubID2 := "test-cancel-ts-2-" + uuid.New().String()[:8]
 		sub2 := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-			UserID:         uuid.New().String(),
-			PriceID:        priceID,
-			Status:         models.StatusActive,
-			Processor:      models.ProcessorMobius,
-			ProcessorSubID: processorSubID2,
-			PeriodStart:    cancelTime,
-			PeriodEnd:      cancelTime.Add(30 * 24 * time.Hour),
+			UserID:      uuid.New().String(),
+			PriceID:     priceID,
+			Status:      models.StatusActive,
+			Rail:        models.RailMobius,
+			RailSubID:   railSubID2,
+			PeriodStart: cancelTime,
+			PeriodEnd:   cancelTime.Add(30 * 24 * time.Hour),
 		})
 
 		// Advance clock by 5 days
@@ -1041,7 +1041,7 @@ func TestVaultTimestamps(t *testing.T) {
 	pm := &models.PaymentMethod{
 		ID:         uuid.New(),
 		CustomerID: suite.ensureCustomer(ctx, userID),
-		Processor:  models.ProcessorMobius,
+		Rail:       models.RailMobius,
 		VaultID:    "test-vault-" + uuid.New().String()[:8],
 		CreatedAt:  mockClock.Now(),
 		UpdatedAt:  mockClock.Now(),

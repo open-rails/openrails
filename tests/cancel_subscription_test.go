@@ -73,11 +73,11 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorCCBill,
-		ProcessorSubID: "test-ccbill-sub-" + uuid.NewString(),
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailCCBill,
+		RailSubID: "test-ccbill-sub-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "I want to cancel"}
@@ -107,11 +107,11 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        priceID,
-		Status:         models.StatusCancelled,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: "test-nmi-cancelled-" + uuid.NewString(),
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusCancelled,
+		Rail:      models.RailMobius,
+		RailSubID: "test-nmi-cancelled-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "test"}
@@ -137,11 +137,11 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 	routerA := newHostSeamSelfRouter(t, suite, userAID, nil)
 
 	subB := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userBID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorMobius,
-		ProcessorSubID: "test-mobius-sub-" + uuid.NewString(),
+		UserID:    userBID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailMobius,
+		RailSubID: "test-mobius-sub-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "not yours"}

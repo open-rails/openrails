@@ -225,13 +225,13 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 		return
 	}
 	var stripePriceID string
-	if m := price.Processors["stripe"]; m != nil {
-		stripePriceID = strings.TrimSpace(m[models.ProcessorKeyStripePriceID])
+	if m := price.Rails["stripe"]; m != nil {
+		stripePriceID = strings.TrimSpace(m[models.RailKeyStripePriceID])
 	}
 	if stripePriceID == "" {
 		return
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	a := active
 	_ = stripeSvc.UpdatePrice(ctx, stripePriceID, catalog.UpdatePriceParams{Active: &a})
 }
@@ -340,7 +340,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 	if err != nil {
 		return nil, err
 	}
-	if len(p.Processors) == 0 {
+	if len(p.Rails) == 0 {
 		return nil, nil
 	}
 	local := &priceVerifyContext{
@@ -349,8 +349,8 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		Currency:   p.Currency,
 	}
 	adapters := s.providerAdapters()
-	out := make(map[string]ProviderState, len(p.Processors))
-	for name, ids := range p.Processors {
+	out := make(map[string]ProviderState, len(p.Rails))
+	for name, ids := range p.Rails {
 		adapter, ok := adapters[strings.ToLower(strings.TrimSpace(name))]
 		if !ok {
 			// Unknown providers stay visible but uncomputed.
@@ -463,7 +463,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			}
 			// Recreate path (stripe only): mint a new Stripe Price under the
 			// same lookup_key + metadata, then patch the local row's
-			// processors map to point at it.
+			// rails map to point at it.
 			product, _, perr := s.requireCatalogServices()
 			if perr != nil {
 				return nil, perr
@@ -472,7 +472,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			if perr != nil {
 				return nil, perr
 			}
-			if _, perr := s.recreateStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
+			if _, perr := s.recreateStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.RailKeyStripeProductID]); perr != nil {
 				return nil, perr
 			}
 			actions[name] = "recreated_remote"
@@ -589,7 +589,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	}
 
 	// Push OpenRails values to Stripe: name, description, and the active flag.
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	name := strings.TrimSpace(local.DisplayName)
 	desc := strings.TrimSpace(local.Description)
 	active := local.IsPurchasable()
@@ -615,7 +615,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 }
 
 // recreateStripePrice mints a fresh Stripe Price for the OpenRails price under
-// its content lookup_key and repoints the local processors map at the new id.
+// its content lookup_key and repoints the local rails map at the new id.
 // This is the missing→recreate path: the stored Stripe price 404'd, so we
 // re-mint one carrying the SAME content lookup_key + metadata (derived from the
 // product slug + the price's immutable money terms) and point the row at it.
@@ -625,7 +625,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 // upstream (create-new + archive-old), never an in-place re-mint+transfer.
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
 	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays)
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	newPriceID, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
 		StripeProductID:  stripeProductID,
 		UnitAmount:       local.Amount,
@@ -646,21 +646,21 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 	if err != nil {
 		return "", err
 	}
-	newProcessors := cloneProcessors(local.Processors)
-	if newProcessors["stripe"] == nil {
-		newProcessors["stripe"] = map[string]string{}
+	newRails := cloneRails(local.Rails)
+	if newRails["stripe"] == nil {
+		newRails["stripe"] = map[string]string{}
 	}
-	newProcessors["stripe"][models.ProcessorKeyStripePriceID] = newPriceID
-	if err := prices.UpdateProcessors(ctx, priceID, newProcessors); err != nil {
+	newRails["stripe"][models.RailKeyStripePriceID] = newPriceID
+	if err := prices.UpdateRails(ctx, priceID, newRails); err != nil {
 		return "", err
 	}
 	return newPriceID, nil
 }
 
-// cloneProcessors returns a shallow-deep copy of a processors map. Used by
+// cloneRails returns a shallow-deep copy of a rails map. Used by
 // UpdatePrice when computing the merged provider_links result so we don't
 // mutate the row's in-memory map before the DB round-trip.
-func cloneProcessors(in map[string]map[string]string) map[string]map[string]string {
+func cloneRails(in map[string]map[string]string) map[string]map[string]string {
 	out := make(map[string]map[string]string, len(in))
 	for k, v := range in {
 		inner := make(map[string]string, len(v))

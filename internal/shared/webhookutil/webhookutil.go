@@ -86,7 +86,7 @@ func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
 	}
 
 	return Prepared{
-		Provider:  subscriptions.ProcessorCCBill,
+		Provider:  subscriptions.RailCCBill,
 		EventType: eventType,
 		Body:      normalizedBody,
 	}, nil
@@ -128,7 +128,7 @@ func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) 
 	}
 
 	return Prepared{
-		Provider:          subscriptions.ProcessorStripe,
+		Provider:          subscriptions.RailStripe,
 		EventID:           eventID,
 		EventType:         eventType,
 		Body:              body,

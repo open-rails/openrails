@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +36,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":     "nmi",
+			"rail":          "nmi",
 			"payment_token": "tok_test_123",
 			"email":         email,
 			"first_name":    "Test",
@@ -64,14 +64,14 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	subs := suite.GetAllSubscriptionsByUserID(userID)
 	require.NotEmpty(t, subs, "expected subscription records")
 	sub := subs[0]
-	assert.Equal(t, models.Processor("nmi"), sub.Processor)
+	assert.Equal(t, models.Rail("nmi"), sub.Rail)
 	assert.Equal(t, models.StatusActive, sub.Status)
 	require.NotNil(t, sub.CurrentPeriodStartsAt)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
 
 	pms := suite.GetPaymentMethodsByUserID(userID)
 	require.NotEmpty(t, pms)
-	assert.Equal(t, models.Processor("nmi"), pms[0].Processor)
+	assert.Equal(t, models.Rail("nmi"), pms[0].Rail)
 
 	payments := suite.GetPaymentsByUserID(userID)
 	require.NotEmpty(t, payments)
@@ -104,8 +104,8 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.Processor("nmi"),
-		ProcessorSubID:      "nmi-sub-" + uuid.New().String()[:8],
+		Rail:                models.Rail("nmi"),
+		RailSubID:           "nmi-sub-" + uuid.New().String()[:8],
 		CurrentPeriodEndsAt: &periodEnd,
 	})
 	defer suite.CleanupSubscriptionsForUser(userID)
@@ -113,11 +113,11 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	txnID := "nmi-renew-" + uuid.New().String()[:8]
 	ctx := dbtest.WithTestMerchant(context.Background())
 	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.Processor("nmi"),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		TransactionID:           txnID,
-		Amount:                  price.Amount,
-		Currency:                price.Currency,
+		Rail:               models.Rail("nmi"),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		TransactionID:      txnID,
+		Amount:             price.Amount,
+		Currency:           price.Currency,
 	})
 	require.NoError(t, err)
 
@@ -126,11 +126,11 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	firstPeriodEnd := *afterFirst.CurrentPeriodEndsAt
 
 	err = suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.Processor("nmi"),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		TransactionID:           txnID,
-		Amount:                  price.Amount,
-		Currency:                price.Currency,
+		Rail:               models.Rail("nmi"),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		TransactionID:      txnID,
+		Amount:             price.Amount,
+		Currency:           price.Currency,
 	})
 	require.NoError(t, err)
 
@@ -143,7 +143,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	for _, payment := range payments {
 		if payment.TransactionID == txnID {
 			matched++
-			assert.Equal(t, models.Processor("nmi"), payment.Processor)
+			assert.Equal(t, models.Rail("nmi"), payment.Rail)
 		}
 	}
 	assert.Equal(t, 1, matched, "expected exactly one payment record for the renewal transaction")
@@ -153,11 +153,11 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	suite.Processors[provider] = &config.ProcessorConfig{
-		Type:        config.ProcessorTypeNMI,
+	suite.Rails[provider] = &config.RailConfig{
+		Type:        config.RailTypeNMI,
 		SecurityKey: "test-security-key-" + provider,
 	}
-	processors.InitNMIBackedProcessors(suite.Processors)
+	rails.InitNMIBackedRails(suite.Rails)
 
 	settings := &config.NMIProviderSettings{
 		Name:        provider,
@@ -184,15 +184,15 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	}
 
 	price := suite.GetPrice(priceID)
-	if price.Processors == nil {
-		price.Processors = map[string]map[string]string{}
+	if price.Rails == nil {
+		price.Rails = map[string]map[string]string{}
 	}
-	price.Processors[provider] = map[string]string{
-		models.ProcessorKeyPlanID: provider + "-plan",
+	price.Rails[provider] = map[string]string{
+		models.RailKeyPlanID: provider + "-plan",
 	}
-	processorsJSON, err := json.Marshal(price.Processors)
+	railsJSON, err := json.Marshal(price.Rails)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE openrails.prices SET processors = $1 WHERE id = $2", processorsJSON, price.ID)
+		"UPDATE openrails.prices SET rails = $1 WHERE id = $2", railsJSON, price.ID)
 	require.NoError(t, err)
 }

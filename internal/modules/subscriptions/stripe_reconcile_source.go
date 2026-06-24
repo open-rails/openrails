@@ -45,10 +45,10 @@ type HTTPStripeSubscriptionLister struct {
 	HTTPClient *http.Client
 }
 
-// NewStripeSubscriptionLister builds a lister from the OpenRails processor set,
+// NewStripeSubscriptionLister builds a lister from the OpenRails rail set,
 // reusing RequireStripeSecretKey for auth.
-func NewStripeSubscriptionLister(processors config.ProcessorSet) (*HTTPStripeSubscriptionLister, error) {
-	_, secretKey, err := RequireStripeSecretKey(processors)
+func NewStripeSubscriptionLister(rails config.RailSet) (*HTTPStripeSubscriptionLister, error) {
+	_, secretKey, err := RequireStripeSecretKey(rails)
 	if err != nil {
 		return nil, err
 	}
@@ -237,10 +237,10 @@ type HTTPStripeChargeLister struct {
 	HTTPClient *http.Client
 }
 
-// NewStripeChargeLister builds a charge lister from the OpenRails processor set,
+// NewStripeChargeLister builds a charge lister from the OpenRails rail set,
 // reusing RequireStripeSecretKey for auth.
-func NewStripeChargeLister(processors config.ProcessorSet) (*HTTPStripeChargeLister, error) {
-	_, secretKey, err := RequireStripeSecretKey(processors)
+func NewStripeChargeLister(rails config.RailSet) (*HTTPStripeChargeLister, error) {
+	_, secretKey, err := RequireStripeSecretKey(rails)
 	if err != nil {
 		return nil, err
 	}

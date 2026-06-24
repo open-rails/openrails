@@ -13,7 +13,7 @@ import (
 // DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
 const DefaultNMICollectJSURL = "https://secure.networkmerchants.com/token/Collect.js"
 
-// StripeCredentials are a merchant's processor credentials, loaded by merchant id at
+// StripeCredentials are a merchant's rail credentials, loaded by merchant id at
 // request time (NOT injected process-wide). Empty fields mean "not configured".
 type StripeCredentials struct {
 	SecretKey            string

@@ -105,7 +105,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		MerchantSecrets:      store,
 		ProviderSecrets:      vaultStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:               vaultTestConfig(true),
-		Processors:           vaultTestProcessors(""),
+		Rails:                vaultTestRails(""),
 		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
 			client, err := nmi.NewClient(provider, cfg, testMode)
 			if err != nil {
@@ -145,8 +145,8 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 func TestVaultFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &VaultService{
-		Config:     vaultTestConfig(true),
-		Processors: vaultTestProcessors("static-mobius-key"),
+		Config: vaultTestConfig(true),
+		Rails:  vaultTestRails("static-mobius-key"),
 	}
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
@@ -160,7 +160,7 @@ func TestVaultProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 		ProviderSecrets: vaultMissingProviderSecretResolver{},
 		Config:          vaultTestConfig(true),
-		Processors:      vaultTestProcessors("static-mobius-key"),
+		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
 	_, err := svc.resolveNMIClient(ctx, "mobius")
@@ -185,7 +185,7 @@ func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 		MerchantSecrets: vaultUnavailableSecretStore{},
 		ProviderSecrets: vaultStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:          vaultTestConfig(true),
-		Processors:      vaultTestProcessors("static-mobius-key"),
+		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
 	_, err := svc.resolveNMIClient(ctx, "mobius")
@@ -212,8 +212,8 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 			merchantA: "mobius-a",
 			merchantB: "mobius-b",
 		},
-		Config:     vaultTestConfig(true),
-		Processors: vaultTestProcessors(""),
+		Config: vaultTestConfig(true),
+		Rails:  vaultTestRails(""),
 	}
 
 	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "mobius")
@@ -254,15 +254,15 @@ func (r vaultPerMerchantProviderSecretResolver) PrimaryProviderAccountSecretName
 
 func vaultTestConfig(testMode bool) *config.Config {
 	return &config.Config{
-		Mode:    config.ModeFull,
+		Mode:     config.ModeFull,
 		TestMode: testMode,
 	}
 }
 
-func vaultTestProcessors(mobiusKey string) config.ProcessorSet {
-	return config.ProcessorSet{
+func vaultTestRails(mobiusKey string) config.RailSet {
+	return config.RailSet{
 		"mobius": {
-			Type:        config.ProcessorTypeNMI,
+			Type:        config.RailTypeNMI,
 			SecurityKey: mobiusKey,
 		},
 	}

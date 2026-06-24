@@ -60,12 +60,12 @@ func TestSolanaTokensNoAuth(t *testing.T) {
 func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string) {
 	suite, token, userID := setupTestSuiteWithAuth(t)
 
-	// Add Solana configuration to the construction-time processor set.
-	if suite.Processors == nil {
-		suite.Processors = make(config.ProcessorSet)
+	// Add Solana configuration to the construction-time rail set.
+	if suite.Rails == nil {
+		suite.Rails = make(config.RailSet)
 	}
-	suite.Processors["solana"] = &config.ProcessorConfig{
-		Type:            config.ProcessorTypeSolana,
+	suite.Rails["solana"] = &config.RailConfig{
+		Type:            config.RailTypeSolana,
 		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 		Tokens:          solanatokens.DefaultDevnetTokens(),
 		// RPCEndpoint and Network are derived from test_mode

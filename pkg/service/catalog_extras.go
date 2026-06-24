@@ -171,8 +171,8 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 	}
 	var stripeLister stripeProductLister
 	if s.rt != nil {
-		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != "" {
-			stripeLister = &catalog.StripeCatalogService{Config: cfg, Processors: s.rt.Processors}
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != "" {
+			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
 		}
 	}
 	var nmiLister nmiPlanLister
@@ -370,7 +370,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 	}
 	byPDA := map[string]*pdaState{}
 	for _, pr := range snap.priceByID {
-		cfg := pr.Processors[string(models.ProcessorSolana)]
+		cfg := pr.Rails[string(models.RailSolana)]
 		if cfg == nil {
 			continue
 		}

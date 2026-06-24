@@ -25,7 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -47,7 +47,7 @@ type TierChangeResponse struct {
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
 	PriceID        string                         `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
-	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Processor info
+	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
 	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                         `json:"message,omitempty"`         // User-friendly message
@@ -71,13 +71,13 @@ type TierChangePreviewResponse struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
 	PriceID          string     `json:"price_id"`
-	Processor        string     `json:"processor"`
+	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now"`     // cents charged immediately (0 for downgrade)
 	NextChargeAmount int64      `json:"next_charge_amount"` // cents at next renewal (new plan price)
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
 	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
-	IsEstimate       bool       `json:"is_estimate"` // true when the processor finalizes the exact amount (Stripe upgrades)
+	IsEstimate       bool       `json:"is_estimate"` // true when the rail finalizes the exact amount (Stripe upgrades)
 	Message          string     `json:"message,omitempty"`
 }
 
@@ -97,16 +97,16 @@ type CheckoutService struct {
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchantSecretGetter
 	ProviderSecrets      providerAccountSecretResolver
-	// ProcessorCustomerService maps app users to processor customer ids so we
+	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
-	ProcessorCustomerService *payments.ProcessorCustomerService
+	RailCustomerService *payments.RailCustomerService
 	// StripeService is used to resolve/create the Stripe customer and to run the
 	// webhook-independent duplicate guard (issue #213).
 	StripeService *subscriptions.StripeService
 	clock         clockwork.Clock
 	Config        *config.Config
-	Processors    config.ProcessorSet
+	Rails         config.RailSet
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -139,29 +139,29 @@ func NewCheckoutService(
 	vaultService *vault.VaultService,
 	idempotencyService checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
-	processorCustomerService *payments.ProcessorCustomerService,
+	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
-	processorSet config.ProcessorSet,
+	railSet config.RailSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
 	service := &CheckoutService{
-		SubscriptionService:      subscriptionService,
-		ProductService:           productService,
-		PriceService:             priceService,
-		PaymentService:           paymentService,
-		EntitlementService:       entitlementService,
-		PurchaseService:          NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		VaultResolver:            NewCheckoutVaultService(paymentMethodService, vaultService),
-		PaymentMethodService:     paymentMethodService,
-		VaultService:             vaultService,
-		IdempotencyService:       idempotencyService,
-		NMIClients:               nmiClients,
-		ProcessorCustomerService: processorCustomerService,
-		StripeService:            &subscriptions.StripeService{Config: cfg, Processors: processorSet},
-		clock:                    clock,
-		Config:                   cfg,
-		Processors:               processorSet,
+		SubscriptionService:  subscriptionService,
+		ProductService:       productService,
+		PriceService:         priceService,
+		PaymentService:       paymentService,
+		EntitlementService:   entitlementService,
+		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		VaultResolver:        NewCheckoutVaultService(paymentMethodService, vaultService),
+		PaymentMethodService: paymentMethodService,
+		VaultService:         vaultService,
+		IdempotencyService:   idempotencyService,
+		NMIClients:           nmiClients,
+		RailCustomerService:  railCustomerService,
+		StripeService:        &subscriptions.StripeService{Config: cfg, Rails: railSet},
+		clock:                clock,
+		Config:               cfg,
+		Rails:                railSet,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
@@ -254,10 +254,10 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		return nil, errors.New("product is not available for purchase")
 	}
 
-	// Normalize processor
-	processor := strings.TrimSpace(strings.ToLower(req.Processor))
-	if processor == "" {
-		return nil, errors.New("processor is required")
+	// Normalize rail
+	rail := strings.TrimSpace(strings.ToLower(req.Rail))
+	if rail == "" {
+		return nil, errors.New("rail is required")
 	}
 
 	// Check for tier group conflicts (upgrade/downgrade scenarios)
@@ -309,7 +309,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		// empty and the guard would let a second parallel subscription through.
 		// For Stripe, additionally ask Stripe directly whether this customer
 		// already holds an active/trialing subscription in the same tier group.
-		if processor == "stripe" {
+		if rail == "stripe" {
 			blocked, err := s.stripeTierGroupConflict(ctx, user, *product.TierGroup)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check stripe tier group: %w", err)
@@ -341,23 +341,23 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 
 		// User has coverage with an end date
 		// CCBill cannot schedule future start dates - block
-		if processor == "ccbill" {
+		if rail == "ccbill" {
 			return &CheckoutResponse{
 				Status:  "blocked",
 				Message: "You already have active access. CCBill subscriptions cannot be scheduled for future start. Please try again when your current access expires.",
 			}, nil
 		}
 
-		// Other processors: allow with delayed start
+		// Other rails: allow with delayed start
 	}
 
 	// Determine if this is a subscription or one-time purchase
 	isSubscription := price.BillingCycleDays != nil
 
 	if isSubscription {
-		return s.processSubscription(ctx, req, user, price, product, coverage, processor)
+		return s.processSubscription(ctx, req, user, price, product, coverage, rail)
 	}
-	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, processor)
+	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, rail)
 }
 
 // GetUserProductCoverage checks if user has active coverage for a product.
@@ -379,21 +379,21 @@ func (s *CheckoutService) processSubscription(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
-	// Route to processor-specific handler based on config type detection
+	// Route to rail-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
-	case processor == "ccbill":
+	case rail == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
-	case processors.IsNMIBacked(processor):
-		return s.processNMISubscription(ctx, req, user, price, product, coverage, processor)
-	case processor == "stripe":
+	case rails.IsNMIBacked(rail):
+		return s.processNMISubscription(ctx, req, user, price, product, coverage, rail)
+	case rail == "stripe":
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
-	case processor == "solana":
+	case rail == "solana":
 		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
 	default:
-		return nil, fmt.Errorf("unsupported processor: %s", processor)
+		return nil, fmt.Errorf("unsupported rail: %s", rail)
 	}
 }
 
@@ -405,21 +405,21 @@ func (s *CheckoutService) processOneTimePurchase(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
-	// Route to processor-specific handler based on config type detection
+	// Route to rail-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
-	case processors.IsNMIBacked(processor):
-		return s.processNMISale(ctx, req, user, price, product, coverage, processor)
-	case processor == "solana":
+	case rails.IsNMIBacked(rail):
+		return s.processNMISale(ctx, req, user, price, product, coverage, rail)
+	case rail == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
-	case processor == "ccbill":
+	case rail == "ccbill":
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
-	case processor == "stripe":
+	case rail == "stripe":
 		return s.processStripePayment(ctx, req, user, price)
 	default:
-		return nil, fmt.Errorf("unsupported processor for one-time purchases: %s", processor)
+		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", rail)
 	}
 }
 
@@ -499,10 +499,10 @@ func (s *CheckoutService) processCCBillUpgrade(
 	}
 
 	// Validate existing subscription is CCBill
-	if existingSub.Processor != models.ProcessorCCBill {
+	if existingSub.Rail != models.RailCCBill {
 		return nil, errors.New("existing subscription is not a CCBill subscription")
 	}
-	if existingSub.ProcessorSubscriptionID == "" {
+	if existingSub.RailSubscriptionID == "" {
 		return nil, errors.New("existing subscription is missing CCBill reference")
 	}
 
@@ -527,7 +527,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 		Email:                  *user.Email,
 		FormName:               formName,
 		FlexID:                 flexID,
-		OriginalSubscriptionID: existingSub.ProcessorSubscriptionID,
+		OriginalSubscriptionID: existingSub.RailSubscriptionID,
 	}
 
 	response, err := ccbillClient.GenerateUpgradeFlexFormURL(upgradeParams)
@@ -536,11 +536,11 @@ func (s *CheckoutService) processCCBillUpgrade(
 	}
 
 	log.WithFields(log.Fields{
-		"user_id":                   user.ID,
-		"subscription_id":           existingSub.ID,
-		"current_price_id":          existingSub.PriceID,
-		"target_price_id":           newPrice.ID,
-		"processor_subscription_id": existingSub.ProcessorSubscriptionID,
+		"user_id":              user.ID,
+		"subscription_id":      existingSub.ID,
+		"current_price_id":     existingSub.PriceID,
+		"target_price_id":      newPrice.ID,
+		"rail_subscription_id": existingSub.RailSubscriptionID,
 	}).Info("Generated CCBill upgrade FlexForm URL via checkout")
 
 	return &CheckoutResponse{
@@ -567,13 +567,13 @@ func (s *CheckoutService) processNMISubscription(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
-	provider := normalize.Lower(processor)
+	provider := normalize.Lower(rail)
 	if provider == "" {
-		return nil, errors.New("processor is required")
+		return nil, errors.New("rail is required")
 	}
-	nmiPlanID, err := requireNMIPlanForProcessor(price, provider)
+	nmiPlanID, err := requireNMIPlanForRail(price, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +676,7 @@ func (s *CheckoutService) processNMISubscription(
 		ID:            uuidutil.NewV7(),
 		CustomerID:    customerID,
 		PriceID:       price.ID,
-		Processor:     models.Processor(provider),
+		Rail:          models.Rail(provider),
 		TransactionID: nmiSubscriptionAttemptTransactionID(orderID),
 		Amount:        price.Amount,
 		ListAmount:    price.Amount,
@@ -786,7 +786,7 @@ func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req
 }
 
 func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
-	if existing, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
+	if existing, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
 		if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
 			return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
 		}
@@ -811,9 +811,9 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
 		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
-		ProcessorSubscriptionID:  providerSubscriptionID,
+		RailSubscriptionID:       providerSubscriptionID,
 		Status:                   models.StatusPending,
-		Processor:                models.Processor(provider),
+		Rail:                     models.Rail(provider),
 		UserEmail:                emailPtr,
 		StartedAt:                *timePtr(now),
 		PaymentMethodID:          paymentMethodID,
@@ -833,7 +833,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 
 	if err := s.SubscriptionService.Create(ctx, subscription); err != nil {
 		if errors.Is(err, subscriptions.ErrActiveSubscriptionExists) {
-			if existing, loadErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
+			if existing, loadErr := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
 				if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
 					return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
 				}
@@ -883,10 +883,10 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		subscription.CurrentPeriodStartsAt = &periodStart
 		subscription.CurrentPeriodEndsAt = &periodEnd
 		subscription.StartedAt = periodStart
-		if subscription.ProcessorSubscriptionID == "" {
-			subscription.ProcessorSubscriptionID = providerSubscriptionID
+		if subscription.RailSubscriptionID == "" {
+			subscription.RailSubscriptionID = providerSubscriptionID
 		}
-		subscription.Processor = models.Processor(provider)
+		subscription.Rail = models.Rail(provider)
 		if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
 			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 			return nil, fmt.Errorf("failed to activate NMI subscription: %w", err)
@@ -897,7 +897,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		return nil, err
 	}
 
-	if _, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(provider), transactionID); err != nil {
+	if _, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(provider), transactionID); err != nil {
 		if !repo.IsNotFound(err) {
 			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 			return nil, fmt.Errorf("failed to check NMI subscription payment: %w", err)
@@ -908,7 +908,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 			CustomerID:               subscription.CustomerID,
 			PriceID:                  price.ID,
 			SubscriptionID:           &subscription.ID,
-			Processor:                models.Processor(provider),
+			Rail:                     models.Rail(provider),
 			TransactionID:            transactionID,
 			Amount:                   price.Amount,
 			ListAmount:               price.Amount,
@@ -1114,16 +1114,16 @@ func (s *CheckoutService) processNMISale(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
 	_ = coverage
 	if s.NMISaleService == nil {
 		return nil, errors.New("NMI sale service unavailable")
 	}
 	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_sale")
-	provider := normalize.Lower(processor)
+	provider := normalize.Lower(rail)
 	if provider == "" {
-		return nil, errors.New("processor is required")
+		return nil, errors.New("rail is required")
 	}
 	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey, provider)
 }
@@ -1147,7 +1147,7 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	_, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
+	_, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -1202,7 +1202,7 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	_, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
+	_, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -1237,12 +1237,12 @@ func (s *CheckoutService) processStripePayment(
 	}, nil
 }
 
-// processorCustomerStore is the slice of ProcessorCustomerService used for
+// railCustomerStore is the slice of RailCustomerService used for
 // Stripe customer resolution. Defined as an interface so the resolution logic
 // is unit-testable without a database.
-type processorCustomerStore interface {
-	GetCustomerID(ctx context.Context, userID, processor string) (string, error)
-	Upsert(ctx context.Context, userID, processor, customerID string) error
+type railCustomerStore interface {
+	GetCustomerID(ctx context.Context, userID, rail string) (string, error)
+	Upsert(ctx context.Context, userID, rail, customerID string) error
 }
 
 // stripeCustomerClient is the slice of StripeService used for customer
@@ -1263,11 +1263,11 @@ type productResolver interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
 }
 
-func (s *CheckoutService) customerStore() processorCustomerStore {
-	if s.ProcessorCustomerService == nil {
+func (s *CheckoutService) customerStore() railCustomerStore {
+	if s.RailCustomerService == nil {
 		return nil
 	}
-	return s.ProcessorCustomerService
+	return s.RailCustomerService
 }
 
 func (s *CheckoutService) stripeClient() stripeCustomerClient {
@@ -1287,7 +1287,7 @@ func (s *CheckoutService) resolveStripeCustomer(ctx context.Context, user *UserI
 // resolveStripeCustomerWith returns the durable Stripe customer id for a user,
 // resolving in priority order (issue #212):
 //
-//  1. local mapping (ProcessorCustomerService.GetCustomerID)
+//  1. local mapping (RailCustomerService.GetCustomerID)
 //  2. Stripe Customer Search on metadata[app_user_id]
 //  3. create a fresh, idempotent Stripe customer
 //
@@ -1295,7 +1295,7 @@ func (s *CheckoutService) resolveStripeCustomer(ctx context.Context, user *UserI
 // the link survives even if the corresponding webhook is missed. It returns ""
 // (and no error) only when the dependencies are unavailable, in which case the
 // caller falls back to the legacy customer_email behavior.
-func resolveStripeCustomerWith(ctx context.Context, store processorCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
 	}
@@ -1361,7 +1361,7 @@ func (s *CheckoutService) stripeTierGroupConflict(ctx context.Context, user *Use
 // leave the local DB empty) cannot allow a second parallel subscription. It
 // never creates a customer: if no customer is mapped/found, there is by
 // definition no Stripe-side subscription to conflict with.
-func stripeTierGroupConflictWith(ctx context.Context, store processorCustomerStore, client stripeCustomerClient, prices stripePriceResolver, products productResolver, user *UserIdentity, tierGroup string) (bool, error) {
+func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, prices stripePriceResolver, products productResolver, user *UserIdentity, tierGroup string) (bool, error) {
 	tierGroup = strings.TrimSpace(tierGroup)
 	if tierGroup == "" {
 		return false, nil
@@ -1442,11 +1442,11 @@ func getStripePriceID(price *models.Price) (string, error) {
 	if price == nil {
 		return "", errors.New("price is required")
 	}
-	cfg := price.GetProcessorConfig(models.ProcessorStripe)
+	cfg := price.GetRailConfig(models.RailStripe)
 	if cfg == nil {
 		return "", errors.New("stripe price not configured")
 	}
-	id := strings.TrimSpace(cfg[models.ProcessorKeyStripePriceID])
+	id := strings.TrimSpace(cfg[models.RailKeyStripePriceID])
 	if id == "" {
 		return "", errors.New("stripe price id missing")
 	}
@@ -1467,7 +1467,7 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -1585,7 +1585,7 @@ func (s *CheckoutService) processUpgrade(
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
 	now := s.now()
 
@@ -1597,18 +1597,18 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// CCBill handles upgrades via their own Package Upgrade flow
-	if processor == "ccbill" {
+	if rail == "ccbill" {
 		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
 	}
 
 	// Solana doesn't support subscriptions
-	if processor == "solana" {
+	if rail == "solana" {
 		return nil, errors.New("solana does not support subscription upgrades")
 	}
 
-	// Only NMI-backed processors support programmatic upgrades
-	if !processors.IsNMIBacked(processor) {
-		return nil, fmt.Errorf("unsupported processor for upgrades: %s", processor)
+	// Only NMI-backed rails support programmatic upgrades
+	if !rails.IsNMIBacked(rail) {
+		return nil, fmt.Errorf("unsupported rail for upgrades: %s", rail)
 	}
 
 	// Get idempotency key (client-provided or generated)
@@ -1682,9 +1682,9 @@ func (s *CheckoutService) processUpgrade(
 		"billing_model":    "B",
 	}).Info("calculating Model-B upgrade first charge")
 
-	provider := normalize.Lower(processor)
+	provider := normalize.Lower(rail)
 	if provider == "" {
-		err := errors.New("processor is required for upgrades")
+		err := errors.New("rail is required for upgrades")
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
@@ -1694,7 +1694,7 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
-	nmiPlanID, err := requireNMIPlanForProcessor(newPrice, provider)
+	nmiPlanID, err := requireNMIPlanForRail(newPrice, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1763,12 +1763,12 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	rollbackNewSubscription := func() {
-		cleanupSub := &models.Subscription{ProcessorSubscriptionID: resp.SubscriptionID}
+		cleanupSub := &models.Subscription{RailSubscriptionID: resp.SubscriptionID}
 		if cancelErr := s.cancelNMISubscription(ctx, cleanupSub, provider); cancelErr != nil {
 			log.WithError(cancelErr).WithFields(log.Fields{
-				"subscription_id":           newSubscriptionID,
-				"processor_subscription_id": resp.SubscriptionID,
-				"processor":                 provider,
+				"subscription_id":      newSubscriptionID,
+				"rail_subscription_id": resp.SubscriptionID,
+				"rail":                 provider,
 			}).Error("failed to rollback successor NMI subscription after upgrade error")
 		}
 	}
@@ -1802,7 +1802,7 @@ func (s *CheckoutService) processUpgrade(
 			"user_id":        user.ID,
 			"transaction_id": prorationTransactionID,
 			"amount":         prorationAmount,
-			"processor":      provider,
+			"rail":           provider,
 		}).Info("charged upgrade proration")
 	}
 
@@ -1827,9 +1827,9 @@ func (s *CheckoutService) processUpgrade(
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
 		CreditsSpecSnapshot:      models.CloneCreditsSpec(newProduct.CreditsSpec),
-		ProcessorSubscriptionID:  resp.SubscriptionID,
+		RailSubscriptionID:       resp.SubscriptionID,
 		Status:                   models.StatusActive, // Active immediately since user paid proration
-		Processor:                models.Processor(provider),
+		Rail:                     models.Rail(provider),
 		UserEmail:                emailPtr,
 		StartedAt:                now,
 		// #268: Model B resets the period — fresh full period [now, now+cycle].
@@ -1865,7 +1865,7 @@ func (s *CheckoutService) processUpgrade(
 		// Post-charge DB failure: the user was charged the proration and a new
 		// subscription is live at NMI, but we cannot persist it locally. Compensate
 		// by refunding the proration and cancelling the new NMI subscription so the
-		// processor state matches the (unchanged) local state.
+		// rail state matches the (unchanged) local state.
 		s.compensateFailedUpgrade(ctx, provider, prorationTransactionID, newSubscriptionID, resp.SubscriptionID, user.ID, &existingSub.ID, rollbackNewSubscription, saveErr)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, saveErr)
 		return nil, saveErr
@@ -1913,10 +1913,10 @@ func (s *CheckoutService) processUpgrade(
 	// billing, so flag it for operator repair rather than silently dropping it.
 	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
 		log.WithError(err).WithFields(log.Fields{
-			"subscription_id":           existingSub.ID,
-			"processor_subscription_id": existingSub.ProcessorSubscriptionID,
-			"processor":                 provider,
-			"event":                     "upgrade_old_subscription_cancel_failed",
+			"subscription_id":      existingSub.ID,
+			"rail_subscription_id": existingSub.RailSubscriptionID,
+			"rail":                 provider,
+			"event":                "upgrade_old_subscription_cancel_failed",
 		}).Error("failed to cancel old NMI subscription after upgrade; manual intervention required to stop duplicate billing")
 	}
 
@@ -1939,15 +1939,15 @@ func (s *CheckoutService) processUpgrade(
 }
 
 // shortHash returns a stable 16-hex-char digest of s, used to build
-// deterministic processor order references from an idempotency key.
+// deterministic rail order references from an idempotency key.
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// compensateFailedUpgrade rolls back processor-side state after a post-charge DB
+// compensateFailedUpgrade rolls back rail-side state after a post-charge DB
 // failure during an NMI tier upgrade: it refunds the proration charge and cancels
-// the newly created NMI subscription so the processor matches the unchanged local
+// the newly created NMI subscription so the rail matches the unchanged local
 // state. Each step is best-effort; any failure is logged at error level with a
 // structured event so operators can finish the repair manually.
 func (s *CheckoutService) compensateFailedUpgrade(
@@ -1955,19 +1955,19 @@ func (s *CheckoutService) compensateFailedUpgrade(
 	provider string,
 	prorationTransactionID string,
 	newSubscriptionID uuid.UUID,
-	newProcessorSubscriptionID string,
+	newRailSubscriptionID string,
 	userID string,
 	oldSubscriptionID *uuid.UUID,
 	rollbackNewSubscription func(),
 	cause error,
 ) {
 	logEntry := log.WithError(cause).WithFields(log.Fields{
-		"user_id":                       userID,
-		"new_subscription_id":           newSubscriptionID,
-		"new_processor_subscription_id": newProcessorSubscriptionID,
-		"proration_transaction_id":      prorationTransactionID,
-		"processor":                     provider,
-		"event":                         "upgrade_compensation",
+		"user_id":                  userID,
+		"new_subscription_id":      newSubscriptionID,
+		"new_rail_subscription_id": newRailSubscriptionID,
+		"proration_transaction_id": prorationTransactionID,
+		"rail":                     provider,
+		"event":                    "upgrade_compensation",
 	})
 	if oldSubscriptionID != nil {
 		logEntry = logEntry.WithField("old_subscription_id", *oldSubscriptionID)
@@ -2002,10 +2002,10 @@ func (s *CheckoutService) processDowngrade(
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
-	processor string,
+	rail string,
 ) (*CheckoutResponse, error) {
 	// CCBill handles downgrades via their own flow
-	if processor == "ccbill" {
+	if rail == "ccbill" {
 		return &CheckoutResponse{
 			Status:  "blocked",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
@@ -2013,22 +2013,22 @@ func (s *CheckoutService) processDowngrade(
 	}
 
 	// Solana doesn't support subscriptions
-	if processor == "solana" {
+	if rail == "solana" {
 		return nil, errors.New("solana does not support subscription downgrades")
 	}
 
-	// Only NMI-backed processors support programmatic downgrades
-	if !processors.IsNMIBacked(processor) {
-		return nil, fmt.Errorf("unsupported processor for downgrades: %s", processor)
+	// Only NMI-backed rails support programmatic downgrades
+	if !rails.IsNMIBacked(rail) {
+		return nil, fmt.Errorf("unsupported rail for downgrades: %s", rail)
 	}
 
-	provider := normalize.Lower(processor)
+	provider := normalize.Lower(rail)
 	if provider == "" {
-		return nil, errors.New("processor is required for downgrades")
+		return nil, errors.New("rail is required for downgrades")
 	}
 
 	// Validate the new price has NMI configuration
-	if _, err := requireNMIPlanForProcessor(newPrice, provider); err != nil {
+	if _, err := requireNMIPlanForRail(newPrice, provider); err != nil {
 		return nil, err
 	}
 
@@ -2091,7 +2091,7 @@ func (s *CheckoutService) processDowngrade(
 //   - 0 days remaining            => firstCharge = newFull
 //   - full period remaining       => firstCharge = newFull - oldFull
 //
-// This helper is intentionally pure (no receiver state) so other processors
+// This helper is intentionally pure (no receiver state) so other rails
 // (e.g. the Solana path in #267) can reuse the exact same math. cycleDays is
 // returned so callers can advance the period end (now + cycleDays).
 func CalculateModelBUpgradeCharge(
@@ -2195,14 +2195,14 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
-	if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
+	if err := client.DeleteRecurringSubscription(sub.RailSubscriptionID); err != nil {
 		return err
 	}
 	return nil
 }
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
-// This is the unified entry point that routes to processor-specific implementations.
+// This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
 	// 1. Parse and validate price
 	priceID, err := api.ParsePriceID(req.PriceID)
@@ -2274,23 +2274,23 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		action = "downgrade"
 	}
 
-	// 6. Route to processor-specific handler based on config type detection
+	// 6. Route to rail-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
-	processor := string(existingSub.Processor)
+	rail := string(existingSub.Rail)
 
 	switch {
-	case processor == "stripe":
+	case rail == "stripe":
 		return s.processTierChangeStripe(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case processors.IsNMIBacked(processor):
+	case rails.IsNMIBacked(rail):
 		return s.processTierChangeNMI(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case processor == "ccbill":
+	case rail == "ccbill":
 		return s.processTierChangeCCBill(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case processor == "solana":
+	case rail == "solana":
 		return s.processTierChangeSolana(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	default:
 		return nil, &TierChangeError{
 			HTTPStatus: http.StatusBadRequest,
-			Message:    fmt.Sprintf("unsupported processor: %s", processor),
+			Message:    fmt.Sprintf("unsupported rail: %s", rail),
 		}
 	}
 }
@@ -2359,12 +2359,12 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		}
 	}
 
-	processor := string(existingSub.Processor)
+	rail := string(existingSub.Rail)
 	now := s.now()
 	resp := &TierChangePreviewResponse{
 		Object:           "tier_change_preview",
 		PriceID:          api.FormatPriceID(newPrice.ID),
-		Processor:        processor,
+		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
 	}
@@ -2395,7 +2395,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	resp.AmountDueNow = firstCharge
 	resp.Effective = "now"
 	resp.NextChargeDate = &nextDate
-	resp.IsEstimate = processor == "stripe"
+	resp.IsEstimate = rail == "stripe"
 	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.",
 		formatMinorAmount(firstCharge, newPrice.Currency),
 		formatMinorAmount(newPrice.Amount, newPrice.Currency),
@@ -2439,7 +2439,7 @@ func (s *CheckoutService) processTierChangeStripe(
 			Message:    "target price not configured for Stripe",
 		}
 	}
-	if strings.TrimSpace(existingSub.ProcessorSubscriptionID) == "" {
+	if strings.TrimSpace(existingSub.RailSubscriptionID) == "" {
 		return nil, &TierChangeError{
 			HTTPStatus: http.StatusBadRequest,
 			Message:    "subscription missing Stripe reference",
@@ -2454,7 +2454,7 @@ func (s *CheckoutService) processTierChangeStripe(
 				Mode:    "tier_change",
 				Action:  action,
 				PriceID: api.FormatPriceID(newPrice.ID),
-				Payment: CheckoutSessionPaymentResponse{Processor: "stripe"},
+				Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
 				Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 			}, nil
 		}
@@ -2484,8 +2484,8 @@ func (s *CheckoutService) processTierChangeStripe(
 			currentPeriodStart = *existingSub.CurrentPeriodStartsAt
 		}
 
-		stripeService := &subscriptions.StripeService{Config: s.Config, Processors: s.Processors}
-		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.ProcessorSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays); err != nil {
+		stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
+		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.RailSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays); err != nil {
 			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 		}
 
@@ -2502,7 +2502,7 @@ func (s *CheckoutService) processTierChangeStripe(
 			Mode:             "tier_change",
 			Action:           action,
 			PriceID:          api.FormatPriceID(newPrice.ID),
-			Payment:          CheckoutSessionPaymentResponse{Processor: "stripe"},
+			Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
 			SubscriptionID:   &subID,
 			Message:          fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
 			DelayedStart:     existingSub.CurrentPeriodEndsAt,
@@ -2535,15 +2535,15 @@ func (s *CheckoutService) processTierChangeStripe(
 	// of truth for Stripe-billed amounts. If exact parity with the NMI math is
 	// later required, switch to an explicit invoice-item + price-update flow.
 	// Verify the live invoice amount on a real Stripe test upgrade before deploy.
-	stripeService := &subscriptions.StripeService{Config: s.Config, Processors: s.Processors}
-	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.ProcessorSubscriptionID)
+	stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
+	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.RailSubscriptionID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
 	// Pass newPrice.ID so the subscription's metadata[internal_price_id] is
 	// rewritten to the new tier; otherwise the proration invoice and every future
 	// renewal would resolve the stale old price in the invoice.paid webhook (#268).
-	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, newPrice.ID.String(), "always_invoice", "now"); err != nil {
+	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.RailSubscriptionID, itemID, stripePriceID, newPrice.ID.String(), "always_invoice", "now"); err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
 
@@ -2585,7 +2585,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		Mode:             "tier_change",
 		Action:           action,
 		PriceID:          api.FormatPriceID(newPrice.ID),
-		Payment:          CheckoutSessionPaymentResponse{Processor: "stripe"},
+		Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
 		SubscriptionID:   &subID,
 		Message:          "Plan updated",
 		Currency:         newPrice.Currency,
@@ -2666,7 +2666,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		Mode:           "tier_change",
 		Action:         action,
 		PriceID:        req.PriceID,
-		Payment:        CheckoutSessionPaymentResponse{Processor: "solana"},
+		Payment:        CheckoutSessionPaymentResponse{Rail: "solana"},
 		SubscriptionID: &subIDStr,
 		Message:        msg,
 	}, nil
@@ -2688,7 +2688,7 @@ func (s *CheckoutService) processTierChangeNMI(
 	// Create a synthetic CheckoutRequest for reuse of existing upgrade/downgrade logic
 	checkoutReq := &CheckoutRequest{
 		PriceID:        req.PriceID,
-		Processor:      string(existingSub.Processor),
+		Rail:           string(existingSub.Rail),
 		IdempotencyKey: req.IdempotencyKey,
 	}
 	if existingSub.PaymentMethodID != nil {
@@ -2700,9 +2700,9 @@ func (s *CheckoutService) processTierChangeNMI(
 	var err error
 
 	if action == "upgrade" {
-		checkoutResp, err = s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Processor))
+		checkoutResp, err = s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Rail))
 	} else {
-		checkoutResp, err = s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Processor))
+		checkoutResp, err = s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Rail))
 	}
 
 	if err != nil {
@@ -2733,7 +2733,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Mode:    "tier_change",
 			Action:  action,
 			PriceID: api.FormatPriceID(newPrice.ID),
-			Payment: CheckoutSessionPaymentResponse{Processor: "ccbill"},
+			Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
 	}
@@ -2755,7 +2755,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutSessionPaymentResponse{
-			Processor:   "ccbill",
+			Rail:        "ccbill",
 			RedirectURL: checkoutResp.RedirectURL,
 		},
 		Message: "Redirect to CCBill to complete upgrade",
@@ -2821,17 +2821,17 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 	return tierResp
 }
 
-func requireNMIPlanForProcessor(price *models.Price, provider string) (string, error) {
+func requireNMIPlanForRail(price *models.Price, provider string) (string, error) {
 	provider = normalize.Lower(provider)
 	if provider == "" {
-		return "", errors.New("processor is required")
+		return "", errors.New("rail is required")
 	}
 	if price == nil {
 		return "", errors.New("price is required")
 	}
-	planID, ok := price.GetNMIConfigForProcessor(provider)
+	planID, ok := price.GetNMIConfigForRail(provider)
 	if !ok || strings.TrimSpace(planID) == "" {
-		return "", fmt.Errorf("price %s is missing NMI plan configuration for processor %s", price.ID, provider)
+		return "", fmt.Errorf("price %s is missing NMI plan configuration for rail %s", price.ID, provider)
 	}
 	return planID, nil
 }

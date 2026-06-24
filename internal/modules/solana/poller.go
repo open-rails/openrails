@@ -41,7 +41,7 @@ type RegisterPurchaseResult struct {
 }
 
 type paymentLookup interface {
-	GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error)
+	GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error)
 }
 
 type checkoutSessionMarker interface {
@@ -83,7 +83,7 @@ func NewSolanaPayPoller(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	processors config.ProcessorSet,
+	rails config.RailSet,
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
 	purchaseRegistrar purchaseRegistrar,
@@ -91,7 +91,7 @@ func NewSolanaPayPoller(
 	checkoutSessionService checkoutSessionMarker,
 ) *SolanaPayPoller {
 	var rpc *solanarpc.RPCClient
-	if solanaProc := processors.GetSolanaProcessor(); solanaProc != nil {
+	if solanaProc := rails.GetSolanaRail(); solanaProc != nil {
 		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Network))
 		if solanaNetwork == "" {
 			solanaNetwork = "mainnet"
@@ -345,7 +345,7 @@ func (p *SolanaPayPoller) attachCheckoutExpiry(ctx context.Context, reference st
 	if err != nil {
 		return err
 	}
-	if session.Processor != models.ProcessorSolana {
+	if session.Rail != models.RailSolana {
 		return fmt.Errorf("checkout session %s is not a solana session", session.ID)
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) != strings.TrimSpace(reference) {
@@ -368,7 +368,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		}
 		return nil, err
 	}
-	if session.Processor != models.ProcessorSolana {
+	if session.Rail != models.RailSolana {
 		return nil, nil
 	}
 	switch session.Status {
@@ -418,10 +418,10 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		return pending, nil
 	}
 
-	token := strings.ToUpper(strings.TrimSpace(solanaStateString(session.ProcessorState, "token_symbol")))
-	tokenMint := strings.TrimSpace(solanaStateString(session.ProcessorState, "token_mint"))
-	recipient := strings.TrimSpace(solanaStateString(session.ProcessorState, "recipient"))
-	tokenAmount := solanaStateUint64(session.ProcessorState, "token_amount")
+	token := strings.ToUpper(strings.TrimSpace(solanaStateString(session.RailState, "token_symbol")))
+	tokenMint := strings.TrimSpace(solanaStateString(session.RailState, "token_mint"))
+	recipient := strings.TrimSpace(solanaStateString(session.RailState, "recipient"))
+	tokenAmount := solanaStateUint64(session.RailState, "token_amount")
 	if token == "" || tokenMint == "" || recipient == "" || tokenAmount == 0 {
 		return nil, fmt.Errorf("checkout session %s is missing solana payment state", session.ID)
 	}
@@ -659,7 +659,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	}
 
 	// Fast idempotency guard: skip processing if this signature is already recorded.
-	existingPayment, err := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+	existingPayment, err := p.paymentLookup.GetByTransactionID(ctx, models.RailSolana, signature)
 	if err != nil && !repo.IsNotFound(err) {
 		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
@@ -683,7 +683,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	result, err := p.purchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         pending.UserID,
 		PriceID:        priceID,
-		Processor:      "solana",
+		Rail:           "solana",
 		TransactionID:  signature,
 		Amount:         pending.Amount,
 		Currency:       pending.Currency,
@@ -701,7 +701,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	if err != nil {
 		// Race-safe idempotency: if another worker inserted first, treat as success.
 		if isDuplicatePaymentTransactionIDError(err) {
-			existingPayment, getErr := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+			existingPayment, getErr := p.paymentLookup.GetByTransactionID(ctx, models.RailSolana, signature)
 			if getErr == nil {
 				if !solanaPaymentMatchesPending(existingPayment, reference, pending) {
 					log.WithFields(log.Fields{
@@ -784,7 +784,7 @@ func isDuplicatePaymentTransactionIDError(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "payments_processor_transaction_id_key") ||
+	return strings.Contains(msg, "payments_rail_transaction_id_key") ||
 		(strings.Contains(msg, "duplicate key value") && strings.Contains(msg, "sqlstate=23505"))
 }
 

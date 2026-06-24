@@ -64,10 +64,10 @@ func TestCreditGrantSpec_UnitAndExpiryDefaults(t *testing.T) {
 }
 
 func TestPrice_GetCCBillFlexForm_RequiresFlexID(t *testing.T) {
-	price := &Price{Processors: map[string]map[string]string{
-		string(ProcessorCCBill): {
-			ProcessorKeyCCBillFormName: "form-name",
-			ProcessorKeyStripePriceID:  "stripe-price-id",
+	price := &Price{Rails: map[string]map[string]string{
+		string(RailCCBill): {
+			RailKeyCCBillFormName: "form-name",
+			RailKeyStripePriceID:  "stripe-price-id",
 		},
 	}}
 

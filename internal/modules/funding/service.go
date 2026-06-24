@@ -43,7 +43,7 @@ var (
 type Service struct {
 	repo       *repo.USDCFundingSessionRepo
 	cfg        *config.Config
-	processors config.ProcessorSet
+	rails      config.RailSet
 	httpClient *http.Client
 	balances   SolanaBalanceReader
 	now        func() time.Time
@@ -92,15 +92,15 @@ type ProviderWebhookEvent struct {
 	Payload   map[string]any
 }
 
-func NewService(repo *repo.USDCFundingSessionRepo, cfg *config.Config, processorSets ...config.ProcessorSet) *Service {
-	var processors config.ProcessorSet
-	if len(processorSets) > 0 {
-		processors = processorSets[0]
+func NewService(repo *repo.USDCFundingSessionRepo, cfg *config.Config, railSets ...config.RailSet) *Service {
+	var rails config.RailSet
+	if len(railSets) > 0 {
+		rails = railSets[0]
 	}
 	return &Service{
 		repo:       repo,
 		cfg:        cfg,
-		processors: processors,
+		rails:      rails,
 		httpClient: http.DefaultClient,
 		now:        func() time.Time { return time.Now().UTC() },
 	}
@@ -474,7 +474,7 @@ func (s *Service) updateSessionStatus(ctx context.Context, session *models.USDCF
 }
 
 func (s *Service) usdcMintConfig() (solanago.PublicKey, int, error) {
-	proc := s.processors.GetSolanaProcessor()
+	proc := s.rails.GetSolanaRail()
 	if proc == nil || proc.Tokens == nil {
 		return solanago.PublicKey{}, 0, fmt.Errorf("solana_usdc_not_configured")
 	}

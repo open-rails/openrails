@@ -29,50 +29,50 @@ type FetcherOptions struct {
 	ProviderKeys map[Provider]string
 }
 
-// BuildFetchers wires a ProcessorFetcher for every provider the runtime has
+// BuildFetchers wires a RailFetcher for every provider the runtime has
 // clients/credentials for. Reads only; providers without configuration are
 // simply absent from the map.
-func BuildFetchers(cfg *config.Config, processors config.ProcessorSet, clients FetcherClients, d *db.DB) map[Provider]ProcessorFetcher {
-	fetchers, _ := BuildFetchersWithOptions(cfg, processors, clients, d, FetcherOptions{})
+func BuildFetchers(cfg *config.Config, rails config.RailSet, clients FetcherClients, d *db.DB) map[Provider]RailFetcher {
+	fetchers, _ := BuildFetchersWithOptions(cfg, rails, clients, d, FetcherOptions{})
 	return fetchers
 }
 
 // BuildFetchersWithOptions is the strict builder used by operator commands.
-// It respects processor role selection and returns config errors instead of
+// It respects rail role selection and returns config errors instead of
 // silently picking an arbitrary account.
-func BuildFetchersWithOptions(cfg *config.Config, processors config.ProcessorSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]ProcessorFetcher, error) {
-	fetchers := map[Provider]ProcessorFetcher{}
+func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
+	fetchers := map[Provider]RailFetcher{}
 
-	if key, c, err := selectNMIClient(processors, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
+	if key, c, err := selectNMIClient(rails, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
 		return nil, err
 	} else if c != nil {
-		fetchers[ProviderNMI] = keyedFetcher{ProcessorFetcher: NewNMIFetcher(c), key: key}
+		fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(c), key: key}
 	}
 	if clients.CCBillDataLink != nil {
-		key, proc, err := selectProcessorByType(processors, config.ProcessorTypeCCBill, opts.providerKey(ProviderCCBill))
+		key, proc, err := selectRailByType(rails, config.RailTypeCCBill, opts.providerKey(ProviderCCBill))
 		if err != nil {
 			return nil, err
 		}
 		if proc != nil {
-			fetchers[ProviderCCBill] = keyedFetcher{ProcessorFetcher: NewCCBillFetcher(clients.CCBillDataLink), key: key}
+			fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(clients.CCBillDataLink), key: key}
 		}
 	}
 	{
-		key, sp, err := selectProcessorByType(processors, config.ProcessorTypeStripe, opts.providerKey(ProviderStripe))
+		key, sp, err := selectRailByType(rails, config.RailTypeStripe, opts.providerKey(ProviderStripe))
 		if err != nil {
 			return nil, err
 		}
 		if sp != nil && sp.SecretKey != "" {
-			fetchers[ProviderStripe] = keyedFetcher{ProcessorFetcher: NewStripeFetcher(sp.SecretKey), key: key}
+			fetchers[ProviderStripe] = keyedFetcher{RailFetcher: NewStripeFetcher(sp.SecretKey), key: key}
 		}
 	}
 	if clients.SolanaRPC != nil && d != nil {
-		key, proc, err := selectProcessorByType(processors, config.ProcessorTypeSolana, opts.providerKey(ProviderSolana))
+		key, proc, err := selectRailByType(rails, config.RailTypeSolana, opts.providerKey(ProviderSolana))
 		if err != nil {
 			return nil, err
 		}
 		if proc != nil {
-			fetchers[ProviderSolana] = keyedFetcher{ProcessorFetcher: NewSolanaFetcher(clients.SolanaRPC, SolanaSubscriptionSourceFromDB(d)), key: key}
+			fetchers[ProviderSolana] = keyedFetcher{RailFetcher: NewSolanaFetcher(clients.SolanaRPC, SolanaSubscriptionSourceFromDB(d)), key: key}
 		}
 	}
 
@@ -86,36 +86,36 @@ func (o FetcherOptions) providerKey(provider Provider) string {
 	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
 }
 
-func selectProcessorByType(processors config.ProcessorSet, providerType, explicitKey string) (string, *config.ProcessorConfig, error) {
+func selectRailByType(rails config.RailSet, providerType, explicitKey string) (string, *config.RailConfig, error) {
 	if explicitKey != "" {
-		proc := processors.GetProcessor(explicitKey)
+		proc := rails.GetRail(explicitKey)
 		if proc == nil {
-			return "", nil, fmt.Errorf("processor %q is not configured", explicitKey)
+			return "", nil, fmt.Errorf("rail %q is not configured", explicitKey)
 		}
 		if proc.GetEffectiveType(explicitKey) != providerType {
-			return "", nil, fmt.Errorf("processor %q is type %q, not %q", explicitKey, proc.GetEffectiveType(explicitKey), providerType)
+			return "", nil, fmt.Errorf("rail %q is type %q, not %q", explicitKey, proc.GetEffectiveType(explicitKey), providerType)
 		}
 		return explicitKey, proc, nil
 	}
-	return processors.PrimaryProcessorByType(providerType)
+	return rails.PrimaryRailByType(providerType)
 }
 
-func selectNMIClient(processors config.ProcessorSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
+func selectNMIClient(rails config.RailSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
 	if explicitKey != "" {
 		c := clients[explicitKey]
 		if c == nil {
-			return "", nil, fmt.Errorf("nmi processor %q is not configured for reconciliation", explicitKey)
+			return "", nil, fmt.Errorf("nmi rail %q is not configured for reconciliation", explicitKey)
 		}
 		return explicitKey, c, nil
 	}
-	key, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeNMI)
+	key, proc, err := rails.PrimaryRailByType(config.RailTypeNMI)
 	if err != nil {
 		return "", nil, err
 	}
 	if proc != nil {
 		c := clients[key]
 		if c == nil {
-			return "", nil, fmt.Errorf("primary nmi processor %q is not configured for reconciliation", key)
+			return "", nil, fmt.Errorf("primary nmi rail %q is not configured for reconciliation", key)
 		}
 		return key, c, nil
 	}
@@ -124,7 +124,7 @@ func selectNMIClient(processors config.ProcessorSet, clients map[string]*nmi.NMI
 }
 
 // pickNMIClient selects the NMI gateway client deterministically: the only
-// one when a single NMI processor is configured, else "mobius" then "nmi"
+// one when a single NMI rail is configured, else "mobius" then "nmi"
 // then the lexicographically first key.
 func pickNMIClient(clients map[string]*nmi.NMIClient) (string, *nmi.NMIClient) {
 	if len(clients) == 0 {
@@ -145,7 +145,7 @@ func pickNMIClient(clients map[string]*nmi.NMIClient) (string, *nmi.NMIClient) {
 
 // NewEngine assembles a DB-backed engine over the given fetchers. The caller
 // supplies a merchant-scoped context at Run time.
-func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]ProcessorFetcher) *Engine {
+func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) *Engine {
 	e := &Engine{
 		Fetchers: fetchers,
 		Store:    &PGStore{DB: d},

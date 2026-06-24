@@ -22,17 +22,17 @@ func main() {
         Redis:   yourRedis,    // Share your existing Redis client
         PaymentProviders: []embedded.PaymentProvider{
             {
-                Config: config.ProcessorConfig{
-                    Type:      config.ProcessorTypeStripe,
-                    Role:      config.ProcessorRolePrimary,
+                Config: config.RailConfig{
+                    Type:      config.RailTypeStripe,
+                    Role:      config.RailRolePrimary,
                     SecretKey: hostSecrets.StripePrimaryKey,
                 },
             },
             {
                 Name: "stripe_legacy",
-                Config: config.ProcessorConfig{
-                    Type:      config.ProcessorTypeStripe,
-                    Role:      config.ProcessorRoleLegacy,
+                Config: config.RailConfig{
+                    Type:      config.RailTypeStripe,
+                    Role:      config.RailRoleLegacy,
                     SecretKey: hostSecrets.StripeLegacyKey,
                 },
             },
@@ -60,25 +60,25 @@ openrails, err := embedded.New(embedded.Options{
     Config: cfg,
     PaymentProviders: []embedded.PaymentProvider{
         {
-            Config: config.ProcessorConfig{
-                Type:      config.ProcessorTypeStripe,
-                Role:      config.ProcessorRolePrimary,
+            Config: config.RailConfig{
+                Type:      config.RailTypeStripe,
+                Role:      config.RailRolePrimary,
                 SecretKey: stripePrimarySecret,
             },
         },
         {
             Name: "stripe_legacy",
-            Config: config.ProcessorConfig{
-                Type:      config.ProcessorTypeStripe,
-                Role:      config.ProcessorRoleLegacy,
+            Config: config.RailConfig{
+                Type:      config.RailTypeStripe,
+                Role:      config.RailRoleLegacy,
                 SecretKey: stripeLegacySecret,
             },
         },
         {
             Name: "mobius",
-            Config: config.ProcessorConfig{
-                Type:        config.ProcessorTypeNMI,
-                Role:        config.ProcessorRolePrimary,
+            Config: config.RailConfig{
+                Type:        config.RailTypeNMI,
+                Role:        config.RailRolePrimary,
                 SecurityKey: mobiusSecurityKey,
             },
         },

@@ -25,7 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -215,23 +215,23 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	var stripeRefundTargetID string
 	var nmiClient *nmi.NMIClient
 	switch {
-	case payment.Processor == models.ProcessorCCBill:
+	case payment.Rail == models.RailCCBill:
 		return nil, adminRefundHTTPError(http.StatusBadRequest, "CCBill refunds must be processed through CCBill's admin portal. After issuing the refund in CCBill, it will be recorded automatically via webhook.")
-	case payment.Processor == models.ProcessorStripe:
+	case payment.Rail == models.RailStripe:
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
 			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
 		}
 		stripeRefundTargetID = refundTargetID
-	case processors.IsNMIBackedProcessor(payment.Processor):
-		providerName := strings.ToLower(string(payment.Processor))
+	case rails.IsNMIBackedRail(payment.Rail):
+		providerName := strings.ToLower(string(payment.Rail))
 		client, ok := r.State.NMIClients[providerName]
 		if !ok {
-			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment processor not configured")
+			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
 		}
 		nmiClient = client
 	default:
-		return nil, adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for processor: %s", payment.Processor))
+		return nil, adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for rail: %s", payment.Rail))
 	}
 	prepared.stripeRefundTargetID = stripeRefundTargetID
 	prepared.nmiClient = nmiClient
@@ -276,7 +276,7 @@ func adminRefundMetadataString(metadata map[string]any, key string) string {
 
 // releaseAdminRefundReservation marks a refund reservation failed after the
 // provider-side refund could not be issued (intent-build error, an unexpected
-// processor reaching the issue stage, or a conflicting in-flight refund). A
+// rail reaching the issue stage, or a conflicting in-flight refund). A
 // failure to release is surfaced as 500 reservation_release_failed rather than
 // swallowed: a silently stranded `pending` reservation would otherwise block
 // this idempotency key from ever retrying. cause is the original trigger.
@@ -310,17 +310,17 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 
 	var providerTarget string
 	switch {
-	case prepared.payment.Processor == models.ProcessorStripe:
+	case prepared.payment.Rail == models.RailStripe:
 		providerTarget = prepared.stripeRefundTargetID
-	case processors.IsNMIBackedProcessor(prepared.payment.Processor):
+	case rails.IsNMIBackedRail(prepared.payment.Rail):
 		providerTarget = prepared.payment.TransactionID
 	default:
 		// Unreachable by construction: prepareAdminRefund already rejects CCBill
-		// and unsupported processors before a reservation exists. Reaching here
+		// and unsupported rails before a reservation exists. Reaching here
 		// means the issue-stage switch drifted from the prepare-stage guard —
 		// an internal invariant violation, not a user error.
-		cause := fmt.Errorf("processor %s reached refund issue stage unguarded", prepared.payment.Processor)
-		log.WithError(cause).WithField("payment_id", prepared.payment.ID).Error("admin refund: issue-stage processor switch drifted from prepare-stage guard")
+		cause := fmt.Errorf("rail %s reached refund issue stage unguarded", prepared.payment.Rail)
+		log.WithError(cause).WithField("payment_id", prepared.payment.ID).Error("admin refund: issue-stage rail switch drifted from prepare-stage guard")
 		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
 			return nil, 0, relErr
 		}
@@ -545,7 +545,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		tm = tm.UTC()
 		purchasedAt = &tm
 	}
-	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.ProcessorManual, transactionID); err == nil {
+	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.RailManual, transactionID); err == nil {
 		r.JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
 		return
 	}
@@ -553,7 +553,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	if req.Amount != nil {
 		amount = *req.Amount
 	}
-	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Processor: string(models.ProcessorManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
+	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Rail: string(models.RailManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

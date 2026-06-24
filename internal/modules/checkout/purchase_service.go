@@ -200,7 +200,7 @@ type SubscriptionConflict struct {
 }
 
 // CheckSubscriptionConflict is the shared duplicate-billing guard (issue #269).
-// It must run at subscribe time for every processor BEFORE any charge or
+// It must run at subscribe time for every rail BEFORE any charge or
 // on-chain action. It blocks when the user already holds a NON-terminal
 // subscription (active/pending/past_due) that either:
 //   - is to this exact price (idempotent re-subscribe; no second sub/charge), or
@@ -343,8 +343,8 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	if req.TransactionID == "" {
 		return nil, errors.New("transaction_id is required")
 	}
-	if req.Processor == "" {
-		return nil, errors.New("processor is required")
+	if req.Rail == "" {
+		return nil, errors.New("rail is required")
 	}
 
 	price, err := s.PriceService.GetByID(ctx, req.PriceID)
@@ -392,7 +392,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		CustomerID:               customerID,
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
-		Processor:                models.Processor(req.Processor),
+		Rail:                     models.Rail(req.Rail),
 		TransactionID:            req.TransactionID,
 		Amount:                   amount,
 		ListAmount:               price.Amount,
@@ -412,7 +412,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
 	if !created {
-		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(req.Processor), req.TransactionID)
+		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}
@@ -469,7 +469,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		}
 		log.WithFields(log.Fields{
 			"payment_id": existingPayment.ID, "user_id": req.UserID, "price_id": req.PriceID,
-			"processor": req.Processor, "transaction_id": req.TransactionID,
+			"rail": req.Rail, "transaction_id": req.TransactionID,
 		}).Info("purchase already registered; repaired entitlement state if needed")
 		return &payments.RegisterPurchaseResponse{PaymentID: existingPayment.ID, Entitlements: grantedEntitlements, Eligibility: string(eligibility.Status)}, nil
 	}
@@ -507,7 +507,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 
 	log.WithFields(log.Fields{
 		"payment_id": paymentID, "user_id": req.UserID, "price_id": req.PriceID, "product_id": product.ID,
-		"processor": req.Processor, "transaction_id": req.TransactionID, "entitlements": grantedEntitlements,
+		"rail": req.Rail, "transaction_id": req.TransactionID, "entitlements": grantedEntitlements,
 		"delayed_start": delayedStart, "eligibility": eligibility.Status,
 	}).Info("registered purchase")
 

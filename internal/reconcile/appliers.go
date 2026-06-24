@@ -14,7 +14,7 @@ import (
 )
 
 // LocalWriter performs enforce mode's idempotent LOCAL writes. No method ever
-// calls a processor — that is the design invariant that lets enforce run
+// calls a rail — that is the design invariant that lets enforce run
 // under mode=readonly. Every method reports whether it changed anything, so
 // a second enforce run is observably a no-op.
 type LocalWriter interface {
@@ -51,7 +51,7 @@ func (w *PGLocalWriter) CancelSubscriptionLocal(ctx context.Context, a CancelLoc
 	}
 	reason := a.Reason
 	if reason == "" {
-		reason = "reconcile: processor reports subscription terminated"
+		reason = "reconcile: rail reports subscription terminated"
 	}
 	n, err := w.DB.Gen(ctx).ReconcileCancelSubscriptionLocal(ctx, gen.ReconcileCancelSubscriptionLocalParams{
 		Now:        w.now(),
@@ -95,7 +95,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
 		MerchantID:        tid.UUID(),
 		PriceID:           a.PriceID,
-		Processor:         gen.OpenrailsProcessorType(a.Processor),
+		Rail:              gen.OpenrailsRailType(a.Rail),
 		TransactionID:     a.TransactionID,
 		Amount:            a.AmountCents,
 		Currency:          currency,
@@ -139,7 +139,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
 		MerchantID:        tid.UUID(),
 		PriceID:           a.PriceID,
-		Processor:         gen.OpenrailsProcessorType(a.Processor),
+		Rail:              gen.OpenrailsRailType(a.Rail),
 		TransactionID:     a.TransactionID,
 		Amount:            amount,
 		Currency:          currency,
@@ -197,7 +197,7 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 
 // MaterializeSubscription creates the local subscription for a resolved PS-1
 // (bootstrap mode v1.1). Idempotent: when any local subscription already
-// carries the processor subscription id, the insert returns zero rows and
+// carries the rail subscription id, the insert returns zero rows and
 // nothing else runs. The created row snapshots the product's entitlements
 // spec, and entitlements are granted through the normal subscription-sourced
 // path when the remote period is still running.
@@ -211,18 +211,18 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, err
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		MerchantID:              tid.UUID(),
-		Status:                  gen.OpenrailsSubscriptionStatus(a.Status),
-		Processor:               a.Processor,
-		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
-		UserEmail:               emailPtr,
-		PeriodStartsAt:          a.PeriodStartsAt,
-		PeriodEndsAt:            a.PeriodEndsAt,
-		StartedAt:               a.StartedAt,
-		CustomerID:              a.CustomerID,
-		PriceID:                 a.PriceID,
-		Processors:              localProcessorNames(a.Provider),
-		ProviderAccountID:       a.ProviderAccountID,
+		MerchantID:         tid.UUID(),
+		Status:             gen.OpenrailsSubscriptionStatus(a.Status),
+		Rail:               a.Rail,
+		RailSubscriptionID: a.RailSubscriptionID,
+		UserEmail:          emailPtr,
+		PeriodStartsAt:     a.PeriodStartsAt,
+		PeriodEndsAt:       a.PeriodEndsAt,
+		StartedAt:          a.StartedAt,
+		CustomerID:         a.CustomerID,
+		PriceID:            a.PriceID,
+		Rails:              localRailNames(a.Provider),
+		ProviderAccountID:  a.ProviderAccountID,
 	})
 	if err != nil {
 		return MaterializeResult{}, err
@@ -280,7 +280,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 func (w *PGLocalWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {
 	reason := a.Reason
 	if reason == "" {
-		reason = "reconcile: subscription not active at processor"
+		reason = "reconcile: subscription not active at rail"
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRevokeSubscriptionEntitlements(ctx, gen.ReconcileRevokeSubscriptionEntitlementsParams{
 		Now:            w.now(),

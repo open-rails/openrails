@@ -91,7 +91,7 @@ func TestSolanaFetcher_Fetch(t *testing.T) {
 
 	require.Len(t, snap.Subscriptions, 2)
 	open := snap.Subscriptions[0]
-	require.Equal(t, openSub.String(), open.ProcessorSubscriptionID)
+	require.Equal(t, openSub.String(), open.RailSubscriptionID)
 	require.Equal(t, SubscriptionStatusActive, open.Status)
 	require.Equal(t, "account_open", open.RawStatus)
 	require.Equal(t, wallet.String(), open.CustomerID)
@@ -156,5 +156,5 @@ func TestSolanaFetcher_SubscriptionFilter(t *testing.T) {
 	snap, err := (&SolanaFetcher{RPC: rpc, Source: source}).Fetch(context.Background(), FetchParams{SubscriptionID: keep.String()})
 	require.NoError(t, err)
 	require.Len(t, snap.Subscriptions, 1)
-	require.Equal(t, keep.String(), snap.Subscriptions[0].ProcessorSubscriptionID)
+	require.Equal(t, keep.String(), snap.Subscriptions[0].RailSubscriptionID)
 }

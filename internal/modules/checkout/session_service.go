@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
@@ -105,7 +105,7 @@ type CheckoutSessionService struct {
 	priceProvider            solanamodule.TokenPriceProvider
 	providerAccounts         intents.ProviderAccountResolver
 	config                   *config.Config
-	processors               config.ProcessorSet
+	rails                    config.RailSet
 	clock                    clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
@@ -234,7 +234,7 @@ func NewCheckoutSessionService(
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
-	processors config.ProcessorSet,
+	rails config.RailSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
@@ -250,7 +250,7 @@ func NewCheckoutSessionService(
 		fxProvider:               fxProvider,
 		priceProvider:            priceProvider,
 		config:                   cfg,
-		processors:               processors,
+		rails:                    rails,
 		clock:                    timeutil.FirstClock(clocks...),
 	}
 }
@@ -369,8 +369,8 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if strings.TrimSpace(req.PriceID) == "" {
 		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
 	}
-	if strings.TrimSpace(req.Payment.Processor) == "" {
-		return nil, fmt.Errorf("%w: payment.processor is required", ErrCheckoutSessionValidation)
+	if strings.TrimSpace(req.Payment.Rail) == "" {
+		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
 	}
 
 	priceID, err := api.ParsePriceID(req.PriceID)
@@ -392,23 +392,23 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
 
-	processor := strings.ToLower(strings.TrimSpace(req.Payment.Processor))
-	mode, err := s.resolveMode(req.Mode, processor, price)
+	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
+	mode, err := s.resolveMode(req.Mode, rail, price)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.validatePayment(ctx, processor, &req.Payment, user); err != nil {
+	if err := s.validatePayment(ctx, rail, &req.Payment, user); err != nil {
 		return nil, fmt.Errorf("error validating payment: %w", err)
 	}
-	providerAccountID, err := s.providerAccountIDForCheckout(ctx, processor)
+	providerAccountID, err := s.providerAccountIDForCheckout(ctx, rail)
 	if err != nil {
 		return nil, err
 	}
 
 	now := s.now()
 	ttl := defaultCheckoutSessionTTL
-	if processor == "ccbill" || processor == "stripe" {
+	if rail == "ccbill" || rail == "stripe" {
 		ttl = redirectCheckoutSessionTTL
 	}
 	session := &models.CheckoutSession{
@@ -416,14 +416,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		CustomerID:        identity.CustomerIDFromString(user.ID).UUID(),
 		PriceID:           price.ID,
 		Mode:              mode,
-		Processor:         models.Processor(processor),
+		Rail:              models.Rail(rail),
 		Status:            models.CheckoutSessionStatusCreated,
 		Amount:            price.Amount,
 		Currency:          price.Currency,
 		ExpiresAt:         timePtr(now.Add(ttl)),
 		Metadata:          normalizeMetadata(req.Metadata),
-		ProcessorFields:   s.buildProcessorFields(processor, &req.Payment),
-		ProcessorState:    map[string]any{},
+		RailFields:        s.buildRailFields(rail, &req.Payment),
+		RailState:         map[string]any{},
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		ProviderAccountID: providerAccountID,
@@ -453,11 +453,11 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	return s.sessionToResponse(session), nil
 }
 
-func (s *CheckoutSessionService) providerAccountIDForCheckout(ctx context.Context, processor string) (*uuid.UUID, error) {
+func (s *CheckoutSessionService) providerAccountIDForCheckout(ctx context.Context, rail string) (*uuid.UUID, error) {
 	if s.providerAccounts == nil || s.db == nil {
 		return nil, nil
 	}
-	providerKey, err := s.providerKeyForCheckout(processor)
+	providerKey, err := s.providerKeyForCheckout(rail)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -469,31 +469,31 @@ func (s *CheckoutSessionService) providerAccountIDForCheckout(ctx context.Contex
 		WithProviderAccounts(s.providerAccounts).
 		VerifyOrBindPrimaryProviderAccount(ctx, tid.UUID(), providerKey)
 	if err != nil {
-		return nil, fmt.Errorf("%w: bind provider account for checkout processor %q: %v", ErrCheckoutSessionValidation, processor, err)
+		return nil, fmt.Errorf("%w: bind provider account for checkout rail %q: %v", ErrCheckoutSessionValidation, rail, err)
 	}
 	return &account.ID, nil
 }
 
-func (s *CheckoutSessionService) providerKeyForCheckout(processor string) (string, error) {
-	processor = strings.ToLower(strings.TrimSpace(processor))
-	if processor == "" {
-		return "", fmt.Errorf("processor is required")
+func (s *CheckoutSessionService) providerKeyForCheckout(rail string) (string, error) {
+	rail = strings.ToLower(strings.TrimSpace(rail))
+	if rail == "" {
+		return "", fmt.Errorf("rail is required")
 	}
-	if s.processors == nil {
-		return processor, nil
+	if s.rails == nil {
+		return rail, nil
 	}
-	if proc := s.processors.GetProcessor(processor); proc != nil {
-		return processor, nil
+	if proc := s.rails.GetRail(rail); proc != nil {
+		return rail, nil
 	}
-	switch processor {
-	case config.ProcessorTypeStripe, config.ProcessorTypeCCBill, config.ProcessorTypeSolana, config.ProcessorTypeNMI:
-		key, _, err := s.processors.PrimaryProcessorByType(processor)
+	switch rail {
+	case config.RailTypeStripe, config.RailTypeCCBill, config.RailTypeSolana, config.RailTypeNMI:
+		key, _, err := s.rails.PrimaryRailByType(rail)
 		if err != nil {
 			return "", err
 		}
 		return key, nil
 	default:
-		return processor, nil
+		return rail, nil
 	}
 }
 
@@ -539,38 +539,38 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 			return nil, ErrCheckoutSessionConflict
 		}
 	}
-	processor := strings.ToLower(strings.TrimSpace(req.Payment.Processor))
-	if processor == "" {
-		return nil, fmt.Errorf("%w: payment.processor is required", ErrCheckoutSessionValidation)
+	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
+	if rail == "" {
+		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
 	}
-	if processor != strings.ToLower(string(session.Processor)) {
-		return nil, fmt.Errorf("%w: processor mismatch", ErrCheckoutSessionValidation)
+	if rail != strings.ToLower(string(session.Rail)) {
+		return nil, fmt.Errorf("%w: rail mismatch", ErrCheckoutSessionValidation)
 	}
-	if s.isExpired(session) && processor != string(models.ProcessorSolana) {
+	if s.isExpired(session) && rail != string(models.RailSolana) {
 		if !s.isTerminal(session.Status) {
 			_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
 		}
 		return nil, ErrCheckoutSessionExpired
 	}
 
-	switch processor {
+	switch rail {
 	case "solana":
 		if session.Mode == models.CheckoutSessionModeSubscription {
 			return s.confirmSolanaSubscriptionSession(ctx, session, req, user)
 		}
 		return s.confirmSolanaSession(ctx, session, req, user)
 	default:
-		return nil, fmt.Errorf("%w: confirmation not implemented for processor %s", ErrCheckoutSessionConflict, processor)
+		return nil, fmt.Errorf("%w: confirmation not implemented for rail %s", ErrCheckoutSessionConflict, rail)
 	}
 }
 
-func (s *CheckoutSessionService) resolveMode(mode string, processor string, price *models.Price) (models.CheckoutSessionMode, error) {
-	if processor == "" {
-		return "", fmt.Errorf("%w: processor is required", ErrCheckoutSessionValidation)
+func (s *CheckoutSessionService) resolveMode(mode string, rail string, price *models.Price) (models.CheckoutSessionMode, error) {
+	if rail == "" {
+		return "", fmt.Errorf("%w: rail is required", ErrCheckoutSessionValidation)
 	}
 
 	trimmedMode := strings.TrimSpace(mode)
-	if processor == "solana" {
+	if rail == "solana" {
 		hasRecurring := priceHasSolanaRecurring(price)
 		if trimmedMode == string(models.CheckoutSessionModeSubscription) {
 			if !hasRecurring {
@@ -602,24 +602,24 @@ func (s *CheckoutSessionService) resolveMode(mode string, processor string, pric
 	return models.CheckoutSessionMode(trimmedMode), nil
 }
 
-// validatePayment dispatches checkout-input validation to the per-processor
-// validator that owns that processor's required-input contract. Keeping each
-// processor's rules in its own method (rather than a shared switch body) is what
+// validatePayment dispatches checkout-input validation to the per-rail
+// validator that owns that rail's required-input contract. Keeping each
+// rail's rules in its own method (rather than a shared switch body) is what
 // keeps the validation contract from drifting out of sync with what the
-// processor's executor actually consumes — the drift that previously made Stripe
+// rail's executor actually consumes — the drift that previously made Stripe
 // demand billing fields its hosted-checkout path never reads.
-func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
+func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	switch {
-	case processors.IsNMIBacked(processor):
+	case rails.IsNMIBacked(rail):
 		return s.validateNMIInput(ctx, payment, user)
-	case processor == "stripe":
+	case rail == "stripe":
 		return s.validateStripeInput(payment)
-	case processor == "solana":
+	case rail == "solana":
 		return s.validateSolanaInput(payment)
-	case processor == "ccbill":
+	case rail == "ccbill":
 		return s.validateCCBillInput(payment)
 	default:
-		return fmt.Errorf("%w: unsupported processor", ErrCheckoutSessionValidation)
+		return fmt.Errorf("%w: unsupported rail", ErrCheckoutSessionValidation)
 	}
 }
 
@@ -681,18 +681,18 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 		return fmt.Errorf("%w: payment is required", ErrCheckoutSessionValidation)
 	}
 
-	processor := strings.ToLower(string(session.Processor))
-	// Route to processor-specific initialization based on config type detection
+	rail := strings.ToLower(string(session.Rail))
+	// Route to rail-specific initialization based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
-	case processor == "solana":
+	case rail == "solana":
 		return s.initializeSolanaSession(ctx, session, payment)
-	case processors.IsNMIBacked(processor):
+	case rails.IsNMIBacked(rail):
 		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)
-	case processor == "ccbill" || processor == "stripe":
+	case rail == "ccbill" || rail == "stripe":
 		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)
 	default:
-		return fmt.Errorf("%w: unsupported processor", ErrCheckoutSessionValidation)
+		return fmt.Errorf("%w: unsupported rail", ErrCheckoutSessionValidation)
 	}
 }
 
@@ -704,7 +704,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return s.initializeSolanaSubscriptionSession(ctx, session, payment)
 	}
 
-	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.processors)
+	solanaProc, err := solanamodule.RequireSolanaRailConfig(s.rails)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -740,12 +740,12 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		session.Status = models.CheckoutSessionStatusRequiresAction
 		session.Reference = &result.Reference
 		session.ExpiresAt = &result.ExpiresAt
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["transaction_url"] = result.URL
-		session.ProcessorState["flow"] = flow
-		session.ProcessorState["token_symbol"] = tokenSymbol
+		session.RailState["transaction_url"] = result.URL
+		session.RailState["flow"] = flow
+		session.RailState["token_symbol"] = tokenSymbol
 		tokenMintValue := strings.TrimSpace(result.TokenMint)
 		if tokenMintValue == "" {
 			tokenMintValue = tokenMint
@@ -754,9 +754,9 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if recipient == "" {
 			return fmt.Errorf("%w: recipient missing from payment quote", ErrCheckoutSessionValidation)
 		}
-		session.ProcessorState["token_mint"] = tokenMintValue
-		session.ProcessorState["recipient"] = recipient
-		if err := setSolanaQuoteState(session.ProcessorState, result.TokenUnits, result.TokenPriceUSD, result.FXRate, result.FXCurrency, result.QuotedAt, result.QuoteExpiresAt); err != nil {
+		session.RailState["token_mint"] = tokenMintValue
+		session.RailState["recipient"] = recipient
+		if err := setSolanaQuoteState(session.RailState, result.TokenUnits, result.TokenPriceUSD, result.FXRate, result.FXCurrency, result.QuotedAt, result.QuoteExpiresAt); err != nil {
 			return err
 		}
 	case "transaction_request":
@@ -774,18 +774,18 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if recipient == "" {
 			return fmt.Errorf("%w: recipient wallet not configured", ErrCheckoutSessionValidation)
 		}
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["flow"] = flow
-		session.ProcessorState["token_symbol"] = tokenSymbol
-		session.ProcessorState["token_mint"] = tokenMint
-		session.ProcessorState["recipient"] = recipient
+		session.RailState["flow"] = flow
+		session.RailState["token_symbol"] = tokenSymbol
+		session.RailState["token_mint"] = tokenMint
+		session.RailState["recipient"] = recipient
 		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, session.Amount, session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
-		if err := setSolanaQuoteState(session.ProcessorState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
+		if err := setSolanaQuoteState(session.RailState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
 			return err
 		}
 	default:
@@ -796,12 +796,12 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 }
 
 // priceHasSolanaRecurring reports whether a price carries a published Solana
-// recurring plan config (the keys PlanService.ToProcessorConfig writes).
+// recurring plan config (the keys PlanService.ToRailConfig writes).
 func priceHasSolanaRecurring(price *models.Price) bool {
 	if price == nil {
 		return false
 	}
-	cfg := price.GetProcessorConfig(models.ProcessorSolana)
+	cfg := price.GetRailConfig(models.RailSolana)
 	if cfg == nil {
 		return false
 	}
@@ -847,7 +847,7 @@ func toAnySlice(ss []string) []any {
 	return out
 }
 
-// getStringSliceField reads a []string persisted in ProcessorState (JSONB decodes
+// getStringSliceField reads a []string persisted in RailState (JSONB decodes
 // it back as []any of strings).
 func getStringSliceField(fields map[string]any, key string) []string {
 	if fields == nil {
@@ -917,7 +917,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.GetProcessorConfig(models.ProcessorSolana))
+	terms, err := parseSolanaPlanTerms(price.GetRailConfig(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -943,19 +943,19 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	expiresAt := s.now().Add(defaultCheckoutSessionTTL)
 	session.Status = models.CheckoutSessionStatusRequiresAction
 	session.ExpiresAt = &expiresAt
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
-	session.ProcessorState["flow"] = "subscription"
-	session.ProcessorState["subscriber_wallet"] = wallet
-	session.ProcessorState["plan_id"] = strconv.FormatUint(terms.planID, 10)
-	session.ProcessorState["mint_symbol"] = terms.mintSymbol
-	session.ProcessorState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
-	session.ProcessorState["period_hours"] = strconv.FormatUint(terms.period, 10)
-	session.ProcessorState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
-	session.ProcessorState["subscription_pda"] = res.SubscriptionPDA
-	session.ProcessorState["subscribe_step"] = res.Step
-	session.ProcessorState["sign_transactions"] = toAnySlice(res.Transactions)
+	session.RailState["flow"] = "subscription"
+	session.RailState["subscriber_wallet"] = wallet
+	session.RailState["plan_id"] = strconv.FormatUint(terms.planID, 10)
+	session.RailState["mint_symbol"] = terms.mintSymbol
+	session.RailState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
+	session.RailState["period_hours"] = strconv.FormatUint(terms.period, 10)
+	session.RailState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
+	session.RailState["subscription_pda"] = res.SubscriptionPDA
+	session.RailState["subscribe_step"] = res.Step
+	session.RailState["sign_transactions"] = toAnySlice(res.Transactions)
 	return nil
 }
 
@@ -991,7 +991,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.GetProcessorConfig(models.ProcessorSolana))
+	terms, err := parseSolanaPlanTerms(price.GetRailConfig(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -999,20 +999,20 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 	expiresAt := s.now().Add(defaultCheckoutSessionTTL)
 	session.Status = models.CheckoutSessionStatusRequiresAction
 	session.ExpiresAt = &expiresAt
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
 	// flow=transaction_request is what makes sessionToResponse build the
-	// solana_pay_url; the subscribe terms travel on ProcessorState exactly like the
+	// solana_pay_url; the subscribe terms travel on RailState exactly like the
 	// wallet path so BuildSolanaPayTransaction can re-derive the PrepareSubscribe
 	// input without trusting client input. subscribe_step starts empty — the first
 	// POST resolves it to "init" or "subscribe" from on-chain authority state.
-	session.ProcessorState["flow"] = "transaction_request"
-	session.ProcessorState["plan_id"] = strconv.FormatUint(terms.planID, 10)
-	session.ProcessorState["mint_symbol"] = terms.mintSymbol
-	session.ProcessorState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
-	session.ProcessorState["period_hours"] = strconv.FormatUint(terms.period, 10)
-	session.ProcessorState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
+	session.RailState["flow"] = "transaction_request"
+	session.RailState["plan_id"] = strconv.FormatUint(terms.planID, 10)
+	session.RailState["mint_symbol"] = terms.mintSymbol
+	session.RailState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
+	session.RailState["period_hours"] = strconv.FormatUint(terms.period, 10)
+	session.RailState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
 	return nil
 }
 
@@ -1025,17 +1025,17 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
 	}
-	wallet := strings.TrimSpace(getStringField(session.ProcessorState, "subscriber_wallet"))
+	wallet := strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet"))
 	if reqWallet := strings.TrimSpace(req.Payment.Wallet); reqWallet != "" && wallet != "" && reqWallet != wallet {
 		return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutSessionValidation)
 	}
 	terms := solanaPlanTerms{
-		planID:     getUint64Field(session.ProcessorState, "plan_id"),
-		mintSymbol: getStringField(session.ProcessorState, "mint_symbol"),
-		amount:     getUint64Field(session.ProcessorState, "amount_base_units"),
-		period:     getUint64Field(session.ProcessorState, "period_hours"),
+		planID:     getUint64Field(session.RailState, "plan_id"),
+		mintSymbol: getStringField(session.RailState, "mint_symbol"),
+		amount:     getUint64Field(session.RailState, "amount_base_units"),
+		period:     getUint64Field(session.RailState, "period_hours"),
 	}
-	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
+	if v := strings.TrimSpace(getStringField(session.RailState, "plan_created_at")); v != "" {
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
 	tenantID, err := merchant.Require(ctx)
@@ -1046,7 +1046,7 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 	// Step 1: the signed transaction was init_subscription_authority. Re-prepare
 	// the subscribe transaction (the authority now exists) and stay in
 	// requires_action so the wallet signs the second transaction.
-	if getStringField(session.ProcessorState, "subscribe_step") == "init" {
+	if getStringField(session.RailState, "subscribe_step") == "init" {
 		res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
 			MerchantID:       tenantID,
 			SubscriberWallet: wallet,
@@ -1064,11 +1064,11 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 			// to retry; keep the init transaction so it can re-sign/resend if needed.
 			return nil, fmt.Errorf("%w: subscription authority not yet confirmed on-chain; retry", ErrCheckoutSessionConflict)
 		}
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["subscribe_step"] = "subscribe"
-		session.ProcessorState["sign_transactions"] = toAnySlice(res.Transactions)
+		session.RailState["subscribe_step"] = "subscribe"
+		session.RailState["sign_transactions"] = toAnySlice(res.Transactions)
 		session.Status = models.CheckoutSessionStatusRequiresAction
 		session.UpdatedAt = s.now()
 		if err := s.repo.Update(ctx, session); err != nil {
@@ -1130,7 +1130,7 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 // solanaLifecycleState is everything a cancel / tier-change Solana Pay session
 // needs to (a) build the on-chain tx in BuildSolanaPayTransaction and (b) mirror
 // the confirmed tx in the poller. It is derived once at create time and
-// persisted (mode + ProcessorState carry it forward); the build/confirm paths
+// persisted (mode + RailState carry it forward); the build/confirm paths
 // re-derive it from the session row so they never trust client input.
 type solanaLifecycleState struct {
 	mode             models.CheckoutSessionMode
@@ -1152,7 +1152,7 @@ type resolvedSolanaLifecycleTierChange struct {
 // createSolanaLifecycleSession authorizes ownership and creates a Solana Pay
 // session for a CANCEL or TIER-CHANGE on the caller's EXISTING Solana
 // subscription. The subscription_id (and new_price_id for tier-change) is stored
-// in ProcessorState; the public Solana Pay endpoint then builds the reference-
+// in RailState; the public Solana Pay endpoint then builds the reference-
 // tagged on-chain tx and the reference poller mirrors the confirmation.
 func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	mode := models.CheckoutSessionMode(strings.TrimSpace(req.Mode))
@@ -1166,9 +1166,9 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 		return nil, fmt.Errorf("%w: solana tier change is not configured", ErrCheckoutSessionValidation)
 	}
 
-	processor := strings.ToLower(strings.TrimSpace(req.Payment.Processor))
-	if processor != string(models.ProcessorSolana) {
-		return nil, fmt.Errorf("%w: %s mode requires the solana processor", ErrCheckoutSessionValidation, mode)
+	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
+	if rail != string(models.RailSolana) {
+		return nil, fmt.Errorf("%w: %s mode requires the solana rail", ErrCheckoutSessionValidation, mode)
 	}
 
 	subscriptionID, err := api.ParseSubscriptionID(strings.TrimSpace(req.SubscriptionID))
@@ -1189,7 +1189,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 		// Do not leak existence of someone else's subscription.
 		return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
 	}
-	if sub.Processor != models.ProcessorSolana {
+	if sub.Rail != models.RailSolana {
 		return nil, fmt.Errorf("%w: subscription is not a solana subscription", ErrCheckoutSessionValidation)
 	}
 
@@ -1239,20 +1239,20 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	now := s.now()
 	expiresAt := now.Add(defaultCheckoutSessionTTL)
 	session := &models.CheckoutSession{
-		ID:              uuidutil.NewV7(),
-		CustomerID:      identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:         sessionPriceID,
-		Mode:            mode,
-		Processor:       models.ProcessorSolana,
-		Status:          models.CheckoutSessionStatusRequiresAction,
-		Amount:          sessionAmount,
-		Currency:        sessionCurrency,
-		ExpiresAt:       &expiresAt,
-		Metadata:        normalizeMetadata(req.Metadata),
-		ProcessorFields: map[string]any{"processor": string(models.ProcessorSolana)},
-		ProcessorState:  s.buildLifecycleState(lifecycle),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:         uuidutil.NewV7(),
+		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
+		PriceID:    sessionPriceID,
+		Mode:       mode,
+		Rail:       models.RailSolana,
+		Status:     models.CheckoutSessionStatusRequiresAction,
+		Amount:     sessionAmount,
+		Currency:   sessionCurrency,
+		ExpiresAt:  &expiresAt,
+		Metadata:   normalizeMetadata(req.Metadata),
+		RailFields: map[string]any{"rail": string(models.RailSolana)},
+		RailState:  s.buildLifecycleState(lifecycle),
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
 		session.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
@@ -1264,7 +1264,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	return s.sessionToResponse(session), nil
 }
 
-// buildLifecycleState serializes the resolved lifecycle facts onto ProcessorState
+// buildLifecycleState serializes the resolved lifecycle facts onto RailState
 // (JSON-safe scalars), mirroring how the subscribe flow persists its plan terms.
 // "flow" marks the session as a lifecycle session so the poller/builder branch.
 func (s *CheckoutSessionService) buildLifecycleState(l *solanaLifecycleState) map[string]any {
@@ -1322,7 +1322,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 	if !newPrice.IsPurchasable() {
 		return nil, fmt.Errorf("%w: target price is not available", ErrCheckoutSessionValidation)
 	}
-	newTerms, err := parseSolanaPlanTerms(newPrice.GetProcessorConfig(models.ProcessorSolana))
+	newTerms, err := parseSolanaPlanTerms(newPrice.GetRailConfig(models.RailSolana))
 	if err != nil {
 		return nil, fmt.Errorf("%w: target price is not configured for Solana recurring billing", ErrCheckoutSessionValidation)
 	}
@@ -1381,7 +1381,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		PriceID:         api.FormatPriceID(session.PriceID),
 		PaymentMethodID: payment.PaymentMethodID,
 		PaymentToken:    payment.PaymentToken,
-		Processor:       string(session.Processor),
+		Rail:            string(session.Rail),
 		SuccessURL:      successURL,
 		CancelURL:       cancelURL,
 		Metadata:        session.Metadata,
@@ -1403,7 +1403,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 			req.IdempotencyKey = fmt.Sprintf("checkout_session:%s", key)
 		}
 	}
-	if session.Processor == models.ProcessorStripe || session.Processor == models.ProcessorCCBill {
+	if session.Rail == models.RailStripe || session.Rail == models.RailCCBill {
 		req.CheckoutSessionID = api.FormatCheckoutSessionID(session.ID)
 	}
 
@@ -1441,10 +1441,10 @@ func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutS
 			return fmt.Errorf("%w: redirect url missing", ErrCheckoutSessionValidation)
 		}
 		session.Status = models.CheckoutSessionStatusRequiresAction
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["redirect_url"] = redirectURL
+		session.RailState["redirect_url"] = redirectURL
 	case "blocked":
 		msg := strings.TrimSpace(resp.Message)
 		if msg == "" {
@@ -1477,9 +1477,9 @@ func requireBillingFields(payment *CheckoutSessionPaymentRequest) error {
 	return nil
 }
 
-func (s *CheckoutSessionService) buildProcessorFields(processor string, payment *CheckoutSessionPaymentRequest) map[string]any {
+func (s *CheckoutSessionService) buildRailFields(rail string, payment *CheckoutSessionPaymentRequest) map[string]any {
 	fields := map[string]any{
-		"processor": processor,
+		"rail": rail,
 	}
 
 	addField(fields, "payment_method_id", payment.PaymentMethodID)
@@ -1513,7 +1513,7 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		Mode:    string(session.Mode),
 		PriceID: api.FormatPriceID(session.PriceID),
 		Payment: CheckoutSessionPaymentResponse{
-			Processor: string(session.Processor),
+			Rail: string(session.Rail),
 		},
 		ExpiresAt: session.ExpiresAt,
 	}
@@ -1537,8 +1537,8 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		resp.SubscriptionID = &subID
 	}
 
-	if session.ProcessorState != nil {
-		if val, ok := session.ProcessorState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" {
+	if session.RailState != nil {
+		if val, ok := session.RailState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Payment.TransactionURL = val
 		}
 		// Build solana_pay_url for every Solana-Pay-capable session. The wallet POSTs
@@ -1560,13 +1560,13 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 				)
 			}
 		}
-		if val, ok := session.ProcessorState["redirect_url"].(string); ok && strings.TrimSpace(val) != "" {
+		if val, ok := session.RailState["redirect_url"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.URL = strings.TrimSpace(val)
 			resp.Payment.RedirectURL = resp.URL
 		}
-		if val, ok := session.ProcessorState["message"].(string); ok && strings.TrimSpace(val) != "" {
+		if val, ok := session.RailState["message"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Message = strings.TrimSpace(val)
-		} else if val, ok := session.ProcessorState["failure_reason"].(string); ok && strings.TrimSpace(val) != "" {
+		} else if val, ok := session.RailState["failure_reason"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Message = strings.TrimSpace(val)
 		}
 	}
@@ -1578,7 +1578,7 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 	// Recurring Solana subscribe (#261): surface the unsigned transaction(s) to
 	// sign. Takes precedence over other next_actions for a subscription session.
 	if resp.Status == string(models.CheckoutSessionStatusRequiresAction) {
-		if txns := getStringSliceField(session.ProcessorState, "sign_transactions"); len(txns) > 0 {
+		if txns := getStringSliceField(session.RailState, "sign_transactions"); len(txns) > 0 {
 			resp.NextAction = &CheckoutSessionNextAction{
 				Type:         "solana_sign_transactions",
 				Transactions: txns,
@@ -1668,14 +1668,14 @@ func (s *CheckoutSessionService) buildNextAction(resp *CheckoutSessionResponse) 
 // (one-off transfer OR recurring subscribe — the build endpoint picks based on
 // the session mode/price) and for the cancel / tier-change lifecycle modes.
 func solanaSessionUsesPayURL(session *models.CheckoutSession) bool {
-	if session == nil || session.Processor != models.ProcessorSolana {
+	if session == nil || session.Rail != models.RailSolana {
 		return false
 	}
 	switch session.Mode {
 	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
 		return true
 	}
-	if flow, ok := session.ProcessorState["flow"].(string); ok && flow == "transaction_request" {
+	if flow, ok := session.RailState["flow"].(string); ok && flow == "transaction_request" {
 		return true
 	}
 	return false
@@ -1710,13 +1710,13 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.processors)
+	solanaProc, err := solanamodule.RequireSolanaRailConfig(s.rails)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
 
-	// Get token symbol from ProcessorState (where initializeSolanaSession stores it)
-	tokenSymbol := strings.ToUpper(strings.TrimSpace(getStringField(session.ProcessorState, "token_symbol")))
+	// Get token symbol from RailState (where initializeSolanaSession stores it)
+	tokenSymbol := strings.ToUpper(strings.TrimSpace(getStringField(session.RailState, "token_symbol")))
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("%w: token_symbol missing", ErrCheckoutSessionValidation)
 	}
@@ -1726,7 +1726,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
 	tokenMint := tokenCfg.Mint
-	storedTokenMint := getStringField(session.ProcessorState, "token_mint")
+	storedTokenMint := getStringField(session.RailState, "token_mint")
 	if storedTokenMint == "" {
 		return nil, fmt.Errorf("%w: token_mint missing", ErrCheckoutSessionValidation)
 	}
@@ -1737,16 +1737,16 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, fmt.Errorf("%w: token_mint mismatch", ErrCheckoutSessionValidation)
 	}
 
-	expectedAmount := getUint64Field(session.ProcessorState, "token_amount")
+	expectedAmount := getUint64Field(session.RailState, "token_amount")
 	if expectedAmount == 0 {
 		return nil, fmt.Errorf("%w: token_amount missing or invalid", ErrCheckoutSessionValidation)
 	}
-	expectedRecipient := getStringField(session.ProcessorState, "recipient")
+	expectedRecipient := getStringField(session.RailState, "recipient")
 	if expectedRecipient == "" {
 		return nil, fmt.Errorf("%w: recipient missing", ErrCheckoutSessionValidation)
 	}
-	// Get payer from ProcessorState (set by BuildSolanaPayTransaction)
-	expectedPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer"))
+	// Get payer from RailState (set by BuildSolanaPayTransaction)
+	expectedPayer := strings.TrimSpace(getStringField(session.RailState, "payer"))
 	if reqWallet := strings.TrimSpace(req.Payment.Wallet); reqWallet != "" {
 		if expectedPayer != "" && expectedPayer != reqWallet {
 			return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutSessionValidation)
@@ -1776,7 +1776,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 
 	signature := strings.TrimSpace(req.Payment.Signature)
 	if s.db != nil {
-		if existingPayment, err := repo.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.ProcessorSolana, signature); err == nil {
+		if existingPayment, err := repo.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.RailSolana, signature); err == nil {
 			if err := validateSolanaPaymentMatchesSession(existingPayment, session, referenceValue); err != nil {
 				return nil, err
 			}
@@ -1799,18 +1799,18 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        session.CustomerID.String(),
 		PriceID:       session.PriceID,
-		Processor:     "solana",
+		Rail:          "solana",
 		TransactionID: signature,
 		Amount:        session.Amount,
 		Currency:      session.Currency,
 		Metadata: map[string]any{
 			"solana_reference":    referenceValue,
 			"checkout_session_id": session.ID.String(),
-			"solana_payer_wallet": checkoutStateString(session.ProcessorState, "payer"),
-			"solana_token_symbol": checkoutStateString(session.ProcessorState, "token_symbol"),
-			"solana_token_mint":   checkoutStateString(session.ProcessorState, "token_mint"),
-			"solana_token_amount": checkoutStateUint64(session.ProcessorState, "token_amount"),
-			"solana_recipient":    checkoutStateString(session.ProcessorState, "recipient"),
+			"solana_payer_wallet": checkoutStateString(session.RailState, "payer"),
+			"solana_token_symbol": checkoutStateString(session.RailState, "token_symbol"),
+			"solana_token_mint":   checkoutStateString(session.RailState, "token_mint"),
+			"solana_token_amount": checkoutStateUint64(session.RailState, "token_amount"),
+			"solana_recipient":    checkoutStateString(session.RailState, "recipient"),
 		},
 	})
 	if err != nil {
@@ -1870,14 +1870,14 @@ func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uu
 		if session.Status == models.CheckoutSessionStatusSucceeded {
 			return nil
 		}
-		if session.Status == models.CheckoutSessionStatusExpired && session.Processor == models.ProcessorSolana && paymentID != uuid.Nil && strings.TrimSpace(transactionID) != "" {
+		if session.Status == models.CheckoutSessionStatusExpired && session.Rail == models.RailSolana && paymentID != uuid.Nil && strings.TrimSpace(transactionID) != "" {
 			// A wallet may broadcast before expiry but the app may confirm after expiry.
 			// The caller has already verified the signature against the session-bound quote.
 		} else {
 			return ErrCheckoutSessionConflict
 		}
 	}
-	if s.isExpired(session) && session.Processor != models.ProcessorSolana {
+	if s.isExpired(session) && session.Rail != models.RailSolana {
 		_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
 		return ErrCheckoutSessionExpired
 	}
@@ -1913,15 +1913,15 @@ func (s *CheckoutSessionService) MarkFailed(ctx context.Context, sessionID uuid.
 
 	session.Status = models.CheckoutSessionStatusFailed
 	session.UpdatedAt = s.now()
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
 	if msg := strings.TrimSpace(reason); msg != "" {
-		session.ProcessorState["message"] = msg
-		session.ProcessorState["failure_reason"] = msg
+		session.RailState["message"] = msg
+		session.RailState["failure_reason"] = msg
 	}
 	if strings.TrimSpace(code) != "" {
-		session.ProcessorState["failure_code"] = strings.TrimSpace(code)
+		session.RailState["failure_code"] = strings.TrimSpace(code)
 	}
 
 	return s.repo.Update(ctx, session)
@@ -1939,10 +1939,10 @@ func (s *CheckoutSessionService) MarkExpired(ctx context.Context, sessionID uuid
 	session.Status = models.CheckoutSessionStatusExpired
 	session.UpdatedAt = s.now()
 	if msg := strings.TrimSpace(message); msg != "" {
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["message"] = msg
+		session.RailState["message"] = msg
 	}
 
 	return s.repo.Update(ctx, session)
@@ -1979,11 +1979,11 @@ func (s *CheckoutSessionService) MarkSucceededWithSubscription(ctx context.Conte
 	return s.repo.Update(ctx, session)
 }
 
-func (s *CheckoutSessionService) FindOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
+func (s *CheckoutSessionService) FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
-	session, err := s.repo.GetLatestOpenByUserPriceProcessor(ctx, userID, priceID, processor)
+	session, err := s.repo.GetLatestOpenByUserPriceRail(ctx, userID, priceID, rail)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			return nil, nil
@@ -2009,7 +2009,7 @@ func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if session.CustomerID.String() != userID || session.PriceID != priceID || session.Processor != models.ProcessorCCBill {
+	if session.CustomerID.String() != userID || session.PriceID != priceID || session.Rail != models.RailCCBill {
 		return nil, ErrCheckoutSessionConflict
 	}
 	if s.isTerminal(session.Status) || s.isExpired(session) {
@@ -2076,7 +2076,7 @@ func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
 	if session == nil {
 		return false
 	}
-	flow := strings.ToLower(strings.TrimSpace(getStringField(session.ProcessorState, "flow")))
+	flow := strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow")))
 	if flow == "" {
 		// Legacy default for Solana checkout sessions.
 		return true
@@ -2085,7 +2085,7 @@ func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
 }
 
 func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Context, session *models.CheckoutSession, transactionID string) error {
-	if session == nil || session.Processor != models.ProcessorSolana {
+	if session == nil || session.Rail != models.RailSolana {
 		return nil
 	}
 	if !isSolanaTransferRequestFlow(session) {
@@ -2109,9 +2109,9 @@ func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Con
 	return nil
 }
 
-func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
-	if processorState == nil {
-		return fmt.Errorf("%w: processor_state unavailable", ErrCheckoutSessionValidation)
+func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
+	if railState == nil {
+		return fmt.Errorf("%w: rail_state unavailable", ErrCheckoutSessionValidation)
 	}
 	if tokenAmount == 0 {
 		return fmt.Errorf("%w: token_amount must be greater than 0", ErrCheckoutSessionValidation)
@@ -2123,12 +2123,12 @@ func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, toke
 		return fmt.Errorf("%w: quote expiry missing", ErrCheckoutSessionValidation)
 	}
 
-	processorState["token_amount"] = tokenAmount
-	processorState["token_price_usd"] = tokenPriceUSD
-	processorState["fx_rate"] = fxRate
-	processorState["fx_currency"] = strings.TrimSpace(fxCurrency)
-	processorState["quoted_at"] = quotedAt.UTC().Format(time.RFC3339)
-	processorState["quote_expires_at"] = quoteExpiresAt.UTC().Format(time.RFC3339)
+	railState["token_amount"] = tokenAmount
+	railState["token_price_usd"] = tokenPriceUSD
+	railState["fx_rate"] = fxRate
+	railState["fx_currency"] = strings.TrimSpace(fxCurrency)
+	railState["quoted_at"] = quotedAt.UTC().Format(time.RFC3339)
+	railState["quote_expires_at"] = quoteExpiresAt.UTC().Format(time.RFC3339)
 
 	return nil
 }
@@ -2180,7 +2180,7 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		return nil, err
 	}
 	// Validate it's a Solana session
-	if session.Processor != models.ProcessorSolana {
+	if session.Rail != models.RailSolana {
 		return nil, ErrCheckoutSessionNotSolana
 	}
 
@@ -2211,9 +2211,9 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 	// "Change to Pro") so the wallet shows the right action, not "pay".
 	switch session.Mode {
 	case models.CheckoutSessionModeSolanaCancel:
-		productName = solanaLifecycleLabel("Cancel", productName, session.ProcessorState)
+		productName = solanaLifecycleLabel("Cancel", productName, session.RailState)
 	case models.CheckoutSessionModeSolanaTierChange:
-		productName = solanaLifecycleLabel("Change to", productName, session.ProcessorState)
+		productName = solanaLifecycleLabel("Change to", productName, session.RailState)
 	}
 
 	return &solanamodule.PaySessionInfo{
@@ -2257,7 +2257,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		return nil, err
 	}
 	// Validate it's a Solana session
-	if session.Processor != models.ProcessorSolana {
+	if session.Rail != models.RailSolana {
 		return nil, ErrCheckoutSessionNotSolana
 	}
 
@@ -2304,16 +2304,16 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		return resp, nil
 	}
 
-	// Get token symbol from processor state
-	tokenSymbol := getStringField(session.ProcessorState, "token_symbol")
+	// Get token symbol from rail state
+	tokenSymbol := getStringField(session.RailState, "token_symbol")
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("%w: token_symbol missing from session", ErrCheckoutSessionValidation)
 	}
 
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
-	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+	if existingPayer := strings.TrimSpace(getStringField(session.RailState, "payer")); existingPayer != "" && existingPayer != account {
 		return nil, fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
 	}
 
@@ -2325,7 +2325,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		}
 		session.Reference = &reference
 	}
-	session.ProcessorState["payer"] = account
+	session.RailState["payer"] = account
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
 	}
@@ -2357,18 +2357,18 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 	if session == nil {
 		return nil, fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
 	}
-	tokenAmount := getUint64Field(session.ProcessorState, "token_amount")
+	tokenAmount := getUint64Field(session.RailState, "token_amount")
 	if tokenAmount == 0 {
 		return nil, fmt.Errorf("%w: token_amount missing from session", ErrCheckoutSessionValidation)
 	}
-	tokenMint := getStringField(session.ProcessorState, "token_mint")
+	tokenMint := getStringField(session.RailState, "token_mint")
 	if tokenMint == "" {
 		return nil, fmt.Errorf("%w: token_mint missing from session", ErrCheckoutSessionValidation)
 	}
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
 		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
 	}
-	recipient := getStringField(session.ProcessorState, "recipient")
+	recipient := getStringField(session.RailState, "recipient")
 	if recipient == "" {
 		return nil, fmt.Errorf("%w: recipient missing from session", ErrCheckoutSessionValidation)
 	}
@@ -2394,15 +2394,15 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 // wallet — only that wallet can sign the cancel / tier-change. Returns the
 // reference string to inject into the tx.
 func (s *CheckoutSessionService) bindSolanaLifecycleReference(ctx context.Context, session *models.CheckoutSession, account string) (string, error) {
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
 	// The signer must be the subscription's subscriber wallet (it owns the
 	// SubscriptionAuthority / fee payer slot). Reject a mismatched wallet up front.
-	if subscriber := strings.TrimSpace(getStringField(session.ProcessorState, "subscriber_wallet")); subscriber != "" && subscriber != account {
+	if subscriber := strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet")); subscriber != "" && subscriber != account {
 		return "", fmt.Errorf("%w: account is not the subscriber wallet for this subscription", ErrCheckoutSessionConflict)
 	}
-	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+	if existingPayer := strings.TrimSpace(getStringField(session.RailState, "payer")); existingPayer != "" && existingPayer != account {
 		return "", fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
@@ -2412,7 +2412,7 @@ func (s *CheckoutSessionService) bindSolanaLifecycleReference(ctx context.Contex
 		}
 		session.Reference = &reference
 	}
-	session.ProcessorState["payer"] = account
+	session.RailState["payer"] = account
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
 	}
@@ -2425,19 +2425,19 @@ func (s *CheckoutSessionService) bindSolanaLifecycleReference(ctx context.Contex
 // there is no client-supplied one-off override. It binds the Solana Pay reference
 // + payer to the POSTed account, calls PrepareSubscribeService for that wallet
 // with the reference injected, and tracks the init→subscribe step on
-// ProcessorState so a first-timer's second POST (after init lands) returns the
+// RailState so a first-timer's second POST (after init lands) returns the
 // subscribe tx. The poller mirrors the confirmed subscribe via ConfirmEnrollment.
 func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Context, session *models.CheckoutSession, account string) (*solanamodule.PayTransactionResponse, error) {
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
 	}
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
 	}
 	// The subscribe Solana Pay session is bound to the first wallet that POSTs its
 	// account (it becomes the subscriber + fee payer). A second, different wallet is
 	// rejected so the QR can't be hijacked mid-flow.
-	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+	if existingPayer := strings.TrimSpace(getStringField(session.RailState, "payer")); existingPayer != "" && existingPayer != account {
 		return nil, fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
@@ -2448,19 +2448,19 @@ func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Con
 		session.Reference = &reference
 	}
 	reference := strings.TrimSpace(*session.Reference)
-	session.ProcessorState["payer"] = account
-	session.ProcessorState["subscriber_wallet"] = account
+	session.RailState["payer"] = account
+	session.RailState["subscriber_wallet"] = account
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
 	}
 
 	terms := solanaPlanTerms{
-		planID:     getUint64Field(session.ProcessorState, "plan_id"),
-		mintSymbol: getStringField(session.ProcessorState, "mint_symbol"),
-		amount:     getUint64Field(session.ProcessorState, "amount_base_units"),
-		period:     getUint64Field(session.ProcessorState, "period_hours"),
+		planID:     getUint64Field(session.RailState, "plan_id"),
+		mintSymbol: getStringField(session.RailState, "mint_symbol"),
+		amount:     getUint64Field(session.RailState, "amount_base_units"),
+		period:     getUint64Field(session.RailState, "period_hours"),
 	}
-	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
+	if v := strings.TrimSpace(getStringField(session.RailState, "plan_created_at")); v != "" {
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
 
@@ -2489,8 +2489,8 @@ func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Con
 	// Track the step so the poller knows whether the landed tx was init (advance,
 	// stay pending) or subscribe (enroll). A first-timer's second POST re-derives
 	// the step from on-chain authority state (now "subscribe" once init landed).
-	session.ProcessorState["subscribe_step"] = res.Step
-	session.ProcessorState["subscription_pda"] = res.SubscriptionPDA
+	session.RailState["subscribe_step"] = res.Step
+	session.RailState["subscription_pda"] = res.SubscriptionPDA
 	session.UpdatedAt = s.now()
 	if err := s.repo.Update(ctx, session); err != nil {
 		return nil, err
@@ -2513,7 +2513,7 @@ func (s *CheckoutSessionService) buildSolanaCancelTransaction(ctx context.Contex
 	if s.solanaPrepareCancel == nil {
 		return nil, fmt.Errorf("%w: solana cancel is not configured", ErrCheckoutSessionValidation)
 	}
-	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "subscription_id")))
 	if err != nil {
 		return nil, fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
 	}
@@ -2566,7 +2566,7 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 	if s.solanaSubscriptionRows == nil {
 		return in, fmt.Errorf("%w: solana subscription lifecycle is not configured", ErrCheckoutSessionValidation)
 	}
-	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "subscription_id")))
 	if err != nil {
 		return in, fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
 	}
@@ -2574,7 +2574,7 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 	if err != nil || oldRow == nil {
 		return in, fmt.Errorf("%w: no on-chain record for this subscription", ErrCheckoutSessionValidation)
 	}
-	newPlanCreatedAt, safeErr := safecast.Convert[int64](getUint64Field(session.ProcessorState, "tier_new_plan_created_at"))
+	newPlanCreatedAt, safeErr := safecast.Convert[int64](getUint64Field(session.RailState, "tier_new_plan_created_at"))
 	if safeErr != nil {
 		return in, fmt.Errorf("%w: tier_new_plan_created_at overflows int64", ErrCheckoutSessionValidation)
 	}
@@ -2585,15 +2585,15 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 	in = recurring.PrepareTierChangeInput{
 		MerchantID:           tid,
 		SubscriberWallet:     oldRow.SubscriberWallet,
-		MintSymbol:           getStringField(session.ProcessorState, "tier_new_mint_symbol"),
+		MintSymbol:           getStringField(session.RailState, "tier_new_mint_symbol"),
 		OldPlanPDA:           oldRow.PlanPDA,
 		OldSubscriptionPDA:   oldRow.SubscriptionPDA,
-		NewPlanID:            getUint64Field(session.ProcessorState, "tier_new_plan_id"),
-		NewAmountBaseUnits:   getUint64Field(session.ProcessorState, "tier_new_amount_base_units"),
-		NewPeriodHours:       getUint64Field(session.ProcessorState, "tier_new_period_hours"),
+		NewPlanID:            getUint64Field(session.RailState, "tier_new_plan_id"),
+		NewAmountBaseUnits:   getUint64Field(session.RailState, "tier_new_amount_base_units"),
+		NewPeriodHours:       getUint64Field(session.RailState, "tier_new_period_hours"),
 		NewPlanCreatedAt:     newPlanCreatedAt,
-		IsUpgrade:            getBoolField(session.ProcessorState, "tier_is_upgrade"),
-		FirstChargeBaseUnits: getUint64Field(session.ProcessorState, "tier_first_charge_base_units"),
+		IsUpgrade:            getBoolField(session.RailState, "tier_is_upgrade"),
+		FirstChargeBaseUnits: getUint64Field(session.RailState, "tier_first_charge_base_units"),
 	}
 	return in, nil
 }
@@ -2611,7 +2611,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		return nil
 	}
-	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "subscription_id")))
 	if err != nil {
 		return fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
 	}
@@ -2663,7 +2663,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 //     persists the on-chain row, and the session is marked succeeded.
 //
 // Idempotent: a re-confirm of an already-succeeded session is a no-op, and
-// ConfirmEnrollment upserts on the processor subscription id.
+// ConfirmEnrollment upserts on the rail subscription id.
 func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
@@ -2680,18 +2680,18 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 		return fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)
 	}
 
-	wallet := strings.TrimSpace(getStringField(session.ProcessorState, "subscriber_wallet"))
+	wallet := strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet"))
 	if wallet == "" {
 		// No wallet has POSTed yet — there is nothing to confirm.
 		return solanamodule.ErrSolanaSubscribePending
 	}
 	terms := solanaPlanTerms{
-		planID:     getUint64Field(session.ProcessorState, "plan_id"),
-		mintSymbol: getStringField(session.ProcessorState, "mint_symbol"),
-		amount:     getUint64Field(session.ProcessorState, "amount_base_units"),
-		period:     getUint64Field(session.ProcessorState, "period_hours"),
+		planID:     getUint64Field(session.RailState, "plan_id"),
+		mintSymbol: getStringField(session.RailState, "mint_symbol"),
+		amount:     getUint64Field(session.RailState, "amount_base_units"),
+		period:     getUint64Field(session.RailState, "period_hours"),
 	}
-	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
+	if v := strings.TrimSpace(getStringField(session.RailState, "plan_created_at")); v != "" {
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
 	tenantID, err := merchant.Require(ctx)
@@ -2716,10 +2716,10 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	}
 	if prep.Step != "subscribe" {
 		// Authority not yet visible → only the init tx (at most) has landed.
-		if session.ProcessorState == nil {
-			session.ProcessorState = map[string]any{}
+		if session.RailState == nil {
+			session.RailState = map[string]any{}
 		}
-		session.ProcessorState["subscribe_step"] = prep.Step
+		session.RailState["subscribe_step"] = prep.Step
 		session.UpdatedAt = s.now()
 		_ = s.repo.Update(ctx, session)
 		return solanamodule.ErrSolanaSubscribePending
@@ -2779,12 +2779,12 @@ func (s *CheckoutSessionService) tierChangeConfirmInput(ctx context.Context, ses
 	if err != nil {
 		return out, err
 	}
-	newPriceID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "new_price_id")))
+	newPriceID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "new_price_id")))
 	if err != nil {
 		return out, fmt.Errorf("%w: new_price_id missing from session", ErrCheckoutSessionValidation)
 	}
 	var oldPeriodEnds *time.Time
-	if v := strings.TrimSpace(getStringField(session.ProcessorState, "tier_old_period_ends_at")); v != "" {
+	if v := strings.TrimSpace(getStringField(session.RailState, "tier_old_period_ends_at")); v != "" {
 		if t, perr := time.Parse(time.RFC3339, v); perr == nil {
 			tt := t.UTC()
 			oldPeriodEnds = &tt

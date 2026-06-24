@@ -94,16 +94,16 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           999, // Amount in cents ($9.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_monthly_usd_999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_monthly_usd_999",
 						},
 						// CCBillPriceID matches flexId from testdata/webhooks/ccbill/newsalesuccess.json
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: CCBillTestFormName,
-							models.ProcessorKeyCCBillFlexID:   CCBillTestFlexID,
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: CCBillTestFormName,
+							models.RailKeyCCBillFlexID:   CCBillTestFlexID,
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -114,15 +114,15 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           2499, // Amount in cents ($24.99, ~17% discount)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(90),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_quarterly_usd_2499",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_quarterly_usd_2499",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormQuarterlyUSD",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_quarterly_usd_2499",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormQuarterlyUSD",
+							models.RailKeyCCBillFlexID:   "ccbill_quarterly_usd_2499",
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -133,13 +133,13 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           899, // Amount in cents (€8.99)
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_monthly_eur_899",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_monthly_eur_899",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormMonthlyEUR",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_monthly_eur_899",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormMonthlyEUR",
+							models.RailKeyCCBillFlexID:   "ccbill_monthly_eur_899",
 						},
 					},
 				},
@@ -149,9 +149,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           1200, // Amount in yen (no decimals for JPY)
 					Currency:         "jpy",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_monthly_jpy_1200",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_monthly_jpy_1200",
 						},
 						// CCBill doesn't support JPY in this example
 					},
@@ -162,15 +162,15 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           7999, // Amount in cents ($79.99, ~33% discount)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_yearly_usd_7999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_yearly_usd_7999",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormYearlyUSD",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_yearly_usd_7999",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormYearlyUSD",
+							models.RailKeyCCBillFlexID:   "ccbill_yearly_usd_7999",
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -197,15 +197,15 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           1999, // Amount in cents ($19.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_pro_monthly_usd_1999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_pro_monthly_usd_1999",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormProMonthlyUSD",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_pro_monthly_usd_1999",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormProMonthlyUSD",
+							models.RailKeyCCBillFlexID:   "ccbill_pro_monthly_usd_1999",
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -216,15 +216,15 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           14999, // Amount in cents ($149.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_pro_yearly_usd_14999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_pro_yearly_usd_14999",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormProYearlyUSD",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_pro_yearly_usd_14999",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormProYearlyUSD",
+							models.RailKeyCCBillFlexID:   "ccbill_pro_yearly_usd_14999",
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -235,13 +235,13 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           1799, // Amount in cents (€17.99)
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_pro_monthly_eur_1799",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_pro_monthly_eur_1799",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormProMonthlyEUR",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_pro_monthly_eur_1799",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormProMonthlyEUR",
+							models.RailKeyCCBillFlexID:   "ccbill_pro_monthly_eur_1799",
 						},
 					},
 				},
@@ -266,15 +266,15 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           29999, // Amount in cents ($299.99)
 					Currency:         "usd",
 					BillingCycleDays: nil, // One-time purchase, no recurring billing
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_lifetime_usd_29999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_lifetime_usd_29999",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormLifetimeUSD",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_lifetime_usd_29999",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormLifetimeUSD",
+							models.RailKeyCCBillFlexID:   "ccbill_lifetime_usd_29999",
 						},
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -285,13 +285,13 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           26999, // Amount in cents (€269.99)
 					Currency:         "eur",
 					BillingCycleDays: nil, // One-time purchase
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_lifetime_eur_26999",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_lifetime_eur_26999",
 						},
-						string(models.ProcessorCCBill): {
-							models.ProcessorKeyCCBillFormName: "FormLifetimeEUR",
-							models.ProcessorKeyCCBillFlexID:   "ccbill_lifetime_eur_26999",
+						string(models.RailCCBill): {
+							models.RailKeyCCBillFormName: "FormLifetimeEUR",
+							models.RailKeyCCBillFlexID:   "ccbill_lifetime_eur_26999",
 						},
 					},
 				},
@@ -301,9 +301,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           39800, // Amount in yen
 					Currency:         "jpy",
 					BillingCycleDays: nil, // One-time purchase
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_lifetime_jpy_39800",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_lifetime_jpy_39800",
 						},
 						// CCBill doesn't support JPY in this example
 					},
@@ -328,12 +328,12 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:           499, // Amount in cents ($4.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_basic_monthly_usd_499",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_basic_monthly_usd_499",
 						},
 						// No CCBill - this price is NMI-only
-						string(models.ProcessorSolana): {
+						string(models.RailSolana): {
 							"enabled": "true",
 						},
 					},
@@ -414,12 +414,12 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, status, amount, currency, billing_cycle_days,
-			processors, created_at, updated_at, merchant_id
+			rails, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, status, price.Amount, price.Currency,
 		price.BillingCycleDays,
-		suite.mustJSONB(price.Processors, len(price.Processors) == 0),
+		suite.mustJSONB(price.Rails, len(price.Rails) == 0),
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
 }
@@ -448,9 +448,9 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:           1000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_premium_basic_1000",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_premium_basic_1000",
 						},
 					},
 				},
@@ -476,9 +476,9 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:           2000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_premium_plus_2000",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_premium_plus_2000",
 						},
 					},
 				},
@@ -505,9 +505,9 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:           3000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
-					Processors: map[string]map[string]string{
-						string(models.ProcessorMobius): {
-							models.ProcessorKeyPlanID: "plan_premium_ultimate_3000",
+					Rails: map[string]map[string]string{
+						string(models.RailMobius): {
+							models.RailKeyPlanID: "plan_premium_ultimate_3000",
 						},
 					},
 				},
@@ -558,18 +558,18 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 	periodEnd := now.Add(30 * 24 * time.Hour)
 
 	sub := &models.Subscription{
-		ID:                      uuid.New(),
-		CustomerID:              tenantSubjectID,
-		ProductID:               price.ProductID,
-		PriceID:                 priceID,
-		Status:                  status,
-		StartedAt:               now,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &periodEnd,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: "test-sub-" + uuid.New().String()[:8],
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    uuid.New(),
+		CustomerID:            tenantSubjectID,
+		ProductID:             price.ProductID,
+		PriceID:               priceID,
+		Status:                status,
+		StartedAt:             now,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &periodEnd,
+		Rail:                  models.RailMobius,
+		RailSubscriptionID:    "test-sub-" + uuid.New().String()[:8],
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 
 	suite.InsertSubscription(ctx, sub)
@@ -582,14 +582,14 @@ type SubscriptionOptions struct {
 	UserID              string
 	PriceID             uuid.UUID
 	Status              models.SubscriptionStatus
-	Processor           models.Processor
+	Rail                models.Rail
 	PeriodStart         time.Time
 	PeriodEnd           time.Time
 	CurrentPeriodEndsAt *time.Time // Optional: if set, overrides PeriodEnd for current_period_ends_at
 	PaymentMethodID     *uuid.UUID
 	CancelType          *models.CancelType
 	CancelFeedback      *string
-	ProcessorSubID      string
+	RailSubID           string
 	RetryAttempts       *int
 	NextRetryAt         *time.Time
 	DeletionScheduledAt *time.Time
@@ -610,11 +610,11 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 	if opts.PeriodEnd.IsZero() {
 		opts.PeriodEnd = now.Add(30 * 24 * time.Hour)
 	}
-	if opts.Processor == "" {
-		opts.Processor = models.ProcessorMobius
+	if opts.Rail == "" {
+		opts.Rail = models.RailMobius
 	}
-	if opts.ProcessorSubID == "" {
-		opts.ProcessorSubID = "test-sub-" + uuid.New().String()[:8]
+	if opts.RailSubID == "" {
+		opts.RailSubID = "test-sub-" + uuid.New().String()[:8]
 	}
 
 	periodEndsAt := &opts.PeriodEnd
@@ -623,24 +623,24 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 	}
 
 	sub := &models.Subscription{
-		ID:                      uuid.New(),
-		CustomerID:              tenantSubjectID,
-		ProductID:               price.ProductID,
-		PriceID:                 opts.PriceID,
-		Status:                  opts.Status,
-		StartedAt:               opts.PeriodStart,
-		CurrentPeriodStartsAt:   &opts.PeriodStart,
-		CurrentPeriodEndsAt:     periodEndsAt,
-		Processor:               opts.Processor,
-		ProcessorSubscriptionID: opts.ProcessorSubID,
-		PaymentMethodID:         opts.PaymentMethodID,
-		CancelType:              opts.CancelType,
-		CancelFeedback:          opts.CancelFeedback,
-		RetryAttempts:           opts.RetryAttempts,
-		NextRetryAt:             opts.NextRetryAt,
-		DeletionScheduledAt:     opts.DeletionScheduledAt,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    uuid.New(),
+		CustomerID:            tenantSubjectID,
+		ProductID:             price.ProductID,
+		PriceID:               opts.PriceID,
+		Status:                opts.Status,
+		StartedAt:             opts.PeriodStart,
+		CurrentPeriodStartsAt: &opts.PeriodStart,
+		CurrentPeriodEndsAt:   periodEndsAt,
+		Rail:                  opts.Rail,
+		RailSubscriptionID:    opts.RailSubID,
+		PaymentMethodID:       opts.PaymentMethodID,
+		CancelType:            opts.CancelType,
+		CancelFeedback:        opts.CancelFeedback,
+		RetryAttempts:         opts.RetryAttempts,
+		NextRetryAt:           opts.NextRetryAt,
+		DeletionScheduledAt:   opts.DeletionScheduledAt,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 
 	if opts.Status == models.StatusCancelled {
@@ -668,7 +668,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
-		Processor:            models.ProcessorMobius,
+		Rail:                 models.RailMobius,
 		VaultID:              "vault-" + uuid.New().String()[:8],
 		BillingID:            strPtr("billing-" + uuid.New().String()[:8]),
 		InitialTransactionID: "txn-" + uuid.New().String()[:8],
@@ -687,7 +687,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 // CreateTestPaymentMethodWithOptions creates a payment method with custom options
 type PaymentMethodOptions struct {
 	UserID               string
-	Processor            models.Processor
+	Rail                 models.Rail
 	VaultID              string
 	BillingID            string
 	InitialTransactionID string
@@ -703,8 +703,8 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 	now := time.Now()
 	tenantSubjectID := suite.ensureCustomer(ctx, opts.UserID)
 
-	if opts.Processor == "" {
-		opts.Processor = models.ProcessorMobius
+	if opts.Rail == "" {
+		opts.Rail = models.RailMobius
 	}
 	if opts.VaultID == "" {
 		opts.VaultID = "vault-" + uuid.New().String()[:8]
@@ -716,7 +716,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
-		Processor:            opts.Processor,
+		Rail:                 opts.Rail,
 		VaultID:              opts.VaultID,
 		BillingID:            strPtrOrNil(opts.BillingID),
 		InitialTransactionID: opts.InitialTransactionID,
@@ -745,7 +745,7 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 		CustomerID:     tenantSubjectID,
 		PriceID:        priceID,
 		SubscriptionID: subscriptionID,
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		TransactionID:  "txn-" + uuid.New().String()[:8],
 		Amount:         999, // Amount in cents ($9.99)
 		Currency:       "usd",
@@ -764,7 +764,7 @@ type PaymentOptions struct {
 	PriceID           uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
-	Processor         models.Processor
+	Rail              models.Rail
 	TransactionID     string
 	Amount            int64 // Amount in cents
 	Currency          string
@@ -777,8 +777,8 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 	now := time.Now()
 	tenantSubjectID := suite.ensureCustomer(ctx, opts.UserID)
 
-	if opts.Processor == "" {
-		opts.Processor = models.ProcessorMobius
+	if opts.Rail == "" {
+		opts.Rail = models.RailMobius
 	}
 	if opts.TransactionID == "" {
 		opts.TransactionID = "txn-" + uuid.New().String()[:8]
@@ -799,7 +799,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 		PriceID:           opts.PriceID,
 		SubscriptionID:    opts.SubscriptionID,
 		RefundedPaymentID: opts.RefundedPaymentID,
-		Processor:         opts.Processor,
+		Rail:              opts.Rail,
 		TransactionID:     opts.TransactionID,
 		Amount:            opts.Amount,
 		Currency:          opts.Currency,
@@ -1039,13 +1039,13 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 
-	// Create an active subscription with the processor subscription ID from saved webhooks
+	// Create an active subscription with the rail subscription ID from saved webhooks
 	return suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         CCBillTestUserID,
-		PriceID:        priceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorCCBill,
-		ProcessorSubID: CCBillTestSubscriptionID,
+		UserID:    CCBillTestUserID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailCCBill,
+		RailSubID: CCBillTestSubscriptionID,
 	})
 }
 

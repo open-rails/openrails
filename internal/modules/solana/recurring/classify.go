@@ -53,7 +53,7 @@ var (
 )
 
 // CrankFailure is the classified outcome of a failed pull: a stable
-// processor-agnostic decline code (shared with the card processors) plus the
+// rail-agnostic decline code (shared with the card rails) plus the
 // action category the cranker acts on, and the raw on-chain code for forensics.
 type CrankFailure struct {
 	Code        declinecode.Code

@@ -10,7 +10,7 @@ import (
 )
 
 func TestProviderRefreshProvidersExcludeSolana(t *testing.T) {
-	fetchers := map[reconcile.Provider]reconcile.ProcessorFetcher{
+	fetchers := map[reconcile.Provider]reconcile.RailFetcher{
 		reconcile.ProviderSolana: providerRefreshFakeFetcher{provider: reconcile.ProviderSolana},
 		reconcile.ProviderStripe: providerRefreshFakeFetcher{provider: reconcile.ProviderStripe},
 		reconcile.ProviderNMI:    providerRefreshFakeFetcher{provider: reconcile.ProviderNMI},

@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -55,7 +55,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 	if allowOverride {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"processor":       subscription.Processor,
+			"rail":            subscription.Rail,
 			"trigger":         trigger,
 			"reason":          reason,
 		}).Warn("Bypassing terminal transition guard via explicit manual override")
@@ -64,7 +64,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 
 	return &TerminalTransitionBlockedError{
 		SubscriptionID: subscription.ID,
-		Processor:      subscription.Processor,
+		Rail:           subscription.Rail,
 		FromStatus:     subscription.Status,
 		ToStatus:       models.StatusActive,
 		CancelType:     NormalizeCancelType(subscription.CancelType),
@@ -123,8 +123,8 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 // at period end — a lost success webhook, a provider billing on its own day
 // boundary, a merely late webhook — extends access briefly instead of cutting
 // it at the period-end second. Called on activation and on every renewal for
-// grace-eligible processors (NMI-backed + Stripe; see
-// RenewalGraceEligibleProcessor), right after the paid window push, so the
+// grace-eligible rails (NMI-backed + Stripe; see
+// RenewalGraceEligibleRail), right after the paid window push, so the
 // timeline tail is the paid period end and the grace window starts exactly
 // there (no-gap property; the DB period range is half-open, so touching
 // boundaries never violate the overlap exclusion).
@@ -153,7 +153,7 @@ func (s *SubscriptionLifecycleService) appendRenewalGraceWindows(
 	if entitlementService == nil || subscription == nil || periodEnd.IsZero() || len(entNames) == 0 {
 		return
 	}
-	if !RenewalGraceEligibleProcessor(subscription.Processor) {
+	if !RenewalGraceEligibleRail(subscription.Rail) {
 		return
 	}
 	notBefore := periodEnd.UTC()
@@ -201,16 +201,16 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		notifications []*models.NotificationQueue
 	)
 
-	procSubID := normalize.FromPtr(params.ProcessorSubscriptionID)
+	procSubID := normalize.FromPtr(params.RailSubscriptionID)
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"user_id":                   params.UserID,
-		"price_id":                  params.PriceID,
-		"processor":                 params.Processor,
-		"processor_subscription_id": procSubID,
-		"transaction_id":            params.TransactionID,
-		"amount_cents":              params.Amount,
-		"currency":                  params.Currency,
+		"user_id":              params.UserID,
+		"price_id":             params.PriceID,
+		"rail":                 params.Rail,
+		"rail_subscription_id": procSubID,
+		"transaction_id":       params.TransactionID,
+		"amount_cents":         params.Amount,
+		"currency":             params.Currency,
 	}).Info("Starting membership creation flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -226,7 +226,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	s.dispatchNotifications(ctx, notifications)
 
 	// Log the charge success event to ClickHouse
-	s.logPaymentEvent(ctx, subscription, params.Processor, params.TransactionID, params.Amount, params.Currency)
+	s.logPaymentEvent(ctx, subscription, params.Rail, params.TransactionID, params.Amount, params.Currency)
 
 	return subscription, nil
 }
@@ -267,14 +267,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}).Info("Loaded price for membership creation")
 
 	var existingPendingSub *models.Subscription
-	if params.ProcessorSubscriptionID != nil && strings.TrimSpace(*params.ProcessorSubscriptionID) != "" {
-		found, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), strings.TrimSpace(*params.ProcessorSubscriptionID))
+	if params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "" {
+		found, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
 		if err != nil && !repo.IsNotFound(err) {
-			return nil, nil, fmt.Errorf("failed to check existing subscription by processor subscription ID: %w", err)
+			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
 		if err == nil && found.Status == models.StatusPending {
 			if found.CustomerID.String() != params.UserID || found.ProductID != price.ProductID {
-				return nil, nil, fmt.Errorf("processor subscription belongs to a different pending subscription")
+				return nil, nil, fmt.Errorf("rail subscription belongs to a different pending subscription")
 			}
 			existingPendingSub = found
 		}
@@ -283,7 +283,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var paymentService *payments.PaymentService
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
-		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
+		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
 		if err != nil && !repo.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
@@ -332,13 +332,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	if err == nil && (existingPendingSub == nil || activeSub.ID != existingPendingSub.ID) {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"user_id":                   params.UserID,
-			"product_id":                price.ProductID,
-			"existing_subscription_id":  activeSub.ID,
-			"existing_price_id":         activeSub.PriceID,
-			"existing_status":           activeSub.Status,
-			"existing_processor":        activeSub.Processor,
-			"processor_subscription_id": activeSub.ProcessorSubscriptionID,
+			"user_id":                  params.UserID,
+			"product_id":               price.ProductID,
+			"existing_subscription_id": activeSub.ID,
+			"existing_price_id":        activeSub.PriceID,
+			"existing_status":          activeSub.Status,
+			"existing_rail":            activeSub.Rail,
+			"rail_subscription_id":     activeSub.RailSubscriptionID,
 		}).Warn("User already has an active, pending, or past_due subscription for this product; aborting membership creation")
 		return nil, nil, fmt.Errorf("user already has an active, pending, or past_due subscription for this product")
 	}
@@ -375,9 +375,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		existingPendingSub.PriceID = price.ID
 		existingPendingSub.ProductID = price.ProductID
 		existingPendingSub.Status = models.StatusActive
-		existingPendingSub.Processor = params.Processor
-		if params.ProcessorSubscriptionID != nil {
-			existingPendingSub.ProcessorSubscriptionID = *params.ProcessorSubscriptionID
+		existingPendingSub.Rail = params.Rail
+		if params.RailSubscriptionID != nil {
+			existingPendingSub.RailSubscriptionID = *params.RailSubscriptionID
 		}
 
 		existingPendingSub.CurrentPeriodStartsAt = &periodStartsAt
@@ -398,13 +398,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			return nil, nil, fmt.Errorf("failed to update subscription: %w", err)
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           existingPendingSub.ID,
-			"user_id":                   existingPendingSub.CustomerID.String(),
-			"price_id":                  existingPendingSub.PriceID,
-			"processor":                 existingPendingSub.Processor,
-			"processor_subscription_id": existingPendingSub.ProcessorSubscriptionID,
-			"period_start":              periodStartsAt,
-			"period_end":                periodEndsAt,
+			"subscription_id":      existingPendingSub.ID,
+			"user_id":              existingPendingSub.CustomerID.String(),
+			"price_id":             existingPendingSub.PriceID,
+			"rail":                 existingPendingSub.Rail,
+			"rail_subscription_id": existingPendingSub.RailSubscriptionID,
+			"period_start":         periodStartsAt,
+			"period_end":           periodEndsAt,
 		}).Info("Activating existing pending subscription record for membership creation")
 		subscription = existingPendingSub
 	} else {
@@ -416,10 +416,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
 			Status:                   models.StatusActive,
-			Processor:                params.Processor,
-			ProcessorSubscriptionID: func() string {
-				if params.ProcessorSubscriptionID != nil {
-					return *params.ProcessorSubscriptionID
+			Rail:                     params.Rail,
+			RailSubscriptionID: func() string {
+				if params.RailSubscriptionID != nil {
+					return *params.RailSubscriptionID
 				}
 				return ""
 			}(),
@@ -437,13 +437,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"user_id":                   subscription.CustomerID.String(),
-			"price_id":                  subscription.PriceID,
-			"processor":                 subscription.Processor,
-			"processor_subscription_id": subscription.ProcessorSubscriptionID,
-			"period_start":              periodStartsAt,
-			"period_end":                periodEndsAt,
+			"subscription_id":      subscription.ID,
+			"user_id":              subscription.CustomerID.String(),
+			"price_id":             subscription.PriceID,
+			"rail":                 subscription.Rail,
+			"rail_subscription_id": subscription.RailSubscriptionID,
+			"period_start":         periodStartsAt,
+			"period_end":           periodEndsAt,
 		}).Info("Created new subscription record for membership")
 	}
 
@@ -561,7 +561,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			CustomerID:               subscription.CustomerID,
 			PriceID:                  price.ID,
 			SubscriptionID:           &subscription.ID,
-			Processor:                params.Processor,
+			Rail:                     params.Rail,
 			TransactionID:            params.TransactionID,
 			Amount:                   amount,
 			ListAmount:               price.Amount,
@@ -605,8 +605,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	var userID string
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"processor":                 params.Processor,
-		"processor_subscription_id": params.ProcessorSubscriptionID,
+		"rail":                      params.Rail,
+		"rail_subscription_id":      params.RailSubscriptionID,
 		"transaction_id":            params.TransactionID,
 		"amount_cents":              params.Amount,
 		"currency":                  params.Currency,
@@ -623,12 +623,12 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		paymentService := payments.NewPaymentService(db, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
-		// Find subscription - use processor name for gateway lookup
-		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), params.ProcessorSubscriptionID)
+		// Find subscription - use rail name for gateway lookup
+		subscription, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), params.RailSubscriptionID)
 		if err != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"processor":                 params.Processor,
-				"processor_subscription_id": params.ProcessorSubscriptionID,
+				"rail":                 params.Rail,
+				"rail_subscription_id": params.RailSubscriptionID,
 			}).WithError(err).Error("Failed to load subscription for renewal")
 			return fmt.Errorf("subscription not found: %w", err)
 		}
@@ -720,7 +720,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				CustomerID:               subscription.CustomerID,
 				PriceID:                  price.ID,
 				SubscriptionID:           &subscription.ID,
-				Processor:                params.Processor,
+				Rail:                     params.Rail,
 				TransactionID:            params.TransactionID,
 				Amount:                   amount,
 				ListAmount:               amount,
@@ -736,7 +736,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
 			}
 			if !created {
-				existingPayment, loadErr := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
+				existingPayment, loadErr := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
 				if loadErr != nil {
 					return fmt.Errorf("failed to load duplicate renewal payment marker: %w", loadErr)
 				}
@@ -755,7 +755,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				log.WithContext(ctx).WithFields(log.Fields{
 					"transaction_id":  params.TransactionID,
 					"subscription_id": subscription.ID,
-					"processor":       params.Processor,
+					"rail":            params.Rail,
 				}).Info("Renewal already processed; skipping duplicate lifecycle mutation")
 				return nil
 			}
@@ -799,14 +799,14 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 		renewalApplied = true
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"user_id":                   subscription.CustomerID.String(),
-			"price_id":                  price.ID,
-			"processor":                 subscription.Processor,
-			"processor_subscription_id": subscription.ProcessorSubscriptionID,
-			"period_start":              periodStartsAt,
-			"period_end":                periodEndsAt,
-			"downgrade_applied":         applyingDowngrade,
+			"subscription_id":      subscription.ID,
+			"user_id":              subscription.CustomerID.String(),
+			"price_id":             price.ID,
+			"rail":                 subscription.Rail,
+			"rail_subscription_id": subscription.RailSubscriptionID,
+			"period_start":         periodStartsAt,
+			"period_end":           periodEndsAt,
+			"downgrade_applied":    applyingDowngrade,
 		}).Info("Updated subscription for renewal")
 
 		// Append the next paid entitlement window for the subscription's entitlements.
@@ -839,7 +839,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				}).Warn("Renewal period already elapsed; advancing lifecycle without granting entitlement windows")
 			}
 			for entName := range entitlementsSpec {
-				// If the subscription had processor-driven grace windows (e.g. CCBill dunning),
+				// If the subscription had rail-driven grace windows (e.g. CCBill dunning),
 				// remove them before pushing the next paid window. Otherwise, the grace tail can
 				// cause the paid push to be scheduled after grace or become a no-op.
 				grace := models.EntitlementSourceGrace
@@ -961,7 +961,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	// Log the charge success event to ClickHouse
 	if s.EventLogService != nil {
 		sub := &models.Subscription{ID: subscriptionID, CustomerID: identity.CustomerIDFromString(userID).UUID()}
-		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Processor, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
+		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Rail, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 				"event_type":      "charge_success",
@@ -979,9 +979,9 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		return nil, fmt.Errorf("reactivation params are required")
 	}
 
-	processorSubID := strings.TrimSpace(params.ProcessorSubscriptionID)
-	if processorSubID == "" {
-		return nil, fmt.Errorf("processor subscription id is required")
+	railSubID := strings.TrimSpace(params.RailSubscriptionID)
+	if railSubID == "" {
+		return nil, fmt.Errorf("rail subscription id is required")
 	}
 
 	now := s.now().UTC()
@@ -990,8 +990,8 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"processor":                 params.Processor,
-		"processor_subscription_id": processorSubID,
+		"rail":                      params.Rail,
+		"rail_subscription_id":      railSubID,
 		"has_period_override":       params.CurrentPeriodEndsAt != nil,
 		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership reactivation flow")
@@ -1006,7 +1006,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
-		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), processorSubID)
+		subscription, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), railSubID)
 		if err != nil {
 			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
 		}
@@ -1101,11 +1101,11 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           reactivated.ID,
-		"user_id":                   reactivated.CustomerID.String(),
-		"processor":                 reactivated.Processor,
-		"processor_subscription_id": reactivated.ProcessorSubscriptionID,
-		"current_period_ends_at":    reactivated.CurrentPeriodEndsAt,
+		"subscription_id":        reactivated.ID,
+		"user_id":                reactivated.CustomerID.String(),
+		"rail":                   reactivated.Rail,
+		"rail_subscription_id":   reactivated.RailSubscriptionID,
+		"current_period_ends_at": reactivated.CurrentPeriodEndsAt,
 	}).Info("Membership reactivation flow completed")
 
 	return reactivated, nil
@@ -1118,13 +1118,13 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 	// Variables to capture from transaction for event logging
 	var subscriptionID uuid.UUID
 	var userID string
-	var processor models.Processor
+	var rail models.Rail
 
 	var procName string
-	if params.Processor != nil {
-		procName = string(*params.Processor)
+	if params.Rail != nil {
+		procName = string(*params.Rail)
 	}
-	procSub := normalize.FromPtr(params.ProcessorSubscriptionID)
+	procSub := normalize.FromPtr(params.RailSubscriptionID)
 	subID := ""
 	if params.SubscriptionID != nil {
 		subID = params.SubscriptionID.String()
@@ -1132,8 +1132,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 	cancelFeedback := normalize.FromPtr(params.CancelFeedback)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           subID,
-		"processor":                 procName,
-		"processor_subscription_id": procSub,
+		"rail":                      procName,
+		"rail_subscription_id":      procSub,
 		"cancel_type":               params.CancelType,
 		"revoke_access_immediately": params.RevokeAccess,
 		"cancel_feedback_provided":  cancelFeedback != "",
@@ -1146,17 +1146,17 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		notificationRepo := repo.NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
 
-		// Use processor name for gateway lookup
+		// Use rail name for gateway lookup
 		// Find subscription
 		var subscription *models.Subscription
 		var err error
 
 		if params.SubscriptionID != nil {
 			subscription, err = subService.GetByID(ctx, *params.SubscriptionID)
-		} else if params.ProcessorSubscriptionID != nil && params.Processor != nil {
-			subscription, err = subService.GetByProcessorSubscriptionID(ctx, string(*params.Processor), *params.ProcessorSubscriptionID)
+		} else if params.RailSubscriptionID != nil && params.Rail != nil {
+			subscription, err = subService.GetByRailSubscriptionID(ctx, string(*params.Rail), *params.RailSubscriptionID)
 		} else {
-			return fmt.Errorf("either subscription_id or processor details must be provided")
+			return fmt.Errorf("either subscription_id or rail details must be provided")
 		}
 
 		if err != nil {
@@ -1167,7 +1167,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		// Capture values for event logging after transaction
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
-		processor = subscription.Processor
+		rail = subscription.Rail
 
 		// Cancellation policy (caller-owned): an immediate revoke truncates the
 		// paid period to now; a period-end cancel keeps paid access until the term
@@ -1232,7 +1232,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		case models.CancelTypeExpired:
 			reason = PremiumEndReasonExpired
 		case models.CancelTypeMerchant:
-			reason = PremiumEndReasonProcessor
+			reason = PremiumEndReasonRail
 		}
 
 		notification := &models.NotificationQueue{
@@ -1262,7 +1262,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 	// Log the subscription cancelled event to ClickHouse
 	if s.EventLogService != nil {
-		if err := s.EventLogService.LogLifecycleCancellation(ctx, subscriptionID, userID, processor, params.CancelType, params.RevokeAccess, s.now()); err != nil {
+		if err := s.EventLogService.LogLifecycleCancellation(ctx, subscriptionID, userID, rail, params.CancelType, params.RevokeAccess, s.now()); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 				"event_type":      "subscription_cancelled",
@@ -1334,7 +1334,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	// #264 cascade: stop the Solana cranker. Log-and-continue (never fail the
 	// cancel on the cascade), matching the user path; idempotent + tolerant of a
 	// missing solana_subscriptions row.
-	if sub.Processor == models.ProcessorSolana {
+	if sub.Rail == models.RailSolana {
 		if err := cancelSolanaSubscriptionCascade(ctx, dbb, sub.ID); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
 				Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
@@ -1543,10 +1543,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	var scheduleDeferredDelete bool
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"processor":                 params.Processor,
-		"processor_subscription_id": params.SubscriptionID,
-		"failure_reason":            normalize.FromPtr(params.FailureReason),
-		"failure_code":              normalize.FromPtr(params.FailureCode),
+		"rail":                 params.Rail,
+		"rail_subscription_id": params.SubscriptionID,
+		"failure_reason":       normalize.FromPtr(params.FailureReason),
+		"failure_code":         normalize.FromPtr(params.FailureCode),
 	}).Warn("Starting membership failure flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -1652,11 +1652,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// For OpenRails-driven processors (NMI-backed + Solana), we control retry
+		// For OpenRails-driven rails (NMI-backed + Solana), we control retry
 		// timing; if the retry schedule would extend beyond the paid term end, model
 		// that access as explicit grace entitlement windows. (#257: Solana gets the
 		// same paid-through grace as NMI.)
-		if processors.OpenRailsDrivenDunning(subscription.Processor) && subscription.Status == models.StatusPastDue {
+		if rails.OpenRailsDrivenDunning(subscription.Rail) && subscription.Status == models.StatusPastDue {
 			if subscription.CurrentPeriodEndsAt != nil && subscription.NextRetryAt != nil && subscription.NextRetryAt.After(*subscription.CurrentPeriodEndsAt) {
 				paidEnd := subscription.CurrentPeriodEndsAt.UTC()
 				graceUntil := subscription.NextRetryAt.UTC()
@@ -1690,23 +1690,23 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 
 		// #344 follow-up: a terminal payment-failure cancellation of an
-		// NMI-backed subscription must also stop the processor-side recurring
+		// NMI-backed subscription must also stop the rail-side recurring
 		// subscription, or NMI keeps retrying it monthly forever. The
 		// DeletionScheduledAt marker AND the nmi_delete intent are both
 		// written inside this transaction (atomic — no crash window between
 		// marker and intent). The intent executor plus the #344 client-level
 		// kill switch then govern actual execution.
 		if subscription.Status == models.StatusCancelled &&
-			processors.IsNMIBackedProcessor(subscription.Processor) &&
-			subscription.ProcessorSubscriptionID != "" {
+			rails.IsNMIBackedRail(subscription.Rail) &&
+			subscription.RailSubscriptionID != "" {
 			if s.Config != nil && s.Config.IsLimitedMode() {
 				// Limited mode (#345): no proactive provider action — leave the
 				// remote subscription for reconciliation.
 				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id":           subscription.ID,
-					"processor":                 subscription.Processor,
-					"processor_subscription_id": subscription.ProcessorSubscriptionID,
-				}).Warn("Limited mode: remote processor subscription left alive for reconciliation (no proactive provider action)")
+					"subscription_id":      subscription.ID,
+					"rail":                 subscription.Rail,
+					"rail_subscription_id": subscription.RailSubscriptionID,
+				}).Warn("Limited mode: remote rail subscription left alive for reconciliation (no proactive provider action)")
 			} else if s.deferDelete != nil {
 				subscription.DeletionScheduledAt = &now
 				scheduleDeferredDelete = true
@@ -1840,7 +1840,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	// Log the payment failure event to ClickHouse
 	if s.EventLogService != nil {
-		if err := s.EventLogService.LogLifecycleFailure(ctx, subscriptionID, userID, params.Processor, finalStatus, params.FailureReason, params.FailureCode, s.now()); err != nil {
+		if err := s.EventLogService.LogLifecycleFailure(ctx, subscriptionID, userID, params.Rail, finalStatus, params.FailureReason, params.FailureCode, s.now()); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 				"event_type":      "charge_failure",
@@ -1851,15 +1851,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	return nil
 }
 
-func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string) {
+func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, rail models.Rail, transactionID string, amount int64, currency string) {
 	if s.EventLogService == nil || sub == nil {
 		return
 	}
-	if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, processor, transactionID, amount, currency, s.now(), nil); err != nil {
+	if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, rail, transactionID, amount, currency, s.now(), nil); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"subscription_id": sub.ID,
 			"event_type":      "charge_success",
-			"processor":       processor,
+			"rail":            rail,
 		}).Warn("failed to log payment event to ClickHouse")
 	}
 }

@@ -6,7 +6,7 @@
 
 ## 1. Goal
 
-Make Solana a true peer to Stripe as a payment processor by adding **recurring
+Make Solana a true peer to Stripe as a payment rail by adding **recurring
 subscriptions** on top of the existing one-off purchase flow. Today Solana is
 one-off only — `SolanaPayService.GeneratePayment` explicitly rejects tier
 changes (`internal/modules/solana/pay.go:154`: *"solana does not support
@@ -122,7 +122,7 @@ existing subscription lifecycle.
 
 ```
                        ┌─────────────────────────────────────────────┐
-                       │  config: solana processor                   │
+                       │  config: solana rail                   │
                        │   + merchant signing keypair (hot wallet)   │
                        │   + fee wallet balance monitor              │
                        └─────────────────────────────────────────────┘
@@ -150,13 +150,13 @@ existing subscription lifecycle.
 
 OpenRails is merchant-aware at the data layer today (migration `039_merchant_aware_core`:
 `billing.merchants` control-plane table, `merchant_id` on merchant-owned tables,
-`pkg/merchant` context, `middleware.ResolveMerchant`), but **processor credentials are
-still a single global config** (`cfg.GetSolanaProcessor()` → one `RecipientWallet`,
+`pkg/merchant` context, `middleware.ResolveMerchant`), but **rail credentials are
+still a single global config** (`cfg.GetSolanaRail()` → one `RecipientWallet`,
 one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 
 - **Each merchant brings its own provider connection.** Stripe = its own API key +
   account; Solana = **its own keypair + on-chain merchant address**. The global
-  config-file processor becomes the **`default` merchant's** credentials, so
+  config-file rail becomes the **`default` merchant's** credentials, so
   single-merchant self-hosted installs keep working unchanged.
 - **Credentials use the EXISTING `tenancy.MerchantSecretStore`** (issues #225/#227),
   not a new store. The Solana keypair is the secret `solana/private_key`, resolved
@@ -171,21 +171,21 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
   to load one merchant's credentials must not block other merchants.
 
 ### Reuse, don't rebuild
-- **Subscription lifecycle:** `SubscriptionLifecycleService.CreateMembership` on first successful pull, `RenewMembership` on each subsequent pull, `FailMembership` (dunning) on failed pull, `CancelMembership` on cancel. The NMI dunning worker already calls these — Solana is just another `Processor` (`models.ProcessorSolana` already exists).
+- **Subscription lifecycle:** `SubscriptionLifecycleService.CreateMembership` on first successful pull, `RenewMembership` on each subsequent pull, `FailMembership` (dunning) on failed pull, `CancelMembership` on cancel. The NMI dunning worker already calls these — Solana is just another `Rail` (`models.RailSolana` already exists).
 - **Payments + entitlements + credits:** `RegisterPurchase` / lifecycle already record `models.Payment`, grant entitlement windows, and snapshot credits. Each Solana pull's tx signature is the `TransactionID` (idempotency key, same as today).
-- **Price catalog:** store the on-chain plan handle in `Price.Processors["solana"]` (e.g. `plan_pda`, `plan_id`, `mint`, `created_at`) via the existing `SetProcessorConfig` helper, exactly like `SetStripeConfig` stores a Stripe price ID.
+- **Price catalog:** store the on-chain plan handle in `Price.Rails["solana"]` (e.g. `plan_pda`, `plan_id`, `mint`, `created_at`) via the existing `SetRailConfig` helper, exactly like `SetStripeConfig` stores a Stripe price ID.
 
 ## 6. Data model changes
 
-- **`Price.Processors["solana"]`** gains keys: `plan_pda`, `plan_id`, `mint`, `mint_symbol` (`USDC`|`PYUSD`), `amount_base_units`, `period_hours`, `created_at`. Created when an admin "publishes" a recurring Solana price (calls `create_plan` on-chain). Recurring Solana prices must have `BillingCycleDays` consistent with on-chain `period_hours`.
+- **`Price.Rails["solana"]`** gains keys: `plan_pda`, `plan_id`, `mint`, `mint_symbol` (`USDC`|`PYUSD`), `amount_base_units`, `period_hours`, `created_at`. Created when an admin "publishes" a recurring Solana price (calls `create_plan` on-chain). Recurring Solana prices must have `BillingCycleDays` consistent with on-chain `period_hours`.
 - **Recurring stablecoin allowlist** — a small constant set, **`{USDC}` at launch**, with `PYUSD` gated behind devnet verification (see §2 warning; its mint extensions likely disqualify it). Resolved to mainnet/devnet mints via `config.TokensForNetwork`. `create_plan` / publish-recurring-price **rejects any mint not in this set** (notably USDT and SOL). One-off purchase paths keep using the full `DefaultSupportedTokens()` set and are unaffected.
-- **`subscriptions` table:** reuse `Processor=solana`, `ProcessorSubscriptionID` = the **Subscription PDA** address (natural unique key for `GetByProcessorSubscriptionID`, which lifecycle renewal already keys on). No new columns on this table.
+- **`subscriptions` table:** reuse `Rail=solana`, `RailSubscriptionID` = the **Subscription PDA** address (natural unique key for `GetByRailSubscriptionID`, which lifecycle renewal already keys on). No new columns on this table.
 - **New table `billing.solana_subscriptions`** (decided — a dedicated table, **not** subscription metadata; on-chain state is load-bearing and the due-worker queries it, so it must be first-class and indexable). Merchant-scoped (`merchant_id`), with FK to `subscriptions.id`. Columns: `subscriber_wallet`, `authority_pda`, `subscription_pda` (unique), `plan_pda`, `mint`, `last_pulled_period_start`, `last_signature`, `plan_created_at_fingerprint` (detects ghost-plan recreation), `next_pull_at`, timestamps. Indexes on `(merchant_id, next_pull_at)` for the due-query and `subscription_pda` for idempotent upserts.
 - **Merchant credentials reuse the EXISTING `MerchantSecretStore`** (`internal/tenancy/secrets.go`, issues #225/#227) — **do NOT build a bespoke `merchant_solana_credentials` table.** That abstraction already provides `(merchant_id, name)`-addressed, per-merchant-isolated, envelope-encrypted secrets with a DB backend (self-hosted) and a Vault backend (managed) behind one interface. Add canonical Solana secret names alongside the existing `stripe/*` ones:
   - `solana/private_key` — the merchant's signing keypair (the sensitive bit; ideally never extracted — see §8 Transit).
   - `solana/merchant_address`, `solana/fee_wallet_address` — non-secret but stored together for cohesion (or keep addresses in a small non-secret merchant-config row; they're public on-chain).
   - `solana/rpc_endpoint`, `solana/helius_api_key` — per-merchant RPC config.
-  The global config `GetSolanaProcessor()` seeds the **`default` merchant's** secrets so existing single-merchant installs are unchanged. **Only the non-secret on-chain merchant address needs to be queryable** for plan-PDA derivation — keep it in a tiny non-secret `billing.merchant_solana_config` row (or on `billing.solana_subscriptions`), never the private key.
+  The global config `GetSolanaRail()` seeds the **`default` merchant's** secrets so existing single-merchant installs are unchanged. **Only the non-secret on-chain merchant address needs to be queryable** for plan-PDA derivation — keep it in a tiny non-secret `billing.merchant_solana_config` row (or on `billing.solana_subscriptions`), never the private key.
 - **Pending-enroll record:** mirror the existing Redis pending-payment pattern for the `subscribe` confirmation (detect the user's on-chain `subscribe` tx before activating).
 
 ## 7. Flows
@@ -193,7 +193,7 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 ### 7.1 Publish a recurring Solana price (admin, one-time per price)
 1. Admin marks a stablecoin price as Solana-recurring; backend **validates the mint is in the allowlist** (rejects USDT/SOL/others) and loads the **merchant's** Solana credentials.
 2. Backend signs (with the **merchant's** keypair) + submits `create_plan(plan_id, mint, amount, period_hours, pullers=[merchant_address], end_ts=0)`. The Plan PDA is `["plan", merchant_address, plan_id]`, so it's merchant-unique by construction.
-3. Persist `plan_pda` + `mint_symbol` + `created_at` into `Price.Processors["solana"]` (the price row is already merchant-scoped).
+3. Persist `plan_pda` + `mint_symbol` + `created_at` into `Price.Rails["solana"]` (the price row is already merchant-scoped).
 
 ### 7.2 Enroll (user, checkout)
 1. Checkout session for a Solana-recurring price → backend returns the instructions (or SDK params) for the user to sign: `initialize_subscription_authority` (if absent) + `subscribe(plan_pda)`.
@@ -206,7 +206,7 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 
 1. River cron (`jobs_solana_rebill.go`) runs hourly; queries `billing.solana_subscriptions` due rows (`next_pull_at <= now`), **grouped by `merchant_id`**.
 2. Per merchant, load the merchant's signer once; per sub, enqueue a pull job: build + sign + submit `transfer_subscription(plan_pda, subscription_pda)` from **that merchant's** hot wallet. A credential-load failure for one merchant is logged and skipped without blocking others.
-3. On confirmed tx → `RenewMembership(processor=solana, processor_subscription_id=subscription_pda, transaction_id=signature, amount, currency=usd-equiv)` extends the period, pushes the next entitlement window, records the payment. Idempotent on signature. Advance `last_pulled_period_start` / `next_pull_at` in `billing.solana_subscriptions`.
+3. On confirmed tx → `RenewMembership(rail=solana, rail_subscription_id=subscription_pda, transaction_id=signature, amount, currency=usd-equiv)` extends the period, pushes the next entitlement window, records the payment. Idempotent on signature. Advance `last_pulled_period_start` / `next_pull_at` in `billing.solana_subscriptions`.
 4. On failure → classify (see 7.5).
 
 ### 7.4 Cancel (user or admin)
@@ -214,10 +214,10 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 - **Merchant/admin-initiated:** stop pulling + `CancelMembership`. Optionally call `update_plan` to sunset the plan for new subscribers. We cannot force-cancel a user's on-chain authorization, but not pulling is sufficient.
 
 ### 7.5 Failure / dunning
-- **Insufficient USDC balance** → `transfer_subscription` fails → `FailMembership` → **the same dunning state machine as NMI** (`lifecycle_service.go`: `past_due`, retried on the cadence-relative `DunningRetryOffsets` schedule (#359) — for a monthly price: retries at D+2/5/9/13, terminal on the 5th failure, then cancel). The pull worker is the Solana analog of `DunningWorker`. **No new dunning logic — Solana is just another processor on the existing path.**
+- **Insufficient USDC balance** → `transfer_subscription` fails → `FailMembership` → **the same dunning state machine as NMI** (`lifecycle_service.go`: `past_due`, retried on the cadence-relative `DunningRetryOffsets` schedule (#359) — for a monthly price: retries at D+2/5/9/13, terminal on the 5th failure, then cancel). The pull worker is the Solana analog of `DunningWorker`. **No new dunning logic — Solana is just another rail on the existing path.**
   - **Never partial-pull (decided):** the worker always requests the **full** plan amount; it never pulls `min(balance, cap)`. Combined with Solana tx atomicity, an underfunded pull **reverts entirely — zero USDC moves** (we pay only the failed-tx SOL fee). "Take nothing, not $5" is therefore a property of the chain, not a policy to enforce.
   - **On-chain period cap (Solana-only nuance):** the program enforces `amount_pulled_in_period ≤ plan_amount` and **resets the allowance each period**. So (a) dunning retries must land **within the on-chain period window** — fine, since the monthly schedule's last retry is D+13 (window 14d), inside a 30d monthly period, and we cancel before the period rolls; and (b) a **fully-missed period cannot be clawed back later** (can't exceed the cap next period — unlike NMI arrears). #257 must keep `NextRetryAt` inside the period and treat exhausted dunning as cancel (already the existing behavior).
-  - **Dunning grace (decided): Solana gets the SAME paid-through grace as NMI.** The grace-entitlement-append at `lifecycle_service.go:1375` is currently gated on `processors.IsNMIBackedProcessor`. Generalize that gate to a predicate like `processorDrivesDunning(processor)` (true for NMI-backed **and** Solana — both are processors where *OpenRails* controls retry timing, unlike Stripe where the processor does). So during a Solana subscriber's retry window the user keeps access via grace entitlement windows, exactly like NMI; access is revoked only on dunning exhaustion → cancel.
+  - **Dunning grace (decided): Solana gets the SAME paid-through grace as NMI.** The grace-entitlement-append at `lifecycle_service.go:1375` is currently gated on `rails.IsNMIBackedRail`. Generalize that gate to a predicate like `railDrivesDunning(rail)` (true for NMI-backed **and** Solana — both are rails where *OpenRails* controls retry timing, unlike Stripe where the rail does). So during a Solana subscriber's retry window the user keeps access via grace entitlement windows, exactly like NMI; access is revoked only on dunning exhaustion → cancel.
 - **Delegation revoked** (user revoked the SA approval) → terminal; `CancelMembership`.
 - **`PlanTermsMismatch` (ghost plan)** → terminal for that subscription; notify user to re-enroll.
 - **Period already pulled** → on-chain `amount_pulled_in_period` guard makes double-pull a no-op; treat as idempotent success.
@@ -279,7 +279,7 @@ plugs into the same pipe; we do not invent a parallel one.**
 1. **Merchant Solana signer over the existing secret store** — add `solana/*` secret names; `Signer` (KV-fetch impl) resolving `solana/private_key` from `tenancy.MerchantSecretStore`; seed the `default` merchant from existing global config; in-process cache with TTL. **No new credentials table** — reuse #225/#227. *(foundation; everything else depends on it)*
 2. **Signer + tx-builder foundation** — build/sign helpers, devnet smoke test using a merchant signer. *(no user-facing change)*
    - *Managed-prod track (parallel, optional):* implement a live `VaultKV` adapter (`hashicorp/vault/api`) + Vault auth (AppRole/K8s) + select `vaultSecretStore`; and/or a Vault **Transit** `RemoteSigner` so the key never leaves Vault.
-3. **Plan publishing** — `create_plan`/`update_plan`/`delete_plan` signed by the merchant key; admin path to mark a USDC price Solana-recurring; persist plan handle in `Price.Processors["solana"]`.
+3. **Plan publishing** — `create_plan`/`update_plan`/`delete_plan` signed by the merchant key; admin path to mark a USDC price Solana-recurring; persist plan handle in `Price.Rails["solana"]`.
 4. **Enroll flow** — `billing.solana_subscriptions` migration; checkout returns subscribe instructions; poller confirms `subscribe`; first pull → `CreateMembership`.
 5. **Recurring pull worker** — `jobs_solana_rebill.go`; merchant-grouped due-query; per-sub pull with the merchant signer; `RenewMembership`; idempotency on signature.
 6. **Cancel / resume / dunning** — `cancel_subscription`/`resume_subscription` wiring; `FailMembership` classification; ghost-plan + revoked-delegation handling.

@@ -42,13 +42,13 @@ type CatalogReconciliationPullArgs struct{}
 func (CatalogReconciliationPullArgs) Kind() string { return KindCatalogReconciliationPull }
 
 // CatalogReconciliationPullWorker runs one pull-and-diff pass across both Stripe
-// and NMI. Each provider pass is independently skipped if that processor is
+// and NMI. Each provider pass is independently skipped if that rail is
 // unconfigured.
 type CatalogReconciliationPullWorker struct {
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
 	DB         *db.DB
 	Config     *config.Config
-	Processors config.ProcessorSet
+	Rails      config.RailSet
 	NMIClients map[string]*nmi.NMIClient
 }
 
@@ -78,8 +78,8 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	scannedProducts, scannedPrices, scannedPlans := 0, 0, 0
 
 	// --- Stripe pass (skipped if unconfigured) ---
-	if stripeProc := w.Processors.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
-		stripeSvc := &catalog.StripeCatalogService{Config: w.Config, Processors: w.Processors}
+	if stripeProc := w.Rails.GetStripeRail(); stripeProc != nil && stripeProc.SecretKey != "" {
+		stripeSvc := &catalog.StripeCatalogService{Config: w.Config, Rails: w.Rails}
 		products, err := listAllStripeProducts(ctx, stripeSvc)
 		if err != nil {
 			return err
@@ -203,14 +203,14 @@ func computeStripeDriftJob(
 				priceByContentKey[ck] = pr
 			}
 		}
-		stripe := pr.Processors["stripe"]
+		stripe := pr.Rails["stripe"]
 		if stripe == nil {
 			continue
 		}
-		if id := strings.TrimSpace(stripe[models.ProcessorKeyStripePriceID]); id != "" {
+		if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
 			stripePriceIDs[id] = pr.ID.String()
 		}
-		if id := strings.TrimSpace(stripe[models.ProcessorKeyStripeProductID]); id != "" {
+		if id := strings.TrimSpace(stripe[models.RailKeyStripeProductID]); id != "" {
 			stripeProductIDs[id] = pr.ProductID.String()
 		}
 	}
@@ -392,11 +392,11 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 	priceByPlanID := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
-		mobius := pr.Processors[string(models.ProcessorMobius)]
+		mobius := pr.Rails[string(models.RailMobius)]
 		if mobius == nil {
 			continue
 		}
-		if planID := strings.TrimSpace(mobius[models.ProcessorKeyPlanID]); planID != "" {
+		if planID := strings.TrimSpace(mobius[models.RailKeyPlanID]); planID != "" {
 			planIDByOpenRailsPrice[pr.ID.String()] = planID
 			priceByPlanID[planID] = pr.ID.String()
 		}

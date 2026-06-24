@@ -139,12 +139,12 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 -- name: InsertInvoicePayment :exec
 INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, money_transaction_id,
-    currency, amount, status, processor, processor_payment_id,
+    currency, amount, status, rail, rail_payment_id,
     failure_code, failure_message, attempted_at, settled_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(money_transaction_id),
-    sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.narg(processor),
-    sqlc.narg(processor_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_message),
+    sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.narg(rail),
+    sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_message),
     sqlc.arg(attempted_at), sqlc.narg(settled_at), sqlc.arg(created_at), sqlc.arg(updated_at)
 );
 

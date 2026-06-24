@@ -12,7 +12,7 @@ import (
 // Source: https://ccbill.com/doc/webhooks
 //
 // These are used as a fallback only. The allowlist is intended to be supplied
-// at boot via configuration (processors.ccbill.allowed_cidrs / env var) so the
+// at boot via configuration (rails.ccbill.allowed_cidrs / env var) so the
 // ranges can be rotated without a code deploy. See Configure.
 var DefaultCCBillIPRanges = []string{
 	"64.38.212.0/24", // 64.38.212.1 - 64.38.212.254

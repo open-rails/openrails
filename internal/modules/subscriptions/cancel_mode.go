@@ -4,13 +4,13 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // CancelMode describes how a subscription's cancellation behaves for a given
-// processor (and, for NMI, the subscription's current lifecycle state). It is a
-// capability classification — NOT a processor-name check — so that callers can
-// reason about "can this be undone" uniformly across processors.
+// rail (and, for NMI, the subscription's current lifecycle state). It is a
+// capability classification — NOT a rail-name check — so that callers can
+// reason about "can this be undone" uniformly across rails.
 type CancelMode string
 
 const (
@@ -19,13 +19,13 @@ const (
 	// still pending — see issue 216).
 	CancelModeReversible CancelMode = "reversible"
 
-	// CancelModeDestructive: cancellation tears down the processor-side
+	// CancelModeDestructive: cancellation tears down the rail-side
 	// subscription immediately and cannot be undone (NMI delete_subscription
 	// once executed, Solana).
 	CancelModeDestructive CancelMode = "destructive"
 
 	// CancelModeExternalPortal: we cannot cancel or resume from our system; the
-	// user must use the processor's own consumer portal (CCBill).
+	// user must use the rail's own consumer portal (CCBill).
 	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
@@ -49,7 +49,7 @@ const CCBillSupportPortalURL = "https://support.ccbill.com"
 const NMIDeleteSafetyMargin = 48 * time.Hour
 
 // NMIDeferredDeleteAt returns (deleteAt, true) when an NMI-backed cancellation
-// should DEFER the processor-side delete to a scheduled time (a genuine future
+// should DEFER the rail-side delete to a scheduled time (a genuine future
 // undo window exists), or (zero, false) when it must delete IMMEDIATELY.
 //
 // Defer only when there is a real future window: the paid period end is known,
@@ -73,7 +73,7 @@ func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bo
 
 // CancelModeFor returns the cancellation capability for a subscription.
 //
-// It takes the full subscription (not just the processor) because NMI is
+// It takes the full subscription (not just the rail) because NMI is
 // conditionally reversible: while the subscription is cancelled, its deferred
 // delete_subscription has not yet executed, and the paid period is still in the
 // future (issue 216), the cancellation can be undone. Once the delete fires
@@ -87,11 +87,11 @@ func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 	}
 
 	switch {
-	case sub.Processor == models.ProcessorStripe:
+	case sub.Rail == models.RailStripe:
 		return CancelModeReversible
-	case sub.Processor == models.ProcessorCCBill:
+	case sub.Rail == models.RailCCBill:
 		return CancelModeExternalPortal
-	case processors.IsNMIBackedProcessor(sub.Processor):
+	case rails.IsNMIBackedRail(sub.Rail):
 		// NMI is reversible only while a deferred delete is still pending and the
 		// paid-through window is in the future. nmiDeletePending encapsulates that.
 		if nmiDeletePending(sub, now) {
@@ -99,7 +99,7 @@ func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 		}
 		return CancelModeDestructive
 	default:
-		// Solana and any other self-contained processor: destructive.
+		// Solana and any other self-contained rail: destructive.
 		return CancelModeDestructive
 	}
 }
@@ -153,7 +153,7 @@ func CancelScheduled(sub *models.Subscription, now time.Time) bool {
 }
 
 // Resumable is the single shared predicate for "can this subscription be resumed
-// right now". It is true when the cancellation is reversible for this processor
+// right now". It is true when the cancellation is reversible for this rail
 // AND the subscription is cancelled AND the paid period is still in the future.
 //
 // This is the ONE place that gates resume — the HTTP handler, the River worker,

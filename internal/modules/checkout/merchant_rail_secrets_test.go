@@ -90,7 +90,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"})
 
@@ -102,7 +102,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 
 func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testi
 
 func TestCheckoutProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
 	svc.SetProviderAccountSecretResolver(checkoutMissingProviderSecretResolver{})
 
@@ -122,7 +122,7 @@ func TestCheckoutProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClien
 
 func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(unavailableSecretStore{})
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"})
 
@@ -143,7 +143,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	}`)
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "ccbill", environment: "live", accountID: "merchant-acc/merchant-sub"})
 
@@ -165,7 +165,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 
 func TestCheckoutProviderAccountResolverMissingCCBillSecretDoesNotUseStaticConfig(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
 	svc.SetProviderAccountSecretResolver(checkoutMissingProviderSecretResolver{})
 
@@ -185,7 +185,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	}`)
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "ccbill", environment: "live", accountID: "merchant-acc/merchant-sub"})
 
@@ -196,10 +196,10 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 		Username: "alice",
 	}, &models.Price{
 		ID: uuid.New(),
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"ccbill": {
-				models.ProcessorKeyCCBillFormName: "premium",
-				models.ProcessorKeyCCBillFlexID:   "flex-123",
+				models.RailKeyCCBillFormName: "premium",
+				models.RailKeyCCBillFlexID:   "flex-123",
 			},
 		},
 	})
@@ -210,21 +210,21 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	require.Equal(t, "merchant-sub", parsed.Query().Get("clientSubacc"))
 }
 
-func checkoutProcessorConfig(testMode bool) *config.Config {
+func checkoutRailConfig(testMode bool) *config.Config {
 	return &config.Config{
-		Mode:    config.ModeFull,
+		Mode:     config.ModeFull,
 		TestMode: testMode,
 	}
 }
 
-func checkoutProcessorSet(mobiusKey string) config.ProcessorSet {
-	return config.ProcessorSet{
+func checkoutRailSet(mobiusKey string) config.RailSet {
+	return config.RailSet{
 		"mobius": {
-			Type:        config.ProcessorTypeNMI,
+			Type:        config.RailTypeNMI,
 			SecurityKey: mobiusKey,
 		},
 		"ccbill": {
-			Type:         config.ProcessorTypeCCBill,
+			Type:         config.RailTypeCCBill,
 			ClientAccNum: "static-acc",
 			ClientSubAcc: "static-sub",
 			Salt:         "static-salt",

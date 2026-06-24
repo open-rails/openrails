@@ -13,54 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type OpenrailsProcessorType string
-
-const (
-	OpenrailsProcessorTypePaypal OpenrailsProcessorType = "paypal"
-	OpenrailsProcessorTypeSolana OpenrailsProcessorType = "solana"
-	OpenrailsProcessorTypeMobius OpenrailsProcessorType = "mobius"
-	OpenrailsProcessorTypeCcbill OpenrailsProcessorType = "ccbill"
-	OpenrailsProcessorTypeStripe OpenrailsProcessorType = "stripe"
-	OpenrailsProcessorTypeAdmin  OpenrailsProcessorType = "admin"
-	OpenrailsProcessorTypeNmi    OpenrailsProcessorType = "nmi"
-	OpenrailsProcessorTypeManual OpenrailsProcessorType = "manual"
-)
-
-func (e *OpenrailsProcessorType) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = OpenrailsProcessorType(s)
-	case string:
-		*e = OpenrailsProcessorType(s)
-	default:
-		return fmt.Errorf("unsupported scan type for OpenrailsProcessorType: %T", src)
-	}
-	return nil
-}
-
-type NullOpenrailsProcessorType struct {
-	OpenrailsProcessorType OpenrailsProcessorType
-	Valid                  bool // Valid is true if OpenrailsProcessorType is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullOpenrailsProcessorType) Scan(value interface{}) error {
-	if value == nil {
-		ns.OpenrailsProcessorType, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.OpenrailsProcessorType.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullOpenrailsProcessorType) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.OpenrailsProcessorType), nil
-}
-
 type OpenrailsPurchaseStatus string
 
 const (
@@ -103,6 +55,54 @@ func (ns NullOpenrailsPurchaseStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.OpenrailsPurchaseStatus), nil
+}
+
+type OpenrailsRailType string
+
+const (
+	OpenrailsRailTypePaypal OpenrailsRailType = "paypal"
+	OpenrailsRailTypeSolana OpenrailsRailType = "solana"
+	OpenrailsRailTypeMobius OpenrailsRailType = "mobius"
+	OpenrailsRailTypeCcbill OpenrailsRailType = "ccbill"
+	OpenrailsRailTypeStripe OpenrailsRailType = "stripe"
+	OpenrailsRailTypeAdmin  OpenrailsRailType = "admin"
+	OpenrailsRailTypeNmi    OpenrailsRailType = "nmi"
+	OpenrailsRailTypeManual OpenrailsRailType = "manual"
+)
+
+func (e *OpenrailsRailType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OpenrailsRailType(s)
+	case string:
+		*e = OpenrailsRailType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OpenrailsRailType: %T", src)
+	}
+	return nil
+}
+
+type NullOpenrailsRailType struct {
+	OpenrailsRailType OpenrailsRailType
+	Valid             bool // Valid is true if OpenrailsRailType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOpenrailsRailType) Scan(value interface{}) error {
+	if value == nil {
+		ns.OpenrailsRailType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OpenrailsRailType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOpenrailsRailType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OpenrailsRailType), nil
 }
 
 type OpenrailsSubscriptionStatus string
@@ -181,26 +181,26 @@ type OpenrailsCatalogDriftEvent struct {
 }
 
 type OpenrailsCheckoutSession struct {
-	ID              uuid.UUID
-	PriceID         uuid.UUID
-	Mode            string
-	Processor       string
-	Status          string
-	Amount          int64
-	Currency        string
-	ExpiresAt       *time.Time
-	Reference       *string
-	TransactionID   *string
-	PaymentID       *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	ProcessorFields []byte
-	ProcessorState  []byte
-	Metadata        []byte
-	IdempotencyKey  *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
+	ID             uuid.UUID
+	PriceID        uuid.UUID
+	Mode           string
+	Rail           string
+	Status         string
+	Amount         int64
+	Currency       string
+	ExpiresAt      *time.Time
+	Reference      *string
+	TransactionID  *string
+	PaymentID      *uuid.UUID
+	SubscriptionID *uuid.UUID
+	RailFields     []byte
+	RailState      []byte
+	Metadata       []byte
+	IdempotencyKey *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
 	// Provider account selected for this provider checkout/session.
 	ProviderAccountID *uuid.UUID
 }
@@ -369,8 +369,8 @@ type OpenrailsInvoicePayment struct {
 	Currency           string
 	Amount             int64
 	Status             string
-	Processor          *string
-	ProcessorPaymentID *string
+	Rail               *string
+	RailPaymentID      *string
 	FailureCode        *string
 	FailureMessage     *string
 	AttemptedAt        time.Time
@@ -570,7 +570,7 @@ type OpenrailsPayerSpendLimit struct {
 type OpenrailsPayment struct {
 	ID            uuid.UUID
 	PriceID       uuid.UUID
-	Processor     OpenrailsProcessorType
+	Rail          OpenrailsRailType
 	TransactionID string
 	Amount        int64
 	ListAmount    int64
@@ -606,12 +606,12 @@ type OpenrailsPaymentBlocklist struct {
 	CreatedAt  time.Time
 }
 
-// Generalized payment method table supporting multiple processors.
+// Generalized payment method table supporting multiple rails.
 type OpenrailsPaymentMethod struct {
 	ID uuid.UUID
-	// Payment processor type: nmi, ccbill, stripe, etc.
-	Processor string
-	// Primary payment method identifier in the processor system
+	// Payment rail type: nmi, ccbill, stripe, etc.
+	Rail string
+	// Primary payment method identifier in the rail system
 	VaultID              string
 	BillingID            *string
 	InitialTransactionID string
@@ -628,14 +628,14 @@ type OpenrailsPaymentMethod struct {
 	ProviderAccountID *uuid.UUID
 }
 
-// Pricing tiers for products with processor-specific identifiers
+// Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
 	ID               uuid.UUID
 	ProductID        uuid.UUID
 	Amount           int64
 	Currency         string
 	BillingCycleDays *int32
-	Processors       []byte
+	Rails            []byte
 	Status           string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -649,18 +649,6 @@ type OpenrailsProbeVerdict struct {
 	KeyHash   string
 	Verdict   string
 	CheckedAt time.Time
-}
-
-type OpenrailsProcessorCustomer struct {
-	ID                  uuid.UUID
-	Processor           string
-	ProcessorCustomerID string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	MerchantID          uuid.UUID
-	CustomerID          uuid.UUID
-	// Provider account that produced this processor customer mirror row.
-	ProviderAccountID *uuid.UUID
 }
 
 // Product definitions that can be purchased or subscribed to
@@ -722,7 +710,7 @@ type OpenrailsProviderAccount struct {
 type OpenrailsProviderIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// Provider/processor key the mutation targets (e.g. 'mobius' for an NMI-backed processor, 'stripe').
+	// Provider/rail key the mutation targets (e.g. 'mobius' for an NMI-backed rail, 'stripe').
 	Provider string
 	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
 	IntentType     string
@@ -772,12 +760,24 @@ type OpenrailsProviderRefreshWatermark struct {
 	UpdatedAt       time.Time
 }
 
+type OpenrailsRailCustomer struct {
+	ID             uuid.UUID
+	Rail           string
+	RailCustomerID string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	// Provider account that produced this rail customer mirror row.
+	ProviderAccountID *uuid.UUID
+}
+
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
 type OpenrailsReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
-	// Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
+	// Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
 	SubjectKey        string
 	Severity          string
 	Status            string
@@ -795,7 +795,7 @@ type OpenrailsReconciliationFinding struct {
 	Evidence []byte
 }
 
-// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.
+// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-provider counts and the dunning-forensics report.
 type OpenrailsReconciliationRun struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -844,17 +844,17 @@ type OpenrailsSubscription struct {
 	ID      uuid.UUID
 	PriceID *uuid.UUID
 	// Denormalized product ID for efficient user+product lookups without joining prices
-	ProductID               uuid.UUID
-	Status                  OpenrailsSubscriptionStatus
-	Processor               string
-	ProcessorSubscriptionID string
-	UserEmail               *string
-	PaymentMethodID         *uuid.UUID
-	CurrentPeriodStartsAt   *time.Time
-	CurrentPeriodEndsAt     *time.Time
-	StartedAt               time.Time
-	EndedAt                 *time.Time
-	GraceEndsAt             *time.Time
+	ProductID             uuid.UUID
+	Status                OpenrailsSubscriptionStatus
+	Rail                  string
+	RailSubscriptionID    string
+	UserEmail             *string
+	PaymentMethodID       *uuid.UUID
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	StartedAt             time.Time
+	EndedAt               *time.Time
+	GraceEndsAt           *time.Time
 	// Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.
 	ScheduledPriceID         *uuid.UUID
 	LastRetryAt              *time.Time

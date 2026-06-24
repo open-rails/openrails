@@ -91,7 +91,7 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if sub.Processor == subscriptions.ProcessorCCBill {
+	if sub.Rail == subscriptions.RailCCBill {
 		r.JSON(http.StatusUnprocessableEntity, map[string]any{
 			"error":       "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
 			"support_url": "https://support.ccbill.com",
@@ -160,10 +160,10 @@ func ResumeSubscription(r *httprequest.Request) {
 			return
 		}
 		if subscriptions.CancelModeFor(sub, now) != subscriptions.CancelModeReversible {
-			r.ErrorJSON(http.StatusBadRequest, "resume unsupported for processor")
+			r.ErrorJSON(http.StatusBadRequest, "resume unsupported for rail")
 			return
 		}
-		// Cancelled + reversible processor but the paid period has elapsed.
+		// Cancelled + reversible rail but the paid period has elapsed.
 		r.ErrorJSON(http.StatusBadRequest, "subscription can no longer be resumed")
 		return
 	}

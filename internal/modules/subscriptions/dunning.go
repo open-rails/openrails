@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // Cadence-relative dunning (#359).
@@ -59,7 +59,7 @@ const (
 	dunningWindowSlack = 24 * time.Hour
 )
 
-// DeclineCategory classifies a processor decline for dunning purposes.
+// DeclineCategory classifies a rail decline for dunning purposes.
 type DeclineCategory int
 
 const (
@@ -100,12 +100,12 @@ const (
 // Soft (retryable) codes are intentionally NOT listed and fall through to the
 // normal retry schedule:
 //
-//	200 = Declined by processor (generic)   202 = Insufficient funds
+//	200 = Declined by rail (generic)   202 = Insufficient funds
 //	203 = Over limit                         260 = Declined w/ further instructions
 //	264 = Declined - Retry in a few days     300 = Rejected by gateway
-//	400 = Processor error                    410/411 = Merchant config/inactive
+//	400 = Rail error                    410/411 = Merchant config/inactive
 //	420/421 = Communication error            430 = Duplicate transaction
-//	440/441 = Processor format/info error    460 = Processor feature unavailable
+//	440/441 = Rail format/info error    460 = Rail feature unavailable
 var hardDeclineNMICodes = map[int]bool{
 	201: true,
 	204: true,
@@ -130,7 +130,7 @@ var hardDeclineNMICodes = map[int]bool{
 // ClassifyNMIDecline categorizes an NMI Payment API response_code as a hard or
 // soft decline. Unknown/zero codes and known transient codes (e.g. 200 generic
 // decline, 202 insufficient funds, 264 retry-in-a-few-days, 300/400/420
-// gateway/processor/comms errors) are treated as soft so the normal retry
+// gateway/rail/comms errors) are treated as soft so the normal retry
 // schedule applies. Merchant-side errors (410/411) are also soft so a
 // configuration problem on our end does not cancel the customer's subscription.
 func ClassifyNMIDecline(responseCode int) DeclineCategory {
@@ -246,7 +246,7 @@ const (
 	// graceSlackCap bounds the trailing grace window: at most 48h of silence
 	// generosity (Paul, 2026-06-12). This grace exists for provider-side
 	// schedule rounding and late webhooks — NOT for dunning, which has its
-	// own processor-driven grace; anything a rounding error can't explain
+	// own rail-driven grace; anything a rounding error can't explain
 	// within two days is the #367 prober's and dunning's problem.
 	graceSlackCap = 48 * time.Hour
 	// LivenessProbeSlack is how long past current_period_ends_at a silent
@@ -273,11 +273,11 @@ func GraceSlack(billingCycleDays int) time.Duration {
 	return half
 }
 
-// RenewalGraceEligibleProcessor reports whether a processor's subscriptions
+// RenewalGraceEligibleRail reports whether a rail's subscriptions
 // get the pre-appended renewal grace window (#368): NMI-backed + Stripe.
 // CCBill keeps its own retry-driven grace (the webhook handler appends grace
 // from CCBill's nextRetryDate); Solana is pull-based — OpenRails is the only
 // puller, so there is no webhook silence to bridge.
-func RenewalGraceEligibleProcessor(processor models.Processor) bool {
-	return processors.IsNMIBackedProcessor(processor) || processor == models.ProcessorStripe
+func RenewalGraceEligibleRail(rail models.Rail) bool {
+	return rails.IsNMIBackedRail(rail) || rail == models.RailStripe
 }

@@ -1,11 +1,11 @@
 # Checkout Session Spec
 
-This document defines the unified checkout flow for all processors (NMI-backed processors such as Mobius, CCBill, Solana, Stripe).
-It replaces processor-specific endpoints with a single checkout session model.
+This document defines the unified checkout flow for all rails (NMI-backed rails such as Mobius, CCBill, Solana, Stripe).
+It replaces rail-specific endpoints with a single checkout session model.
 
 ## Goals
-- Single entrypoint for all payment processors.
-- One processor per checkout.
+- Single entrypoint for all payment rails.
+- One rail per checkout.
 - Consistent session lifecycle and responses.
 - No storage of raw payment tokens.
 - Extensible without changing top-level request/response shapes.
@@ -38,7 +38,7 @@ All endpoints require authentication.
   "price_id": "price_...",
   "mode": "one_off|subscription",
   "payment": {
-    "processor": "mobius|ccbill|solana|stripe",
+    "rail": "mobius|ccbill|solana|stripe",
 
     "payment_method_id": "pm_...",
     "payment_token": "tok_...",
@@ -61,15 +61,15 @@ All endpoints require authentication.
 ```
 
 ### Request Rules
-- `payment.processor` is required and defines all valid fields.
+- `payment.rail` is required and defines all valid fields.
 - `mode` is optional. If omitted, it is inferred from the price. If provided and invalid, return 400.
-- NMI-backed processors/Stripe: exactly one of `payment_method_id` or `payment_token`.
+- NMI-backed rails/Stripe: exactly one of `payment_method_id` or `payment_token`.
 - `payment_token` is never stored; it is consumed once to create a vault/payment method.
 - If `payment_method_id` is used, it must belong to the authenticated user.
 - Solana: `token_symbol` is required; `flow` defaults to `transfer_request`.
 - Solana is always treated as `one_off`. If `mode=subscription` is provided with Solana, return 400.
 - CCBill/Stripe: billing fields are required.
-- NMI-backed processors/Solana: billing fields are ignored.
+- NMI-backed rails/Solana: billing fields are ignored.
 
 ## Create Response
 
@@ -82,7 +82,7 @@ All endpoints require authentication.
   "price_id": "price_...",
   "url": "https://...",
   "payment": {
-    "processor": "solana|mobius|ccbill|stripe",
+    "rail": "solana|mobius|ccbill|stripe",
     "reference": "...",
     "transaction_url": "solana:...",
     "transaction_data": "base64...",
@@ -102,7 +102,7 @@ All endpoints require authentication.
 ```
 
 ### Response Notes
-- `payment.*` includes only fields relevant to the processor.
+- `payment.*` includes only fields relevant to the rail.
 - `payment_id` appears when payment is finalized.
 - `subscription_id` appears for subscription flows (non-Solana).
 - `next_action` describes the next user action, if any.
@@ -112,7 +112,7 @@ All endpoints require authentication.
 ```json
 {
   "payment": {
-    "processor": "solana",
+    "rail": "solana",
     "signature": "base58_signature",
     "wallet": "payer_pubkey"
   }
@@ -120,13 +120,13 @@ All endpoints require authentication.
 ```
 
 ### Confirm Notes
-- Only required for processors that need client-provided completion signals (Solana).
+- Only required for rails that need client-provided completion signals (Solana).
 - Idempotent: if the session is already succeeded, return the current session.
 
-## Processor Flows
+## Rail Flows
 
 ### Solana (One-Off Only)
-1) Create session with `payment.processor = solana`, `token_symbol`, optional `flow`.
+1) Create session with `payment.rail = solana`, `token_symbol`, optional `flow`.
 2) Response:
    - `flow=transfer_request` -> `payment.transaction_url`, `payment.reference`, `next_action=solana_qr`.
    - `flow=transaction_request` -> `payment.transaction_data`, `next_action=solana_transaction`.
@@ -165,16 +165,16 @@ that duration defines the entitlement window for the one-off purchase.
 - `customer_id` (payable identity FK → `billing.customers`; #317)
 - `price_id`
 - `mode` (`one_off|subscription`)
-- `processor` (`solana|mobius|ccbill|stripe`)
+- `rail` (`solana|mobius|ccbill|stripe`)
 - `status`
 - `amount`, `currency`
 - `expires_at`
 - `reference` (Solana)
-- `transaction_id` (processor transaction identifier)
+- `transaction_id` (rail transaction identifier)
 - `payment_id`
 - `metadata` (JSON, client-provided metadata)
-- `processor_fields` (JSON, sanitized request inputs)
-- `processor_state` (JSON, generated outputs)
+- `rail_fields` (JSON, sanitized request inputs)
+- `rail_state` (JSON, generated outputs)
 - `created_at`, `updated_at`
 
 ### payments (existing)
@@ -191,6 +191,6 @@ Remains the ledger of finalized transactions. Sessions never replace payments.
 
 ## Error Handling
 - Use structured error responses.
-- Invalid processor or missing required fields: 400.
+- Invalid rail or missing required fields: 400.
 - Unauthorized access or ownership mismatch: 403.
 - Expired session: 410.

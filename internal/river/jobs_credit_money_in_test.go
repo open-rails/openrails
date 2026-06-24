@@ -10,7 +10,7 @@ import (
 
 // When the Charger/Alerter (and/or CreditsService) are not configured, the
 // money-in workers must log-and-skip rather than panic or error, so they are
-// safe to register before the processor/notification wiring lands.
+// safe to register before the rail/notification wiring lands.
 func TestMoneyInWorkers_NilDepsSkipCleanly(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, LowBalanceAlertWorker{}.Work(ctx, &river.Job[LowBalanceAlertArgs]{}))

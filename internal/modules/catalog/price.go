@@ -70,9 +70,9 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 
 // Update is not supported - prices are immutable to preserve historical payment accuracy.
 // To change pricing, create a new price and deactivate the old one.
-// Use UpdateProcessors() for non-financial fields.
+// Use UpdateRails() for non-financial fields.
 func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
-	return errors.New("prices are immutable; use UpdateProcessors() or Deactivate() for allowed changes")
+	return errors.New("prices are immutable; use UpdateRails() or Deactivate() for allowed changes")
 }
 
 // Delete is not supported - prices are immutable to preserve historical payment accuracy.
@@ -106,13 +106,13 @@ func (s *PriceService) SetStatus(ctx context.Context, id uuid.UUID, status model
 	return s.repo.Update(ctx, price)
 }
 
-// UpdateProcessors updates the processor mappings (external IDs, does not affect historical data).
-// This is useful when adding new processors or updating external price/plan IDs.
-func (s *PriceService) UpdateProcessors(ctx context.Context, id uuid.UUID, processors map[string]map[string]string) error {
+// UpdateRails updates the rail mappings (external IDs, does not affect historical data).
+// This is useful when adding new rails or updating external price/plan IDs.
+func (s *PriceService) UpdateRails(ctx context.Context, id uuid.UUID, rails map[string]map[string]string) error {
 	price, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	price.Processors = processors
+	price.Rails = rails
 	return s.repo.Update(ctx, price)
 }

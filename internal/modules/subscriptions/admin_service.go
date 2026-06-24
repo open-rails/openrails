@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -177,27 +177,27 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 
 // cancelWithNMI cancels a subscription with NMI if applicable
 func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscription) error {
-	if !processors.IsNMIBackedProcessor(subscription.Processor) {
+	if !rails.IsNMIBackedRail(subscription.Rail) {
 		return nil // Not an NMI-backed subscription, nothing to do
 	}
 
-	if s.NMIClients == nil || subscription.ProcessorSubscriptionID == "" {
+	if s.NMIClients == nil || subscription.RailSubscriptionID == "" {
 		return nil // No NMI clients configured or no subscription ID
 	}
 
-	// Use processor name to look up NMI client
-	provider := strings.ToLower(string(subscription.Processor))
+	// Use rail name to look up NMI client
+	provider := strings.ToLower(string(subscription.Rail))
 
 	client, ok := s.NMIClients[provider]
 	if !ok {
 		log.WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"processor":       provider,
+			"rail":            provider,
 		}).Warn("NMI provider not configured for admin cancel")
 		return nil // Log warning but don't fail the cancellation
 	}
 
-	if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
+	if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
 		return fmt.Errorf("failed to cancel subscription with NMI provider '%s': %w", provider, err)
 	}
 
@@ -215,21 +215,21 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return fmt.Errorf("subscription is not active")
 	}
 
-	if !processors.IsNMIBackedProcessor(subscription.Processor) && subscription.Processor != models.ProcessorStripe {
-		return fmt.Errorf("cancel operation not supported for processor '%s'", subscription.Processor)
+	if !rails.IsNMIBackedRail(subscription.Rail) && subscription.Rail != models.RailStripe {
+		return fmt.Errorf("cancel operation not supported for rail '%s'", subscription.Rail)
 	}
 
-	// Cancel with payment processor first.
+	// Cancel with payment rail first.
 	switch {
-	case processors.IsNMIBackedProcessor(subscription.Processor):
+	case rails.IsNMIBackedRail(subscription.Rail):
 		if err := s.cancelWithNMI(subscription); err != nil {
 			return err
 		}
-	case subscription.Processor == models.ProcessorStripe:
+	case subscription.Rail == models.RailStripe:
 		if s.StripeService == nil {
 			return fmt.Errorf("stripe cancellation service unavailable")
 		}
-		if err := s.StripeService.CancelSubscription(ctx, subscription.ProcessorSubscriptionID); err != nil {
+		if err := s.StripeService.CancelSubscription(ctx, subscription.RailSubscriptionID); err != nil {
 			return fmt.Errorf("failed to cancel subscription with Stripe: %w", err)
 		}
 	}

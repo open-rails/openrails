@@ -67,11 +67,11 @@ func FiatCentsToStablecoinBaseUnits(ctx context.Context, cents int64, symbol str
 	return uint64(math.Ceil((usd / priceUSD) * scale))
 }
 
-func RequireSolanaProcessorConfig(processors config.ProcessorSet) (*config.ProcessorConfig, error) {
-	if processors == nil {
+func RequireSolanaRailConfig(rails config.RailSet) (*config.RailConfig, error) {
+	if rails == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
-	proc := processors.GetSolanaProcessor()
+	proc := rails.GetSolanaRail()
 	if proc == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}

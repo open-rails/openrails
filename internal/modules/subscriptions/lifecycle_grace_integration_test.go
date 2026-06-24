@@ -111,11 +111,11 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 
 	procSubID := "sub_grace_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
-		UserID:                  f.userID,
-		PriceID:                 f.priceID,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: &procSubID,
-		TransactionID:           "txn_create_" + uuid.New().String(),
+		UserID:             f.userID,
+		PriceID:            f.priceID,
+		Rail:               models.RailMobius,
+		RailSubscriptionID: &procSubID,
+		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
 	require.NoError(t, err)
 
@@ -134,9 +134,9 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 	// Idempotence: re-pushing the same grace (e.g. a replayed webhook) lands
 	// in the covered branch — still exactly one live grace window.
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: procSubID,
-		TransactionID:           "txn_renew_" + uuid.New().String(),
+		Rail:               models.RailMobius,
+		RailSubscriptionID: procSubID,
+		TransactionID:      "txn_renew_" + uuid.New().String(),
 	}))
 
 	paid = f.windows(t, sub.ID, "subscription")
@@ -162,11 +162,11 @@ func TestGraceWindow_UserCancelDeletesFutureGrace(t *testing.T) {
 
 	procSubID := "sub_cancel_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
-		UserID:                  f.userID,
-		PriceID:                 f.priceID,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: &procSubID,
-		TransactionID:           "txn_create_" + uuid.New().String(),
+		UserID:             f.userID,
+		PriceID:            f.priceID,
+		Rail:               models.RailMobius,
+		RailSubscriptionID: &procSubID,
+		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
 	require.NoError(t, err)
 	require.Len(t, f.windows(t, sub.ID, "grace"), 1)
@@ -197,11 +197,11 @@ func TestGraceWindow_DailyCycleSlackCap(t *testing.T) {
 
 	procSubID := "sub_daily_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
-		UserID:                  f.userID,
-		PriceID:                 f.priceID,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: &procSubID,
-		TransactionID:           "txn_create_" + uuid.New().String(),
+		UserID:             f.userID,
+		PriceID:            f.priceID,
+		Rail:               models.RailMobius,
+		RailSubscriptionID: &procSubID,
+		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
 	require.NoError(t, err)
 
@@ -211,19 +211,19 @@ func TestGraceWindow_DailyCycleSlackCap(t *testing.T) {
 	assert.Equal(t, 12*time.Hour, grace[0].EndAt.Sub(grace[0].StartAt), "daily cycle gets 12h grace")
 }
 
-// TestGraceWindow_IneligibleProcessorGetsNone (#368): CCBill keeps its own
+// TestGraceWindow_IneligibleRailGetsNone (#368): CCBill keeps its own
 // retry-driven grace; activation must not pre-append a renewal grace window.
-func TestGraceWindow_IneligibleProcessorGetsNone(t *testing.T) {
+func TestGraceWindow_IneligibleRailGetsNone(t *testing.T) {
 	f := newGraceTestFixture(t, 30)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_ccbill_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
-		UserID:                  f.userID,
-		PriceID:                 f.priceID,
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: &procSubID,
-		TransactionID:           "txn_create_" + uuid.New().String(),
+		UserID:             f.userID,
+		PriceID:            f.priceID,
+		Rail:               models.RailCCBill,
+		RailSubscriptionID: &procSubID,
+		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
 	require.NoError(t, err)
 
@@ -242,13 +242,13 @@ func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
 	staleStart := time.Now().UTC().Add(-120 * 24 * time.Hour)
 	staleEnd := staleStart.Add(30 * 24 * time.Hour) // ended ~90 days ago
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
-		UserID:                  f.userID,
-		PriceID:                 f.priceID,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: &procSubID,
-		CurrentPeriodStartsAt:   &staleStart,
-		CurrentPeriodEndsAt:     &staleEnd,
-		TransactionID:           "txn_create_" + uuid.New().String(),
+		UserID:                f.userID,
+		PriceID:               f.priceID,
+		Rail:                  models.RailMobius,
+		RailSubscriptionID:    &procSubID,
+		CurrentPeriodStartsAt: &staleStart,
+		CurrentPeriodEndsAt:   &staleEnd,
+		TransactionID:         "txn_create_" + uuid.New().String(),
 	})
 	require.NoError(t, err)
 
@@ -259,9 +259,9 @@ func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
 	// forward: -90d -> -60d) advances the lifecycle + records the payment but
 	// still mints no windows — no resurrection access, no resurrection grace.
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: procSubID,
-		TransactionID:           "txn_stale_renew_" + uuid.New().String(),
+		Rail:               models.RailMobius,
+		RailSubscriptionID: procSubID,
+		TransactionID:      "txn_stale_renew_" + uuid.New().String(),
 	}))
 	assert.Empty(t, f.windows(t, sub.ID, "subscription"), "a stale renewal grants no paid window")
 	assert.Empty(t, f.windows(t, sub.ID, "grace"), "a stale renewal mints no grace")

@@ -43,7 +43,7 @@ func paymentFromGen(p gen.OpenrailsPayment) (*models.Payment, error) {
 		PriceID:           p.PriceID,
 		SubscriptionID:    p.SubscriptionID,
 		RefundedPaymentID: p.RefundedPaymentID,
-		Processor:         models.Processor(p.Processor),
+		Rail:              models.Rail(p.Rail),
 		TransactionID:     p.TransactionID,
 		Amount:            p.Amount,
 		ListAmount:        p.ListAmount,
@@ -95,7 +95,7 @@ func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}
-	if err := fromJSONB(p.Processors, &m.Processors, "prices.processors"); err != nil {
+	if err := fromJSONB(p.Rails, &m.Rails, "prices.rails"); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -148,31 +148,31 @@ func derefUUID(u *uuid.UUID) uuid.UUID {
 
 func subscriptionFromGen(s gen.OpenrailsSubscription) (*models.Subscription, error) {
 	m := &models.Subscription{
-		ID:                      s.ID,
-		MerchantID:              s.MerchantID,
-		CustomerID:              s.CustomerID,
-		ProductID:               s.ProductID,
-		PriceID:                 derefUUID(s.PriceID),
-		ScheduledPriceID:        s.ScheduledPriceID,
-		Status:                  models.SubscriptionStatus(s.Status),
-		StartedAt:               s.StartedAt,
-		EndedAt:                 s.EndedAt,
-		CurrentPeriodStartsAt:   s.CurrentPeriodStartsAt,
-		CurrentPeriodEndsAt:     s.CurrentPeriodEndsAt,
-		Processor:               models.Processor(s.Processor),
-		ProcessorSubscriptionID: s.ProcessorSubscriptionID,
-		UserEmail:               s.UserEmail,
-		PaymentMethodID:         s.PaymentMethodID,
-		LastRetryAt:             s.LastRetryAt,
-		RetryAttempts:           derefIntPtr(s.RetryAttempts),
-		NextRetryAt:             s.NextRetryAt,
-		GraceEndsAt:             s.GraceEndsAt,
-		CancelFeedback:          s.CancelFeedback,
-		CancelledAt:             s.CancelledAt,
-		DeletionScheduledAt:     s.DeletionScheduledAt,
-		Metadata:                s.GatewayResponse,
-		CreatedAt:               s.CreatedAt,
-		UpdatedAt:               s.UpdatedAt,
+		ID:                    s.ID,
+		MerchantID:            s.MerchantID,
+		CustomerID:            s.CustomerID,
+		ProductID:             s.ProductID,
+		PriceID:               derefUUID(s.PriceID),
+		ScheduledPriceID:      s.ScheduledPriceID,
+		Status:                models.SubscriptionStatus(s.Status),
+		StartedAt:             s.StartedAt,
+		EndedAt:               s.EndedAt,
+		CurrentPeriodStartsAt: s.CurrentPeriodStartsAt,
+		CurrentPeriodEndsAt:   s.CurrentPeriodEndsAt,
+		Rail:                  models.Rail(s.Rail),
+		RailSubscriptionID:    s.RailSubscriptionID,
+		UserEmail:             s.UserEmail,
+		PaymentMethodID:       s.PaymentMethodID,
+		LastRetryAt:           s.LastRetryAt,
+		RetryAttempts:         derefIntPtr(s.RetryAttempts),
+		NextRetryAt:           s.NextRetryAt,
+		GraceEndsAt:           s.GraceEndsAt,
+		CancelFeedback:        s.CancelFeedback,
+		CancelledAt:           s.CancelledAt,
+		DeletionScheduledAt:   s.DeletionScheduledAt,
+		Metadata:              s.GatewayResponse,
+		CreatedAt:             s.CreatedAt,
+		UpdatedAt:             s.UpdatedAt,
 	}
 	if s.CancelType != nil {
 		ct := models.CancelType(*s.CancelType)
@@ -203,7 +203,7 @@ func paymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*models.PaymentMethod, 
 	m := &models.PaymentMethod{
 		ID:                   p.ID,
 		CustomerID:           p.CustomerID,
-		Processor:            models.Processor(p.Processor),
+		Rail:                 models.Rail(p.Rail),
 		VaultID:              p.VaultID,
 		BillingID:            p.BillingID,
 		InitialTransactionID: p.InitialTransactionID,
@@ -238,7 +238,7 @@ func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSes
 		CustomerID:        c.CustomerID,
 		PriceID:           c.PriceID,
 		Mode:              models.CheckoutSessionMode(c.Mode),
-		Processor:         models.Processor(c.Processor),
+		Rail:              models.Rail(c.Rail),
 		Status:            models.CheckoutSessionStatus(c.Status),
 		Amount:            c.Amount,
 		Currency:          c.Currency,
@@ -255,10 +255,10 @@ func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSes
 	if err := fromJSONB(c.Metadata, &m.Metadata, "checkout_sessions.metadata"); err != nil {
 		return nil, err
 	}
-	if err := fromJSONB(c.ProcessorFields, &m.ProcessorFields, "checkout_sessions.processor_fields"); err != nil {
+	if err := fromJSONB(c.RailFields, &m.RailFields, "checkout_sessions.rail_fields"); err != nil {
 		return nil, err
 	}
-	if err := fromJSONB(c.ProcessorState, &m.ProcessorState, "checkout_sessions.processor_state"); err != nil {
+	if err := fromJSONB(c.RailState, &m.RailState, "checkout_sessions.rail_state"); err != nil {
 		return nil, err
 	}
 	return m, nil

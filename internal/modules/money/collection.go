@@ -13,13 +13,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// CollectionAdapter charges a processor-specific saved payment method.
+// CollectionAdapter charges a rail-specific saved payment method.
 type CollectionAdapter interface {
 	ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error)
 }
 
 // ScopedCharger validates merchant/customer/payment-method scope before
-// dispatching an off-session invoice or top-up charge to a processor adapter.
+// dispatching an off-session invoice or top-up charge to a rail adapter.
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter
@@ -27,12 +27,12 @@ type ScopedCharger struct {
 
 func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *ScopedCharger {
 	cp := make(map[string]CollectionAdapter, len(adapters))
-	for processor, adapter := range adapters {
-		processor = normalizeProcessor(processor)
-		if processor == "" || adapter == nil {
+	for rail, adapter := range adapters {
+		rail = normalizeRail(rail)
+		if rail == "" || adapter == nil {
 			continue
 		}
-		cp[processor] = adapter
+		cp[rail] = adapter
 	}
 	return &ScopedCharger{db: database, adapters: cp}
 }
@@ -71,29 +71,29 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 		return ChargeResult{}, fmt.Errorf("payment method is not eligible for invoice collection")
 	}
 
-	processor := normalizeProcessor(method.Processor)
-	if processor == "" {
-		return ChargeResult{}, fmt.Errorf("payment method processor required")
+	rail := normalizeRail(method.Rail)
+	if rail == "" {
+		return ChargeResult{}, fmt.Errorf("payment method rail required")
 	}
-	switch processor {
-	case string(models.ProcessorCCBill), string(models.ProcessorSolana):
-		return ChargeResult{}, fmt.Errorf("processor %q does not support invoice collection", processor)
+	switch rail {
+	case string(models.RailCCBill), string(models.RailSolana):
+		return ChargeResult{}, fmt.Errorf("rail %q does not support invoice collection", rail)
 	}
 
-	adapter := c.adapters[processor]
+	adapter := c.adapters[rail]
 	if adapter == nil {
-		return ChargeResult{}, fmt.Errorf("no invoice collection adapter configured for processor %q", processor)
+		return ChargeResult{}, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)
 	}
 	res, err := adapter.ChargeSavedMethod(ctx, method, req)
 	if err != nil {
 		return ChargeResult{}, err
 	}
-	if strings.TrimSpace(res.Processor) == "" {
-		res.Processor = processor
+	if strings.TrimSpace(res.Rail) == "" {
+		res.Rail = rail
 	}
 	return res, nil
 }
 
-func normalizeProcessor(processor string) string {
-	return strings.ToLower(strings.TrimSpace(processor))
+func normalizeRail(rail string) string {
+	return strings.ToLower(strings.TrimSpace(rail))
 }

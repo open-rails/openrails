@@ -191,13 +191,13 @@ func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets
 		return false
 	}
 	switch normalizeManifestProviderType(providerType) {
-	case config.ProcessorTypeStripe:
+	case config.RailTypeStripe:
 		_, ok := values.sources["secret_key"]
 		return ok
-	case config.ProcessorTypeNMI:
+	case config.RailTypeNMI:
 		_, ok := values.sources["production_key"]
 		return ok
-	case config.ProcessorTypeCCBill:
+	case config.RailTypeCCBill:
 		_, ok := values.sources["account_config"]
 		return ok
 	default:
@@ -206,9 +206,9 @@ func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets
 }
 
 const (
-	configProcessorRolePrimary   = "primary"
-	configProcessorRoleSecondary = "secondary"
-	configProcessorRoleLegacy    = "legacy"
+	configRailRolePrimary   = "primary"
+	configRailRoleSecondary = "secondary"
+	configRailRoleLegacy    = "legacy"
 )
 
 func validHTTPURL(raw string) bool {

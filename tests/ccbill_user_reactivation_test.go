@@ -14,7 +14,7 @@ import (
 )
 
 func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T) {
-	suite, userID, processorSubID, subscriptionID, now := seedCCBillActiveSubscriptionWithEntitlement(t)
+	suite, userID, railSubID, subscriptionID, now := seedCCBillActiveSubscriptionWithEntitlement(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	expiredAt := now
@@ -23,10 +23,10 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 		"UPDATE openrails.subscriptions SET current_period_ends_at = $1 WHERE id = $2",
 		expiredPeriodEnd, subscriptionID)
 	require.NoError(t, err)
-	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", processorSubID, expiredAt)
+	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", railSubID, expiredAt)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled
 	}, 10*time.Second, 200*time.Millisecond)
 
@@ -37,7 +37,7 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 	reactivationPayload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/userreactivation.json")
 	nextRenewalDate := expiredAt.Add(14 * 24 * time.Hour)
 	transactionID := "ccbill_reactivate_txn_" + uuid.New().String()
-	reactivationPayload["subscriptionId"] = processorSubID
+	reactivationPayload["subscriptionId"] = railSubID
 	reactivationPayload["transactionId"] = transactionID
 	reactivationPayload["clientAccnum"] = "945280"
 	reactivationPayload["clientSubacc"] = "0000"
@@ -49,7 +49,7 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 
 	expectedPeriodEnd := time.Date(nextRenewalDate.Year(), nextRenewalDate.Month(), nextRenewalDate.Day(), 23, 59, 59, 0, time.UTC)
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		if sub == nil || sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil {
 			return false
 		}
@@ -67,17 +67,17 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 }
 
 func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T) {
-	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
+	suite, userID, railSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", processorSubID, now)
+	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", railSubID, now)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled
 	}, 10*time.Second, 200*time.Millisecond)
 
-	cancelled := suite.GetSubscriptionByProcessorID(processorSubID)
+	cancelled := suite.GetSubscriptionByRailID(railSubID)
 	require.NotNil(t, cancelled)
 	require.NotNil(t, cancelled.CancelType)
 	require.Equal(t, models.CancelTypeChargeback, *cancelled.CancelType)
@@ -88,7 +88,7 @@ func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T)
 
 	reactivationPayload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/userreactivation.json")
 	transactionID := "ccbill_reactivate_txn_" + uuid.New().String()
-	reactivationPayload["subscriptionId"] = processorSubID
+	reactivationPayload["subscriptionId"] = railSubID
 	reactivationPayload["transactionId"] = transactionID
 	reactivationPayload["clientAccnum"] = "945280"
 	reactivationPayload["clientSubacc"] = "0000"
@@ -99,7 +99,7 @@ func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T)
 	postCCBillWebhook(t, suite.ServerURL, "UserReactivation", reactivationPayload)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled && sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback
 	}, 10*time.Second, 200*time.Millisecond)
 
@@ -109,24 +109,24 @@ func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T)
 }
 
 func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
-	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
+	suite, userID, railSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", processorSubID, now)
+	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", railSubID, now)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled
 	}, 10*time.Second, 200*time.Millisecond)
 
-	initial := suite.GetSubscriptionByProcessorID(processorSubID)
+	initial := suite.GetSubscriptionByRailID(railSubID)
 	require.NotNil(t, initial)
 	require.NotNil(t, initial.CancelType)
 	require.Equal(t, models.CancelTypeChargeback, *initial.CancelType)
 
 	renewalPayload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/renewalsuccess.json")
 	renewalTxnID := "ccbill_renewal_after_chargeback_" + uuid.New().String()
-	renewalPayload["subscriptionId"] = processorSubID
+	renewalPayload["subscriptionId"] = railSubID
 	renewalPayload["transactionId"] = renewalTxnID
 	renewalPayload["timestamp"] = now.Add(2 * time.Hour).Format("2006-01-02 15:04:05")
 	renewalPayload["nextRenewalDate"] = now.Add(30 * 24 * time.Hour).Format("2006-01-02")
@@ -134,7 +134,7 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "RenewalSuccess", renewalPayload)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled && sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback
 	}, 10*time.Second, 200*time.Millisecond)
 
@@ -143,18 +143,18 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	require.False(t, entitled)
 
 	count := suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.payments WHERE processor = $1 AND transaction_id = $2",
-		string(models.ProcessorCCBill), renewalTxnID)
+		"SELECT COUNT(*) FROM openrails.payments WHERE rail = $1 AND transaction_id = $2",
+		string(models.RailCCBill), renewalTxnID)
 	require.Equal(t, 0, count)
 }
 
 func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
-	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
+	suite, userID, railSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	payload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/chargeback.json")
 	txID := "ccbill_chargeback_dupe_" + uuid.New().String()
-	payload["subscriptionId"] = processorSubID
+	payload["subscriptionId"] = railSubID
 	payload["transactionId"] = txID
 	payload["timestamp"] = now.Format("2006-01-02 15:04:05")
 
@@ -162,7 +162,7 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "Chargeback", payload)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		sub := suite.GetSubscriptionByRailID(railSubID)
 		return sub != nil && sub.Status == models.StatusCancelled && sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback
 	}, 10*time.Second, 200*time.Millisecond)
 
@@ -193,17 +193,17 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	require.NotEmpty(t, products[0].Prices)
 
 	userID := uuid.New().String()
-	processorSubID := "ccbill_reactivate_" + uuid.New().String()
+	railSubID := "ccbill_reactivate_" + uuid.New().String()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	created := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        products[0].Prices[0].ID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorCCBill,
-		ProcessorSubID: processorSubID,
-		PeriodStart:    now.Add(-5 * 24 * time.Hour),
-		PeriodEnd:      now.Add(25 * 24 * time.Hour),
+		UserID:      userID,
+		PriceID:     products[0].Prices[0].ID,
+		Status:      models.StatusActive,
+		Rail:        models.RailCCBill,
+		RailSubID:   railSubID,
+		PeriodStart: now.Add(-5 * 24 * time.Hour),
+		PeriodEnd:   now.Add(25 * 24 * time.Hour),
 	})
 	require.NotNil(t, created)
 
@@ -222,14 +222,14 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 		UpdatedAt:   now,
 	})
 
-	return suite, userID, processorSubID, created.ID, now
+	return suite, userID, railSubID, created.ID, now
 }
 
-func postCCBillTerminalEvent(t *testing.T, suite *TestContainerSuite, eventType, fixturePath, processorSubID string, at time.Time) {
+func postCCBillTerminalEvent(t *testing.T, suite *TestContainerSuite, eventType, fixturePath, railSubID string, at time.Time) {
 	t.Helper()
 
 	terminalPayload := mustLoadJSONMap(t, fixturePath)
-	terminalPayload["subscriptionId"] = processorSubID
+	terminalPayload["subscriptionId"] = railSubID
 	terminalPayload["timestamp"] = at.Format("2006-01-02 15:04:05")
 	terminalPayload["transactionId"] = "ccbill_term_" + uuid.New().String()
 	postCCBillWebhook(t, suite.ServerURL, eventType, terminalPayload)

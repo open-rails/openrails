@@ -10,23 +10,23 @@ import (
 )
 
 type CreateMembershipParams struct {
-	UserID                  string
-	PriceID                 uuid.UUID
-	Processor               models.Processor
-	ProcessorSubscriptionID *string
-	UserEmail               *string
-	CurrentPeriodStartsAt   *time.Time
-	CurrentPeriodEndsAt     *time.Time
-	TransactionID           string
-	Amount                  int64
-	AmountProvided          bool
-	Currency                string
-	PaymentMetadata         map[string]any
+	UserID                string
+	PriceID               uuid.UUID
+	Rail                  models.Rail
+	RailSubscriptionID    *string
+	UserEmail             *string
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	TransactionID         string
+	Amount                int64
+	AmountProvided        bool
+	Currency              string
+	PaymentMetadata       map[string]any
 }
 
 type RenewMembershipParams struct {
-	Processor                 models.Processor
-	ProcessorSubscriptionID   string
+	Rail                      models.Rail
+	RailSubscriptionID        string
 	CurrentPeriodStartsAt     *time.Time
 	CurrentPeriodEndsAt       *time.Time
 	TransactionID             string
@@ -38,8 +38,8 @@ type RenewMembershipParams struct {
 }
 
 type ReactivateMembershipParams struct {
-	Processor                 models.Processor
-	ProcessorSubscriptionID   string
+	Rail                      models.Rail
+	RailSubscriptionID        string
 	CurrentPeriodEndsAt       *time.Time
 	AllowTerminalReactivation bool
 }
@@ -48,7 +48,7 @@ var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blo
 
 type TerminalTransitionBlockedError struct {
 	SubscriptionID uuid.UUID
-	Processor      models.Processor
+	Rail           models.Rail
 	FromStatus     models.SubscriptionStatus
 	ToStatus       models.SubscriptionStatus
 	CancelType     string
@@ -60,11 +60,11 @@ func (e *TerminalTransitionBlockedError) Error() string {
 	if e == nil {
 		return ErrTerminalTransitionBlocked.Error()
 	}
-	return fmt.Sprintf("%v: trigger=%s subscription_id=%s processor=%s from=%s to=%s cancel_type=%s reason=%s",
+	return fmt.Sprintf("%v: trigger=%s subscription_id=%s rail=%s from=%s to=%s cancel_type=%s reason=%s",
 		ErrTerminalTransitionBlocked,
 		e.Trigger,
 		e.SubscriptionID,
-		e.Processor,
+		e.Rail,
 		e.FromStatus,
 		e.ToStatus,
 		e.CancelType,
@@ -88,16 +88,16 @@ func IsTerminalTransitionBlocked(err error) bool {
 }
 
 type CancelMembershipParams struct {
-	SubscriptionID          *uuid.UUID
-	Processor               *models.Processor
-	ProcessorSubscriptionID *string
-	CancelType              models.CancelType
-	CancelFeedback          *string
-	RevokeAccess            bool
+	SubscriptionID     *uuid.UUID
+	Rail               *models.Rail
+	RailSubscriptionID *string
+	CancelType         models.CancelType
+	CancelFeedback     *string
+	RevokeAccess       bool
 }
 
 type FailMembershipParams struct {
-	Processor      models.Processor
+	Rail           models.Rail
 	SubscriptionID *uuid.UUID
 	FailureReason  *string
 	FailureCode    *string
@@ -107,7 +107,7 @@ type FailMembershipParams struct {
 	// rebill must be downgraded, never retried.
 	Terminal bool
 	// HardDecline, when true, forces immediate cancellation with no further retry
-	// scheduling regardless of dunning mode. Set by dunning when the processor
+	// scheduling regardless of dunning mode. Set by dunning when the rail
 	// returns a permanent decline (stolen card, do-not-honor, account closed,
 	// expired card, pickup card). See ClassifyNMIDecline.
 	HardDecline bool

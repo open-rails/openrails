@@ -112,7 +112,7 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 			productID, "dup-prod-"+suffix, "dup-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, productID, merchantID)
 		ins := func(id uuid.UUID, txn string) {
-			exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
+			exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
 			      VALUES ($1,$2,'nmi',$3,999,999,'usd','completed',$4,$5,$6)`, id, priceID, txn, when, merchantID, customer)
 		}
 		ins(pay1, "dup-txn-1-"+suffix)

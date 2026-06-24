@@ -24,11 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const liveProcessorOptIn = "OPENRAILS_LIVE_PROCESSOR_TESTS"
+const liveRailOptIn = "OPENRAILS_LIVE_RAIL_TESTS"
 
 func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
-	requireLiveProcessorTest(t)
-	secretKey := liveEnvValue("PROCESSORS_STRIPE_SECRET_KEY", "BILLING_PROCESSORS_STRIPE_SECRET_KEY")
+	requireLiveRailTest(t)
+	secretKey := liveEnvValue("RAILS_STRIPE_SECRET_KEY", "BILLING_RAILS_STRIPE_SECRET_KEY")
 	if secretKey == "" {
 		t.Skip("Stripe test key missing")
 	}
@@ -51,8 +51,8 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 		"customer": {customerID},
 	})["id"].(string)
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.ProcessorStripe), pmID)
-	seedProcessorCustomer(t, pool, ctx, payer, string(models.ProcessorStripe), customerID)
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), pmID)
+	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), customerID)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -65,12 +65,12 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: true},
-		Processors: config.ProcessorSet{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: secretKey},
+		Rails: config.RailSet{
+			"stripe": {Type: config.RailTypeStripe, SecretKey: secretKey},
 		},
 	}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
+		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -93,8 +93,8 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 }
 
 func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
-	requireLiveProcessorTest(t)
-	securityKey := liveEnvValue("NMI_SANDBOX_SECURITY_KEY", "PROCESSORS_MOBIUS_SECURITY_KEY", "BILLING_PROCESSORS_MOBIUS_SECURITY_KEY")
+	requireLiveRailTest(t)
+	securityKey := liveEnvValue("NMI_SANDBOX_SECURITY_KEY", "RAILS_MOBIUS_SECURITY_KEY", "BILLING_RAILS_MOBIUS_SECURITY_KEY")
 	if securityKey == "" {
 		t.Skip("NMI sandbox security key missing")
 	}
@@ -109,7 +109,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID})
 	})
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.ProcessorMobius), vaultID)
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailMobius), vaultID)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -122,7 +122,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.ProcessorMobius): client,
+		string(models.RailMobius): client,
 	}))
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -144,13 +144,13 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	require.Equal(t, amount, paid.AmountPaid)
 }
 
-func requireLiveProcessorTest(t *testing.T) {
+func requireLiveRailTest(t *testing.T) {
 	t.Helper()
-	if strings.TrimSpace(os.Getenv(liveProcessorOptIn)) != "1" {
-		t.Skipf("%s=1 is required for live processor invoice tests", liveProcessorOptIn)
+	if strings.TrimSpace(os.Getenv(liveRailOptIn)) != "1" {
+		t.Skipf("%s=1 is required for live rail invoice tests", liveRailOptIn)
 	}
 	if !isTruthy(os.Getenv("TEST_MODE")) && !isTruthy(os.Getenv("OPENRAILS_TEST_MODE")) {
-		t.Fatalf("TEST_MODE=true is required for live processor invoice tests")
+		t.Fatalf("TEST_MODE=true is required for live rail invoice tests")
 	}
 }
 

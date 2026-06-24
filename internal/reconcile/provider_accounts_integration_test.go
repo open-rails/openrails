@@ -73,13 +73,13 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			end := now.Add(29 * 24 * time.Hour)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payment_methods
-				   (id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
+				   (id, rail, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
 				 VALUES ($1, 'mobius', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
 				pmID, marker, marker, dbtest.TestMerchantID.UUID(), customerID, account.ID)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.subscriptions
-				   (id, price_id, product_id, status, processor, processor_subscription_id,
+				   (id, price_id, product_id, status, rail, rail_subscription_id,
 				    payment_method_id, current_period_starts_at, current_period_ends_at, started_at,
 				    entitlements_spec_snapshot, customer_id, merchant_id, provider_account_id)
 				 VALUES ($1, $2, $3, 'active', 'mobius', 'sub-shared',
@@ -94,7 +94,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payments
-				   (id, price_id, processor, transaction_id, amount, list_amount, currency,
+				   (id, price_id, rail, transaction_id, amount, list_amount, currency,
 				    status, subscription_id, purchased_at, customer_id, merchant_id, provider_account_id)
 				 VALUES ($1, $2, 'nmi', 'txn-shared', 999, 999, 'usd',
 				    'completed', $3, $4, $5, $6, $7)`,

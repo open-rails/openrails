@@ -22,8 +22,8 @@ type Payment struct {
 	// Optional linkage back to the payment that this record refunds
 	RefundedPaymentID *uuid.UUID `json:"refunded_payment_id,omitempty"`
 
-	Processor     Processor `json:"processor"` // Processor: mobius, ccbill, solana
-	TransactionID string    `json:"transaction_id"`
+	Rail          Rail   `json:"rail"` // Rail: mobius, ccbill, solana
+	TransactionID string `json:"transaction_id"`
 
 	// Payment details - amount in cents (smallest currency unit)
 	Amount     int64  `json:"amount"`

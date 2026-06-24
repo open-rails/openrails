@@ -44,7 +44,7 @@ type StripeLivenessRecord struct {
 // StripeLivenessProber probes one remote Stripe subscription. Interface so
 // the liveness worker can be tested without the live Stripe API.
 type StripeLivenessProber interface {
-	ProbeSubscription(ctx context.Context, processorSubscriptionID string) (StripeLivenessRecord, error)
+	ProbeSubscription(ctx context.Context, railSubscriptionID string) (StripeLivenessRecord, error)
 }
 
 // HTTPStripeLivenessProber is the production prober over the Stripe REST API.
@@ -55,11 +55,11 @@ type HTTPStripeLivenessProber struct {
 	BaseURL string
 }
 
-// NewStripeLivenessProber builds a prober from the OpenRails processor set, reusing
+// NewStripeLivenessProber builds a prober from the OpenRails rail set, reusing
 // RequireStripeSecretKey for auth. Returns an error when Stripe is not
 // configured — callers skip the Stripe slice of the cohort in that case.
-func NewStripeLivenessProber(processors config.ProcessorSet) (*HTTPStripeLivenessProber, error) {
-	_, secretKey, err := RequireStripeSecretKey(processors)
+func NewStripeLivenessProber(rails config.RailSet) (*HTTPStripeLivenessProber, error) {
+	_, secretKey, err := RequireStripeSecretKey(rails)
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +114,10 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 // ProbeSubscription fetches GET /v1/subscriptions/{id}?expand[]=latest_invoice.
 // A 404 returns Found=false with a nil error — at Stripe that is an answer
 // (remote absent), not a transport failure.
-func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, processorSubscriptionID string) (StripeLivenessRecord, error) {
-	id := strings.TrimSpace(processorSubscriptionID)
+func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSubscriptionID string) (StripeLivenessRecord, error) {
+	id := strings.TrimSpace(railSubscriptionID)
 	if id == "" {
-		return StripeLivenessRecord{}, errors.New("processor subscription id is required")
+		return StripeLivenessRecord{}, errors.New("rail subscription id is required")
 	}
 	if strings.TrimSpace(p.SecretKey) == "" {
 		return StripeLivenessRecord{}, errors.New("stripe secret key is required")

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// CatalogDriftProvider names the upstream payment processor a drift event
+// CatalogDriftProvider names the upstream payment rail a drift event
 // concerns. It disambiguates the shared field_drift kind across providers.
 //
 // CCBill is deliberately absent: CCBill has no catalog-list API (FlexForms are
@@ -33,7 +33,7 @@ const (
 //     (deleted or archived upstream). Resolve via the per-price reconcile action.
 //   - CatalogDriftFieldDrift: an OpenRails row and its upstream mirror disagree
 //     on a mutable field (name/description/amount/currency/active/...). The
-//     Provider column says which processor drifted. Resolve via per-price
+//     Provider column says which rail drifted. Resolve via per-price
 //     reconcile.
 type CatalogDriftKind string
 

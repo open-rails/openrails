@@ -20,15 +20,15 @@ type HistoryEvent struct {
 	// subscription_events).
 	Table     string
 	EventType string
-	Processor string
+	Rail      string
 	// SubscriptionID is the local openrails.subscriptions uuid when known.
 	SubscriptionID *uuid.UUID
-	// ProcessorSubscriptionID correlates when no local id was stamped.
-	ProcessorSubscriptionID string
-	ProcessorTransactionID  string
-	Status                  string
-	Amount                  *float64
-	OccurredAt              time.Time
+	// RailSubscriptionID correlates when no local id was stamped.
+	RailSubscriptionID string
+	RailTransactionID  string
+	Status             string
+	Amount             *float64
+	OccurredAt         time.Time
 }
 
 // HistoryEventSource supplies the analytics-event evidence for the dunning
@@ -39,9 +39,9 @@ type HistoryEventSource interface {
 	// ClickHouse present in the config). Unconfigured sources are noted in
 	// the report and skipped.
 	Configured() bool
-	// ListEvents returns the merchant's events for the given local processor
+	// ListEvents returns the merchant's events for the given local rail
 	// names, oldest first. Zero since/until = unbounded on that side.
-	ListEvents(ctx context.Context, processorNames []string, since, until time.Time) ([]HistoryEvent, error)
+	ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error)
 }
 
 // analyticsHistorySource adapts the analytics module's ClickHouse forensics
@@ -59,8 +59,8 @@ func (s *analyticsHistorySource) Configured() bool {
 	return s != nil && s.svc.Configured()
 }
 
-func (s *analyticsHistorySource) ListEvents(ctx context.Context, processorNames []string, since, until time.Time) ([]HistoryEvent, error) {
-	rows, err := s.svc.ListDunningHistory(ctx, processorNames, since, until, 0)
+func (s *analyticsHistorySource) ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error) {
+	rows, err := s.svc.ListDunningHistory(ctx, railNames, since, until, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -69,17 +69,17 @@ func (s *analyticsHistorySource) ListEvents(ctx context.Context, processorNames 
 		ev := HistoryEvent{
 			Table:          r.Table,
 			EventType:      r.EventType,
-			Processor:      r.Processor,
+			Rail:           r.Rail,
 			SubscriptionID: r.SubscriptionID,
 			Status:         r.Status,
 			Amount:         r.Amount,
 			OccurredAt:     r.Timestamp,
 		}
-		if r.ProcessorSubscriptionID != nil {
-			ev.ProcessorSubscriptionID = *r.ProcessorSubscriptionID
+		if r.RailSubscriptionID != nil {
+			ev.RailSubscriptionID = *r.RailSubscriptionID
 		}
-		if r.ProcessorTransactionID != nil {
-			ev.ProcessorTransactionID = *r.ProcessorTransactionID
+		if r.RailTransactionID != nil {
+			ev.RailTransactionID = *r.RailTransactionID
 		}
 		out = append(out, ev)
 	}

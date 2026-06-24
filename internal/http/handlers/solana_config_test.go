@@ -18,7 +18,7 @@ func TestGetSolanaConfig(t *testing.T) {
 	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
 		runtime := &app.Runtime{
 			Config: &config.Config{},
-			Processors: config.ProcessorSet{
+			Rails: config.RailSet{
 				"solana": {
 					Network: "devnet",
 					Tokens: map[string]config.TokenConfig{
@@ -44,7 +44,7 @@ func TestGetSolanaConfig(t *testing.T) {
 
 	runtime := &app.Runtime{
 		Config: &config.Config{},
-		Processors: config.ProcessorSet{
+		Rails: config.RailSet{
 			"solana": {
 				Network:                         "devnet",
 				SolanaPayRecurringSubscriptions: true,

@@ -11,7 +11,7 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
@@ -20,7 +20,7 @@ import (
 )
 
 type checkoutSessionPaymentParams struct {
-	Processor       string `json:"processor" binding:"required"`
+	Rail            string `json:"rail" binding:"required"`
 	PaymentMethodID string `json:"payment_method_id,omitempty" binding:"omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	TokenSymbol     string `json:"token_symbol,omitempty" binding:"omitempty"`
@@ -57,17 +57,17 @@ type checkoutSessionCreateRequest struct {
 
 	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
 	// Stripe Checkout. The frontend supplies them (it knows its own origin);
-	// #521 moved these off processor config and onto the request, but only the
+	// #521 moved these off rail config and onto the request, but only the
 	// direct CheckoutRequest carried them — the session path (this struct) had
 	// no field, so the Stripe hosted flow always errored "success_url required".
-	// Optional here because non-Stripe processors (Solana, NMI, CCBill) don't use them.
+	// Optional here because non-Stripe rails (Solana, NMI, CCBill) don't use them.
 	SuccessURL string `json:"success_url,omitempty" binding:"omitempty,url"`
 	CancelURL  string `json:"cancel_url,omitempty" binding:"omitempty,url"`
 }
 
 type checkoutSessionConfirmRequest struct {
 	Payment struct {
-		Processor string `json:"processor" binding:"required,oneof=solana"`
+		Rail      string `json:"rail" binding:"required,oneof=solana"`
 		Signature string `json:"signature,omitempty"`
 		Wallet    string `json:"wallet,omitempty"`
 	} `json:"payment" binding:"required"`
@@ -87,8 +87,8 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	if !checkoutProcessorConfigured(r, req.Payment.Processor) {
-		r.ErrorJSON(http.StatusBadRequest, "unsupported processor")
+	if !checkoutRailConfigured(r, req.Payment.Rail) {
+		r.ErrorJSON(http.StatusBadRequest, "unsupported rail")
 		return
 	}
 	req.IdempotencyKey = r.Header("X-Idempotency-Key")
@@ -101,7 +101,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")
@@ -118,29 +118,29 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			)
 		}
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
-			Processor: req.Payment.Processor,
-			Wallet:    req.Payment.Wallet,
+			Rail:   req.Payment.Rail,
+			Wallet: req.Payment.Wallet,
 		})
 		return
 	}
 	r.SuccessJSON(resp)
 }
 
-func checkoutProcessorConfigured(r *httprequest.Request, processor string) bool {
+func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if r == nil || r.State == nil {
 		return false
 	}
-	if processors.IsConfigured(r.State.Processors, processor) {
+	if rails.IsConfigured(r.State.Rails, rail) {
 		return true
 	}
-	if !processors.IsNMIBacked(processor) || r.State.Merchants == nil {
+	if !rails.IsNMIBacked(rail) || r.State.Merchants == nil {
 		return false
 	}
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok {
 		return false
 	}
-	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, config.ProcessorTypeNMI, "live", "security_key")
+	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, config.RailTypeNMI, "live", "security_key")
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {
@@ -195,11 +195,11 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
-	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Processor: req.Payment.Processor, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
+	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
-			Processor:         req.Payment.Processor,
+			Rail:              req.Payment.Rail,
 			Wallet:            req.Payment.Wallet,
 			CheckoutSessionID: sessionID,
 		})
@@ -212,7 +212,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 // actionable checkout error metadata (e.g. the usdc_funding payload on the
 // pre-flight insufficient-USDC 402), so the frontend can drive a funding flow.
 type checkoutSessionErrorContext struct {
-	Processor         string
+	Rail              string
 	Wallet            string
 	CheckoutSessionID string
 }
@@ -256,8 +256,8 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		if id := strings.TrimSpace(ectx.CheckoutSessionID); id != "" {
 			funding["checkout_session_id"] = id
 		}
-		if p := strings.TrimSpace(ectx.Processor); p != "" {
-			funding["processor"] = p
+		if p := strings.TrimSpace(ectx.Rail); p != "" {
+			funding["rail"] = p
 		}
 		r.APIError(apiErr.WithMetadata(map[string]any{"usdc_funding": funding}))
 		return

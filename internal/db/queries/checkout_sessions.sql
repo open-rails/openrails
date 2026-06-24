@@ -2,16 +2,16 @@
 
 -- name: CreateCheckoutSession :execrows
 INSERT INTO openrails.checkout_sessions (
-    id, merchant_id, customer_id, price_id, mode, processor, status, amount,
+    id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, processor_fields, processor_state,
+    subscription_id, metadata, rail_fields, rail_state,
     idempotency_key, provider_account_id, created_at, updated_at
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7,
     sqlc.arg(currency),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
-    sqlc.narg(processor_fields), sqlc.narg(processor_state),
+    sqlc.narg(rail_fields), sqlc.narg(rail_state),
     sqlc.narg(idempotency_key), sqlc.narg(provider_account_id),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -25,7 +25,7 @@ UPDATE openrails.checkout_sessions SET
     customer_id = $2,
     price_id = $3,
     mode = $4,
-    processor = $5,
+    rail = $5,
     status = $6,
     amount = $7,
     currency = $8,
@@ -35,8 +35,8 @@ UPDATE openrails.checkout_sessions SET
     payment_id = sqlc.narg(payment_id),
     subscription_id = sqlc.narg(subscription_id),
     metadata = sqlc.narg(metadata),
-    processor_fields = sqlc.narg(processor_fields),
-    processor_state = sqlc.narg(processor_state),
+    rail_fields = sqlc.narg(rail_fields),
+    rail_state = sqlc.narg(rail_state),
     idempotency_key = sqlc.narg(idempotency_key),
     provider_account_id = sqlc.narg(provider_account_id),
     updated_at = sqlc.arg(updated_at)
@@ -45,13 +45,13 @@ WHERE id = $1;
 -- name: BindSolanaCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     reference = sqlc.arg(reference),
-    processor_state = sqlc.arg(processor_state),
+    rail_state = sqlc.arg(rail_state),
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1
-  AND processor = 'solana'
+  AND rail = 'solana'
   AND status = 'requires_action'
   AND (reference IS NULL OR reference = sqlc.arg(reference))
-  AND (COALESCE(processor_state ->> 'payer', '') = '' OR processor_state ->> 'payer' = sqlc.arg(payer)::text);
+  AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = sqlc.arg(payer)::text);
 
 -- name: GetCheckoutSessionByReference :one
 SELECT * FROM openrails.checkout_sessions cs
@@ -62,7 +62,7 @@ LIMIT 1;
 SELECT * FROM openrails.checkout_sessions cs
 WHERE cs.customer_id = $1
   AND cs.price_id = $2
-  AND cs.processor = $3
+  AND cs.rail = $3
   AND cs.status IN ('created', 'requires_action')
   AND (cs.expires_at IS NULL OR cs.expires_at > sqlc.arg(now)::timestamptz)
 ORDER BY cs.created_at DESC

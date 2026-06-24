@@ -59,7 +59,7 @@ func TestAdminListPayments(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		Amount:         999,
 		PurchasedAt:    time.Now().Add(-24 * time.Hour),
 	})
@@ -67,7 +67,7 @@ func TestAdminListPayments(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		Amount:         999,
 		PurchasedAt:    time.Now(),
 	})
@@ -96,7 +96,7 @@ func TestAdminListPayments(t *testing.T) {
 		assert.NotNil(t, payment["amount"], "Should have amount")
 		assert.NotNil(t, payment["currency"], "Should have currency")
 		assert.True(t, strings.HasPrefix(payment["user"].(string), "usr_"), "User should have usr_ prefix")
-		assert.NotNil(t, payment["processor"], "Should have processor")
+		assert.NotNil(t, payment["rail"], "Should have rail")
 		assert.NotNil(t, payment["transaction_id"], "Should have transaction_id")
 		assert.NotNil(t, payment["created"], "Should have created (unix timestamp)")
 		assert.NotNil(t, payment["refunded"], "Should have refunded boolean")
@@ -131,9 +131,9 @@ func TestAdminListPayments(t *testing.T) {
 		}
 	})
 
-	t.Run("filters by processor", func(t *testing.T) {
+	t.Run("filters by rail", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/merchant/payments?processor=mobius", nil)
+		req, _ := http.NewRequest("GET", "/v1/merchant/payments?rail=mobius", nil)
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
@@ -146,7 +146,7 @@ func TestAdminListPayments(t *testing.T) {
 		data := response["data"].([]interface{})
 		for _, p := range data {
 			payment := p.(map[string]interface{})
-			assert.Equal(t, "mobius", payment["processor"], "Payment should use mobius processor")
+			assert.Equal(t, "mobius", payment["rail"], "Payment should use mobius rail")
 		}
 	})
 
@@ -177,7 +177,7 @@ func TestAdminListPayments(t *testing.T) {
 			UserID:            userID,
 			PriceID:           priceID,
 			RefundedPaymentID: &payment1.ID,
-			Processor:         models.ProcessorMobius,
+			Rail:              models.RailMobius,
 			Amount:            -999, // Negative amount for refund
 		})
 
@@ -292,7 +292,7 @@ func TestAdminGetPayment(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		Amount:         999,
 	})
 
@@ -314,7 +314,7 @@ func TestAdminGetPayment(t *testing.T) {
 		assert.Equal(t, float64(999), response["amount"], "Amount should match")
 		assert.Equal(t, "usd", response["currency"], "Currency should match")
 		assert.Equal(t, api.FormatUserID(userID), response["user"], "User should have usr_ prefix")
-		assert.Equal(t, "mobius", response["processor"], "Processor should match")
+		assert.Equal(t, "mobius", response["rail"], "Rail should match")
 		assert.NotNil(t, response["subscription"], "Should include subscription ID")
 		assert.Equal(t, false, response["refunded"], "Should not be refunded")
 		assert.Equal(t, float64(0), response["amount_refunded"], "Amount refunded should be 0")
@@ -338,7 +338,7 @@ func TestAdminGetPayment(t *testing.T) {
 			UserID:            userID,
 			PriceID:           priceID,
 			RefundedPaymentID: &payment.ID,
-			Processor:         models.ProcessorMobius,
+			Rail:              models.RailMobius,
 			Amount:            -500, // Partial refund (negative)
 			TransactionID:     "refund-txn-" + uuid.New().String()[:8],
 		})
@@ -404,7 +404,7 @@ func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     models.ProcessorMobius,
+		Rail:          models.RailMobius,
 		Amount:        999,
 		TransactionID: transactionID,
 	})
@@ -456,10 +456,10 @@ func TestAdminRefund_RequiresPaymentsWrite(t *testing.T) {
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-		UserID:    uuid.New().String(),
-		PriceID:   priceID,
-		Processor: models.ProcessorMobius,
-		Amount:    1000,
+		UserID:  uuid.New().String(),
+		PriceID: priceID,
+		Rail:    models.RailMobius,
+		Amount:  1000,
 	})
 
 	w := httptest.NewRecorder()
@@ -509,10 +509,10 @@ func TestAdminRefundPayment(t *testing.T) {
 
 	t.Run("returns 400 for missing amount", func(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorMobius,
-			Amount:    1000,
+			UserID:  userID,
+			PriceID: priceID,
+			Rail:    models.RailMobius,
+			Amount:  1000,
 		})
 
 		w := httptest.NewRecorder()
@@ -528,10 +528,10 @@ func TestAdminRefundPayment(t *testing.T) {
 
 	t.Run("returns 400 for zero amount", func(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorMobius,
-			Amount:    1000,
+			UserID:  userID,
+			PriceID: priceID,
+			Rail:    models.RailMobius,
+			Amount:  1000,
 		})
 
 		w := httptest.NewRecorder()
@@ -549,7 +549,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:        userID,
 			PriceID:       priceID,
-			Processor:     models.ProcessorStripe,
+			Rail:          models.RailStripe,
 			TransactionID: "cs_test_old_checkout_" + uuid.NewString()[:8],
 			Amount:        1000,
 		})
@@ -575,10 +575,10 @@ func TestAdminRefundPayment(t *testing.T) {
 
 	t.Run("returns 400 for CCBill payments with helpful message", func(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorCCBill,
-			Amount:    1000,
+			UserID:  userID,
+			PriceID: priceID,
+			Rail:    models.RailCCBill,
+			Amount:  1000,
 		})
 
 		w := httptest.NewRecorder()
@@ -605,7 +605,7 @@ func TestAdminRefundPayment(t *testing.T) {
 // TestAdminRefundReachesAnyUserInMerchant confirms a merchant admin holding
 // payments:write can drive a refund against ANY user's payment within its
 // merchant — the operator is merchant-scoped, not user-scoped. (CCBill returns a
-// processor error, which proves the request reached the handler, not an auth gate.)
+// rail error, which proves the request reached the handler, not an auth gate.)
 func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := adminPaymentsWriter(t, suite)
@@ -614,16 +614,16 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	paymentA := suite.CreateTestPaymentWithOptions(PaymentOptions{
-		UserID:    uuid.New().String(),
-		PriceID:   priceID,
-		Processor: models.ProcessorCCBill, // CCBill so we don't need a processor mock
-		Amount:    2000,
+		UserID:  uuid.New().String(),
+		PriceID: priceID,
+		Rail:    models.RailCCBill, // CCBill so we don't need a rail mock
+		Amount:  2000,
 	})
 	paymentB := suite.CreateTestPaymentWithOptions(PaymentOptions{
-		UserID:    uuid.New().String(),
-		PriceID:   priceID,
-		Processor: models.ProcessorCCBill,
-		Amount:    3000,
+		UserID:  uuid.New().String(),
+		PriceID: priceID,
+		Rail:    models.RailCCBill,
+		Amount:  3000,
 	})
 
 	for _, payment := range []*models.Payment{paymentA, paymentB} {
@@ -635,7 +635,7 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 		req.Header.Set("X-Idempotency-Key", "refund-boundary-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
-		// Should get the CCBill processor error, not an auth error.
+		// Should get the CCBill rail error, not an auth error.
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Admin should be able to reach payment")
 
 		var response map[string]interface{}
@@ -662,7 +662,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     models.ProcessorMobius,
+		Rail:          models.RailMobius,
 		TransactionID: "txn-ledger-" + uuid.NewString()[:8],
 		Amount:        1000,
 	})

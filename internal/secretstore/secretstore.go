@@ -1,6 +1,6 @@
 // Package secretstore builds the canonical merchant secret store from config.
 //
-// It is the single source of truth for how provider/processor/Solana secrets are
+// It is the single source of truth for how provider/rail/Solana secrets are
 // protected at rest, used by BOTH the long-lived HTTP server runtime and the
 // bootstrap / push-merchant-config provisioning path. Centralizing the wiring
 // here closes OR-CFG-001: before this, the provisioning path constructed a raw

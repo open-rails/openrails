@@ -49,7 +49,7 @@ type ProviderRefreshWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
 	DB                  *db.DB
 	Config              *config.Config
-	Processors          config.ProcessorSet
+	Rails               config.RailSet
 	Clock               clockwork.Clock
 	NMIClients          map[string]*nmi.NMIClient
 	CCBillDataLink      *ccbill.DataLinkClient
@@ -96,7 +96,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	}
 	stats.Merchants = len(merchantIDs)
 
-	fetchers, fetcherErr := reconcile.BuildFetchersWithOptions(w.Config, w.Processors, reconcile.FetcherClients{
+	fetchers, fetcherErr := reconcile.BuildFetchersWithOptions(w.Config, w.Rails, reconcile.FetcherClients{
 		NMIClients:     w.NMIClients,
 		CCBillDataLink: w.CCBillDataLink,
 		SolanaRPC:      w.SolanaRPC,
@@ -150,7 +150,7 @@ func (w *ProviderRefreshWorker) runSubscriptionLiveness(ctx context.Context) err
 	worker := &SubscriptionLivenessWorker{
 		DB:              w.DB,
 		Config:          w.Config,
-		Processors:      w.Processors,
+		Rails:           w.Rails,
 		Clock:           w.Clock,
 		NMIClients:      w.NMIClients,
 		EventLogService: w.EventLogService,
@@ -175,7 +175,7 @@ func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUI
 	return err
 }
 
-func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.ProcessorFetcher) providerRefreshMerchantResult {
+func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshMerchantResult {
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
@@ -187,7 +187,7 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	return result
 }
 
-func refreshProviders(fetchers map[reconcile.Provider]reconcile.ProcessorFetcher) []reconcile.Provider {
+func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []reconcile.Provider {
 	allowed := map[reconcile.Provider]bool{
 		reconcile.ProviderNMI:    true,
 		reconcile.ProviderStripe: true,
@@ -203,12 +203,12 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.ProcessorFetcher
 	return providers
 }
 
-func (w *ProviderRefreshWorker) providerAccountBinding(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, fetcher reconcile.ProcessorFetcher) (*uuid.UUID, map[reconcile.Provider]reconcile.ProviderAccountBinding) {
+func (w *ProviderRefreshWorker) providerAccountBinding(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, fetcher reconcile.RailFetcher) (*uuid.UUID, map[reconcile.Provider]reconcile.ProviderAccountBinding) {
 	providerKey := reconcile.ProviderKeyFor(provider, fetcher)
 	if providerKey == "" {
 		providerKey = string(provider)
 	}
-	resolver := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Processors, w.NMIClients, w.DB)
+	resolver := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Rails, w.NMIClients, w.DB)
 	store := intents.NewStore(w.DB).WithProviderAccounts(resolver)
 	account, err := store.VerifyOrBindPrimaryProviderAccount(ctx, mid, providerKey)
 	if err != nil {
@@ -227,7 +227,7 @@ func (w *ProviderRefreshWorker) providerAccountBinding(ctx context.Context, mid 
 	}
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.ProviderAccountBinding, fetchers map[reconcile.Provider]reconcile.ProcessorFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.ProviderAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())

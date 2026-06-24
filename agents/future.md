@@ -1113,6 +1113,7 @@ None of these apply to "one-way convert at spot, each currency its own wallet."
 ## Relationship
 - Closes the loop on **#512 Phase E** (which is marked CLOSED-as-not-needed there, pointing here).
 - Reuses the **already-shipped** `internal/integrations/fx` provider (no new rate-source work).
+- Downstream consumer: **#577 (coupons)** fixed-amount coupons are per-currency until this ships; once cross-currency conversion exists, a fixed-amount coupon defined in currency A could convert to charge currency B at spot.
 
 ---
 
@@ -1318,7 +1319,7 @@ Steal **UniBee's** model specifically (it's richer than Lago's and maps cleanly 
 
 - **Definition**: percentage vs fixed-amount; `once | recurring | forever` (+ duration); validity window; active flag; per-merchant.
 - **Scoping / gates** (UniBee-rich): user-scope (`all | new-customers-only | renewals-only`), upgrade-only / upgrade-longer-only, plan allow/exclude lists, per-subscription / per-cycle / per-user redemption limits, total-quantity-limited code pools.
-- **Fixed-amount + currency**: because the ledger forbids cross-currency FX, fixed-amount coupons are **defined per-currency** (or single-currency-scoped) — do **not** cross-convert the way UniBee does. Percentage coupons are currency-agnostic. (Call this out — it's the one place UniBee's model doesn't port.)
+- **Fixed-amount + currency**: percentage coupons are currency-agnostic. For **fixed-amount** coupons, the simplest first cut is to **define them per-currency** (or single-currency-scoped) and not cross-convert — the ledger's currency-guard trigger forbids cross-currency transfers *today*. This is **not a permanent rule**: cross-currency conversion at spot is already planned in **#515 (cross-currency settlement)**, which adds the `fx_liquidity` two-transfer mechanic + reuses the shipped `internal/integrations/fx` rate provider. So once #515 lands, a fixed-amount coupon defined in currency A *could* optionally convert to charge currency B at spot (UniBee-style cross-convert) — until then, per-currency. Decide whether to ship per-currency-only and revisit after #515, or gate cross-convert behind #515 from the start.
 - **Application points**: checkout/first charge (`internal/modules/checkout/service.go`); `RenewMembership` (`internal/modules/subscriptions/lifecycle_service.go`) for recurring coupons; tier-change checkout for upgrade-only gates.
 - **Redemption ledger**: one row per application (coupon, customer, subscription, invoice/payment, amount discounted, cycle index). Supersedes/back-fills the free-text `discount_*` columns; powers "remaining redemptions", "applied N of M cycles", and history-discount-aware proration.
 - **Proration interplay**: a discounted sub changing tier must credit back the **discounted** historical amount, not list price (UniBee's `ComputeHistoryDiscountAmount`); wire into the existing checkout proration.
@@ -1467,3 +1468,53 @@ The distinction is **occurrence** (something happened at an instant; a side-effe
 - Does any real merchant need this, or does poll+reconcile suffice indefinitely?
 - Delivery semantics (at-least-once + idempotency key on the event) and ordering.
 - How to keep the surface occurrence-only so it can't be abused as a state-replication channel.
+
+---
+
+# #581: Authorize.Net gateway adapter (second card rail after NMI)
+
+**Completed:** no — planned. Likely the **next** processor adapter to build.
+
+## Why
+
+Authorize.Net is the **#2 card gateway in high-risk after NMI**, and it's the one merchants land on when they can't or won't use NMI: they already have an Authorize.Net account, or their acquiring bank/ISO provisions Auth.Net instead. The high-risk ISOs we'd onboard through (PayKings, PaymentCloud, HighRiskPay, Host Merchant Services) all resell **NMI _or_ Authorize.Net** on top of the merchant account — so today, "ask for NMI and you're covered," but any merchant stuck on Auth.Net is unservable. Supporting Auth.Net widens the set of acquirers/ISOs OpenRails can take without forcing a gateway switch. Origin: adult/high-risk acquirer research (2026-06-24).
+
+**The big lever:** NMI was built to speak **Authorize.Net's transaction format** (AIM / Direct Post), so this is the *closest* adapter we'll ever add to an existing rail. Much of the NMI rail's shape — vaulted cards + OpenRails-driven dunning + direct-sale rebills — ports directly. This is an *adapter*, not a new rail architecture.
+
+## Target Model (map onto the existing decomposed abstraction)
+
+OpenRails has **no single `PaymentProcessor` interface** — a gateway is implemented across four seams. Auth.Net plugs into each, using the NMI rail (`internal/integrations/nmi`, `internal/modules/payments/processors/nmi.go`, `internal/modules/vault`, `internal/modules/subscriptions/dunning.go`) as the template:
+
+- **Processor enum**: add `authorize_net` (a.k.a. `authnet`) to `models.Processor`. It is **NMI-format-adjacent but NOT NMI-backed** — keep `processors.IsNMIBacked` false for it; decide whether it shares NMI rail helpers or gets a sibling package (recommend a sibling `internal/integrations/authnet` that reuses shared card/dunning lifecycle code, not the NMI direct-post client).
+- **Gateway client** (`internal/integrations/authnet`): target Auth.Net's **current API** (`createTransactionRequest` for auth/capture/sale/refund/void), not the legacy AIM — NMI's Auth.Net-format compatibility helps us *read* the model, but we still call Auth.Net's own endpoints (`api.authorize.net` / `apitest.authorize.net`).
+- **Card vault**: today `internal/modules/vault` is NMI-only (`CreateCustomerVault → vault_id`). Add the Auth.Net equivalent — **CIM** (Customer Information Manager): `createCustomerProfileRequest` + payment profile, store the profile/payment-profile IDs as the vault ref. Reuse the compensating-delete + "refuse delete with active sub" safety from the NMI path.
+- **Subscription lifecycle**: prefer **OpenRails-driven charges against the CIM profile** (the direct-sale rebill path we already use for NMI dunning via `intents/manual_rebill.go`) over Auth.Net's native **ARB** (Automated Recurring Billing). ARB is limited and would pull lifecycle control back to the provider; OpenRails-driven keeps proration/dunning/grace uniform with NMI. **Decision to lock:** ARB vs OpenRails-driven-against-CIM (recommend the latter; revisit only if a merchant needs provider-native recurring).
+- **Inbound webhooks** (`webhooks.WebhookHandler` + `internal/shared/sigverify`): add an Auth.Net verifier. Auth.Net signs webhooks with **HMAC-SHA512** (`X-ANET-Signature` header) over the body using the webhook signature key — distinct from NMI's `timestamp.body` HMAC. Also account for the legacy **Silent Post URL** if any target account only supports that. Normalize to the existing event taxonomy.
+- **Outbound mutations** (`intents.Handler`): add `authnet_refund` / `authnet_void` / `authnet_delete_subscription` (if ARB) intent types through the durable intent ledger, with the account-fingerprint guard.
+- **Reconcile / convergence PULL**: Auth.Net has read-only detail APIs (`getTransactionDetailsRequest`, `getSettledBatchListRequest`, `getUnsettledTransactionListRequest`) — wire them into the `ProcessorFetcher` so the four-plane engine and the intent verifier get "detail-call-as-truth" parity with NMI/Stripe.
+- **Catalog provider mapping**: with OpenRails-driven charges (no ARB), Auth.Net is **amount-driven like NMI** — deterministic local plan id, no remote catalog object, so no `pending_manual_link`. (Only ARB would require provider-side subscription objects.)
+- **Modes**: enforce the `readonly` wire-gate on the Auth.Net transport (mirroring the NMI direct-post gate / Stripe transport gate / Solana submission gate). `limited` defers system-origin intents as usual.
+- **`test_mode`**: Auth.Net sandbox is a **separate host** (`apitest.authorize.net`) and separate sandbox accounts, so the credential guarantee is **structural (URL-based)** — much simpler than NMI's boot-time test-card probe. A live key pointed at the sandbox URL (or vice-versa) is rejectable without a probe; reuse the `billing.probe_verdicts`/refingerprint plumbing only if useful.
+
+## Open Questions / Decisions
+
+- **ARB vs OpenRails-driven-against-CIM** for recurring (recommend OpenRails-driven).
+- **Share the NMI rail vs sibling package** — how much of `internal/integrations/nmi` + the NMI dunning/vault paths can be factored into shared card-rail helpers without leaking NMI specifics.
+- Webhooks vs legacy **Silent Post** — support both, or webhooks-only and require accounts that have webhooks enabled?
+- Does the existing `IsNMIBacked` branch logic need a broader `IsCardDirectSale`-style predicate so Auth.Net inherits the right dunning/vault behavior without being mislabeled NMI?
+
+## Tasks
+
+- [ ] Add `authorize_net` to `models.Processor` + routing; introduce an `internal/integrations/authnet` client (current JSON API: sale/auth/capture/refund/void).
+- [ ] CIM-based vaulting in `internal/modules/vault` (profile + payment profile), with compensating delete + active-sub guard.
+- [ ] Wire the OpenRails-driven rebill/dunning path to charge the CIM profile (reuse `manual_rebill` + `dunning.go` cadence).
+- [ ] Inbound webhook handler + `sigverify` HMAC-SHA512 (`X-ANET-Signature`) verifier; normalize to the existing event taxonomy; decide Silent-Post fallback.
+- [ ] Intent handlers: `authnet_refund` / `authnet_void` (+ ARB delete only if ARB chosen).
+- [ ] Reconcile PULL fetcher + intent verifier using Auth.Net transaction/batch detail APIs.
+- [ ] Mode gating on the Auth.Net transport (`readonly` wire-gate, `limited` system-intent defer).
+- [ ] `test_mode` structural URL guarantee (`apitest.authorize.net`) + live-key-refuses-sandbox/boot check.
+- [ ] Integration tests against the Auth.Net sandbox: sale, vault+rebill, refund/void, webhook signature verify, reconcile pull, readonly-blocks-write.
+
+## Acceptance
+
+- A merchant on an Authorize.Net account can run the full lifecycle (checkout, vaulted rebill, OpenRails-driven dunning, refund/void, reconcile) through OpenRails, with the same mode/test-mode/convergence guarantees as the NMI rail — so an ISO that provisions Auth.Net instead of NMI is fully servable without a gateway switch.

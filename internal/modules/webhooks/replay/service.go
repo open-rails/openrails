@@ -28,7 +28,7 @@ type ReplayService struct {
 // ReplayResult represents the result of a webhook replay attempt.
 type ReplayResult struct {
 	EventFile    string `json:"event_file"`
-	Processor    string `json:"processor"`
+	Rail         string `json:"rail"`
 	EventType    string `json:"event_type,omitempty"`
 	Success      bool   `json:"success"`
 	StatusCode   int    `json:"status_code,omitempty"`
@@ -73,33 +73,33 @@ func (rs *ReplayService) getWebhookFilesPath() (string, error) {
 	return webhookPath, nil
 }
 
-// loadWebhookEvents loads webhook event files from the specified processor directory.
-func (rs *ReplayService) loadWebhookEvents(processor, eventFilter string) ([]string, error) {
+// loadWebhookEvents loads webhook event files from the specified rail directory.
+func (rs *ReplayService) loadWebhookEvents(rail, eventFilter string) ([]string, error) {
 	webhookPath, err := rs.getWebhookFilesPath()
 	if err != nil {
 		return nil, err
 	}
 
-	processorPath := filepath.Join(webhookPath, processor)
-	if _, err := os.Stat(processorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("processor directory not found: %s", processorPath)
+	railPath := filepath.Join(webhookPath, rail)
+	if _, err := os.Stat(railPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("rail directory not found: %s", railPath)
 	}
 
 	var eventFiles []string
 
 	if eventFilter == "all" {
-		files, err := os.ReadDir(processorPath)
+		files, err := os.ReadDir(railPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read processor directory %s: %w", processorPath, err)
+			return nil, fmt.Errorf("failed to read rail directory %s: %w", railPath, err)
 		}
 
 		for _, file := range files {
 			if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
-				eventFiles = append(eventFiles, filepath.Join(processorPath, file.Name()))
+				eventFiles = append(eventFiles, filepath.Join(railPath, file.Name()))
 			}
 		}
 	} else {
-		eventFile := filepath.Join(processorPath, eventFilter)
+		eventFile := filepath.Join(railPath, eventFilter)
 		if _, err := os.Stat(eventFile); os.IsNotExist(err) {
 			return nil, fmt.Errorf("event file not found: %s", eventFile)
 		}
@@ -107,7 +107,7 @@ func (rs *ReplayService) loadWebhookEvents(processor, eventFilter string) ([]str
 	}
 
 	if len(eventFiles) == 0 {
-		return nil, fmt.Errorf("no webhook event files found in %s", processorPath)
+		return nil, fmt.Errorf("no webhook event files found in %s", railPath)
 	}
 
 	return eventFiles, nil
@@ -117,7 +117,7 @@ func (rs *ReplayService) loadWebhookEvents(processor, eventFilter string) ([]str
 func (rs *ReplayService) validateWebhookPayload(filePath string) (*ReplayResult, error) {
 	result := &ReplayResult{
 		EventFile: filepath.Base(filePath),
-		Processor: filepath.Base(filepath.Dir(filePath)),
+		Rail:      filepath.Base(filepath.Dir(filePath)),
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -132,7 +132,7 @@ func (rs *ReplayService) validateWebhookPayload(filePath string) (*ReplayResult,
 		return result, nil
 	}
 
-	if result.Processor == "mobius" {
+	if result.Rail == "mobius" {
 		if payloadArray, ok := payload.([]interface{}); ok && len(payloadArray) > 0 {
 			if firstEvent, ok := payloadArray[0].(map[string]interface{}); ok {
 				if eventType, exists := firstEvent["event_type"]; exists {
@@ -158,7 +158,7 @@ func (rs *ReplayService) validateWebhookPayload(filePath string) (*ReplayResult,
 func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string) (*ReplayResult, error) {
 	result := &ReplayResult{
 		EventFile: filepath.Base(filePath),
-		Processor: filepath.Base(filepath.Dir(filePath)),
+		Rail:      filepath.Base(filepath.Dir(filePath)),
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -173,7 +173,7 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 		return result, nil
 	}
 
-	if result.Processor == "mobius" {
+	if result.Rail == "mobius" {
 		if payloadArray, ok := payload.([]interface{}); ok && len(payloadArray) > 0 {
 			if firstEvent, ok := payloadArray[0].(map[string]interface{}); ok {
 				if eventType, exists := firstEvent["event_type"]; exists {
@@ -192,7 +192,7 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 	}
 
 	// Canonical standalone webhook path: /v1/webhooks/:provider
-	webhookURL, err := url.JoinPath(rs.TargetEndpoint, "v1", "webhooks", result.Processor)
+	webhookURL, err := url.JoinPath(rs.TargetEndpoint, "v1", "webhooks", result.Rail)
 	if err != nil {
 		result.Error = fmt.Sprintf("Failed to build webhook URL: %v", err)
 		return result, nil
@@ -201,7 +201,7 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 	var requestBody io.Reader
 	var contentType string
 
-	if result.Processor == "ccbill" {
+	if result.Rail == "ccbill" {
 		formData := url.Values{}
 		if payloadMap, ok := payload.(map[string]interface{}); ok {
 			for key, value := range payloadMap {
@@ -251,7 +251,7 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 }
 
 // processWebhookEvents processes a list of webhook events with concurrency control.
-func (rs *ReplayService) processWebhookEvents(ctx context.Context, eventFiles []string, processor string) (int, int, error) {
+func (rs *ReplayService) processWebhookEvents(ctx context.Context, eventFiles []string, rail string) (int, int, error) {
 	if len(eventFiles) == 0 {
 		return 0, 0, nil
 	}
@@ -294,7 +294,7 @@ func (rs *ReplayService) processWebhookEvents(ctx context.Context, eventFiles []
 				if err != nil {
 					result = &ReplayResult{
 						EventFile: filepath.Base(eventFile),
-						Processor: processor,
+						Rail:      rail,
 						Error:     err.Error(),
 					}
 				}
@@ -369,7 +369,7 @@ func (rs *ReplayService) ReplayNMIWebhooks(ctx context.Context, eventFilter stri
 }
 
 // ReplayEvent replays a single webhook event to the target URL.
-func ReplayEvent(ctx context.Context, processor, eventFile, targetURL string) error {
+func ReplayEvent(ctx context.Context, rail, eventFile, targetURL string) error {
 	rs := &ReplayService{
 		TargetEndpoint: targetURL,
 		Concurrent:     1,
@@ -381,13 +381,13 @@ func ReplayEvent(ctx context.Context, processor, eventFile, targetURL string) er
 	var failures int
 	var err error
 
-	switch processor {
+	switch rail {
 	case "ccbill":
 		_, failures, err = rs.ReplayCCBillWebhooks(ctx, eventFile)
 	case "mobius":
 		_, failures, err = rs.ReplayNMIWebhooks(ctx, eventFile)
 	default:
-		return fmt.Errorf("invalid processor '%s'. Must be: ccbill or mobius", processor)
+		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or mobius", rail)
 	}
 
 	if err != nil {
@@ -395,19 +395,19 @@ func ReplayEvent(ctx context.Context, processor, eventFile, targetURL string) er
 	}
 
 	if failures > 0 {
-		return fmt.Errorf("webhook replay failed for %s/%s", processor, eventFile)
+		return fmt.Errorf("webhook replay failed for %s/%s", rail, eventFile)
 	}
 
 	return nil
 }
 
-// ReplayAllEvents replays all webhook events for a processor.
-func ReplayAllEvents(ctx context.Context, processor, targetURL string) error {
-	return ReplayEvent(ctx, processor, "all", targetURL)
+// ReplayAllEvents replays all webhook events for a rail.
+func ReplayAllEvents(ctx context.Context, rail, targetURL string) error {
+	return ReplayEvent(ctx, rail, "all", targetURL)
 }
 
 // ValidateEvent validates a webhook event payload without sending HTTP requests.
-func ValidateEvent(processor, eventFile string) error {
+func ValidateEvent(rail, eventFile string) error {
 	rs := &ReplayService{
 		DryRun:  true,
 		Verbose: false,
@@ -416,13 +416,13 @@ func ValidateEvent(processor, eventFile string) error {
 	var failures int
 	var err error
 
-	switch processor {
+	switch rail {
 	case "ccbill":
 		_, failures, err = rs.ReplayCCBillWebhooks(context.Background(), eventFile)
 	case "mobius":
 		_, failures, err = rs.ReplayNMIWebhooks(context.Background(), eventFile)
 	default:
-		return fmt.Errorf("invalid processor '%s'. Must be: ccbill or mobius", processor)
+		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or mobius", rail)
 	}
 
 	if err != nil {
@@ -430,25 +430,25 @@ func ValidateEvent(processor, eventFile string) error {
 	}
 
 	if failures > 0 {
-		return fmt.Errorf("webhook validation failed for %s/%s", processor, eventFile)
+		return fmt.Errorf("webhook validation failed for %s/%s", rail, eventFile)
 	}
 
 	return nil
 }
 
-// ValidateAllEvents validates all webhook events for a processor.
-func ValidateAllEvents(processor string) error {
-	return ValidateEvent(processor, "all")
+// ValidateAllEvents validates all webhook events for a rail.
+func ValidateAllEvents(rail string) error {
+	return ValidateEvent(rail, "all")
 }
 
 // LoadTestWebhookPayload loads a test webhook payload from testdata.
-func LoadTestWebhookPayload(processor, eventFile string) (string, error) {
+func LoadTestWebhookPayload(rail, eventFile string) (string, error) {
 	projectRoot, err := getProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("failed to find project root: %w", err)
 	}
 
-	payloadPath := filepath.Join(projectRoot, "testdata", "webhooks", processor, eventFile)
+	payloadPath := filepath.Join(projectRoot, "testdata", "webhooks", rail, eventFile)
 	data, err := os.ReadFile(payloadPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read payload file %s: %w", payloadPath, err)

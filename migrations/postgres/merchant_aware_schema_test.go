@@ -35,7 +35,7 @@ var merchantOwnedTables = []string{
 	"invoice_payments",
 	"notification_queue",
 	"payment_blocklist",
-	"processor_customers",
+	"rail_customers",
 	"external_provider_mutation_logs",
 	"grants",
 	"ledger_accounts",
@@ -195,7 +195,7 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 		"uq_payment_methods_tenant_user_vault",
 		"uq_subscriptions_tenant_user_product_lifecycle",
 		"uq_entitlements_tenant_active",
-		"uq_processor_customers_tenant_user_processor",
+		"uq_rail_customers_tenant_user_rail",
 		" user_id text",
 	} {
 		if strings.Contains(c, forbidden) {
@@ -206,8 +206,8 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 		"uq_payment_methods_customer_vault",
 		"uq_subscriptions_customer_product_lifecycle",
 		"uq_entitlements_customer_active",
-		"uq_payments_merchant_processor_transaction",
-		"uq_processor_customers_customer_processor",
+		"uq_payments_merchant_rail_transaction",
+		"uq_rail_customers_customer_rail",
 		"entitlements_customer_no_overlap",
 	} {
 		if !strings.Contains(c, want) {

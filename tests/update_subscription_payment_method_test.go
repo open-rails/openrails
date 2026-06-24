@@ -53,30 +53,30 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 
 	// Create an active subscription for the user
 	oldPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
-		VaultID:   "old-vault-" + uuid.New().String(),
-		LastFour:  "4242",
-		CardType:  "Visa",
+		UserID:   userID,
+		Rail:     models.RailMobius,
+		VaultID:  "old-vault-" + uuid.New().String(),
+		LastFour: "4242",
+		CardType: "Visa",
 	})
 
-	processorSubID := "sub-to-update-" + uuid.New().String()
+	railSubID := "sub-to-update-" + uuid.New().String()
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusActive,
-		Processor:       models.ProcessorMobius,
-		ProcessorSubID:  processorSubID,
+		Rail:            models.RailMobius,
+		RailSubID:       railSubID,
 		PaymentMethodID: &oldPM.ID,
 	})
 
 	// Create new payment method to swap to
 	newPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
-		VaultID:   "new-vault-" + uuid.New().String(),
-		LastFour:  "1234",
-		CardType:  "Mastercard",
+		UserID:   userID,
+		Rail:     models.RailMobius,
+		VaultID:  "new-vault-" + uuid.New().String(),
+		LastFour: "1234",
+		CardType: "Mastercard",
 	})
 
 	t.Run("updates subscription payment method successfully", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 
 		// Verify NMI was called with update_subscription
 		assert.Contains(t, mock.LastRequest["recurring"], "update_subscription", "Should call NMI with update_subscription")
-		assert.Contains(t, mock.LastRequest["subscription_id"], processorSubID, "Should send subscription ID")
+		assert.Contains(t, mock.LastRequest["subscription_id"], railSubID, "Should send subscription ID")
 		assert.Contains(t, mock.LastRequest["customer_vault_id"], newPM.VaultID, "Should send new vault ID")
 
 		// Verify subscription was updated in database
@@ -152,8 +152,8 @@ func TestUpdateSubscriptionPaymentMethodNotOwned(t *testing.T) {
 
 	// Create payment method for current user
 	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
+		UserID: userID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns 403 for subscription owned by another user", func(t *testing.T) {
@@ -192,8 +192,8 @@ func TestUpdateSubscriptionPaymentMethodNotOwnedPM(t *testing.T) {
 	// Create payment method owned by different user
 	otherUserID := uuid.New().String()
 	otherPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    otherUserID,
-		Processor: models.ProcessorMobius,
+		UserID: otherUserID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns 403 for payment method owned by another user", func(t *testing.T) {
@@ -228,16 +228,16 @@ func TestUpdateSubscriptionPaymentMethodCancelledSub(t *testing.T) {
 
 	// Create cancelled subscription
 	cancelledSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:    userID,
-		PriceID:   priceID,
-		Status:    models.StatusCancelled,
-		Processor: models.ProcessorMobius,
+		UserID:  userID,
+		PriceID: priceID,
+		Status:  models.StatusCancelled,
+		Rail:    models.RailMobius,
 	})
 
 	// Create active payment method
 	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
+		UserID: userID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns error for cancelled subscription", func(t *testing.T) {
@@ -272,16 +272,16 @@ func TestUpdateSubscriptionPaymentMethodCCBillNotSupported(t *testing.T) {
 
 	// Create CCBill subscription (can't have payment method updated)
 	ccbillSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:    userID,
-		PriceID:   priceID,
-		Status:    models.StatusActive,
-		Processor: models.ProcessorCCBill,
+		UserID:  userID,
+		PriceID: priceID,
+		Status:  models.StatusActive,
+		Rail:    models.RailCCBill,
 	})
 
 	// Create NMI payment method
 	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
+		UserID: userID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns error for CCBill subscription", func(t *testing.T) {
@@ -319,8 +319,8 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 
 	// Create payment method for user
 	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
+		UserID: userID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns 404 for non-existent subscription", func(t *testing.T) {
@@ -427,17 +427,17 @@ func TestUpdateSubscriptionPaymentMethodPastDue(t *testing.T) {
 
 	// Create past_due subscription (payment failed but still retrying)
 	pastDueSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:    userID,
-		PriceID:   priceID,
-		Status:    models.StatusPastDue,
-		Processor: models.ProcessorMobius,
+		UserID:  userID,
+		PriceID: priceID,
+		Status:  models.StatusPastDue,
+		Rail:    models.RailMobius,
 	})
 
 	// Create new payment method
 	newPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
-		VaultID:   "new-vault-pastdue-" + uuid.New().String(),
+		UserID:  userID,
+		Rail:    models.RailMobius,
+		VaultID: "new-vault-pastdue-" + uuid.New().String(),
 	})
 
 	t.Run("allows updating payment method for past_due subscription", func(t *testing.T) {
@@ -483,8 +483,8 @@ func TestUpdateSubscriptionPaymentMethodNMIFailure(t *testing.T) {
 
 	// Create payment method
 	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
+		UserID: userID,
+		Rail:   models.RailMobius,
 	})
 
 	t.Run("returns error when NMI API fails", func(t *testing.T) {

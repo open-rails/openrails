@@ -164,12 +164,12 @@ type StripeCardSubscriptionLinker interface {
 //
 // It is the single shared implementation behind both the webhook handler
 // (charge.succeeded / payment_method.attached) and the reconcile backfill. The
-// upsert is keyed by (processor=stripe, vault_id); the subscription link is only
+// upsert is keyed by (rail=stripe, vault_id); the subscription link is only
 // written when it changes. Both make it idempotent and safe to re-run.
 func UpsertStripeCardForCustomer(
 	ctx context.Context,
 	database *db.DB,
-	customers *ProcessorCustomerService,
+	customers *RailCustomerService,
 	subscriptions StripeCardSubscriptionLinker,
 	clock clockwork.Clock,
 	customerID, paymentMethodID, initialTxnID string,
@@ -179,7 +179,7 @@ func UpsertStripeCardForCustomer(
 	if customerID == "" || database == nil || customers == nil || card == nil {
 		return nil
 	}
-	userID, err := customers.GetUserIDByCustomerID(ctx, string(models.ProcessorStripe), customerID)
+	userID, err := customers.GetUserIDByCustomerID(ctx, string(models.RailStripe), customerID)
 	if err != nil || strings.TrimSpace(userID) == "" {
 		// No user mapping yet (e.g. customer created out-of-band); nothing to link.
 		return nil
@@ -196,13 +196,13 @@ func UpsertStripeCardForCustomer(
 	}
 
 	methods := repo.NewPaymentMethodRepo(database)
-	pm, err := methods.GetByVaultID(ctx, string(models.ProcessorStripe), vaultID)
+	pm, err := methods.GetByVaultID(ctx, string(models.RailStripe), vaultID)
 	switch {
 	case errors.Is(err, repo.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
-			Processor:            models.ProcessorStripe,
+			Rail:                 models.RailStripe,
 			VaultID:              vaultID,
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,

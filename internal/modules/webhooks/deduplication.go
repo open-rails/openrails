@@ -67,18 +67,18 @@ func NewDeduplicationService(idem *idempotency.IdempotencyService) *Deduplicatio
 
 // IsDuplicate checks if a webhook with this eventID has already been processed successfully.
 // Returns true if the webhook should be skipped (already processed), false otherwise.
-func (s *DeduplicationService) IsDuplicate(ctx context.Context, processor string, eventID string) (bool, error) {
+func (s *DeduplicationService) IsDuplicate(ctx context.Context, rail string, eventID string) (bool, error) {
 	trimmedEventID := strings.TrimSpace(eventID)
 	if trimmedEventID == "" {
 		return false, nil // No event ID, can't deduplicate
 	}
 
-	op := fmt.Sprintf("webhook.%s.event", processor)
+	op := fmt.Sprintf("webhook.%s.event", rail)
 
 	if s == nil || s.idem == nil {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"eventID":   trimmedEventID,
-			"processor": processor,
+			"eventID": trimmedEventID,
+			"rail":    rail,
 		}).Warn("IdempotencyService is not configured; dedupe check skipped")
 		return false, nil
 	}
@@ -98,7 +98,7 @@ func (s *DeduplicationService) IsDuplicate(ctx context.Context, processor string
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
-func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, processor models.Processor, payload interface{}, processingFunc func(ctx context.Context) error) error {
+func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, rail models.Rail, payload interface{}, processingFunc func(ctx context.Context) error) error {
 	var payloadBytes []byte
 	if payload != nil {
 		if data, err := json.Marshal(payload); err == nil {
@@ -109,7 +109,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 
 	trimmedEventID := strings.TrimSpace(eventID)
-	op := fmt.Sprintf("webhook.%s.%s", processor, eventType)
+	op := fmt.Sprintf("webhook.%s.%s", rail, eventType)
 
 	var shouldRecordOutcome bool
 	if trimmedEventID != "" {
@@ -117,7 +117,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			log.WithContext(ctx).WithFields(log.Fields{
 				"eventID":   trimmedEventID,
 				"eventType": eventType,
-				"processor": processor,
+				"rail":      rail,
 			}).Warn("IdempotencyService is not configured; processing webhook without dedupe protection")
 		} else {
 			rec, alreadyExists, err := s.idem.Begin(ctx, op, trimmedEventID)
@@ -128,7 +128,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"processor": processor,
+					"rail":      rail,
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
@@ -142,21 +142,21 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 						log.WithContext(ctx).WithFields(log.Fields{
 							"eventID":   trimmedEventID,
 							"eventType": eventType,
-							"processor": processor,
+							"rail":      rail,
 						}).Info("Stale pending webhook was claimed by another worker")
 						return fmt.Errorf("webhook already in progress")
 					}
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"processor": processor,
+						"rail":      rail,
 					}).Warn("Taking over stale pending webhook idempotency record")
 					shouldRecordOutcome = true
 				} else {
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"processor": processor,
+						"rail":      rail,
 					}).Info("Webhook already in progress, skipping concurrent duplicate")
 					return fmt.Errorf("webhook already in progress")
 				}
@@ -173,7 +173,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		log.WithContext(ctx).WithFields(log.Fields{
 			"eventID":   trimmedEventID,
 			"eventType": eventType,
-			"processor": processor,
+			"rail":      rail,
 			"error":     processingErr.Error(),
 		}).Error("Webhook processing failed")
 
@@ -193,7 +193,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			log.WithContext(ctx).WithFields(log.Fields{
 				"eventID":   trimmedEventID,
 				"eventType": eventType,
-				"processor": processor,
+				"rail":      rail,
 			}).Warn("Webhook failed with non-retryable error; marked complete to avoid futile retries")
 			return nil
 		}
@@ -210,7 +210,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	log.WithContext(ctx).WithFields(log.Fields{
 		"eventID":   trimmedEventID,
 		"eventType": eventType,
-		"processor": processor,
+		"rail":      rail,
 	}).Info("Webhook processed successfully")
 
 	return nil

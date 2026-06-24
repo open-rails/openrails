@@ -15,7 +15,7 @@ import (
 // Engine is the #107 phase-2 diff engine: it fetches each provider's declared
 // state, diffs it against local billing state, persists PS-1..PS-9 findings
 // with stable identity, and (in enforce mode) applies idempotent LOCAL
-// convergence writes. It NEVER mutates a processor — remote actions are
+// convergence writes. It NEVER mutates a rail — remote actions are
 // findings in the admin queue (requires_admin), and the fetchers are
 // read-only by construction.
 //
@@ -23,7 +23,7 @@ import (
 // connection / merchant in context) so every read and write is RLS-constrained
 // to one merchant; a run executes under exactly one merchant.
 type Engine struct {
-	Fetchers map[Provider]ProcessorFetcher
+	Fetchers map[Provider]RailFetcher
 	Store    Store
 	Local    LocalStateLoader
 	// Writer applies enforce-mode local writes. May be nil for advisory-only
@@ -199,11 +199,11 @@ func (e *Engine) breakerRatio() float64 {
 type providerTraits struct {
 	// absenceMeansCancelled: the provider's subscription listing only contains
 	// LIVE subscriptions, so a local-live subscription that is absent remotely
-	// is dead at the processor (NMI recurring report). Guarded by the circuit
+	// is dead at the rail (NMI recurring report). Guarded by the circuit
 	// breaker.
 	absenceMeansCancelled bool
 	// vaultExhaustive: the vault listing is the complete roster, so a local
-	// payment method missing from it no longer exists at the processor.
+	// payment method missing from it no longer exists at the rail.
 	vaultExhaustive bool
 }
 
@@ -364,7 +364,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		localLive := 0
 		for i := range local.Subscriptions {
 			s := &local.Subscriptions[i]
-			if s.IsLive() && s.ProcessorSubscriptionID != "" {
+			if s.IsLive() && s.RailSubscriptionID != "" {
 				localLive++
 			}
 		}
@@ -509,7 +509,7 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 	if e.History == nil || !e.History.Configured() {
 		return nil, "not configured (no ClickHouse analytics source; provider + local evidence only)"
 	}
-	events, err := e.History.ListEvents(ctx, localProcessorNames(provider), params.Since, params.Until)
+	events, err := e.History.ListEvents(ctx, localRailNames(provider), params.Since, params.Until)
 	if err != nil {
 		log.WithError(err).WithField("provider", provider).
 			Warn("reconcile: analytics history source unavailable; forensics degrade to provider + local evidence")

@@ -17,14 +17,14 @@ type PaymentProvider struct {
 	Name string
 	// Config is the provider credential/config payload. Set Config.Type for
 	// non-reserved names and for generated names. Config.Role defaults to primary.
-	Config config.ProcessorConfig
+	Config config.RailConfig
 }
 
 // ApplyPaymentProviders converts host-supplied embedded provider credentials
-// into an in-memory ProcessorSet. Local names are not durable identity; provider
+// into an in-memory RailSet. Local names are not durable identity; provider
 // account rows store the provider-returned account id.
-func ApplyPaymentProviders(providers []PaymentProvider) (config.ProcessorSet, error) {
-	set := config.ProcessorSet{}
+func ApplyPaymentProviders(providers []PaymentProvider) (config.RailSet, error) {
+	set := config.RailSet{}
 	if len(providers) == 0 {
 		return set, nil
 	}
@@ -49,12 +49,12 @@ func ApplyPaymentProviders(providers []PaymentProvider) (config.ProcessorSet, er
 			return nil, fmt.Errorf("duplicate embedded payment provider name %q", key)
 		}
 		seen[key] = struct{}{}
-		set[key] = cloneProcessorConfig(&proc)
+		set[key] = cloneRailConfig(&proc)
 	}
 	return set, nil
 }
 
-func generatedProviderName(existing map[string]*config.ProcessorConfig, seen map[string]struct{}, providerType string) string {
+func generatedProviderName(existing map[string]*config.RailConfig, seen map[string]struct{}, providerType string) string {
 	base := strings.ToLower(strings.TrimSpace(providerType))
 	if base == "" {
 		base = "provider"
@@ -74,7 +74,7 @@ func generatedProviderName(existing map[string]*config.ProcessorConfig, seen map
 	}
 }
 
-func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {
+func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 	if in == nil {
 		return nil
 	}

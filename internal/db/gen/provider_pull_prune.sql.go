@@ -65,10 +65,10 @@ const listExcessSubscriptionsForProviderAccount = `-- name: ListExcessSubscripti
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND provider_account_id = $2::uuid
-  AND processor_subscription_id <> ''
+  AND rail_subscription_id <> ''
   AND (
     COALESCE(cardinality($3::text[]), 0) = 0
-    OR processor_subscription_id <> ALL($3::text[])
+    OR rail_subscription_id <> ALL($3::text[])
   )
 `
 

@@ -55,7 +55,7 @@ type ProviderAccountResolver interface {
 //   - NMI-backed providers: the merchant identity from the gateway's own
 //     profile report (nmi.NMIClient.AccountIdentity — query.php
 //     report_type=profile), fetched lazily and cached per security key.
-//   - stripe-type processors: the account id from GET /v1/account,
+//   - stripe-type rails: the account id from GET /v1/account,
 //     fetched lazily through the stripeapi choke point and cached per secret
 //     key.
 //   - CCBill/Solana: account identity comes from the configured provider
@@ -65,10 +65,10 @@ type ProviderAccountResolver interface {
 // A fetch failure resolves to ok=false (check skipped this pass, warn logged)
 // rather than blocking the ledger on provider availability.
 type RuntimeProviderAccounts struct {
-	Config     *config.Config
-	Processors config.ProcessorSet
-	NMI        map[string]*nmi.NMIClient
-	DB         *db.DB
+	Config *config.Config
+	Rails  config.RailSet
+	NMI    map[string]*nmi.NMIClient
+	DB     *db.DB
 	// StripeBaseURL overrides https://api.stripe.com in tests.
 	StripeBaseURL string
 
@@ -83,12 +83,12 @@ type nmiIdentityEntry struct {
 }
 
 // NewRuntimeProviderAccounts builds the resolver over the live clients/config.
-func NewRuntimeProviderAccounts(cfg *config.Config, processors config.ProcessorSet, nmiClients map[string]*nmi.NMIClient) *RuntimeProviderAccounts {
-	return &RuntimeProviderAccounts{Config: cfg, Processors: processors, NMI: nmiClients}
+func NewRuntimeProviderAccounts(cfg *config.Config, rails config.RailSet, nmiClients map[string]*nmi.NMIClient) *RuntimeProviderAccounts {
+	return &RuntimeProviderAccounts{Config: cfg, Rails: rails, NMI: nmiClients}
 }
 
-func NewRuntimeProviderAccountsWithDB(cfg *config.Config, processors config.ProcessorSet, nmiClients map[string]*nmi.NMIClient, database *db.DB) *RuntimeProviderAccounts {
-	r := NewRuntimeProviderAccounts(cfg, processors, nmiClients)
+func NewRuntimeProviderAccountsWithDB(cfg *config.Config, rails config.RailSet, nmiClients map[string]*nmi.NMIClient, database *db.DB) *RuntimeProviderAccounts {
+	r := NewRuntimeProviderAccounts(cfg, rails, nmiClients)
 	r.DB = database
 	return r
 }
@@ -101,10 +101,10 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 	if c, ok := r.NMI[p]; ok && c != nil {
 		return r.nmiAccount(ctx, p, c)
 	}
-	if r.Processors != nil {
-		if proc, ok := r.Processors[p]; ok && proc != nil {
+	if r.Rails != nil {
+		if proc, ok := r.Rails[p]; ok && proc != nil {
 			providerType := proc.GetEffectiveType(p)
-			isStripe := providerType == config.ProcessorTypeStripe
+			isStripe := providerType == config.RailTypeStripe
 			if key := strings.TrimSpace(proc.SecretKey); isStripe && key != "" {
 				accountID, ok := r.stripeAccountID(ctx, key)
 				if !ok {
@@ -112,14 +112,14 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 				}
 				return ProviderAccountIdentity{
 					ProviderKey:  p,
-					ProviderType: config.ProcessorTypeStripe,
+					ProviderType: config.RailTypeStripe,
 					Environment:  "live",
 					AccountID:    accountID,
 					Evidence:     map[string]any{"source": "stripe.get_account"},
 				}, true
 			}
 			switch providerType {
-			case config.ProcessorTypeCCBill:
+			case config.RailTypeCCBill:
 				accountID := strings.TrimSpace(proc.ClientAccNum)
 				if sub := strings.TrimSpace(proc.ClientSubAcc); accountID != "" && sub != "" {
 					accountID += "/" + sub
@@ -127,17 +127,17 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 				if accountID != "" {
 					return ProviderAccountIdentity{
 						ProviderKey:  p,
-						ProviderType: config.ProcessorTypeCCBill,
+						ProviderType: config.RailTypeCCBill,
 						Environment:  "live",
 						AccountID:    accountID,
 						Evidence:     map[string]any{"source": "config.client_acc_num"},
 					}, true
 				}
-			case config.ProcessorTypeSolana:
+			case config.RailTypeSolana:
 				if accountID := strings.TrimSpace(proc.RecipientWallet); accountID != "" {
 					return ProviderAccountIdentity{
 						ProviderKey:  p,
-						ProviderType: config.ProcessorTypeSolana,
+						ProviderType: config.RailTypeSolana,
 						Environment:  "live",
 						AccountID:    accountID,
 						Evidence:     map[string]any{"source": "config.recipient_wallet"},
@@ -189,8 +189,8 @@ func (r *RuntimeProviderAccounts) dbPrimaryProviderAccount(ctx context.Context, 
 
 func dbProviderType(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "mobius", config.ProcessorTypeNMI:
-		return config.ProcessorTypeNMI
+	case "mobius", config.RailTypeNMI:
+		return config.RailTypeNMI
 	default:
 		return ""
 	}
@@ -226,7 +226,7 @@ func (r *RuntimeProviderAccounts) FindProviderAccount(ctx context.Context, provi
 
 func (r *RuntimeProviderAccounts) providerKeysByType(providerType string) []string {
 	keys := map[string]struct{}{}
-	if providerType == config.ProcessorTypeNMI {
+	if providerType == config.RailTypeNMI {
 		for key, client := range r.NMI {
 			key = strings.ToLower(strings.TrimSpace(key))
 			if key != "" && client != nil {
@@ -234,8 +234,8 @@ func (r *RuntimeProviderAccounts) providerKeysByType(providerType string) []stri
 			}
 		}
 	}
-	if r.Processors != nil {
-		for key, proc := range r.Processors {
+	if r.Rails != nil {
+		for key, proc := range r.Rails {
 			key = strings.ToLower(strings.TrimSpace(key))
 			if key == "" || proc == nil || proc.GetEffectiveType(key) != providerType {
 				continue
@@ -258,7 +258,7 @@ func (r *RuntimeProviderAccounts) nmiAccount(ctx context.Context, provider strin
 		r.mu.Unlock()
 		return ProviderAccountIdentity{
 			ProviderKey:  provider,
-			ProviderType: config.ProcessorTypeNMI,
+			ProviderType: config.RailTypeNMI,
 			Environment:  "live",
 			AccountID:    accountID,
 			DisplayName:  accountID,
@@ -283,7 +283,7 @@ func (r *RuntimeProviderAccounts) nmiAccount(ctx context.Context, provider strin
 	r.mu.Unlock()
 	return ProviderAccountIdentity{
 		ProviderKey:  provider,
-		ProviderType: config.ProcessorTypeNMI,
+		ProviderType: config.RailTypeNMI,
 		Environment:  "live",
 		AccountID:    accountID,
 		DisplayName:  accountID,

@@ -161,7 +161,7 @@ func TestCoinbaseSessionCreationGeneratesCDPJWT(t *testing.T) {
 }
 
 func TestRefreshSolanaFundingStatusMarksFundedFromWalletBalance(t *testing.T) {
-	svc := NewService(nil, testFundingConfig(), testFundingProcessors()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
+	svc := NewService(nil, testFundingConfig(), testFundingRails()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
 		balance: 12_500_000,
 	})
 	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
@@ -194,7 +194,7 @@ func TestRefreshSolanaFundingStatusMarksFundedFromWalletBalance(t *testing.T) {
 }
 
 func TestRefreshSolanaFundingStatusDoesNotMarkFundedWhenBalanceShort(t *testing.T) {
-	svc := NewService(nil, testFundingConfig(), testFundingProcessors()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
+	svc := NewService(nil, testFundingConfig(), testFundingRails()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
 		balance: 12_499_999,
 	})
 	session := &models.USDCFundingSession{
@@ -275,8 +275,8 @@ func testFundingConfig() *config.Config {
 	return &config.Config{}
 }
 
-func testFundingProcessors() config.ProcessorSet {
-	return config.ProcessorSet{
+func testFundingRails() config.RailSet {
+	return config.RailSet{
 		"solana": {
 			Tokens: map[string]config.TokenConfig{
 				"USDC": {

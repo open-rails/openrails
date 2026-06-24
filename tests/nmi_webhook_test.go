@@ -108,10 +108,10 @@ func TestNMIWebhookValidation(t *testing.T) {
 		t.Log("All NMI events validated successfully")
 	})
 
-	t.Run("Invalid Processor", func(t *testing.T) {
+	t.Run("Invalid Rail", func(t *testing.T) {
 		err := replay.ValidateEvent("invalid", "test.json")
-		assert.Error(t, err, "Should fail with invalid processor")
-		assert.Contains(t, err.Error(), "invalid processor", "Should have appropriate error message")
+		assert.Error(t, err, "Should fail with invalid rail")
+		assert.Contains(t, err.Error(), "invalid rail", "Should have appropriate error message")
 	})
 }
 

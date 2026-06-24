@@ -21,7 +21,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 		ctx,
 		"tx-retryable",
 		"RenewalSuccess",
-		models.ProcessorCCBill,
+		models.RailCCBill,
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -38,7 +38,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 		ctx,
 		"tx-retryable",
 		"RenewalSuccess",
-		models.ProcessorCCBill,
+		models.RailCCBill,
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -64,7 +64,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 		ctx,
 		"tx-terminal",
 		"RenewalSuccess",
-		models.ProcessorCCBill,
+		models.RailCCBill,
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -78,7 +78,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 		ctx,
 		"tx-terminal",
 		"RenewalSuccess",
-		models.ProcessorCCBill,
+		models.RailCCBill,
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -109,7 +109,7 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 			ctx,
 			"tx-concurrent",
 			"RenewalSuccess",
-			models.ProcessorCCBill,
+			models.RailCCBill,
 			map[string]any{"sample": "payload"},
 			func(context.Context) error {
 				attempts.Add(1)
@@ -126,7 +126,7 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 		ctx,
 		"tx-concurrent",
 		"RenewalSuccess",
-		models.ProcessorCCBill,
+		models.RailCCBill,
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts.Add(1)

@@ -81,7 +81,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	first, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     string(models.ProcessorStripe),
+		Rail:          string(models.RailStripe),
 		TransactionID: txnID,
 		Amount:        price.Amount,
 		Currency:      price.Currency,
@@ -112,7 +112,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	second, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     string(models.ProcessorStripe),
+		Rail:          string(models.RailStripe),
 		TransactionID: txnID,
 		Amount:        price.Amount,
 		Currency:      price.Currency,
@@ -211,7 +211,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	_, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     string(models.ProcessorStripe),
+		Rail:          string(models.RailStripe),
 		TransactionID: "grandfather_initial_" + uuid.New().String(),
 		Amount:        price.Amount,
 		Currency:      price.Currency,
@@ -233,7 +233,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	renewal, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
-		Processor:     string(models.ProcessorStripe),
+		Rail:          string(models.RailStripe),
 		TransactionID: "grandfather_renewal_" + uuid.New().String(),
 		Amount:        archived.Amount,
 		Currency:      archived.Currency,

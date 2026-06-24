@@ -72,7 +72,7 @@ func New(opts Options) (*Embedded, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	processors, err := ApplyPaymentProviders(opts.PaymentProviders)
+	rails, err := ApplyPaymentProviders(opts.PaymentProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func New(opts Options) (*Embedded, error) {
 		Authenticator:          opts.Authenticator,
 		DelegatedAuthenticator: opts.DelegatedAuthenticator,
 		Cache:                  opts.Cache,
-		Processors:             processors,
+		Rails:                  rails,
 	})
 	if err != nil {
 		return nil, err

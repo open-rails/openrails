@@ -165,7 +165,7 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 	}{
 		{http.MethodPut, "/settings", map[string]any{"currency": "USD", "max_spend_per_day": 1}},
 		{http.MethodGet, "/payment-methods", nil},
-		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"processor": "stripe"}}},
+		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"rail": "stripe"}}},
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},
 	}
 	for _, f := range forbidden {

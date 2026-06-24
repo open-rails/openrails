@@ -44,7 +44,7 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 }
 
 // AdminListCatalogOrphans lists open orphan drift events across providers. The
-// optional ?provider= filter ('stripe' | 'nmi') scopes it to one processor and
+// optional ?provider= filter ('stripe' | 'nmi') scopes it to one rail and
 // selects the matching orphan kind; with no provider it returns orphans from
 // every provider. (CCBill is never reconciled — no catalog-list API — so it
 // never appears here.)

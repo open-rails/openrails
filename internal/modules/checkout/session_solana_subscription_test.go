@@ -8,7 +8,7 @@ import (
 
 func solanaRecurringPrice() *models.Price {
 	p := &models.Price{}
-	p.SetProcessorConfig(models.ProcessorSolana, map[string]string{
+	p.SetRailConfig(models.RailSolana, map[string]string{
 		"plan_pda":          "PdA1111111111111111111111111111111111111111",
 		"plan_id":           "7",
 		"mint":              "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -30,7 +30,7 @@ func TestPriceHasSolanaRecurring(t *testing.T) {
 	}
 	// Missing a required key (amount) → not recurring.
 	p := &models.Price{}
-	p.SetProcessorConfig(models.ProcessorSolana, map[string]string{
+	p.SetRailConfig(models.RailSolana, map[string]string{
 		"plan_id": "7", "period_hours": "720", "mint_symbol": "USDC",
 	})
 	if priceHasSolanaRecurring(p) {
@@ -42,7 +42,7 @@ func TestPriceHasSolanaRecurring(t *testing.T) {
 }
 
 func TestParseSolanaPlanTerms(t *testing.T) {
-	cfg := solanaRecurringPrice().GetProcessorConfig(models.ProcessorSolana)
+	cfg := solanaRecurringPrice().GetRailConfig(models.RailSolana)
 	terms, err := parseSolanaPlanTerms(cfg)
 	if err != nil {
 		t.Fatalf("parseSolanaPlanTerms: %v", err)

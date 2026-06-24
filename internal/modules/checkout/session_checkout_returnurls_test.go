@@ -32,7 +32,7 @@ func (c *captureCheckoutExecutor) CheckSubscriptionConflict(ctx context.Context,
 }
 
 // TestInitializeCheckoutSession_ThreadsStripeReturnURLs is the regression guard
-// for #521: the refactor moved Stripe success_url/cancel_url off processor
+// for #521: the refactor moved Stripe success_url/cancel_url off rail
 // config and onto the request, but the public /v1/checkout SESSION path
 // (CreateSession → initializeSession → initializeCheckoutSession) had no field
 // to carry them, so processStripeSubscription/Payment always failed with
@@ -48,11 +48,11 @@ func TestInitializeCheckoutSession_ThreadsStripeReturnURLs(t *testing.T) {
 	svc := &CheckoutSessionService{checkoutService: exec}
 
 	session := &models.CheckoutSession{
-		ID:        uuid.New(),
-		PriceID:   uuid.New(),
-		Processor: models.ProcessorStripe,
+		ID:      uuid.New(),
+		PriceID: uuid.New(),
+		Rail:    models.RailStripe,
 	}
-	payment := &CheckoutSessionPaymentRequest{Processor: string(models.ProcessorStripe)}
+	payment := &CheckoutSessionPaymentRequest{Rail: string(models.RailStripe)}
 	user := &UserIdentity{ID: uuid.New().String()}
 
 	// Returns the stub's "stop after capture" error; we only care about capture.

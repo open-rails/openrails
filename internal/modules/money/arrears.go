@@ -269,7 +269,7 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	}
 	now := s.now()
 	if res.Declined {
-		if err := s.recordInvoicePaymentAttempt(ctx, r, nil, "failed", optionalProcessor(res.Processor), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, now); err != nil {
+		if err := s.recordInvoicePaymentAttempt(ctx, r, nil, "failed", optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, now); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -315,8 +315,8 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		if err != nil {
 			return err
 		}
-		processor := optionalProcessor(res.Processor)
-		processorPaymentID := optionalString(res.TransactionID)
+		rail := optionalRail(res.Rail)
+		railPaymentID := optionalString(res.TransactionID)
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:                 uuidutil.NewV7(),
 			MerchantID:         r.MerchantID,
@@ -326,8 +326,8 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 			Currency:           normalizeCurrency(r.Currency),
 			Amount:             snapshot,
 			Status:             "settled",
-			Processor:          processor,
-			ProcessorPaymentID: processorPaymentID,
+			Rail:               rail,
+			RailPaymentID:      railPaymentID,
 			AttemptedAt:        now,
 			SettledAt:          &now,
 			CreatedAt:          now,
@@ -344,7 +344,7 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	return charged, nil
 }
 
-func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, processor, processorPaymentID, failureCode, failureMessage *string, now time.Time) error {
+func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, rail, railPaymentID, failureCode, failureMessage *string, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return gen.New(tx).InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:                 uuidutil.NewV7(),
@@ -355,8 +355,8 @@ func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoic
 			Currency:           normalizeCurrency(r.Currency),
 			Amount:             r.AmountDue,
 			Status:             status,
-			Processor:          processor,
-			ProcessorPaymentID: processorPaymentID,
+			Rail:               rail,
+			RailPaymentID:      railPaymentID,
 			FailureCode:        failureCode,
 			FailureMessage:     failureMessage,
 			AttemptedAt:        now,
@@ -366,12 +366,12 @@ func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoic
 	})
 }
 
-func optionalProcessor(processor string) *string {
-	processor = normalizeProcessor(processor)
-	if processor == "" {
+func optionalRail(rail string) *string {
+	rail = normalizeRail(rail)
+	if rail == "" {
 		return nil
 	}
-	return &processor
+	return &rail
 }
 
 func optionalString(v string) *string {

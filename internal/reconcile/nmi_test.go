@@ -135,7 +135,7 @@ func TestNMIFetcher_Fetch(t *testing.T) {
 	// Subscriptions: future next_charge_date => active, past => past_due.
 	require.Len(t, snap.Subscriptions, 2)
 	active := snap.Subscriptions[0]
-	require.Equal(t, "11494735091", active.ProcessorSubscriptionID)
+	require.Equal(t, "11494735091", active.RailSubscriptionID)
 	require.Equal(t, SubscriptionStatusActive, active.Status)
 	require.Empty(t, active.RawStatus)
 	require.Equal(t, "basic_monthly", active.PlanID)

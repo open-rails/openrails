@@ -176,28 +176,28 @@ type CancellationReasonBreakdown struct {
 	Involuntary int `json:"involuntary"`
 }
 
-type ProcessorMetricsResponse struct {
-	Currency    string             `json:"currency"`
-	PeriodStart time.Time          `json:"period_start"`
-	PeriodEnd   time.Time          `json:"period_end"`
-	Processors  []ProcessorMetrics `json:"processors"`
+type RailMetricsResponse struct {
+	Currency    string        `json:"currency"`
+	PeriodStart time.Time     `json:"period_start"`
+	PeriodEnd   time.Time     `json:"period_end"`
+	Rails       []RailMetrics `json:"rails"`
 }
 
-type ProcessorMetrics struct {
-	Processor string                `json:"processor"`
-	Metrics   DailyProcessorMetrics `json:"metrics"`
+type RailMetrics struct {
+	Rail    string           `json:"rail"`
+	Metrics DailyRailMetrics `json:"metrics"`
 }
 
-type DailyProcessorMetrics struct {
-	Revenue  DailyProcessorRevenue `json:"revenue"`
-	Payments DailyProcessorPayment `json:"payments"`
+type DailyRailMetrics struct {
+	Revenue  DailyRailRevenue `json:"revenue"`
+	Payments DailyRailPayment `json:"payments"`
 
 	ActiveSubscriptions int `json:"active_subscriptions"`
 	NewSubscriptions    int `json:"new_subscriptions"`
 	Cancellations       int `json:"cancellations"`
 }
 
-type DailyProcessorRevenue struct {
+type DailyRailRevenue struct {
 	Total        int64 `json:"total"`
 	Subscription int64 `json:"subscription"`
 	OneTime      int64 `json:"one_time"`
@@ -205,7 +205,7 @@ type DailyProcessorRevenue struct {
 	Chargebacks  int64 `json:"chargebacks"`
 }
 
-type DailyProcessorPayment struct {
+type DailyRailPayment struct {
 	Successful int `json:"successful"`
 	Failed     int `json:"failed"`
 }
@@ -296,9 +296,9 @@ type subscriptionBucketRow struct {
 	ActiveCountEnd          int64     `ch:"active_count_end"`
 }
 
-type processorAggRow struct {
+type railAggRow struct {
 	Currency            string `ch:"currency"`
-	Processor           string `ch:"processor"`
+	Rail                string `ch:"rail"`
 	ActiveSubscriptions int64  `ch:"active_subscriptions"`
 	NewSubscriptions    int64  `ch:"new_subscriptions"`
 	Cancellations       int64  `ch:"cancellations"`
@@ -596,54 +596,54 @@ func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng Met
 	return out, nil
 }
 
-// GetProcessorMetrics returns processor metrics scoped to the merchant resolved
+// GetRailMetrics returns rail metrics scoped to the merchant resolved
 // from ctx (issue #232).
-func (s *AdminMetricsService) GetProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
+func (s *AdminMetricsService) GetRailMetrics(ctx context.Context, rng MetricsDateRange, currency string) ([]RailMetricsResponse, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.getProcessorMetrics(ctx, rng, currency, tid, false)
+	return s.getRailMetrics(ctx, rng, currency, tid, false)
 }
 
-// GetProcessorMetricsCrossMerchant is the platform-superadmin cross-merchant
+// GetRailMetricsCrossMerchant is the platform-superadmin cross-merchant
 // variant. See GetSummaryCrossMerchant for the boundary contract (issue #232).
-func (s *AdminMetricsService) GetProcessorMetricsCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
-	return s.getProcessorMetrics(ctx, rng, currency, merchant.ID{}, true)
+func (s *AdminMetricsService) GetRailMetricsCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]RailMetricsResponse, error) {
+	return s.getRailMetrics(ctx, rng, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string, merchantID merchant.ID, crossMerchant bool) ([]ProcessorMetricsResponse, error) {
+func (s *AdminMetricsService) getRailMetrics(ctx context.Context, rng MetricsDateRange, currency string, merchantID merchant.ID, crossMerchant bool) ([]RailMetricsResponse, error) {
 	startDay := truncateToDay(rng.Start)
 	endDay := truncateToDay(rng.End.Add(-time.Nanosecond))
 	endDay = clampToToday(endDay)
 
-	aggRows, err := s.queryProcessorAggregates(ctx, startDay, endDay, currency, merchantID, crossMerchant)
+	aggRows, err := s.queryRailAggregates(ctx, startDay, endDay, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
 
-	responses := make(map[string]*ProcessorMetricsResponse)
+	responses := make(map[string]*RailMetricsResponse)
 	for _, r := range aggRows {
 		resp, ok := responses[r.Currency]
 		if !ok {
-			resp = &ProcessorMetricsResponse{
+			resp = &RailMetricsResponse{
 				Currency:    r.Currency,
 				PeriodStart: startDay,
 				PeriodEnd:   endDay.Add(24 * time.Hour),
 			}
 			responses[r.Currency] = resp
 		}
-		resp.Processors = append(resp.Processors, ProcessorMetrics{
-			Processor: r.Processor,
-			Metrics: DailyProcessorMetrics{
-				Revenue: DailyProcessorRevenue{
+		resp.Rails = append(resp.Rails, RailMetrics{
+			Rail: r.Rail,
+			Metrics: DailyRailMetrics{
+				Revenue: DailyRailRevenue{
 					Total:        r.RevenueTotal,
 					Subscription: r.RevenueSubscription,
 					OneTime:      r.RevenueOneTime,
 					Refunds:      r.RevenueRefunds,
 					Chargebacks:  r.RevenueChargebacks,
 				},
-				Payments: DailyProcessorPayment{
+				Payments: DailyRailPayment{
 					Successful: int(r.PaymentsSuccessful),
 					Failed:     int(r.PaymentsFailed),
 				},
@@ -654,15 +654,15 @@ func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng Metri
 		})
 	}
 
-	var out []ProcessorMetricsResponse
+	var out []RailMetricsResponse
 	for _, resp := range responses {
-		sort.Slice(resp.Processors, func(i, j int) bool {
-			return resp.Processors[i].Processor < resp.Processors[j].Processor
+		sort.Slice(resp.Rails, func(i, j int) bool {
+			return resp.Rails[i].Rail < resp.Rails[j].Rail
 		})
 		out = append(out, *resp)
 	}
 	if len(out) == 0 {
-		return []ProcessorMetricsResponse{}, nil
+		return []RailMetricsResponse{}, nil
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Currency < out[j].Currency
@@ -939,7 +939,7 @@ func (s *AdminMetricsService) querySubscriptionBuckets(ctx context.Context, star
 	return result, nil
 }
 
-func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, startDay, endDay time.Time, currency string, merchantID merchant.ID, crossMerchant bool) ([]processorAggRow, error) {
+func (s *AdminMetricsService) queryRailAggregates(ctx context.Context, startDay, endDay time.Time, currency string, merchantID merchant.ID, crossMerchant bool) ([]railAggRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -949,7 +949,7 @@ func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, star
 	query := `
         SELECT
             currency,
-            proc.1 AS processor,
+            proc.1 AS rail,
             argMax(proc.2, snapshot_date) AS active_subscriptions,
             sum(proc.3) AS new_subscriptions,
             sum(proc.4) AS cancellations,
@@ -965,24 +965,24 @@ func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, star
                 snapshot_date,
                 currency,
                 arrayJoin(arrayZip(
-                    processor.name,
-                    processor.active_subscriptions,
-                    processor.new_subscriptions,
-                    processor.cancellations,
-                    processor.revenue_total_cents,
-                    processor.revenue_subscription_cents,
-                    processor.revenue_one_time_cents,
-                    processor.revenue_refunds_cents,
-                    processor.revenue_chargebacks_cents,
-                    processor.payments_successful,
-                    processor.payments_failed
+                    rail.name,
+                    rail.active_subscriptions,
+                    rail.new_subscriptions,
+                    rail.cancellations,
+                    rail.revenue_total_cents,
+                    rail.revenue_subscription_cents,
+                    rail.revenue_one_time_cents,
+                    rail.revenue_refunds_cents,
+                    rail.revenue_chargebacks_cents,
+                    rail.payments_successful,
+                    rail.payments_failed
                 )) AS proc
             FROM daily_metrics
             WHERE snapshot_date >= ? AND snapshot_date <= ?
             %[1]s
         )
-        GROUP BY currency, processor
-        ORDER BY currency, processor`
+        GROUP BY currency, rail
+        ORDER BY currency, rail`
 
 	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startDay, endDay}
@@ -999,9 +999,9 @@ func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, star
 	}
 	defer rows.Close()
 
-	var result []processorAggRow
+	var result []railAggRow
 	for rows.Next() {
-		var r processorAggRow
+		var r railAggRow
 		if err := rows.ScanStruct(&r); err != nil {
 			return nil, err
 		}

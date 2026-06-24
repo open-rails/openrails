@@ -110,17 +110,6 @@ func (q *Queries) CountMerchantRowsPrices(ctx context.Context, merchantID uuid.U
 	return count, err
 }
 
-const countMerchantRowsProcessorCustomers = `-- name: CountMerchantRowsProcessorCustomers :one
-SELECT count(*) FROM openrails.processor_customers WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsProcessorCustomers(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsProcessorCustomers, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsProducts = `-- name: CountMerchantRowsProducts :one
 
 SELECT count(*) FROM openrails.products WHERE merchant_id = $1
@@ -143,6 +132,17 @@ SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsProviderIntents, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsRailCustomers = `-- name: CountMerchantRowsRailCustomers :one
+SELECT count(*) FROM openrails.rail_customers WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsRailCustomers, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -240,15 +240,6 @@ func (q *Queries) PurgeMerchantRowsPrices(ctx context.Context, merchantID uuid.U
 	return err
 }
 
-const purgeMerchantRowsProcessorCustomers = `-- name: PurgeMerchantRowsProcessorCustomers :exec
-DELETE FROM openrails.processor_customers WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsProcessorCustomers(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsProcessorCustomers, merchantID)
-	return err
-}
-
 const purgeMerchantRowsProducts = `-- name: PurgeMerchantRowsProducts :exec
 DELETE FROM openrails.products WHERE merchant_id = $1
 `
@@ -264,6 +255,15 @@ DELETE FROM openrails.provider_intents WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsProviderIntents, merchantID)
+	return err
+}
+
+const purgeMerchantRowsRailCustomers = `-- name: PurgeMerchantRowsRailCustomers :exec
+DELETE FROM openrails.rail_customers WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsRailCustomers, merchantID)
 	return err
 }
 

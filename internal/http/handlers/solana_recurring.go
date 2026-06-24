@@ -70,7 +70,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 
 	// Read the canonical, immutable plan terms from the price's Solana config —
 	// these were stamped at publish time and must not be client-supplied.
-	cfg := price.GetProcessorConfig(models.ProcessorSolana)
+	cfg := price.GetRailConfig(models.RailSolana)
 	if cfg == nil {
 		r.ErrorJSON(http.StatusBadRequest, "price is not configured for Solana recurring billing")
 		return
@@ -318,7 +318,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if oldSub.CustomerID.String() != uc.UserID {
 		return nil, http.StatusNotFound, "subscription not found"
 	}
-	if oldSub.Processor != models.ProcessorSolana {
+	if oldSub.Rail != models.RailSolana {
 		return nil, http.StatusBadRequest, "subscription is not a Solana subscription"
 	}
 
@@ -340,7 +340,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if !newPrice.IsPurchasable() {
 		return nil, http.StatusBadRequest, "target price is not available"
 	}
-	newCfg := newPrice.GetProcessorConfig(models.ProcessorSolana)
+	newCfg := newPrice.GetRailConfig(models.RailSolana)
 	newTerms, ok := parseResolvedPlanTerms(newCfg)
 	if !ok {
 		return nil, http.StatusBadRequest, "target price is not configured for Solana recurring billing"
@@ -405,7 +405,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	return out, 0, ""
 }
 
-// parseResolvedPlanTerms parses a price's Solana processor config into the
+// parseResolvedPlanTerms parses a price's Solana rail config into the
 // canonical plan terms. Returns ok=false when the config is absent or malformed.
 func parseResolvedPlanTerms(cfg map[string]string) (solanaResolvedPlanTerms, bool) {
 	var t solanaResolvedPlanTerms
@@ -567,7 +567,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	}
 	network := ""
 	var tokens map[string]config.TokenConfig
-	if pc := r.State.Processors.GetSolanaProcessor(); pc != nil {
+	if pc := r.State.Rails.GetSolanaRail(); pc != nil {
 		network = pc.Network
 		tokens = pc.Tokens
 	}

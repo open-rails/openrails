@@ -69,18 +69,18 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	})
 
 	suite.InsertSubscription(ctx, &models.Subscription{
-		ID:                      subID,
-		CustomerID:              suite.ensureCustomer(ctx, userID),
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               clock.Now().UTC(),
-		CreatedAt:               clock.Now().UTC(),
-		UpdatedAt:               clock.Now().UTC(),
+		ID:                    subID,
+		CustomerID:            suite.ensureCustomer(ctx, userID),
+		ProductID:             productID,
+		PriceID:               priceID,
+		Status:                models.StatusActive,
+		Rail:                  models.RailCCBill,
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             clock.Now().UTC(),
+		CreatedAt:             clock.Now().UTC(),
+		UpdatedAt:             clock.Now().UTC(),
 	})
 
 	paidEnt := &models.Entitlement{

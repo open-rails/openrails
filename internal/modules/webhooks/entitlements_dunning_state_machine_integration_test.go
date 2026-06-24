@@ -72,19 +72,19 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		MerchantID:              dbtest.TestMerchantID.UUID(),
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorCCBill),
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               clock.Now().UTC(),
-		CreatedAt:               clock.Now().UTC(),
-		UpdatedAt:               clock.Now().UTC(),
+		ID:                    subID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailCCBill),
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             clock.Now().UTC(),
+		CreatedAt:             clock.Now().UTC(),
+		UpdatedAt:             clock.Now().UTC(),
 	})
 	require.NoError(t, err)
 
@@ -247,7 +247,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		}
 	}
 
-	// Renewal should append a new paid window that starts now and ends at the processor-provided paid term end.
+	// Renewal should append a new paid window that starts now and ends at the rail-provided paid term end.
 	expectedPaidEnd := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
 	paidQuery := `SELECT start_at, end_at FROM openrails.entitlements
 		WHERE customer_id = $1 AND entitlement = $2

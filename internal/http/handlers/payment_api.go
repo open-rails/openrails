@@ -80,7 +80,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.CustomerID.String()), Subscription: subID, Processor: string(p.Processor), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, Created: api.ToUnix(p.CreatedAt)}
+	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.CustomerID.String()), Subscription: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, Created: api.ToUnix(p.CreatedAt)}
 	if refunds != nil {
 		if refundObjects == nil {
 			refundObjects = []api.PaymentObject{}
@@ -103,7 +103,7 @@ type userPaymentObject struct {
 	Currency       string           `json:"currency"`
 	User           string           `json:"user"`
 	Subscription   *string          `json:"subscription,omitempty"`
-	Processor      string           `json:"processor"`
+	Rail           string           `json:"rail"`
 	Refunded       bool             `json:"refunded"`
 	Captured       bool             `json:"captured,omitempty"`
 	Created        int64            `json:"created"`
@@ -143,7 +143,7 @@ func PaymentToUserAPI(p *models.Payment) userPaymentObject {
 		Currency:       payment.Currency,
 		User:           payment.User,
 		Subscription:   payment.Subscription,
-		Processor:      payment.Processor,
+		Rail:           payment.Rail,
 		Refunded:       payment.Refunded,
 		Captured:       payment.Captured,
 		Created:        payment.Created,
@@ -187,9 +187,9 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		priceType = "recurring"
 	}
 	var providers []string
-	if len(p.Processors) > 0 {
-		providers = make([]string, 0, len(p.Processors))
-		for name := range p.Processors {
+	if len(p.Rails) > 0 {
+		providers = make([]string, 0, len(p.Rails))
+		for name := range p.Rails {
 			providers = append(providers, name)
 		}
 		sort.Strings(providers)

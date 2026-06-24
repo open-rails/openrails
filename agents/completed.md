@@ -3827,7 +3827,7 @@ Remove deprecated legacy processor config fields (NMI, CCBill, Solana, Stripe) f
 - [x] internal/services/stripe_refunds_test.go - use Processors['stripe']
 -
 - === PHASE 9: CLEAN UP DOCUMENTATION ===
-- [x] Remove LEGACY PROCESSOR CONFIG section from config.example.yaml
+- [x] Remove LEGACY RAIL CONFIG section from config.example.yaml
 - [x] Remove deprecated env var examples from .env.example
 -
 - === PHASE 10: VERIFY & TEST ===
@@ -4520,7 +4520,7 @@ Split out of #201: per-tenant provisioning and lifecycle. Provision/suspend/dele
 - [ ] Tenant data export: tenant-scoped logical export plus Vault-side secret enumeration for GDPR / portability requests
 - [ ] Tenant tier change: upgrade/downgrade the platform's own billing for this tenant (eats own dogfood)
 - [ ] Migration strategy: shared schema migrations run once, with backfills/tenant data migrations chunked by tenant id and resumable per tenant; halt fleet rollout on schema or tenant backfill drift
-- PROCESSOR CREDENTIAL MANAGEMENT:
+- RAIL CREDENTIAL MANAGEMENT:
 - [ ] Per-tenant Stripe credential storage in Vault (path namespaced by tenant slug)
 - [ ] Stripe Connect onboarding flow if Connect is in scope (`accounts.create`, hosted onboarding link, account status webhooks)
 - [ ] Credential rotation API + audit log
@@ -5572,7 +5572,7 @@ NMI becomes a first-class create-capable provider in the admin catalog API, alon
 - [ ] Add `GetRecurringPlanByID(planID)` (or extend `GetRecurringPlanData` to filter) so find-or-attach has a strongly-consistent lookup
 - [ ] Unit tests for each new client method (request body shape, response parsing, error surfacing)
 -
-- PROCESSOR FACADE INTEGRATION:
+- RAIL FACADE INTEGRATION:
 - [ ] In `pkg/service.resolveProcessorMappings`, add a `mobius` create-mode branch that mirrors the Stripe pattern: find-or-attach by deterministic plan_id, fall back to create
 - [ ] Deterministic plan_id format: `openrails-<openrails_price_uuid>` (NMI plan_id is operator-chosen and stable, so use the OpenRails price UUID as the identity)
 - [ ] Map OpenRails price fields → NMI plan fields: `display_name` -> `plan_name`, `unit_amount` -> `plan_amount` (NMI takes dollars, OpenRails stores cents → divide by 100), `billing_cycle_days` -> `day_frequency` or `month_frequency` (matching Stripe's interval mapping logic)
@@ -6846,7 +6846,7 @@ Comprehensive rebill/dunning/cancel STATE-MACHINE validation. The dunning/rebill
 # #103: nmi-test-account-integration
 
 **Completed:** yes
-**Status:** DONE (2026-06-03): Real Mobius/NMI sandbox account in use — creds in .env (PROCESSORS_MOBIUS_*). Integration tests hit the real sandbox: tests/nmi_integration_test.go, tests/nmi_webhook_test.go, tests/entitlements_dunning_nmi_state_machine_test.go, tests/nmi_provider_regression_test.go, internal/integrations/nmi/recurring_plan_test.go (//go:build integration). Subscribe/cancel exercised against real plans.
+**Status:** DONE (2026-06-03): Real Mobius/NMI sandbox account in use — creds in .env (RAILS_MOBIUS_*). Integration tests hit the real sandbox: tests/nmi_integration_test.go, tests/nmi_webhook_test.go, tests/entitlements_dunning_nmi_state_machine_test.go, tests/nmi_provider_regression_test.go, internal/integrations/nmi/recurring_plan_test.go (//go:build integration). Subscribe/cancel exercised against real plans.
 
 Set up real Mobius/NMI test account for integration tests that hit the NMI API
 
@@ -6918,12 +6918,12 @@ Current code behavior: when `test_mode=true`, billing hardcodes `sandbox.nmi.com
   - [ ] Verify query endpoint (`/api/query.php`) works for the resulting transaction
 
 - Step 4: Align billing behavior with reality
-  - [ ] If `sandbox.nmi.com` is correct: keep `test_mode=true` and only require `PROCESSORS_MOBIUS_SECURITY_KEY`
+  - [ ] If `sandbox.nmi.com` is correct: keep `test_mode=true` and only require `RAILS_MOBIUS_SECURITY_KEY`
   - [ ] If `secure.mobiusgateway.com` is required for sandbox: change billing to allow provider-specific sandbox endpoints (config override even when `test_mode=true`)
   - [ ] Update `.env.example` comments to clarify which endpoint(s) work for Mobius sandbox
 
 - Step 5: Webhook verification sanity
-  - [ ] In non-test mode, ensure webhook signature verification passes with configured `PROCESSORS_MOBIUS_WEBHOOK_SECRET`
+  - [ ] In non-test mode, ensure webhook signature verification passes with configured `RAILS_MOBIUS_WEBHOOK_SECRET`
   - [ ] Confirm signature scheme matches `sha256=` + hex(HMAC_SHA256(body, secret))
 
 ## Exit Criteria
@@ -6943,7 +6943,7 @@ Current code behavior: when `test_mode=true`, billing hardcodes `sandbox.nmi.com
 # #149: mobius-collectjs-endpoint-config-billing
 
 **Completed:** yes
-**Status:** DONE (2026-06-03): processors.<provider>.tokenization_url config + PROCESSORS_MOBIUS_TOKENIZATION_URL env (config/config.go). Dev-only Collect.js page GET /debug/mobius/tokenization (internal/http/debug_nmi_tokenization.go + _test.go). Runbook docs/nmi-tokenization-harness.md. Only the optional no-network stubbed-Collect.js automated test was dropped as low-value.
+**Status:** DONE (2026-06-03): processors.<provider>.tokenization_url config + RAILS_MOBIUS_TOKENIZATION_URL env (config/config.go). Dev-only Collect.js page GET /debug/mobius/tokenization (internal/http/debug_nmi_tokenization.go + _test.go). Runbook docs/nmi-tokenization-harness.md. Only the optional no-network stubbed-Collect.js automated test was dropped as low-value.
 
 Add a configurable Mobius/NMI Collect.js tokenization endpoint URL to billing configuration and define a concrete way to test tokenization end-to-end.
 
@@ -6983,7 +6983,7 @@ Tier B (real sandbox, manual):
 
 **Tasks:**
 - [x] Add `processors.<provider>.tokenization_url` (Collect.js script URL) to ProcessorConfig
-- [x] Add env var support: `PROCESSORS_MOBIUS_TOKENIZATION_URL`
+- [x] Add env var support: `RAILS_MOBIUS_TOKENIZATION_URL`
 - [x] Update `.env.example` and `config.example.yaml`
 - [x] Add dev-only tokenization test page endpoint (e.g., `GET /debug/mobius/tokenization`)
 - [x] Page loads Collect.js from `processors.mobius.tokenization_url` and uses `processors.mobius.tokenization_key`
@@ -9063,7 +9063,7 @@ Two safety mechanisms for the billing lifecycle, motivated by the doujins legacy
 ## Why
 
 - A card that failed in February must never be surprise-charged by a catch-up dunning run in June. The 4-hourly dunning worker queries `past_due` with `next_retry_at <= now` — months-stale subscriptions (e.g. imported from the legacy machine) are all immediately "due". The dry_run_only boot flag mitigates at cutover, but the window is the structural fix: dunning operates within [period_end, period_end + window], default 15 days; past that the user is downgraded and the subscription cancelled instead.
-- NMI recurring subscriptions do NOT auto-delete on failure: OpenRails must call delete_subscription, then downgrade entitlements. During cutover we do not want bulk remote deletions (risk: mass delete + downgrade on bad local state). Kill switch = `feature_flags.disable_processor_subscription_deletions` (env `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true`); local lifecycle proceeds, remote subs stay alive, #107 reconciliation finds and disposes of the orphans.
+- NMI recurring subscriptions do NOT auto-delete on failure: OpenRails must call delete_subscription, then downgrade entitlements. During cutover we do not want bulk remote deletions (risk: mass delete + downgrade on bad local state). Kill switch = `feature_flags.disable_processor_subscription_deletions` (env `FEATURE_FLAGS_DISABLE_RAIL_SUBSCRIPTION_DELETIONS=true`); local lifecycle proceeds, remote subs stay alive, #107 reconciliation finds and disposes of the orphans.
 
 ## Design decisions (locked)
 
@@ -9130,7 +9130,7 @@ REACTIVE (someone asked) — UNAFFECTED:
 - disable_processor_subscription_deletions (#344) is STRICTER than limited_mode (blocks even user-asked deletes); both can be set — cutover boots set both.
 - disable_entitlement_expiration is orthogonal (local access lifecycle).
 
-Cutover boot posture (#343): FEATURE_FLAGS_LIMITED_MODE=true + FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true (limited_mode alone subsumes dunning_mode=dry_run_only).
+Cutover boot posture (#343): FEATURE_FLAGS_LIMITED_MODE=true + FEATURE_FLAGS_DISABLE_RAIL_SUBSCRIPTION_DELETIONS=true (limited_mode alone subsumes dunning_mode=dry_run_only).
 
 ## Implementation
 
@@ -9215,7 +9215,7 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 
 ## Scope decision
 
-HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only dial. Unset mode = test in development; outside development an explicit mode is REQUIRED (Validate refuses to boot). The probe now runs whenever IsTestMode() (incl. dev default) for every configured NMI client; refusal message names the failure explicitly ("PRODUCTION NMI credentials detected while test mode is on ... refusing to start"). Also closed: explicit PROCESSORS_SOLANA_NETWORK=mainnet override is refused under test mode (the derived devnet can be overridden, so the guarantee needed the check). TEST_MODE env mapping deleted; .env.example/config.example.yaml/README updated; all test fixtures migrated to Mode. Unconfigured clients (empty key) still skipped; probe errors still warn-and-continue.
+HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only dial. Unset mode = test in development; outside development an explicit mode is REQUIRED (Validate refuses to boot). The probe now runs whenever IsTestMode() (incl. dev default) for every configured NMI client; refusal message names the failure explicitly ("PRODUCTION NMI credentials detected while test mode is on ... refusing to start"). Also closed: explicit RAILS_SOLANA_NETWORK=mainnet override is refused under test mode (the derived devnet can be overridden, so the guarantee needed the check). TEST_MODE env mapping deleted; .env.example/config.example.yaml/README updated; all test fixtures migrated to Mode. Unconfigured clients (empty key) still skipped; probe errors still warn-and-continue.
 
 **Tasks:**
 - [x] Stripe: live key + sandbox money -> hard Validate error; tests updated to new semantics
@@ -9228,8 +9228,8 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 
 # #350: config knob diet: remove useless/redundant configuration
 
-**Completed:** yes — 2026-06-11. Config knob diet round 1 (PROCESSORS_SOLANA_NETWORK override + cloudflared block removed; tenant_bootstrap.file follow-up landed). Continued in #352/#353 (rounds 2/3, already archived).
-**Status:** DONE 2026-06-11 (Paul: "the fewer knobs we have the easier openrails will be to use operationally"). Removed: (1) PROCESSORS_SOLANA_NETWORK override (9b1edec) — Network derives purely from the operating mode (devnet under test, mainnet otherwise), koanf tag dropped, #348 mainnet-under-test guard deleted as unrepresentable; (2) the cloudflared config block (tunnel_token/tunnel_name/public_hostname) — doc-only by its own admission, zero readers; docs/cloudflared-webhooks.md remains as plain dev-tooling docs. AUDIT VERDICTS on the rest (full field-by-field sweep): everything else has live readers. NOTE two false-DEAD findings from the audit subagent, corrected by hand: feature_flags.disable_processor_subscription_deletions (read via IsProcessorSubscriptionDeletionDisabled -> NMI client wiring, #344) and dunning_window_days (read via GetDunningWindow -> dunning worker) — the agent grepped direct field reads and missed method-mediated ones. KEPT deliberately: tenant_bootstrap.file (read by cmd/billing/bootstrap_apply.go:136 as legacy manifest-path fallback — flagged as a hard-cut candidate but that file is in-flight #342 work owned by another session); tokenization_url (read by the /debug/nmi page); db url-vs-atomic-params (legit pair); ProcessorConfig.Type (required for non-reserved names).
+**Completed:** yes — 2026-06-11. Config knob diet round 1 (RAILS_SOLANA_NETWORK override + cloudflared block removed; tenant_bootstrap.file follow-up landed). Continued in #352/#353 (rounds 2/3, already archived).
+**Status:** DONE 2026-06-11 (Paul: "the fewer knobs we have the easier openrails will be to use operationally"). Removed: (1) RAILS_SOLANA_NETWORK override (9b1edec) — Network derives purely from the operating mode (devnet under test, mainnet otherwise), koanf tag dropped, #348 mainnet-under-test guard deleted as unrepresentable; (2) the cloudflared config block (tunnel_token/tunnel_name/public_hostname) — doc-only by its own admission, zero readers; docs/cloudflared-webhooks.md remains as plain dev-tooling docs. AUDIT VERDICTS on the rest (full field-by-field sweep): everything else has live readers. NOTE two false-DEAD findings from the audit subagent, corrected by hand: feature_flags.disable_processor_subscription_deletions (read via IsProcessorSubscriptionDeletionDisabled -> NMI client wiring, #344) and dunning_window_days (read via GetDunningWindow -> dunning worker) — the agent grepped direct field reads and missed method-mediated ones. KEPT deliberately: tenant_bootstrap.file (read by cmd/billing/bootstrap_apply.go:136 as legacy manifest-path fallback — flagged as a hard-cut candidate but that file is in-flight #342 work owned by another session); tokenization_url (read by the /debug/nmi page); db url-vs-atomic-params (legit pair); ProcessorConfig.Type (required for non-reserved names).
 
 **Tasks:**
 - [x] Remove solana network override; derive from mode
@@ -11469,7 +11469,7 @@ and generalized provider capability matrices belong in future operational/provid
 - [x] Keep transient adapter errors retryable without creating local settled payments.
 - [x] Wire consolidated `InvoiceWorker` collection to the configured runtime collection router.
 - [x] Add guarded live processor tests for Stripe test mode and NMI/Mobius sandbox, requiring
-      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1`.
+      `TEST_ENV=true OPENRAILS_LIVE_RAIL_TESTS=1`.
 
 ## Acceptance
 - [x] Open invoices with a valid saved Stripe payment method can be collected and marked paid.
@@ -11486,9 +11486,9 @@ and generalized provider capability matrices belong in future operational/provid
 - [x] Stripe fake-server success/failure integration tests.
 - [x] NMI fake-provider success/failure integration tests.
 - [x] Guarded Stripe test-account integration, including provider-side nonzero paid invoice/payment-intent checks:
-      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+      `TEST_ENV=true OPENRAILS_LIVE_RAIL_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
 - [x] Guarded NMI/Mobius sandbox integration:
-      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+      `TEST_ENV=true OPENRAILS_LIVE_RAIL_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
 - [x] Full money integration suite: `go test -tags integration ./internal/modules/money -count=1`
 - [x] `go test ./...`
 - [x] `task build`
@@ -12599,7 +12599,7 @@ Secret values may be supplied inline only for private/local installs, but the ap
 - [x] Add secret-source support for `{env: NAME}` and `{file: /path}` plus inline `{value: ...}` for private installs. `{vault: ...}` is parsed/validated as an explicit future source but currently rejected at apply time because `push-merchant-config` cannot read Vault references yet.
 - [x] Bind provider accounts by durable provider-returned account identity, not local config key. Runtime provider-account guards resolve/verify Stripe/NMI identity before provider-pull/intents act, and manifest apply stores the declared provider identity plus secrets through merchant-owned state.
 - [x] Remove `auth.issuers` / `auth.expected_audience` as runtime tenant/user trust config. Standalone user/admin auth now uses the OpenRails control plane's AuthKit verifier with fixed `openrails` audience; remote applications/JWKS/public keys, service tokens, users, orgs, roles, and permissions are seeded through AuthKit/merchant config state. Config file/env loading warns/ignores stale `auth.issuers` / `auth.expected_audience`.
-- [x] Remove top-level `processors` from `config.Config` as runtime infrastructure state. Config file/env loading currently warns/ignores `processors` / `PROCESSORS_*`; provider helpers now use an explicit construction-time `config.ProcessorSet` instead of mutating `config.Config`.
+- [x] Remove top-level `processors` from `config.Config` as runtime infrastructure state. Config file/env loading currently warns/ignores `processors` / `RAILS_*`; provider helpers now use an explicit construction-time `config.ProcessorSet` instead of mutating `config.Config`.
 - [x] Remove obsolete runtime behavior overrides for dunning mode, entitlement/credit expiration, and processor-subscription deletions. Those are convergence-engine/application invariants now, not globally configurable behavior. `mode` remains the only process-level behavior dial. (Confirmed 2026-06-18: the legitimate use of the old `DISABLE_ENTITLEMENT_EXPIRATION` global toggle — lifetime / grandfathered access — is representable PER-CUSTOMER as an INDEFINITE entitlement: `PushNewEntitlement{Indefinite:true}` → grant with `EndsAt=nil` → entitlement `end_at=NULL`, which `IsEntitled` honors as never-expiring (`AND (end_at IS NULL OR end_at > at)`); dedicated `EntitlementHasActiveIndefinite` / `HasActiveIndefinite` / `TimelineHasIndefinite`. The per-grant indefinite mechanism supersedes the blunt global flag — more correct, since it's scoped to the specific customer rather than every entitlement in the deploy. The flag's secondary effect (globally disabling dead-sub revocation) is intentionally dropped: a dead sub now correctly loses access, and "keep access after the sub ends" must be an explicit indefinite/admin grant.)
 - [x] Finish the provider-account identity boundary: provider-pull, webhooks, provider intents, and checkout can stamp/resolve the current merchant/provider account, while durable provider credentials live in merchant secrets/provider accounts. `ProcessorSet` remains only the explicit in-memory construction bridge for embedded hosts and local standalone wiring, not loaded runtime config.
 - [x] Move Stripe checkout `success_url` / `cancel_url` out of `ProcessorConfig`. They are host callback URLs, not provider credentials; Stripe checkout now requires request-supplied URLs.

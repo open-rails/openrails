@@ -137,7 +137,7 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 	suite.App.Runtime.NMIClients = map[string]*nmi.NMIClient{
 		"mobius": client,
 	}
-	suite.App.Runtime.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Processors, suite.App.Runtime.NMIClients))
+	suite.App.Runtime.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Rails, suite.App.Runtime.NMIClients))
 
 	// Also update the subscription service's NMI clients
 	if suite.App.Runtime.SubscriptionService != nil {

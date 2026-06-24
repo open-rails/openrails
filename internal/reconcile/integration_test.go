@@ -90,7 +90,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
-		        (id, price_id, product_id, status, processor, processor_subscription_id,
+		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
@@ -115,7 +115,7 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 	t.Helper()
 	var alivePSID string
 	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-		`SELECT processor_subscription_id FROM openrails.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alivePSID))
+		`SELECT rail_subscription_id FROM openrails.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alivePSID))
 
 	now := time.Now().UTC()
 	end := now.Add(20 * 24 * time.Hour)
@@ -124,10 +124,10 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 		FetchedAt:    now,
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Vault: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: alivePSID, Status: SubscriptionStatusActive, NextBillingAt: &end},
-			{ProcessorSubscriptionID: "ghost-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "ghost@example.com"},
-			{ProcessorSubscriptionID: "dup1-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "dup@example.com", PlanID: "plan-1"},
-			{ProcessorSubscriptionID: "dup2-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "dup@example.com", PlanID: "plan-1"},
+			{RailSubscriptionID: alivePSID, Status: SubscriptionStatusActive, NextBillingAt: &end},
+			{RailSubscriptionID: "ghost-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "ghost@example.com"},
+			{RailSubscriptionID: "dup1-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "dup@example.com", PlanID: "plan-1"},
+			{RailSubscriptionID: "dup2-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "dup@example.com", PlanID: "plan-1"},
 		},
 		Transactions: []RemoteTransaction{
 			{
@@ -156,7 +156,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	store := &PGStore{DB: appDB}
 	newEngine := func(snap *RemoteSnapshot) *Engine {
 		return &Engine{
-			Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
+			Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
 			Store:    store,
 			Local:    &PGLocalStateLoader{DB: appDB},
 			Writer:   &PGLocalWriter{DB: appDB},
@@ -241,7 +241,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		var amount int64
 		var subjectID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, customer_id FROM openrails.payments WHERE processor = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+			`SELECT amount, customer_id FROM openrails.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
 			Scan(&amount, &subjectID))
 		assert.Equal(t, int64(999), amount)
 		assert.Equal(t, seeded.subjectID, subjectID)
@@ -357,11 +357,11 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, merchant_id)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, rails, merchant_id)
 		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, customer_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
+		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
 		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestMerchantID.UUID())
 		return nil
 	}))
@@ -379,22 +379,22 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Vault: true},
 		Subscriptions: []RemoteSubscription{
 			{
-				ProcessorSubscriptionID: resolvablePSID,
-				Status:                  SubscriptionStatusActive,
-				CustomerID:              vaultID,
-				Email:                   "mat-" + suffix + "@example.com",
-				PlanID:                  planID,
-				NextBillingAt:           &periodEnd,
-				LastBilledAt:            &lastBilled,
-				AmountCents:             1499,
-				Currency:                "usd",
+				RailSubscriptionID: resolvablePSID,
+				Status:             SubscriptionStatusActive,
+				CustomerID:         vaultID,
+				Email:              "mat-" + suffix + "@example.com",
+				PlanID:             planID,
+				NextBillingAt:      &periodEnd,
+				LastBilledAt:       &lastBilled,
+				AmountCents:        1499,
+				Currency:           "usd",
 			},
 			{
 				// No vault/email match locally, no plan link: unresolvable.
-				ProcessorSubscriptionID: unresolvablePSID,
-				Status:                  SubscriptionStatusActive,
-				Email:                   "stranger-" + suffix + "@example.com",
-				PlanID:                  "unknown-plan-" + suffix,
+				RailSubscriptionID: unresolvablePSID,
+				Status:             SubscriptionStatusActive,
+				Email:              "stranger-" + suffix + "@example.com",
+				PlanID:             "unknown-plan-" + suffix,
 			},
 		},
 		Transactions: []RemoteTransaction{
@@ -408,7 +408,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	newEngine := func() *Engine {
 		return &Engine{
-			Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
+			Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
 			Store:    store,
 			Local:    &PGLocalStateLoader{DB: appDB},
 			Writer:   &PGLocalWriter{DB: appDB},
@@ -426,7 +426,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).Scan(&n))
+			`SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
 		assert.Zero(t, n, "no subscription created by an advisory run")
 		return nil
 	}))
@@ -444,15 +444,15 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// Resolvable: subscription created with remote status/periods.
 		var subID uuid.UUID
-		var status, processor string
+		var status, rail string
 		var gotSubject uuid.UUID
 		var gotPeriodEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT id, status::text, processor, customer_id, current_period_ends_at
-			 FROM openrails.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).
-			Scan(&subID, &status, &processor, &gotSubject, &gotPeriodEnd))
+			`SELECT id, status::text, rail, customer_id, current_period_ends_at
+			 FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).
+			Scan(&subID, &status, &rail, &gotSubject, &gotPeriodEnd))
 		assert.Equal(t, "active", status)
-		assert.Equal(t, "nmi", processor)
+		assert.Equal(t, "nmi", rail)
 		assert.Equal(t, subjectID, gotSubject)
 		assert.WithinDuration(t, periodEnd, gotPeriodEnd, time.Second)
 
@@ -511,7 +511,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).Scan(&n))
+			`SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
 		assert.Equal(t, 1, n, "exactly one materialized subscription after a re-run")
 		return nil
 	}))
@@ -561,7 +561,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	// Engine with NO fetchers: the PS-10 pass runs regardless of providers.
 	newEngine := func() *Engine {
 		return &Engine{
-			Fetchers: map[Provider]ProcessorFetcher{},
+			Fetchers: map[Provider]RailFetcher{},
 			Store:    store,
 			Local:    &PGLocalStateLoader{DB: appDB},
 			Writer:   &PGLocalWriter{DB: appDB},
@@ -681,7 +681,7 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := &PGStore{DB: appDB}
 	eng := &Engine{
-		Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},
+		Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},
 		Store:    store,
 		Local:    &PGLocalStateLoader{DB: appDB},
 		Writer:   &PGLocalWriter{DB: appDB},
@@ -731,7 +731,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,999,'usd',$3),($4,$2,499,'usd',$3)`,
 			priceID, productID, merchantID, schedPriceID)
 		exec(`INSERT INTO openrails.subscriptions
-		        (id, price_id, product_id, status, processor, processor_subscription_id,
+		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         deletion_scheduled_at, scheduled_price_id, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,$7,$8,'{}'::jsonb,$9,$10)`,

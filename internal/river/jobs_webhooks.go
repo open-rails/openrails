@@ -56,7 +56,7 @@ func (w WebhookProcessWorker) Work(ctx context.Context, job *river.Job[WebhookPr
 	}
 
 	msg := &webhooks.WebhookMessage{
-		Processor:      provider,
+		Rail:           provider,
 		EventID:        strings.TrimSpace(args.EventID),
 		EventType:      strings.TrimSpace(args.EventType),
 		Payload:        args.Body,

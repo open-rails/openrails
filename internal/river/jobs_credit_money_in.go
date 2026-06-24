@@ -13,9 +13,9 @@ import (
 
 // These workers drive the money-in + reconciliation flows (issues
 // #239/#240/#241/#243). The auto-top-up and arrears workers need a
-// money.Charger (off-session processor charge) and the low-balance worker
+// money.Charger (off-session rail charge) and the low-balance worker
 // needs a money.Alerter; when those are not configured the worker logs and
-// no-ops so it is safe to register before the processor/notification wiring
+// no-ops so it is safe to register before the rail/notification wiring
 // lands. The reconcile worker needs no external dependency and runs fully.
 
 // --- Low-balance alerts (#240) ---
@@ -104,7 +104,7 @@ const KindInvoice = "openrails.invoice"
 // Arrears collection cadence (#241/#301). The HOURLY invoice job collects
 // balances at or above ArrearsHourlyThresholdAmount (collect big balances
 // promptly); the MONTHLY sweep collects everything at or above
-// ArrearsMonthlyFloorAmount (the $1 floor, so we don't burn processor fees on
+// ArrearsMonthlyFloorAmount (the $1 floor, so we don't burn rail fees on
 // dust). "Whichever comes first." Payments are idempotent per invoice, so the
 // two cadences never double-collect.
 // TODO(#301): make these configurable per-merchant; decide calendar-month vs

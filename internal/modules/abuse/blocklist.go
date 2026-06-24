@@ -1,13 +1,13 @@
 // Package abuse holds payment-fraud / abuse controls (issue #300).
 //
 // This slice provides ONLY the blocklist primitive: a merchant-scoped list of
-// known-bad payment identifiers (card fingerprints, processor customer ids,
+// known-bad payment identifiers (card fingerprints, rail customer ids,
 // emails, IPs) that checkout/admission can later consult to DENY a payment.
 //
 // INTEGRATION HOOK (out of this slice): the deny wiring is intentionally NOT
 // built here. A checkout/admission gate should, before authorizing a charge,
 // call BlocklistService.IsBlocked for each available identifier (card
-// fingerprint, processor customer id, payer email, request IP) and refuse the
+// fingerprint, rail customer id, payer email, request IP) and refuse the
 // charge if any returns true. Velocity caps and a new-account default tier are
 // also out of scope for this slice.
 package abuse
@@ -32,10 +32,10 @@ import (
 // Valid blocklist identifier kinds. Mirrors the CHECK constraint on
 // openrails.payment_blocklist.kind (migration 067).
 const (
-	KindCardFingerprint   = "card_fingerprint"
-	KindProcessorCustomer = "processor_customer"
-	KindEmail             = "email"
-	KindIP                = "ip"
+	KindCardFingerprint = "card_fingerprint"
+	KindRailCustomer    = "processor_customer"
+	KindEmail           = "email"
+	KindIP              = "ip"
 )
 
 // ErrInvalidKind is returned when a blocklist operation is given a kind that is
@@ -44,7 +44,7 @@ var ErrInvalidKind = errors.New("invalid blocklist kind")
 
 func validKind(kind string) bool {
 	switch kind {
-	case KindCardFingerprint, KindProcessorCustomer, KindEmail, KindIP:
+	case KindCardFingerprint, KindRailCustomer, KindEmail, KindIP:
 		return true
 	default:
 		return false

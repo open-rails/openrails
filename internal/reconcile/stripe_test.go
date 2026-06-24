@@ -130,7 +130,7 @@ func TestStripeFetcher_Fetch(t *testing.T) {
 	// Subscriptions across both pages.
 	require.Len(t, snap.Subscriptions, 2)
 	active := snap.Subscriptions[0]
-	require.Equal(t, "sub_active1", active.ProcessorSubscriptionID)
+	require.Equal(t, "sub_active1", active.RailSubscriptionID)
 	require.Equal(t, SubscriptionStatusActive, active.Status)
 	require.Equal(t, "active", active.RawStatus)
 	require.Equal(t, "cus_A", active.CustomerID)
@@ -199,7 +199,7 @@ func TestStripeFetcher_SingleSubscriptionFilter(t *testing.T) {
 	snap, err := fetcher.Fetch(context.Background(), FetchParams{SubscriptionID: "sub_active1"})
 	require.NoError(t, err)
 	require.Len(t, snap.Subscriptions, 1)
-	require.Equal(t, "sub_active1", snap.Subscriptions[0].ProcessorSubscriptionID)
+	require.Equal(t, "sub_active1", snap.Subscriptions[0].RailSubscriptionID)
 }
 
 func TestStripeFetcher_APIErrorSurfaced(t *testing.T) {

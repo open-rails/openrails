@@ -42,9 +42,9 @@ type PriceObject struct {
 	Product    string         `json:"product"`             // Product ID
 	Active     bool           `json:"active"`
 	Livemode   bool           `json:"livemode,omitempty"`
-	// Providers lists the payment processors this price can be paid through
+	// Providers lists the payment rails this price can be paid through
 	// (e.g. ["stripe","ccbill"]), sorted. Lets clients render per-provider
-	// checkout actions and choose which processor to send at checkout time.
+	// checkout actions and choose which rail to send at checkout time.
 	Providers []string          `json:"providers,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Created   int64             `json:"created"`
@@ -117,8 +117,8 @@ type PaymentObject struct {
 	User            string              `json:"user"`                     // User ID with usr_ prefix
 	Subscription    *string             `json:"subscription,omitempty"`   // Subscription ID if linked
 	PaymentMethod   *string             `json:"payment_method,omitempty"` // Payment method ID if known
-	Processor       string              `json:"processor"`                // mobius, ccbill, solana
-	TransactionID   string              `json:"transaction_id"`           // Processor's transaction identifier
+	Rail            string              `json:"rail"`                     // mobius, ccbill, solana
+	TransactionID   string              `json:"transaction_id"`           // Rail's transaction identifier
 	Refunded        bool                `json:"refunded"`                 // True if fully refunded
 	Captured        bool                `json:"captured,omitempty"`       // Always true for immediate captures
 	FailureCode     *string             `json:"failure_code,omitempty"`

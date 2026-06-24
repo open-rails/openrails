@@ -36,7 +36,7 @@ func TestLogPaymentEventSpoolsWithoutCurrencyDefaultWhenClickHouseDown(t *testin
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{
 		UserID:    "user-1",
 		EventType: PaymentEventChargeSuccess,
-		Processor: "test",
+		Rail:      "test",
 	}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestLogPaymentEventRequiresCurrencyWithAmount(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
-	err = svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test", Amount: &amount})
+	err = svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Rail: "test", Amount: &amount})
 	if err == nil {
 		t.Fatal("expected missing currency error")
 	}
@@ -106,7 +106,7 @@ func TestLogPaymentEventStampsResolvedMerchant(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
-	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
+	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Rail: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestLogPaymentEventCarriesResolvedMerchant(t *testing.T) {
 	merchantID := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
 	ctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), merchantID), 50*time.Millisecond)
 	defer cancel()
-	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
+	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Rail: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestLogSubscriptionEventStampsMerchant(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
-	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "user-1", EventType: PaymentEventSubscriptionCreated, Processor: "test"}); err != nil {
+	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "user-1", EventType: PaymentEventSubscriptionCreated, Rail: "test"}); err != nil {
 		t.Fatalf("log subscription event: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestLogPaymentEventDisabledClickHouseDoesNotSpool(t *testing.T) {
 	if err := svc.LogPaymentEvent(context.Background(), PaymentEventData{
 		UserID:    "user-1",
 		EventType: PaymentEventChargeSuccess,
-		Processor: "test",
+		Rail:      "test",
 	}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
@@ -247,19 +247,19 @@ func TestEventLogIsOptionalNoOpWhenUnconfigured(t *testing.T) {
 
 func assertSinkNoOp(t *testing.T, ctx context.Context, svc *EventLogService) {
 	t.Helper()
-	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "u", EventType: PaymentEventChargeSuccess, Processor: "p"}); err != nil {
+	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "u", EventType: PaymentEventChargeSuccess, Rail: "p"}); err != nil {
 		t.Fatalf("LogPaymentEvent errored on unconfigured sink: %v", err)
 	}
-	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "u", EventType: PaymentEventSubscriptionCreated, Processor: "p"}); err != nil {
+	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "u", EventType: PaymentEventSubscriptionCreated, Rail: "p"}); err != nil {
 		t.Fatalf("LogSubscriptionEvent errored on unconfigured sink: %v", err)
 	}
-	if err := svc.LogTransactionEvent(ctx, TransactionEventData{TransactionID: "t", EventType: "charge", Processor: "p"}); err != nil {
+	if err := svc.LogTransactionEvent(ctx, TransactionEventData{TransactionID: "t", EventType: "charge", Rail: "p"}); err != nil {
 		t.Fatalf("LogTransactionEvent errored on unconfigured sink: %v", err)
 	}
-	if err := svc.LogACUEvent(ctx, ACUEventData{EventType: "acu", Processor: "p"}); err != nil {
+	if err := svc.LogACUEvent(ctx, ACUEventData{EventType: "acu", Rail: "p"}); err != nil {
 		t.Fatalf("LogACUEvent errored on unconfigured sink: %v", err)
 	}
-	if err := svc.LogChargebackEvent(ctx, ChargebackEventData{ChargebackID: "c", EventType: "chargeback", Processor: "p"}); err != nil {
+	if err := svc.LogChargebackEvent(ctx, ChargebackEventData{ChargebackID: "c", EventType: "chargeback", Rail: "p"}); err != nil {
 		t.Fatalf("LogChargebackEvent errored on unconfigured sink: %v", err)
 	}
 }

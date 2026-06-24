@@ -209,8 +209,8 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	//    params the checkout upgrade branch passes.
 	svc := &StripeService{
 		Config: &config.Config{},
-		Processors: config.ProcessorSet{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: key},
+		Rails: config.RailSet{
+			"stripe": {Type: config.RailTypeStripe, SecretKey: key},
 		},
 	}
 	require.NoError(t, svc.UpdateSubscriptionPrice(

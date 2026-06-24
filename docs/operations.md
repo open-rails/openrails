@@ -50,7 +50,7 @@ The three `push-*` commands push declared file state into OpenRails-owned
 state, AuthKit/control-plane state, the merchant secret backend, or provider
 catalog surfaces. `pull-provider` moves the opposite direction: provider
 observed state into OpenRails' local mirror, then local convergence. It never
-mutates external payment processors.
+mutates external payment rails.
 
 Merchant provider secrets in `push-merchant-config` are seed material, not the
 runtime source of truth. The command resolves each declared provider account
@@ -248,11 +248,11 @@ local mirror reads/writes are scoped to that row. Historical NULL
 for destructive absence handling.
 
 **Materialize** — part of `fix` (enforce mode; advisory never writes). PS-1
-findings (the processor bills a subscription OpenRails does not know) are
+findings (the rail bills a subscription OpenRails does not know) are
 auto-created locally **only when both halves resolve unambiguously**:
 identity through the engine's existing matcher (a single vault/email match —
 zero or multiple candidates never guess) and plan through catalog
-provider_links (the billable price whose `processors[provider]` entry
+provider_links (the billable price whose `rails[provider]` entry
 carries the remote plan id). A materialized subscription adopts the remote
 status and period timestamps, snapshots the product's entitlement spec like a
 normal signup, gets the snapshot's latest successful charge backfilled as a
@@ -285,7 +285,7 @@ from a bad fetch).
 subscription (locally past_due, or cancelled-as-expired) the report
 cross-references, with each timeline entry tagged by source:
 
-1. **provider** — the processor's own charge-attempt timeline, declines
+1. **provider** — the rail's own charge-attempt timeline, declines
    included (NMI transaction search, Stripe charges, CCBill exports);
 2. **local** — the retry fields on the subscription row (`last_retry_at` /
    `retry_attempts` / `next_retry_at`), preserved verbatim by the legacy
@@ -316,7 +316,7 @@ span always well inside one cycle:
 
 The staleness window ("never charge a months-old failure") is derived from
 the same schedule, so it cannot be misconfigured. Terminal failure = cancel +
-revoke entitlements + scheduled processor-side delete through the one shared
+revoke entitlements + scheduled rail-side delete through the one shared
 deferred-delete mechanism.
 
 (Benchmark: Stripe's own default for monthly billing is 8 ML-timed retries

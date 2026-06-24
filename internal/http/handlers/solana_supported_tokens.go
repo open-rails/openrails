@@ -82,7 +82,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
-	solanaProc := r.State.Processors.GetSolanaProcessor()
+	solanaProc := r.State.Rails.GetSolanaRail()
 	if solanaProc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
@@ -196,7 +196,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
-	solanaProc := r.State.Processors.GetSolanaProcessor()
+	solanaProc := r.State.Rails.GetSolanaRail()
 	if solanaProc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return

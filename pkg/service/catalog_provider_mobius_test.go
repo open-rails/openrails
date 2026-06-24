@@ -117,10 +117,10 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	if !addCalled {
 		t.Fatal("expected AddRecurringPlan to be called for a missing plan")
 	}
-	if ids[models.ProcessorKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30)) {
+	if ids[models.RailKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30)) {
 		t.Fatalf("plan_id mismatch: %v", ids)
 	}
-	if ids[models.ProcessorKeyProvider] != "mobius" {
+	if ids[models.RailKeyProvider] != "mobius" {
 		t.Fatalf("provider mismatch: %v", ids)
 	}
 }
@@ -148,7 +148,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if ids[models.ProcessorKeyPlanID] != planID {
+	if ids[models.RailKeyPlanID] != planID {
 		t.Fatalf("plan_id mismatch: %v", ids)
 	}
 }
@@ -175,12 +175,12 @@ func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.Attach(context.Background(),
-		map[string]string{models.ProcessorKeyPlanID: planID},
+		map[string]string{models.RailKeyPlanID: planID},
 		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("valid link should attach cleanly, got %v", err)
 	}
-	if ids[models.ProcessorKeyPlanID] != planID || ids[models.ProcessorKeyProvider] != "mobius" {
+	if ids[models.RailKeyPlanID] != planID || ids[models.RailKeyProvider] != "mobius" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 }
@@ -206,7 +206,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.Attach(context.Background(),
-		map[string]string{models.ProcessorKeyPlanID: "premium"},
+		map[string]string{models.RailKeyPlanID: "premium"},
 		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("missing plan should be created, got %v", err)
@@ -217,7 +217,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 	if addedPlanID != "premium" || addedFreq != "30" || addedAmount != "9.99" {
 		t.Fatalf("created plan with wrong terms: id=%q freq=%q amount=%q", addedPlanID, addedFreq, addedAmount)
 	}
-	if ids[models.ProcessorKeyPlanID] != "premium" {
+	if ids[models.RailKeyPlanID] != "premium" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 }
@@ -236,7 +236,7 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	_, err := a.Attach(context.Background(),
-		map[string]string{models.ProcessorKeyPlanID: "premium"},
+		map[string]string{models.RailKeyPlanID: "premium"},
 		autoCreateContext{UnitAmount: 999, BillingCycleDays: nil})
 	if err == nil || !strings.Contains(err.Error(), "billing_cycle_days") {
 		t.Fatalf("expected a loud billing_cycle_days error, got %v", err)
@@ -253,7 +253,7 @@ func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	_, err := a.Attach(context.Background(),
-		map[string]string{models.ProcessorKeyPlanID: planID},
+		map[string]string{models.RailKeyPlanID: planID},
 		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "amount") {
 		t.Fatalf("expected an amount-mismatch error, got %v", err)
@@ -270,7 +270,7 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	_, err := a.Attach(context.Background(),
-		map[string]string{models.ProcessorKeyPlanID: planID},
+		map[string]string{models.RailKeyPlanID: planID},
 		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
 		t.Fatalf("expected a billing-cycle-mismatch error, got %v", err)
@@ -284,7 +284,7 @@ func TestMobiusAdapter_UpdateIsNoop(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	ids := map[string]string{models.ProcessorKeyPlanID: "p", models.ProcessorKeyProvider: "mobius"}
+	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
 	if err := a.Update(context.Background(), ids, mutableUpdate{}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	ids := map[string]string{models.ProcessorKeyPlanID: "p", models.ProcessorKeyProvider: "mobius"}
+	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
 	drift, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{
 		UnitAmount: 999,
 	})
@@ -324,7 +324,7 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	ids := map[string]string{models.ProcessorKeyPlanID: "p", models.ProcessorKeyProvider: "mobius"}
+	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
 	_, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -336,7 +336,7 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 
 func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	a := &mobiusAdapter{svc: &Service{rt: &app.Runtime{}}}
-	drift, missing, err := a.Verify(context.Background(), map[string]string{models.ProcessorKeyPlanID: "p"}, &priceVerifyContext{})
+	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{})
 	if err != nil || missing || drift != nil {
 		t.Fatalf("expected sync_disabled (nil,false,nil), got drift=%v missing=%v err=%v", drift, missing, err)
 	}

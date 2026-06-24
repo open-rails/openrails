@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -112,7 +112,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		EndedAt               *time.Time                `json:"ended_at,omitempty"`
 		CurrentPeriodStartsAt *time.Time                `json:"current_period_starts_at,omitempty"`
 		CurrentPeriodEndsAt   *time.Time                `json:"current_period_ends_at,omitempty"`
-		Processor             models.Processor          `json:"processor,omitempty"`
+		Rail                  models.Rail               `json:"rail,omitempty"`
 		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
 		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
 		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
@@ -146,7 +146,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 			EndedAt:               r.Subscription.EndedAt,
 			CurrentPeriodStartsAt: r.Subscription.CurrentPeriodStartsAt,
 			CurrentPeriodEndsAt:   r.Subscription.CurrentPeriodEndsAt,
-			Processor:             r.Subscription.Processor,
+			Rail:                  r.Subscription.Rail,
 			CancelFeedback:        r.Subscription.CancelFeedback,
 			CancelType:            r.Subscription.CancelType,
 			CancelledAt:           r.Subscription.CancelledAt,
@@ -277,15 +277,15 @@ func creditsSpecToAPIObject(specs models.CreditsSpec) map[string]api.CreditGrant
 
 // UserAccessGrant summarizes how the user currently has premium access (subscription vs one-off entitlement).
 type UserAccessGrant struct {
-	Kind                    string                        `json:"kind"`
-	Entitlement             string                        `json:"entitlement"`
-	SourceType              *models.EntitlementSourceType `json:"source_type,omitempty"`
-	SourceID                *uuid.UUID                    `json:"source_id,omitempty"`
-	SubscriptionID          *uuid.UUID                    `json:"subscription_id,omitempty"`
-	Processor               string                        `json:"processor,omitempty"`
-	ProcessorSubscriptionID *string                       `json:"-"`
-	StartAt                 time.Time                     `json:"start_at"`
-	EndAt                   *time.Time                    `json:"end_at,omitempty"`
+	Kind               string                        `json:"kind"`
+	Entitlement        string                        `json:"entitlement"`
+	SourceType         *models.EntitlementSourceType `json:"source_type,omitempty"`
+	SourceID           *uuid.UUID                    `json:"source_id,omitempty"`
+	SubscriptionID     *uuid.UUID                    `json:"subscription_id,omitempty"`
+	Rail               string                        `json:"rail,omitempty"`
+	RailSubscriptionID *string                       `json:"-"`
+	StartAt            time.Time                     `json:"start_at"`
+	EndAt              *time.Time                    `json:"end_at,omitempty"`
 }
 
 // GetUserSubscription retrieves the current subscription for a user with enriched data
@@ -478,24 +478,24 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	// CCBill doesn't have a public API for merchant-initiated cancellation
 	// Users must cancel through CCBill's consumer support portal
-	if subscription.Processor == models.ProcessorCCBill {
+	if subscription.Rail == models.RailCCBill {
 		return &CCBillCancelError{
 			SupportURL: "https://support.ccbill.com",
 			Message:    "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
 		}
 	}
 
-	// Only NMI-backed processors can be cancelled via this service
-	if !processors.IsNMIBackedProcessor(subscription.Processor) {
-		return fmt.Errorf("unable to cancel subscription for processor %s", subscription.Processor)
+	// Only NMI-backed rails can be cancelled via this service
+	if !rails.IsNMIBackedRail(subscription.Rail) {
+		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 
 	now := s.now()
-	provider := strings.ToLower(string(subscription.Processor))
+	provider := strings.ToLower(string(subscription.Rail))
 
 	// Issue 216: when there is a genuine future undo window, DEFER the
-	// processor-side delete instead of doing it inline. We keep the NMI
-	// subscription alive (so a resume is a no-op processor-side) and schedule
+	// rail-side delete instead of doing it inline. We keep the NMI
+	// subscription alive (so a resume is a no-op rail-side) and schedule
 	// delete_subscription to fire at period_end - safety margin. If the window
 	// has already opened (now >= period_end - margin, common near rebill) or the
 	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
@@ -509,9 +509,9 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		// Immediate delete with NMI (no scheduled job).
 		subscription.DeletionScheduledAt = nil
 		if s.NMIClients != nil {
-			if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
-				if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
-					return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
+			if client, ok := s.NMIClients[provider]; ok && subscription.RailSubscriptionID != "" {
+				if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
+					return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
 				}
 			}
 		}
@@ -572,14 +572,14 @@ func accessFromSubscription(sub *models.Subscription) *UserAccessGrant {
 	grant := &UserAccessGrant{
 		Kind:        "subscription",
 		Entitlement: "premium",
-		Processor:   string(sub.Processor),
+		Rail:        string(sub.Rail),
 	}
 	if subID := sub.ID; subID != uuid.Nil {
 		grant.SubscriptionID = &subID
 	}
-	if sub.ProcessorSubscriptionID != "" {
-		psid := sub.ProcessorSubscriptionID
-		grant.ProcessorSubscriptionID = &psid
+	if sub.RailSubscriptionID != "" {
+		psid := sub.RailSubscriptionID
+		grant.RailSubscriptionID = &psid
 	}
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		grant.StartAt = *sub.CurrentPeriodStartsAt

@@ -63,7 +63,7 @@ func ChangeTier(r *httprequest.Request) {
 
 // ChangeTierPreview is the non-mutating dry-run of ChangeTier: it returns what a
 // confirm WOULD charge now and at the next renewal, without touching the
-// processor or the local subscription. The frontend renders it as a
+// rail or the local subscription. The frontend renders it as a
 // "Right now: $X / On <date>: $Y" confirmation before calling ChangeTier.
 func ChangeTierPreview(r *httprequest.Request) {
 	var req ChangeTierRequest

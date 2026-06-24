@@ -58,9 +58,9 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,
-		Processors: map[string]map[string]string{
-			string(models.ProcessorMobius): {
-				models.ProcessorKeyPlanID: "plan_test_999",
+		Rails: map[string]map[string]string{
+			string(models.RailMobius): {
+				models.RailKeyPlanID: "plan_test_999",
 			},
 		},
 		CreatedAt: clock.Now().UTC(),
@@ -77,11 +77,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PeriodStart:         periodStart,
 		CurrentPeriodEndsAt: &paidEnd,
 		PaymentMethodID:     &pm.ID,
-		ProcessorSubID:      "sub_" + uuid.New().String()[:8],
+		RailSubID:           "sub_" + uuid.New().String()[:8],
 	})
 
 	// Initial paid windows for both entitlements.
@@ -111,7 +111,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
 	}))
@@ -166,11 +166,11 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PeriodStart:         periodStart,
 		CurrentPeriodEndsAt: &paidEnd,
 		PaymentMethodID:     &pm.ID,
-		ProcessorSubID:      "sub_" + uuid.New().String()[:8],
+		RailSubID:           "sub_" + uuid.New().String()[:8],
 	})
 
 	// Minimal entitlement for this subscription.
@@ -195,7 +195,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
 	}))

@@ -42,7 +42,7 @@ type StripeWebhookService struct {
 	EventLogService              *analytics.EventLogService
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
-	ProcessorCustomerService     *payments.ProcessorCustomerService
+	RailCustomerService          *payments.RailCustomerService
 	CheckoutSessionService       webhookCheckoutSessionStore
 	Clock                        clockwork.Clock
 }
@@ -126,10 +126,10 @@ type stripeInvoice struct {
 	} `json:"parent"`
 }
 
-// processorSubscriptionID returns the Stripe subscription id, reading the
+// railSubscriptionID returns the Stripe subscription id, reading the
 // top-level field (classic/snapshot shape) and falling back to
 // parent.subscription_details.subscription (2026-04-22.preview shape).
-func (inv stripeInvoice) processorSubscriptionID() string {
+func (inv stripeInvoice) railSubscriptionID() string {
 	if id := strings.TrimSpace(inv.Subscription); id != "" {
 		return id
 	}
@@ -219,7 +219,7 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	}
 
 	if s.DeduplicationService != nil {
-		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.ProcessorStripe, evt, func(ctx context.Context) error {
+		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe, evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt.Data.Object)
 		})
 	}
@@ -337,7 +337,7 @@ func (s *StripeWebhookService) recordStripeCardForCustomer(ctx context.Context, 
 	return payments.UpsertStripeCardForCustomer(
 		ctx,
 		s.DB,
-		s.ProcessorCustomerService,
+		s.RailCustomerService,
 		linker,
 		s.Clock,
 		customerID, paymentMethodID, initialTxnID,
@@ -355,18 +355,18 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if userID == "" {
 		// Stripe subscription invoices do not carry user_id in invoice metadata (it lives
 		// on the checkout session / subscription). Resolve it from the existing subscription
-		// first (renewals), then from the processor customer mapping that
+		// first (renewals), then from the rail customer mapping that
 		// checkout.session.completed records (first invoice). If neither is available yet
 		// (e.g. invoice.paid arrived before checkout.session.completed), return an error so
 		// Stripe retries once the mapping exists.
-		if procSubID := inv.processorSubscriptionID(); procSubID != "" {
-			if sub, lookupErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), procSubID); lookupErr == nil && sub != nil {
+		if procSubID := inv.railSubscriptionID(); procSubID != "" {
+			if sub, lookupErr := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), procSubID); lookupErr == nil && sub != nil {
 				userID = strings.TrimSpace(sub.CustomerID.String())
 			}
 		}
-		if userID == "" && s.ProcessorCustomerService != nil {
+		if userID == "" && s.RailCustomerService != nil {
 			if customerID := strings.TrimSpace(inv.Customer); customerID != "" {
-				if uid, lookupErr := s.ProcessorCustomerService.GetUserIDByCustomerID(ctx, string(models.ProcessorStripe), customerID); lookupErr == nil {
+				if uid, lookupErr := s.RailCustomerService.GetUserIDByCustomerID(ctx, string(models.RailStripe), customerID); lookupErr == nil {
 					userID = strings.TrimSpace(uid)
 				}
 			}
@@ -375,10 +375,10 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if userID == "" {
 		return fmt.Errorf("stripe invoice missing user_id metadata")
 	}
-	if s.ProcessorCustomerService != nil {
+	if s.RailCustomerService != nil {
 		customerID := strings.TrimSpace(inv.Customer)
 		if customerID != "" {
-			_ = s.ProcessorCustomerService.Upsert(ctx, userID, string(models.ProcessorStripe), customerID)
+			_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), customerID)
 		}
 	}
 	priceID, price, err := s.resolvePriceFromMetadata(ctx, metadata, inv.Lines.Data)
@@ -409,7 +409,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	// DIFFERENT transaction-id key than the one we resolved above. The reconcile
 	// backfill (reconcile.ensureChargePayment) keys subscription payments by the
 	// charge id, while the 2026-04-22.preview invoice.paid payload omits the
-	// charge and falls back to the invoice id. Because the (merchant, processor,
+	// charge and falls back to the invoice id. Because the (merchant, rail,
 	// transaction_id) unique index can't see across those keys, a backfill-then-
 	// webhook ordering would otherwise insert a duplicate row. If a row for this
 	// invoice already exists under any of its ids (charge/payment_intent/invoice)
@@ -423,27 +423,27 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	}
 	paymentMetadata := stripeInvoicePaymentMetadata(inv)
 
-	processorSubID := inv.processorSubscriptionID()
-	if processorSubID == "" {
+	railSubID := inv.railSubscriptionID()
+	if railSubID == "" {
 		return fmt.Errorf("stripe invoice missing subscription id")
 	}
 
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
+	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	createdSubscription := false
 	if err != nil {
 		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-			UserID:                  userID,
-			UserEmail:               normalize.OptionalString(inv.CustomerEmail),
-			PriceID:                 priceID,
-			Processor:               models.ProcessorStripe,
-			ProcessorSubscriptionID: &processorSubID,
-			CurrentPeriodStartsAt:   zeroTimePtr(stripeInvoicePeriodStart(inv)),
-			CurrentPeriodEndsAt:     zeroTimePtr(stripeInvoicePeriodEnd(inv)),
-			TransactionID:           paymentTransactionID,
-			Amount:                  inv.AmountPaid,
-			AmountProvided:          true,
-			Currency:                inv.Currency,
-			PaymentMetadata:         paymentMetadata,
+			UserID:                userID,
+			UserEmail:             normalize.OptionalString(inv.CustomerEmail),
+			PriceID:               priceID,
+			Rail:                  models.RailStripe,
+			RailSubscriptionID:    &railSubID,
+			CurrentPeriodStartsAt: zeroTimePtr(stripeInvoicePeriodStart(inv)),
+			CurrentPeriodEndsAt:   zeroTimePtr(stripeInvoicePeriodEnd(inv)),
+			TransactionID:         paymentTransactionID,
+			Amount:                inv.AmountPaid,
+			AmountProvided:        true,
+			Currency:              inv.Currency,
+			PaymentMetadata:       paymentMetadata,
 		})
 		if err != nil {
 			return fmt.Errorf("create membership: %w", err)
@@ -451,20 +451,20 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		createdSubscription = true
 	} else {
 		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor:               models.ProcessorStripe,
-			ProcessorSubscriptionID: processorSubID,
-			CurrentPeriodStartsAt:   zeroTimePtr(stripeInvoicePeriodStart(inv)),
-			CurrentPeriodEndsAt:     zeroTimePtr(stripeInvoicePeriodEnd(inv)),
-			TransactionID:           paymentTransactionID,
-			Amount:                  inv.AmountPaid,
-			AmountProvided:          true,
-			Currency:                inv.Currency,
-			PaymentMetadata:         paymentMetadata,
+			Rail:                  models.RailStripe,
+			RailSubscriptionID:    railSubID,
+			CurrentPeriodStartsAt: zeroTimePtr(stripeInvoicePeriodStart(inv)),
+			CurrentPeriodEndsAt:   zeroTimePtr(stripeInvoicePeriodEnd(inv)),
+			TransactionID:         paymentTransactionID,
+			Amount:                inv.AmountPaid,
+			AmountProvided:        true,
+			Currency:              inv.Currency,
+			PaymentMetadata:       paymentMetadata,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"processor_subscription_id": processorSubID,
-					"transaction_id":            paymentTransactionID,
+					"rail_subscription_id": railSubID,
+					"transaction_id":       paymentTransactionID,
 				}).Warn("Blocked terminal -> active transition for delayed Stripe renewal")
 				return nil
 			}
@@ -472,7 +472,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		}
 	}
 
-	if err := s.ensureStripePaidSubscriptionEntitlements(ctx, processorSubID, price); err != nil {
+	if err := s.ensureStripePaidSubscriptionEntitlements(ctx, railSubID, price); err != nil {
 		return err
 	}
 
@@ -506,14 +506,14 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if s.CheckoutSessionService != nil {
 		sessionID := parseCheckoutSessionID(metadata)
 		if sessionID == uuid.Nil {
-			if session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorStripe); err == nil && session != nil {
+			if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 				sessionID = session.ID
 			}
 		}
 		if sessionID != uuid.Nil {
 			paymentID := uuid.Nil
 			if s.PaymentService != nil {
-				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, paymentTransactionID); err == nil {
+				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, paymentTransactionID); err == nil {
 					paymentID = payment.ID
 				}
 			}
@@ -528,11 +528,11 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	return nil
 }
 
-func (s *StripeWebhookService) ensureStripePaidSubscriptionEntitlements(ctx context.Context, processorSubID string, price *models.Price) error {
+func (s *StripeWebhookService) ensureStripePaidSubscriptionEntitlements(ctx context.Context, railSubID string, price *models.Price) error {
 	if s == nil || s.DB == nil || s.SubscriptionService == nil {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
+	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	if err != nil {
 		return fmt.Errorf("load stripe subscription for paid entitlement reconciliation: %w", err)
 	}
@@ -638,7 +638,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		if err != nil {
 			return nil
 		}
-		if session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorStripe); err == nil && session != nil {
+		if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 			sessionID = session.ID
 		}
 	}
@@ -664,10 +664,10 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if userID == "" {
 		return fmt.Errorf("stripe checkout missing user_id metadata")
 	}
-	if s.ProcessorCustomerService != nil {
+	if s.RailCustomerService != nil {
 		customerID := strings.TrimSpace(sess.Customer)
 		if customerID != "" {
-			_ = s.ProcessorCustomerService.Upsert(ctx, userID, string(models.ProcessorStripe), customerID)
+			_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), customerID)
 		}
 	}
 	if sess.Mode != "payment" {
@@ -710,7 +710,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         userID,
 		PriceID:        priceID,
-		Processor:      string(models.ProcessorStripe),
+		Rail:           string(models.RailStripe),
 		TransactionID:  paymentTransactionID,
 		Amount:         sess.AmountTotal,
 		AmountProvided: true,
@@ -724,7 +724,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if s.CheckoutSessionService != nil {
 		sessionID := parseCheckoutSessionID(sess.Metadata)
 		if sessionID == uuid.Nil {
-			if session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorStripe); err == nil && session != nil {
+			if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 				sessionID = session.ID
 			}
 		}
@@ -825,10 +825,10 @@ func (s *StripeWebhookService) handleSubscriptionDeleted(ctx context.Context, ob
 		return nil
 	}
 	return s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-		Processor:               ptrProcessor(models.ProcessorStripe),
-		ProcessorSubscriptionID: &data.ID,
-		CancelType:              models.CancelTypeUser,
-		RevokeAccess:            false,
+		Rail:               ptrRail(models.RailStripe),
+		RailSubscriptionID: &data.ID,
+		CancelType:         models.CancelTypeUser,
+		RevokeAccess:       false,
 	})
 }
 
@@ -855,16 +855,16 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if subID == "" {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), subID)
+	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), subID)
 	if err != nil {
 		return nil
 	}
 	incomingStatus := strings.ToLower(strings.TrimSpace(data.Status))
 	if _, terminal := subscriptions.TerminalCancelReason(sub); terminal && (incomingStatus == "active" || incomingStatus == "trialing") {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           sub.ID,
-			"processor_subscription_id": subID,
-			"incoming_status":           incomingStatus,
+			"subscription_id":      sub.ID,
+			"rail_subscription_id": subID,
+			"incoming_status":      incomingStatus,
 		}).Warn("ignoring stripe active update for terminal local subscription")
 		return nil
 	}
@@ -1066,7 +1066,7 @@ func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, n
 // payment. The "failed:" prefix guarantees it never collides with the eventual
 // successful charge's row (which uses the bare charge/payment_intent id), while
 // staying stable for a given failed invoice so duplicate webhook deliveries
-// dedupe via the (processor, transaction_id) unique constraint.
+// dedupe via the (rail, transaction_id) unique constraint.
 func failedPaymentTransactionID(inv stripeInvoice) string {
 	return "failed:" + normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent, inv.ID)
 }
@@ -1076,19 +1076,19 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse failed invoice: %w", err)
 	}
-	processorSubID := inv.processorSubscriptionID()
-	if processorSubID == "" {
+	railSubID := inv.railSubscriptionID()
+	if railSubID == "" {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
+	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	if err != nil {
 		return nil
 	}
 	if sub.Status == models.StatusCancelled {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           sub.ID,
-			"processor_subscription_id": processorSubID,
-			"invoice_id":                inv.ID,
+			"subscription_id":      sub.ID,
+			"rail_subscription_id": railSubID,
+			"invoice_id":           inv.ID,
 		}).Warn("ignoring stripe payment failure for cancelled local subscription")
 		return nil
 	}
@@ -1100,7 +1100,7 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	// Record the failed attempt so it shows in payment history. The transaction
 	// id is prefixed with "failed:" so it can never collide with the eventual
 	// successful charge's row, and so duplicate webhook deliveries of the same
-	// failure dedupe (CreateIfNotExists on processor+transaction_id). This is a
+	// failure dedupe (CreateIfNotExists on rail+transaction_id). This is a
 	// plain insert: no entitlements/credits are granted for a failed payment.
 	if s.PaymentService != nil {
 		amount := inv.AmountDue
@@ -1118,7 +1118,7 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 			CustomerID:     sub.CustomerID,
 			PriceID:        sub.PriceID,
 			SubscriptionID: &subID,
-			Processor:      models.ProcessorStripe,
+			Rail:           models.RailStripe,
 			TransactionID:  txnID,
 			Amount:         amount,
 			ListAmount:     amount,
@@ -1137,43 +1137,43 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 			CustomerID: sub.CustomerID,
 			EventType:  models.NotificationPaymentMethodFailed,
 			Data: map[string]any{
-				"processor":                 string(models.ProcessorStripe),
-				"processor_subscription_id": processorSubID,
-				"stripe_invoice_id":         strings.TrimSpace(inv.ID),
+				"rail":                 string(models.RailStripe),
+				"rail_subscription_id": railSubID,
+				"stripe_invoice_id":    strings.TrimSpace(inv.ID),
 			},
 		}
 		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id":           sub.ID,
-				"processor_subscription_id": processorSubID,
-				"invoice_id":                inv.ID,
+				"subscription_id":      sub.ID,
+				"rail_subscription_id": railSubID,
+				"invoice_id":           inv.ID,
 			}).Error("failed to create and deliver stripe payment failure notification")
 		}
 	}
 
-	s.logStripePaymentFailure(ctx, sub, inv, processorSubID)
+	s.logStripePaymentFailure(ctx, sub, inv, railSubID)
 	return nil
 }
 
-func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub *models.Subscription, inv stripeInvoice, processorSubID string) {
+func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub *models.Subscription, inv stripeInvoice, railSubID string) {
 	if s.EventLogService == nil || sub == nil {
 		return
 	}
 	reason := "stripe_invoice_payment_failed"
-	if err := s.EventLogService.LogLifecycleFailure(ctx, sub.ID, sub.CustomerID.String(), models.ProcessorStripe, models.StatusPastDue, &reason, nil, s.now()); err != nil {
+	if err := s.EventLogService.LogLifecycleFailure(ctx, sub.ID, sub.CustomerID.String(), models.RailStripe, models.StatusPastDue, &reason, nil, s.now()); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"subscription_id":           sub.ID,
-			"processor_subscription_id": processorSubID,
-			"invoice_id":                inv.ID,
+			"subscription_id":      sub.ID,
+			"rail_subscription_id": railSubID,
+			"invoice_id":           inv.ID,
 		}).Error("failed to log stripe payment failure event")
 	}
 
 	metadata := map[string]interface{}{
-		"processor":                 string(models.ProcessorStripe),
-		"event_source":              "webhook",
-		"stripe_invoice_id":         strings.TrimSpace(inv.ID),
-		"processor_subscription_id": processorSubID,
-		"is_renewal":                true,
+		"rail":                 string(models.RailStripe),
+		"event_source":         "webhook",
+		"stripe_invoice_id":    strings.TrimSpace(inv.ID),
+		"rail_subscription_id": railSubID,
+		"is_renewal":           true,
 	}
 	priceAmount := 0.0
 	priceCurrency := strings.ToLower(strings.TrimSpace(inv.Currency))
@@ -1195,25 +1195,25 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 	}
 	statusPastDue := string(models.StatusPastDue)
 	if err := s.EventLogService.LogSubscriptionEvent(ctx, analytics.SubscriptionEventData{
-		EventID:                 uuidutil.NewV7(),
-		SubscriptionID:          sub.ID,
-		UserID:                  sub.CustomerID.String(),
-		EventType:               analytics.PaymentEventSubscriptionPastDue,
-		Status:                  statusPastDue,
-		PriceAmount:             priceAmount,
-		PriceCurrency:           priceCurrency,
-		BillingCycleDays:        billingCycleDays,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Processor:               string(models.ProcessorStripe),
-		ProcessorSubscriptionID: &processorSubID,
-		Metadata:                analytics.CreateMetadataJSON(metadata),
-		Timestamp:               s.now().UTC(),
+		EventID:            uuidutil.NewV7(),
+		SubscriptionID:     sub.ID,
+		UserID:             sub.CustomerID.String(),
+		EventType:          analytics.PaymentEventSubscriptionPastDue,
+		Status:             statusPastDue,
+		PriceAmount:        priceAmount,
+		PriceCurrency:      priceCurrency,
+		BillingCycleDays:   billingCycleDays,
+		ProductID:          productID,
+		PriceID:            &priceID,
+		Rail:               string(models.RailStripe),
+		RailSubscriptionID: &railSubID,
+		Metadata:           analytics.CreateMetadataJSON(metadata),
+		Timestamp:          s.now().UTC(),
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"subscription_id":           sub.ID,
-			"processor_subscription_id": processorSubID,
-			"invoice_id":                inv.ID,
+			"subscription_id":      sub.ID,
+			"rail_subscription_id": railSubID,
+			"invoice_id":           inv.ID,
 		}).Error("failed to log stripe subscription past_due event")
 	}
 }
@@ -1267,7 +1267,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund missing id or amount"))
 	}
 	var original *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, refundID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, refundID); err == nil && existing != nil {
 		if existing.RefundedPaymentID == nil {
 			return nil
 		}
@@ -1293,11 +1293,11 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		return fmt.Errorf("calculate stripe refund total: %w", err)
 	}
 	if original.SubscriptionID != nil && refundedTotal >= original.Amount && s.SubscriptionLifecycleService != nil {
-		processor := models.ProcessorStripe
+		rail := models.RailStripe
 		reason := "Stripe refund processed"
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: original.SubscriptionID,
-			Processor:      &processor,
+			Rail:           &rail,
 			CancelType:     models.CancelTypeMerchant,
 			CancelFeedback: &reason,
 			RevokeAccess:   true,
@@ -1343,7 +1343,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe dispute missing id or amount"))
 	}
 	var original *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, disputeID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, disputeID); err == nil && existing != nil {
 		if existing.RefundedPaymentID == nil {
 			return nil
 		}
@@ -1370,11 +1370,11 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 	}
 	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		processor := models.ProcessorStripe
+		rail := models.RailStripe
 		reason := fmt.Sprintf("STRIPE DISPUTE: %s status=%s", strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: original.SubscriptionID,
-			Processor:      &processor,
+			Rail:           &rail,
 			CancelType:     models.CancelTypeChargeback,
 			CancelFeedback: &reason,
 			RevokeAccess:   true,
@@ -1423,7 +1423,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	if disputeID == "" {
 		return nil
 	}
-	disputeReversal, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, disputeID)
+	disputeReversal, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, disputeID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			return nil
@@ -1436,7 +1436,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 
 	recoveryID := "dispute_won:" + disputeID
 	var existingRecovery *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, recoveryID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, recoveryID); err == nil && existing != nil {
 		existingRecovery = existing
 	} else if err != nil && !repo.IsNotFound(err) {
 		return fmt.Errorf("lookup stripe won dispute recovery payment: %w", err)
@@ -1461,7 +1461,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			PriceID:           original.PriceID,
 			SubscriptionID:    original.SubscriptionID,
 			RefundedPaymentID: &original.ID,
-			Processor:         original.Processor,
+			Rail:              original.Rail,
 			TransactionID:     recoveryID,
 			Amount:            -disputeReversal.Amount,
 			ListAmount:        original.ListAmount,
@@ -1519,8 +1519,8 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		return nil
 	}
 	_, err = s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
-		Processor:                 models.ProcessorStripe,
-		ProcessorSubscriptionID:   sub.ProcessorSubscriptionID,
+		Rail:                      models.RailStripe,
+		RailSubscriptionID:        sub.RailSubscriptionID,
 		CurrentPeriodEndsAt:       &paidThrough,
 		AllowTerminalReactivation: true,
 	})
@@ -1558,7 +1558,7 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 		if candidate == "" {
 			continue
 		}
-		payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, candidate)
+		payment, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, candidate)
 		if err == nil {
 			return payment, nil
 		}
@@ -1646,7 +1646,7 @@ func stripeInvoiceIsProration(inv stripeInvoice) bool {
 // linker write. It lets handleInvoicePaid avoid inserting a second row for a
 // payment already recorded under a different key (e.g. the backfill keyed by
 // charge id vs the preview webhook keyed by invoice id), which the
-// (merchant, processor, transaction_id) unique index cannot dedupe on its own.
+// (merchant, rail, transaction_id) unique index cannot dedupe on its own.
 //
 // Failed-attempt rows never match: their transaction ids are "failed:"-prefixed
 // and they carry no stripe_invoice_id metadata, so a prior failure does not
@@ -1665,7 +1665,7 @@ func (s *StripeWebhookService) stripeInvoicePaymentAlreadyRecorded(ctx context.C
 			continue
 		}
 		seen[candidate] = struct{}{}
-		existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, candidate)
+		existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, candidate)
 		if err != nil {
 			if repo.IsNotFound(err) {
 				continue
@@ -1695,7 +1695,7 @@ func stripeInvoiceHasNoRefundableTransaction(inv stripeInvoice) bool {
 	return strings.TrimSpace(inv.Charge) == "" && strings.TrimSpace(inv.PaymentIntent) == ""
 }
 
-func ptrProcessor(p models.Processor) *models.Processor {
+func ptrRail(p models.Rail) *models.Rail {
 	return &p
 }
 

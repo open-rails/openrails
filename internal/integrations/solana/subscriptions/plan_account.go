@@ -50,7 +50,7 @@ const (
 
 // PlanAccount is the decoded on-chain Plan record. The immutable core terms
 // (Amount, PeriodHours, Mint) are what catalog drift compares against the
-// OpenRails-side Price.Processors["solana"] snapshot; Status / EndTs / Pullers /
+// OpenRails-side Price.Rails["solana"] snapshot; Status / EndTs / Pullers /
 // MetadataURI are mutable via updatePlan.
 type PlanAccount struct {
 	Discriminator byte

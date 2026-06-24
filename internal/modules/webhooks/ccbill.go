@@ -273,7 +273,7 @@ func (s *CCBillWebhookService) stableDedupeEventKey() string {
 
 type CCBillWebhookEventType = string
 
-const CCBillProcessorType models.Processor = "ccbill"
+const CCBillRailType models.Rail = "ccbill"
 
 const (
 	EventTypeNewSaleSuccess     CCBillWebhookEventType = "NewSaleSuccess"
@@ -373,7 +373,7 @@ func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
 			ctx,
 			s.stableDedupeEventKey(),
 			string(s.Data.EventType),
-			models.ProcessorCCBill,
+			models.RailCCBill,
 			s.Data,
 			s.handleCCBillWebhookDispatch,
 		)
@@ -413,7 +413,7 @@ func (s *CCBillWebhookService) handleCCBillWebhookDispatch(ctx context.Context) 
 		return s.handleChargeback(ctx)
 	default:
 		log.WithContext(ctx).WithFields(log.Fields{
-			"processor":  "ccbill",
+			"rail":       "ccbill",
 			"event_type": s.Data.EventType,
 		}).Warn("Unsupported CCBill webhook event type")
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("unsupported event type: %s", s.Data.EventType))
@@ -461,7 +461,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.ProcessorCCBill,
+			models.RailCCBill,
 			data,
 			process,
 		)
@@ -549,16 +549,16 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 
 	// CreateMembership now creates the Payment record internally
 	subscription, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		UserID:                  userID,
-		PriceID:                 price.ID,
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: &ccBillSubID,
-		UserEmail:               emailPtr,
-		CurrentPeriodEndsAt:     paidTermEnd,
-		TransactionID:           transactionID,
-		Amount:                  billedAmountCents,
-		AmountProvided:          true,
-		Currency:                currencyValue,
+		UserID:              userID,
+		PriceID:             price.ID,
+		Rail:                models.RailCCBill,
+		RailSubscriptionID:  &ccBillSubID,
+		UserEmail:           emailPtr,
+		CurrentPeriodEndsAt: paidTermEnd,
+		TransactionID:       transactionID,
+		Amount:              billedAmountCents,
+		AmountProvided:      true,
+		Currency:            currencyValue,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create membership: %w", err)
@@ -594,7 +594,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		} else if session != nil {
 			paymentID := uuid.Nil
 			if s.PaymentService != nil && strings.TrimSpace(transactionID) != "" {
-				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID); err == nil {
+				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.RailCCBill, transactionID); err == nil {
 					paymentID = payment.ID
 				}
 			}
@@ -611,7 +611,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id": transactionID,
-			"processor":      "ccbill",
+			"rail":           "ccbill",
 			"event_source":   "webhook",
 			"amount":         billedAmount,
 			// Card information for fraud monitoring and audit
@@ -653,7 +653,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
-			Processor:      "ccbill",
+			Rail:           "ccbill",
 			Amount:         &billedAmount,
 			Currency:       currencyValue,
 			WebhookSource:  "webhook",
@@ -680,7 +680,7 @@ func (s *CCBillWebhookService) findCCBillCheckoutSession(ctx context.Context, re
 			return session, err
 		}
 	}
-	return s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorCCBill)
+	return s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailCCBill)
 }
 
 func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
@@ -724,7 +724,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
 				"transaction_id": transactionID,
-				"processor":      "ccbill",
+				"rail":           "ccbill",
 				"event_source":   "webhook",
 				"failure_code":   failureCode,
 				"failure_reason": failureReason,
@@ -736,7 +736,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				EventID:       uuidutil.NewV7(),
 				UserID:        userID,
 				EventType:     analytics.PaymentEventChargeFailure,
-				Processor:     "ccbill",
+				Rail:          "ccbill",
 				Currency:      currencyValue,
 				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"initial_signup": true}),
 				WebhookSource: "webhook",
@@ -843,7 +843,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 	paymentService := s.paymentService()
 	if paymentService != nil {
-		existingPayment, err := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID)
+		existingPayment, err := paymentService.GetByTransactionID(ctx, models.RailCCBill, transactionID)
 		if err != nil && !repo.IsNotFound(err) {
 			return fmt.Errorf("failed to check existing upgrade payment: %w", err)
 		}
@@ -864,11 +864,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
-		// Find subscription by the original processor subscription ID and then transition it.
-		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), originalSubscriptionID)
+		// Find subscription by the original rail subscription ID and then transition it.
+		subscription, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), originalSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for original processor subscription ID: %s", originalSubscriptionID)
+				return fmt.Errorf("subscription not found for original rail subscription ID: %s", originalSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -913,7 +913,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			CustomerID:     subscription.CustomerID,
 			PriceID:        newPrice.ID,
 			SubscriptionID: &subscription.ID,
-			Processor:      models.ProcessorCCBill,
+			Rail:           models.RailCCBill,
 			TransactionID:  transactionID,
 			Amount:         billedAmountCents,
 			ListAmount:     newPrice.Amount,
@@ -938,7 +938,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}
 
-		subscription.ProcessorSubscriptionID = ccBillSubID
+		subscription.RailSubscriptionID = ccBillSubID
 
 		if err = subscription.Validate(billedAmount); err != nil {
 			return fmt.Errorf("failed to validate subscription: %w", err)
@@ -958,7 +958,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
 				"transaction_id":           transactionID,
-				"processor":                "ccbill",
+				"rail":                     "ccbill",
 				"event_source":             "webhook",
 				"event_type":               "upgrade",
 				"amount":                   billedAmount,
@@ -1009,7 +1009,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				SubscriptionID: &subscription.ID,
 				UserID:         subscription.CustomerID.String(),
 				EventType:      analytics.PaymentEventChargeSuccess,
-				Processor:      "ccbill",
+				Rail:           "ccbill",
 				Amount:         &billedAmount,
 				Currency:       currencyValue,
 				BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
@@ -1218,7 +1218,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
 				"transaction_id":           transactionID,
-				"processor":                "ccbill",
+				"rail":                     "ccbill",
 				"event_source":             "webhook",
 				"failure_code":             failureCode,
 				"failure_reason":           failureReason,
@@ -1236,7 +1236,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				EventID:       uuidutil.NewV7(),
 				UserID:        userID,
 				EventType:     analytics.PaymentEventChargeFailure,
-				Processor:     "ccbill",
+				Rail:          "ccbill",
 				Currency:      currencyValue,
 				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"upgrade_failure": true}),
 				WebhookSource: "webhook",
@@ -1295,11 +1295,11 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		productService := catalog.NewProductService(txdb)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
-		// Find subscription by processor subscription ID
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
+		// Find subscription by rail subscription ID
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
+				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -1323,23 +1323,23 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		// Log billing date change event to ClickHouse
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
-				"processor_subscription_id": pSubscriptionID,
-				"processor":                 "ccbill",
-				"event_source":              "webhook",
-				"old_renewal_date":          oldRenewalDate,
-				"new_renewal_date":          sub.CurrentPeriodEndsAt,
+				"rail_subscription_id": pSubscriptionID,
+				"rail":                 "ccbill",
+				"event_source":         "webhook",
+				"old_renewal_date":     oldRenewalDate,
+				"new_renewal_date":     sub.CurrentPeriodEndsAt,
 			}
 
 			uid1 := sub.CustomerID.String()
 			subscriptionEventData := analytics.SubscriptionEventData{
-				EventID:                 uuidutil.NewV7(),
-				SubscriptionID:          sub.ID,
-				UserID:                  uid1,
-				EventType:               analytics.PaymentEventBillingDateChanged,
-				Processor:               "ccbill",
-				ProcessorSubscriptionID: &pSubscriptionID,
-				Metadata:                analytics.CreateMetadataJSON(metadata),
-				Timestamp:               s.now(),
+				EventID:            uuidutil.NewV7(),
+				SubscriptionID:     sub.ID,
+				UserID:             uid1,
+				EventType:          analytics.PaymentEventBillingDateChanged,
+				Rail:               "ccbill",
+				RailSubscriptionID: &pSubscriptionID,
+				Metadata:           analytics.CreateMetadataJSON(metadata),
+				Timestamp:          s.now(),
 			}
 
 			if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -1348,10 +1348,10 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscriptionID":          sub.ID,
-			"userID":                  sub.CustomerID.String(),
-			"processorSubscriptionID": pSubscriptionID,
-			"newRenewalDate":          parsed,
+			"subscriptionID":     sub.ID,
+			"userID":             sub.CustomerID.String(),
+			"railSubscriptionID": pSubscriptionID,
+			"newRenewalDate":     parsed,
 		}).Info("Updated subscription billing date successfully")
 
 		return nil
@@ -1379,11 +1379,11 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		productService := catalog.NewProductService(txdb)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
-		// Find subscription by processor subscription ID
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
+		// Find subscription by rail subscription ID
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
+				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -1391,9 +1391,9 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		// Log customer data update event to ClickHouse
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
-				"processor_subscription_id": pSubscriptionID,
-				"processor":                 "ccbill",
-				"event_source":              "webhook",
+				"rail_subscription_id": pSubscriptionID,
+				"rail":                 "ccbill",
+				"event_source":         "webhook",
 				"updated_fields": []string{
 					"firstName",
 					"lastName",
@@ -1414,14 +1414,14 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 
 			uid2 := sub.CustomerID.String()
 			subscriptionEventData := analytics.SubscriptionEventData{
-				EventID:                 uuidutil.NewV7(),
-				SubscriptionID:          sub.ID,
-				UserID:                  uid2,
-				EventType:               analytics.PaymentEventCustomerDataUpdated,
-				Processor:               "ccbill",
-				ProcessorSubscriptionID: &pSubscriptionID,
-				Metadata:                analytics.CreateMetadataJSON(metadata),
-				Timestamp:               s.now(),
+				EventID:            uuidutil.NewV7(),
+				SubscriptionID:     sub.ID,
+				UserID:             uid2,
+				EventType:          analytics.PaymentEventCustomerDataUpdated,
+				Rail:               "ccbill",
+				RailSubscriptionID: &pSubscriptionID,
+				Metadata:           analytics.CreateMetadataJSON(metadata),
+				Timestamp:          s.now(),
 			}
 
 			if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -1430,9 +1430,9 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscriptionID":          sub.ID,
-			"userID":                  sub.CustomerID.String(),
-			"processorSubscriptionID": pSubscriptionID,
+			"subscriptionID":     sub.ID,
+			"userID":             sub.CustomerID.String(),
+			"railSubscriptionID": pSubscriptionID,
 		}).Info("Processed customer data update successfully")
 
 		return nil
@@ -1477,15 +1477,15 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	}
 
 	sub, err := s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: pSubscriptionID,
-		CurrentPeriodEndsAt:     renewalDate,
+		Rail:                models.RailCCBill,
+		RailSubscriptionID:  pSubscriptionID,
+		CurrentPeriodEndsAt: renewalDate,
 	})
 	if err != nil {
 		if subscriptions.IsTerminalTransitionBlocked(err) {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"processor_subscription_id": pSubscriptionID,
-				"transaction_id":            transactionID,
+				"rail_subscription_id": pSubscriptionID,
+				"transaction_id":       transactionID,
 			}).Warn("Blocked terminal -> active transition for CCBill UserReactivation")
 			return nil
 		}
@@ -1494,13 +1494,13 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
-			"transaction_id":            transactionID,
-			"processor_subscription_id": pSubscriptionID,
-			"processor":                 "ccbill",
-			"event_source":              "webhook",
-			"price_description":         priceStr,
-			"next_renewal_date":         nextRenewalDate,
-			"reactivation_type":         "user_initiated",
+			"transaction_id":       transactionID,
+			"rail_subscription_id": pSubscriptionID,
+			"rail":                 "ccbill",
+			"event_source":         "webhook",
+			"price_description":    priceStr,
+			"next_renewal_date":    nextRenewalDate,
+			"reactivation_type":    "user_initiated",
 		}
 
 		priceAmount := 0.0
@@ -1519,22 +1519,22 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		}
 
 		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:                 uuidutil.NewV7(),
-			SubscriptionID:          sub.ID,
-			UserID:                  sub.CustomerID.String(),
-			EventType:               analytics.PaymentEventSubscriptionReactivated,
-			Status:                  string(sub.Status),
-			CancelType:              "",
-			PriceAmount:             priceAmount,
-			PriceCurrency:           priceCurrency,
-			BillingCycleDays:        billingCycleDays,
-			ProductID:               productID,
-			PriceID:                 priceID,
-			Processor:               "ccbill",
-			ProcessorSubscriptionID: &pSubscriptionID,
-			ProcessorTransactionID:  &transactionID,
-			Metadata:                analytics.CreateMetadataJSON(metadata),
-			Timestamp:               s.now(),
+			EventID:            uuidutil.NewV7(),
+			SubscriptionID:     sub.ID,
+			UserID:             sub.CustomerID.String(),
+			EventType:          analytics.PaymentEventSubscriptionReactivated,
+			Status:             string(sub.Status),
+			CancelType:         "",
+			PriceAmount:        priceAmount,
+			PriceCurrency:      priceCurrency,
+			BillingCycleDays:   billingCycleDays,
+			ProductID:          productID,
+			PriceID:            priceID,
+			Rail:               "ccbill",
+			RailSubscriptionID: &pSubscriptionID,
+			RailTransactionID:  &transactionID,
+			Metadata:           analytics.CreateMetadataJSON(metadata),
+			Timestamp:          s.now(),
 		}
 
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -1555,13 +1555,13 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscriptionID":          sub.ID,
-		"userID":                  sub.CustomerID.String(),
-		"transactionID":           transactionID,
-		"processorSubscriptionID": pSubscriptionID,
-		"priceDescription":        priceStr,
-		"nextRenewalDate":         nextRenewalDate,
-		"periodEndsAt":            sub.CurrentPeriodEndsAt,
+		"subscriptionID":     sub.ID,
+		"userID":             sub.CustomerID.String(),
+		"transactionID":      transactionID,
+		"railSubscriptionID": pSubscriptionID,
+		"priceDescription":   priceStr,
+		"nextRenewalDate":    nextRenewalDate,
+		"periodEndsAt":       sub.CurrentPeriodEndsAt,
 	}).Info("Processed user reactivation successfully")
 
 	return nil
@@ -1601,11 +1601,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
-		// Find subscription by processor subscription ID
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
+		// Find subscription by rail subscription ID
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
+				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -1625,7 +1625,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		var originalPayment *models.Payment
 		if refundTransactionID != "" && refundAmountCents > 0 {
 			reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
-			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID)
+			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.RailCCBill, reversalID)
 			switch {
 			case lookupErr == nil && existingRefund != nil:
 				log.WithContext(ctx).WithFields(log.Fields{
@@ -1642,7 +1642,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 				}
 			default:
 				var originalErr error
-				originalPayment, originalErr = paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, refundTransactionID)
+				originalPayment, originalErr = paymentService.GetByTransactionID(ctx, models.RailCCBill, refundTransactionID)
 				if repo.IsNotFound(originalErr) {
 					originalPayment, originalErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
 				}
@@ -1717,9 +1717,9 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					SubscriptionID:    &subscriptionID,
 					Err:               refundLedgerErr,
 					Metadata: map[string]any{
-						"processor_subscription_id": pSubscriptionID,
-						"refund_amount":             refundAmount,
-						"refund_reason":             refundReason,
+						"rail_subscription_id": pSubscriptionID,
+						"refund_amount":        refundAmount,
+						"refund_reason":        refundReason,
 					},
 				}
 			}
@@ -1753,14 +1753,14 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		// Log refund event to ClickHouse
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
-				"refund_transaction_id":     refundTransactionID,
-				"processor":                 "ccbill",
-				"event_source":              "webhook",
-				"refund_reason":             refundReason,
-				"refund_type":               "auto_detected",
-				"refund_amount":             refundAmount,
-				"subscription_terminated":   shouldTerminate,
-				"processor_subscription_id": pSubscriptionID,
+				"refund_transaction_id":   refundTransactionID,
+				"rail":                    "ccbill",
+				"event_source":            "webhook",
+				"refund_reason":           refundReason,
+				"refund_type":             "auto_detected",
+				"refund_amount":           refundAmount,
+				"subscription_terminated": shouldTerminate,
+				"rail_subscription_id":    pSubscriptionID,
 			}
 
 			// Log as payment event (negative amount for refund)
@@ -1770,7 +1770,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 				SubscriptionID: &sub.ID,
 				UserID:         sub.CustomerID.String(),
 				EventType:      analytics.PaymentEventRefund,
-				Processor:      "ccbill",
+				Rail:           "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
 				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
@@ -1838,30 +1838,30 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 		paymentService := payments.NewPaymentService(db)
 
-		// Try to find subscription by processor subscription ID
+		// Try to find subscription by rail subscription ID
 		// Note: For voids, the subscription might not exist yet since the transaction was voided
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
 				// This is expected for voids - the subscription may never have been created
 				log.WithContext(ctx).WithFields(log.Fields{
-					"processor_subscription_id": pSubscriptionID,
-					"void_amount":               voidAmount,
-					"void_transaction_id":       voidTransactionID,
-					"original_transaction_id":   voidTransactionID,
+					"rail_subscription_id":    pSubscriptionID,
+					"void_amount":             voidAmount,
+					"void_transaction_id":     voidTransactionID,
+					"original_transaction_id": voidTransactionID,
 				}).Info("Void event for non-existent subscription - transaction was voided before subscription creation")
 
 				// Still log the void event for audit purposes, but without subscription ID
 				if s.EventLogService != nil {
 					metadata := map[string]interface{}{
-						"void_transaction_id":       voidTransactionID,
-						"original_transaction_id":   voidTransactionID,
-						"processor":                 "ccbill",
-						"event_source":              "webhook",
-						"void_reason":               voidReason,
-						"void_amount":               voidAmount,
-						"processor_subscription_id": pSubscriptionID,
-						"subscription_exists":       false,
+						"void_transaction_id":     voidTransactionID,
+						"original_transaction_id": voidTransactionID,
+						"rail":                    "ccbill",
+						"event_source":            "webhook",
+						"void_reason":             voidReason,
+						"void_amount":             voidAmount,
+						"rail_subscription_id":    pSubscriptionID,
+						"subscription_exists":     false,
 					}
 
 					// Log as payment event (negative amount for void)
@@ -1869,7 +1869,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 					paymentEventData := analytics.PaymentEventData{
 						EventID:       uuidutil.NewV7(),
 						EventType:     analytics.PaymentEventVoid,
-						Processor:     "ccbill",
+						Rail:          "ccbill",
 						Amount:        &negativeAmount,
 						Currency:      currencyValue,
 						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
@@ -1896,13 +1896,13 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			"originalTransactionID": voidTransactionID,
 		}).Info("Void event for existing subscription")
 
-		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, voidTransactionID)
+		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.RailCCBill, voidTransactionID)
 		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
 			reversalID := "void:" + voidTransactionID
-			if existingVoid, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingVoid != nil {
+			if existingVoid, lookupErr := paymentService.GetByTransactionID(ctx, models.RailCCBill, reversalID); lookupErr == nil && existingVoid != nil {
 				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("Void reversal already recorded")
 			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
@@ -1930,14 +1930,14 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		// Log void event to ClickHouse
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
-				"void_transaction_id":       voidTransactionID,
-				"original_transaction_id":   voidTransactionID,
-				"processor":                 "ccbill",
-				"event_source":              "webhook",
-				"void_reason":               voidReason,
-				"void_amount":               voidAmount,
-				"processor_subscription_id": pSubscriptionID,
-				"subscription_exists":       true,
+				"void_transaction_id":     voidTransactionID,
+				"original_transaction_id": voidTransactionID,
+				"rail":                    "ccbill",
+				"event_source":            "webhook",
+				"void_reason":             voidReason,
+				"void_amount":             voidAmount,
+				"rail_subscription_id":    pSubscriptionID,
+				"subscription_exists":     true,
 			}
 
 			// Log as payment event (negative amount for void)
@@ -1947,7 +1947,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 				SubscriptionID: &sub.ID,
 				UserID:         sub.CustomerID.String(),
 				EventType:      analytics.PaymentEventVoid,
-				Processor:      "ccbill",
+				Rail:           "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
 				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
@@ -1973,11 +1973,11 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		return err
 	}
 	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		processor := models.ProcessorCCBill
+		rail := models.RailCCBill
 		reason := "CCBill void processed"
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: voidedSubscriptionID,
-			Processor:      &processor,
+			Rail:           &rail,
 			CancelType:     models.CancelTypeMerchant,
 			CancelFeedback: &reason,
 			RevokeAccess:   true,
@@ -2023,14 +2023,14 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		entSvc := entitlements.NewEntitlementService(db, s.Clock)
 		paymentService := payments.NewPaymentService(db, s.Clock)
 
-		// Find subscription by processor subscription ID
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
+		// Find subscription by rail subscription ID
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
 				log.WithContext(ctx).WithFields(log.Fields{
-					"processor_subscription_id": pSubscriptionID,
-					"chargeback_amount":         chargebackAmount,
-					"dispute_id":                "unknown",
+					"rail_subscription_id": pSubscriptionID,
+					"chargeback_amount":    chargebackAmount,
+					"dispute_id":           "unknown",
 				}).Error("Chargeback event for non-existent subscription - potential fraud")
 
 				// Still log the chargeback event for audit purposes
@@ -2038,14 +2038,14 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 					metadata := map[string]interface{}{
 						"chargeback_transaction_id": chargebackTransactionID,
 						"original_transaction_id":   chargebackTransactionID,
-						"processor":                 "ccbill",
+						"rail":                      "ccbill",
 						"event_source":              "webhook",
 						"chargeback_reason":         chargebackReason,
 						// CCBill doesn't provide dispute_id or structured reason codes in their webhook format
 						// The "Reason" field is a free-text description, not a standard code
-						"processor_subscription_id": pSubscriptionID,
-						"subscription_exists":       false,
-						"fraud_flag":                true,
+						"rail_subscription_id": pSubscriptionID,
+						"subscription_exists":  false,
+						"fraud_flag":           true,
 						// Card info for fraud analysis
 						"card_type":     data.CardType,
 						"card_last4":    data.Last4,
@@ -2058,7 +2058,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 					paymentEventData := analytics.PaymentEventData{
 						EventID:       uuidutil.NewV7(),
 						EventType:     analytics.PaymentEventChargeback,
-						Processor:     "ccbill",
+						Rail:          "ccbill",
 						Amount:        &negativeAmount,
 						Currency:      currencyValue,
 						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
@@ -2078,7 +2078,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		// No external user lookup (IdP-managed ID already on subscription)
-		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, chargebackTransactionID)
+		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.RailCCBill, chargebackTransactionID)
 		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for CCBill chargeback: %w", paymentErr)
 		}
@@ -2093,7 +2093,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			if reversalID == "chargeback:" {
 				reversalID += strings.TrimSpace(pSubscriptionID)
 			}
-			if existingChargeback, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingChargeback != nil {
+			if existingChargeback, lookupErr := paymentService.GetByTransactionID(ctx, models.RailCCBill, reversalID); lookupErr == nil && existingChargeback != nil {
 				log.WithContext(ctx).WithField("chargeback_transaction_id", reversalID).Info("CCBill chargeback reversal already recorded")
 			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing CCBill chargeback reversal: %w", lookupErr)
@@ -2114,7 +2114,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			ledgerErr = fmt.Errorf("resolve original payment for CCBill chargeback ledger reversal")
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id":           sub.ID,
-				"processor_subscription_id": pSubscriptionID,
+				"rail_subscription_id":      pSubscriptionID,
 				"chargeback_transaction_id": chargebackTransactionID,
 			}).Warn("Unable to resolve original payment for CCBill chargeback ledger reversal")
 		}
@@ -2163,9 +2163,9 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				SubscriptionID:    &subscriptionID,
 				Err:               ledgerErr,
 				Metadata: map[string]any{
-					"processor_subscription_id": pSubscriptionID,
-					"chargeback_amount":         chargebackAmount,
-					"chargeback_reason":         chargebackReason,
+					"rail_subscription_id": pSubscriptionID,
+					"chargeback_amount":    chargebackAmount,
+					"chargeback_reason":    chargebackReason,
 				},
 			}
 		}
@@ -2181,16 +2181,16 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			metadata := map[string]interface{}{
 				"chargeback_transaction_id": chargebackTransactionID,
 				"original_transaction_id":   chargebackTransactionID,
-				"processor":                 "ccbill",
+				"rail":                      "ccbill",
 				"event_source":              "webhook",
 				"chargeback_reason":         chargebackReason,
 				"chargeback_amount":         chargebackAmount,
 				// CCBill doesn't provide dispute_id or structured reason codes in their webhook format
 				// The "Reason" field is a free-text description, not a standard code
-				"processor_subscription_id": pSubscriptionID,
-				"subscription_terminated":   true,
-				"fraud_flag":                true,
-				"termination_immediate":     true,
+				"rail_subscription_id":    pSubscriptionID,
+				"subscription_terminated": true,
+				"fraud_flag":              true,
+				"termination_immediate":   true,
 				// Card info for fraud analysis
 				"card_type":     data.CardType,
 				"card_last4":    data.Last4,
@@ -2205,7 +2205,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				SubscriptionID: &sub.ID,
 				UserID:         sub.CustomerID.String(),
 				EventType:      analytics.PaymentEventChargeback,
-				Processor:      "ccbill",
+				Rail:           "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
 				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
@@ -2275,7 +2275,7 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.ProcessorCCBill,
+			models.RailCCBill,
 			data,
 			process,
 		)
@@ -2303,7 +2303,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		return err
 	}
 
-	prevSub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+	prevSub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 	if err != nil {
 		return fmt.Errorf("failed to get subscription for renewal: %w", err)
 	}
@@ -2312,23 +2312,23 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		return fmt.Errorf("subscription price is required for CCBill renewal amount validation")
 	}
 	if err := validateCCBillCurrencyMatches(currencyValue, prevSub.Price.Currency, map[string]interface{}{
-		"price_id":                  prevSub.Price.ID.String(),
-		"processor_subscription_id": ccBillSubID,
-		"subscription_id":           prevSub.ID.String(),
-		"transaction_id":            transactionID,
+		"price_id":             prevSub.Price.ID.String(),
+		"rail_subscription_id": ccBillSubID,
+		"subscription_id":      prevSub.ID.String(),
+		"transaction_id":       transactionID,
 	}); err != nil {
 		return err
 	}
 	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, prevSub.Price.Amount, map[string]interface{}{
 		"price_id":                     prevSub.Price.ID.String(),
-		"processor_subscription_id":    ccBillSubID,
+		"rail_subscription_id":         ccBillSubID,
 		"subscription_id":              prevSub.ID.String(),
 		"subscription_status":          string(prevStatus),
 		"subscription_expected_amount": prevSub.Price.Amount,
 	}, log.Fields{
-		"transaction_id":            transactionID,
-		"processor_subscription_id": ccBillSubID,
-		"subscription_id":           prevSub.ID,
+		"transaction_id":       transactionID,
+		"rail_subscription_id": ccBillSubID,
+		"subscription_id":      prevSub.ID,
 	}); err != nil {
 		return err
 	}
@@ -2340,31 +2340,31 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 	// RenewMembership now creates the Payment record internally
 	if err = s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: ccBillSubID,
-		CurrentPeriodEndsAt:     paidTermEnd,
-		TransactionID:           transactionID,
-		Amount:                  billedAmountCents,
-		AmountProvided:          true,
-		Currency:                currencyValue,
+		Rail:                models.RailCCBill,
+		RailSubscriptionID:  ccBillSubID,
+		CurrentPeriodEndsAt: paidTermEnd,
+		TransactionID:       transactionID,
+		Amount:              billedAmountCents,
+		AmountProvided:      true,
+		Currency:            currencyValue,
 	}); err != nil {
 		if subscriptions.IsTerminalTransitionBlocked(err) {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"processor_subscription_id": ccBillSubID,
-				"transaction_id":            transactionID,
+				"rail_subscription_id": ccBillSubID,
+				"transaction_id":       transactionID,
 			}).Warn("Blocked terminal -> active transition for delayed CCBill RenewalSuccess")
 			if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
-				Provider:       string(models.ProcessorCCBill),
+				Provider:       string(models.RailCCBill),
 				Operation:      "terminal_blocked_renewal_success",
 				TransactionID:  transactionID,
 				UserID:         prevSub.CustomerID.String(),
 				SubscriptionID: &prevSub.ID,
 				Err:            err,
 				Metadata: map[string]any{
-					"processor_subscription_id": ccBillSubID,
-					"amount_cents":              billedAmountCents,
-					"currency":                  currencyValue,
-					"event_type":                string(s.Data.EventType),
+					"rail_subscription_id": ccBillSubID,
+					"amount_cents":         billedAmountCents,
+					"currency":             currencyValue,
+					"event_type":           string(s.Data.EventType),
 				},
 			}); alertErr != nil {
 				return fmt.Errorf("record terminal-blocked CCBill renewal success repair alert: %w", alertErr)
@@ -2375,7 +2375,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}
 
 	// Get the subscription for logging
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 	if err != nil {
 		return fmt.Errorf("failed to get subscription for logging: %w", err)
 	}
@@ -2406,7 +2406,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id":  transactionID,
-			"processor":       "ccbill",
+			"rail":            "ccbill",
 			"event_source":    "webhook",
 			"event_type":      "renewal",
 			"amount":          billedAmount,
@@ -2430,7 +2430,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
-			Processor:      "ccbill",
+			Rail:           "ccbill",
 			Amount:         &billedAmount,
 			Currency:       currencyValue,
 			BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
@@ -2463,29 +2463,29 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			priceID = &subscription.Price.ID
 		}
 		metadata := map[string]interface{}{
-			"processor_subscription_id": ccBillSubID,
-			"processor":                 "ccbill",
-			"event_source":              "webhook",
-			"from_status":               string(prevStatus),
-			"to_status":                 statusActive,
+			"rail_subscription_id": ccBillSubID,
+			"rail":                 "ccbill",
+			"event_source":         "webhook",
+			"from_status":          string(prevStatus),
+			"to_status":            statusActive,
 		}
 		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:                 uuidutil.NewV7(),
-			SubscriptionID:          subscription.ID,
-			UserID:                  uidStr,
-			EventType:               analytics.PaymentEventSubscriptionReactivated,
-			Status:                  statusActive,
-			CancelType:              "",
-			PriceAmount:             priceAmount,
-			PriceCurrency:           priceCurrency,
-			BillingCycleDays:        billingCycleDays,
-			ProductID:               productID,
-			PriceID:                 priceID,
-			Processor:               "ccbill",
-			ProcessorSubscriptionID: &ccBillSubID,
-			ProcessorTransactionID:  &transactionID,
-			Metadata:                analytics.CreateMetadataJSON(metadata),
-			Timestamp:               s.now(),
+			EventID:            uuidutil.NewV7(),
+			SubscriptionID:     subscription.ID,
+			UserID:             uidStr,
+			EventType:          analytics.PaymentEventSubscriptionReactivated,
+			Status:             statusActive,
+			CancelType:         "",
+			PriceAmount:        priceAmount,
+			PriceCurrency:      priceCurrency,
+			BillingCycleDays:   billingCycleDays,
+			ProductID:          productID,
+			PriceID:            priceID,
+			Rail:               "ccbill",
+			RailSubscriptionID: &ccBillSubID,
+			RailTransactionID:  &transactionID,
+			Metadata:           analytics.CreateMetadataJSON(metadata),
+			Timestamp:          s.now(),
 		}
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
 			log.WithError(err).Error("Failed to log subscription reactivation event to ClickHouse")
@@ -2531,7 +2531,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		entSvc.SetClock(s.Clock)
 
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
 		}
@@ -2541,10 +2541,10 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		}
 		if ignored, reason := shouldIgnoreCCBillRenewalFailure(sub, failureRenewalAt); ignored {
 			fields := log.Fields{
-				"subscription_id":           sub.ID,
-				"processor_subscription_id": ccBillSubID,
-				"transaction_id":            transactionID,
-				"reason":                    reason,
+				"subscription_id":      sub.ID,
+				"rail_subscription_id": ccBillSubID,
+				"transaction_id":       transactionID,
+				"reason":               reason,
 			}
 			if failureRenewalAt != nil {
 				fields["failure_renewal_at"] = failureRenewalAt.UTC()
@@ -2568,7 +2568,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		sub.RetryAttempts = nil
 		sub.GraceEndsAt = nil
 
-		// For CCBill, retry behavior is dictated by the processor.
+		// For CCBill, retry behavior is dictated by the rail.
 		// We treat nextRetryAt as the only grace signal and model grace as separate entitlement windows
 		// (source_type='grace'), appended to the user's entitlement timeline.
 		var graceUntil *time.Time
@@ -2637,7 +2637,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	}
 
 	// Reload subscription for logging (ensures relations are present if service loads them).
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 	if err != nil {
 		// Fall back to the version we updated inside the transaction.
 		subscription = subForLogs
@@ -2646,7 +2646,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		return fmt.Errorf("subscription not found for logging: %s", ccBillSubID)
 	}
 
-	// Log renewal failure event to ClickHouse - standardized with NMI-backed processors
+	// Log renewal failure event to ClickHouse - standardized with NMI-backed rails
 	if s.EventLogService != nil {
 		failureCurrency := ""
 		if subscription.Price != nil {
@@ -2656,16 +2656,16 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		}
 
 		metadata := map[string]interface{}{
-			"transaction_id":            transactionID,
-			"processor":                 "ccbill",
-			"event_source":              "webhook",
-			"failure_code":              data.FailureCode,
-			"failure_reason":            data.FailureReason,
-			"processor_subscription_id": ccBillSubID,
-			"is_renewal":                true,
-			"next_retry_at":             subscription.NextRetryAt,
-			"paid_term_end":             subscription.CurrentPeriodEndsAt,
-			"grace_ends_at":             subscription.GraceEndsAt,
+			"transaction_id":       transactionID,
+			"rail":                 "ccbill",
+			"event_source":         "webhook",
+			"failure_code":         data.FailureCode,
+			"failure_reason":       data.FailureReason,
+			"rail_subscription_id": ccBillSubID,
+			"is_renewal":           true,
+			"next_retry_at":        subscription.NextRetryAt,
+			"paid_term_end":        subscription.CurrentPeriodEndsAt,
+			"grace_ends_at":        subscription.GraceEndsAt,
 		}
 
 		paymentEventData := analytics.PaymentEventData{
@@ -2673,7 +2673,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.CustomerID.String(),
 			EventType:      analytics.PaymentEventChargeFailure,
-			Processor:      "ccbill",
+			Rail:           "ccbill",
 			Currency:       failureCurrency,
 			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"renewal_failure": true}),
 			WebhookSource:  "webhook",
@@ -2702,22 +2702,22 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			priceID = &subscription.Price.ID
 		}
 		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:                 uuidutil.NewV7(),
-			SubscriptionID:          subscription.ID,
-			UserID:                  uidStr,
-			EventType:               analytics.PaymentEventSubscriptionPastDue,
-			Status:                  statusPastDue,
-			CancelType:              "",
-			PriceAmount:             priceAmount,
-			PriceCurrency:           priceCurrency,
-			BillingCycleDays:        billingCycleDays,
-			ProductID:               productID,
-			PriceID:                 priceID,
-			Processor:               "ccbill",
-			ProcessorSubscriptionID: &ccBillSubID,
-			ProcessorTransactionID:  &transactionID,
-			Metadata:                analytics.CreateMetadataJSON(metadata),
-			Timestamp:               s.now(),
+			EventID:            uuidutil.NewV7(),
+			SubscriptionID:     subscription.ID,
+			UserID:             uidStr,
+			EventType:          analytics.PaymentEventSubscriptionPastDue,
+			Status:             statusPastDue,
+			CancelType:         "",
+			PriceAmount:        priceAmount,
+			PriceCurrency:      priceCurrency,
+			BillingCycleDays:   billingCycleDays,
+			ProductID:          productID,
+			PriceID:            priceID,
+			Rail:               "ccbill",
+			RailSubscriptionID: &ccBillSubID,
+			RailTransactionID:  &transactionID,
+			Metadata:           analytics.CreateMetadataJSON(metadata),
+			Timestamp:          s.now(),
 		}
 
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -2731,31 +2731,31 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPaymentMethodFailed,
 			Data: map[string]any{
-				"processor":                 string(models.ProcessorCCBill),
-				"processor_subscription_id": ccBillSubID,
-				"transaction_id":            transactionID,
-				"failure_code":              data.FailureCode,
-				"failure_reason":            data.FailureReason,
+				"rail":                 string(models.RailCCBill),
+				"rail_subscription_id": ccBillSubID,
+				"transaction_id":       transactionID,
+				"failure_code":         data.FailureCode,
+				"failure_reason":       data.FailureReason,
 			},
 		}
 		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id":           subscription.ID,
-				"processor_subscription_id": ccBillSubID,
-				"transaction_id":            transactionID,
+				"subscription_id":      subscription.ID,
+				"rail_subscription_id": ccBillSubID,
+				"transaction_id":       transactionID,
 			}).Error("failed to create and deliver CCBill renewal failure notification")
 		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.CustomerID.String(),
-		"processorSubscriptionID": ccBillSubID,
-		"failureCode":             data.FailureCode,
-		"failureReason":           data.FailureReason,
-		"nextRetryAt":             subscription.NextRetryAt,
-		"paidTermEnd":             subscription.CurrentPeriodEndsAt,
-		"graceEndsAt":             subscription.GraceEndsAt,
+		"subscriptionID":     subscription.ID,
+		"userID":             subscription.CustomerID.String(),
+		"railSubscriptionID": ccBillSubID,
+		"failureCode":        data.FailureCode,
+		"failureReason":      data.FailureReason,
+		"nextRetryAt":        subscription.NextRetryAt,
+		"paidTermEnd":        subscription.CurrentPeriodEndsAt,
+		"graceEndsAt":        subscription.GraceEndsAt,
 	}).Info("Handled renewal failure")
 
 	return nil
@@ -2773,10 +2773,10 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	}
 
 	// Get the subscription to determine cancel type and for logging
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 	if err != nil {
 		if repo.IsNotFound(err) {
-			return fmt.Errorf("subscription not found for processor subscription ID: %s", ccBillSubID)
+			return fmt.Errorf("subscription not found for rail subscription ID: %s", ccBillSubID)
 		}
 		return fmt.Errorf("failed to get subscription: %w", err)
 	}
@@ -2790,15 +2790,15 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	}
 
 	// Use SubscriptionLifecycleService to cancel membership
-	processor := models.ProcessorCCBill
+	rail := models.RailCCBill
 	revokeAccess := data.Source == "failedRB"
 	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-		SubscriptionID:          &subscription.ID,
-		Processor:               &processor,
-		ProcessorSubscriptionID: &ccBillSubID,
-		CancelType:              cancelType,
-		CancelFeedback:          &data.Reason,
-		RevokeAccess:            revokeAccess,
+		SubscriptionID:     &subscription.ID,
+		Rail:               &rail,
+		RailSubscriptionID: &ccBillSubID,
+		CancelType:         cancelType,
+		CancelFeedback:     &data.Reason,
+		RevokeAccess:       revokeAccess,
 	}); err != nil {
 		return fmt.Errorf("failed to cancel membership: %w", err)
 	}
@@ -2806,11 +2806,11 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	// Log subscription cancellation event to ClickHouse
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
-			"processor_subscription_id": ccBillSubID,
-			"cancel_reason":             data.Reason,
-			"cancel_source":             data.Source,
-			"cancel_type":               string(cancelType),
-			"is_failed_rebill":          data.Source == "failedRB",
+			"rail_subscription_id": ccBillSubID,
+			"cancel_reason":        data.Reason,
+			"cancel_source":        data.Source,
+			"cancel_type":          string(cancelType),
+			"is_failed_rebill":     data.Source == "failedRB",
 		}
 
 		uidStr := subscription.CustomerID.String()
@@ -2830,12 +2830,12 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 				}
 				return 0
 			}(),
-			ProductID:               &subscription.Price.ProductID,
-			PriceID:                 &subscription.Price.ID,
-			Processor:               "ccbill",
-			ProcessorSubscriptionID: &ccBillSubID,
-			Metadata:                analytics.CreateMetadataJSON(metadata),
-			Timestamp:               s.now(),
+			ProductID:          &subscription.Price.ProductID,
+			PriceID:            &subscription.Price.ID,
+			Rail:               "ccbill",
+			RailSubscriptionID: &ccBillSubID,
+			Metadata:           analytics.CreateMetadataJSON(metadata),
+			Timestamp:          s.now(),
 		}
 
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -2844,11 +2844,11 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.CustomerID.String(),
-		"processorSubscriptionID": ccBillSubID,
-		"cancelReason":            data.Reason,
-		"cancelSource":            data.Source,
+		"subscriptionID":     subscription.ID,
+		"userID":             subscription.CustomerID.String(),
+		"railSubscriptionID": ccBillSubID,
+		"cancelReason":       data.Reason,
+		"cancelSource":       data.Source,
 	}).Info("Cancelled subscription successfully")
 
 	return nil
@@ -2863,18 +2863,18 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	ccBillSubID := data.SubscriptionID
 
 	// Get the subscription for logging
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
+	subscription, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
 	if err != nil {
 		if repo.IsNotFound(err) {
-			return fmt.Errorf("subscription not found for processor subscription ID: %s", ccBillSubID)
+			return fmt.Errorf("subscription not found for rail subscription ID: %s", ccBillSubID)
 		}
 		return fmt.Errorf("failed to get subscription: %w", err)
 	}
 	if subscription.Status == models.StatusActive && subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(s.now()) {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           subscription.ID,
-			"processor_subscription_id": ccBillSubID,
-			"current_period_ends_at":    subscription.CurrentPeriodEndsAt,
+			"subscription_id":        subscription.ID,
+			"rail_subscription_id":   ccBillSubID,
+			"current_period_ends_at": subscription.CurrentPeriodEndsAt,
 		}).Warn("Ignoring CCBill expiration for active paid-through subscription")
 		return nil
 	}
@@ -2888,10 +2888,10 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	if s.EventLogService != nil {
 		cancelType := models.CancelTypeExpired
 		metadata := map[string]interface{}{
-			"processor_subscription_id": ccBillSubID,
-			"cancel_source":             "expiration",
-			"cancel_type":               string(cancelType),
-			"is_expiration":             true,
+			"rail_subscription_id": ccBillSubID,
+			"cancel_source":        "expiration",
+			"cancel_type":          string(cancelType),
+			"is_expiration":        true,
 		}
 
 		uidStr := subscription.CustomerID.String()
@@ -2911,12 +2911,12 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 				}
 				return 0
 			}(),
-			ProductID:               &subscription.Price.ProductID,
-			PriceID:                 &subscription.Price.ID,
-			Processor:               "ccbill",
-			ProcessorSubscriptionID: &ccBillSubID,
-			Metadata:                analytics.CreateMetadataJSON(metadata),
-			Timestamp:               s.now(),
+			ProductID:          &subscription.Price.ProductID,
+			PriceID:            &subscription.Price.ID,
+			Rail:               "ccbill",
+			RailSubscriptionID: &ccBillSubID,
+			Metadata:           analytics.CreateMetadataJSON(metadata),
+			Timestamp:          s.now(),
 		}
 
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -2925,9 +2925,9 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.CustomerID.String(),
-		"processorSubscriptionID": ccBillSubID,
+		"subscriptionID":     subscription.ID,
+		"userID":             subscription.CustomerID.String(),
+		"railSubscriptionID": ccBillSubID,
 	}).Info("Expired subscription successfully")
 
 	return nil

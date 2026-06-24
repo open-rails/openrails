@@ -35,7 +35,7 @@ type PendingAction struct {
 }
 
 // providerLookupKey is the conventional key under which an adapter stores its
-// canonical lookup key on the processors[provider] map (when one exists).
+// canonical lookup key on the rails[provider] map (when one exists).
 // Stripe is the canonical example; other providers may or may not populate it.
 const providerLookupKey = "lookup_key"
 
@@ -84,7 +84,7 @@ type providerAdapter interface {
 
 	// Attach validates and stores caller-supplied link ids on a freshly created
 	// OpenRails price. Returns the canonical IDs that should be written to the
-	// processors[provider] map. Called when the caller provided
+	// rails[provider] map. Called when the caller provided
 	// provider_links[provider] in the create/update request.
 	//
 	// in carries the OpenRails price substance (slug + immutable money terms) so
@@ -208,17 +208,17 @@ func internalStripeLookupKey(productSlug, currency string, unitAmount int64, bil
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
 // CreatePrice request through every adapter, dispatches Attach / AutoCreate as
-// appropriate, and returns the raw processors map to persist, the typed
+// appropriate, and returns the raw rails map to persist, the typed
 // per-provider response states, and any aggregated pending-manual-action items.
 //
 // A pending_manual_link result is NOT an error: the price is still created in
 // OpenRails with the corresponding provider slot empty, and the response carries
 // a PendingAction telling the operator what to do.
 //
-// Unknown providers are silently dropped (the same way an unknown processor in
-// processors[] was previously ignored by the catalog layer).
+// Unknown providers are silently dropped (the same way an unknown rail in
+// rails[] was previously ignored by the catalog layer).
 func (s *Service) resolveProviders(ctx context.Context, product *models.Product, req CreatePriceRequest, priceID uuid.UUID) (
-	processors map[string]map[string]string,
+	rails map[string]map[string]string,
 	states map[string]ProviderState,
 	pending []PendingAction,
 	err error,
@@ -243,7 +243,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		want[p] = struct{}{}
 	}
 
-	processors = map[string]map[string]string{}
+	rails = map[string]map[string]string{}
 	states = map[string]ProviderState{}
 
 	// Sort for deterministic ordering in tests / pending action lists.
@@ -309,7 +309,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			if ids == nil {
 				ids = map[string]string{}
 			}
-			processors[name] = ids
+			rails[name] = ids
 			states[name] = ProviderState{
 				Status:     ProviderStatusLinked,
 				IDs:        copyStringMap(ids),
@@ -354,7 +354,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			if ids == nil {
 				ids = map[string]string{}
 			}
-			processors[name] = ids
+			rails[name] = ids
 			states[name] = ProviderState{
 				Status:     ProviderStatusLinked,
 				IDs:        copyStringMap(ids),
@@ -363,7 +363,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 		}
 	}
-	return processors, states, pending, nil
+	return rails, states, pending, nil
 }
 
 // priceLinkContext builds the substance context (slug + immutable money terms)
@@ -414,7 +414,7 @@ func normalizeLinkMap(in map[string]string) map[string]string {
 }
 
 // copyStringMap is a tiny defensive copy so response structs don't alias the
-// processors map stored on the DB row.
+// rails map stored on the DB row.
 func copyStringMap(in map[string]string) map[string]string {
 	if in == nil {
 		return nil

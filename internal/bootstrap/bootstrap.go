@@ -28,7 +28,7 @@ type Options struct {
 	Cache                  cache.Cache
 	Clock                  clockwork.Clock
 	ConfiguredMerchant     merchant.ID
-	Processors             config.ProcessorSet
+	Rails                  config.RailSet
 }
 
 // NewApp constructs the long-lived application runtime.
@@ -41,7 +41,7 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		Cache:                  optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
 		Clock:                  optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 		ConfiguredMerchant:     optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
-		Processors:             optsValue(opts, func(o *Options) config.ProcessorSet { return o.Processors }),
+		Rails:                  optsValue(opts, func(o *Options) config.RailSet { return o.Rails }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

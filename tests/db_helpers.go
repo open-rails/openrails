@@ -142,11 +142,11 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 	return p
 }
 
-// GetPaymentByTransaction loads a payment by (processor, transaction_id);
+// GetPaymentByTransaction loads a payment by (rail, transaction_id);
 // fails the test when missing.
-func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, processor models.Processor, transactionID string) *models.Payment {
+func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := dbrepo.NewPaymentRepo(suite.App.Runtime.DB).GetByTransactionID(ctx, processor, transactionID)
+	p, err := dbrepo.NewPaymentRepo(suite.App.Runtime.DB).GetByTransactionID(ctx, rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }
@@ -204,21 +204,21 @@ func (suite *TestContainerSuite) GetEntitlement(ctx context.Context, id uuid.UUI
 	return &ents[0]
 }
 
-// GetSubscriptionByProcessorID retrieves a subscription by processor
+// GetSubscriptionByRailID retrieves a subscription by rail
 // subscription ID, or nil when none exists (matching the bun-era helper that
 // swallowed the not-found error).
-func (suite *TestContainerSuite) GetSubscriptionByProcessorID(processorSubID string) *models.Subscription {
+func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *models.Subscription {
 	suite.t.Helper()
 	ctx := context.Background()
 
 	var id uuid.UUID
 	err := suite.Pool.QueryRow(ctx,
-		"SELECT id FROM openrails.subscriptions WHERE processor_subscription_id = $1 LIMIT 1",
-		processorSubID).Scan(&id)
+		"SELECT id FROM openrails.subscriptions WHERE rail_subscription_id = $1 LIMIT 1",
+		railSubID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
-	require.NoError(suite.t, err, "Failed to look up subscription by processor id %s", processorSubID)
+	require.NoError(suite.t, err, "Failed to look up subscription by rail id %s", railSubID)
 
 	sub, err := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	if err != nil {

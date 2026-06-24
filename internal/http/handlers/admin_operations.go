@@ -111,22 +111,22 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 		statusFilter = &mapped
 	}
 
-	var processorFilter *string
-	if processor := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("processor"))); processor != "" {
-		processorFilter = &processor
+	var railFilter *string
+	if rail := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("rail"))); rail != "" {
+		railFilter = &rail
 	}
 	intentType := intents.TypeManualRebill
 
 	q := r.State.DB.Gen(ctx)
 	total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
-		Status: statusFilter, Provider: processorFilter, IntentType: &intentType,
+		Status: statusFilter, Provider: railFilter, IntentType: &intentType,
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count manual rebill intents")
 		return
 	}
 	rows, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
-		Status: statusFilter, Provider: processorFilter, IntentType: &intentType,
+		Status: statusFilter, Provider: railFilter, IntentType: &intentType,
 		PageLimit: int64(limit), PageOffset: int64(offset),
 	})
 	if err != nil {
@@ -138,7 +138,7 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 		item := map[string]any{
 			"id":              row.ID,
 			"subscription_id": row.SubscriptionID,
-			"processor":       row.Provider,
+			"rail":            row.Provider,
 			"status":          row.Status,
 			"attempts":        row.Attempts,
 			"next_attempt_at": row.NextAttemptAt,

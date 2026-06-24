@@ -37,13 +37,13 @@ func extrasTestSnapshot() localCatalogSnapshot {
 		Amount:           2300,
 		Currency:         "usd",
 		BillingCycleDays: &cycle,
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"stripe": {
-				models.ProcessorKeyStripePriceID:   "price_local",
-				models.ProcessorKeyStripeProductID: "prod_local",
+				models.RailKeyStripePriceID:   "price_local",
+				models.RailKeyStripeProductID: "prod_local",
 			},
-			string(models.ProcessorMobius): {
-				models.ProcessorKeyPlanID: "premium-usd-2300-30",
+			string(models.RailMobius): {
+				models.RailKeyPlanID: "premium-usd-2300-30",
 			},
 		},
 	}
@@ -436,8 +436,8 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 		return &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 2300, Currency: "usd",
 			BillingCycleDays: &cycle, Status: status,
-			Processors: map[string]map[string]string{
-				string(models.ProcessorSolana): {"plan_pda": pda},
+			Rails: map[string]map[string]string{
+				string(models.RailSolana): {"plan_pda": pda},
 			},
 		}
 	}
@@ -488,10 +488,10 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 	if key == "" {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
-	processors := config.ProcessorSet{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: key},
+	rails := config.RailSet{
+		"stripe": {Type: config.RailTypeStripe, SecretKey: key},
 	}
-	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Processors: processors}
+	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}
 	products, prices, err := fetchStripeCatalog(context.Background(), lister)
 	if err != nil {
 		t.Fatalf("live stripe listing: %v", err)

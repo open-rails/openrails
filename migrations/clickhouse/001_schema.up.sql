@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
     user_id String,
     merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
-    processor LowCardinality(String),
-    processor_subscription_id Nullable(String),
-    processor_transaction_id Nullable(String),
+    rail LowCardinality(String),
+    rail_subscription_id Nullable(String),
+    rail_transaction_id Nullable(String),
     status LowCardinality(String) DEFAULT '',
     cancel_type LowCardinality(String) DEFAULT '',
     price_amount Decimal(12, 2) DEFAULT 0,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
     version DateTime('UTC') DEFAULT now(),
     INDEX idx_subscription_events_user (user_id) TYPE minmax GRANULARITY 1,
     INDEX idx_subscription_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
-    INDEX idx_subscription_events_processor (processor) TYPE set(100) GRANULARITY 1,
+    INDEX idx_subscription_events_rail (rail) TYPE set(100) GRANULARITY 1,
     INDEX idx_subscription_events_type (event_type) TYPE set(100) GRANULARITY 1,
     INDEX idx_subscription_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS payment_events {{ON_CLUSTER}} (
     user_id String,
     merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
-    processor LowCardinality(String),
-    processor_transaction_id Nullable(String),
+    rail LowCardinality(String),
+    rail_transaction_id Nullable(String),
     amount Nullable(Decimal(10, 2)),
     currency LowCardinality(String),
     billing_info String DEFAULT '{}',
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS payment_events {{ON_CLUSTER}} (
     version DateTime('UTC') DEFAULT now(),
     INDEX idx_payment_events_user (user_id) TYPE minmax GRANULARITY 1,
     INDEX idx_payment_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
-    INDEX idx_payment_events_processor (processor) TYPE set(100) GRANULARITY 1,
+    INDEX idx_payment_events_rail (rail) TYPE set(100) GRANULARITY 1,
     INDEX idx_payment_events_type (event_type) TYPE set(100) GRANULARITY 1,
     INDEX idx_payment_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
@@ -63,8 +63,8 @@ CREATE TABLE IF NOT EXISTS webhook_events {{ON_CLUSTER}} (
     event_type String,
     subscription_id Nullable(UUID),
     user_id Nullable(String),
-    processor_subscription_id Nullable(String),
-    processor_transaction_id Nullable(String),
+    rail_subscription_id Nullable(String),
+    rail_transaction_id Nullable(String),
     processing_status LowCardinality(String),
     processing_time_ms UInt32,
     error_message Nullable(String),
@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS acu_events {{ON_CLUSTER}} (
     user_id Nullable(String),
     merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
-    processor LowCardinality(String),
-    processor_subscription_id Nullable(String),
+    rail LowCardinality(String),
+    rail_subscription_id Nullable(String),
     card_info String,
     update_status LowCardinality(String),
     requires_action Bool,
@@ -108,8 +108,8 @@ CREATE TABLE IF NOT EXISTS chargeback_events {{ON_CLUSTER}} (
     user_id Nullable(String),
     merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
-    processor LowCardinality(String),
-    processor_transaction_id Nullable(String),
+    rail LowCardinality(String),
+    rail_transaction_id Nullable(String),
     amount Nullable(Float64),
     currency LowCardinality(String),
     chargeback_type LowCardinality(String),
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS daily_metrics {{ON_CLUSTER}} (
     pending_count_end Int64,
     mrr_cents Int64,
     entitlements_granted Nullable(Int64),
-    processor Nested (
+    rail Nested (
         name String,
         active_subscriptions Int64,
         new_subscriptions Int64,
@@ -232,7 +232,7 @@ per_sub AS (
         argMax(status, timestamp) AS status,
         argMax(price_amount, timestamp) AS price_amount,
         argMax(billing_cycle_days, timestamp) AS billing_cycle_days,
-        argMax(processor, timestamp) AS processor
+        argMax(rail, timestamp) AS rail
     FROM subscription_events
     GROUP BY
         toDate(timestamp),
@@ -276,7 +276,7 @@ sub_proc AS (
         toDate(timestamp) AS snapshot_date,
         if(price_currency = '', 'usd', price_currency) AS currency,
         merchant_id,
-        processor,
+        rail,
         toInt64(countIf(event_type = 'subscription_created')) AS new_subscriptions,
         toInt64(countIf(event_type IN ('subscription_cancelled','subscription_expired'))) AS cancellations,
         toInt64(countIf(status = 'active')) AS active_subscriptions
@@ -285,7 +285,7 @@ sub_proc AS (
         toDate(timestamp),
         if(price_currency = '', 'usd', price_currency),
         merchant_id,
-        processor
+        rail
 ),
 pay_events AS (
     SELECT
@@ -316,7 +316,7 @@ pay_proc AS (
         snapshot_date,
         currency,
         merchant_id,
-        processor,
+        rail,
         toInt64(sumIf(amount * 100, event_type = 'charge_success')) AS revenue_total_cents,
         toInt64(sumIf(amount * 100, event_type = 'charge_success' AND subscription_id IS NOT NULL)) AS revenue_subscription_cents,
         toInt64(sumIf(amount * 100, event_type = 'charge_success' AND subscription_id IS NULL)) AS revenue_one_time_cents,
@@ -329,20 +329,20 @@ pay_proc AS (
             toDate(timestamp) AS snapshot_date,
             if(currency = '', 'usd', currency) AS currency,
             merchant_id,
-            processor,
+            rail,
             amount,
             event_type,
             subscription_id
         FROM payment_events
     )
-    GROUP BY snapshot_date, currency, merchant_id, processor
+    GROUP BY snapshot_date, currency, merchant_id, rail
 ),
 proc_join AS (
     SELECT
         coalesce(sp.snapshot_date, pp.snapshot_date) AS snapshot_date,
         coalesce(sp.currency, pp.currency) AS currency,
         coalesce(sp.merchant_id, pp.merchant_id) AS merchant_id,
-        coalesce(sp.processor, pp.processor) AS processor,
+        coalesce(sp.rail, pp.rail) AS rail,
         coalesce(sp.active_subscriptions, 0) AS active_subscriptions,
         coalesce(sp.new_subscriptions, 0) AS new_subscriptions,
         coalesce(sp.cancellations, 0) AS cancellations,
@@ -356,21 +356,21 @@ proc_join AS (
     FROM sub_proc sp
     FULL OUTER JOIN pay_proc pp
       ON sp.snapshot_date = pp.snapshot_date
-     AND sp.processor = pp.processor
+     AND sp.rail = pp.rail
      AND sp.currency = pp.currency
      AND sp.merchant_id = pp.merchant_id
 ),
 proc_arrays AS (
     WITH
     proc_dim AS (
-        SELECT DISTINCT currency, merchant_id, processor FROM proc_join
+        SELECT DISTINCT currency, merchant_id, rail FROM proc_join
     ),
     proc_spine AS (
         SELECT
             s.snapshot_date AS snapshot_date,
             d.currency AS currency,
             d.merchant_id AS merchant_id,
-            d.processor AS processor
+            d.rail AS rail
         FROM spine s
         INNER JOIN proc_dim d ON s.currency = d.currency AND s.merchant_id = d.merchant_id
     ),
@@ -379,7 +379,7 @@ proc_arrays AS (
             ps.snapshot_date,
             ps.currency,
             ps.merchant_id,
-            ps.processor,
+            ps.rail,
             pj.active_subscriptions AS active_subscriptions_raw,
             coalesce(pj.new_subscriptions, 0) AS new_subscriptions,
             coalesce(pj.cancellations, 0) AS cancellations,
@@ -395,15 +395,15 @@ proc_arrays AS (
           ON ps.snapshot_date = pj.snapshot_date
          AND ps.currency = pj.currency
          AND ps.merchant_id = pj.merchant_id
-         AND ps.processor = pj.processor
+         AND ps.rail = pj.rail
     ),
     proc_carried AS (
         SELECT
             snapshot_date,
             currency,
             merchant_id,
-            processor,
-            last_value(active_subscriptions_raw) IGNORE NULLS OVER (PARTITION BY currency, merchant_id, processor ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS active_subscriptions,
+            rail,
+            last_value(active_subscriptions_raw) IGNORE NULLS OVER (PARTITION BY currency, merchant_id, rail ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS active_subscriptions,
             new_subscriptions,
             cancellations,
             revenue_total_cents,
@@ -419,7 +419,7 @@ proc_arrays AS (
         snapshot_date,
         currency,
         merchant_id,
-        arraySort(groupArray((processor,
+        arraySort(groupArray((rail,
             coalesce(active_subscriptions, 0),
             coalesce(new_subscriptions, 0),
             coalesce(cancellations, 0),
@@ -499,17 +499,17 @@ SELECT
     coalesce(last_value(pending_count_end) IGNORE NULLS OVER w, 0) AS pending_count_end,
     coalesce(last_value(mrr_cents) IGNORE NULLS OVER w, 0) AS mrr_cents,
     entitlements_granted,
-    proc_name AS `processor.name`,
-    proc_active AS `processor.active_subscriptions`,
-    proc_new AS `processor.new_subscriptions`,
-    proc_cancel AS `processor.cancellations`,
-    proc_rev_total AS `processor.revenue_total_cents`,
-    proc_rev_sub AS `processor.revenue_subscription_cents`,
-    proc_rev_one_time AS `processor.revenue_one_time_cents`,
-    proc_refunds AS `processor.revenue_refunds_cents`,
-    proc_chargebacks AS `processor.revenue_chargebacks_cents`,
-    proc_pay_success AS `processor.payments_successful`,
-    proc_pay_failed AS `processor.payments_failed`,
+    proc_name AS `rail.name`,
+    proc_active AS `rail.active_subscriptions`,
+    proc_new AS `rail.new_subscriptions`,
+    proc_cancel AS `rail.cancellations`,
+    proc_rev_total AS `rail.revenue_total_cents`,
+    proc_rev_sub AS `rail.revenue_subscription_cents`,
+    proc_rev_one_time AS `rail.revenue_one_time_cents`,
+    proc_refunds AS `rail.revenue_refunds_cents`,
+    proc_chargebacks AS `rail.revenue_chargebacks_cents`,
+    proc_pay_success AS `rail.payments_successful`,
+    proc_pay_failed AS `rail.payments_failed`,
     now('UTC') AS created_at,
     now('UTC') AS version
 FROM daily

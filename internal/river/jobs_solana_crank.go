@@ -161,7 +161,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 	merchantID := merchant.ID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
-	// from the linked price's Solana processor config.
+	// from the linked price's Solana rail config.
 	resolve := w.resolvePlanFn
 	if resolve == nil {
 		resolve = w.resolvePlan
@@ -229,10 +229,10 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				return fmt.Errorf("solana crank: set cancelled status: %w", err)
 			}
 			subID := row.SubscriptionID
-			proc := models.ProcessorSolana
+			proc := models.RailSolana
 			reason := fmt.Sprintf("%s (%s)", crankErr.Error(), cf.Code)
 			if err := w.Lifecycle.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-				Processor:      &proc,
+				Rail:           &proc,
 				SubscriptionID: &subID,
 				CancelType:     models.CancelTypeUser,
 				CancelFeedback: &reason,
@@ -251,7 +251,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			code := string(cf.Code)
 			subID := row.SubscriptionID
 			if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-				Processor:      models.ProcessorSolana,
+				Rail:           models.RailSolana,
 				SubscriptionID: &subID,
 				FailureReason:  &reason,
 				FailureCode:    &code,
@@ -283,14 +283,14 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 	now := w.now()
 	periodEnd := now.Add(time.Duration(periodHoursI64) * time.Hour)
 	if err := w.Lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.ProcessorSolana,
-		ProcessorSubscriptionID: row.SubscriptionPDA,
-		TransactionID:           sig,
-		Amount:                  fiatAmount,
-		AmountProvided:          true,
-		Currency:                currency,
-		CurrentPeriodStartsAt:   &now,
-		CurrentPeriodEndsAt:     &periodEnd,
+		Rail:                  models.RailSolana,
+		RailSubscriptionID:    row.SubscriptionPDA,
+		TransactionID:         sig,
+		Amount:                fiatAmount,
+		AmountProvided:        true,
+		Currency:              currency,
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   &periodEnd,
 		PaymentMetadata: map[string]any{
 			"solana_subscriber_wallet": row.SubscriberWallet,
 			"solana_subscription_pda":  row.SubscriptionPDA,
@@ -320,9 +320,9 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 	if sub.RetryAttempts != nil {
 		retryAttempts = *sub.RetryAttempts
 	}
-	cfg := price.GetProcessorConfig(models.ProcessorSolana)
+	cfg := price.GetRailConfig(models.RailSolana)
 	if cfg == nil {
-		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana processor config", price.ID)
+		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana rail config", price.ID)
 	}
 	amountBaseUnits, err := strconv.ParseUint(cfg["amount_base_units"], 10, 64)
 	if err != nil || amountBaseUnits == 0 {

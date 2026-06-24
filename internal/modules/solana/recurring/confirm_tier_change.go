@@ -59,11 +59,11 @@ type ConfirmTierChangeInput struct {
 	NewPriceID uuid.UUID
 
 	// New on-chain subscription account the atomic tx created (from the prepare
-	// step's result). This is the processor_subscription_id of the new membership +
+	// step's result). This is the rail_subscription_id of the new membership +
 	// the subscription_pda of the new row.
 	NewSubscriptionPDA string
 
-	// New plan terms (canonical, from the new price's Solana processor config).
+	// New plan terms (canonical, from the new price's Solana rail config).
 	NewPlanID          uint64
 	NewMintSymbol      string
 	NewAmountBaseUnits uint64 // full per-cycle pull amount (token base units)
@@ -109,7 +109,7 @@ type ConfirmTierChangeResult struct {
 // signature here. We confirm it landed + SUCCEEDED on-chain and only then MIRROR
 // it into the DB:
 //
-//   - create the NEW membership (processor=solana, processor_subscription_id =
+//   - create the NEW membership (rail=solana, rail_subscription_id =
 //     new subscription PDA, recording the prorated first charge for an upgrade /
 //     no charge for a downgrade) + upsert the NEW solana_subscriptions row
 //     (status active) with next_pull_at set per kind (upgrade => now+period;
@@ -247,18 +247,18 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 
 	newSub, err := s.lifecycle.CreateMembership(ctx, &submod.CreateMembershipParams{
-		UserID:                  in.UserID,
-		PriceID:                 in.NewPriceID,
-		Processor:               models.ProcessorSolana,
-		ProcessorSubscriptionID: &newPDA,
-		UserEmail:               emailPtr,
-		TransactionID:           in.Signature,
-		Amount:                  in.NewFiatAmount,
-		AmountProvided:          true,
-		Currency:                in.NewCurrency,
-		CurrentPeriodStartsAt:   &newPeriodStart,
-		CurrentPeriodEndsAt:     &newPeriodEnd,
-		PaymentMetadata:         paymentMeta,
+		UserID:                in.UserID,
+		PriceID:               in.NewPriceID,
+		Rail:                  models.RailSolana,
+		RailSubscriptionID:    &newPDA,
+		UserEmail:             emailPtr,
+		TransactionID:         in.Signature,
+		Amount:                in.NewFiatAmount,
+		AmountProvided:        true,
+		Currency:              in.NewCurrency,
+		CurrentPeriodStartsAt: &newPeriodStart,
+		CurrentPeriodEndsAt:   &newPeriodEnd,
+		PaymentMetadata:       paymentMeta,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("recurring: create new membership: %w", err)

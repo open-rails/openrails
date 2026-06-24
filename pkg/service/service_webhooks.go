@@ -10,7 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -18,7 +18,7 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// HandleWebhook processes an incoming webhook from a payment processor.
+// HandleWebhook processes an incoming webhook from a payment rail.
 // It validates the signature, parses the payload, and enqueues a job for async processing.
 func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
 	_, err := s.requireWebhookRuntime()
@@ -34,14 +34,14 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 	}).Debug("Received webhook via Service API")
 
 	// Route based on provider
-	if processors.IsNMIBacked(provider) {
+	if rails.IsNMIBacked(provider) {
 		return s.handleNMIWebhook(ctx, provider, req)
 	}
 
 	switch provider {
-	case subscriptions.ProcessorCCBill:
+	case subscriptions.RailCCBill:
 		return s.handleCCBillWebhook(ctx, req)
-	case subscriptions.ProcessorStripe:
+	case subscriptions.RailStripe:
 		return s.handleStripeWebhook(ctx, req)
 	default:
 		return &WebhookResult{
@@ -142,7 +142,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		if !iputil.IsValidCCBillIP(req.ClientIP) {
 			log.WithFields(log.Fields{
 				"client_ip":  req.ClientIP,
-				"processor":  "ccbill",
+				"rail":       "ccbill",
 				"event_type": req.EventType,
 			}).Warn("CCBill webhook rejected - unauthorized IP address")
 
@@ -188,7 +188,7 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 	}
 	secret := ""
 	if s.rt != nil {
-		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil {
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil {
 			secret = stripeProc.WebhookSecret
 		}
 	}

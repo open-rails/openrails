@@ -24,7 +24,7 @@ type checkoutProviderAccountResolver struct{}
 func (checkoutProviderAccountResolver) ResolveProviderAccount(context.Context, string) (intents.ProviderAccountIdentity, bool) {
 	return intents.ProviderAccountIdentity{
 		ProviderKey:  "stripe_primary",
-		ProviderType: config.ProcessorTypeStripe,
+		ProviderType: config.RailTypeStripe,
 		AccountID:    "acct_checkout_primary",
 		Evidence:     map[string]any{"source": "test"},
 	}, true
@@ -76,8 +76,8 @@ func TestCheckoutSessionStampsPrimaryProviderAccount(t *testing.T) {
 		}
 		insertProductAndPrice(ctx, t, dbi.Qx(ctx), product, price)
 
-		processors := config.ProcessorSet{
-			"stripe_primary": {Type: config.ProcessorTypeStripe, Role: config.ProcessorRolePrimary},
+		rails := config.RailSet{
+			"stripe_primary": {Type: config.RailTypeStripe, Role: config.RailRolePrimary},
 		}
 		cfg := &config.Config{}
 		svc := NewCheckoutSessionService(
@@ -92,14 +92,14 @@ func TestCheckoutSessionStampsPrimaryProviderAccount(t *testing.T) {
 			nil,
 			nil,
 			cfg,
-			processors,
+			rails,
 		)
 		svc.SetProviderAccounts(checkoutProviderAccountResolver{})
 
 		resp, err := svc.CreateSession(ctx, &CheckoutSessionCreateRequest{
 			PriceID: api.FormatPriceID(priceID),
 			Payment: CheckoutSessionPaymentRequest{
-				Processor: config.ProcessorTypeStripe,
+				Rail: config.RailTypeStripe,
 			},
 		}, &UserIdentity{ID: uuid.NewString()})
 		require.NoError(t, err)

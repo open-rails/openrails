@@ -23,22 +23,22 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	newPrice := products[0].Prices[1]
 
 	userID := uuid.New().String()
-	originalProcessorSubID := "ccbill_sub_upgrade_old_" + uuid.New().String()
-	newProcessorSubID := "ccbill_sub_upgrade_new_" + uuid.New().String()
+	originalRailSubID := "ccbill_sub_upgrade_old_" + uuid.New().String()
+	newRailSubID := "ccbill_sub_upgrade_new_" + uuid.New().String()
 
 	created := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:         userID,
-		PriceID:        oldPriceID,
-		Status:         models.StatusActive,
-		Processor:      models.ProcessorCCBill,
-		ProcessorSubID: originalProcessorSubID,
+		UserID:    userID,
+		PriceID:   oldPriceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailCCBill,
+		RailSubID: originalRailSubID,
 	})
 	require.NotNil(t, created)
 	require.Equal(t, oldPriceID, created.PriceID)
 
 	payload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/upgradesuccess.json")
-	payload["subscriptionId"] = newProcessorSubID
-	payload["originalSubscriptionId"] = originalProcessorSubID
+	payload["subscriptionId"] = newRailSubID
+	payload["originalSubscriptionId"] = originalRailSubID
 	payload["originalClientAccnum"] = 945280
 	payload["originalClientSubacc"] = "0000"
 	payload["source"] = "FORM"
@@ -59,17 +59,17 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
 
 	require.Eventually(t, func() bool {
-		sub := suite.GetSubscriptionByProcessorID(newProcessorSubID)
+		sub := suite.GetSubscriptionByRailID(newRailSubID)
 		return sub != nil && sub.Status == models.StatusActive && sub.PriceID == newPrice.ID
 	}, 10*time.Second, 200*time.Millisecond)
 
-	updated := suite.GetSubscriptionByProcessorID(newProcessorSubID)
+	updated := suite.GetSubscriptionByRailID(newRailSubID)
 	require.NotNil(t, updated)
 	require.Equal(t, models.StatusActive, updated.Status)
 	require.Equal(t, newPrice.ID, updated.PriceID)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	payment := suite.GetPaymentByTransaction(ctx, models.ProcessorCCBill, transactionID)
+	payment := suite.GetPaymentByTransaction(ctx, models.RailCCBill, transactionID)
 	require.NotNil(t, payment.SubscriptionID)
 	require.Equal(t, updated.ID, *payment.SubscriptionID)
 	require.Equal(t, newPrice.ID, payment.PriceID)
@@ -77,18 +77,18 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, newPrice.Amount, payment.ListAmount)
 	require.Equal(t, "usd", payment.Currency)
 
-	oldLookup := suite.GetSubscriptionByProcessorID(originalProcessorSubID)
+	oldLookup := suite.GetSubscriptionByRailID(originalRailSubID)
 	require.Nil(t, oldLookup)
 
 	payload["timestamp"] = time.Now().UTC().Add(2 * time.Second).Format("2006-01-02 15:04:05")
 	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
 
 	count := suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.payments WHERE processor = $1 AND transaction_id = $2",
-		string(models.ProcessorCCBill), transactionID)
+		"SELECT COUNT(*) FROM openrails.payments WHERE rail = $1 AND transaction_id = $2",
+		string(models.RailCCBill), transactionID)
 	require.Equal(t, 1, count)
 
-	updatedAfterDupe := suite.GetSubscriptionByProcessorID(newProcessorSubID)
+	updatedAfterDupe := suite.GetSubscriptionByRailID(newRailSubID)
 	require.NotNil(t, updatedAfterDupe)
 	require.Equal(t, updated.ID, updatedAfterDupe.ID)
 	require.Equal(t, newPrice.ID, updatedAfterDupe.PriceID)

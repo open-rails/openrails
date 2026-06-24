@@ -14,7 +14,7 @@ const (
 	// CheckoutSessionModeSolanaCancel and CheckoutSessionModeSolanaTierChange
 	// extend the Solana Pay transaction-request machinery to the recurring
 	// subscription lifecycle (#272+). A cancel session carries the target
-	// subscription_id in ProcessorState; a tier-change session additionally
+	// subscription_id in RailState; a tier-change session additionally
 	// carries new_price_id. The public Solana Pay endpoint builds the unsigned
 	// (or cranker-co-signed) on-chain tx with the Solana Pay reference attached,
 	// and the reference poller mirrors the confirmed cancel / tier-change into
@@ -45,8 +45,8 @@ type CheckoutSession struct {
 	PriceID uuid.UUID           `json:"price_id"`
 	Mode    CheckoutSessionMode `json:"mode"`
 
-	Processor Processor             `json:"processor"`
-	Status    CheckoutSessionStatus `json:"status"`
+	Rail   Rail                  `json:"rail"`
+	Status CheckoutSessionStatus `json:"status"`
 
 	Amount   int64  `json:"amount"`
 	Currency string `json:"currency"`
@@ -60,8 +60,8 @@ type CheckoutSession struct {
 
 	Metadata map[string]string `json:"metadata,omitempty"`
 
-	ProcessorFields map[string]any `json:"processor_fields,omitempty"`
-	ProcessorState  map[string]any `json:"processor_state,omitempty"`
+	RailFields map[string]any `json:"rail_fields,omitempty"`
+	RailState  map[string]any `json:"rail_state,omitempty"`
 
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	// ProviderAccountID is the provider_accounts row selected for this provider

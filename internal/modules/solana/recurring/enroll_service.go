@@ -71,7 +71,7 @@ type EnrollInput struct {
 	PriceID          uuid.UUID
 	SubscriberWallet string
 
-	// Plan terms (from the price's Solana processor config).
+	// Plan terms (from the price's Solana rail config).
 	PlanID          uint64
 	MintSymbol      string
 	AmountBaseUnits uint64 // on-chain pull amount (token base units) — the NORMAL full per-cycle amount
@@ -93,7 +93,7 @@ type EnrollInput struct {
 // already pulled in that same tx (#286) — then creates the membership and
 // persists the openrails.solana_subscriptions row. There is NO separate first
 // crank: the first pull happened inside the atomic subscribe tx. Idempotent (the
-// lifecycle CreateMembership upserts on the processor subscription id).
+// lifecycle CreateMembership upserts on the rail subscription id).
 func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (*models.Subscription, error) {
 	if in.UserID == "" || in.SubscriberWallet == "" {
 		return nil, fmt.Errorf("recurring: user id and subscriber wallet are required")
@@ -185,17 +185,17 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		emailPtr = &in.UserEmail
 	}
 	sub, err := s.lifecycle.CreateMembership(ctx, &submod.CreateMembershipParams{
-		UserID:                  in.UserID,
-		PriceID:                 in.PriceID,
-		Processor:               models.ProcessorSolana,
-		ProcessorSubscriptionID: &subPDAStr,
-		UserEmail:               emailPtr,
-		TransactionID:           sig,
-		Amount:                  in.FiatAmount,
-		AmountProvided:          true,
-		Currency:                in.Currency,
-		CurrentPeriodStartsAt:   &now,
-		CurrentPeriodEndsAt:     &periodEnd,
+		UserID:                in.UserID,
+		PriceID:               in.PriceID,
+		Rail:                  models.RailSolana,
+		RailSubscriptionID:    &subPDAStr,
+		UserEmail:             emailPtr,
+		TransactionID:         sig,
+		Amount:                in.FiatAmount,
+		AmountProvided:        true,
+		Currency:              in.Currency,
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   &periodEnd,
 		PaymentMetadata: map[string]any{
 			"solana_subscriber_wallet": row.SubscriberWallet,
 			"solana_subscription_pda":  row.SubscriptionPDA,

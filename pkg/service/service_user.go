@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -133,7 +133,7 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 		Metadata:       req.Metadata,
 		IdempotencyKey: req.IdempotencyKey,
 		Payment: checkout.CheckoutSessionPaymentRequest{
-			Processor:       req.Payment.Processor,
+			Rail:            req.Payment.Rail,
 			PaymentMethodID: req.Payment.PaymentMethodID,
 			PaymentToken:    req.Payment.PaymentToken,
 			TokenSymbol:     req.Payment.TokenSymbol,
@@ -201,7 +201,7 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 
 	svcReq := &checkout.CheckoutSessionConfirmRequest{
 		Payment: checkout.CheckoutSessionConfirmPayment{
-			Processor: req.Payment.Processor,
+			Rail:      req.Payment.Rail,
 			Signature: req.Payment.Signature,
 			Wallet:    req.Payment.Wallet,
 		},
@@ -444,7 +444,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if sub.CustomerID.String() != userID {
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
-	if !processors.IsNMIBackedProcessor(sub.Processor) {
+	if !rails.IsNMIBackedRail(sub.Rail) {
 		return nil, fmt.Errorf("only NMI-backed subscriptions can have their payment method updated")
 	}
 	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
@@ -458,19 +458,19 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if pm.CustomerID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
-	if !processors.IsNMIBackedProcessor(pm.Processor) {
+	if !rails.IsNMIBackedRail(pm.Rail) {
 		return nil, fmt.Errorf("only NMI-backed payment methods can be used")
 	}
-	if !processors.SameProcessor(pm.Processor, sub.Processor) {
+	if !rails.SameRail(pm.Rail, sub.Rail) {
 		return nil, fmt.Errorf("payment method belongs to a different payment provider")
 	}
-	processorName := strings.ToLower(string(sub.Processor))
-	nmiClient, ok := s.rt.NMIClients[processorName]
+	railName := strings.ToLower(string(sub.Rail))
+	nmiClient, ok := s.rt.NMIClients[railName]
 	if !ok {
-		return nil, fmt.Errorf("payment processor not available")
+		return nil, fmt.Errorf("payment rail not available")
 	}
-	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.ProcessorSubscriptionID, pm.VaultID); err != nil {
-		return nil, fmt.Errorf("update payment method with processor: %w", err)
+	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.RailSubscriptionID, pm.VaultID); err != nil {
+		return nil, fmt.Errorf("update payment method with rail: %w", err)
 	}
 
 	// Update subscription payment method
@@ -871,9 +871,9 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
-	var solanaProc *config.ProcessorConfig
+	var solanaProc *config.RailConfig
 	if s.rt != nil {
-		solanaProc = s.rt.Processors.GetSolanaProcessor()
+		solanaProc = s.rt.Rails.GetSolanaRail()
 	}
 	if solanaProc == nil {
 		return nil, fmt.Errorf("solana not configured")
@@ -909,7 +909,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 	if err != nil {
 		return nil, err
 	}
-	if rt.ProcessorCustomerService == nil || rt.Config == nil {
+	if rt.RailCustomerService == nil || rt.Config == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	userID = strings.TrimSpace(userID)
@@ -917,7 +917,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	customerID, err := rt.ProcessorCustomerService.GetCustomerID(ctx, userID, "stripe")
+	customerID, err := rt.RailCustomerService.GetCustomerID(ctx, userID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		return nil, fmt.Errorf("stripe customer not found")
 	}
@@ -927,7 +927,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("return_url required")
 	}
 
-	service := &subscriptions.StripePortalService{Config: rt.Config, Processors: rt.Processors}
+	service := &subscriptions.StripePortalService{Config: rt.Config, Rails: rt.Rails}
 	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
 	if err != nil {
 		return nil, err
@@ -1005,13 +1005,13 @@ func priceFromModel(p *models.Price) Price {
 func subscriptionFromModel(resp *subscriptions.UserSubscriptionResponse) Subscription {
 	sub := resp.Subscription
 	result := Subscription{
-		ID:                      api.FormatSubscriptionID(sub.ID),
-		Status:                  string(sub.Status),
-		Processor:               string(sub.Processor),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		StartedAt:               api.ToUnix(sub.StartedAt),
-		Created:                 api.ToUnix(sub.CreatedAt),
-		Updated:                 api.ToUnix(sub.UpdatedAt),
+		ID:                 api.FormatSubscriptionID(sub.ID),
+		Status:             string(sub.Status),
+		Rail:               string(sub.Rail),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		StartedAt:          api.ToUnix(sub.StartedAt),
+		Created:            api.ToUnix(sub.CreatedAt),
+		Updated:            api.ToUnix(sub.UpdatedAt),
 	}
 	if sub.EndedAt != nil && !sub.EndedAt.IsZero() {
 		ts := sub.EndedAt.Unix()
@@ -1081,7 +1081,7 @@ func paymentFromModel(p *models.Payment) Payment {
 		Amount:        p.Amount,
 		Currency:      p.Currency,
 		UserID:        api.FormatUserID(p.CustomerID.String()),
-		Processor:     string(p.Processor),
+		Rail:          string(p.Rail),
 		TransactionID: p.TransactionID,
 		Created:       api.ToUnix(p.CreatedAt),
 	}
@@ -1098,10 +1098,10 @@ func paymentFromModel(p *models.Payment) Payment {
 
 func paymentMethodFromModel(pm *models.PaymentMethod) PaymentMethod {
 	result := PaymentMethod{
-		ID:        api.FormatPaymentMethodID(pm.ID),
-		Type:      "card",
-		Processor: string(pm.Processor),
-		Created:   api.ToUnix(pm.CreatedAt),
+		ID:      api.FormatPaymentMethodID(pm.ID),
+		Type:    "card",
+		Rail:    string(pm.Rail),
+		Created: api.ToUnix(pm.CreatedAt),
 	}
 	if pm.FailureReason != nil {
 		result.FailureReason = pm.FailureReason
@@ -1155,8 +1155,8 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 	} else if resp.NextAction != nil && resp.NextAction.RedirectToURL != nil {
 		result.URL = &resp.NextAction.RedirectToURL.URL
 	}
-	result.ProcessorData = map[string]any{
-		"processor":       resp.Payment.Processor,
+	result.RailData = map[string]any{
+		"rail":            resp.Payment.Rail,
 		"reference":       resp.Payment.Reference,
 		"transaction_url": resp.Payment.TransactionURL,
 		"solana_pay_url":  resp.Payment.SolanaPayURL,

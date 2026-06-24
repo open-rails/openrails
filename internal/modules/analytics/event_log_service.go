@@ -323,19 +323,19 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				userID = *d.UserID
 			}
 			transAsPayments = append(transAsPayments, PaymentEventData{
-				EventID:                d.EventID,
-				MerchantID:             d.MerchantID,
-				SubscriptionID:         d.SubscriptionID,
-				UserID:                 userID,
-				EventType:              d.EventType,
-				Processor:              d.Processor,
-				ProcessorTransactionID: d.ProcessorTransactionID,
-				Amount:                 d.Amount,
-				Currency:               d.Currency,
-				BillingInfo:            "{}",
-				WebhookSource:          "",
-				Metadata:               d.Metadata,
-				Timestamp:              d.Timestamp,
+				EventID:           d.EventID,
+				MerchantID:        d.MerchantID,
+				SubscriptionID:    d.SubscriptionID,
+				UserID:            userID,
+				EventType:         d.EventType,
+				Rail:              d.Rail,
+				RailTransactionID: d.RailTransactionID,
+				Amount:            d.Amount,
+				Currency:          d.Currency,
+				BillingInfo:       "{}",
+				WebhookSource:     "",
+				Metadata:          d.Metadata,
+				Timestamp:         d.Timestamp,
 			})
 			transFiles = append(transFiles, fileRec{p})
 		case "acu":
@@ -458,26 +458,26 @@ type SubscriptionEventData struct {
 	// MerchantID scopes this analytics event to a merchant / billing namespace
 	// (issue #232). It is populated from the request context at log time via
 	// merchant.Require; never write an unscoped hosted event.
-	MerchantID              string     `json:"merchant_id"`
-	SubscriptionID          uuid.UUID  `json:"subscription_id"`
-	UserID                  string     `json:"user_id"`
-	EventType               string     `json:"event_type"`
-	Status                  string     `json:"status"`
-	CancelType              string     `json:"cancel_type"`
-	PriceAmount             float64    `json:"price_amount"`
-	PriceCurrency           string     `json:"price_currency"`
-	BillingCycleDays        uint32     `json:"billing_cycle_days"`
-	ProductID               *uuid.UUID `json:"product_id,omitempty"`
-	PriceID                 *uuid.UUID `json:"price_id,omitempty"`
-	Processor               string     `json:"processor"`
-	ProcessorSubscriptionID *string    `json:"processor_subscription_id,omitempty"`
-	ProcessorTransactionID  *string    `json:"processor_transaction_id,omitempty"`
-	Metadata                string     `json:"metadata"`
-	Timestamp               time.Time  `json:"timestamp"`
+	MerchantID         string     `json:"merchant_id"`
+	SubscriptionID     uuid.UUID  `json:"subscription_id"`
+	UserID             string     `json:"user_id"`
+	EventType          string     `json:"event_type"`
+	Status             string     `json:"status"`
+	CancelType         string     `json:"cancel_type"`
+	PriceAmount        float64    `json:"price_amount"`
+	PriceCurrency      string     `json:"price_currency"`
+	BillingCycleDays   uint32     `json:"billing_cycle_days"`
+	ProductID          *uuid.UUID `json:"product_id,omitempty"`
+	PriceID            *uuid.UUID `json:"price_id,omitempty"`
+	Rail               string     `json:"rail"`
+	RailSubscriptionID *string    `json:"rail_subscription_id,omitempty"`
+	RailTransactionID  *string    `json:"rail_transaction_id,omitempty"`
+	Metadata           string     `json:"metadata"`
+	Timestamp          time.Time  `json:"timestamp"`
 }
 
 // PaymentEventType defines standardized event types for payment logging.
-// All processors (CCBill, NMI-backed, Solana) should use these constants
+// All rails (CCBill, NMI-backed, Solana) should use these constants
 // to ensure consistent event type values across the system.
 type PaymentEventType = string
 
@@ -517,75 +517,75 @@ const (
 type PaymentEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
-	MerchantID             string     `json:"merchant_id"`
-	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
-	UserID                 string     `json:"user_id"`
-	EventType              string     `json:"event_type"`
-	Processor              string     `json:"processor"`
-	ProcessorTransactionID *string    `json:"processor_transaction_id,omitempty"`
-	Amount                 *float64   `json:"amount,omitempty"`
-	Currency               string     `json:"currency"`
-	BillingInfo            string     `json:"billing_info"`
-	WebhookSource          string     `json:"webhook_source"`
-	Metadata               string     `json:"metadata"`
-	Timestamp              time.Time  `json:"timestamp"`
+	MerchantID        string     `json:"merchant_id"`
+	SubscriptionID    *uuid.UUID `json:"subscription_id,omitempty"`
+	UserID            string     `json:"user_id"`
+	EventType         string     `json:"event_type"`
+	Rail              string     `json:"rail"`
+	RailTransactionID *string    `json:"rail_transaction_id,omitempty"`
+	Amount            *float64   `json:"amount,omitempty"`
+	Currency          string     `json:"currency"`
+	BillingInfo       string     `json:"billing_info"`
+	WebhookSource     string     `json:"webhook_source"`
+	Metadata          string     `json:"metadata"`
+	Timestamp         time.Time  `json:"timestamp"`
 }
 
 // TransactionEventData represents data for transaction events
 type TransactionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
-	MerchantID             string     `json:"merchant_id"`
-	TransactionID          string     `json:"transaction_id"`
-	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
-	UserID                 *string    `json:"user_id,omitempty"`
-	EventType              string     `json:"event_type"`
-	Processor              string     `json:"processor"`
-	ProcessorTransactionID *string    `json:"processor_transaction_id,omitempty"`
-	Amount                 *float64   `json:"amount,omitempty"`
-	Currency               string     `json:"currency"`
-	Status                 string     `json:"status"`
-	Metadata               string     `json:"metadata"`
-	Timestamp              time.Time  `json:"timestamp"`
+	MerchantID        string     `json:"merchant_id"`
+	TransactionID     string     `json:"transaction_id"`
+	SubscriptionID    *uuid.UUID `json:"subscription_id,omitempty"`
+	UserID            *string    `json:"user_id,omitempty"`
+	EventType         string     `json:"event_type"`
+	Rail              string     `json:"rail"`
+	RailTransactionID *string    `json:"rail_transaction_id,omitempty"`
+	Amount            *float64   `json:"amount,omitempty"`
+	Currency          string     `json:"currency"`
+	Status            string     `json:"status"`
+	Metadata          string     `json:"metadata"`
+	Timestamp         time.Time  `json:"timestamp"`
 }
 
 // ACUEventData represents data for Automatic Card Updater events
 type ACUEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
-	MerchantID              string     `json:"merchant_id"`
-	SubscriptionID          *uuid.UUID `json:"subscription_id,omitempty"`
-	UserID                  *string    `json:"user_id,omitempty"`
-	EventType               string     `json:"event_type"`
-	Processor               string     `json:"processor"`
-	ProcessorSubscriptionID *string    `json:"processor_subscription_id,omitempty"`
-	CardInfo                string     `json:"card_info"`
-	UpdateStatus            string     `json:"update_status"`
-	RequiresAction          bool       `json:"requires_action"`
-	Reason                  string     `json:"reason"`
-	Metadata                string     `json:"metadata"`
-	Timestamp               time.Time  `json:"timestamp"`
+	MerchantID         string     `json:"merchant_id"`
+	SubscriptionID     *uuid.UUID `json:"subscription_id,omitempty"`
+	UserID             *string    `json:"user_id,omitempty"`
+	EventType          string     `json:"event_type"`
+	Rail               string     `json:"rail"`
+	RailSubscriptionID *string    `json:"rail_subscription_id,omitempty"`
+	CardInfo           string     `json:"card_info"`
+	UpdateStatus       string     `json:"update_status"`
+	RequiresAction     bool       `json:"requires_action"`
+	Reason             string     `json:"reason"`
+	Metadata           string     `json:"metadata"`
+	Timestamp          time.Time  `json:"timestamp"`
 }
 
 // ChargebackEventData represents data for chargeback events
 type ChargebackEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
-	MerchantID             string     `json:"merchant_id"`
-	ChargebackID           string     `json:"chargeback_id"`
-	BatchID                string     `json:"batch_id"`
-	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
-	UserID                 *string    `json:"user_id,omitempty"`
-	EventType              string     `json:"event_type"`
-	Processor              string     `json:"processor"`
-	ProcessorTransactionID *string    `json:"processor_transaction_id,omitempty"`
-	Amount                 *float64   `json:"amount,omitempty"`
-	Currency               string     `json:"currency"`
-	ChargebackType         string     `json:"chargeback_type"`
-	Reason                 string     `json:"reason"`
-	Status                 string     `json:"status"`
-	Metadata               string     `json:"metadata"`
-	Timestamp              time.Time  `json:"timestamp"`
+	MerchantID        string     `json:"merchant_id"`
+	ChargebackID      string     `json:"chargeback_id"`
+	BatchID           string     `json:"batch_id"`
+	SubscriptionID    *uuid.UUID `json:"subscription_id,omitempty"`
+	UserID            *string    `json:"user_id,omitempty"`
+	EventType         string     `json:"event_type"`
+	Rail              string     `json:"rail"`
+	RailTransactionID *string    `json:"rail_transaction_id,omitempty"`
+	Amount            *float64   `json:"amount,omitempty"`
+	Currency          string     `json:"currency"`
+	ChargebackType    string     `json:"chargeback_type"`
+	Reason            string     `json:"reason"`
+	Status            string     `json:"status"`
+	Metadata          string     `json:"metadata"`
+	Timestamp         time.Time  `json:"timestamp"`
 }
 
 // Basic PII redaction for free-form strings
@@ -647,7 +647,7 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 			"event_id":        data.EventID,
 			"subscription_id": data.SubscriptionID,
 			"event_type":      data.EventType,
-			"processor":       data.Processor,
+			"rail":            data.Rail,
 		}).Warn("Failed to log subscription event to ClickHouse; spooled")
 		return nil
 	}
@@ -656,7 +656,7 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 		"event_id":        data.EventID,
 		"subscription_id": data.SubscriptionID,
 		"event_type":      data.EventType,
-		"processor":       data.Processor,
+		"rail":            data.Rail,
 	}).Debug("Logged subscription event to ClickHouse")
 
 	return nil
@@ -698,7 +698,7 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 			"event_id":   data.EventID,
 			"user_id":    data.UserID,
 			"event_type": data.EventType,
-			"processor":  data.Processor,
+			"rail":       data.Rail,
 		}).Warn("Failed to log payment event to ClickHouse; spooled")
 		return nil
 	}
@@ -707,7 +707,7 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 		"event_id":   data.EventID,
 		"user_id":    data.UserID,
 		"event_type": data.EventType,
-		"processor":  data.Processor,
+		"rail":       data.Rail,
 	}).Debug("Logged payment event to ClickHouse")
 
 	return nil
@@ -767,19 +767,19 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	}
 
 	ped := PaymentEventData{
-		EventID:                data.EventID,
-		MerchantID:             data.MerchantID,
-		SubscriptionID:         data.SubscriptionID,
-		UserID:                 *data.UserID,
-		EventType:              paymentType,
-		Processor:              data.Processor,
-		ProcessorTransactionID: data.ProcessorTransactionID,
-		Amount:                 data.Amount,
-		Currency:               data.Currency,
-		BillingInfo:            "{}",
-		WebhookSource:          source,
-		Metadata:               data.Metadata,
-		Timestamp:              data.Timestamp,
+		EventID:           data.EventID,
+		MerchantID:        data.MerchantID,
+		SubscriptionID:    data.SubscriptionID,
+		UserID:            *data.UserID,
+		EventType:         paymentType,
+		Rail:              data.Rail,
+		RailTransactionID: data.RailTransactionID,
+		Amount:            data.Amount,
+		Currency:          data.Currency,
+		BillingInfo:       "{}",
+		WebhookSource:     source,
+		Metadata:          data.Metadata,
+		Timestamp:         data.Timestamp,
 	}
 	return s.LogPaymentEvent(ctx, ped)
 }
@@ -806,8 +806,8 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 
 	query := `
         INSERT INTO acu_events (
-            event_id, merchant_id, subscription_id, user_id, event_type, processor,
-            processor_subscription_id, card_info, update_status, requires_action,
+            event_id, merchant_id, subscription_id, user_id, event_type, rail,
+            rail_subscription_id, card_info, update_status, requires_action,
             reason, metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
@@ -821,8 +821,8 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 			data.SubscriptionID,
 			data.UserID,
 			data.EventType,
-			data.Processor,
-			data.ProcessorSubscriptionID,
+			data.Rail,
+			data.RailSubscriptionID,
 			data.CardInfo,
 			data.UpdateStatus,
 			data.RequiresAction,
@@ -840,7 +840,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 		log.WithError(err).WithFields(log.Fields{
 			"event_id":      data.EventID,
 			"event_type":    data.EventType,
-			"processor":     data.Processor,
+			"rail":          data.Rail,
 			"update_status": data.UpdateStatus,
 		}).Warn("Failed to log ACU event to ClickHouse; spooled")
 		return nil
@@ -849,7 +849,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	log.WithFields(log.Fields{
 		"event_id":      data.EventID,
 		"event_type":    data.EventType,
-		"processor":     data.Processor,
+		"rail":          data.Rail,
 		"update_status": data.UpdateStatus,
 	}).Debug("Logged ACU event to ClickHouse")
 
@@ -880,8 +880,8 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 
 	query := `
 		INSERT INTO chargeback_events (
-			event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor,
-			processor_transaction_id, amount, currency, chargeback_type, reason,
+			event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, rail,
+			rail_transaction_id, amount, currency, chargeback_type, reason,
 			status, metadata, timestamp
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
@@ -897,8 +897,8 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 			nullableUUID(data.SubscriptionID),
 			nullableString2(data.UserID),
 			data.EventType,
-			data.Processor,
-			nullableString2(data.ProcessorTransactionID),
+			data.Rail,
+			nullableString2(data.RailTransactionID),
 			data.Amount,
 			data.Currency,
 			data.ChargebackType,
@@ -918,7 +918,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 			"event_id":        data.EventID,
 			"chargeback_id":   data.ChargebackID,
 			"event_type":      data.EventType,
-			"processor":       data.Processor,
+			"rail":            data.Rail,
 			"chargeback_type": data.ChargebackType,
 		}).Warn("Failed to log chargeback event to ClickHouse; spooled")
 		return nil
@@ -928,7 +928,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 		"event_id":        data.EventID,
 		"chargeback_id":   data.ChargebackID,
 		"event_type":      data.EventType,
-		"processor":       data.Processor,
+		"rail":            data.Rail,
 		"chargeback_type": data.ChargebackType,
 	}).Debug("Logged chargeback event to ClickHouse")
 
@@ -956,8 +956,8 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	}
 
 	var procSubID *string
-	if subscription.ProcessorSubscriptionID != "" {
-		procSubID = &subscription.ProcessorSubscriptionID
+	if subscription.RailSubscriptionID != "" {
+		procSubID = &subscription.RailSubscriptionID
 	}
 
 	cancelType := ""
@@ -989,24 +989,24 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	}
 
 	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
-		SubscriptionID:          subscription.ID,
-		UserID:                  subscription.CustomerID.String(),
-		EventType:               PaymentEventSubscriptionCancelled,
-		Status:                  string(subscription.Status),
-		CancelType:              cancelType,
-		PriceAmount:             priceAmount,
-		PriceCurrency:           priceCurrency,
-		BillingCycleDays:        billingDays,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Processor:               string(subscription.Processor),
-		ProcessorSubscriptionID: procSubID,
-		Metadata:                CreateMetadataJSON(metadata),
-		Timestamp:               at.UTC(),
+		SubscriptionID:     subscription.ID,
+		UserID:             subscription.CustomerID.String(),
+		EventType:          PaymentEventSubscriptionCancelled,
+		Status:             string(subscription.Status),
+		CancelType:         cancelType,
+		PriceAmount:        priceAmount,
+		PriceCurrency:      priceCurrency,
+		BillingCycleDays:   billingDays,
+		ProductID:          productID,
+		PriceID:            priceID,
+		Rail:               string(subscription.Rail),
+		RailSubscriptionID: procSubID,
+		Metadata:           CreateMetadataJSON(metadata),
+		Timestamp:          at.UTC(),
 	})
 }
 
-func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string, at time.Time, metadata map[string]interface{}) error {
+func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *models.Subscription, rail models.Rail, transactionID string, amount int64, currency string, at time.Time, metadata map[string]interface{}) error {
 	if s == nil || sub == nil {
 		return nil
 	}
@@ -1028,21 +1028,21 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	}
 	metadata["subscription_id"] = sub.ID.String()
 	return s.LogPaymentEvent(ctx, PaymentEventData{
-		SubscriptionID:         &sub.ID,
-		UserID:                 sub.CustomerID.String(),
-		EventType:              PaymentEventChargeSuccess,
-		Processor:              string(processor),
-		ProcessorTransactionID: txnID,
-		Amount:                 amountFloat,
-		Currency:               currency,
-		BillingInfo:            "{}",
-		WebhookSource:          "lifecycle",
-		Metadata:               CreateMetadataJSON(metadata),
-		Timestamp:              at.UTC(),
+		SubscriptionID:    &sub.ID,
+		UserID:            sub.CustomerID.String(),
+		EventType:         PaymentEventChargeSuccess,
+		Rail:              string(rail),
+		RailTransactionID: txnID,
+		Amount:            amountFloat,
+		Currency:          currency,
+		BillingInfo:       "{}",
+		WebhookSource:     "lifecycle",
+		Metadata:          CreateMetadataJSON(metadata),
+		Timestamp:         at.UTC(),
 	})
 }
 
-func (s *EventLogService) LogLifecycleCancellation(ctx context.Context, subscriptionID uuid.UUID, userID string, processor models.Processor, cancelType models.CancelType, revokeAccess bool, at time.Time) error {
+func (s *EventLogService) LogLifecycleCancellation(ctx context.Context, subscriptionID uuid.UUID, userID string, rail models.Rail, cancelType models.CancelType, revokeAccess bool, at time.Time) error {
 	if s == nil {
 		return nil
 	}
@@ -1050,13 +1050,13 @@ func (s *EventLogService) LogLifecycleCancellation(ctx context.Context, subscrip
 		SubscriptionID: subscriptionID,
 		UserID:         userID,
 		EventType:      PaymentEventSubscriptionCancelled,
-		Processor:      string(processor),
+		Rail:           string(rail),
 		Metadata:       CreateMetadataJSON(map[string]interface{}{"cancel_type": string(cancelType), "revoke_access": revokeAccess}),
 		Timestamp:      at.UTC(),
 	})
 }
 
-func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionID uuid.UUID, userID string, processor models.Processor, finalStatus models.SubscriptionStatus, failureReason *string, failureCode *string, at time.Time) error {
+func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionID uuid.UUID, userID string, rail models.Rail, finalStatus models.SubscriptionStatus, failureReason *string, failureCode *string, at time.Time) error {
 	if s == nil {
 		return nil
 	}
@@ -1078,7 +1078,7 @@ func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionI
 		SubscriptionID: &subscriptionID,
 		UserID:         userID,
 		EventType:      eventType,
-		Processor:      string(processor),
+		Rail:           string(rail),
 		Currency:       "",
 		BillingInfo:    "{}",
 		WebhookSource:  "lifecycle",
@@ -1107,7 +1107,7 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 	query := `
         INSERT INTO subscription_events (
             event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type,
-            processor, processor_subscription_id, processor_transaction_id,
+            rail, rail_subscription_id, rail_transaction_id,
             price_amount, price_currency, billing_cycle_days, product_id, price_id,
             metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1120,9 +1120,9 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 		data.EventType,
 		data.Status,
 		data.CancelType,
-		data.Processor,
-		nullableString2(data.ProcessorSubscriptionID),
-		nullableString2(data.ProcessorTransactionID),
+		data.Rail,
+		nullableString2(data.RailSubscriptionID),
+		nullableString2(data.RailTransactionID),
 		data.PriceAmount,
 		data.PriceCurrency,
 		data.BillingCycleDays,
@@ -1134,12 +1134,12 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 }
 
 func (s *EventLogService) insertSubscriptionBatch(ctx context.Context, rows []SubscriptionEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type, processor, processor_subscription_id, processor_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type, rail, rail_subscription_id, rail_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Processor, nullableString2(d.ProcessorSubscriptionID), nullableString2(d.ProcessorTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Rail, nullableString2(d.RailSubscriptionID), nullableString2(d.RailTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1163,8 +1163,8 @@ func nullableString2(value *string) any {
 func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventData) error {
 	query := `
         INSERT INTO payment_events (
-            event_id, merchant_id, subscription_id, user_id, event_type, processor,
-            processor_transaction_id, amount, currency, billing_info,
+            event_id, merchant_id, subscription_id, user_id, event_type, rail,
+            rail_transaction_id, amount, currency, billing_info,
             webhook_source, metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
@@ -1174,8 +1174,8 @@ func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventDa
 		data.SubscriptionID,
 		data.UserID,
 		data.EventType,
-		data.Processor,
-		data.ProcessorTransactionID,
+		data.Rail,
+		data.RailTransactionID,
 		data.Amount,
 		data.Currency,
 		data.BillingInfo,
@@ -1186,12 +1186,12 @@ func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventDa
 }
 
 func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []PaymentEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, merchant_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, merchant_id, subscription_id, user_id, event_type, rail, rail_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Rail, d.RailTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1199,12 +1199,12 @@ func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []Payment
 }
 
 func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, merchant_id, subscription_id, user_id, event_type, processor, processor_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, merchant_id, subscription_id, user_id, event_type, rail, rail_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Rail, d.RailSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1212,12 +1212,12 @@ func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventDat
 }
 
 func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []ChargebackEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, rail, rail_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Rail, nullableString2(d.RailTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}

@@ -107,7 +107,7 @@ func (e *CustomerVaultError) Error() string {
 
 var mobiusResponseMessages = map[int]string{
 	100: "Transaction was approved.",
-	200: "Transaction was declined by processor.",
+	200: "Transaction was declined by rail.",
 	201: "Do not honor.",
 	202: "Insufficient funds.",
 	203: "Over limit.",
@@ -130,15 +130,15 @@ var mobiusResponseMessages = map[int]string{
 	263: "Declined-Update cardholder data available.",
 	264: "Declined-Retry in a few days.",
 	300: "Transaction was rejected by gateway.",
-	400: "Transaction error returned by processor.",
+	400: "Transaction error returned by rail.",
 	410: "Invalid merchant configuration.",
 	411: "Merchant account is inactive.",
 	420: "Communication error.",
 	421: "Communication error with issuer.",
-	430: "Duplicate transaction at processor.",
-	440: "Processor format error.",
+	430: "Duplicate transaction at rail.",
+	440: "Rail format error.",
 	441: "Invalid transaction information.",
-	460: "Processor feature not available.",
+	460: "Rail feature not available.",
 	461: "Unsupported card type.",
 }
 
@@ -172,10 +172,10 @@ var mobiusLocalizationIDs = map[int]string{
 	411: "merchant_account_is_inactive",
 	420: "communication_error",
 	421: "communication_error_with_issuer",
-	430: "duplicate_transaction_at_processor",
-	440: "processor_format_error",
+	430: "duplicate_transaction_at_rail",
+	440: "rail_format_error",
 	441: "invalid_transaction_information",
-	460: "processor_feature_not_available",
+	460: "rail_feature_not_available",
 	461: "unsupported_card_type",
 }
 

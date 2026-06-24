@@ -27,7 +27,7 @@ type GetSubscriptionsFilters struct {
 	UserID          string     `form:"user_id"`
 	Status          string     `form:"status"`
 	PriceID         uuid.UUID  `form:"price_id"`
-	Processor       string     `form:"processor"`
+	Rail            string     `form:"rail"`
 	CreatedAfter    *time.Time `form:"created_after" time_format:"2006-01-02"`
 	CreatedBefore   *time.Time `form:"created_before" time_format:"2006-01-02"`
 	CancelledAfter  *time.Time `form:"cancelled_after" time_format:"2006-01-02"`
@@ -69,8 +69,8 @@ func (s *SubscriptionService) Clock() clockwork.Clock {
 }
 
 const (
-	ProcessorCCBill = "ccbill"
-	ProcessorStripe = "stripe"
+	RailCCBill = "ccbill"
+	RailStripe = "stripe"
 
 	CurrencyUSD = "usd"
 	CurrencyEUR = "eur"
@@ -251,7 +251,7 @@ func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.Q
 			UserID:          params.Filters.UserID,
 			Status:          params.Filters.Status,
 			PriceID:         params.Filters.PriceID,
-			Processor:       params.Filters.Processor,
+			Rail:            params.Filters.Rail,
 			CreatedAfter:    params.Filters.CreatedAfter,
 			CreatedBefore:   params.Filters.CreatedBefore,
 			CancelledAfter:  params.Filters.CancelledAfter,
@@ -281,9 +281,9 @@ func (s *SubscriptionService) GetActiveSubscriptionsByUserID(ctx context.Context
 	return s.subscriptionRepo.GetActiveSubscriptionsByUserID(ctx, userID)
 }
 
-// GetSubscriptionsByProcessorAndUserID retrieves subscriptions filtered by processor
-func (s *SubscriptionService) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
-	return s.subscriptionRepo.GetSubscriptionsByProcessorAndUserID(ctx, userID, processor)
+// GetSubscriptionsByRailAndUserID retrieves subscriptions filtered by rail
+func (s *SubscriptionService) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
+	return s.subscriptionRepo.GetSubscriptionsByRailAndUserID(ctx, userID, rail)
 }
 
 // GetActiveSubscription retrieves the active subscription for a user
@@ -291,18 +291,18 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID 
 	return s.subscriptionRepo.GetActiveSubscriptionAt(ctx, userID, s.now())
 }
 
-// GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
-func (s *SubscriptionService) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByProcessorSubscriptionID(ctx, processor, processorSubscriptionID)
+// GetByRailSubscriptionID finds a subscription by rail and rail_subscription_id.
+func (s *SubscriptionService) GetByRailSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByRailSubscriptionID(ctx, rail, railSubscriptionID)
 }
 
-func (s *SubscriptionService) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByProcessorMetadataValue(ctx, processor, key, value)
+func (s *SubscriptionService) GetByRailMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByRailMetadataValue(ctx, rail, key, value)
 }
 
-// GetActiveSubscriptionsByProcessor gets all active subscriptions for a processor
-func (s *SubscriptionService) GetActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]*models.Subscription, error) {
-	return s.subscriptionRepo.GetActiveSubscriptionsByProcessor(ctx, processor)
+// GetActiveSubscriptionsByRail gets all active subscriptions for a rail
+func (s *SubscriptionService) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
+	return s.subscriptionRepo.GetActiveSubscriptionsByRail(ctx, rail)
 }
 
 // Delete removes a subscription from the database permanently

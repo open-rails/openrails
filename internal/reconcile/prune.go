@@ -50,7 +50,7 @@ type PruneResult struct {
 //
 // Dry-run (Apply=false) only discovers and counts; it writes nothing. It must be
 // called inside a merchant-scoped connection (the CLI's RunInMerchantConn).
-func PruneProviderAccountExcess(ctx context.Context, database *db.DB, fetcher ProcessorFetcher, provider Provider, binding ProviderAccountBinding, params PruneParams) (PruneResult, error) {
+func PruneProviderAccountExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, provider Provider, binding ProviderAccountBinding, params PruneParams) (PruneResult, error) {
 	var res PruneResult
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -68,7 +68,7 @@ func PruneProviderAccountExcess(ctx context.Context, database *db.DB, fetcher Pr
 
 	presentSubs := make([]string, 0, len(snap.Subscriptions))
 	for i := range snap.Subscriptions {
-		if id := snap.Subscriptions[i].ProcessorSubscriptionID; id != "" {
+		if id := snap.Subscriptions[i].RailSubscriptionID; id != "" {
 			presentSubs = append(presentSubs, id)
 		}
 	}

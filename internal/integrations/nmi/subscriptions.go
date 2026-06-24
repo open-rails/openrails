@@ -65,7 +65,7 @@ type ManualRebillResponse struct {
 	Success       bool
 	TransactionID string
 	ErrorMessage  string
-	// ResponseCode is the NMI/processor response_code for a declined rebill
+	// ResponseCode is the NMI/rail response_code for a declined rebill
 	// (0 when approved or unavailable). Used by dunning to distinguish hard
 	// declines (stop retries) from soft declines (keep retrying).
 	ResponseCode int

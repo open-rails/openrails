@@ -35,7 +35,7 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ps-prod-"+suffix, "ps-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, processor, processor_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'pending','nmi',$4,$5,$5,'{}'::jsonb,$6,$7)`,
 			subID, priceID, productID, "ps-sub-"+suffix, old, customer, merchantID)
 		return nil
@@ -88,7 +88,7 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "pi-prod-"+suffix, "pi-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, processor, processor_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID)
 		// a provider action that failed terminally and won't auto-retry
 		exec(`INSERT INTO openrails.provider_intents (id, merchant_id, provider, intent_type, idempotency_key, status, origin, subscription_id)
@@ -149,7 +149,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "po-prod-"+suffix, "po-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, processor, processor_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,'{}'::jsonb,$7,$8)`,
 			subID, priceID, productID, "po-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
 		return nil
@@ -224,7 +224,7 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 			productID, "do-prod-"+suffix, "do-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, productID, merchantID)
 		// past_due, grace still open, but next_retry_at NULL: schedule stalled.
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, processor, processor_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9)`,
 			subID, priceID, productID, "do-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, graceEnd, customer, merchantID)
 		return nil

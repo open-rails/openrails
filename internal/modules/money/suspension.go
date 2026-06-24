@@ -16,7 +16,7 @@ import (
 // read it.
 //
 // Payment-method verification: callers may record that a collection method was
-// verified after they complete their own processor-specific setup. Borrowing
+// verified after they complete their own rail-specific setup. Borrowing
 // capacity is computed elsewhere and should be consumed as credit capacity by
 // the hot path.
 //

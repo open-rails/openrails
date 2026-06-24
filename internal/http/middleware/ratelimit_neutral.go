@@ -46,7 +46,7 @@ const (
 // payload-size throttling. A request whose declared Content-Length exceeds the
 // ceiling is rejected with 413 before any rate-limit counting or body read,
 // cheaply shedding oversized-payload load. Buckets absent from the map (e.g.
-// "webhook", which enforces tighter per-processor caps in the handler) are not
+// "webhook", which enforces tighter per-rail caps in the handler) are not
 // checked here.
 var BucketMaxContentLength = map[string]int64{
 	"checkout":        64 << 10, // 64 KiB

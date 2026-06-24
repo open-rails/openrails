@@ -177,7 +177,7 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "join-prod-"+uuid.NewString()[:8], tenantID)
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, merchant_id)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, rails, merchant_id)
 	      VALUES ($1, $2, 900, 'usd', 30, $3, $4)`, priceID, productID,
 		[]byte(`{"stripe": {"price_id": "`+objectID+`"}}`), tenantID)
 	require.NoError(t, err)

@@ -1,5 +1,5 @@
 // Package sigverify holds the HMAC webhook-signature primitives for the payment
-// processors OpenRails ingests (Stripe, NMI). It is a dependency-free leaf
+// rails OpenRails ingests (Stripe, NMI). It is a dependency-free leaf
 // package (stdlib only) so it can be the SINGLE source of truth shared by both
 // the public ingestion path (internal/shared/webhookutil) and the queued
 // re-verification path (internal/modules/webhooks) without an import cycle —

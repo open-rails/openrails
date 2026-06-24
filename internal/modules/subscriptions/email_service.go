@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -389,7 +389,7 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	switch reason {
 	case PremiumEndReasonExpired:
 		return s.SendSubscriptionExpired(ctx, *emailData)
-	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonProcessor:
+	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonRail:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
 	case PremiumEndReasonUserCancel:
 		fallthrough
@@ -497,7 +497,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 
 	paymentMethod := describePaymentMethod(subscription)
 	if paymentMethod == "" {
-		paymentMethod = processorDisplayName(subscription.Processor)
+		paymentMethod = railDisplayName(subscription.Rail)
 		if paymentMethod == "" {
 			paymentMethod = "Credit Card"
 		}
@@ -557,7 +557,7 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	if cardType != "" {
 		parts = append(parts, cardType)
 	} else {
-		friendly := processorDisplayName(pm.Processor)
+		friendly := railDisplayName(pm.Rail)
 		if friendly != "" {
 			parts = append(parts, friendly)
 		}
@@ -574,20 +574,20 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	return strings.Join(parts, " ")
 }
 
-func processorDisplayName(processor models.Processor) string {
-	if processors.IsNMIBackedProcessor(processor) {
+func railDisplayName(rail models.Rail) string {
+	if rails.IsNMIBackedRail(rail) {
 		return "Credit Card"
 	}
 
-	switch processor {
-	case models.ProcessorCCBill:
+	switch rail {
+	case models.RailCCBill:
 		return "Credit Card"
-	case models.ProcessorPayPal:
+	case models.RailPayPal:
 		return "PayPal"
-	case models.ProcessorSolana:
+	case models.RailSolana:
 		return "Solana"
 	default:
-		clean := strings.TrimSpace(string(processor))
+		clean := strings.TrimSpace(string(rail))
 		if clean == "" {
 			return ""
 		}

@@ -4,7 +4,7 @@
 // A manifest is a YAML file describing the desired catalog: a tree of
 // tier_groups > products > prices. Applying it converges OpenRails (and, via
 // the existing declarative-provider dispatch in issue #208, every configured
-// payment processor) onto that desired state. The pipeline is the proven
+// payment rail) onto that desired state. The pipeline is the proven
 // cozy-art shape — load → validate → plan → print → apply — with two
 // identity rules:
 //

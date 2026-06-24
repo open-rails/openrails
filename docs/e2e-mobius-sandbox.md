@@ -93,7 +93,7 @@ E2E_NMI_PLAN_ID=openrails_e2e_nmi_daily_999
 Notes:
 - Billing uses fixed NMI gateway endpoints for direct-post and query calls. Use
   sandbox/test credentials when `TEST_MODE=true`.
-- OpenRails does not read PROCESSORS_* from `.env`. Seed merchant-scoped
+- OpenRails does not read RAILS_* from `.env`. Seed merchant-scoped
   provider credentials through `openrails push-merchant-config`:
 
 ```yaml
@@ -154,7 +154,7 @@ task seed-e2e-nmi
 
 This creates:
 - `billing.products.slug = e2e_mobius`
-- one active `billing.prices` row with `processors.mobius.plan_id = $E2E_NMI_PLAN_ID`
+- one active `billing.prices` row with `rails.mobius.plan_id = $E2E_NMI_PLAN_ID`
 
 ## 5) Mint a JWT for API calls
 
@@ -201,7 +201,7 @@ curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/me/checkout" \
     "mode": "subscription",
     "metadata": {"e2e_run_id":"'"$E2E_RUN_ID"'"},
     "payment": {
-      "processor": "mobius",
+      "rail": "mobius",
       "payment_method_id": "pm_PAYMENT_METHOD_UUID"
     }
   }'
@@ -215,7 +215,7 @@ Local DB dump:
 task e2e-dump-local
 ```
 
-Remote query (by processor transaction/subscription IDs):
+Remote query (by rail transaction/subscription IDs):
 
 ```bash
 task nmi-query TXN_ID="TRANSACTION_ID_FROM_BILLING"

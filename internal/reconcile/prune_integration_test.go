@@ -47,7 +47,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 			exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				prodID, "prune-"+tag+"-"+suffix, "prune-tier-"+tag+"-"+suffix, merchantID)
 			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`, priceID, prodID, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, processor, processor_subscription_id, provider_account_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, provider_account_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 			      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 				id, priceID, prodID, psub, paID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), customer, merchantID)
 		}
@@ -78,7 +78,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		Capabilities: Capabilities{Subscriptions: true},
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: psubKeep, Status: SubscriptionStatusActive},
+			{RailSubscriptionID: psubKeep, Status: SubscriptionStatusActive},
 		},
 	}
 	fetcher := &fakeFetcher{provider: ProviderNMI, snap: snap}
@@ -166,10 +166,10 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 			productID, "prune-pay-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
+		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
 		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
 			payKeep, priceID, suffix, since.Add(24*time.Hour), customer, merchantID, paID)
-		exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
+		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
 		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
 			payGone, priceID, suffix, since.Add(48*time.Hour), customer, merchantID, paID)
 		return nil

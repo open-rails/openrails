@@ -35,10 +35,10 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 --
--- Name: processor_type; Type: TYPE; Schema: openrails; Owner: -
+-- Name: rail_type; Type: TYPE; Schema: openrails; Owner: -
 --
 
-CREATE TYPE openrails.processor_type AS ENUM (
+CREATE TYPE openrails.rail_type AS ENUM (
     'paypal',
     'solana',
     'mobius',
@@ -206,7 +206,7 @@ CREATE TABLE openrails.checkout_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid NOT NULL,
     mode text NOT NULL,
-    processor text NOT NULL,
+    rail text NOT NULL,
     status text NOT NULL,
     amount bigint NOT NULL,
     currency text NOT NULL,
@@ -215,8 +215,8 @@ CREATE TABLE openrails.checkout_sessions (
     transaction_id text,
     payment_id uuid,
     subscription_id uuid,
-    processor_fields jsonb,
-    processor_state jsonb,
+    rail_fields jsonb,
+    rail_state jsonb,
     metadata jsonb,
     idempotency_key text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -523,8 +523,8 @@ CREATE TABLE openrails.invoice_payments (
     currency text NOT NULL,
     amount bigint NOT NULL,
     status text DEFAULT 'attempted'::text NOT NULL,
-    processor text,
-    processor_payment_id text,
+    rail text,
+    rail_payment_id text,
     failure_code text,
     failure_message text,
     attempted_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1131,7 +1131,7 @@ COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of know
 
 CREATE TABLE openrails.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
-    processor character varying(50) NOT NULL,
+    rail character varying(50) NOT NULL,
     vault_id character varying(255) NOT NULL,
     billing_id character varying(255),
     initial_transaction_id character varying(255) NOT NULL,
@@ -1154,21 +1154,21 @@ ALTER TABLE ONLY openrails.payment_methods FORCE ROW LEVEL SECURITY;
 -- Name: TABLE payment_methods; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple processors.';
+COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple rails.';
 
 
 --
--- Name: COLUMN payment_methods.processor; Type: COMMENT; Schema: openrails; Owner: -
+-- Name: COLUMN payment_methods.rail; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.payment_methods.processor IS 'Payment processor type: nmi, ccbill, stripe, etc.';
+COMMENT ON COLUMN openrails.payment_methods.rail IS 'Payment rail type: nmi, ccbill, stripe, etc.';
 
 
 --
 -- Name: COLUMN payment_methods.vault_id; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.payment_methods.vault_id IS 'Primary payment method identifier in the processor system';
+COMMENT ON COLUMN openrails.payment_methods.vault_id IS 'Primary payment method identifier in the rail system';
 
 
 --
@@ -1185,7 +1185,7 @@ COMMENT ON COLUMN openrails.payment_methods.provider_account_id IS 'Provider acc
 CREATE TABLE openrails.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid NOT NULL,
-    processor openrails.processor_type NOT NULL,
+    rail openrails.rail_type NOT NULL,
     transaction_id text NOT NULL,
     amount bigint NOT NULL,
     list_amount bigint NOT NULL,
@@ -1243,7 +1243,7 @@ CREATE TABLE openrails.prices (
     amount bigint NOT NULL,
     currency text NOT NULL,
     billing_cycle_days integer,
-    processors jsonb,
+    rails jsonb,
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -1259,7 +1259,7 @@ ALTER TABLE ONLY openrails.prices FORCE ROW LEVEL SECURITY;
 -- Name: TABLE prices; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with processor-specific identifiers';
+COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with rail-specific identifiers';
 
 
 --
@@ -1290,13 +1290,13 @@ COMMENT ON COLUMN openrails.probe_verdicts.key_hash IS 'sha256 hex of the provid
 
 
 --
--- Name: processor_customers; Type: TABLE; Schema: openrails; Owner: -
+-- Name: rail_customers; Type: TABLE; Schema: openrails; Owner: -
 --
 
-CREATE TABLE openrails.processor_customers (
+CREATE TABLE openrails.rail_customers (
     id uuid DEFAULT uuidv7() NOT NULL,
-    processor text NOT NULL,
-    processor_customer_id text NOT NULL,
+    rail text NOT NULL,
+    rail_customer_id text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1304,14 +1304,14 @@ CREATE TABLE openrails.processor_customers (
     provider_account_id uuid
 );
 
-ALTER TABLE ONLY openrails.processor_customers FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.rail_customers FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: COLUMN processor_customers.provider_account_id; Type: COMMENT; Schema: openrails; Owner: -
+-- Name: COLUMN rail_customers.provider_account_id; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.processor_customers.provider_account_id IS 'Provider account that produced this processor customer mirror row.';
+COMMENT ON COLUMN openrails.rail_customers.provider_account_id IS 'Provider account that produced this rail customer mirror row.';
 
 
 --
@@ -1507,7 +1507,7 @@ COMMENT ON TABLE openrails.provider_intents IS 'Durable, effectively-once outbox
 -- Name: COLUMN provider_intents.provider; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.provider_intents.provider IS 'Provider/processor key the mutation targets (e.g. ''mobius'' for an NMI-backed processor, ''stripe'').';
+COMMENT ON COLUMN openrails.provider_intents.provider IS 'Provider/rail key the mutation targets (e.g. ''mobius'' for an NMI-backed rail, ''stripe'').';
 
 
 --
@@ -1661,7 +1661,7 @@ COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable reconciliation fi
 -- Name: COLUMN reconciliation_findings.subject_key; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
+COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
 
 
 --
@@ -1705,7 +1705,7 @@ ALTER TABLE ONLY openrails.reconciliation_runs FORCE ROW LEVEL SECURITY;
 -- Name: TABLE reconciliation_runs; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.';
+COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-provider counts and the dunning-forensics report.';
 
 
 --
@@ -1767,8 +1767,8 @@ CREATE TABLE openrails.subscriptions (
     price_id uuid,
     product_id uuid NOT NULL,
     status openrails.subscription_status DEFAULT 'pending'::openrails.subscription_status NOT NULL,
-    processor text DEFAULT 'ccbill'::text NOT NULL,
-    processor_subscription_id text DEFAULT ''::text NOT NULL,
+    rail text DEFAULT 'ccbill'::text NOT NULL,
+    rail_subscription_id text DEFAULT ''::text NOT NULL,
     user_email text,
     payment_method_id uuid,
     current_period_starts_at timestamp with time zone,
@@ -2254,11 +2254,11 @@ ALTER TABLE ONLY openrails.probe_verdicts
 
 
 --
--- Name: processor_customers processor_customers_pkey; Type: CONSTRAINT; Schema: openrails; Owner: -
+-- Name: rail_customers rail_customers_pkey; Type: CONSTRAINT; Schema: openrails; Owner: -
 --
 
-ALTER TABLE ONLY openrails.processor_customers
-    ADD CONSTRAINT processor_customers_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY openrails.rail_customers
+    ADD CONSTRAINT rail_customers_pkey PRIMARY KEY (id);
 
 
 --
@@ -2421,17 +2421,17 @@ CREATE INDEX checkout_sessions_expires_at_idx ON openrails.checkout_sessions USI
 
 
 --
--- Name: checkout_sessions_processor_reference_idx; Type: INDEX; Schema: openrails; Owner: -
+-- Name: checkout_sessions_rail_reference_idx; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX checkout_sessions_processor_reference_idx ON openrails.checkout_sessions USING btree (processor, reference) WHERE (reference IS NOT NULL);
+CREATE UNIQUE INDEX checkout_sessions_rail_reference_idx ON openrails.checkout_sessions USING btree (rail, reference) WHERE (reference IS NOT NULL);
 
 
 --
--- Name: checkout_sessions_processor_transaction_id_idx; Type: INDEX; Schema: openrails; Owner: -
+-- Name: checkout_sessions_rail_transaction_id_idx; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX checkout_sessions_processor_transaction_id_idx ON openrails.checkout_sessions USING btree (processor, transaction_id) WHERE (transaction_id IS NOT NULL);
+CREATE UNIQUE INDEX checkout_sessions_rail_transaction_id_idx ON openrails.checkout_sessions USING btree (rail, transaction_id) WHERE (transaction_id IS NOT NULL);
 
 
 --
@@ -2750,10 +2750,10 @@ CREATE INDEX idx_payment_methods_merchant_id ON openrails.payment_methods USING 
 
 
 --
--- Name: idx_payment_methods_processor; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_payment_methods_rail; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_payment_methods_processor ON openrails.payment_methods USING btree (processor);
+CREATE INDEX idx_payment_methods_rail ON openrails.payment_methods USING btree (rail);
 
 
 --
@@ -2792,10 +2792,10 @@ CREATE INDEX idx_payments_price_id ON openrails.payments USING btree (price_id);
 
 
 --
--- Name: idx_payments_processor; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_payments_rail; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_payments_processor ON openrails.payments USING btree (processor);
+CREATE INDEX idx_payments_rail ON openrails.payments USING btree (rail);
 
 
 --
@@ -2834,10 +2834,10 @@ CREATE INDEX idx_prices_merchant_id ON openrails.prices USING btree (merchant_id
 
 
 --
--- Name: idx_prices_processors; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_prices_rails; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_prices_processors ON openrails.prices USING gin (processors);
+CREATE INDEX idx_prices_rails ON openrails.prices USING gin (rails);
 
 
 --
@@ -2855,24 +2855,24 @@ CREATE INDEX idx_prices_status ON openrails.prices USING btree (status);
 
 
 --
--- Name: idx_processor_customers_customer; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_rail_customers_customer; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_processor_customers_customer ON openrails.processor_customers USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-
-
---
--- Name: idx_processor_customers_merchant_id; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE INDEX idx_processor_customers_merchant_id ON openrails.processor_customers USING btree (merchant_id);
+CREATE INDEX idx_rail_customers_customer ON openrails.rail_customers USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
 
 --
--- Name: idx_processor_customers_provider_account; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_rail_customers_merchant_id; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_processor_customers_provider_account ON openrails.processor_customers USING btree (provider_account_id) WHERE (provider_account_id IS NOT NULL);
+CREATE INDEX idx_rail_customers_merchant_id ON openrails.rail_customers USING btree (merchant_id);
+
+
+--
+-- Name: idx_rail_customers_provider_account; Type: INDEX; Schema: openrails; Owner: -
+--
+
+CREATE INDEX idx_rail_customers_provider_account ON openrails.rail_customers USING btree (provider_account_id) WHERE (provider_account_id IS NOT NULL);
 
 
 --
@@ -3026,7 +3026,7 @@ CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (
 -- Name: idx_subscriptions_due_dunning; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, processor) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
+CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 
 
 --
@@ -3065,17 +3065,17 @@ CREATE INDEX idx_subscriptions_price_id ON openrails.subscriptions USING btree (
 
 
 --
--- Name: idx_subscriptions_processor; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_subscriptions_rail; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_subscriptions_processor ON openrails.subscriptions USING btree (processor);
+CREATE INDEX idx_subscriptions_rail ON openrails.subscriptions USING btree (rail);
 
 
 --
--- Name: idx_subscriptions_processor_subscription; Type: INDEX; Schema: openrails; Owner: -
+-- Name: idx_subscriptions_rail_subscription; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE INDEX idx_subscriptions_processor_subscription ON openrails.subscriptions USING btree (processor, processor_subscription_id);
+CREATE INDEX idx_subscriptions_rail_subscription ON openrails.subscriptions USING btree (rail, rail_subscription_id);
 
 
 --
@@ -3289,10 +3289,10 @@ CREATE UNIQUE INDEX uq_payment_methods_customer_vault_legacy ON openrails.paymen
 
 
 --
--- Name: uq_payment_methods_merchant_processor_vault_legacy; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_payment_methods_merchant_rail_vault_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_payment_methods_merchant_processor_vault_legacy ON openrails.payment_methods USING btree (merchant_id, processor, vault_id) WHERE (provider_account_id IS NULL);
+CREATE UNIQUE INDEX uq_payment_methods_merchant_rail_vault_legacy ON openrails.payment_methods USING btree (merchant_id, rail, vault_id) WHERE (provider_account_id IS NULL);
 
 
 --
@@ -3303,10 +3303,10 @@ CREATE UNIQUE INDEX uq_payment_methods_provider_account_vault ON openrails.payme
 
 
 --
--- Name: uq_payments_merchant_processor_transaction_legacy; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_payments_merchant_rail_transaction_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_payments_merchant_processor_transaction_legacy ON openrails.payments USING btree (merchant_id, processor, transaction_id) WHERE (provider_account_id IS NULL);
+CREATE UNIQUE INDEX uq_payments_merchant_rail_transaction_legacy ON openrails.payments USING btree (merchant_id, rail, transaction_id) WHERE (provider_account_id IS NULL);
 
 
 --
@@ -3324,31 +3324,31 @@ CREATE UNIQUE INDEX uq_prices_id_product_merchant ON openrails.prices USING btre
 
 
 --
--- Name: uq_processor_customers_customer_processor_legacy; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_rail_customers_customer_rail_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_processor_customers_customer_processor_legacy ON openrails.processor_customers USING btree (merchant_id, customer_id, processor) WHERE (provider_account_id IS NULL);
-
-
---
--- Name: uq_processor_customers_customer_provider_account; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE UNIQUE INDEX uq_processor_customers_customer_provider_account ON openrails.processor_customers USING btree (merchant_id, customer_id, provider_account_id) WHERE (provider_account_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_rail_customers_customer_rail_legacy ON openrails.rail_customers USING btree (merchant_id, customer_id, rail) WHERE (provider_account_id IS NULL);
 
 
 --
--- Name: uq_processor_customers_merchant_processor_customer_legacy; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_rail_customers_customer_provider_account; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_processor_customers_merchant_processor_customer_legacy ON openrails.processor_customers USING btree (merchant_id, processor, processor_customer_id) WHERE (provider_account_id IS NULL);
+CREATE UNIQUE INDEX uq_rail_customers_customer_provider_account ON openrails.rail_customers USING btree (merchant_id, customer_id, provider_account_id) WHERE (provider_account_id IS NOT NULL);
 
 
 --
--- Name: uq_processor_customers_provider_account_customer; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_rail_customers_merchant_rail_customer_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_processor_customers_provider_account_customer ON openrails.processor_customers USING btree (merchant_id, provider_account_id, processor_customer_id) WHERE (provider_account_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_rail_customers_merchant_rail_customer_legacy ON openrails.rail_customers USING btree (merchant_id, rail, rail_customer_id) WHERE (provider_account_id IS NULL);
+
+
+--
+-- Name: uq_rail_customers_provider_account_customer; Type: INDEX; Schema: openrails; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_rail_customers_provider_account_customer ON openrails.rail_customers USING btree (merchant_id, provider_account_id, rail_customer_id) WHERE (provider_account_id IS NOT NULL);
 
 
 --
@@ -3401,17 +3401,17 @@ CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.sub
 
 
 --
--- Name: uq_subscriptions_merchant_processor_subscription_id_legacy; Type: INDEX; Schema: openrails; Owner: -
+-- Name: uq_subscriptions_merchant_rail_subscription_id_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_subscriptions_merchant_processor_subscription_id_legacy ON openrails.subscriptions USING btree (merchant_id, processor, processor_subscription_id) WHERE ((provider_account_id IS NULL) AND (processor_subscription_id <> ''::text));
+CREATE UNIQUE INDEX uq_subscriptions_merchant_rail_subscription_id_legacy ON openrails.subscriptions USING btree (merchant_id, rail, rail_subscription_id) WHERE ((provider_account_id IS NULL) AND (rail_subscription_id <> ''::text));
 
 
 --
 -- Name: uq_subscriptions_provider_account_subscription; Type: INDEX; Schema: openrails; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_subscriptions_provider_account_subscription ON openrails.subscriptions USING btree (merchant_id, provider_account_id, processor_subscription_id) WHERE ((provider_account_id IS NOT NULL) AND (processor_subscription_id <> ''::text));
+CREATE UNIQUE INDEX uq_subscriptions_provider_account_subscription ON openrails.subscriptions USING btree (merchant_id, provider_account_id, rail_subscription_id) WHERE ((provider_account_id IS NOT NULL) AND (rail_subscription_id <> ''::text));
 
 
 --
@@ -3802,19 +3802,19 @@ ALTER TABLE ONLY openrails.prices
 
 
 --
--- Name: processor_customers processor_customers_customer_fk; Type: FK CONSTRAINT; Schema: openrails; Owner: -
+-- Name: rail_customers rail_customers_customer_fk; Type: FK CONSTRAINT; Schema: openrails; Owner: -
 --
 
-ALTER TABLE ONLY openrails.processor_customers
-    ADD CONSTRAINT processor_customers_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+ALTER TABLE ONLY openrails.rail_customers
+    ADD CONSTRAINT rail_customers_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
 
 
 --
--- Name: processor_customers processor_customers_provider_account_fk; Type: FK CONSTRAINT; Schema: openrails; Owner: -
+-- Name: rail_customers rail_customers_provider_account_fk; Type: FK CONSTRAINT; Schema: openrails; Owner: -
 --
 
-ALTER TABLE ONLY openrails.processor_customers
-    ADD CONSTRAINT processor_customers_provider_account_fk FOREIGN KEY (provider_account_id) REFERENCES openrails.provider_accounts(id);
+ALTER TABLE ONLY openrails.rail_customers
+    ADD CONSTRAINT rail_customers_provider_account_fk FOREIGN KEY (provider_account_id) REFERENCES openrails.provider_accounts(id);
 
 
 --
@@ -4268,10 +4268,10 @@ CREATE POLICY merchant_isolation ON openrails.prices USING ((merchant_id = (NULL
 
 
 --
--- Name: processor_customers merchant_isolation; Type: POLICY; Schema: openrails; Owner: -
+-- Name: rail_customers merchant_isolation; Type: POLICY; Schema: openrails; Owner: -
 --
 
-CREATE POLICY merchant_isolation ON openrails.processor_customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.rail_customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 
 --
@@ -4414,10 +4414,10 @@ ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: processor_customers; Type: ROW SECURITY; Schema: openrails; Owner: -
+-- Name: rail_customers; Type: ROW SECURITY; Schema: openrails; Owner: -
 --
 
-ALTER TABLE openrails.processor_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.rail_customers ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: product_entitlement_features; Type: ROW SECURITY; Schema: openrails; Owner: -
@@ -4708,10 +4708,10 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.probe_verdicts TO openrails
 
 
 --
--- Name: TABLE processor_customers; Type: ACL; Schema: openrails; Owner: -
+-- Name: TABLE rail_customers; Type: ACL; Schema: openrails; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.processor_customers TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.rail_customers TO openrails_app;
 
 
 --

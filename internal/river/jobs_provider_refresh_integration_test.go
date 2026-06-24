@@ -38,7 +38,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.ProcessorFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: successFetcher,
 		})
 		require.Equal(t, 2, res.Windows)
@@ -53,7 +53,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	failingFetcher := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe, err: errors.New("provider offline")}
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		before, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID)
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.ProcessorFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: failingFetcher,
 		})
 		require.Zero(t, res.Windows)
@@ -90,13 +90,13 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
-		        (id, price_id, product_id, status, processor, processor_subscription_id,
+		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $5, '{}'::jsonb, $7, $8)`,
 			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID)
 		exec(`INSERT INTO openrails.payments
-		        (id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id)
+		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id)
 		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'usd', 'completed', $3, $4, $5, $6)`,
 			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID)
 		return nil
@@ -106,9 +106,9 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		Provider:  reconcile.ProviderStripe,
 		FetchedAt: now,
 		Subscriptions: []reconcile.RemoteSubscription{{
-			ProcessorSubscriptionID: psid,
-			Status:                  reconcile.SubscriptionStatusCancelled,
-			RawStatus:               "canceled",
+			RailSubscriptionID: psid,
+			Status:             reconcile.SubscriptionStatusCancelled,
+			RawStatus:          "canceled",
 		}},
 		Transactions: []reconcile.RemoteTransaction{
 			{TransactionID: "ch_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 999, Currency: "usd", OccurredAt: now.Add(-48 * time.Hour)},
@@ -131,7 +131,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(merchant.WithID(context.Background(), merchant.ID(merchantID)), func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.ProcessorFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: &providerRefreshSnapshotFetcher{provider: reconcile.ProviderStripe, snap: snap},
 		})
 		require.Equal(t, 1, res.Windows)

@@ -96,7 +96,7 @@ type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
 	cfg                *config.Config
-	processors         config.ProcessorSet
+	rails              config.RailSet
 	clock              clockwork.Clock
 	priceService       *catalog.PriceService
 	productService     *catalog.ProductService
@@ -110,7 +110,7 @@ func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	processorSet config.ProcessorSet,
+	railSet config.RailSet,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,
@@ -122,7 +122,7 @@ func NewSolanaPayService(
 		db:                 db,
 		redis:              redis,
 		cfg:                cfg,
-		processors:         processorSet,
+		rails:              railSet,
 		priceService:       priceService,
 		productService:     productService,
 		eligibilityChecker: eligibilityChecker,
@@ -201,7 +201,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc, err := RequireSolanaProcessorConfig(s.processors)
+	solanaProc, err := RequireSolanaRailConfig(s.rails)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc, err := RequireSolanaProcessorConfig(s.processors)
+	solanaProc, err := RequireSolanaRailConfig(s.rails)
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}

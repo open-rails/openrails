@@ -101,7 +101,7 @@ func TestGetBoolField(t *testing.T) {
 
 // TestResolveModeRejectsLifecycleForNonSolana is a guard that the lifecycle modes
 // remain Solana-only at the create boundary (the dedicated builder enforces the
-// processor, and resolveMode is never reached for them).
+// rail, and resolveMode is never reached for them).
 func TestLifecycleModeConstants(t *testing.T) {
 	if models.CheckoutSessionModeSolanaCancel != "solana_cancel" {
 		t.Error("solana_cancel constant drifted")

@@ -23,7 +23,7 @@ func TestWriteCheckoutSessionErrorIncludesUSDCFundingMetadata(t *testing.T) {
 		HaveBaseUnits: 250_000,
 		NeedBaseUnits: 1_500_000,
 	}, checkoutSessionErrorContext{
-		Processor:         "solana",
+		Rail:              "solana",
 		Wallet:            "11111111111111111111111111111111",
 		CheckoutSessionID: "chk_123",
 	})

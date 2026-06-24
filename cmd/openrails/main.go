@@ -72,7 +72,7 @@ func main() {
 	rootCmd.PersistentFlags().
 		String("mode", "", "Operating mode (behavior): full | limited | readonly (overrides MODE env and config.yaml; required outside development)")
 	rootCmd.PersistentFlags().
-		Bool("test-mode", false, "Use sandbox processor credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
+		Bool("test-mode", false, "Use sandbox rail credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
 
 	serverCmd := &cobra.Command{
 		Use:     "run-server",

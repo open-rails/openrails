@@ -104,7 +104,7 @@ func TestGrants_RevokeWithRefund(t *testing.T) {
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
 	mustBal(t, ctx, ml, custAcc, 100)
 	// processor_clearing = -100 after the deposit.
-	require.Equal(t, int64(-100), sysBal(t, ctx, ml, ledger.ProcessorClearing, cur))
+	require.Equal(t, int64(-100), sysBal(t, ctx, ml, ledger.RailClearing, cur))
 
 	clawed, err := l.RevokeGrant(ctx, lot.ID, "refunded", true)
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestGrants_RevokeWithRefund(t *testing.T) {
 
 	mustBal(t, ctx, ml, custAcc, 0)
 	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.RevokedCredits, cur), "refund drains the frozen credits out")
-	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.ProcessorClearing, cur), "money returned: deposit -100 + refund +100")
+	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.RailClearing, cur), "money returned: deposit -100 + refund +100")
 	requireConserved(t, ctx, ml, cur)
 }
 

@@ -463,7 +463,7 @@ func (s *MoneyService) MarkInvoiceUncollectible(ctx context.Context, payer ident
 	return inv, nil
 }
 
-func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, id uuid.UUID, amount int64, processorPaymentID string) (*models.Invoice, error) {
+func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, id uuid.UUID, amount int64, railPaymentID string) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -476,9 +476,9 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
-	processorPaymentID = strings.TrimSpace(processorPaymentID)
-	if processorPaymentID == "" {
-		return nil, fmt.Errorf("processor_payment_id required")
+	railPaymentID = strings.TrimSpace(railPaymentID)
+	if railPaymentID == "" {
+		return nil, fmt.Errorf("rail_payment_id required")
 	}
 	var inv *models.Invoice
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -502,7 +502,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			return fmt.Errorf("payment amount exceeds invoice amount_due")
 		}
 		now := s.now()
-		sourceID := processorPaymentID
+		sourceID := railPaymentID
 		// Reference dedup: a prior owed-payment transfer with this reference means
 		// the manual payment was already applied (the single-entry uniqueness this
 		// replaced lived on money_transactions).
@@ -534,7 +534,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if e != nil {
 			return e
 		}
-		processor := string(models.ProcessorManual)
+		rail := string(models.RailManual)
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:                 uuidutil.NewV7(),
 			MerchantID:         tid.UUID(),
@@ -544,8 +544,8 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			Currency:           invoiceRow.Currency,
 			Amount:             amount,
 			Status:             "settled",
-			Processor:          &processor,
-			ProcessorPaymentID: &processorPaymentID,
+			Rail:               &rail,
+			RailPaymentID:      &railPaymentID,
 			AttemptedAt:        now,
 			SettledAt:          &now,
 			CreatedAt:          now,

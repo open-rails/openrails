@@ -72,16 +72,16 @@ func (s *PaymentService) GetByUserID(ctx context.Context, userID string) ([]*mod
 	return s.repo.GetByUserID(ctx, userID)
 }
 
-func (s *PaymentService) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
-	return s.repo.GetByTransactionID(ctx, processor, transactionID)
+func (s *PaymentService) GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
+	return s.repo.GetByTransactionID(ctx, rail, transactionID)
 }
 
 func (s *PaymentService) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
 	return s.repo.GetByPriceID(ctx, priceID)
 }
 
-func (s *PaymentService) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
-	return s.repo.GetByProcessor(ctx, processor)
+func (s *PaymentService) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
+	return s.repo.GetByRail(ctx, rail)
 }
 
 func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
@@ -93,7 +93,7 @@ func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 // Refund records a refund as a negative payment entry linked by transaction ID
-// Note: Processors should handle the actual money movement; this persists the event.
+// Note: Rails should handle the actual money movement; this persists the event.
 // amount is in cents (smallest currency unit)
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64) (*models.Payment, error) {
 	orig, err := s.GetByID(ctx, originalPaymentID)
@@ -116,7 +116,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 			id := orig.ID
 			return &id
 		}(),
-		Processor:     orig.Processor,
+		Rail:          orig.Rail,
 		TransactionID: refundTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
@@ -154,7 +154,7 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 			id := orig.ID
 			return &id
 		}(),
-		Processor:     orig.Processor,
+		Rail:          orig.Rail,
 		TransactionID: reservationTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
@@ -214,7 +214,7 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 	if created {
 		return payment, nil
 	}
-	return s.GetByTransactionID(ctx, payment.Processor, payment.TransactionID)
+	return s.GetByTransactionID(ctx, payment.Rail, payment.TransactionID)
 }
 
 func (s *PaymentService) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
@@ -309,8 +309,8 @@ func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryO
 	return s.repo.GetPayments(ctx, repoOpts)
 }
 
-func (s *PaymentService) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
-	return s.repo.GetLatestByUserAndProcessor(ctx, userID, processor)
+func (s *PaymentService) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
+	return s.repo.GetLatestByUserAndRail(ctx, userID, rail)
 }
 
 func (s *PaymentService) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
@@ -321,8 +321,8 @@ func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, su
 	return s.repo.GetLatestChargeBySubscriptionID(ctx, subscriptionID)
 }
 
-func (s *PaymentService) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
-	return s.repo.CountByUserAndProcessor(ctx, userID, processor)
+func (s *PaymentService) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
+	return s.repo.CountByUserAndRail(ctx, userID, rail)
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {

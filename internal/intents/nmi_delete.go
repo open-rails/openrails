@@ -25,11 +25,11 @@ import (
 const TypeNMIDeleteSubscription = "nmi_delete_subscription"
 
 // NMIDeletePayload is the stored payload for TypeNMIDeleteSubscription. The
-// processor subscription id is re-read from the subscription row at execution
+// rail subscription id is re-read from the subscription row at execution
 // time; the payload copy is evidence/forensics.
 type NMIDeletePayload struct {
-	UserID                  string `json:"user_id"`
-	ProcessorSubscriptionID string `json:"processor_subscription_id,omitempty"`
+	UserID             string `json:"user_id"`
+	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 }
 
 // NMIDeleteIdempotencyKey is the logical identity of "the deferred delete of
@@ -108,13 +108,13 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 		// (no provider write attempted) retryable failure.
 		return Retryable("load subscription: " + err.Error())
 	}
-	psid := strings.TrimSpace(sub.ProcessorSubscriptionID)
+	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		// Nothing exists remotely to delete; finalize locally.
 		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no processor subscription id, but local finalize failed: " + err.Error())
+			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"no_processor_subscription_id": true})
+		return Succeeded(map[string]any{"no_rail_subscription_id": true})
 	}
 
 	// Verify-then-execute: absent = success.
@@ -126,7 +126,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 		if err := h.finalize(ctx, intent); err != nil {
 			return Ambiguous("verified absent at provider, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"verified_absent": true, "processor_subscription_id": psid})
+		return Succeeded(map[string]any{"verified_absent": true, "rail_subscription_id": psid})
 	}
 
 	if err := client.DeleteRecurringSubscription(psid); err != nil {
@@ -143,7 +143,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 		// finalize is retried (its read will see the subscription absent).
 		return Ambiguous("deleted at provider, but local finalize failed: " + err.Error())
 	}
-	return Succeeded(map[string]any{"deleted": true, "processor_subscription_id": psid})
+	return Succeeded(map[string]any{"deleted": true, "rail_subscription_id": psid})
 }
 
 // Verify resolves an ambiguous delete by reading the provider: absent means
@@ -158,12 +158,12 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsProvi
 	if err != nil {
 		return Ambiguous("load subscription: " + err.Error())
 	}
-	psid := strings.TrimSpace(sub.ProcessorSubscriptionID)
+	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no processor subscription id, but local finalize failed: " + err.Error())
+			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"no_processor_subscription_id": true})
+		return Succeeded(map[string]any{"no_rail_subscription_id": true})
 	}
 	present, err := h.subscriptionPresent(client, psid)
 	if err != nil {
@@ -173,7 +173,7 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsProvi
 		if err := h.finalize(ctx, intent); err != nil {
 			return Ambiguous("verified absent at provider, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"verified_absent": true, "processor_subscription_id": psid})
+		return Succeeded(map[string]any{"verified_absent": true, "rail_subscription_id": psid})
 	}
 	return Retryable("subscription still present at provider; delete verified not executed")
 }
@@ -216,8 +216,8 @@ type nmiRecurringQueryResponse struct {
 // subscriptionPresent reads the recurring report filtered by subscription_id.
 // NMI drops deleted/cancelled subscriptions from the report entirely, so "no
 // matching row" means deleted.
-func (h *NMIDeleteHandler) subscriptionPresent(client *nmi.NMIClient, processorSubscriptionID string) (bool, error) {
-	raw, err := client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{SubscriptionID: processorSubscriptionID})
+func (h *NMIDeleteHandler) subscriptionPresent(client *nmi.NMIClient, railSubscriptionID string) (bool, error) {
+	raw, err := client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{SubscriptionID: railSubscriptionID})
 	if err != nil {
 		return false, err
 	}
@@ -229,7 +229,7 @@ func (h *NMIDeleteHandler) subscriptionPresent(client *nmi.NMIClient, processorS
 		return false, fmt.Errorf("recurring query error_response: %s", parsed.ErrorResponse)
 	}
 	for _, s := range parsed.Subscriptions {
-		if strings.TrimSpace(s.SubscriptionID) == strings.TrimSpace(processorSubscriptionID) {
+		if strings.TrimSpace(s.SubscriptionID) == strings.TrimSpace(railSubscriptionID) {
 			return true, nil
 		}
 	}

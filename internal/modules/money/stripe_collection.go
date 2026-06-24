@@ -31,10 +31,10 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return ChargeResult{}, fmt.Errorf("stripe payment method missing reusable payment_method id")
 	}
-	customerID, err := a.DB.Gen(ctx).GetProcessorCustomerIDForMerchant(ctx, gen.GetProcessorCustomerIDForMerchantParams{
+	customerID, err := a.DB.Gen(ctx).GetRailCustomerIDForMerchant(ctx, gen.GetRailCustomerIDForMerchantParams{
 		MerchantID: method.MerchantID,
 		CustomerID: method.CustomerID,
-		Processor:  string(models.ProcessorStripe),
+		Rail:       string(models.RailStripe),
 	})
 	if err != nil {
 		return ChargeResult{}, fmt.Errorf("load stripe customer mapping: %w", err)
@@ -61,7 +61,7 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 			code := stripeErr.FailureCode()
 			message := stripeErr.Error()
 			return ChargeResult{
-				Processor:      string(models.ProcessorStripe),
+				Rail:           string(models.RailStripe),
 				Declined:       true,
 				FailureCode:    &code,
 				FailureMessage: &message,
@@ -77,7 +77,7 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 		transactionID = strings.TrimSpace(result.InvoiceID)
 	}
 	return ChargeResult{
-		Processor:         string(models.ProcessorStripe),
+		Rail:              string(models.RailStripe),
 		TransactionID:     transactionID,
 		ExternalInvoiceID: strings.TrimSpace(result.InvoiceID),
 	}, nil

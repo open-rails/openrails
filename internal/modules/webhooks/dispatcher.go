@@ -24,7 +24,7 @@ import (
 
 type webhookCheckoutSessionStore interface {
 	FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error)
-	FindOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error)
+	FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error)
 	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
 	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
 	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
@@ -34,7 +34,7 @@ type webhookCheckoutSessionStore interface {
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.
 // It is intentionally minimal and decoupled from any database persistence.
 type WebhookMessage struct {
-	Processor      string
+	Rail           string
 	EventID        string
 	EventType      string
 	Payload        []byte
@@ -45,7 +45,7 @@ type WebhookMessage struct {
 	ReceivedAt     time.Time
 }
 
-// WebhookDispatcher routes persisted webhook events to processor-specific handlers.
+// WebhookDispatcher routes persisted webhook events to rail-specific handlers.
 type WebhookDispatcher struct {
 	Config                       *config.Config
 	DB                           *db.DB
@@ -59,7 +59,7 @@ type WebhookDispatcher struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	DeduplicationService         *DeduplicationService
-	ProcessorCustomerService     *payments.ProcessorCustomerService
+	RailCustomerService          *payments.RailCustomerService
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
 	PurchaseRegistrar            stripePurchaseRegistrar
@@ -67,16 +67,16 @@ type WebhookDispatcher struct {
 	MoneyService                 *money.MoneyService
 }
 
-// webhookRegistry resolves WebhookHandlers by processor. The dispatcher is fully
+// webhookRegistry resolves WebhookHandlers by rail. The dispatcher is fully
 // registry-driven: Process looks up the handler and calls Apply, so adding a
-// processor is "implement the WebhookHandler interface + register here" rather
+// rail is "implement the WebhookHandler interface + register here" rather
 // than adding a branch (issue #296). The NMIWebhookHandler resolves its signing
 // secret per gateway alias from the dispatcher's NMI clients.
 func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
 	reg.Register(StripeWebhookHandler{})
-	reg.Register(NMIWebhookHandler{SecretFor: func(processor string) string {
-		if c := d.NMIClients[processor]; c != nil {
+	reg.Register(NMIWebhookHandler{SecretFor: func(rail string) string {
+		if c := d.NMIClients[rail]; c != nil {
 			return c.GetWebhookSecret()
 		}
 		return ""
@@ -85,15 +85,15 @@ func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	return reg
 }
 
-// Process resolves the registered handler for the message's processor and runs
-// its Apply. No processor switch lives here anymore.
+// Process resolves the registered handler for the message's rail and runs
+// its Apply. No rail switch lives here anymore.
 func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) error {
 	if event == nil {
 		return fmt.Errorf("webhook event is required")
 	}
-	handler, ok := d.webhookRegistry().Handler(event.Processor)
+	handler, ok := d.webhookRegistry().Handler(event.Rail)
 	if !ok {
-		return fmt.Errorf("unsupported webhook processor: %s", strings.ToLower(strings.TrimSpace(event.Processor)))
+		return fmt.Errorf("unsupported webhook rail: %s", strings.ToLower(strings.TrimSpace(event.Rail)))
 	}
 	return handler.Apply(ctx, d, event)
 }
@@ -134,7 +134,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	}
 	var client *nmi.NMIClient
 	if d.NMIClients != nil {
-		client = d.NMIClients[event.Processor]
+		client = d.NMIClients[event.Rail]
 	}
 	if err := h.Verify(event); err != nil {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi queued webhook signature verification failed: %w", err))
@@ -149,7 +149,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		PriceService:                 d.PriceService,
 		ProductService:               d.ProductService,
 		Data:                         payload,
-		Processor:                    event.Processor,
+		Rail:                         event.Rail,
 		NMIClient:                    client,
 		EventLogService:              d.EventLogService,
 		SubscriptionService:          d.SubscriptionService,
@@ -182,7 +182,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		EventLogService:              d.EventLogService,
 		MoneyService:                 d.MoneyService,
 		DeduplicationService:         d.DeduplicationService,
-		ProcessorCustomerService:     d.ProcessorCustomerService,
+		RailCustomerService:          d.RailCustomerService,
 		CheckoutSessionService:       d.CheckoutSessionService,
 		Clock:                        d.Clock,
 	}

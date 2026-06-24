@@ -16,8 +16,8 @@ import (
 // the SAME production gateway URL and the security key carries no marker
 // (unlike Stripe's sk_test_/sk_live_ prefixes). What IS distinguishable is
 // behavior: the canonical test card (4111...) is a non-issued PAN that no
-// production processor can ever approve, while a test-mode account simulates
-// approval for it without touching a processor
+// production rail can ever approve, while a test-mode account simulates
+// approval for it without touching a rail
 // (docs.nmi.com/reference/testing-methods). One authorization-only probe is
 // therefore conclusive:
 //
@@ -32,10 +32,10 @@ import (
 //
 // The amount and order_id are randomized per attempt: NMI's duplicate-
 // transaction check rejects a repeat of the same card+amount+order_id within
-// its window (response=3 "Duplicate transaction"), and the processor refuses
+// its window (response=3 "Duplicate transaction"), and the rail refuses
 // dup_seconds=0, so a fixed probe would turn back-to-back boots (#362) into
 // ProbeIndeterminate. The verdict is amount-independent — no production
-// processor approves a non-issued PAN at any amount.
+// rail approves a non-issued PAN at any amount.
 
 const (
 	probeTestCard      = "4111111111111111"
@@ -64,7 +64,7 @@ const (
 	// only a simulator can do that; transactions cannot move real money.
 	ProbeSimulated
 	// ProbeLive: the account declined the test card — it forwarded to a real
-	// processor, so it is a live account.
+	// rail, so it is a live account.
 	ProbeLive
 )
 

@@ -12,8 +12,8 @@ import (
 )
 
 // Charger performs an off-session (merchant-initiated) charge of a saved
-// payment method and returns a processor transaction id. It is implemented by
-// the processor layer (Stripe MIT / NMI stored rebill) and faked in tests.
+// payment method and returns a rail transaction id. It is implemented by
+// the rail layer (Stripe MIT / NMI stored rebill) and faked in tests.
 // Issues #239 (prepaid auto-top-up) and #241 (arrears settlement) depend on it.
 type Charger interface {
 	ChargeSavedMethod(ctx context.Context, req ChargeRequest) (ChargeResult, error)
@@ -32,7 +32,7 @@ type ChargeRequest struct {
 }
 
 type ChargeResult struct {
-	Processor         string
+	Rail              string
 	TransactionID     string
 	ExternalInvoiceID string
 	Declined          bool // true = hard decline (don't keep retrying); false+err = transient
@@ -186,7 +186,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     nativeAmountToProcessorMinor(r.Currency, *r.TopupAmount),
+		AmountCents:     nativeAmountToRailMinor(r.Currency, *r.TopupAmount),
 		Currency:        normalizeCurrency(r.Currency),
 		IdempotencyKey:  episode,
 		Description:     "auto top-up",
@@ -218,7 +218,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	return true, nil
 }
 
-func nativeAmountToProcessorMinor(currency string, amount int64) int64 {
+func nativeAmountToRailMinor(currency string, amount int64) int64 {
 	scale, ok := CurrencyScale(currency)
 	if !ok {
 		return amount

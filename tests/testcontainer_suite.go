@@ -62,7 +62,7 @@ type TestContainerSuite struct {
 	Server     *server.Server
 	httpServer *http.Server
 	Config     *config.Config
-	Processors config.ProcessorSet
+	Rails      config.RailSet
 	ServerURL  string
 
 	// Context for container operations
@@ -203,11 +203,11 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		Env: "dev",
 		// Sandbox semantics MUST be explicit (#355): the dev default is now
 		// live credentials + mode=full, so the suite sets test_mode=true to keep
-		// processors on their sandbox environments (and the NMI demo-key boot
+		// rails on their sandbox environments (and the NMI demo-key boot
 		// probe working).
 		TestMode: true,
-		Host:    "localhost",
-		Port:    8080, // Fixed port for shared test suite
+		Host:     "localhost",
+		Port:     8080, // Fixed port for shared test suite
 		DB: &config.DBConfig{
 			URL: postgresConnStr,
 		},
@@ -233,25 +233,25 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			Issuer: "https://controlplane.openrails.test",
 		},
 	}
-	// Payment processor credentials are construction-time merchant/provider
+	// Payment rail credentials are construction-time merchant/provider
 	// state, not infrastructure config.yaml state.
-	suite.Processors = config.ProcessorSet{
+	suite.Rails = config.RailSet{
 		"ccbill": {
-			Type:         config.ProcessorTypeCCBill,
+			Type:         config.RailTypeCCBill,
 			ClientAccNum: "945280",
 			ClientSubAcc: "0000",
 			Salt:         "test-salt",
 		},
 		"solana": {
-			Type:            config.ProcessorTypeSolana,
+			Type:            config.RailTypeSolana,
 			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 			Tokens:          solanatokens.DefaultDevnetTokens(),
 		},
 		"mobius": {
-			Type:            config.ProcessorTypeNMI,
-			SecurityKey:     envOrDefault("PROCESSORS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
-			TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
-			WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
+			Type:            config.RailTypeNMI,
+			SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
+			TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
+			WebhookSecret:   envOrDefault("RAILS_MOBIUS_WEBHOOK_SECRET", ""),
 		},
 	}
 	if suite.port != 0 {
@@ -348,7 +348,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	assembled, err := ginboot.NewServer(suite.Config, &bootstrap.Options{
 		Clock:                  suite.clock,
 		ConfiguredMerchant:     dbtest.TestMerchantID,
-		Processors:             suite.Processors,
+		Rails:                  suite.Rails,
 		Authenticator:          suiteTestAuthenticator{},
 		DelegatedAuthenticator: suiteTestDelegatedAuthenticator{},
 	})
@@ -594,7 +594,7 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		return
 	}
 	clients := make(map[string]*nmi.NMIClient)
-	for name, proc := range suite.Processors.GetNMIProcessors() {
+	for name, proc := range suite.Rails.GetNMIRails() {
 		settings := proc.ToNMIProviderSettings(name)
 		client, err := nmi.NewClient(name, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
@@ -617,7 +617,7 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		}
 	}
 	if rt.CheckoutSessionService != nil {
-		rt.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Processors, clients))
+		rt.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Rails, clients))
 	}
 }
 

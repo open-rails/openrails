@@ -30,7 +30,7 @@ func TestAccrueOwed_Idempotent(t *testing.T) {
 
 func TestChargeOutstanding_Threshold(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -70,7 +70,7 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 
 func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -94,7 +94,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 
 func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})

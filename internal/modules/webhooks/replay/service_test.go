@@ -42,7 +42,7 @@ func TestReplayService_GetWebhookFilesPath(t *testing.T) {
 	_, err = os.Stat(webhookPath)
 	assert.NoError(t, err, "webhook testdata directory should exist")
 
-	// Verify processor subdirectories exist
+	// Verify rail subdirectories exist
 	ccbillPath := filepath.Join(webhookPath, "ccbill")
 	_, err = os.Stat(ccbillPath)
 	assert.NoError(t, err, "ccbill directory should exist")
@@ -58,48 +58,48 @@ func TestReplayService_LoadWebhookEvents(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		processor   string
+		rail        string
 		eventFilter string
 		expectError bool
 		minFiles    int
 	}{
 		{
 			name:        "Load all CCBill events",
-			processor:   "ccbill",
+			rail:        "ccbill",
 			eventFilter: "all",
 			expectError: false,
 			minFiles:    1,
 		},
 		{
 			name:        "Load all NMI events",
-			processor:   "mobius",
+			rail:        "mobius",
 			eventFilter: "all",
 			expectError: false,
 			minFiles:    1,
 		},
 		{
 			name:        "Load specific CCBill event",
-			processor:   "ccbill",
+			rail:        "ccbill",
 			eventFilter: "newsalesuccess.json",
 			expectError: false,
 			minFiles:    1,
 		},
 		{
 			name:        "Load specific NMI event",
-			processor:   "mobius",
+			rail:        "mobius",
 			eventFilter: "recurring_subscription_add.json",
 			expectError: false,
 			minFiles:    1,
 		},
 		{
-			name:        "Invalid processor",
-			processor:   "invalid",
+			name:        "Invalid rail",
+			rail:        "invalid",
 			eventFilter: "all",
 			expectError: true,
 		},
 		{
 			name:        "Nonexistent event file",
-			processor:   "ccbill",
+			rail:        "ccbill",
 			eventFilter: "nonexistent.json",
 			expectError: true,
 		},
@@ -107,7 +107,7 @@ func TestReplayService_LoadWebhookEvents(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eventFiles, err := rs.loadWebhookEvents(tt.processor, tt.eventFilter)
+			eventFiles, err := rs.loadWebhookEvents(tt.rail, tt.eventFilter)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -140,7 +140,7 @@ func TestReplayService_ValidateWebhookPayload(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Success)
 	assert.Equal(t, "newsalesuccess.json", result.EventFile)
-	assert.Equal(t, "ccbill", result.Processor)
+	assert.Equal(t, "ccbill", result.Rail)
 	assert.Empty(t, result.Error)
 
 	// Test NMI event validation
@@ -152,7 +152,7 @@ func TestReplayService_ValidateWebhookPayload(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, nmiResult.Success)
 	assert.Equal(t, "recurring_subscription_add.json", nmiResult.EventFile)
-	assert.Equal(t, "mobius", nmiResult.Processor)
+	assert.Equal(t, "mobius", nmiResult.Rail)
 	assert.NotEmpty(t, nmiResult.EventType, "NMI events should have event_type extracted")
 }
 
@@ -386,8 +386,8 @@ func TestHelperFunctions(t *testing.T) {
 	assert.NoError(t, err, "Should validate all NMI events successfully")
 
 	err = ValidateEvent("invalid", "test.json")
-	assert.Error(t, err, "Should fail with invalid processor")
-	assert.Contains(t, err.Error(), "invalid processor 'invalid'")
+	assert.Error(t, err, "Should fail with invalid rail")
+	assert.Contains(t, err.Error(), "invalid rail 'invalid'")
 
 	err = ValidateEvent("ccbill", "nonexistent.json")
 	assert.Error(t, err, "Should fail with nonexistent event file")

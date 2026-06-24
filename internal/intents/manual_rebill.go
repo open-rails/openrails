@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// TypeManualRebill is the processor-side dunning charge (#358 phase C),
+// TypeManualRebill is the rail-side dunning charge (#358 phase C),
 // folding the retired openrails.manual_rebill_attempts claim table into the
 // ledger. One intent per (subscription, period end, attempt ordinal): the
 // dunning worker enqueues + executes it synchronously and drives lifecycle
@@ -43,7 +43,7 @@ const TypeManualRebill = "manual_rebill"
 type ManualRebillPayload struct {
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 	PeriodEnd      time.Time `json:"period_end"`
-	Processor      string    `json:"processor"`
+	Rail           string    `json:"rail"`
 	// OrderReference is stamped as the NMI order_id/ponumber: the correlation
 	// handle the verifier queries by. Shared by every attempt for the period,
 	// so verification answers "was this PERIOD charged?" — the invariant that
@@ -54,14 +54,14 @@ type ManualRebillPayload struct {
 
 // ManualRebillIdempotencyKey content-addresses one dunning charge attempt the
 // same way the retired claim row was keyed (subscription + period end +
-// processor + order reference), plus the attempt ordinal: a crash between
+// rail + order reference), plus the attempt ordinal: a crash between
 // charge and lifecycle update re-derives the SAME key (the failure count only
 // moves when lifecycle moves) and gets the durable outcome back instead of
 // double-charging, while each scheduled retry is a fresh intent.
-func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, processor, orderReference string, attempt int) string {
+func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, rail, orderReference string, attempt int) string {
 	return fmt.Sprintf("%s:%s:%d:%s:%s:attempt-%d",
 		TypeManualRebill, subscriptionID, periodEnd.UTC().Unix(),
-		strings.ToLower(strings.TrimSpace(processor)), strings.TrimSpace(orderReference), attempt)
+		strings.ToLower(strings.TrimSpace(rail)), strings.TrimSpace(orderReference), attempt)
 }
 
 // ManualRebillHandler implements the money-mover semantics for dunning
@@ -170,7 +170,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsP
 	rebillResp, err := client.AttemptManualRebill(nmi.ManualRebillParams{
 		VaultID:        pm.VaultID,
 		BillingID:      *pm.BillingID,
-		SubscriptionID: sub.ProcessorSubscriptionID,
+		SubscriptionID: sub.RailSubscriptionID,
 		OrderID:        p.OrderReference,
 		PONumber:       p.OrderReference,
 	})
@@ -279,11 +279,11 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebil
 	}
 
 	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.Processor(strings.ToLower(intentProcessor(p, sub))),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		TransactionID:           transactionID,
-		Amount:                  amount,
-		Currency:                currency,
+		Rail:               models.Rail(strings.ToLower(intentRail(p, sub))),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		TransactionID:      transactionID,
+		Amount:             amount,
+		Currency:           currency,
 	}); err != nil {
 		return fmt.Errorf("renew membership: %w", err)
 	}
@@ -305,11 +305,11 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebil
 	return nil
 }
 
-// intentProcessor prefers the payload's processor (what the producer charged
+// intentRail prefers the payload's rail (what the producer charged
 // under) and falls back to the subscription row.
-func intentProcessor(p ManualRebillPayload, sub *models.Subscription) string {
-	if proc := strings.TrimSpace(p.Processor); proc != "" {
+func intentRail(p ManualRebillPayload, sub *models.Subscription) string {
+	if proc := strings.TrimSpace(p.Rail); proc != "" {
 		return proc
 	}
-	return string(sub.Processor)
+	return string(sub.Rail)
 }

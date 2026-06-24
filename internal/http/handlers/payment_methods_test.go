@@ -106,9 +106,9 @@ func TestPaymentMethodToAPIIncludesStoredBillingMetadata(t *testing.T) {
 	last4 := "4242"
 	cardType := "Visa"
 	pm := &models.PaymentMethod{
-		Processor: "mobius",
-		LastFour:  &last4,
-		CardType:  &cardType,
+		Rail:     "mobius",
+		LastFour: &last4,
+		CardType: &cardType,
 		Metadata: map[string]any{
 			"name_on_card":     "Ada Lovelace",
 			"billing_email":    "ada@example.com",

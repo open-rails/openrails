@@ -93,15 +93,15 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	owner := identity.CustomerIDFromString(uuid.NewString())
 
 	// Not blocked before adding.
-	blocked, err := svc.IsBlocked(ctx, abuse.KindProcessorCustomer, value)
+	blocked, err := svc.IsBlocked(ctx, abuse.KindRailCustomer, value)
 	require.NoError(t, err)
 	require.False(t, blocked)
 
 	// Add an OWNER-SCOPED block.
-	require.NoError(t, svc.Add(ctx, &owner, abuse.KindProcessorCustomer, value, "fraud"))
+	require.NoError(t, svc.Add(ctx, &owner, abuse.KindRailCustomer, value, "fraud"))
 
 	// IsBlocked is true (matches any owner-scoped row for this kind+value).
-	blocked, err = svc.IsBlocked(ctx, abuse.KindProcessorCustomer, value)
+	blocked, err = svc.IsBlocked(ctx, abuse.KindRailCustomer, value)
 	require.NoError(t, err)
 	require.True(t, blocked)
 
@@ -109,14 +109,14 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	var storedOwner *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
 		"SELECT customer_id FROM openrails.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
-		abuse.KindProcessorCustomer, value,
+		abuse.KindRailCustomer, value,
 	).Scan(&storedOwner))
 	require.NotNil(t, storedOwner)
 	require.Equal(t, owner.UUID(), *storedOwner)
 
 	// Remove clears it.
-	require.NoError(t, svc.Remove(ctx, abuse.KindProcessorCustomer, value))
-	blocked, err = svc.IsBlocked(ctx, abuse.KindProcessorCustomer, value)
+	require.NoError(t, svc.Remove(ctx, abuse.KindRailCustomer, value))
+	blocked, err = svc.IsBlocked(ctx, abuse.KindRailCustomer, value)
 	require.NoError(t, err)
 	require.False(t, blocked)
 }

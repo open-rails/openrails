@@ -38,24 +38,24 @@ func testManualRebillPayload() ManualRebillPayload {
 	return ManualRebillPayload{
 		SubscriptionID: subID,
 		PeriodEnd:      time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-		Processor:      "mobius",
+		Rail:           "mobius",
 		OrderReference: fmt.Sprintf("rebill-%s-%d", subID, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC).Unix()),
 		Attempt:        1,
 	}
 }
 
 // TestManualRebillIdempotencyKey pins the identity contract: same content
-// (sub + period + processor + order ref + attempt ordinal) -> same key (the
+// (sub + period + rail + order ref + attempt ordinal) -> same key (the
 // crash-repair conflict), different attempt ordinal -> different key (each
 // scheduled retry is a fresh intent).
 func TestManualRebillIdempotencyKey(t *testing.T) {
 	p := testManualRebillPayload()
-	key := ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd, p.Processor, p.OrderReference, p.Attempt)
+	key := ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd, p.Rail, p.OrderReference, p.Attempt)
 	assert.Equal(t, key, ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd, "MOBIUS", p.OrderReference, p.Attempt),
-		"processor casing must not split identities")
-	assert.NotEqual(t, key, ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd, p.Processor, p.OrderReference, p.Attempt+1),
+		"rail casing must not split identities")
+	assert.NotEqual(t, key, ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd, p.Rail, p.OrderReference, p.Attempt+1),
 		"the next scheduled retry is a new intent")
-	assert.NotEqual(t, key, ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd.Add(30*24*time.Hour), p.Processor, p.OrderReference, p.Attempt),
+	assert.NotEqual(t, key, ManualRebillIdempotencyKey(p.SubscriptionID, p.PeriodEnd.Add(30*24*time.Hour), p.Rail, p.OrderReference, p.Attempt),
 		"another period is another charge")
 }
 

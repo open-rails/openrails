@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
-// WebhookEventType is the normalized, processor-agnostic classification of an
-// incoming webhook. Each processor handler maps its native event type onto one
+// WebhookEventType is the normalized, rail-agnostic classification of an
+// incoming webhook. Each rail handler maps its native event type onto one
 // of these so the dispatcher, deduplication, and ledger/subscription logic can
-// reason about events without a per-processor switch.
+// reason about events without a per-rail switch.
 type WebhookEventType string
 
 const (
@@ -36,42 +36,42 @@ const (
 	WebhookEventCustomerUpdated           WebhookEventType = "customer_updated"
 )
 
-// WebhookEvent is the unified, processor-agnostic representation of an incoming
-// webhook, produced by WebhookHandler.Normalize. Type, RawType, ProcessorRef,
+// WebhookEvent is the unified, rail-agnostic representation of an incoming
+// webhook, produced by WebhookHandler.Normalize. Type, RawType, RailRef,
 // and Raw are always populated; the remaining fields are best-effort — a handler
 // fills them when the native payload makes them cheaply available and leaves
 // them zero otherwise.
 type WebhookEvent struct {
-	Processor       string           // "stripe", "ccbill", or the NMI processor name
+	Rail            string           // "stripe", "ccbill", or the NMI rail name
 	Type            WebhookEventType // normalized classification
-	RawType         string           // native processor event type, verbatim
-	ProcessorRef    string           // processor's event id / primary reference
-	SubscriptionRef string           // processor subscription id (best-effort)
+	RawType         string           // native rail event type, verbatim
+	RailRef         string           // rail's event id / primary reference
+	SubscriptionRef string           // rail subscription id (best-effort)
 	Amount          int64            // minor units / cents (best-effort, 0 if unknown)
 	Currency        string           // ISO currency, upper-cased (best-effort)
 	OccurredAt      time.Time        // event time (best-effort, zero if unknown)
 	Raw             []byte           // original payload, verbatim
 }
 
-// WebhookHandler is the per-processor contract. Adding a new processor's
+// WebhookHandler is the per-rail contract. Adding a new rail's
 // webhooks becomes "implement this interface + register it" rather than adding
 // a branch to the dispatcher. Verify authenticates the raw message; Normalize
 // parses it into a unified WebhookEvent.
 type WebhookHandler interface {
-	Processor() string
+	Rail() string
 	Verify(msg *WebhookMessage) error
 	Normalize(msg *WebhookMessage) (WebhookEvent, error)
-	// Apply runs the processor-specific business logic (subscription/ledger
+	// Apply runs the rail-specific business logic (subscription/ledger
 	// updates, dedup, notifications) for the message. The dispatcher resolves the
-	// handler by processor and calls Apply, so adding a processor is "implement
+	// handler by rail and calls Apply, so adding a rail is "implement
 	// the interface + register" rather than adding a branch. The apply logic
-	// remains processor-specific by necessity — it consumes native payload fields
-	// the unified WebhookEvent does not carry, and each processor owns its own
+	// remains rail-specific by necessity — it consumes native payload fields
+	// the unified WebhookEvent does not carry, and each rail owns its own
 	// deduplication semantics.
 	Apply(ctx context.Context, d *WebhookDispatcher, msg *WebhookMessage) error
 }
 
-// WebhookHandlerRegistry resolves a WebhookHandler by processor name. NMI-backed
+// WebhookHandlerRegistry resolves a WebhookHandler by rail name. NMI-backed
 // gateway aliases all resolve to the single registered "nmi" handler.
 type WebhookHandlerRegistry struct {
 	handlers map[string]WebhookHandler
@@ -82,25 +82,25 @@ func NewWebhookHandlerRegistry() *WebhookHandlerRegistry {
 	return &WebhookHandlerRegistry{handlers: map[string]WebhookHandler{}}
 }
 
-// Register adds (or replaces) the handler for its processor key.
+// Register adds (or replaces) the handler for its rail key.
 func (r *WebhookHandlerRegistry) Register(h WebhookHandler) {
 	if r == nil || h == nil {
 		return
 	}
-	r.handlers[strings.ToLower(strings.TrimSpace(h.Processor()))] = h
+	r.handlers[strings.ToLower(strings.TrimSpace(h.Rail()))] = h
 }
 
-// Handler resolves the handler for a processor name, mapping NMI gateway aliases
+// Handler resolves the handler for a rail name, mapping NMI gateway aliases
 // (e.g. "nmi", "mobius") onto the registered "nmi" handler.
-func (r *WebhookHandlerRegistry) Handler(processor string) (WebhookHandler, bool) {
+func (r *WebhookHandlerRegistry) Handler(rail string) (WebhookHandler, bool) {
 	if r == nil {
 		return nil, false
 	}
-	key := strings.ToLower(strings.TrimSpace(processor))
+	key := strings.ToLower(strings.TrimSpace(rail))
 	if h, ok := r.handlers[key]; ok {
 		return h, true
 	}
-	if processors.IsNMIBacked(key) {
+	if rails.IsNMIBacked(key) {
 		if h, ok := r.handlers["nmi"]; ok {
 			return h, true
 		}
@@ -118,7 +118,7 @@ type StripeWebhookHandler struct {
 	Tolerance time.Duration
 }
 
-func (StripeWebhookHandler) Processor() string { return "stripe" }
+func (StripeWebhookHandler) Rail() string { return "stripe" }
 
 func (h StripeWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
@@ -142,11 +142,11 @@ func (h StripeWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, erro
 		return WebhookEvent{}, fmt.Errorf("parse stripe webhook: %w", err)
 	}
 	out := WebhookEvent{
-		Processor:    "stripe",
-		Type:         mapStripeEventType(evt.Type),
-		RawType:      evt.Type,
-		ProcessorRef: evt.ID,
-		Raw:          msg.Payload,
+		Rail:    "stripe",
+		Type:    mapStripeEventType(evt.Type),
+		RawType: evt.Type,
+		RailRef: evt.ID,
+		Raw:     msg.Payload,
 	}
 	if evt.Created > 0 {
 		out.OccurredAt = time.Unix(evt.Created, 0).UTC()
@@ -210,13 +210,13 @@ func mapStripeEventType(t string) WebhookEventType {
 // ---------------------------------------------------------------------------
 
 // NMIWebhookHandler verifies + normalizes NMI webhooks. SecretFor resolves the
-// signing secret for the concrete processor name on the message (NMI deployments
+// signing secret for the concrete rail name on the message (NMI deployments
 // can run multiple gateway aliases, each with its own secret).
 type NMIWebhookHandler struct {
-	SecretFor func(processor string) string
+	SecretFor func(rail string) string
 }
 
-func (NMIWebhookHandler) Processor() string { return "nmi" }
+func (NMIWebhookHandler) Rail() string { return "nmi" }
 
 func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
@@ -224,7 +224,7 @@ func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 	}
 	secret := strings.TrimSpace(msg.SigningSecret)
 	if secret == "" && h.SecretFor != nil {
-		secret = h.SecretFor(msg.Processor)
+		secret = h.SecretFor(msg.Rail)
 	}
 	if strings.TrimSpace(secret) == "" {
 		return fmt.Errorf("nmi webhook secret not configured")
@@ -245,11 +245,11 @@ func (h NMIWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, error) 
 	}
 	rawType := string(evt.EventType)
 	out := WebhookEvent{
-		Processor:    strings.TrimSpace(msg.Processor),
-		Type:         mapNMIEventType(rawType),
-		RawType:      rawType,
-		ProcessorRef: evt.EventID,
-		Raw:          msg.Payload,
+		Rail:    strings.TrimSpace(msg.Rail),
+		Type:    mapNMIEventType(rawType),
+		RawType: rawType,
+		RailRef: evt.EventID,
+		Raw:     msg.Payload,
 	}
 	switch {
 	case strings.HasPrefix(rawType, "recurring."):
@@ -302,7 +302,7 @@ func mapNMIEventType(t string) WebhookEventType {
 // WebhookMessage.SignatureValid, so there is no per-message HMAC to re-check.
 type CCBillWebhookHandler struct{}
 
-func (CCBillWebhookHandler) Processor() string { return "ccbill" }
+func (CCBillWebhookHandler) Rail() string { return "ccbill" }
 
 func (h CCBillWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
@@ -316,18 +316,18 @@ func (h CCBillWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, erro
 		return WebhookEvent{}, fmt.Errorf("nil webhook message")
 	}
 	out := WebhookEvent{
-		Processor:    "ccbill",
-		Type:         mapCCBillEventType(msg.EventType),
-		RawType:      msg.EventType,
-		ProcessorRef: strings.TrimSpace(msg.EventID),
-		Raw:          msg.Payload,
+		Rail:    "ccbill",
+		Type:    mapCCBillEventType(msg.EventType),
+		RawType: msg.EventType,
+		RailRef: strings.TrimSpace(msg.EventID),
+		Raw:     msg.Payload,
 	}
 	if len(msg.Payload) > 0 {
 		var body map[string]interface{}
 		if err := json.Unmarshal(msg.Payload, &body); err == nil {
 			out.SubscriptionRef = ccbillPayloadStringField(body, "subscriptionId")
-			if out.ProcessorRef == "" {
-				out.ProcessorRef = ccbillPayloadStringField(body, "transactionId")
+			if out.RailRef == "" {
+				out.RailRef = ccbillPayloadStringField(body, "transactionId")
 			}
 		}
 	}

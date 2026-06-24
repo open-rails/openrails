@@ -68,18 +68,18 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorCCBill),
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               now,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailCCBill),
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             now,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	})
 	require.NoError(t, err)
 
@@ -210,18 +210,18 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorCCBill),
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               now,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailCCBill),
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             now,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	})
 	require.NoError(t, err)
 

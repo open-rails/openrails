@@ -46,28 +46,28 @@ SQL="\\set ON_ERROR_STOP on
 \\pset border 2
 
 \\echo '--- checkout_sessions ---'
-SELECT id, status, processor, price_id, transaction_id, subscription_id, payment_id, created_at
+SELECT id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
 FROM billing.checkout_sessions
 WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'"; fi)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payment_methods ---'
-SELECT id, user_id, processor, vault_id, created_at
+SELECT id, user_id, rail, vault_id, created_at
 FROM billing.payment_methods
 WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'"; fi)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- subscriptions ---'
-SELECT id, user_id, status, processor, processor_subscription_id, price_id, created_at
+SELECT id, user_id, status, rail, rail_subscription_id, price_id, created_at
 FROM billing.subscriptions
 WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "gateway_response->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'::uuid"; fi)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payments ---'
-SELECT id, user_id, processor, transaction_id, amount, currency, purchased_at
+SELECT id, user_id, rail, transaction_id, amount, currency, purchased_at
 FROM billing.payments
 WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'::uuid"; fi)
 ORDER BY purchased_at DESC

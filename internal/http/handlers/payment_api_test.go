@@ -29,7 +29,7 @@ func TestPaymentToAPIStatusAndCaptured(t *testing.T) {
 				ID:            uuid.New(),
 				CustomerID:    identity.CustomerIDFromString(uuid.NewString()).UUID(),
 				PriceID:       uuid.New(),
-				Processor:     models.ProcessorMobius,
+				Rail:          models.RailMobius,
 				TransactionID: "txn_123",
 				Amount:        1000,
 				Currency:      "usd",
@@ -51,7 +51,7 @@ func TestPaymentToAPIRefundObjectNotCaptured(t *testing.T) {
 		CustomerID:        identity.CustomerIDFromString(uuid.NewString()).UUID(),
 		PriceID:           uuid.New(),
 		RefundedPaymentID: &originalID,
-		Processor:         models.ProcessorMobius,
+		Rail:              models.RailMobius,
 		TransactionID:     "refund_123",
 		Amount:            -500,
 		Currency:          "usd",
@@ -78,7 +78,7 @@ func TestPaymentToAPIRefundObjectPreservesPendingAndFailedStatus(t *testing.T) {
 				CustomerID:        identity.CustomerIDFromString(uuid.NewString()).UUID(),
 				PriceID:           uuid.New(),
 				RefundedPaymentID: &originalID,
-				Processor:         models.ProcessorMobius,
+				Rail:              models.RailMobius,
 				TransactionID:     "refund_123",
 				Amount:            -500,
 				Currency:          "usd",
@@ -99,7 +99,7 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 		ID:            originalID,
 		CustomerID:    identity.CustomerIDFromString(uuid.NewString()).UUID(),
 		PriceID:       uuid.New(),
-		Processor:     models.ProcessorMobius,
+		Rail:          models.RailMobius,
 		TransactionID: "txn_123",
 		Amount:        1000,
 		Currency:      "usd",
@@ -107,9 +107,9 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 		CreatedAt:     time.Unix(100, 0),
 	}
 	refunds := []*models.Payment{
-		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
-		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
-		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Rail: payment.Rail, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Rail: payment.Rail, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Rail: payment.Rail, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
 	}
 
 	got := PaymentToAPI(payment, refunds)

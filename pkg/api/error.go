@@ -45,7 +45,7 @@ const (
 	CodeCardExpired       = "expired_card"
 	CodeInsufficientFunds = "insufficient_funds"
 	CodePaymentFailed     = "payment_failed"
-	CodeProcessorError    = "processor_error"
+	CodeRailError         = "rail_error"
 
 	// Rate limiting
 	CodeRateLimitExceeded = "rate_limit_exceeded"

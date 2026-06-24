@@ -28,7 +28,7 @@ import (
 //	openrails pull-provider report [--run=ID] latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
-// processors are NEVER mutated: mutation flags converge local state only.
+// rails are NEVER mutated: mutation flags converge local state only.
 // Remote-provider writes are queued by the operation that requests them through
 // the provider intent ledger, not by provider pull.
 func newPullProviderCmd() *cobra.Command {
@@ -55,7 +55,7 @@ func newPullProviderCmd() *cobra.Command {
 			"the changes it WOULD make, writing nothing. Mutation classes are explicit and compose: `--insert` imports " +
 			"provider-observed records missing locally; `--overwrite` updates existing local mirror rows from provider " +
 			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
-			"that are ABSENT from the provider source. The remote processors are NEVER mutated.",
+			"that are ABSENT from the provider source. The remote rails are NEVER mutated.",
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, logDir, insert, overwrite, prune)
 		},
@@ -89,7 +89,7 @@ func newPullProviderCmd() *cobra.Command {
 type reconcileRuntime struct {
 	DB             *db.DB
 	Config         *config.Config
-	Processors     config.ProcessorSet
+	Rails          config.RailSet
 	NMIClients     map[string]*nmi.NMIClient
 	CCBillDataLink *ccbill.DataLinkClient
 	SolanaRPC      *solanaint.RPCClient
@@ -127,18 +127,18 @@ func newReconcileRuntime(cfg *config.Config) (*reconcileRuntime, func(), error) 
 	}
 	cleanup := func() { _ = database.Close() }
 
-	processors := config.ProcessorSet{}
-	nmiClients, err := reconcileNMIClients(cfg, processors)
+	rails := config.RailSet{}
+	nmiClients, err := reconcileNMIClients(cfg, rails)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	ccbillDataLink, err := reconcileCCBillDataLink(cfg, processors)
+	ccbillDataLink, err := reconcileCCBillDataLink(cfg, rails)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	solanaRPC, err := reconcileSolanaRPC(cfg, processors)
+	solanaRPC, err := reconcileSolanaRPC(cfg, rails)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -146,16 +146,16 @@ func newReconcileRuntime(cfg *config.Config) (*reconcileRuntime, func(), error) 
 	return &reconcileRuntime{
 		DB:             database,
 		Config:         cfg,
-		Processors:     processors,
+		Rails:          rails,
 		NMIClients:     nmiClients,
 		CCBillDataLink: ccbillDataLink,
 		SolanaRPC:      solanaRPC,
 	}, cleanup, nil
 }
 
-func reconcileNMIClients(cfg *config.Config, processors config.ProcessorSet) (map[string]*nmi.NMIClient, error) {
+func reconcileNMIClients(cfg *config.Config, rails config.RailSet) (map[string]*nmi.NMIClient, error) {
 	clients := map[string]*nmi.NMIClient{}
-	for name, procConfig := range processors.GetNMIProcessors() {
+	for name, procConfig := range rails.GetNMIRails() {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" {
 			return nil, fmt.Errorf("nmi provider name cannot be empty")
@@ -173,8 +173,8 @@ func reconcileNMIClients(cfg *config.Config, processors config.ProcessorSet) (ma
 	return clients, nil
 }
 
-func reconcileCCBillDataLink(cfg *config.Config, processors config.ProcessorSet) (*ccbill.DataLinkClient, error) {
-	_, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeCCBill)
+func reconcileCCBillDataLink(cfg *config.Config, rails config.RailSet) (*ccbill.DataLinkClient, error) {
+	_, proc, err := rails.PrimaryRailByType(config.RailTypeCCBill)
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +186,8 @@ func reconcileCCBillDataLink(cfg *config.Config, processors config.ProcessorSet)
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }
 
-func reconcileSolanaRPC(cfg *config.Config, processors config.ProcessorSet) (*solanaint.RPCClient, error) {
-	_, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeSolana)
+func reconcileSolanaRPC(cfg *config.Config, rails config.RailSet) (*solanaint.RPCClient, error) {
+	_, proc, err := rails.PrimaryRailByType(config.RailTypeSolana)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +282,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 			explicitBindings[provider] = binding
 		}
 
-		fetchers, err := reconcile.BuildFetchersWithOptions(rt.Config, rt.Processors, reconcile.FetcherClients{
+		fetchers, err := reconcile.BuildFetchersWithOptions(rt.Config, rt.Rails, reconcile.FetcherClients{
 			NMIClients:     rt.NMIClients,
 			CCBillDataLink: rt.CCBillDataLink,
 			SolanaRPC:      rt.SolanaRPC,
@@ -400,7 +400,7 @@ func resolveReconcileProviderAccountTarget(ctx context.Context, rt *reconcileRun
 	if err != nil {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
+	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Rails, rt.NMIClients)
 	identity, ok := resolver.FindProviderAccount(ctx, account.ProviderType, account.Environment, account.AccountID)
 	if !ok {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("provider account %s (%s:%s:%s) is not configured in this runtime", id, account.ProviderType, account.Environment, account.AccountID)
@@ -413,7 +413,7 @@ func resolveReconcileProviderAccountTarget(ctx context.Context, rt *reconcileRun
 	}, nil
 }
 
-func reconcileProviderAccountBindings(ctx context.Context, rt *reconcileRuntime, fetchers map[reconcile.Provider]reconcile.ProcessorFetcher, selected []reconcile.Provider, explicit map[reconcile.Provider]reconcile.ProviderAccountBinding) (map[reconcile.Provider]reconcile.ProviderAccountBinding, error) {
+func reconcileProviderAccountBindings(ctx context.Context, rt *reconcileRuntime, fetchers map[reconcile.Provider]reconcile.RailFetcher, selected []reconcile.Provider, explicit map[reconcile.Provider]reconcile.ProviderAccountBinding) (map[reconcile.Provider]reconcile.ProviderAccountBinding, error) {
 	merchantID, ok := merchant.FromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("merchant context not set")
@@ -425,7 +425,7 @@ func reconcileProviderAccountBindings(ctx context.Context, rt *reconcileRuntime,
 			providers = append(providers, p)
 		}
 	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
+	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Rails, rt.NMIClients)
 	store := intents.NewStore(rt.DB).WithProviderAccounts(resolver)
 	out := make(map[reconcile.Provider]reconcile.ProviderAccountBinding, len(providers))
 	for _, provider := range providers {

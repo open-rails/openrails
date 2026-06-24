@@ -521,7 +521,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	if err != nil {
 		return err
 	}
-	if cfg != nil && !cfg.IsDev() && environment == "test" && role != nil && *role == configProcessorRolePrimary && (status == nil || *status == "enabled") {
+	if cfg != nil && !cfg.IsDev() && environment == "test" && role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
 		return fmt.Errorf("provider account %q cannot be mode=primary with environment=test outside development", providerType)
 	}
 	mctx := merchant.WithID(ctx, merchantID)
@@ -542,7 +542,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		if err != nil {
 			return fmt.Errorf("upsert provider account %s:%s: %w", providerType, accountID, err)
 		}
-		if role != nil && *role == config.ProcessorRolePrimary && (status == nil || *status == "enabled") {
+		if role != nil && *role == config.RailRolePrimary && (status == nil || *status == "enabled") {
 			if err := database.Gen(ctx).DemoteOtherPrimaryProviderAccounts(ctx, gen.DemoteOtherPrimaryProviderAccountsParams{
 				MerchantID:   merchantID.UUID(),
 				ProviderType: providerType,
@@ -600,7 +600,7 @@ func normalizeProviderEnvironment(raw string) (string, error) {
 func normalizeManifestProviderType(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "mobius":
-		return config.ProcessorTypeNMI
+		return config.RailTypeNMI
 	default:
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
@@ -610,14 +610,14 @@ func manifestProviderAccountMode(raw string) (*string, *string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
 		return nil, nil, nil
-	case configProcessorRolePrimary:
-		return stringPtrIfNotEmpty(configProcessorRolePrimary), stringPtrIfNotEmpty("enabled"), nil
-	case configProcessorRoleSecondary:
-		return stringPtrIfNotEmpty(configProcessorRoleSecondary), stringPtrIfNotEmpty("enabled"), nil
-	case configProcessorRoleLegacy:
-		return stringPtrIfNotEmpty(configProcessorRoleLegacy), stringPtrIfNotEmpty("enabled"), nil
+	case configRailRolePrimary:
+		return stringPtrIfNotEmpty(configRailRolePrimary), stringPtrIfNotEmpty("enabled"), nil
+	case configRailRoleSecondary:
+		return stringPtrIfNotEmpty(configRailRoleSecondary), stringPtrIfNotEmpty("enabled"), nil
+	case configRailRoleLegacy:
+		return stringPtrIfNotEmpty(configRailRoleLegacy), stringPtrIfNotEmpty("enabled"), nil
 	case "disabled":
-		return stringPtrIfNotEmpty(configProcessorRoleSecondary), stringPtrIfNotEmpty("disabled"), nil
+		return stringPtrIfNotEmpty(configRailRoleSecondary), stringPtrIfNotEmpty("disabled"), nil
 	default:
 		return nil, nil, fmt.Errorf("provider account mode must be primary, secondary, legacy, or disabled")
 	}
@@ -694,7 +694,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 		}, nil
 	}
 	switch providerType {
-	case config.ProcessorTypeStripe:
+	case config.RailTypeStripe:
 		key, ok, err := secrets.ResolveIfPresent("secret_key")
 		if err != nil {
 			return manifestProviderIdentity{}, fmt.Errorf("resolve stripe secret_key for account discovery: %w", err)
@@ -710,7 +710,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 			AccountID: accountID,
 			Evidence:  map[string]any{"source": "stripe.get_account"},
 		}, nil
-	case config.ProcessorTypeNMI:
+	case config.RailTypeNMI:
 		key, ok, err := secrets.ResolveIfPresent("production_key")
 		if err != nil {
 			return manifestProviderIdentity{}, fmt.Errorf("resolve nmi production_key for account discovery: %w", err)
@@ -732,7 +732,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 			DisplayName: stringPtrIfNotEmpty(accountID),
 			Evidence:    map[string]any{"source": "nmi.profile"},
 		}, nil
-	case config.ProcessorTypeCCBill:
+	case config.RailTypeCCBill:
 		raw, ok, err := secrets.ResolveIfPresent("account_config")
 		if err != nil {
 			return manifestProviderIdentity{}, fmt.Errorf("resolve ccbill account_config for account discovery: %w", err)
@@ -748,7 +748,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 			AccountID: accountID,
 			Evidence:  map[string]any{"source": "ccbill.account_config"},
 		}, nil
-	case config.ProcessorTypeSolana:
+	case config.RailTypeSolana:
 		return manifestProviderIdentity{}, fmt.Errorf("provider account solana account_id is required; declare the public wallet/authority explicitly")
 	default:
 		return manifestProviderIdentity{}, fmt.Errorf("provider account %q account_id is required", providerType)

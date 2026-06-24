@@ -161,7 +161,7 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 // NMI
 // ============================================================================
 
-// NMIRefundHandler executes refunds against NMI-backed processors. NMI has no
+// NMIRefundHandler executes refunds against NMI-backed rails. NMI has no
 // request-level idempotency, so effectively-once rests on the ledger: one
 // intent per (transaction, amount), never blind-retried — any outcome that
 // MIGHT have moved money parks as unknown_needs_verify and the verifier
@@ -353,18 +353,18 @@ type stripeRefundAPI interface {
 // matched on the metadata mirror of the key).
 type StripeRefundHandler struct {
 	refundReservations
-	Config     *config.Config
-	Processors config.ProcessorSet
-	Stripe     stripeRefundAPI
-	Policy     BackoffPolicy
+	Config *config.Config
+	Rails  config.RailSet
+	Stripe stripeRefundAPI
+	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, processors config.ProcessorSet, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.RailSet, clock clockwork.Clock) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
-		Processors:         processors,
-		Stripe:             &subscriptions.StripeRefundService{Config: cfg, Processors: processors},
+		Rails:              rails,
+		Stripe:             &subscriptions.StripeRefundService{Config: cfg, Rails: rails},
 		Policy:             DefaultBackoff,
 	}
 }
@@ -381,7 +381,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsP
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	if _, _, err := subscriptions.RequireStripeSecretKey(h.Processors); err != nil {
+	if _, _, err := subscriptions.RequireStripeSecretKey(h.Rails); err != nil {
 		return Parked("stripe not configured: " + err.Error())
 	}
 
@@ -453,18 +453,18 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsPr
 }
 
 // RefundIntentFor derives the intent type, provider key and content-addressed
-// idempotency key for refunding a payment, or an error when the processor has
+// idempotency key for refunding a payment, or an error when the rail has
 // no ledger refund path. Shared by the admin producer so handler and producer
 // can never disagree on identity.
 func RefundIntentFor(payment *models.Payment, providerTarget string, amountCents int64, reason string) (intentType, provider, idempotencyKey string, err error) {
 	switch {
 	case payment == nil:
 		return "", "", "", errors.New("payment is required")
-	case payment.Processor == models.ProcessorStripe:
-		return TypeStripeRefund, strings.ToLower(string(payment.Processor)),
+	case payment.Rail == models.RailStripe:
+		return TypeStripeRefund, strings.ToLower(string(payment.Rail)),
 			StripeRefundIntentIdempotencyKey(providerTarget, amountCents, reason), nil
 	default:
-		return TypeNMIRefund, strings.ToLower(string(payment.Processor)),
+		return TypeNMIRefund, strings.ToLower(string(payment.Rail)),
 			NMIRefundIdempotencyKey(providerTarget, amountCents), nil
 	}
 }

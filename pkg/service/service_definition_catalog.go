@@ -74,7 +74,7 @@ const (
 )
 
 // ProviderState is the uniform per-provider response surface. Replaces the
-// pre-#208 stripe-specific StripeProcessorState.
+// pre-#208 stripe-specific StripeRailState.
 type ProviderState struct {
 	Status       ProviderStatus    `json:"status"`
 	IDs          map[string]string `json:"ids,omitempty"`
@@ -86,7 +86,7 @@ type ProviderState struct {
 }
 
 // DriftField describes a single divergent field discovered by verify/reconcile.
-// Replaces the pre-#208 ProcessorDriftField (Stripe-only).
+// Replaces the pre-#208 RailDriftField (Stripe-only).
 type DriftField struct {
 	Field          string `json:"field"`
 	OpenRailsValue string `json:"openrails_value"`
@@ -190,11 +190,11 @@ type UpdateProductRequest struct {
 	// Status sets the lifecycle state (draft|active|archived). archived/draft
 	// propagate to Stripe as active=false; active propagates as active=true.
 	Status *models.CatalogStatus `json:"status,omitempty"`
-	// SkipProcessorSync, when true, suppresses any propagation of this update to
-	// configured external processors (Stripe etc.). The DB row is updated as usual.
+	// SkipRailSync, when true, suppresses any propagation of this update to
+	// configured external rails (Stripe etc.). The DB row is updated as usual.
 	// Use sparingly — drift introduced this way will appear as sync_status="drifted"
 	// on subsequent ?verify=true reads or reconcile actions.
-	SkipProcessorSync bool `json:"skip_processor_sync,omitempty"`
+	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
 }
 
 func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
@@ -223,13 +223,13 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 
 	// Propagate mutable Product changes to Stripe (display name + description + active).
 	// The Stripe product ID is not stored on the OpenRails product row itself —
-	// it lives on associated prices' processors.stripe.product_id. Look up one
+	// it lives on associated prices' rails.stripe.product_id. Look up one
 	// such price to find it; if no prices have a Stripe link yet, there is
 	// nothing to propagate (no Stripe Product exists for this OpenRails product).
-	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Description != nil || req.Status != nil) && s.rt.Config != nil {
+	if !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Status != nil) && s.rt.Config != nil {
 		stripeProductID := s.lookupStripeProductID(ctx, productID)
 		if stripeProductID != "" {
-			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
+			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 			params := catalog.UpdateProductParams{}
 			if req.DisplayName != nil {
 				name := strings.TrimSpace(*req.DisplayName)
@@ -267,13 +267,13 @@ func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID 
 	if stripeProductID == "" {
 		return
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	a := active
 	_ = stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{Active: &a})
 }
 
 // lookupStripeProductID returns the Stripe Product ID associated with the
-// given OpenRails product by scanning its prices for processors.stripe.product_id.
+// given OpenRails product by scanning its prices for rails.stripe.product_id.
 // Returns "" if no associated price has a Stripe Product link.
 func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID) string {
 	if s.rt.PriceService == nil {
@@ -284,7 +284,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 		return ""
 	}
 	for _, p := range priceList {
-		if id := strings.TrimSpace(p.Processors["stripe"][models.ProcessorKeyStripeProductID]); id != "" {
+		if id := strings.TrimSpace(p.Rails["stripe"][models.RailKeyStripeProductID]); id != "" {
 			return id
 		}
 	}
@@ -320,7 +320,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 }
 
 // CatalogPrice is the OpenRails-side view of a price. The declarative
-// `providers` shape is the only processor configuration surface.
+// `providers` shape is the only rail configuration surface.
 type CatalogPrice struct {
 	ID               uuid.UUID            `json:"id"`
 	ProductID        uuid.UUID            `json:"product_id"`
@@ -332,7 +332,7 @@ type CatalogPrice struct {
 	UpdatedAt        time.Time            `json:"updated_at"`
 
 	// Providers carries the typed per-provider attachment state for every
-	// processor this price is linked to. Always populated when at least one
+	// rail this price is linked to. Always populated when at least one
 	// provider is attached; SyncStatus defaults to "unknown" until a
 	// verify/reconcile path is invoked.
 	Providers map[string]ProviderState `json:"providers,omitempty"`
@@ -425,12 +425,12 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// Draft prices are not created in any external provider — they have no
 	// subscribers and are not purchasable, so there is nothing to mint remotely.
 	var (
-		processors     map[string]map[string]string
+		rails          map[string]map[string]string
 		providerStates map[string]ProviderState
 		pending        []PendingAction
 	)
 	if status != models.CatalogStatusDraft {
-		processors, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
+		rails, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
 		if err != nil {
 			return nil, err
 		}
@@ -449,7 +449,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		Amount:           req.UnitAmount,
 		Currency:         req.Currency,
 		BillingCycleDays: req.BillingCycleDays,
-		Processors:       processors,
+		Rails:            rails,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -459,10 +459,10 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// Created-as-archived: the providers were auto-created active above, so
 	// propagate active=false to match the archived lifecycle (best-effort; drift
 	// surfaces on next verify if a provider rejects it).
-	if status == models.CatalogStatusArchived && len(processors) > 0 && !s.catalogRemoteWritesDisabled() {
+	if status == models.CatalogStatusArchived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
 		inactive := false
 		adapters := s.providerAdapters()
-		for provider, ids := range processors {
+		for provider, ids := range rails {
 			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
 			if !ok {
 				continue
@@ -489,12 +489,12 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 // existing map). To clear a provider entirely, supply an empty inner map for
 // it and set ReplaceProviderLinks=true.
 type UpdatePriceRequest struct {
-	// ProviderLinks merges per-provider link maps into the existing processors
+	// ProviderLinks merges per-provider link maps into the existing rails
 	// map. Supply only the providers you want to add or rotate. Each map's
 	// values are validated through the matching provider adapter's Attach.
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`
 
-	// ReplaceProviderLinks, when true, replaces the entire processors map
+	// ReplaceProviderLinks, when true, replaces the entire rails map
 	// rather than merging — useful for clearing a provider. When false (the
 	// default) supplied entries are merged into the existing map and providers
 	// not mentioned are left alone.
@@ -504,8 +504,8 @@ type UpdatePriceRequest struct {
 	// to providers as active=true; draft/archived as active=false.
 	Status *models.CatalogStatus `json:"status,omitempty"`
 
-	// See UpdateProductRequest.SkipProcessorSync.
-	SkipProcessorSync bool `json:"skip_processor_sync,omitempty"`
+	// See UpdateProductRequest.SkipRailSync.
+	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
 }
 
 func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
@@ -517,7 +517,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		return nil, fmt.Errorf("price_id required")
 	}
 	// Declarative provider link rotation. ReplaceProviderLinks=true overwrites
-	// the entire processors map; otherwise the supplied entries are merged
+	// the entire rails map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
 	if req.ProviderLinks != nil {
 		// The existing price + its product give the substance (slug + money terms)
@@ -536,7 +536,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		if req.ReplaceProviderLinks {
 			next = map[string]map[string]string{}
 		} else {
-			next = cloneProcessors(existing.Processors)
+			next = cloneRails(existing.Rails)
 			if next == nil {
 				next = map[string]map[string]string{}
 			}
@@ -566,7 +566,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			}
 			next[provider] = ids
 		}
-		if err := prices.UpdateProcessors(ctx, priceID, next); err != nil {
+		if err := prices.UpdateRails(ctx, priceID, next); err != nil {
 			return nil, err
 		}
 	}
@@ -584,9 +584,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	}
 
 	// Propagate mutable changes to every attached provider via its adapter.
-	// Only when the caller did not opt out via SkipProcessorSync. Failures are
+	// Only when the caller did not opt out via SkipRailSync. Failures are
 	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !req.SkipProcessorSync && req.Status != nil {
+	if !req.SkipRailSync && req.Status != nil {
 		mutable := mutableUpdate{}
 		if req.Status != nil {
 			active := *req.Status == models.CatalogStatusActive
@@ -594,7 +594,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		}
 		if !s.catalogRemoteWritesDisabled() {
 			adapters := s.providerAdapters()
-			for provider, ids := range updated.Processors {
+			for provider, ids := range updated.Rails {
 				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
 				if !ok {
 					continue
@@ -622,11 +622,11 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}
-	if len(p.Processors) == 0 {
+	if len(p.Rails) == 0 {
 		return cp
 	}
-	cp.Providers = make(map[string]ProviderState, len(p.Processors))
-	for name, ids := range p.Processors {
+	cp.Providers = make(map[string]ProviderState, len(p.Rails))
+	for name, ids := range p.Rails {
 		if len(ids) == 0 {
 			continue
 		}

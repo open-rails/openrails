@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -41,7 +41,7 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		ID:                   m.ID,
 		MerchantID:           tid.UUID(),
 		CustomerID:           m.CustomerID,
-		Processor:            string(m.Processor),
+		Rail:                 string(m.Rail),
 		VaultID:              m.VaultID,
 		BillingID:            m.BillingID,
 		InitialTransactionID: m.InitialTransactionID,
@@ -190,10 +190,10 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	return methods, total, nil
 }
 
-func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID string) (*models.PaymentMethod, error) {
+func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, rail, vaultID string) (*models.PaymentMethod, error) {
 	row, err := r.db.Gen(ctx).GetPaymentMethodByVaultID(ctx, gen.GetPaymentMethodByVaultIDParams{
-		Processor: processor,
-		VaultID:   vaultID,
+		Rail:    rail,
+		VaultID: vaultID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -204,9 +204,9 @@ func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID
 	return paymentMethodFromGen(row)
 }
 
-func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, processor, initialTransactionID string) (*models.PaymentMethod, error) {
+func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, rail, initialTransactionID string) (*models.PaymentMethod, error) {
 	row, err := r.db.Gen(ctx).GetPaymentMethodByInitialTransactionID(ctx, gen.GetPaymentMethodByInitialTransactionIDParams{
-		Processor:            processor,
+		Rail:                 rail,
 		InitialTransactionID: initialTransactionID,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{
 		ID:                   method.ID,
 		CustomerID:           method.CustomerID,
-		Processor:            string(method.Processor),
+		Rail:                 string(method.Rail),
 		VaultID:              method.VaultID,
 		BillingID:            method.BillingID,
 		InitialTransactionID: method.InitialTransactionID,
@@ -246,24 +246,24 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	return nil
 }
 
-// GetAllNMIBacked returns all payment methods for NMI-backed processors
+// GetAllNMIBacked returns all payment methods for NMI-backed rails
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByProcessors(ctx, processors.GetNMIBackedProcessorsList())
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, rails.GetNMIBackedRailsList())
 	if err != nil {
 		return nil, err
 	}
 	return paymentMethodsFromGen(rows)
 }
 
-// GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
+// GetNMIBackedByUserID returns all payment methods for NMI-backed rails for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerProcessors(ctx, gen.ListPaymentMethodsByCustomerProcessorsParams{
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{
 		CustomerID: tsid,
-		Processors: processors.GetNMIBackedProcessorsList(),
+		Rails:      rails.GetNMIBackedRailsList(),
 	})
 	if err != nil {
 		return nil, err
@@ -290,8 +290,8 @@ func (r *PaymentMethodRepo) WithTx(txdb *db.DB) *PaymentMethodRepo {
 	return NewPaymentMethodRepo(txdb)
 }
 
-func (r *PaymentMethodRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.PaymentMethod, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByProcessor(ctx, string(processor))
+func (r *PaymentMethodRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.PaymentMethod, error) {
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRail(ctx, string(rail))
 	if err != nil {
 		return nil, err
 	}

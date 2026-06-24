@@ -18,12 +18,12 @@ type PriceRepo struct {
 
 func NewPriceRepo(d *db.DB) *PriceRepo { return &PriceRepo{db: d} }
 
-func priceProcessorsJSONB(p *models.Price) ([]byte, error) {
-	return toJSONB(p.Processors)
+func priceRailsJSONB(p *models.Price) ([]byte, error) {
+	return toJSONB(p.Rails)
 }
 
 func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
-	processors, err := priceProcessorsJSONB(price)
+	rails, err := priceRailsJSONB(price)
 	if err != nil {
 		return err
 	}
@@ -35,7 +35,7 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 		Amount:           price.Amount,
 		Currency:         price.Currency,
 		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
-		Processors:       processors,
+		Rails:            rails,
 		CreatedAt:        price.CreatedAt,
 		UpdatedAt:        price.UpdatedAt,
 	})
@@ -225,7 +225,7 @@ func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string
 }
 
 func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
-	processors, err := priceProcessorsJSONB(price)
+	rails, err := priceRailsJSONB(price)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
 		Amount:           price.Amount,
 		Currency:         price.Currency,
 		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
-		Processors:       processors,
+		Rails:            rails,
 		UpdatedAt:        updateTimestamp(price.UpdatedAt),
 	})
 	if err != nil {

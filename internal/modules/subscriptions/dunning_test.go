@@ -141,17 +141,17 @@ func TestGraceSlack(t *testing.T) {
 	}
 }
 
-// TestRenewalGraceEligibleProcessor pins which processors get the
+// TestRenewalGraceEligibleRail pins which rails get the
 // pre-appended renewal grace window: NMI-backed + Stripe only.
-func TestRenewalGraceEligibleProcessor(t *testing.T) {
-	if !RenewalGraceEligibleProcessor(models.ProcessorMobius) {
+func TestRenewalGraceEligibleRail(t *testing.T) {
+	if !RenewalGraceEligibleRail(models.RailMobius) {
 		t.Error("mobius (NMI-backed) must be grace-eligible")
 	}
-	if !RenewalGraceEligibleProcessor(models.ProcessorStripe) {
+	if !RenewalGraceEligibleRail(models.RailStripe) {
 		t.Error("stripe must be grace-eligible")
 	}
-	for _, p := range []models.Processor{models.ProcessorCCBill, models.ProcessorSolana, models.ProcessorPayPal, models.ProcessorAdmin, models.ProcessorManual} {
-		if RenewalGraceEligibleProcessor(p) {
+	for _, p := range []models.Rail{models.RailCCBill, models.RailSolana, models.RailPayPal, models.RailAdmin, models.RailManual} {
+		if RenewalGraceEligibleRail(p) {
 			t.Errorf("%s must NOT be grace-eligible", p)
 		}
 	}

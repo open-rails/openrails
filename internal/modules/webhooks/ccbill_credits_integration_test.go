@@ -87,19 +87,19 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	periodStart := now
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      subID,
-		MerchantID:              dbtest.TestMerchantID.UUID(),
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 &priceID,
-		Status:                  string(models.StatusActive),
-		Processor:               string(models.ProcessorCCBill),
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &periodEnd,
-		StartedAt:               now,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    subID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               &priceID,
+		Status:                string(models.StatusActive),
+		Rail:                  string(models.RailCCBill),
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &periodEnd,
+		StartedAt:             now,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	})
 	require.NoError(t, err)
 

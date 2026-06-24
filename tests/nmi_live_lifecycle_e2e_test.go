@@ -43,7 +43,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 const (
@@ -91,7 +91,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	mkVaultedPM := func(user string) *models.PaymentMethod {
 		return suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID:     user,
-			Processor:  models.Processor(nmiE2EProvider),
+			Rail:       models.Rail(nmiE2EProvider),
 			VaultID:    createNMISandboxVault(t, client, securityKey),
 			LastFour:   nmiE2ETestCard[len(nmiE2ETestCard)-4:],
 			CardType:   "Visa",
@@ -112,7 +112,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 		"price_id": oneOff.ID.String(),
 		"mode":     "one_off",
 		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"processor": nmiE2EProvider, "payment_method_id": oneOffPM.ID.String()},
+		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": oneOffPM.ID.String()},
 	})
 	require.Equal(t, "succeeded", oneOffResp.Status, "one-off checkout should be immediately approved by NMI: %+v", oneOffResp)
 	require.NotEmpty(t, oneOffResp.Payment.TransactionID, "one-off should carry an NMI transaction id")
@@ -126,7 +126,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 		"price_id": recurring.ID.String(),
 		"mode":     "subscription",
 		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"processor": nmiE2EProvider, "payment_method_id": subPM.ID.String()},
+		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": subPM.ID.String()},
 	})
 	require.Contains(t, []string{"succeeded", "pending"}, subResp.Status, "subscription checkout status: %+v", subResp)
 	require.NotEmpty(t, subResp.SubscriptionID, "subscription checkout should return a subscription id")
@@ -135,7 +135,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	subs := suite.GetAllSubscriptionsByUserID(subUser)
 	require.NotEmpty(t, subs, "expected a local subscription row")
 	sub := subs[0]
-	providerSubID := sub.ProcessorSubscriptionID
+	providerSubID := sub.RailSubscriptionID
 	require.NotEmpty(t, providerSubID, "expected the local subscription to carry the NMI recurring id")
 	t.Logf("subscription created: local=%s provider=%s nmi_txn=%s", sub.ID, providerSubID, subResp.Payment.TransactionID)
 
@@ -181,8 +181,8 @@ func postSelfCheckout(t *testing.T, router *gin.Engine, body map[string]any) sel
 
 func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
 	t.Helper()
-	suite.Processors[nmiE2EProvider] = &config.ProcessorConfig{Type: config.ProcessorTypeNMI, SecurityKey: securityKey}
-	processors.InitNMIBackedProcessors(suite.Processors)
+	suite.Rails[nmiE2EProvider] = &config.RailConfig{Type: config.RailTypeNMI, SecurityKey: securityKey}
+	rails.InitNMIBackedRails(suite.Rails)
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
 		Name:        nmiE2EProvider,
@@ -214,18 +214,18 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 func bindPriceToNMIProvider(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID, planID string) {
 	t.Helper()
 	price := suite.GetPrice(priceID)
-	if price.Processors == nil {
-		price.Processors = map[string]map[string]string{}
+	if price.Rails == nil {
+		price.Rails = map[string]map[string]string{}
 	}
 	entry := map[string]string{}
 	if planID != "" {
-		entry[models.ProcessorKeyPlanID] = planID
+		entry[models.RailKeyPlanID] = planID
 	}
-	price.Processors[nmiE2EProvider] = entry
-	processorsJSON, err := json.Marshal(price.Processors)
+	price.Rails[nmiE2EProvider] = entry
+	railsJSON, err := json.Marshal(price.Rails)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE openrails.prices SET processors = $1 WHERE id = $2", processorsJSON, price.ID)
+		"UPDATE openrails.prices SET rails = $1 WHERE id = $2", railsJSON, price.ID)
 	require.NoError(t, err)
 }
 

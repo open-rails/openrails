@@ -17,16 +17,16 @@ import (
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
-func requireStripeProcessorConfig(processors config.ProcessorSet) (*config.ProcessorConfig, error) {
-	proc := processors.GetStripeProcessor()
+func requireStripeRailConfig(rails config.RailSet) (*config.RailConfig, error) {
+	proc := rails.GetStripeRail()
 	if proc == nil {
 		return nil, fmt.Errorf("stripe configuration is not available")
 	}
 	return proc, nil
 }
 
-func RequireStripeSecretKey(processors config.ProcessorSet) (*config.ProcessorConfig, string, error) {
-	proc, err := requireStripeProcessorConfig(processors)
+func RequireStripeSecretKey(rails config.RailSet) (*config.RailConfig, string, error) {
+	proc, err := requireStripeRailConfig(rails)
 	if err != nil {
 		return nil, "", err
 	}
@@ -50,8 +50,8 @@ func ParseStripeAPIError(body []byte) string {
 }
 
 type StripeService struct {
-	Config     *config.Config
-	Processors config.ProcessorSet
+	Config *config.Config
+	Rails  config.RailSet
 
 	// baseURL overrides the Stripe API root. Empty means the production Stripe
 	// API (https://api.stripe.com). Tests set this to an httptest server.
@@ -71,7 +71,7 @@ func (s *StripeService) stripeBaseURL() string {
 // idempotent on the app user id, so retries (or two parallel checkouts) cannot
 // mint duplicate customers.
 func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -128,7 +128,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 // metadata[app_user_id] tag using Stripe Customer Search. It returns "" when no
 // match exists (not an error) so callers can fall back to creating one.
 func (s *StripeService) FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -190,7 +190,7 @@ type StripeSubscriptionSummary struct {
 // Stripe subscriptions. It queries both statuses because a subscription in a
 // trial still represents a committed plan for tier-group purposes.
 func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]StripeSubscriptionSummary, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func (s *StripeService) SetBaseURLForTest(baseURL string) {
 }
 
 func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -327,7 +327,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 // and every later renewal would resolve the old price, fail the amount check,
 // and be dropped (#268).
 func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ type stripeSubscriptionScheduleResponse struct {
 }
 
 func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -508,7 +508,7 @@ func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, sub
 }
 
 func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return err
 	}
@@ -547,7 +547,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 }
 
 func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(s.Processors)
+	_, secretKey, err := RequireStripeSecretKey(s.Rails)
 	if err != nil {
 		return err
 	}

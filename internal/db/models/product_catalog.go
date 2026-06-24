@@ -172,11 +172,11 @@ type Price struct {
 	// 30 = monthly, 365 = yearly, null = one-time purchase
 	BillingCycleDays *int `json:"billing_cycle_days"`
 
-	// Processors is a JSONB map of processor name -> processor-specific configuration
+	// Rails is a JSONB map of rail name -> rail-specific configuration
 	// Keys: "mobius", "ccbill", "solana", etc.
-	// Values: processor-specific data (e.g., plan_id, price_id, provider)
+	// Values: rail-specific data (e.g., plan_id, price_id, provider)
 	// Example: {"mobius": {"plan_id": "123"}, "ccbill": {"price_id": "456"}}
-	Processors map[string]map[string]string `json:"processors,omitempty"`
+	Rails map[string]map[string]string `json:"rails,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -196,48 +196,48 @@ func (p *Price) IsPurchasable() bool { return p.Status == CatalogStatusActive }
 // charging them indefinitely — anything that is not a draft remains billable.
 func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
-// Processor config key constants (used in the Processors JSONB map)
+// Rail config key constants (used in the Rails JSONB map)
 const (
-	ProcessorKeyPlanID          = "plan_id"
-	ProcessorKeyProvider        = "provider"
-	ProcessorKeyCCBillFormName  = "form_name"
-	ProcessorKeyCCBillFlexID    = "flex_id"
-	ProcessorKeyStripePriceID   = "price_id"
-	ProcessorKeyStripeProductID = "product_id"
+	RailKeyPlanID          = "plan_id"
+	RailKeyProvider        = "provider"
+	RailKeyCCBillFormName  = "form_name"
+	RailKeyCCBillFlexID    = "flex_id"
+	RailKeyStripePriceID   = "price_id"
+	RailKeyStripeProductID = "product_id"
 )
 
-// GetProcessorConfig returns the configuration for a specific processor, or nil if not configured
-func (p *Price) GetProcessorConfig(processor Processor) map[string]string {
-	if p.Processors == nil {
+// GetRailConfig returns the configuration for a specific rail, or nil if not configured
+func (p *Price) GetRailConfig(rail Rail) map[string]string {
+	if p.Rails == nil {
 		return nil
 	}
-	return p.Processors[string(processor)]
+	return p.Rails[string(rail)]
 }
 
-// HasProcessor checks if a specific processor is configured for this price
-func (p *Price) HasProcessor(processor Processor) bool {
-	return p.GetProcessorConfig(processor) != nil
+// HasRail checks if a specific rail is configured for this price
+func (p *Price) HasRail(rail Rail) bool {
+	return p.GetRailConfig(rail) != nil
 }
 
-// GetNMIConfigForProcessor returns the NMI config for a specific processor (e.g., "mobius", "acme")
-// This allows support for multiple NMI-backed processors with different plan IDs
-func (p *Price) GetNMIConfigForProcessor(processorName string) (planID string, ok bool) {
-	config := p.GetProcessorConfig(Processor(processorName))
+// GetNMIConfigForRail returns the NMI config for a specific rail (e.g., "mobius", "acme")
+// This allows support for multiple NMI-backed rails with different plan IDs
+func (p *Price) GetNMIConfigForRail(railName string) (planID string, ok bool) {
+	config := p.GetRailConfig(Rail(railName))
 	if config == nil {
 		return "", false
 	}
-	planID = config[ProcessorKeyPlanID]
+	planID = config[RailKeyPlanID]
 	return planID, planID != ""
 }
 
 // GetCCBillFlexForm returns the CCBill flexform configuration (form name + flex ID)
 func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
-	config := p.GetProcessorConfig(ProcessorCCBill)
+	config := p.GetRailConfig(RailCCBill)
 	if config == nil {
 		return "", "", false
 	}
-	formName = strings.TrimSpace(config[ProcessorKeyCCBillFormName])
-	flexID = strings.TrimSpace(config[ProcessorKeyCCBillFlexID])
+	formName = strings.TrimSpace(config[RailKeyCCBillFormName])
+	flexID = strings.TrimSpace(config[RailKeyCCBillFlexID])
 	if formName == "" || flexID == "" {
 		return "", "", false
 	}
@@ -245,65 +245,65 @@ func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
 	return formName, flexID, true
 }
 
-// GetSolanaConfig returns the Solana processor configuration
+// GetSolanaConfig returns the Solana rail configuration
 func (p *Price) GetSolanaConfig() (ok bool) {
-	// Solana processor just needs to be present in the map to be enabled
-	return p.HasProcessor(ProcessorSolana)
+	// Solana rail just needs to be present in the map to be enabled
+	return p.HasRail(RailSolana)
 }
 
 // GetStripeConfig returns Stripe price ID
 func (p *Price) GetStripeConfig() (priceID string, ok bool) {
-	config := p.GetProcessorConfig(ProcessorStripe)
+	config := p.GetRailConfig(RailStripe)
 	if config == nil {
 		return "", false
 	}
-	priceID = strings.TrimSpace(config[ProcessorKeyStripePriceID])
+	priceID = strings.TrimSpace(config[RailKeyStripePriceID])
 	return priceID, priceID != ""
 }
 
-// SetProcessorConfig sets the configuration for a specific processor
-func (p *Price) SetProcessorConfig(processor Processor, config map[string]string) {
-	if p.Processors == nil {
-		p.Processors = make(map[string]map[string]string)
+// SetRailConfig sets the configuration for a specific rail
+func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
+	if p.Rails == nil {
+		p.Rails = make(map[string]map[string]string)
 	}
-	p.Processors[string(processor)] = config
+	p.Rails[string(rail)] = config
 }
 
-// SetNMIConfig sets the NMI processor configuration using "mobius" as the key
+// SetNMIConfig sets the NMI rail configuration using "mobius" as the key
 func (p *Price) SetNMIConfig(planID, provider string) {
-	provider = normalize.FirstNonEmpty(normalize.Lower(provider), string(ProcessorMobius))
+	provider = normalize.FirstNonEmpty(normalize.Lower(provider), string(RailMobius))
 	config := map[string]string{
-		ProcessorKeyPlanID:   planID,
-		ProcessorKeyProvider: provider,
+		RailKeyPlanID:   planID,
+		RailKeyProvider: provider,
 	}
-	p.SetProcessorConfig(ProcessorMobius, config)
+	p.SetRailConfig(RailMobius, config)
 }
 
-// SetNMIConfigForProcessor sets the NMI config for a specific processor (e.g., "acme")
-func (p *Price) SetNMIConfigForProcessor(processorName, planID string) {
-	p.SetProcessorConfig(Processor(processorName), map[string]string{
-		ProcessorKeyPlanID: planID,
+// SetNMIConfigForRail sets the NMI config for a specific rail (e.g., "acme")
+func (p *Price) SetNMIConfigForRail(railName, planID string) {
+	p.SetRailConfig(Rail(railName), map[string]string{
+		RailKeyPlanID: planID,
 	})
 }
 
-// SetCCBillConfig sets the CCBill processor configuration
+// SetCCBillConfig sets the CCBill rail configuration
 func (p *Price) SetCCBillConfig(formName, flexID string) {
-	p.SetProcessorConfig(ProcessorCCBill, map[string]string{
-		ProcessorKeyCCBillFormName: formName,
-		ProcessorKeyCCBillFlexID:   flexID,
+	p.SetRailConfig(RailCCBill, map[string]string{
+		RailKeyCCBillFormName: formName,
+		RailKeyCCBillFlexID:   flexID,
 	})
 }
 
-// SetSolanaConfig enables the Solana processor
+// SetSolanaConfig enables the Solana rail
 func (p *Price) SetSolanaConfig() {
-	p.SetProcessorConfig(ProcessorSolana, map[string]string{
+	p.SetRailConfig(RailSolana, map[string]string{
 		"enabled": "true",
 	})
 }
 
 // SetStripeConfig sets the Stripe price ID
 func (p *Price) SetStripeConfig(priceID string) {
-	p.SetProcessorConfig(ProcessorStripe, map[string]string{
-		ProcessorKeyStripePriceID: priceID,
+	p.SetRailConfig(RailStripe, map[string]string{
+		RailKeyStripePriceID: priceID,
 	})
 }

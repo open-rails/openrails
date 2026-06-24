@@ -131,7 +131,7 @@ func TestSplitNMIChargebackReason(t *testing.T) {
 	require.Equal(t, "Introductory chargeback", reason)
 }
 
-func TestHandleChargebackComplete_RequiresProcessor(t *testing.T) {
+func TestHandleChargebackComplete_RequiresRail(t *testing.T) {
 	body, err := json.Marshal(NMIChargebackBatchEventBody{
 		Chargebacks: []NMIChargebackEntry{},
 		Batch: &NMIChargebackBatch{
@@ -150,7 +150,7 @@ func TestHandleChargebackComplete_RequiresProcessor(t *testing.T) {
 
 	err = svc.handleChargebackComplete(context.Background())
 	require.Error(t, err)
-	require.ErrorContains(t, err, "nmi webhook processor is required")
+	require.ErrorContains(t, err, "nmi webhook rail is required")
 }
 
 func TestNMIProviderTransactionIDFromMetadata(t *testing.T) {

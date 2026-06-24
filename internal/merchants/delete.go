@@ -20,7 +20,7 @@ import (
 var merchantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments",
-	"notification_queue", "processor_customers",
+	"notification_queue", "rail_customers",
 	"checkout_sessions", "external_provider_mutation_logs", "provider_intents",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
@@ -47,8 +47,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsPayments(ctx, id)
 	case "notification_queue":
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
-	case "processor_customers":
-		return q.CountMerchantRowsProcessorCustomers(ctx, id)
+	case "rail_customers":
+		return q.CountMerchantRowsRailCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.CountMerchantRowsCheckoutSessions(ctx, id)
 	case "external_provider_mutation_logs":
@@ -81,8 +81,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsPayments(ctx, id)
 	case "notification_queue":
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
-	case "processor_customers":
-		return q.PurgeMerchantRowsProcessorCustomers(ctx, id)
+	case "rail_customers":
+		return q.PurgeMerchantRowsRailCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
 	case "external_provider_mutation_logs":

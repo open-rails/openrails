@@ -25,7 +25,7 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-const stripeProcessorName = "stripe"
+const stripeRailName = "stripe"
 
 // Options controls the Stripe backfill run.
 type Options struct {
@@ -200,7 +200,7 @@ func reconcileSubscriptions(
 	if lister == nil {
 		return nil
 	}
-	fmt.Printf("\n== %s: subscriptions ==\n", stripeProcessorName)
+	fmt.Printf("\n== %s: subscriptions ==\n", stripeRailName)
 
 	remoteSubs, err := lister.ListSubscriptions(ctx, opts.PageSize, opts.MaxPages)
 	if err != nil {
@@ -249,14 +249,14 @@ func reconcileSubscriptions(
 	}
 
 	subService := subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil, nil, nil)
-	localSubs, err := subService.GetActiveSubscriptionsByProcessor(ctx, stripeProcessorName)
+	localSubs, err := subService.GetActiveSubscriptionsByRail(ctx, stripeRailName)
 	if err != nil {
 		return fmt.Errorf("fetch local subscriptions failed: %w", err)
 	}
 
 	localIDs := make(map[string]struct{}, len(localSubs))
 	for _, sub := range localSubs {
-		id := strings.TrimSpace(sub.ProcessorSubscriptionID)
+		id := strings.TrimSpace(sub.RailSubscriptionID)
 		if id != "" {
 			localIDs[id] = struct{}{}
 		}
@@ -346,12 +346,12 @@ func reconcileSubscriptions(
 		}
 		subID := id
 		_, err := rt.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-			UserID:                  m.UserID,
-			PriceID:                 m.PriceID,
-			Processor:               models.ProcessorStripe,
-			ProcessorSubscriptionID: &subID,
-			CurrentPeriodStartsAt:   zeroTimeNil(m.Remote.CurrentPeriodStart),
-			CurrentPeriodEndsAt:     zeroTimeNil(m.Remote.CurrentPeriodEnd),
+			UserID:                m.UserID,
+			PriceID:               m.PriceID,
+			Rail:                  models.RailStripe,
+			RailSubscriptionID:    &subID,
+			CurrentPeriodStartsAt: zeroTimeNil(m.Remote.CurrentPeriodStart),
+			CurrentPeriodEndsAt:   zeroTimeNil(m.Remote.CurrentPeriodEnd),
 		})
 		if err != nil {
 			fmt.Printf("failed to create membership for %s: %v\n", id, err)
@@ -373,7 +373,7 @@ func reconcileCharges(
 	opts Options,
 	report *Report,
 ) error {
-	fmt.Printf("\n== %s: payments + cards ==\n", stripeProcessorName)
+	fmt.Printf("\n== %s: payments + cards ==\n", stripeRailName)
 
 	charges, err := lister.ListCharges(ctx, opts.PageSize, opts.MaxPages)
 	if err != nil {
@@ -383,7 +383,7 @@ func reconcileCharges(
 
 	paymentService := rt.PaymentService
 	subService := rt.SubscriptionService
-	customers := rt.ProcessorCustomerService
+	customers := rt.RailCustomerService
 	priceService := rt.PriceService
 	if priceService == nil {
 		priceService = catalog.NewPriceService(rt.DB)
@@ -395,7 +395,7 @@ func reconcileCharges(
 		subService = subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil, nil, nil)
 	}
 	if customers == nil {
-		customers = payments.NewProcessorCustomerService(rt.DB)
+		customers = payments.NewRailCustomerService(rt.DB)
 	}
 
 	var cardLinker payments.StripeCardSubscriptionLinker
@@ -443,7 +443,7 @@ func reconcileCharges(
 		}
 
 		// Ensure a payment row exists (idempotent: create-if-not-exists keyed on
-		// processor + transaction_id). We insert directly so the backfill never
+		// rail + transaction_id). We insert directly so the backfill never
 		// re-runs side effects (credits/entitlements) that RegisterPurchase would.
 		createdPayment, err := ensureChargePayment(ctx, paymentService, priceService, userID, sub, charge, txnID, card)
 		if err != nil {
@@ -507,16 +507,16 @@ func reconcileCharges(
 
 // resolveChargeOwner finds the local user (and optional subscription) for a
 // charge. It prefers the subscription tied to the charge's invoice/subscription,
-// then falls back to the processor-customer mapping. Read-only.
+// then falls back to the rail-customer mapping. Read-only.
 func resolveChargeOwner(
 	ctx context.Context,
 	subService *subscriptions.SubscriptionService,
-	customers *payments.ProcessorCustomerService,
+	customers *payments.RailCustomerService,
 	charge subscriptions.StripeRemoteCharge,
 ) (string, *models.Subscription) {
 	if customers != nil {
 		if cid := strings.TrimSpace(charge.CustomerID); cid != "" {
-			if uid, err := customers.GetUserIDByCustomerID(ctx, string(models.ProcessorStripe), cid); err == nil && strings.TrimSpace(uid) != "" {
+			if uid, err := customers.GetUserIDByCustomerID(ctx, string(models.RailStripe), cid); err == nil && strings.TrimSpace(uid) != "" {
 				userID := strings.TrimSpace(uid)
 				var sub *models.Subscription
 				if subService != nil {
@@ -551,7 +551,7 @@ func ensureChargePayment(
 		if candidate == "" {
 			continue
 		}
-		if existing, err := paymentService.GetByTransactionID(ctx, models.ProcessorStripe, candidate); err == nil && existing != nil {
+		if existing, err := paymentService.GetByTransactionID(ctx, models.RailStripe, candidate); err == nil && existing != nil {
 			return false, nil
 		}
 	}
@@ -577,7 +577,7 @@ func ensureChargePayment(
 		ID:            uuidutil.NewV7(),
 		CustomerID:    identity.CustomerIDFromString(userID).UUID(),
 		PriceID:       priceID,
-		Processor:     models.ProcessorStripe,
+		Rail:          models.RailStripe,
 		TransactionID: txnID,
 		Amount:        charge.Amount,
 		ListAmount:    charge.Amount,
@@ -602,7 +602,7 @@ func ensureChargePayment(
 		payment.CardLast4 = &last4
 	}
 
-	// CreateIfNotExists is keyed on (processor, transaction_id) via the unique
+	// CreateIfNotExists is keyed on (rail, transaction_id) via the unique
 	// constraint, so a concurrent or repeat run is a no-op.
 	return paymentService.CreateIfNotExists(ctx, payment)
 }

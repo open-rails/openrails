@@ -18,35 +18,35 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "stripe refund service is not initialized")
 
 	tests := []struct {
-		name       string
-		processors config.ProcessorSet
-		params     RefundParams
-		wantError  string
+		name      string
+		rails     config.RailSet
+		params    RefundParams
+		wantError string
 	}{
 		{
-			name:       "nil config",
-			processors: nil,
-			params:     RefundParams{ChargeID: "ch_123"},
-			wantError:  "stripe configuration is not available",
+			name:      "nil config",
+			rails:     nil,
+			params:    RefundParams{ChargeID: "ch_123"},
+			wantError: "stripe configuration is not available",
 		},
 		{
-			name:       "nil stripe config",
-			processors: config.ProcessorSet{},
-			params:     RefundParams{ChargeID: "ch_123"},
-			wantError:  "stripe configuration is not available",
+			name:      "nil stripe config",
+			rails:     config.RailSet{},
+			params:    RefundParams{ChargeID: "ch_123"},
+			wantError: "stripe configuration is not available",
 		},
 		{
 			name: "empty secret key",
-			processors: config.ProcessorSet{
-				"stripe": {Type: config.ProcessorTypeStripe, SecretKey: ""},
+			rails: config.RailSet{
+				"stripe": {Type: config.RailTypeStripe, SecretKey: ""},
 			},
 			params:    RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe secret key is not configured",
 		},
 		{
 			name: "empty charge ID",
-			processors: config.ProcessorSet{
-				"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+			rails: config.RailSet{
+				"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
 			},
 			params:    RefundParams{ChargeID: ""},
 			wantError: "charge_id or payment_intent_id is required",
@@ -55,7 +55,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := &StripeRefundService{Config: &config.Config{}, Processors: tt.processors}
+			svc := &StripeRefundService{Config: &config.Config{}, Rails: tt.rails}
 			_, err := svc.CreateRefund(context.Background(), tt.params)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantError)
@@ -70,21 +70,21 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "stripe refund service is not initialized")
 
 	tests := []struct {
-		name       string
-		processors config.ProcessorSet
-		refundID   string
-		wantError  string
+		name      string
+		rails     config.RailSet
+		refundID  string
+		wantError string
 	}{
 		{
-			name:       "nil config",
-			processors: nil,
-			refundID:   "re_123",
-			wantError:  "stripe configuration is not available",
+			name:      "nil config",
+			rails:     nil,
+			refundID:  "re_123",
+			wantError: "stripe configuration is not available",
 		},
 		{
 			name: "empty refund ID",
-			processors: config.ProcessorSet{
-				"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+			rails: config.RailSet{
+				"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
 			},
 			refundID:  "",
 			wantError: "refund_id is required",
@@ -93,7 +93,7 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := &StripeRefundService{Config: &config.Config{}, Processors: tt.processors}
+			svc := &StripeRefundService{Config: &config.Config{}, Rails: tt.rails}
 			_, err := svc.GetRefund(context.Background(), tt.refundID)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantError)

@@ -311,12 +311,12 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 	_ = json.Unmarshal(obj, &s)
 
 	sub := RemoteSubscription{
-		ProcessorSubscriptionID: s.ID,
-		Status:                  normalizeStripeStatus(s.Status),
-		RawStatus:               s.Status,
-		CustomerID:              s.Customer,
-		Currency:                strings.ToUpper(s.Currency),
-		Raw:                     obj,
+		RailSubscriptionID: s.ID,
+		Status:             normalizeStripeStatus(s.Status),
+		RawStatus:          s.Status,
+		CustomerID:         s.Customer,
+		Currency:           strings.ToUpper(s.Currency),
+		Raw:                obj,
 	}
 	periodStart, periodEnd := s.CurrentPeriodStart, s.CurrentPeriodEnd
 	if len(s.Items.Data) > 0 {

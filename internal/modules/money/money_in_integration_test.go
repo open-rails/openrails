@@ -85,9 +85,9 @@ func (f *fakeCollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.
 	if f.decline {
 		code := "card_declined"
 		message := "card declined"
-		return money.ChargeResult{Processor: method.Processor, TransactionID: "declined_" + req.IdempotencyKey, Declined: true, FailureCode: &code, FailureMessage: &message}, nil
+		return money.ChargeResult{Rail: method.Rail, TransactionID: "declined_" + req.IdempotencyKey, Declined: true, FailureCode: &code, FailureMessage: &message}, nil
 	}
-	return money.ChargeResult{Processor: method.Processor, TransactionID: "tx_" + req.IdempotencyKey}, nil
+	return money.ChargeResult{Rail: method.Rail, TransactionID: "tx_" + req.IdempotencyKey}, nil
 }
 
 type fakeAlerter struct{ calls int }
@@ -109,28 +109,28 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 	return exp
 }
 
-func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor string) uuid.UUID {
+func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	pm := uuid.New()
-	return seedPaymentMethodRow(t, pool, ctx, payer, processor, pm, "vault_"+pm.String())
+	return seedPaymentMethodRow(t, pool, ctx, payer, rail, pm, "vault_"+pm.String())
 }
 
-func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor, vaultID string) uuid.UUID {
+func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, vaultID string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
-	// One row with the requested processor + vault. (Was double-inserting the
+	// One row with the requested rail + vault. (Was double-inserting the
 	// same id via seedPaymentMethod first → duplicate payment_methods_pkey.)
-	return seedPaymentMethodRow(t, pool, ctx, payer, processor, uuid.New(), vaultID)
+	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), vaultID)
 }
 
-func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor string, pm uuid.UUID, vaultID string) uuid.UUID {
+func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, vaultID string) uuid.UUID {
 	t.Helper()
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           payer.UUID(),
-		Processor:            processor,
+		Rail:                 rail,
 		VaultID:              vaultID,
 		InitialTransactionID: "init_" + pm.String(),
 	})
@@ -141,20 +141,20 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	return pm
 }
 
-func seedProcessorCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor, processorCustomerID string) {
+func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	require.NoError(t, gen.New(pool).UpsertProcessorCustomer(ctx, gen.UpsertProcessorCustomerParams{
-		ID:                  uuidutil.NewV7(),
-		MerchantID:          dbtest.TestMerchantID.UUID(),
-		CustomerID:          payer.UUID(),
-		Processor:           processor,
-		ProcessorCustomerID: processorCustomerID,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+	require.NoError(t, gen.New(pool).UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
+		ID:             uuidutil.NewV7(),
+		MerchantID:     dbtest.TestMerchantID.UUID(),
+		CustomerID:     payer.UUID(),
+		Rail:           rail,
+		RailCustomerID: railCustomerID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.processor_customers WHERE merchant_id = $1 AND customer_id = $2 AND processor = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), processor)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customers WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), rail)
 	})
 }
 
@@ -227,7 +227,7 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	thr, amt := int64(1000), int64(50_000_000)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
@@ -241,7 +241,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
-	// auto_topup_amount is stored in native units; the processor receives cents.
+	// auto_topup_amount is stored in native units; the rail receives cents.
 	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
 	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
 
@@ -260,7 +260,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 func TestRunAutoTopups_Declined(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	thr, amt := int64(1000), int64(50_000_000)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
@@ -281,10 +281,10 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 
 func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	adapter := &fakeCollectionAdapter{}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 
 	res, err := ch.ChargeSavedMethod(ctx, money.ChargeRequest{
@@ -297,7 +297,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Description:     "invoice",
 	})
 	require.NoError(t, err)
-	require.Equal(t, string(models.ProcessorMobius), res.Processor)
+	require.Equal(t, string(models.RailMobius), res.Rail)
 	require.Equal(t, "tx_scope-ok", res.TransactionID)
 	require.Len(t, adapter.charges, 1)
 	require.Equal(t, pm, adapter.charges[0].PaymentMethodID)
@@ -326,13 +326,13 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 
 func TestScopedCharger_RejectsFailedPaymentMethod(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := pool.Exec(ctx, "UPDATE openrails.payment_methods SET failure_reason = 'card_declined' WHERE id = $1", pm)
 	require.NoError(t, err)
 
 	adapter := &fakeCollectionAdapter{}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 	_, err = ch.ChargeSavedMethod(ctx, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
@@ -345,11 +345,11 @@ func TestScopedCharger_RejectsFailedPaymentMethod(t *testing.T) {
 	require.Empty(t, adapter.charges)
 }
 
-func TestScopedCharger_RejectsUnsupportedProcessor(t *testing.T) {
+func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorCCBill))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailCCBill))
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorCCBill): &fakeCollectionAdapter{},
+		string(models.RailCCBill): &fakeCollectionAdapter{},
 	})
 
 	_, err := ch.ChargeSavedMethod(ctx, money.ChargeRequest{
@@ -364,7 +364,7 @@ func TestScopedCharger_RejectsUnsupportedProcessor(t *testing.T) {
 
 func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	seen := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -380,11 +380,11 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.ProcessorMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := nmi.NewClient(string(models.RailMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.ProcessorMobius): client,
+		string(models.RailMobius): client,
 	}))
 
 	res, err := ch.ChargeSavedMethod(ctx, money.ChargeRequest{
@@ -398,7 +398,7 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 		Description:     "invoice",
 	})
 	require.NoError(t, err)
-	require.Equal(t, string(models.ProcessorMobius), res.Processor)
+	require.Equal(t, string(models.RailMobius), res.Rail)
 	require.Equal(t, "txn_nmi_invoice_123", res.TransactionID)
 	select {
 	case <-seen:
@@ -409,18 +409,18 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 
 func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		_, _ = w.Write([]byte("response=2&responsetext=Do not honor&transactionid=txn_declined&response_code=201"))
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.ProcessorMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := nmi.NewClient(string(models.RailMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.ProcessorMobius): client,
+		string(models.RailMobius): client,
 	}))
 
 	res, err := ch.ChargeSavedMethod(ctx, money.ChargeRequest{
@@ -433,7 +433,7 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, res.Declined)
-	require.Equal(t, string(models.ProcessorMobius), res.Processor)
+	require.Equal(t, string(models.RailMobius), res.Rail)
 	require.NotNil(t, res.FailureCode)
 	require.Equal(t, "do_not_honor", *res.FailureCode)
 	require.NotNil(t, res.FailureMessage)
@@ -448,7 +448,7 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -471,11 +471,11 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.ProcessorMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := nmi.NewClient(string(models.RailMobius), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.ProcessorMobius): client,
+		string(models.RailMobius): client,
 	}))
 
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
@@ -493,13 +493,13 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	require.Equal(t, int64(50_000), paid.AmountPaid)
 	require.Equal(t, int64(0), paid.AmountDue)
 
-	var processorPaymentID string
+	var railPaymentID string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT COALESCE(MAX(processor_payment_id), '')
+		SELECT COALESCE(MAX(rail_payment_id), '')
 		FROM openrails.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
-	`, inv.ID).Scan(&processorPaymentID))
-	require.Equal(t, "txn_nmi_invoice_settled", processorPaymentID)
+	`, inv.ID).Scan(&railPaymentID))
+	require.Equal(t, "txn_nmi_invoice_settled", railPaymentID)
 }
 
 func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t *testing.T) {
@@ -510,8 +510,8 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.ProcessorStripe), "pm_openrails_invoice")
-	seedProcessorCustomer(t, pool, ctx, payer, string(models.ProcessorStripe), "cus_openrails_invoice")
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
+	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_invoice")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -557,13 +557,13 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
-		Processors: config.ProcessorSet{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
+		Rails: config.RailSet{
+			"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_invoice"},
 		},
 	}
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
+		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
 
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
@@ -584,14 +584,14 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	require.NotNil(t, paid.ExternalInvoiceID)
 	require.Equal(t, "in_openrails_invoice", *paid.ExternalInvoiceID)
 
-	var processor, processorPaymentID string
+	var rail, railPaymentID string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT COALESCE(MAX(processor), ''), COALESCE(MAX(processor_payment_id), '')
+		SELECT COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
 		FROM openrails.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
-	`, inv.ID).Scan(&processor, &processorPaymentID))
-	require.Equal(t, string(models.ProcessorStripe), processor)
-	require.Equal(t, "ch_openrails_invoice", processorPaymentID)
+	`, inv.ID).Scan(&rail, &railPaymentID))
+	require.Equal(t, string(models.RailStripe), rail)
+	require.Equal(t, "ch_openrails_invoice", railPaymentID)
 }
 
 func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T) {
@@ -602,8 +602,8 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.ProcessorStripe), "pm_openrails_decline")
-	seedProcessorCustomer(t, pool, ctx, payer, string(models.ProcessorStripe), "cus_openrails_decline")
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
+	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_decline")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -634,13 +634,13 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
-		Processors: config.ProcessorSet{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
+		Rails: config.RailSet{
+			"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_invoice"},
 		},
 	}
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
+		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
 
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
@@ -652,20 +652,20 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.Equal(t, "open", stillOpen.Status)
 	require.Equal(t, int64(50_000), stillOpen.AmountDue)
 
-	var processor, failureCode, failureMessage string
+	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT COALESCE(processor, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
+		SELECT COALESCE(rail, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
 		FROM openrails.invoice_payments
 		WHERE invoice_id = $1 AND status = 'failed'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, inv.ID).Scan(&processor, &failureCode, &failureMessage))
-	require.Equal(t, string(models.ProcessorStripe), processor)
+	`, inv.ID).Scan(&rail, &failureCode, &failureMessage))
+	require.Equal(t, string(models.RailStripe), rail)
 	require.Equal(t, "do_not_honor", failureCode)
 	require.Contains(t, failureMessage, "Your card was declined.")
 }
 
-func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsProcessor(t *testing.T) {
+func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
@@ -673,7 +673,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsProcessor(t
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -691,7 +691,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsProcessor(t
 
 	adapter := &fakeCollectionAdapter{}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -709,16 +709,16 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsProcessor(t
 	require.Equal(t, int64(500), paid.AmountPaid)
 	require.Equal(t, int64(0), paid.AmountDue)
 
-	var processor, processorPaymentID string
+	var rail, railPaymentID string
 	var paymentCount int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(MAX(processor), ''), COALESCE(MAX(processor_payment_id), '')
+		SELECT count(*), COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
 		FROM openrails.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
-	`, inv.ID).Scan(&paymentCount, &processor, &processorPaymentID))
+	`, inv.ID).Scan(&paymentCount, &rail, &railPaymentID))
 	require.Equal(t, 1, paymentCount)
-	require.Equal(t, string(models.ProcessorMobius), processor)
-	require.Equal(t, "tx_invoice:"+inv.ID.String()+":500", processorPaymentID)
+	require.Equal(t, string(models.RailMobius), rail)
+	require.Equal(t, "tx_invoice:"+inv.ID.String()+":500", railPaymentID)
 
 	n, err = svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -734,7 +734,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -747,7 +747,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 
 	adapter := &fakeCollectionAdapter{decline: true}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -759,16 +759,16 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	require.Equal(t, "open", stillOpen.Status)
 	require.Equal(t, int64(500), stillOpen.AmountDue)
 
-	var processor, processorPaymentID, failureCode, failureMessage string
+	var rail, railPaymentID, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT COALESCE(processor, ''), COALESCE(processor_payment_id, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
+		SELECT COALESCE(rail, ''), COALESCE(rail_payment_id, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
 		FROM openrails.invoice_payments
 		WHERE invoice_id = $1 AND status = 'failed'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, inv.ID).Scan(&processor, &processorPaymentID, &failureCode, &failureMessage))
-	require.Equal(t, string(models.ProcessorMobius), processor)
-	require.Equal(t, "declined_invoice:"+inv.ID.String()+":500", processorPaymentID)
+	`, inv.ID).Scan(&rail, &railPaymentID, &failureCode, &failureMessage))
+	require.Equal(t, string(models.RailMobius), rail)
+	require.Equal(t, "declined_invoice:"+inv.ID.String()+":500", railPaymentID)
 	require.Equal(t, "card_declined", failureCode)
 	require.Equal(t, "card declined", failureMessage)
 }
@@ -781,7 +781,7 @@ func TestChargeOutstanding_WithScopedCharger_TransientErrorRetriesWithoutSettlem
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -794,7 +794,7 @@ func TestChargeOutstanding_WithScopedCharger_TransientErrorRetriesWithoutSettlem
 
 	adapter := &fakeCollectionAdapter{transientFailures: 1}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.ErrorContains(t, err, "gateway timeout")
@@ -831,7 +831,7 @@ func TestInvoiceWorker_UsesConfiguredScopedCharger(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -843,7 +843,7 @@ func TestInvoiceWorker_UsesConfiguredScopedCharger(t *testing.T) {
 
 	adapter := &fakeCollectionAdapter{}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.ProcessorMobius): adapter,
+		string(models.RailMobius): adapter,
 	})
 	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{

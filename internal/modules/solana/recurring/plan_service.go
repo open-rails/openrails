@@ -114,7 +114,7 @@ type PublishPlanInput struct {
 }
 
 // PlanHandle is the durable record of a published plan, suitable for storing in
-// Price.Processors["solana"].
+// Price.Rails["solana"].
 type PlanHandle struct {
 	PlanPDA         string
 	PlanID          uint64
@@ -127,8 +127,8 @@ type PlanHandle struct {
 	Signature       string
 }
 
-// ToProcessorConfig renders the handle for Price.SetProcessorConfig(ProcessorSolana, ...).
-func (h *PlanHandle) ToProcessorConfig() map[string]string {
+// ToRailConfig renders the handle for Price.SetRailConfig(RailSolana, ...).
+func (h *PlanHandle) ToRailConfig() map[string]string {
 	return map[string]string{
 		"plan_pda":          h.PlanPDA,
 		"plan_id":           strconv.FormatUint(h.PlanID, 10),

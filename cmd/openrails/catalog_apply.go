@@ -349,7 +349,7 @@ func newCatalogRuntime(cfg *config.Config, manifests ...*catalog.Manifest) (*app
 	return &app.Runtime{
 		DB:                 database,
 		Config:             cfg,
-		NMIClients:         catalogNMIClients(cfg, config.ProcessorSet{}, usesMobius),
+		NMIClients:         catalogNMIClients(cfg, config.RailSet{}, usesMobius),
 		ProductService:     catalogmodule.NewProductService(database),
 		PriceService:       catalogmodule.NewPriceService(database),
 		MoneyService:       money.NewMoneyService(database),
@@ -357,12 +357,12 @@ func newCatalogRuntime(cfg *config.Config, manifests ...*catalog.Manifest) (*app
 	}, nil
 }
 
-func catalogNMIClients(cfg *config.Config, processors config.ProcessorSet, enabled bool) map[string]*nmi.NMIClient {
+func catalogNMIClients(cfg *config.Config, rails config.RailSet, enabled bool) map[string]*nmi.NMIClient {
 	clients := make(map[string]*nmi.NMIClient)
 	if cfg == nil || !enabled {
 		return clients
 	}
-	for name, procConfig := range processors.GetNMIProcessors() {
+	for name, procConfig := range rails.GetNMIRails() {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" || procConfig == nil || strings.TrimSpace(procConfig.SecurityKey) == "" {
 			continue

@@ -44,7 +44,7 @@ type membershipCanceller interface {
 // The on-chain cancel_subscription sets the subscription's expires_at_ts to the
 // END of the current billing period (NOT immediate). So the mirror is option A —
 // "cancel at period end": the user keeps the access they already paid for until
-// the current period ends, then it stops. This matches the card processors'
+// the current period ends, then it stops. This matches the card rails'
 // scheduled-cancel state (Stripe cancel_at_period_end; NMI deferred delete). We
 // therefore mirror with RevokeAccess=false, which makes CancelMembership set
 // EndedAt = CurrentPeriodEndsAt and preserve entitlements until then — exactly

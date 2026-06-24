@@ -330,7 +330,7 @@ func (w *fakeWriter) BackfillPayment(ctx context.Context, a BackfillPaymentActio
 		}
 	}
 	w.local.payments = append(w.local.payments, LocalPayment{
-		ID: uuid.New(), CustomerID: a.CustomerID, Processor: a.Processor,
+		ID: uuid.New(), CustomerID: a.CustomerID, Rail: a.Rail,
 		TransactionID: a.TransactionID, AmountCents: a.AmountCents, Status: "completed",
 		SubscriptionID: a.SubscriptionID, PurchasedAt: a.PurchasedAt,
 	})
@@ -362,7 +362,7 @@ func (w *fakeWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bo
 		}
 	}
 	w.local.payments = append(w.local.payments, LocalPayment{
-		ID: uuid.New(), CustomerID: a.CustomerID, Processor: a.Processor,
+		ID: uuid.New(), CustomerID: a.CustomerID, Rail: a.Rail,
 		TransactionID: a.TransactionID, AmountCents: -a.AmountCents, Status: "completed",
 		SubscriptionID: a.SubscriptionID, RefundedPaymentID: a.RefundedPaymentID, PurchasedAt: a.PurchasedAt,
 	})
@@ -432,25 +432,25 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 	w.calls["materialize"]++
 	w.local.mu.Lock()
 	for i := range w.local.state.Subscriptions {
-		if w.local.state.Subscriptions[i].ProcessorSubscriptionID == a.ProcessorSubscriptionID {
+		if w.local.state.Subscriptions[i].RailSubscriptionID == a.RailSubscriptionID {
 			w.local.mu.Unlock()
 			return MaterializeResult{}, nil // already materialized
 		}
 	}
 	priceID := a.PriceID
 	sub := LocalSubscription{
-		ID:                      uuid.New(),
-		CustomerID:              a.CustomerID,
-		PriceID:                 &priceID,
-		ProductID:               a.ProductID,
-		Status:                  a.Status,
-		Processor:               a.Processor,
-		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
-		UserEmail:               a.UserEmail,
-		CurrentPeriodStartsAt:   a.PeriodStartsAt,
-		CurrentPeriodEndsAt:     a.PeriodEndsAt,
-		StartedAt:               time.Now(),
-		EntitlementNames:        fakeMaterializeEntitlements,
+		ID:                    uuid.New(),
+		CustomerID:            a.CustomerID,
+		PriceID:               &priceID,
+		ProductID:             a.ProductID,
+		Status:                a.Status,
+		Rail:                  a.Rail,
+		RailSubscriptionID:    a.RailSubscriptionID,
+		UserEmail:             a.UserEmail,
+		CurrentPeriodStartsAt: a.PeriodStartsAt,
+		CurrentPeriodEndsAt:   a.PeriodEndsAt,
+		StartedAt:             time.Now(),
+		EntitlementNames:      fakeMaterializeEntitlements,
 	}
 	w.local.state.Subscriptions = append(w.local.state.Subscriptions, sub)
 	w.local.mu.Unlock()
@@ -513,7 +513,7 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 	store := newMemStore()
 	writer := newFakeWriter(local)
 	eng := &Engine{
-		Fetchers: map[Provider]ProcessorFetcher{provider: &fakeFetcher{provider: provider, snap: snap}},
+		Fetchers: map[Provider]RailFetcher{provider: &fakeFetcher{provider: provider, snap: snap}},
 		Store:    store,
 		Local:    local,
 		Writer:   writer,
@@ -525,17 +525,17 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 func liveLocalSub(provider Provider, psid string) LocalSubscription {
 	priceID := uuid.New()
 	return LocalSubscription{
-		ID:                      uuid.New(),
-		CustomerID:              uuid.New(),
-		PriceID:                 &priceID,
-		ProductID:               uuid.New(),
-		Status:                  "active",
-		Processor:               string(provider),
-		ProcessorSubscriptionID: psid,
-		CurrentPeriodStartsAt:   tp(testNow.Add(-10 * 24 * time.Hour)),
-		CurrentPeriodEndsAt:     tp(testNow.Add(20 * 24 * time.Hour)),
-		StartedAt:               testNow.Add(-100 * 24 * time.Hour),
-		EntitlementNames:        []string{"premium"},
+		ID:                    uuid.New(),
+		CustomerID:            uuid.New(),
+		PriceID:               &priceID,
+		ProductID:             uuid.New(),
+		Status:                "active",
+		Rail:                  string(provider),
+		RailSubscriptionID:    psid,
+		CurrentPeriodStartsAt: tp(testNow.Add(-10 * 24 * time.Hour)),
+		CurrentPeriodEndsAt:   tp(testNow.Add(20 * 24 * time.Hour)),
+		StartedAt:             testNow.Add(-100 * 24 * time.Hour),
+		EntitlementNames:      []string{"premium"},
 	}
 }
 
@@ -578,7 +578,7 @@ func findByType(findings []FindingRecord, t FindingType) []FindingRecord {
 func TestDiffTaxonomy(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("PS-1 processor sub missing locally is critical requires_review with no apply", func(t *testing.T) {
+	t.Run("PS-1 rail sub missing locally is critical requires_review with no apply", func(t *testing.T) {
 		local := &fakeLocal{}
 		known := liveLocalSub(ProviderNMI, "known-1")
 		local.state.Subscriptions = []LocalSubscription{known}
@@ -587,8 +587,8 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "known-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*known.CurrentPeriodEndsAt)},
-				{ProcessorSubscriptionID: "ghost-7", Status: SubscriptionStatusActive, Email: "ghost@example.com"},
+				{RailSubscriptionID: "known-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*known.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "ghost-7", Status: SubscriptionStatusActive, Email: "ghost@example.com"},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -615,8 +615,8 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "known-1", Status: SubscriptionStatusActive},
-				{ProcessorSubscriptionID: "ghost-9", Status: SubscriptionStatusActive, Email: "JANE@example.com"},
+				{RailSubscriptionID: "known-1", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "ghost-9", Status: SubscriptionStatusActive, Email: "JANE@example.com"},
 			},
 		}
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
@@ -643,7 +643,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "alive-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*alive.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "alive-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*alive.CurrentPeriodEndsAt)},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -684,7 +684,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderStripe,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "sub_123", Status: SubscriptionStatusCancelled, RawStatus: "canceled"},
+				{RailSubscriptionID: "sub_123", Status: SubscriptionStatusCancelled, RawStatus: "canceled"},
 			},
 		}
 		eng, _, _ := newTestEngine(ProviderStripe, snap, local)
@@ -710,7 +710,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead))
 	})
 
-	t.Run("PS-3 adopts processor status and periods on enforce", func(t *testing.T) {
+	t.Run("PS-3 adopts rail status and periods on enforce", func(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderStripe, "sub_42")
 		sub.Status = "past_due"
@@ -720,7 +720,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderStripe,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "sub_42", Status: SubscriptionStatusActive, RawStatus: "active",
+				{RailSubscriptionID: "sub_42", Status: SubscriptionStatusActive, RawStatus: "active",
 					LastBilledAt: tp(testNow.Add(-5 * 24 * time.Hour)), NextBillingAt: &remoteEnd},
 			},
 		}
@@ -761,7 +761,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderStripe,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "sub_dead", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "sub_dead", Status: SubscriptionStatusActive},
 			},
 		}
 		eng, _, writer := newTestEngine(ProviderStripe, snap, local)
@@ -784,7 +784,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "nmi-sub-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "nmi-sub-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 			Transactions: []RemoteTransaction{
 				nmiSaleTxn("txn-1001", fmt.Sprintf("rebill-%s-%d", sub.ID, testNow.Unix()), true),
@@ -827,8 +827,8 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "nmi-a", Status: SubscriptionStatusActive},
-				{ProcessorSubscriptionID: "nmi-b", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "nmi-a", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "nmi-b", Status: SubscriptionStatusActive},
 			},
 			Transactions: []RemoteTransaction{txn},
 		}
@@ -849,7 +849,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		local.state.Subscriptions = []LocalSubscription{sub}
 		subID := sub.ID
 		original := LocalPayment{
-			ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "nmi",
+			ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi",
 			TransactionID: "txn-5001", AmountCents: 999, Status: "completed",
 			SubscriptionID: &subID, PurchasedAt: testNow.Add(-10 * 24 * time.Hour),
 		}
@@ -863,7 +863,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "nmi-sub-5", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "nmi-sub-5", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 			Transactions: []RemoteTransaction{refund},
 		}
@@ -888,14 +888,14 @@ func TestDiffTaxonomy(t *testing.T) {
 		subID := sub.ID
 		originalID := uuid.New()
 		local.payments = []LocalPayment{
-			{ID: originalID, CustomerID: sub.CustomerID, Processor: "stripe", TransactionID: "ch_1", AmountCents: 999, Status: "refunded", SubscriptionID: &subID, PurchasedAt: testNow.Add(-9 * 24 * time.Hour)},
-			{ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "stripe", TransactionID: "re_1", AmountCents: -999, Status: "completed", SubscriptionID: &subID, RefundedPaymentID: &originalID, PurchasedAt: testNow.Add(-8 * 24 * time.Hour)},
+			{ID: originalID, CustomerID: sub.CustomerID, Rail: "stripe", TransactionID: "ch_1", AmountCents: 999, Status: "refunded", SubscriptionID: &subID, PurchasedAt: testNow.Add(-9 * 24 * time.Hour)},
+			{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "stripe", TransactionID: "re_1", AmountCents: -999, Status: "completed", SubscriptionID: &subID, RefundedPaymentID: &originalID, PurchasedAt: testNow.Add(-8 * 24 * time.Hour)},
 		}
 		snap := &RemoteSnapshot{
 			Provider:     ProviderStripe,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Chargebacks: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "sub_55", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "sub_55", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 			Transactions: []RemoteTransaction{
 				{TransactionID: "re_1", Type: TransactionTypeRefund, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-8 * 24 * time.Hour), Raw: rawJSON(map[string]any{"charge": "ch_1"})},
@@ -914,13 +914,13 @@ func TestDiffTaxonomy(t *testing.T) {
 		withLiveEntitlement(local, &sub)
 		subID := sub.ID
 		local.payments = []LocalPayment{
-			{ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "stripe", TransactionID: "ch_66", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-5 * 24 * time.Hour)},
+			{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "stripe", TransactionID: "ch_66", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-5 * 24 * time.Hour)},
 		}
 		snap := &RemoteSnapshot{
 			Provider:     ProviderStripe,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Chargebacks: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "sub_66", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "sub_66", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 			Transactions: []RemoteTransaction{
 				{TransactionID: "dp_1", Type: TransactionTypeChargeback, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"charge": "ch_66"})},
@@ -937,11 +937,11 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Zero(t, writer.totalCalls()) // never auto-applied
 	})
 
-	t.Run("PS-7 vault metadata mismatch adopts the processor record", func(t *testing.T) {
+	t.Run("PS-7 vault metadata mismatch adopts the rail record", func(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderNMI, "nmi-sub-7")
 		pm := LocalPaymentMethod{
-			ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "nmi",
+			ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi",
 			VaultID: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
 		}
 		local.state.Subscriptions = []LocalSubscription{sub}
@@ -950,7 +950,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true, Vault: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "nmi-sub-7", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "nmi-sub-7", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 			VaultEntries: []RemoteVaultEntry{
 				{CustomerVaultID: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
@@ -982,8 +982,8 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "dup-1", Status: SubscriptionStatusActive},
-				{ProcessorSubscriptionID: "dup-2", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "dup-1", Status: SubscriptionStatusActive},
+				{RailSubscriptionID: "dup-2", Status: SubscriptionStatusActive},
 			},
 		}
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1008,7 +1008,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "ps9-grant", Status: SubscriptionStatusActive, NextBillingAt: tp(*missing.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "ps9-grant", Status: SubscriptionStatusActive, NextBillingAt: tp(*missing.CurrentPeriodEndsAt)},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1040,7 +1040,7 @@ func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "nmi-0", Status: SubscriptionStatusActive},
+			{RailSubscriptionID: "nmi-0", Status: SubscriptionStatusActive},
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1076,7 +1076,7 @@ func TestIdentityStableAcrossRuns(t *testing.T) {
 		Provider:     ProviderStripe,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "sub_stable", Status: SubscriptionStatusCancelled},
+			{RailSubscriptionID: "sub_stable", Status: SubscriptionStatusCancelled},
 		},
 	}
 	eng, store, _ := newTestEngine(ProviderStripe, snap, local)
@@ -1107,7 +1107,7 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 		Provider:     ProviderStripe,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "sub_vanish", Status: SubscriptionStatusCancelled},
+			{RailSubscriptionID: "sub_vanish", Status: SubscriptionStatusCancelled},
 		},
 	}
 	eng, store, _ := newTestEngine(ProviderStripe, deadSnap, local)
@@ -1115,12 +1115,12 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, FindingStatusReconcileRequired, store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String()).Status)
 
-	// The drift disappears (processor reactivated / first read was wrong).
+	// The drift disappears (rail reactivated / first read was wrong).
 	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, snap: &RemoteSnapshot{
 		Provider:     ProviderStripe,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "sub_vanish", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+			{RailSubscriptionID: "sub_vanish", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 		},
 	}}
 	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
@@ -1147,7 +1147,7 @@ func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 		Subscriptions: []RemoteSubscription{
 			// The remote sub is still alive because the deferred delete has
 			// not executed yet — exactly the recorded-intent case.
-			{ProcessorSubscriptionID: "nmi-intent", Status: SubscriptionStatusActive},
+			{RailSubscriptionID: "nmi-intent", Status: SubscriptionStatusActive},
 		},
 	}
 	eng, _, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1168,12 +1168,12 @@ func TestCapabilityGating(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}
 	sub := liveLocalSub(ProviderNMI, "nmi-gate")
-	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
+	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
 	local.state.Subscriptions = []LocalSubscription{sub}
 	local.state.PaymentMethods = []LocalPaymentMethod{pm}
 	subID := sub.ID
 	local.payments = []LocalPayment{
-		{ID: uuid.New(), CustomerID: sub.CustomerID, Processor: "nmi", TransactionID: "txn-gate", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-time.Hour)},
+		{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", TransactionID: "txn-gate", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-time.Hour)},
 	}
 	// Snapshot contains a chargeback and a divergent vault entry, but the
 	// provider declares neither capability: both checks must be skipped.
@@ -1181,7 +1181,7 @@ func TestCapabilityGating(t *testing.T) {
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: false, Chargebacks: false, Vault: false},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "nmi-gate", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+			{RailSubscriptionID: "nmi-gate", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 		},
 		Transactions: []RemoteTransaction{
 			{TransactionID: "cb-1", Type: TransactionTypeChargeback, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"order_id": sub.ID.String()})},
@@ -1209,7 +1209,7 @@ func TestEnforceIsIdempotent(t *testing.T) {
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "nmi-idem", Status: SubscriptionStatusExpired, RawStatus: "expired"},
+			{RailSubscriptionID: "nmi-idem", Status: SubscriptionStatusExpired, RawStatus: "expired"},
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1243,7 +1243,7 @@ func TestAdvisoryNeverWrites(t *testing.T) {
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "nmi-adv", Status: SubscriptionStatusCancelled},
+			{RailSubscriptionID: "nmi-adv", Status: SubscriptionStatusCancelled},
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1265,7 +1265,7 @@ func TestDismissedFindingsStayDismissed(t *testing.T) {
 		Provider:     ProviderStripe,
 		Capabilities: Capabilities{Subscriptions: true},
 		Subscriptions: []RemoteSubscription{
-			{ProcessorSubscriptionID: "sub_dismiss", Status: SubscriptionStatusCancelled},
+			{RailSubscriptionID: "sub_dismiss", Status: SubscriptionStatusCancelled},
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderStripe, snap, local)
@@ -1329,13 +1329,13 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		Amount:    999,
 		Currency:  "usd",
 		Status:    "active",
-		Processors: map[string]map[string]string{
+		Rails: map[string]map[string]string{
 			"mobius": {"plan_id": "plan-gold"},
 		},
 	}
 	local.state.Prices = []LocalPrice{price}
 	local.state.PaymentMethods = []LocalPaymentMethod{{
-		ID: uuid.New(), CustomerID: subjectID, Processor: "mobius",
+		ID: uuid.New(), CustomerID: subjectID, Rail: "mobius",
 		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
 	}}
 	end := testNow.Add(20 * 24 * time.Hour)
@@ -1345,15 +1345,15 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Vault: true},
 		Subscriptions: []RemoteSubscription{
 			{
-				ProcessorSubscriptionID: "remote-77",
-				Status:                  SubscriptionStatusActive,
-				CustomerID:              "vault-77",
-				Email:                   "owner@example.com",
-				PlanID:                  "plan-gold",
-				NextBillingAt:           &end,
-				LastBilledAt:            &lastBilled,
-				AmountCents:             999,
-				Currency:                "usd",
+				RailSubscriptionID: "remote-77",
+				Status:             SubscriptionStatusActive,
+				CustomerID:         "vault-77",
+				Email:              "owner@example.com",
+				PlanID:             "plan-gold",
+				NextBillingAt:      &end,
+				LastBilledAt:       &lastBilled,
+				AmountCents:        999,
+				Currency:           "usd",
 			},
 		},
 		Transactions: []RemoteTransaction{
@@ -1409,13 +1409,13 @@ func TestMaterializePS1(t *testing.T) {
 		st, _ := local.Load(ctx, ProviderNMI, nil)
 		var created *LocalSubscription
 		for i := range st.Subscriptions {
-			if st.Subscriptions[i].ProcessorSubscriptionID == "remote-77" {
+			if st.Subscriptions[i].RailSubscriptionID == "remote-77" {
 				created = &st.Subscriptions[i]
 			}
 		}
 		require.NotNil(t, created)
 		assert.Equal(t, "active", created.Status)
-		assert.Equal(t, "mobius", created.Processor)
+		assert.Equal(t, "mobius", created.Rail)
 		require.NotNil(t, created.CurrentPeriodEndsAt)
 		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
 
@@ -1439,7 +1439,7 @@ func TestMaterializePS1(t *testing.T) {
 		other.UserEmail = "owner@example.com"
 		local.state.Subscriptions = append(local.state.Subscriptions, other)
 		snap.Subscriptions = append(snap.Subscriptions, RemoteSubscription{
-			ProcessorSubscriptionID: "other-1", Status: SubscriptionStatusActive,
+			RailSubscriptionID: "other-1", Status: SubscriptionStatusActive,
 		})
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
 		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
@@ -1488,7 +1488,7 @@ type fakeHistorySource struct {
 }
 
 func (f *fakeHistorySource) Configured() bool { return f.configured }
-func (f *fakeHistorySource) ListEvents(ctx context.Context, processors []string, since, until time.Time) ([]HistoryEvent, error) {
+func (f *fakeHistorySource) ListEvents(ctx context.Context, rails []string, since, until time.Time) ([]HistoryEvent, error) {
 	return f.events, f.err
 }
 
@@ -1504,7 +1504,7 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true},
 			Subscriptions: []RemoteSubscription{
-				{ProcessorSubscriptionID: "nmi-hist", Status: SubscriptionStatusPastDue, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+				{RailSubscriptionID: "nmi-hist", Status: SubscriptionStatusPastDue, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
 		}
 		return local, snap, sub
@@ -1516,10 +1516,10 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 		histAt := testNow.Add(-200 * 24 * time.Hour) // deep history the provider window can't see
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 		eng.History = &fakeHistorySource{configured: true, events: []HistoryEvent{
-			{Table: "payment_events", EventType: "charge_failed", Processor: "nmi", SubscriptionID: &subID, OccurredAt: histAt},
-			{Table: "payment_events", EventType: "charge_success", Processor: "nmi", SubscriptionID: &subID, OccurredAt: histAt.Add(-30 * 24 * time.Hour)},
-			{Table: "subscription_events", EventType: "subscription_cancelled", Processor: "nmi", ProcessorSubscriptionID: "nmi-hist", OccurredAt: histAt.Add(24 * time.Hour)},
-			{Table: "payment_events", EventType: "charge_failed", Processor: "nmi", OccurredAt: histAt}, // uncorrelated: no ids
+			{Table: "payment_events", EventType: "charge_failed", Rail: "nmi", SubscriptionID: &subID, OccurredAt: histAt},
+			{Table: "payment_events", EventType: "charge_success", Rail: "nmi", SubscriptionID: &subID, OccurredAt: histAt.Add(-30 * 24 * time.Hour)},
+			{Table: "subscription_events", EventType: "subscription_cancelled", Rail: "nmi", RailSubscriptionID: "nmi-hist", OccurredAt: histAt.Add(24 * time.Hour)},
+			{Table: "payment_events", EventType: "charge_failed", Rail: "nmi", OccurredAt: histAt}, // uncorrelated: no ids
 		}}
 		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)

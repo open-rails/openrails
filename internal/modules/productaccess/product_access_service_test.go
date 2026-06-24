@@ -122,7 +122,7 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`,
 		priceID, productID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
-	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
+	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
 	                             VALUES ($1,$2,'nmi',$3,999,999,'usd','completed',$4,$5,$6)`,
 		paymentID, priceID, "txn-"+paymentID.String(), now, dbtest.TestMerchantID.UUID(), custID)
 	require.NoError(t, err)

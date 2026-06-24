@@ -322,7 +322,7 @@ func (l *Ledger) RevokeGrant(ctx context.Context, grantID uuid.UUID, reason stri
 		if err != nil {
 			return 0, err
 		}
-		clearing, err := l.money.EnsureSystemAccount(ctx, ledger.ProcessorClearing, *g.Currency)
+		clearing, err := l.money.EnsureSystemAccount(ctx, ledger.RailClearing, *g.Currency)
 		if err != nil {
 			return 0, err
 		}

@@ -51,7 +51,7 @@ The lifecycle service is `internal/merchants.Service`.
 | Operation | Behaviour |
 |---|---|
 | `Provision` | Creates or updates `openrails.merchants` and links `owner_org_id` when an AuthKit org owns the merchant. |
-| `Suspend` / `Resume` | Flips `status` and `suspended_at`. Suspended merchants deny writes while reads and processor webhook reconciliation can still proceed. |
+| `Suspend` / `Resume` | Flips `status` and `suspended_at`. Suspended merchants deny writes while reads and rail webhook reconciliation can still proceed. |
 | `Export` | Writes a completed `merchant_exports` row with row counts and secret names, never secret values. |
 | `Delete` | Requires confirmation and a completed export, purges merchant-owned rows and secrets, then tombstones the merchant directory row. |
 
@@ -89,7 +89,7 @@ they are written to `openrails.merchant_secrets` and envelope-encrypted when an
 
 ## Webhooks
 
-Processor webhooks resolve the merchant by explicit path slug.
+Rail webhooks resolve the merchant by explicit path slug.
 
 Path form:
 

@@ -20,7 +20,7 @@ type SubscriptionFilters struct {
 	UserID          string
 	Status          string
 	PriceID         uuid.UUID
-	Processor       string
+	Rail            string
 	CreatedAfter    *time.Time
 	CreatedBefore   *time.Time
 	CancelledAfter  *time.Time
@@ -67,8 +67,8 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		EndedAt:                  s.EndedAt,
 		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
 		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
-		Processor:                string(s.Processor),
-		ProcessorSubscriptionID:  s.ProcessorSubscriptionID,
+		Rail:                     string(s.Rail),
+		RailSubscriptionID:       s.RailSubscriptionID,
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
@@ -167,8 +167,8 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		EndedAt:                  s.EndedAt,
 		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
 		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
-		Processor:                string(s.Processor),
-		ProcessorSubscriptionID:  s.ProcessorSubscriptionID,
+		Rail:                     string(s.Rail),
+		RailSubscriptionID:       s.RailSubscriptionID,
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
@@ -379,11 +379,11 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	return r.oneWithDetails(ctx, row, false)
 }
 
-// GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
-func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByProcessorSubID(ctx, gen.GetSubscriptionByProcessorSubIDParams{
-		Processor:               processor,
-		ProcessorSubscriptionID: processorSubscriptionID,
+// GetByRailSubscriptionID finds a subscription by rail and rail_subscription_id.
+func (r *SubscriptionRepo) GetByRailSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{
+		Rail:               rail,
+		RailSubscriptionID: railSubscriptionID,
 	})
 	if err != nil {
 		return nil, err
@@ -391,11 +391,11 @@ func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, pro
 	return r.oneWithDetails(ctx, row, false)
 }
 
-func (r *SubscriptionRepo) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByProcessorMetadataValue(ctx, gen.GetSubscriptionByProcessorMetadataValueParams{
-		Processor: strings.TrimSpace(processor),
-		Key:       strings.TrimSpace(key),
-		Value:     strings.TrimSpace(value),
+func (r *SubscriptionRepo) GetByRailMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionByRailMetadataValue(ctx, gen.GetSubscriptionByRailMetadataValueParams{
+		Rail:  strings.TrimSpace(rail),
+		Key:   strings.TrimSpace(key),
+		Value: strings.TrimSpace(value),
 	})
 	if err != nil {
 		return nil, err
@@ -419,14 +419,14 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
+func (r *SubscriptionRepo) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListSubscriptionsByCustomerProcessor(ctx, gen.ListSubscriptionsByCustomerProcessorParams{
+	rows, err := r.db.Gen(ctx).ListSubscriptionsByCustomerRail(ctx, gen.ListSubscriptionsByCustomerRailParams{
 		CustomerID: tsid,
-		Processor:  string(processor),
+		Rail:       string(rail),
 	})
 	if err != nil {
 		return nil, err
@@ -438,8 +438,8 @@ func (r *SubscriptionRepo) GetSubscriptionsByProcessorAndUserID(ctx context.Cont
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]*models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByProcessor(ctx, processor)
+func (r *SubscriptionRepo) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByRail(ctx, rail)
 	if err != nil {
 		return nil, err
 	}
@@ -487,12 +487,12 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 	if f.UserID != "" {
 		tsid = &tsidResolved
 	}
-	var status, processor *string
+	var status, rail *string
 	if f.Status != "" {
 		status = &f.Status
 	}
-	if f.Processor != "" {
-		processor = &f.Processor
+	if f.Rail != "" {
+		rail = &f.Rail
 	}
 	var priceID *uuid.UUID
 	if f.PriceID != uuid.Nil {
@@ -504,7 +504,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 		CustomerID:      tsid,
 		Status:          status,
 		PriceID:         priceID,
-		Processor:       processor,
+		Rail:            rail,
 		CreatedAfter:    f.CreatedAfter,
 		CreatedBefore:   f.CreatedBefore,
 		CancelledAfter:  f.CancelledAfter,
@@ -527,7 +527,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 		CustomerID:      tsid,
 		Status:          status,
 		PriceID:         priceID,
-		Processor:       processor,
+		Rail:            rail,
 		CreatedAfter:    f.CreatedAfter,
 		CreatedBefore:   f.CreatedBefore,
 		CancelledAfter:  f.CancelledAfter,
@@ -583,12 +583,12 @@ func intPtrTo32(v *int) *int32 {
 }
 
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
-// processors whose next retry is due (Price + PaymentMethod relations
+// rails whose next retry is due (Price + PaymentMethod relations
 // attached) — the dunning worker's work list.
-func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, processors []string, now time.Time) ([]models.Subscription, error) {
+func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time) ([]models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
-		Processors: processors,
-		Now:        now,
+		Rails: rails,
+		Now:   now,
 	})
 	if err != nil {
 		return nil, err
@@ -605,14 +605,14 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, proc
 }
 
 // ListSilentLapsed returns the #367 silent-lapsed cohort: active
-// subscriptions on the given processors whose current period ended at or
+// subscriptions on the given rails whose current period ended at or
 // before cutoff with no recorded payment at/after the lapsed boundary (Price
 // + PaymentMethod relations attached) — the subscription liveness sync's work
 // list. past_due rows are excluded by the query; that cohort is dunning's.
-func (r *SubscriptionRepo) ListSilentLapsed(ctx context.Context, processors []string, cutoff time.Time) ([]models.Subscription, error) {
+func (r *SubscriptionRepo) ListSilentLapsed(ctx context.Context, rails []string, cutoff time.Time) ([]models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListSilentLapsedSubscriptions(ctx, gen.ListSilentLapsedSubscriptionsParams{
-		Processors: processors,
-		Cutoff:     cutoff,
+		Rails:  rails,
+		Cutoff: cutoff,
 	})
 	if err != nil {
 		return nil, err
@@ -625,7 +625,7 @@ func (r *SubscriptionRepo) ListSilentLapsed(ctx context.Context, processors []st
 }
 
 // ListPendingDeletionScheduled returns cancelled subscriptions that still
-// carry a deletion_scheduled_at marker — their deferred processor-side delete
+// carry a deletion_scheduled_at marker — their deferred rail-side delete
 // never finalized (#344 follow-up boot rescan). No relations attached.
 func (r *SubscriptionRepo) ListPendingDeletionScheduled(ctx context.Context) ([]*models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListPendingDeletionScheduledSubscriptions(ctx)

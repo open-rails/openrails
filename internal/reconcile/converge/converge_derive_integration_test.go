@@ -179,7 +179,7 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
 		      VALUES ($1,$2,999,'usd',$3)`, priceID, productID, merchantID)
 		// A REFUNDED payment backing a still-live ownership grant.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
 		      VALUES ($1,$2,$3,$4,'mobius',$5,999,999,'usd','refunded',now())`,
 			paymentID, merchantID, customer, priceID, "txn_"+suffix)
 		gl := grants.New(appDB.Gen(ctx), merchantID)
@@ -256,7 +256,7 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,500,'usd',$3)`, priceGrant, prodGrant, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,500,'usd',$3)`, priceEmpty, prodEmpty, merchantID)
 		ins := func(id, price uuid.UUID, txn string) {
-			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at)
+			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
 			      VALUES ($1,$2,$3,$4,'mobius',$5,500,500,'usd','completed',now())`, id, merchantID, customer, price, txn)
 		}
 		ins(payMissing, priceGrant, "txn-m-"+sfx) // grantable product, NO grant → flagged

@@ -22,7 +22,7 @@ type PaymentFilters struct {
 	UserID         string     `form:"user_id"`
 	PriceID        uuid.UUID  `form:"price_id"`
 	SubscriptionID string     `form:"subscription_id"` // UUID string, parsed in handler
-	Processor      string     `form:"processor"`
+	Rail           string     `form:"rail"`
 	TransactionID  string     `form:"transaction_id"`
 	StartDate      *time.Time `form:"created_after" time_format:"2006-01-02"`
 	EndDate        *time.Time `form:"created_before" time_format:"2006-01-02"`
@@ -67,7 +67,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	return gen.CreatePaymentParams{
 		ID:                       p.ID,
 		PriceID:                  p.PriceID,
-		Processor:                gen.OpenrailsProcessorType(p.Processor),
+		Rail:                     gen.OpenrailsRailType(p.Rail),
 		TransactionID:            p.TransactionID,
 		Amount:                   p.Amount,
 		ListAmount:               p.ListAmount,
@@ -200,9 +200,9 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 	return paymentsFromGen(rows)
 }
 
-func (r *PaymentRepo) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
+func (r *PaymentRepo) GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
 	row, err := r.db.Gen(ctx).GetPaymentByTransactionID(ctx, gen.GetPaymentByTransactionIDParams{
-		Processor:     gen.OpenrailsProcessorType(processor),
+		Rail:          gen.OpenrailsRailType(rail),
 		TransactionID: transactionID,
 	})
 	if err != nil {
@@ -219,8 +219,8 @@ func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*m
 	return paymentsFromGen(rows)
 }
 
-func (r *PaymentRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByProcessor(ctx, gen.OpenrailsProcessorType(processor))
+func (r *PaymentRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
+	rows, err := r.db.Gen(ctx).ListPaymentsByRail(ctx, gen.OpenrailsRailType(rail))
 	if err != nil {
 		return nil, err
 	}
@@ -418,9 +418,9 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 			subID = &parsed
 		}
 	}
-	var processor, transactionID *string
-	if f.Processor != "" {
-		processor = &f.Processor
+	var rail, transactionID *string
+	if f.Rail != "" {
+		rail = &f.Rail
 	}
 	if f.TransactionID != "" {
 		transactionID = &f.TransactionID
@@ -431,7 +431,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
-		Processor:       processor,
+		Rail:            rail,
 		TransactionID:   transactionID,
 		PurchasedAfter:  f.StartDate,
 		PurchasedBefore: f.EndDate,
@@ -455,7 +455,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
-		Processor:       processor,
+		Rail:            rail,
 		TransactionID:   transactionID,
 		PurchasedAfter:  f.StartDate,
 		PurchasedBefore: f.EndDate,
@@ -545,14 +545,14 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	return nil
 }
 
-func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
+func (r *PaymentRepo) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerProcessor(ctx, gen.GetLatestPaymentByCustomerProcessorParams{
+	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerRail(ctx, gen.GetLatestPaymentByCustomerRailParams{
 		CustomerID: tsid,
-		Processor:  gen.OpenrailsProcessorType(processor),
+		Rail:       gen.OpenrailsRailType(rail),
 	})
 	if err != nil {
 		return nil, err
@@ -576,7 +576,7 @@ func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subsc
 	return paymentFromGen(row)
 }
 
-func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
+func (r *PaymentRepo) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
@@ -584,9 +584,9 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	if err != nil {
 		return 0, 0, err
 	}
-	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectProcessor(ctx, gen.CountPaymentOutcomesBySubjectProcessorParams{
+	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectRail(ctx, gen.CountPaymentOutcomesBySubjectRailParams{
 		CustomerID: tsid,
-		Processor:  gen.OpenrailsProcessorType(processor),
+		Rail:       gen.OpenrailsRailType(rail),
 	})
 	if err != nil {
 		return 0, 0, err

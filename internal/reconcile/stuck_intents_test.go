@@ -44,7 +44,7 @@ func (s *fakeIntentSource) ListStuck(ctx context.Context, actionCutoff, verifyCu
 func newStuckIntentEngine(src StuckIntentSource) (*Engine, *memStore) {
 	store := newMemStore()
 	return &Engine{
-		Fetchers: map[Provider]ProcessorFetcher{},
+		Fetchers: map[Provider]RailFetcher{},
 		Store:    store,
 		Local:    &fakeLocal{},
 		Intents:  src,

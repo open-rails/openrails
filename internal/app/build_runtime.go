@@ -41,7 +41,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -74,10 +74,10 @@ func standaloneRiverSchema(_ *config.Config) string {
 }
 
 type runtimeOverrides struct {
-	DB         *db.DB
-	Redis      *redis.Client
-	Clock      clockwork.Clock
-	Processors config.ProcessorSet
+	DB    *db.DB
+	Redis *redis.Client
+	Clock clockwork.Clock
+	Rails config.RailSet
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -90,7 +90,7 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 	return "mainnet"
 }
 
-// configureSolanaProcessor normalizes the Solana token set and applies the
+// configureSolanaRail normalizes the Solana token set and applies the
 // pricing policy (#360). It NEVER fails the boot over token configuration —
 // tokens that cannot function are dropped with a loud warning, mirroring the
 // "recipient_wallet not configured; Solana payments disabled" pattern:
@@ -105,8 +105,8 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 //     keeps working.
 //
 // The error return is retained for signature stability; it is always nil.
-func configureSolanaProcessor(cfg *config.Config, processors config.ProcessorSet) error {
-	proc := processors.GetSolanaProcessor()
+func configureSolanaRail(cfg *config.Config, rails config.RailSet) error {
+	proc := rails.GetSolanaRail()
 	if proc == nil {
 		return nil
 	}
@@ -179,8 +179,8 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 	return 1.0, nil
 }
 
-func createPythPriceProvider(cfg *config.Config, processors config.ProcessorSet) (solanamodule.TokenPriceProvider, error) {
-	if processors.GetSolanaProcessor() == nil {
+func createPythPriceProvider(cfg *config.Config, rails config.RailSet) (solanamodule.TokenPriceProvider, error) {
+	if rails.GetSolanaRail() == nil {
 		return nil, nil
 	}
 	// Pyth is not configurable (#352): Hermes URL, freshness bounds and the
@@ -209,16 +209,16 @@ func createPythPriceProvider(cfg *config.Config, processors config.ProcessorSet)
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
-	var processorSet config.ProcessorSet
+	var railSet config.RailSet
 	if overrides != nil {
-		processorSet = overrides.Processors
+		railSet = overrides.Rails
 	}
-	if err := config.ValidateProcessorSet(cfg, processorSet); err != nil {
+	if err := config.ValidateRailSet(cfg, railSet); err != nil {
 		return nil, err
 	}
-	// Initialize NMI-backed processors from config BEFORE creating clients
-	// This ensures IsNMIBacked() works correctly for all configured processors
-	processors.InitNMIBackedProcessors(processorSet)
+	// Initialize NMI-backed rails from config BEFORE creating clients
+	// This ensures IsNMIBacked() works correctly for all configured rails
+	rails.InitNMIBackedRails(railSet)
 
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
@@ -249,23 +249,23 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
-	ccbillClient := createCCBillClient(cfg, processorSet)
-	ccbillRESTClient := createCCBillRESTClient(processorSet)
-	ccbillDataLinkClient := createCCBillDataLinkClient(cfg, processorSet)
-	nmiClients, err := createNMIClients(cfg, processorSet, database)
+	ccbillClient := createCCBillClient(cfg, railSet)
+	ccbillRESTClient := createCCBillRESTClient(railSet)
+	ccbillDataLinkClient := createCCBillDataLinkClient(cfg, railSet)
+	nmiClients, err := createNMIClients(cfg, railSet, database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create nmi clients: %w", err)
 	}
 
-	if err := configureSolanaProcessor(cfg, processorSet); err != nil {
+	if err := configureSolanaRail(cfg, railSet); err != nil {
 		return nil, err
 	}
-	solanaPriceProvider, err := createPythPriceProvider(cfg, processorSet)
+	solanaPriceProvider, err := createPythPriceProvider(cfg, railSet)
 	if err != nil {
 		return nil, err
 	}
 
-	serviceInstances := createServices(database, cfg, processorSet, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
+	serviceInstances := createServices(database, cfg, railSet, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
 	healthManager := createHealthManager(database, redisClient)
 
 	var emailService *subscriptions.EmailService
@@ -303,7 +303,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		DB:                   database,
 		RedisClient:          redisClient,
 		Config:               cfg,
-		Processors:           processorSet,
+		Rails:                railSet,
 		Clock:                clock,
 		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
 		HealthManager:        healthManager,
@@ -346,10 +346,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		MoneyService:           serviceInstances.MoneyService,
 		MoneyCharger: money.NewScopedCharger(database, func() map[string]money.CollectionAdapter {
 			adapters := money.NewNMICollectionAdapters(nmiClients)
-			adapters[string(models.ProcessorStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg, Processors: processorSet})
+			adapters[string(models.RailStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg, Rails: railSet})
 			return adapters
 		}()),
-		ProcessorCustomerService: serviceInstances.ProcessorCustomerService,
+		RailCustomerService: serviceInstances.RailCustomerService,
 	}
 
 	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
@@ -375,7 +375,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
 	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.ProviderAccounts(), intents.OriginUser,
-		"user cancellation retained an undo window; processor delete deferred to its close")
+		"user cancellation retained an undo window; rail delete deferred to its close")
 	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.ProviderAccounts(), intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
@@ -523,15 +523,15 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	return nil
 }
 
-func createNMIClients(cfg *config.Config, processors config.ProcessorSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
+func createNMIClients(cfg *config.Config, rails config.RailSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
 	clients := make(map[string]*nmi.NMIClient)
 
-	nmiProcessors := processors.GetNMIProcessors()
-	if len(nmiProcessors) == 0 {
+	nmiRails := rails.GetNMIRails()
+	if len(nmiRails) == 0 {
 		return clients, nil
 	}
 
-	for name, procConfig := range nmiProcessors {
+	for name, procConfig := range nmiRails {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" {
 			return nil, fmt.Errorf("nmi provider name cannot be empty")
@@ -541,7 +541,7 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			return nil, fmt.Errorf("duplicate nmi provider '%s' detected in configuration", providerKey)
 		}
 
-		// Convert ProcessorConfig to NMIProviderSettings
+		// Convert RailConfig to NMIProviderSettings
 		settings := procConfig.ToNMIProviderSettings(providerKey)
 
 		// Validate required fields
@@ -583,9 +583,9 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			if verdict, checkedAt, ok := lookupProbeVerdict(database, providerKey, keyHash); ok {
 				switch probeCacheDecision(verdict, checkedAt, time.Now()) {
 				case probeCacheRefuseBoot:
-					return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_mode)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
+					return nil, fmt.Errorf("rail %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_mode)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
 				case probeCacheSkipProbe:
-					log.Infof("processor %q: NMI account verified as simulating (cached probe verdict from %s; #348 probe cooldown, no probe sent)", providerKey, checkedAt.UTC().Format(time.RFC3339))
+					log.Infof("rail %q: NMI account verified as simulating (cached probe verdict from %s; #348 probe cooldown, no probe sent)", providerKey, checkedAt.UTC().Format(time.RFC3339))
 					continue
 				}
 			}
@@ -593,14 +593,14 @@ func createNMIClients(cfg *config.Config, processors config.ProcessorSet, databa
 			switch result {
 			case nmi.ProbeLive:
 				storeProbeVerdict(database, providerKey, keyHash, probeVerdictLive)
-				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_mode)", providerKey)
+				return nil, fmt.Errorf("rail %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_mode)", providerKey)
 			case nmi.ProbeSimulated:
 				storeProbeVerdict(database, providerKey, keyHash, probeVerdictSimulated)
-				log.Infof("processor %q: NMI account verified as simulating (test env)", providerKey)
+				log.Infof("rail %q: NMI account verified as simulating (test env)", providerKey)
 			default:
 				// Indeterminate verdicts are never cached: the next boot
 				// re-probes once the transport/credential issue clears.
-				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode", providerKey)
+				log.WithError(probeErr).Warnf("⚠️  rail %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode", providerKey)
 			}
 		}
 	}
@@ -633,8 +633,8 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	return client, nil
 }
 
-func createCCBillClient(cfg *config.Config, processors config.ProcessorSet) *ccbill.CCBillClient {
-	ccbillProc := processors.GetCCBillProcessor()
+func createCCBillClient(cfg *config.Config, rails config.RailSet) *ccbill.CCBillClient {
+	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		log.Info("CCBill config missing; CCBill integration disabled")
 		return nil
@@ -643,16 +643,16 @@ func createCCBillClient(cfg *config.Config, processors config.ProcessorSet) *ccb
 	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
 }
 
-func createCCBillRESTClient(processors config.ProcessorSet) *ccbill.RESTClient {
-	ccbillProc := processors.GetCCBillProcessor()
+func createCCBillRESTClient(rails config.RailSet) *ccbill.RESTClient {
+	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
 	}
 	return ccbill.NewRESTClient(ccbillProc.ToCCBillConfig())
 }
 
-func createCCBillDataLinkClient(cfg *config.Config, processors config.ProcessorSet) *ccbill.DataLinkClient {
-	ccbillProc := processors.GetCCBillProcessor()
+func createCCBillDataLinkClient(cfg *config.Config, rails config.RailSet) *ccbill.DataLinkClient {
+	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
 	}
@@ -703,13 +703,13 @@ type servicesInstances struct {
 	IdempotencyService           *idempotency.IdempotencyService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 
-	CheckoutService          *checkout.CheckoutService
-	CheckoutSessionService   *checkout.CheckoutSessionService
-	MoneyService             *money.MoneyService
-	ProcessorCustomerService *payments.ProcessorCustomerService
+	CheckoutService        *checkout.CheckoutService
+	CheckoutSessionService *checkout.CheckoutSessionService
+	MoneyService           *money.MoneyService
+	RailCustomerService    *payments.RailCustomerService
 }
 
-func createServices(database *db.DB, cfg *config.Config, processorSet config.ProcessorSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railSet config.RailSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -720,7 +720,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 	featureService := entitlements.NewFeatureService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
-	processorCustomerService := payments.NewProcessorCustomerService(database)
+	railCustomerService := payments.NewRailCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 
 	// Create FX provider for Solana token quoting and policy-currency admission.
@@ -748,9 +748,9 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, processorSet, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, railSet, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
 	var solanaRPC *solana.RPCClient
-	if solanaProc := processorSet.GetSolanaProcessor(); solanaProc != nil {
+	if solanaProc := railSet.GetSolanaRail(); solanaProc != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
 			HeliusAPIKey: solanaProc.HeliusAPIKey,
@@ -782,7 +782,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		clock,
 	)
 
-	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, processorSet, clock)
+	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
@@ -813,7 +813,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		nmiClients,
 		clock,
 	)
-	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Processors: processorSet}
+	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railSet}
 
 	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService)
 	webhookDispatcher := &webhooks.WebhookDispatcher{
@@ -829,7 +829,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		ProfileRepo:                  profileRepo,
 		DeduplicationService:         deduplicationService,
-		ProcessorCustomerService:     processorCustomerService,
+		RailCustomerService:          railCustomerService,
 		CCBillRESTClient:             ccbillRESTClient,
 		NMIClients:                   nmiClients,
 		MoneyService:                 moneyService,
@@ -846,9 +846,9 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		vaultService,
 		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
 		nmiClients,
-		processorCustomerService,
+		railCustomerService,
 		cfg,
-		processorSet,
+		railSet,
 		clock,
 	)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
@@ -874,10 +874,10 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		fxProvider,
 		solanaPriceProvider,
 		cfg,
-		processorSet,
+		railSet,
 		clock,
 	)
-	checkoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccountsWithDB(cfg, processorSet, nmiClients, database))
+	checkoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccountsWithDB(cfg, railSet, nmiClients, database))
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
@@ -886,7 +886,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		database,
 		redisClient,
 		cfg,
-		processorSet,
+		railSet,
 		solanaPayService,
 		solanaTransactionService,
 		&solanaPurchaseRegistrarAdapter{service: checkoutService},
@@ -922,7 +922,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,
 		MoneyService:                 moneyService,
-		ProcessorCustomerService:     processorCustomerService,
+		RailCustomerService:          railCustomerService,
 	}
 }
 

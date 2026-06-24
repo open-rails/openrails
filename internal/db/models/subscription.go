@@ -55,17 +55,17 @@ type Subscription struct {
 	CurrentPeriodStartsAt *time.Time         `json:"current_period_starts_at"`
 	CurrentPeriodEndsAt   *time.Time         `json:"current_period_ends_at"`
 
-	// Payment processor information
-	Processor               Processor  `json:"processor"`                 // Processor: mobius, ccbill, solana
-	ProcessorSubscriptionID string     `json:"processor_subscription_id"` // Subscription ID from processor
-	UserEmail               *string    `json:"user_email,omitempty"`
-	PaymentMethodID         *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
+	// Payment rail information
+	Rail               Rail       `json:"rail"`                 // Rail: mobius, ccbill, solana
+	RailSubscriptionID string     `json:"rail_subscription_id"` // Subscription ID from rail
+	UserEmail          *string    `json:"user_email,omitempty"`
+	PaymentMethodID    *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
 
 	// Manual rebill attempt fields for NMI
 	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt
 	RetryAttempts *int       `json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
 	NextRetryAt   *time.Time `json:"next_retry_at"`  // When to try next rebill
-	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (processor-specific)
+	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (rail-specific)
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
@@ -73,9 +73,9 @@ type Subscription struct {
 	CancelledAt    *time.Time  `json:"cancelled_at"`
 
 	// DeletionScheduledAt is set for NMI-backed cancellations that defer the
-	// processor-side delete_subscription until shortly before the paid period
+	// rail-side delete_subscription until shortly before the paid period
 	// ends (issue 216). While non-nil, the cancellation is still reversible (the
-	// processor subscription is alive). The River finalizer clears it to nil
+	// rail subscription is alive). The River finalizer clears it to nil
 	// after calling DeleteRecurringSubscription.
 	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 

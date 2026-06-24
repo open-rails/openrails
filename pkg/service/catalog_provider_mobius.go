@@ -25,7 +25,7 @@ import (
 //     does not yet exist is CREATED from the price's terms (+ optional provider override).
 //   - AutoCreate: content-addressed plan_id `<slug>-<cur>-<amt>-<cycle>`; find-or-attach
 //     against NMI, falling back to creating the plan. Requires
-//     billing_cycle_days (NMI requires a frequency). When no NMI processor is
+//     billing_cycle_days (NMI requires a frequency). When no NMI rail is
 //     configured, falls back to errPendingManualLink so the operator can link
 //     a control-center plan manually.
 //   - Update: propagates display_name via EditRecurringPlan; rejects financial
@@ -58,12 +58,12 @@ func (a *mobiusAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 
 func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
-	planID := strings.TrimSpace(link[models.ProcessorKeyPlanID])
+	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
 		return nil, fmt.Errorf("mobius link requires provider_links.mobius.plan_id")
 	}
 	provider := "mobius"
-	if override := strings.TrimSpace(link[models.ProcessorKeyProvider]); override != "" {
+	if override := strings.TrimSpace(link[models.RailKeyProvider]); override != "" {
 		provider = strings.ToLower(override)
 	}
 
@@ -72,7 +72,7 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 	//   - exists: verify it matches the catalog price's immutable money terms
 	//     (amount + day-based cycle); a mismatch is a loud error.
 	//   - missing: create the plan at the supplied id from the price's terms.
-	// When no NMI processor is configured there is no API to verify/create
+	// When no NMI rail is configured there is no API to verify/create
 	// against, so the link is stored as-is (operator-owned).
 	if client, ok := a.nmiClient(provider); ok && client != nil {
 		detail, err := client.GetRecurringPlanDetailByID(planID)
@@ -99,8 +99,8 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 	}
 
 	return map[string]string{
-		models.ProcessorKeyPlanID:   planID,
-		models.ProcessorKeyProvider: provider,
+		models.RailKeyPlanID:   planID,
+		models.RailKeyProvider: provider,
 	}, nil
 }
 
@@ -144,7 +144,7 @@ func mobiusDeterministicPlanID(productSlug, currency string, unitAmount int64, b
 }
 
 // nmiClient resolves the NMI client backing the given provider name (defaulting
-// to "mobius"). Returns (nil, false) when no NMI processor is configured.
+// to "mobius"). Returns (nil, false) when no NMI rail is configured.
 func (a *mobiusAdapter) nmiClient(provider string) (*nmi.NMIClient, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.NMIClients == nil {
 		return nil, false
@@ -158,12 +158,12 @@ func (a *mobiusAdapter) nmiClient(provider string) (*nmi.NMIClient, bool) {
 }
 
 // AutoCreate creates (or attaches to) the NMI Recurring Plan for a price under a
-// deterministic plan_id. When no NMI processor is configured it returns
+// deterministic plan_id. When no NMI rail is configured it returns
 // errPendingManualLink so the dispatcher converts the slot to a manual link.
 func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
 	client, ok := a.nmiClient("mobius")
 	if !ok || client == nil {
-		// No NMI processor configured: defer to manual link.
+		// No NMI rail configured: defer to manual link.
 		return nil, errPendingManualLink
 	}
 	// NMI recurring plans require a fixed billing frequency.
@@ -185,22 +185,22 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 	}
 
 	return map[string]string{
-		models.ProcessorKeyPlanID:   planID,
-		models.ProcessorKeyProvider: "mobius",
+		models.RailKeyPlanID:   planID,
+		models.RailKeyProvider: "mobius",
 	}, nil
 }
 
 // Verify performs a live retrieve of the NMI plan and computes plan_name drift.
 func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
-	provider := strings.TrimSpace(ids[models.ProcessorKeyProvider])
+	provider := strings.TrimSpace(ids[models.RailKeyProvider])
 	client, ok := a.nmiClient(provider)
 	if !ok || client == nil {
 		// No read API available (NMI not configured): signal sync_disabled.
 		return nil, false, nil
 	}
-	planID := strings.TrimSpace(ids[models.ProcessorKeyPlanID])
+	planID := strings.TrimSpace(ids[models.RailKeyPlanID])
 	if planID == "" {
-		return nil, false, fmt.Errorf("mobius plan_id missing on local processors map")
+		return nil, false, fmt.Errorf("mobius plan_id missing on local rails map")
 	}
 	found, _, remoteAmountCents, err := client.GetRecurringPlanByID(planID)
 	if err != nil {

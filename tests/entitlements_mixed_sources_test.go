@@ -66,18 +66,18 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
 	suite.InsertSubscription(ctx, &models.Subscription{
-		ID:                      subID,
-		CustomerID:              suite.ensureCustomer(ctx, userID),
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: "sub_" + uuid.New().String()[:8],
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               clock.Now().UTC(),
-		CreatedAt:               clock.Now().UTC(),
-		UpdatedAt:               clock.Now().UTC(),
+		ID:                    subID,
+		CustomerID:            suite.ensureCustomer(ctx, userID),
+		ProductID:             productID,
+		PriceID:               priceID,
+		Status:                models.StatusActive,
+		Rail:                  models.RailMobius,
+		RailSubscriptionID:    "sub_" + uuid.New().String()[:8],
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             clock.Now().UTC(),
+		CreatedAt:             clock.Now().UTC(),
+		UpdatedAt:             clock.Now().UTC(),
 	})
 
 	// Subscription grants both entitlements for 30 days.
@@ -99,7 +99,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:      userID,
 		PriceID:     priceID,
-		Processor:   models.ProcessorMobius,
+		Rail:        models.RailMobius,
 		Amount:      111,
 		Currency:    "usd",
 		PurchasedAt: clock.Now().UTC(),

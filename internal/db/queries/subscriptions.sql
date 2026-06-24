@@ -5,8 +5,8 @@
 INSERT INTO openrails.subscriptions (
     id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
-    ended_at, current_period_starts_at, current_period_ends_at, processor,
-    processor_subscription_id, user_email, payment_method_id, last_retry_at,
+    ended_at, current_period_starts_at, current_period_ends_at, rail,
+    rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at
@@ -16,7 +16,7 @@ INSERT INTO openrails.subscriptions (
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::openrails.subscription_status,
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
-    sqlc.arg(processor), sqlc.arg(processor_subscription_id),
+    sqlc.arg(rail), sqlc.arg(rail_subscription_id),
     sqlc.narg(user_email), sqlc.narg(payment_method_id), sqlc.narg(last_retry_at),
     sqlc.narg(retry_attempts), sqlc.narg(next_retry_at), sqlc.narg(grace_ends_at),
     sqlc.narg(cancel_feedback), sqlc.narg(cancel_type), sqlc.narg(cancelled_at),
@@ -38,8 +38,8 @@ UPDATE openrails.subscriptions SET
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
     current_period_ends_at = sqlc.narg(current_period_ends_at),
-    processor = sqlc.arg(processor),
-    processor_subscription_id = sqlc.arg(processor_subscription_id),
+    rail = sqlc.arg(rail),
+    rail_subscription_id = sqlc.arg(rail_subscription_id),
     user_email = sqlc.narg(user_email),
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
@@ -92,14 +92,14 @@ WHERE sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
--- name: GetSubscriptionByProcessorSubID :one
+-- name: GetSubscriptionByRailSubID :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.processor = $1 AND sub.processor_subscription_id = $2
+WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
 LIMIT 1;
 
--- name: GetSubscriptionByProcessorMetadataValue :one
+-- name: GetSubscriptionByRailMetadataValue :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.processor = $1
+WHERE sub.rail = $1
   AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
 LIMIT 1;
 
@@ -108,14 +108,14 @@ SELECT * FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.status = 'active'
 ORDER BY sub.created_at DESC;
 
--- name: ListSubscriptionsByCustomerProcessor :many
+-- name: ListSubscriptionsByCustomerRail :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.customer_id = $1 AND sub.processor = $2
+WHERE sub.customer_id = $1 AND sub.rail = $2
 ORDER BY sub.created_at DESC;
 
--- name: ListActiveSubscriptionsByProcessor :many
+-- name: ListActiveSubscriptionsByRail :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.processor = $1 AND sub.status = 'active';
+WHERE sub.rail = $1 AND sub.status = 'active';
 
 -- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
@@ -132,7 +132,7 @@ SELECT count(*) FROM openrails.subscriptions sub
 WHERE (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
-  AND (sqlc.narg(processor)::text IS NULL OR sub.processor = sqlc.narg(processor)::text)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
   AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
   AND (sqlc.narg(cancelled_after)::timestamptz IS NULL OR sub.cancelled_at >= sqlc.narg(cancelled_after)::timestamptz)
@@ -144,7 +144,7 @@ SELECT * FROM openrails.subscriptions sub
 WHERE (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
-  AND (sqlc.narg(processor)::text IS NULL OR sub.processor = sqlc.narg(processor)::text)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
   AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
   AND (sqlc.narg(cancelled_after)::timestamptz IS NULL OR sub.cancelled_at >= sqlc.narg(cancelled_after)::timestamptz)
@@ -189,7 +189,7 @@ WHERE customer_id = $1
 -- name: ListDueDunningSubscriptions :many
 -- Dunning: past_due NMI-backed subscriptions whose next retry is due.
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
+WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz;
 
@@ -206,7 +206,7 @@ WHERE id = $1
 
 -- name: ListPendingDeletionScheduledSubscriptions :many
 -- Boot rescan (#344 follow-up): cancelled subscriptions still carrying the
--- deletion_scheduled_at marker — their deferred processor-side delete never
+-- deletion_scheduled_at marker — their deferred rail-side delete never
 -- finalized (the deletion kill switch skipped it, or the job was lost). The
 -- worker-startup rescan re-enqueues these via the deferred-delete scheduler.
 SELECT * FROM openrails.subscriptions sub
@@ -215,7 +215,7 @@ WHERE sub.status = 'cancelled'
 
 -- name: ListSilentLapsedSubscriptions :many
 -- Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
--- subscriptions on provider-truth-probeable processors whose period lapsed
+-- subscriptions on provider-truth-probeable rails whose period lapsed
 -- past the probe slack, or whose imported period evidence is missing, with NO
 -- signal either way: no renewal (the period would have advanced), no failure
 -- webhook (status would be past_due — that cohort is dunning's, excluded here),
@@ -223,7 +223,7 @@ WHERE sub.status = 'cancelled'
 -- Re-derived every pass, so an unreachable provider needs no durable read-queue:
 -- unchanged state simply reappears next cycle.
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
+WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
   AND sub.status = 'active'
   AND (
     sub.current_period_ends_at IS NULL

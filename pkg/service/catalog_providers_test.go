@@ -26,13 +26,13 @@ func newUnconfiguredService() *Service {
 func TestCCBillAdapter_Attach(t *testing.T) {
 	a := &ccbillAdapter{}
 	ids, err := a.Attach(context.Background(), map[string]string{
-		models.ProcessorKeyCCBillFormName: "premium",
-		models.ProcessorKeyCCBillFlexID:   "abc-123",
+		models.RailKeyCCBillFormName: "premium",
+		models.RailKeyCCBillFlexID:   "abc-123",
 	}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if ids[models.ProcessorKeyCCBillFormName] != "premium" || ids[models.ProcessorKeyCCBillFlexID] != "abc-123" {
+	if ids[models.RailKeyCCBillFormName] != "premium" || ids[models.RailKeyCCBillFlexID] != "abc-123" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 
@@ -55,11 +55,11 @@ func TestCCBillAdapter_AutoCreatePending(t *testing.T) {
 
 func TestMobiusAdapter_Attach(t *testing.T) {
 	a := &mobiusAdapter{}
-	ids, err := a.Attach(context.Background(), map[string]string{models.ProcessorKeyPlanID: "premium_monthly"}, autoCreateContext{})
+	ids, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium_monthly"}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if ids[models.ProcessorKeyPlanID] != "premium_monthly" || ids[models.ProcessorKeyProvider] != "mobius" {
+	if ids[models.RailKeyPlanID] != "premium_monthly" || ids[models.RailKeyProvider] != "mobius" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
@@ -88,13 +88,13 @@ func TestStripeAdapter_AttachRequiresPriceID(t *testing.T) {
 		t.Fatal("expected error when price_id missing")
 	}
 	ids, err := a.Attach(context.Background(), map[string]string{
-		models.ProcessorKeyStripePriceID:   "price_xxx",
-		models.ProcessorKeyStripeProductID: "prod_yyy",
+		models.RailKeyStripePriceID:   "price_xxx",
+		models.RailKeyStripeProductID: "prod_yyy",
 	}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if ids[models.ProcessorKeyStripePriceID] != "price_xxx" || ids[models.ProcessorKeyStripeProductID] != "prod_yyy" {
+	if ids[models.RailKeyStripePriceID] != "price_xxx" || ids[models.RailKeyStripeProductID] != "prod_yyy" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 }
@@ -119,12 +119,12 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 		Currency:   "usd",
 		Providers:  []string{"stripe", "ccbill", "mobius"},
 		ProviderLinks: map[string]map[string]string{
-			"stripe": {models.ProcessorKeyStripePriceID: "price_xxx"},
+			"stripe": {models.RailKeyStripePriceID: "price_xxx"},
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 			"mobius": {"plan_id": "premium_monthly"},
 		},
 	}
-	processors, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
+	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -135,8 +135,8 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 		if states[name].Status != ProviderStatusLinked {
 			t.Errorf("%s: expected linked, got %s", name, states[name].Status)
 		}
-		if len(processors[name]) == 0 {
-			t.Errorf("%s: expected processors entry", name)
+		if len(rails[name]) == 0 {
+			t.Errorf("%s: expected rails entry", name)
 		}
 	}
 }
@@ -155,7 +155,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 			// mobius intentionally has no link -> pending
 		},
 	}
-	processors, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
+	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -165,8 +165,8 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	if states["mobius"].Status != ProviderStatusPendingManualLink {
 		t.Errorf("mobius: expected pending_manual_link, got %s", states["mobius"].Status)
 	}
-	if _, ok := processors["mobius"]; ok {
-		t.Error("mobius should not have a processors entry while pending")
+	if _, ok := rails["mobius"]; ok {
+		t.Error("mobius should not have a rails entry while pending")
 	}
 	if len(pending) != 1 || pending[0].Provider != "mobius" {
 		t.Fatalf("expected one mobius pending action, got %v", pending)
@@ -203,12 +203,12 @@ func TestResolveProviders_UnknownProviderDropped(t *testing.T) {
 		Currency:   "usd",
 		Providers:  []string{"paypal"}, // not in dispatch table
 	}
-	processors, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
+	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if len(processors) != 0 || len(states) != 0 || len(pending) != 0 {
-		t.Fatalf("expected unknown provider to be dropped, got processors=%v states=%v pending=%v", processors, states, pending)
+	if len(rails) != 0 || len(states) != 0 || len(pending) != 0 {
+		t.Fatalf("expected unknown provider to be dropped, got rails=%v states=%v pending=%v", rails, states, pending)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeLimited}}}
 	priceID := uuid.New()
-	processors, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Slug: "premium"}, CreatePriceRequest{
+	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Slug: "premium"}, CreatePriceRequest{
 		Providers:  []string{"stripe", "mobius"},
 		UnitAmount: 2300,
 		Currency:   "usd",
@@ -251,8 +251,8 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if len(processors) != 0 {
-		t.Fatalf("no provider objects may be linked in limited mode, got %v", processors)
+	if len(rails) != 0 {
+		t.Fatalf("no provider objects may be linked in limited mode, got %v", rails)
 	}
 	for _, name := range []string{"stripe", "mobius"} {
 		st, ok := states[name]
@@ -287,7 +287,7 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 
 	a := newMobiusAdapterWithServer(t, server.URL)
 	cycle := 30
-	_, err := a.Attach(context.Background(), map[string]string{models.ProcessorKeyPlanID: "premium-usd-2300-30"}, autoCreateContext{
+	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-2300-30"}, autoCreateContext{
 		ProductSlug: "premium", UnitAmount: 2300, Currency: "usd", BillingCycleDays: &cycle,
 		RemoteWritesDisabled: true,
 	})

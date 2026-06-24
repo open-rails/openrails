@@ -66,7 +66,7 @@ type Config struct {
 	Mode string `koanf:"mode,omitempty"`
 
 	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode. When
-	// true, every processor routes to its sandbox environment AND the
+	// true, every rail routes to its sandbox environment AND the
 	// credential guarantees attach: a live Stripe key (sk_live_/rk_live_)
 	// refuses to boot, configured NMI accounts are probed at boot (a decline
 	// of the non-issued test card proves production credentials and refuses
@@ -106,7 +106,7 @@ type Config struct {
 
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
 // master key wraps each merchant's Data Encryption Key (envelope encryption); the
-// DEK encrypts sensitive at-rest field values (e.g. per-merchant processor
+// DEK encrypts sensitive at-rest field values (e.g. per-merchant rail
 // credentials in openrails.merchant_secrets).
 //
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
@@ -291,27 +291,27 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// ProcessorType constants for the unified processor config
+// RailType constants for the unified rail config
 const (
-	ProcessorTypeNMI    = "nmi"
-	ProcessorTypeCCBill = "ccbill"
-	ProcessorTypeStripe = "stripe"
-	ProcessorTypeSolana = "solana"
+	RailTypeNMI    = "nmi"
+	RailTypeCCBill = "ccbill"
+	RailTypeStripe = "stripe"
+	RailTypeSolana = "solana"
 
-	ProcessorRolePrimary   = "primary"
-	ProcessorRoleSecondary = "secondary"
-	ProcessorRoleLegacy    = "legacy"
+	RailRolePrimary   = "primary"
+	RailRoleSecondary = "secondary"
+	RailRoleLegacy    = "legacy"
 )
 
-// ReservedProcessorNames maps processor names that imply their type.
+// ReservedRailNames maps rail names that imply their type.
 // These names don't require an explicit "type" field in config.
-var ReservedProcessorNames = map[string]string{
-	"ccbill": ProcessorTypeCCBill,
-	"stripe": ProcessorTypeStripe,
-	"solana": ProcessorTypeSolana,
+var ReservedRailNames = map[string]string{
+	"ccbill": RailTypeCCBill,
+	"stripe": RailTypeStripe,
+	"solana": RailTypeSolana,
 }
 
-// ProcessorConfig is the unified configuration for all payment processors.
+// RailConfig is the unified configuration for all payment rails.
 // The Type field determines which fields are relevant:
 //   - type: nmi     → NMI fields (security_key, webhook_secret, etc.)
 //   - type: ccbill  → CCBill fields (client_acc_num, client_sub_acc, salt, etc.)
@@ -320,9 +320,9 @@ var ReservedProcessorNames = map[string]string{
 //
 // Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
 // Non-reserved names (e.g., "acme") require type: nmi.
-type ProcessorConfig struct {
-	// Type specifies the processor type: "nmi", "ccbill", "stripe", "solana"
-	// Required for non-reserved processor names.
+type RailConfig struct {
+	// Type specifies the rail type: "nmi", "ccbill", "stripe", "solana"
+	// Required for non-reserved rail names.
 	// For reserved names (ccbill, stripe, solana), type is inferred from the name.
 	Type string `koanf:"type"`
 	// Role selects routine routing for this configured credential set. Empty is
@@ -384,20 +384,20 @@ type ProcessorConfig struct {
 	PrivateKey string `koanf:"private_key"`
 }
 
-// ProcessorSet is an in-memory set of payment-provider credential entries. It
+// RailSet is an in-memory set of payment-provider credential entries. It
 // is not part of config.yaml/.env; private standalone installs seed provider
 // credentials through merchant bootstrap/Vault state, and embedded hosts may
 // pass a set programmatically during construction.
-type ProcessorSet map[string]*ProcessorConfig
+type RailSet map[string]*RailConfig
 
-// GetEffectiveType returns the processor type, inferring from reserved names if needed.
-func (p *ProcessorConfig) GetEffectiveType(name string) string {
+// GetEffectiveType returns the rail type, inferring from reserved names if needed.
+func (p *RailConfig) GetEffectiveType(name string) string {
 	if p.Type != "" {
 		return strings.ToLower(p.Type)
 	}
 	// Check if it's a reserved name
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if impliedType, ok := ReservedProcessorNames[normalizedName]; ok {
+	if impliedType, ok := ReservedRailNames[normalizedName]; ok {
 		return impliedType
 	}
 	return ""
@@ -405,40 +405,40 @@ func (p *ProcessorConfig) GetEffectiveType(name string) string {
 
 // EffectiveRole returns primary when role is omitted, preserving the existing
 // one-config-per-provider behavior.
-func (p *ProcessorConfig) EffectiveRole() string {
+func (p *RailConfig) EffectiveRole() string {
 	if p == nil {
 		return ""
 	}
 	role := strings.ToLower(strings.TrimSpace(p.Role))
 	if role == "" {
-		return ProcessorRolePrimary
+		return RailRolePrimary
 	}
 	return role
 }
 
-// IsNMI returns true if this processor config is for an NMI-backed processor.
-func (p *ProcessorConfig) IsNMI(name string) bool {
-	return p.GetEffectiveType(name) == ProcessorTypeNMI
+// IsNMI returns true if this rail config is for an NMI-backed rail.
+func (p *RailConfig) IsNMI(name string) bool {
+	return p.GetEffectiveType(name) == RailTypeNMI
 }
 
-// IsCCBill returns true if this processor config is for CCBill.
-func (p *ProcessorConfig) IsCCBill(name string) bool {
-	return p.GetEffectiveType(name) == ProcessorTypeCCBill
+// IsCCBill returns true if this rail config is for CCBill.
+func (p *RailConfig) IsCCBill(name string) bool {
+	return p.GetEffectiveType(name) == RailTypeCCBill
 }
 
-// IsStripe returns true if this processor config is for Stripe.
-func (p *ProcessorConfig) IsStripe(name string) bool {
-	return p.GetEffectiveType(name) == ProcessorTypeStripe
+// IsStripe returns true if this rail config is for Stripe.
+func (p *RailConfig) IsStripe(name string) bool {
+	return p.GetEffectiveType(name) == RailTypeStripe
 }
 
-// IsSolana returns true if this processor config is for Solana.
-func (p *ProcessorConfig) IsSolana(name string) bool {
-	return p.GetEffectiveType(name) == ProcessorTypeSolana
+// IsSolana returns true if this rail config is for Solana.
+func (p *RailConfig) IsSolana(name string) bool {
+	return p.GetEffectiveType(name) == RailTypeSolana
 }
 
-// ToNMIProviderSettings converts the processor config to NMI provider settings.
-// Only valid for NMI-type processors.
-func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
+// ToNMIProviderSettings converts the rail config to NMI provider settings.
+// Only valid for NMI-type rails.
+func (p *RailConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
 	return &NMIProviderSettings{
 		Name:            strings.ToLower(strings.TrimSpace(name)),
 		SecurityKey:     p.SecurityKey,
@@ -448,9 +448,9 @@ func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSetting
 	}
 }
 
-// ToCCBillConfig converts the processor config to CCBillConfig.
-// Only valid for CCBill-type processors.
-func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
+// ToCCBillConfig converts the rail config to CCBillConfig.
+// Only valid for CCBill-type rails.
+func (p *RailConfig) ToCCBillConfig() *CCBillConfig {
 	return &CCBillConfig{
 		Salt:             p.Salt,
 		ClientSubAcc:     p.ClientSubAcc,
@@ -687,7 +687,7 @@ func Validate(cfg *Config) error {
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
 		// Sandbox credentials are dev-only (#355): a production deployment
-		// must never boot pointed at sandbox processors.
+		// must never boot pointed at sandbox rails.
 		if cfg.TestMode {
 			return fmt.Errorf("test_mode=true is not allowed outside development")
 		}
@@ -768,26 +768,26 @@ func validateEncryption(cfg *EncryptionConfig) error {
 // test_mode axis. If there's a mismatch, it logs a warning and clears the key to
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
-func ValidateProcessorSet(cfg *Config, processors ProcessorSet) error {
-	if len(processors) == 0 {
+func ValidateRailSet(cfg *Config, rails RailSet) error {
+	if len(rails) == 0 {
 		return nil
 	}
 	isDev := true
 	if cfg != nil {
 		isDev = cfg.IsDev()
 	}
-	if err := validateProcessors(cfg, processors, isDev); err != nil {
-		return fmt.Errorf("processors validation failed: %w", err)
+	if err := validateRails(cfg, rails, isDev); err != nil {
+		return fmt.Errorf("rails validation failed: %w", err)
 	}
-	return validateStripeKeyForTestMode(cfg, processors)
+	return validateStripeKeyForTestMode(cfg, rails)
 }
 
-func validateStripeKeyForTestMode(cfg *Config, processors ProcessorSet) error {
+func validateStripeKeyForTestMode(cfg *Config, rails RailSet) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
-	for name, stripeProc := range processors {
-		if stripeProc == nil || stripeProc.GetEffectiveType(name) != ProcessorTypeStripe {
+	for name, stripeProc := range rails {
+		if stripeProc == nil || stripeProc.GetEffectiveType(name) != RailTypeStripe {
 			continue
 		}
 
@@ -805,10 +805,10 @@ func validateStripeKeyForTestMode(cfg *Config, processors ProcessorSet) error {
 			// Hard guarantee (#347): the sandbox environment must never hold a live
 			// key — a mistakenly-test-modeed production system would otherwise carry
 			// a credential that can move real money.
-			return fmt.Errorf("stripe processor %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
+			return fmt.Errorf("stripe rail %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
 		}
 		if !cfg.IsTestMode() && isTestKey {
-			log.Warnf("⚠️  Stripe test key provided for processor %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
+			log.Warnf("⚠️  Stripe test key provided for rail %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
 			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=true for sandbox testing")
 			stripeProc.SecretKey = ""
 		}
@@ -816,124 +816,124 @@ func validateStripeKeyForTestMode(cfg *Config, processors ProcessorSet) error {
 	return nil
 }
 
-// validateProcessors validates all processors in the new Processors map
-func validateProcessors(cfg *Config, processors ProcessorSet, isDev bool) error {
+// validateRails validates all rails in the new Rails map
+func validateRails(cfg *Config, rails RailSet, isDev bool) error {
 	primaryByType := map[string]string{}
-	for name, proc := range processors {
+	for name, proc := range rails {
 		if proc == nil {
 			continue
 		}
 		switch role := proc.EffectiveRole(); role {
-		case ProcessorRolePrimary, ProcessorRoleSecondary, ProcessorRoleLegacy:
+		case RailRolePrimary, RailRoleSecondary, RailRoleLegacy:
 		default:
-			return fmt.Errorf("processor '%s' has unknown role '%s'", name, proc.Role)
+			return fmt.Errorf("rail '%s' has unknown role '%s'", name, proc.Role)
 		}
 
 		effectiveType := proc.GetEffectiveType(name)
-		if proc.EffectiveRole() == ProcessorRolePrimary {
+		if proc.EffectiveRole() == RailRolePrimary {
 			if existing := primaryByType[effectiveType]; existing != "" {
-				return fmt.Errorf("multiple primary processors configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
+				return fmt.Errorf("multiple primary rails configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
 			}
 			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
 		}
 		switch effectiveType {
-		case ProcessorTypeNMI:
-			if err := validateNMIProcessor(name, proc, isDev); err != nil {
+		case RailTypeNMI:
+			if err := validateNMIRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case ProcessorTypeCCBill:
-			if err := validateCCBillProcessor(name, proc, isDev); err != nil {
+		case RailTypeCCBill:
+			if err := validateCCBillRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case ProcessorTypeStripe:
-			if err := validateStripeProcessor(name, proc, isDev); err != nil {
+		case RailTypeStripe:
+			if err := validateStripeRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case ProcessorTypeSolana:
-			if err := validateSolanaProcessor(name, proc, isDev); err != nil {
+		case RailTypeSolana:
+			if err := validateSolanaRail(name, proc, isDev); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("processor '%s' has unknown type '%s'", name, effectiveType)
+			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
 		}
 	}
 	return nil
 }
 
-// validateNMIProcessor validates an NMI-type processor
-func validateNMIProcessor(name string, proc *ProcessorConfig, isDev bool) error {
+// validateNMIRail validates an NMI-type rail
+func validateNMIRail(name string, proc *RailConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
 
 	if strings.TrimSpace(proc.SecurityKey) == "" {
-		return fmt.Errorf("processor '%s' (nmi): security_key is required", name)
+		return fmt.Errorf("rail '%s' (nmi): security_key is required", name)
 	}
 
 	if strings.TrimSpace(proc.WebhookSecret) == "" {
-		return fmt.Errorf("processor '%s' (nmi): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
+		return fmt.Errorf("rail '%s' (nmi): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
 	}
 
 	return nil
 }
 
-// validateCCBillProcessor validates a CCBill-type processor
-func validateCCBillProcessor(name string, proc *ProcessorConfig, isDev bool) error {
+// validateCCBillRail validates a CCBill-type rail
+func validateCCBillRail(name string, proc *RailConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
 
 	if strings.TrimSpace(proc.ClientAccNum) == "" {
-		return fmt.Errorf("processor '%s' (ccbill): client_acc_num is required", name)
+		return fmt.Errorf("rail '%s' (ccbill): client_acc_num is required", name)
 	}
 
 	if strings.TrimSpace(proc.ClientSubAcc) == "" {
-		return fmt.Errorf("processor '%s' (ccbill): client_sub_acc is required", name)
+		return fmt.Errorf("rail '%s' (ccbill): client_sub_acc is required", name)
 	}
 
 	// DataLink credentials: either both or neither
 	hasUsername := strings.TrimSpace(proc.DataLinkUsername) != ""
 	hasPassword := strings.TrimSpace(proc.DataLinkPassword) != ""
 	if hasUsername != hasPassword {
-		return fmt.Errorf("processor '%s' (ccbill): both datalink_username and datalink_password must be provided when configuring DataLink", name)
+		return fmt.Errorf("rail '%s' (ccbill): both datalink_username and datalink_password must be provided when configuring DataLink", name)
 	}
 
 	return nil
 }
 
-// validateStripeProcessor validates a Stripe-type processor
-func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) error {
+// validateStripeRail validates a Stripe-type rail
+func validateStripeRail(name string, proc *RailConfig, isDev bool) error {
 	if strings.TrimSpace(proc.SecretKey) == "" {
-		log.Warnf("processor '%s' (stripe): secret_key not configured; checkout unavailable", name)
+		log.Warnf("rail '%s' (stripe): secret_key not configured; checkout unavailable", name)
 	}
 
 	if strings.TrimSpace(proc.WebhookSecret) == "" {
 		if !isDev {
-			return fmt.Errorf("processor '%s' (stripe): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
+			return fmt.Errorf("rail '%s' (stripe): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
 		}
-		log.Warnf("processor '%s' (stripe): webhook_secret not configured; signature verification disabled", name)
+		log.Warnf("rail '%s' (stripe): webhook_secret not configured; signature verification disabled", name)
 	}
 
 	return nil
 }
 
-// validateSolanaProcessor validates only config-loading concerns. Solana token
+// validateSolanaRail validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
-// applied at runtime by configureSolanaProcessor.
-func validateSolanaProcessor(name string, proc *ProcessorConfig, isDev bool) error {
+// applied at runtime by configureSolanaRail.
+func validateSolanaRail(name string, proc *RailConfig, isDev bool) error {
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		if !isDev {
-			return fmt.Errorf("processor '%s' (solana): recipient_wallet is required outside development (Solana payments cannot be processed without it)", name)
+			return fmt.Errorf("rail '%s' (solana): recipient_wallet is required outside development (Solana payments cannot be processed without it)", name)
 		}
-		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
+		log.Warnf("rail '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
 	}
 
 	return nil
 }
 
-// GetNMIProcessors returns all NMI-backed processor configs.
-func (set ProcessorSet) GetNMIProcessors() map[string]*ProcessorConfig {
-	result := make(map[string]*ProcessorConfig)
+// GetNMIRails returns all NMI-backed rail configs.
+func (set RailSet) GetNMIRails() map[string]*RailConfig {
+	result := make(map[string]*RailConfig)
 	if set == nil {
 		return result
 	}
@@ -947,9 +947,9 @@ func (set ProcessorSet) GetNMIProcessors() map[string]*ProcessorConfig {
 	return result
 }
 
-// ProcessorKeysByType returns configured processor names for the provider type,
+// RailKeysByType returns configured rail names for the provider type,
 // sorted for deterministic diagnostics and selection.
-func (set ProcessorSet) ProcessorKeysByType(providerType string) []string {
+func (set RailSet) RailKeysByType(providerType string) []string {
 	if set == nil {
 		return nil
 	}
@@ -968,49 +968,49 @@ func (set ProcessorSet) ProcessorKeysByType(providerType string) []string {
 	return keys
 }
 
-// PrimaryProcessorByType returns the configured primary credential set for a
+// PrimaryRailByType returns the configured primary credential set for a
 // provider type. Existing configs with one entry and no role keep working
 // because an empty role is primary. Multiple primaries are a configuration
 // error: OpenRails cannot guess where default new work should route.
-func (set ProcessorSet) PrimaryProcessorByType(providerType string) (string, *ProcessorConfig, error) {
-	keys := set.ProcessorKeysByType(providerType)
+func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, error) {
+	keys := set.RailKeysByType(providerType)
 	var (
 		primaryKey string
-		primary    *ProcessorConfig
+		primary    *RailConfig
 	)
 	for _, key := range keys {
 		proc := set[key]
-		if proc.EffectiveRole() != ProcessorRolePrimary {
+		if proc.EffectiveRole() != RailRolePrimary {
 			continue
 		}
 		if primary != nil {
-			return "", nil, fmt.Errorf("multiple primary processors configured for type %q: %q and %q", providerType, primaryKey, key)
+			return "", nil, fmt.Errorf("multiple primary rails configured for type %q: %q and %q", providerType, primaryKey, key)
 		}
 		primaryKey, primary = key, proc
 	}
 	return primaryKey, primary, nil
 }
 
-// GetCCBillProcessor returns the configured primary CCBill processor.
-func (set ProcessorSet) GetCCBillProcessor() *ProcessorConfig {
-	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeCCBill)
+// GetCCBillRail returns the configured primary CCBill rail.
+func (set RailSet) GetCCBillRail() *RailConfig {
+	_, proc, _ := set.PrimaryRailByType(RailTypeCCBill)
 	return proc
 }
 
-// GetStripeProcessor returns the configured primary Stripe processor.
-func (set ProcessorSet) GetStripeProcessor() *ProcessorConfig {
-	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeStripe)
+// GetStripeRail returns the configured primary Stripe rail.
+func (set RailSet) GetStripeRail() *RailConfig {
+	_, proc, _ := set.PrimaryRailByType(RailTypeStripe)
 	return proc
 }
 
-// GetSolanaProcessor returns the configured primary Solana processor.
-func (set ProcessorSet) GetSolanaProcessor() *ProcessorConfig {
-	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeSolana)
+// GetSolanaRail returns the configured primary Solana rail.
+func (set RailSet) GetSolanaRail() *RailConfig {
+	_, proc, _ := set.PrimaryRailByType(RailTypeSolana)
 	return proc
 }
 
-// GetProcessor returns a processor config by name.
-func (set ProcessorSet) GetProcessor(name string) *ProcessorConfig {
+// GetRail returns a rail config by name.
+func (set RailSet) GetRail(name string) *RailConfig {
 	if set == nil {
 		return nil
 	}
@@ -1021,19 +1021,19 @@ func (set ProcessorSet) GetProcessor(name string) *ProcessorConfig {
 	return nil
 }
 
-// GetProcessorType returns the type of a processor by name.
-// Returns empty string if processor not found.
-func (set ProcessorSet) GetProcessorType(name string) string {
-	proc := set.GetProcessor(name)
+// GetRailType returns the type of a rail by name.
+// Returns empty string if rail not found.
+func (set RailSet) GetRailType(name string) string {
+	proc := set.GetRail(name)
 	if proc == nil {
 		return ""
 	}
 	return proc.GetEffectiveType(name)
 }
 
-// IsNMIProcessor returns true if the named processor is NMI-backed.
-func (set ProcessorSet) IsNMIProcessor(name string) bool {
-	return set.GetProcessorType(name) == ProcessorTypeNMI
+// IsNMIRail returns true if the named rail is NMI-backed.
+func (set RailSet) IsNMIRail(name string) bool {
+	return set.GetRailType(name) == RailTypeNMI
 }
 
 // GetMode returns the normalized operating mode ("" when unset).
@@ -1049,7 +1049,7 @@ func (cfg *Config) GetMode() string {
 	return mode
 }
 
-// IsTestMode returns true if payment processors should use sandbox/test
+// IsTestMode returns true if payment rails should use sandbox/test
 // environments and the sandbox-credential guarantees apply (#355): Stripe
 // live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
 // Orthogonal to Mode (pure behavior). When unset, Load defaults it to sandbox
@@ -1168,8 +1168,8 @@ func GetDefaultBillingConfig() *Config {
 				RequestsPerMinute: 10, // Kept tight to deter card-testing/abuse
 			},
 			"webhook": &RateLimit{
-				// Per source IP. All webhooks from a processor share one bucket
-				// (fixed processor IPs), so this must absorb rebill runs / event
+				// Per source IP. All webhooks from a rail share one bucket
+				// (fixed rail IPs), so this must absorb rebill runs / event
 				// bursts without 429-ing legit payment events. Webhooks are already
 				// authenticated (signature + IP allowlist + body caps); this is a
 				// DoS floor, not the primary control.
@@ -1295,7 +1295,7 @@ func Load(configPath string) (*Config, error) {
 
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
 		upperKey := strings.ToUpper(key)
-		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "PROCESSORS_") || strings.HasPrefix(upperKey, "STORE_") {
+		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
 
@@ -1347,7 +1347,7 @@ func Load(configPath string) (*Config, error) {
 	ignoredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
 	ignoredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
 		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
-	ignoredProcessors := k.Exists("processors") || hasEnvPrefix("PROCESSORS_")
+	ignoredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
 	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
 		k.Exists("auth.control_plane.issued_audiences") ||
 		k.Exists("auth.control_plane.expected_audiences") ||
@@ -1382,8 +1382,8 @@ func Load(configPath string) (*Config, error) {
 	if ignoredAuthIssuers {
 		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app issuer inline under merchants[].issuer in the bootstrap manifest (registered as the merchant org owner)")
 	}
-	if ignoredProcessors {
-		log.Warn("ignoring retired processors config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")
+	if ignoredRails {
+		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")
 	}
 	if ignoredControlPlaneLegacy {
 		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")
@@ -1403,7 +1403,7 @@ func Load(configPath string) (*Config, error) {
 	// infrastructure-only config surface.
 	// Sandbox-by-default in development (#355): when test_mode is not explicitly
 	// provided, a dev-like boot defaults to sandbox credentials so a local run
-	// can never accidentally move real money against live processor credentials
+	// can never accidentally move real money against live rail credentials
 	// — the dangerous case is silent ("forgot to set it"), so the safe value is
 	// the one you get by omission. Outside development the default stays live
 	// (false), and an explicit test_mode=true is still rejected by Validate: prod

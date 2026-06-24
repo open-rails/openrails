@@ -185,7 +185,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams)
 	out := make([]RemoteSubscription, 0, len(pages))
 	for _, s := range pages {
 		sub := RemoteSubscription{
-			ProcessorSubscriptionID: strings.TrimSpace(s.SubscriptionID),
+			RailSubscriptionID: strings.TrimSpace(s.SubscriptionID),
 			// NMI declares no per-subscription status (see fetcher doc);
 			// RawStatus stays empty on purpose.
 			Status:     SubscriptionStatusUnknown,

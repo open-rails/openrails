@@ -41,7 +41,7 @@ func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
-		        (id, price_id, product_id, status, processor, processor_subscription_id,
+		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at, grace_ends_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, '{}'::jsonb, $8, $9)`,

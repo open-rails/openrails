@@ -1,7 +1,7 @@
 # OpenRails API Reference
 
 OpenRails exposes public catalog routes, delegated browser/self-service APIs,
-delegated billing-admin APIs, processor webhooks, and an API-key server-to-server
+delegated billing-admin APIs, rail webhooks, and an API-key server-to-server
 surface on the same public port. All responses are JSON encoded. Unless
 otherwise stated, errors follow the
 Stripe-style envelope:
@@ -111,9 +111,9 @@ Returns the currently supported Solana tokens and live pricing:
 ```
 
 ### POST /v1/webhooks/{provider}
-Receives processor webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed processor such as `mobius`.
+Receives rail webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed rail such as `mobius`.
 - `ccbill`: form-encoded payload, verified via source IP ranges (unless test mode).
-- NMI-backed processors (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
+- NMI-backed rails (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
   `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
 - `stripe`: JSON body with `Stripe-Signature` header (if configured).
 Returns 200 with `{ status: "accepted" }` on success, 401/403 for auth failures, 400 for unknown provider.
@@ -136,7 +136,7 @@ Creates a checkout session for **new** subscriptions and one-off purchases.
   - `price_id` (required)
   - `mode` (optional) – `one_off` or `subscription`; if omitted, resolved from the price
   - `payment` (required):
-    - `processor` (required) – `mobius`, `ccbill`, `solana`, or `stripe`
+    - `rail` (required) – `mobius`, `ccbill`, `solana`, or `stripe`
     - `payment_method_id` or `payment_token` for `mobius`/`stripe`
     - `token_symbol` for `solana`
     - `flow` for `solana` – `transfer_request` (default) or `transaction_request`
@@ -152,7 +152,7 @@ belongs to another user.
 
 ### POST /v1/checkout/{id}/confirm
 Confirms a Solana checkout session.
-- Body: `{ payment: { processor: "solana", signature: "...", wallet?: "..." } }`
+- Body: `{ payment: { rail: "solana", signature: "...", wallet?: "..." } }`
 - Response: `CheckoutSessionResponse`
 - Errors: 400 validation, 403 forbidden, 404 not found, 409 conflict, 410 expired
 
@@ -202,7 +202,7 @@ Queues a resume for a cancelled Stripe subscription. Returns `202 { "status": "q
 Returns 400 if the subscription is not cancelled or not a Stripe subscription.
 
 ### POST /v1/me/subscriptions/{id}/change-tier
-Unified tier change endpoint for upgrades and downgrades across all processors.
+Unified tier change endpoint for upgrades and downgrades across all rails.
 
 **Request:**
 - Body: `{ "price_id": "price_..." }`
@@ -217,7 +217,7 @@ Unified tier change endpoint for upgrades and downgrades across all processors.
   "action": "upgrade|downgrade",
   "price_id": "price_...",
   "url": "https://...",
-  "payment": { "processor": "stripe|mobius|ccbill" },
+  "payment": { "rail": "stripe|mobius|ccbill" },
   "subscription_id": "sub_...",
   "next_action": { "type": "redirect_to_url", "redirect_to_url": { "url": "..." } },
   "message": "...",
@@ -225,21 +225,21 @@ Unified tier change endpoint for upgrades and downgrades across all processors.
 }
 ```
 
-**Processor behavior:**
-| Processor | Upgrade | Downgrade |
+**Rail behavior:**
+| Rail | Upgrade | Downgrade |
 |-----------|---------|-----------|
 | Stripe | `succeeded` (immediate with proration) | `succeeded` + `delayed_start` (scheduled for period end) |
-| NMI-backed processors | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
+| NMI-backed rails | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
 | CCBill | `requires_action` + top-level `url` redirect to FlexForm | `blocked` + message |
 | Solana | HTTP 400 (not supported) | HTTP 400 (not supported) |
 
 **Notes:**
 - Target price must be in the same tier group as current subscription
-- For hosted processor actions, clients should redirect to top-level `url`
+- For hosted rail actions, clients should redirect to top-level `url`
 - For scheduled downgrades, the change takes effect at `delayed_start`
 
 ### GET /v1/me/payments
-Lists one-off payments. Query params: `type` (processor filter), `limit`, `offset`.
+Lists one-off payments. Query params: `type` (rail filter), `limit`, `offset`.
 Response: list of `PaymentRecord` entries (raw payment model with optional `price` and `subscription`).
 
 ### GET /v1/me/payment-methods
@@ -415,10 +415,10 @@ OpenRails does not seed products/prices/credit types in production. For checkout
 
 - `billing.products`: at least one active product.
 - `billing.prices`: at least one active price for that product.
-- Processor mappings on the price (`billing.prices.processors`) for any processor you intend to use:
-  - Stripe: `processors.stripe.price_id` (and optionally `processors.stripe.product_id`).
-  - NMI-backed processors: `processors.<provider>.plan_id` (for example `processors.mobius.plan_id`).
-  - CCBill: `processors.ccbill.form_name` + `processors.ccbill.flex_id`.
+- Rail mappings on the price (`billing.prices.rails`) for any rail you intend to use:
+  - Stripe: `rails.stripe.price_id` (and optionally `rails.stripe.product_id`).
+  - NMI-backed rails: `rails.<provider>.plan_id` (for example `rails.mobius.plan_id`).
+  - CCBill: `rails.ccbill.form_name` + `rails.ccbill.flex_id`.
 - Any credit types referenced by `products.credits_spec` must exist in `billing.credit_types`.
 
 ### POST /v1/merchant/catalog/products
@@ -455,19 +455,19 @@ Host policy defaults (current behavior):
 Update product definition fields (display_name, description, entitlements_spec, credits_spec, tier_group/tier_rank, is_active).
 
 ### POST /v1/merchant/catalog/prices
-Create a price. Supports per-processor mapping mode: `{ processors: { stripe: { link: {...} } | { create: {...} }, ... } }`.
+Create a price. Supports per-rail mapping mode: `{ rails: { stripe: { link: {...} } | { create: {...} }, ... } }`.
 
-Processor mapping modes:
-- `link`: host provides existing processor identifiers and OpenRails stores them in `billing.prices.processors`.
+Rail mapping modes:
+- `link`: host provides existing rail identifiers and OpenRails stores them in `billing.prices.rails`.
 - `create`: OpenRails attempts to create remote objects and stores the returned IDs.
 
 Auto-create support:
 - Stripe: supported (`create`), using Stripe API.
-- NMI-backed processors: link-only (provide `plan_id`).
+- NMI-backed rails: link-only (provide `plan_id`).
 - CCBill: link-only (provide `form_name` + `flex_id`).
 
 ### PATCH /v1/merchant/catalog/prices/{id}
-Update price display name, processors mapping, or active status.
+Update price display name, rails mapping, or active status.
 
 ### Provider registration & content-addressed dedup
 
@@ -492,7 +492,7 @@ re-attaches to the existing provider objects rather than duplicating them.
 | Provider | Registration |
 |----------|--------------|
 | Stripe | **Auto-creates** products and prices on sync (and stamps the content keys above). |
-| NMI-backed processors | **Link-only** — the operator must supply the existing NMI `plan_id` in the catalog. Not auto-created. |
+| NMI-backed rails | **Link-only** — the operator must supply the existing NMI `plan_id` in the catalog. Not auto-created. |
 | CCBill | **Link-only** — the operator must supply the CCBill `form_name` + `flex_id` (FlexForm) in the catalog. Not auto-created. |
 
 A link-only provider with no operator-supplied ids is recorded as
@@ -560,7 +560,7 @@ Lists merchant payments with filters. Requires `merchant:payments:read`.
 Returns one payment with refund history. Requires `merchant:payments:read`.
 
 ### POST /v1/merchant/payments/{id}/refunds
-Issues or records a refund through the underlying processor. `revoke_access`
+Issues or records a refund through the underlying rail. `revoke_access`
 must be explicit when the refund should also revoke one-off access granted by
 that payment. Requires `merchant:payments:refund`.
 
@@ -577,7 +577,7 @@ should also revoke subscription/grace entitlements immediately. Requires
 `merchant:subscriptions:update`.
 
 ### POST /v1/merchant/subscriptions/{id}/resume
-Resumes a canceling subscription where the processor supports it. Requires
+Resumes a canceling subscription where the rail supports it. Requires
 `merchant:subscriptions:update`.
 
 ### PUT /v1/merchant/subscriptions/{id}/payment-method
@@ -594,7 +594,7 @@ Returns merchant repair alerts. Requires `merchant:repair-alerts:read`.
 
 - **CCBill**: Must originate from the published IP ranges; the handler also validates `formName`/`flexId`
   against the price metadata.
-- **NMI-backed processors**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
+- **NMI-backed rails**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
   `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`. When test mode is enabled via config the signature
   check is bypassed.
 - **Stripe**: Uses the `Stripe-Signature` header with the configured webhook secret.

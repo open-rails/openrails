@@ -71,18 +71,18 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
 	suite.InsertSubscription(ctx, &models.Subscription{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               clock.Now().UTC(),
-		CreatedAt:               clock.Now().UTC(),
-		UpdatedAt:               clock.Now().UTC(),
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               priceID,
+		Status:                models.StatusActive,
+		Rail:                  models.RailCCBill,
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             clock.Now().UTC(),
+		CreatedAt:             clock.Now().UTC(),
+		UpdatedAt:             clock.Now().UTC(),
 	})
 
 	// Paid windows for both entitlements.
@@ -235,18 +235,18 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
 	suite.InsertSubscription(ctx, &models.Subscription{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
-		ProcessorSubscriptionID: ccbillSubID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &paidEnd,
-		StartedAt:               clock.Now().UTC(),
-		CreatedAt:               clock.Now().UTC(),
-		UpdatedAt:               clock.Now().UTC(),
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               priceID,
+		Status:                models.StatusActive,
+		Rail:                  models.RailCCBill,
+		RailSubscriptionID:    ccbillSubID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &paidEnd,
+		StartedAt:             clock.Now().UTC(),
+		CreatedAt:             clock.Now().UTC(),
+		UpdatedAt:             clock.Now().UTC(),
 	})
 
 	notBefore := periodStart.UTC()

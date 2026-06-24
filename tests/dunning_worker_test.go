@@ -63,7 +63,7 @@ func TestDunningWorkerSkipsWithoutNMIClients(t *testing.T) {
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: &pm.ID,
 		RetryAttempts:   &retryAttempts,
 		NextRetryAt:     &pastTime,
@@ -88,7 +88,7 @@ func TestDunningWorkerSkipsWithoutNMIClients(t *testing.T) {
 	assert.Equal(t, models.StatusPastDue, updatedSub.Status, "Subscription should still be past_due")
 }
 
-// TestDunningWorkerSkipsNonNMISubscriptions tests that the worker skips CCBill/other processor subscriptions
+// TestDunningWorkerSkipsNonNMISubscriptions tests that the worker skips CCBill/other rail subscriptions
 func TestDunningWorkerSkipsNonNMISubscriptions(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
@@ -106,7 +106,7 @@ func TestDunningWorkerSkipsNonNMISubscriptions(t *testing.T) {
 		UserID:        userID,
 		PriceID:       priceID,
 		Status:        models.StatusPastDue,
-		Processor:     models.ProcessorCCBill, // CCBill, not NMI
+		Rail:          models.RailCCBill, // CCBill, not NMI
 		RetryAttempts: &retryAttempts,
 		NextRetryAt:   &pastTime,
 	})
@@ -150,7 +150,7 @@ func TestDunningWorkerQueryFilters(t *testing.T) {
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: &pm.ID,
 		RetryAttempts:   &retryAttempts,
 		NextRetryAt:     &pastTime,
@@ -161,7 +161,7 @@ func TestDunningWorkerQueryFilters(t *testing.T) {
 		UserID:          uuid.New().String(),
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: &pm.ID,
 		RetryAttempts:   &retryAttempts,
 		NextRetryAt:     &futureTime,
@@ -172,16 +172,16 @@ func TestDunningWorkerQueryFilters(t *testing.T) {
 		UserID:          uuid.New().String(),
 		PriceID:         priceID,
 		Status:          models.StatusActive,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: &pm.ID,
 	})
 
 	// 4. cancelled subscription (should NOT be processed)
 	cancelledSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:    uuid.New().String(),
-		PriceID:   priceID,
-		Status:    models.StatusCancelled,
-		Processor: models.ProcessorMobius,
+		UserID:  uuid.New().String(),
+		PriceID: priceID,
+		Status:  models.StatusCancelled,
+		Rail:    models.RailMobius,
 	})
 
 	// Create worker (without NMI clients - won't actually try to rebill)
@@ -225,7 +225,7 @@ func TestDunningWorkerMissingPaymentMethod(t *testing.T) {
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: nil, // No payment method!
 		RetryAttempts:   &retryAttempts,
 		NextRetryAt:     &pastTime,
@@ -279,7 +279,7 @@ func TestDunningWorkerMissingPaymentMethodVault(t *testing.T) {
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Processor:       models.ProcessorMobius,
+		Rail:            models.RailMobius,
 		PaymentMethodID: &pm.ID,
 		RetryAttempts:   &retryAttempts,
 		NextRetryAt:     &pastTime,
@@ -328,7 +328,7 @@ func TestDunningWorkerMultipleDueSubscriptions(t *testing.T) {
 			UserID:          userID,
 			PriceID:         priceID,
 			Status:          models.StatusPastDue,
-			Processor:       models.ProcessorMobius,
+			Rail:            models.RailMobius,
 			PaymentMethodID: &pm.ID,
 			RetryAttempts:   &retryAttempts,
 			NextRetryAt:     &pastTime,
@@ -378,7 +378,7 @@ func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &pm.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -391,7 +391,7 @@ func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:         suite.App.Runtime.DB,
 		Config:     suite.App.Runtime.Config,
-		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailMobius): {}},
 	}
 
 	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
@@ -425,7 +425,7 @@ func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &pm.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -436,7 +436,7 @@ func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:         suite.App.Runtime.DB,
 		Config:     suite.App.Runtime.Config,
-		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailMobius): {}},
 	}
 
 	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
@@ -464,11 +464,11 @@ func queryManualRebillIntent(t *testing.T, suite *TestContainerSuite, subID uuid
 // TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites verifies the
 // #366 limited-mode contract (changed from the pre-#366 "takes no action" of
 // #345). Limited mode no longer dry-runs dunning — it MATERIALIZES decisions
-// locally while making ZERO provider/processor writes:
+// locally while making ZERO provider/rail writes:
 //
 //   - a window-EXPIRED past_due sub is cancelled locally + its entitlements are
 //     revoked, with NO provider write (no nmi_delete intent, no deferred-delete
-//     marker — the remote processor sub is left alive for reconciliation);
+//     marker — the remote rail sub is left alive for reconciliation);
 //   - an IN-WINDOW past_due sub records its charge decision as a PARKED
 //     system-origin manual_rebill intent on the ledger (the executor drains it
 //     only at mode=full), while the subscription row itself takes no action —
@@ -492,7 +492,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 		UserID:              expiredUser,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &expiredPM.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -525,7 +525,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 		UserID:              inWindowUser,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &inWindowPM.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -538,12 +538,12 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 
 	// A zero-value NMI client: present (so the scan proceeds) but unconfigured —
 	// any attempted provider call would error, proving the limited-mode path
-	// never reaches the processor. DeferDelete is intentionally nil: limited
+	// never reaches the rail. DeferDelete is intentionally nil: limited
 	// mode must not schedule a remote delete regardless.
 	worker := &riverjobs.DunningWorker{
 		DB:         rt.DB,
 		Config:     &limitedCfg,
-		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailMobius): {}},
 	}
 
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
@@ -612,9 +612,9 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		Currency:         "usd",
 		BillingCycleDays: &cycleDays,
 		MerchantID:       dbtest.TestMerchantID.UUID(),
-		Processors: map[string]map[string]string{
-			string(models.ProcessorMobius): {
-				models.ProcessorKeyPlanID: "plan_dunning_cycle",
+		Rails: map[string]map[string]string{
+			string(models.RailMobius): {
+				models.RailKeyPlanID: "plan_dunning_cycle",
 			},
 		},
 		CreatedAt: now,
@@ -642,7 +642,7 @@ func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 		UserID:              staleUser,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &stalePM.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -658,7 +658,7 @@ func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 		UserID:              freshUser,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &freshPM.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -671,7 +671,7 @@ func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:         suite.App.Runtime.DB,
 		Config:     suite.App.Runtime.Config,
-		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailMobius): {}},
 	}
 	require.NoError(t, worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
 
@@ -704,7 +704,7 @@ func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &pm.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -715,7 +715,7 @@ func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:         suite.App.Runtime.DB,
 		Config:     suite.App.Runtime.Config,
-		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailMobius): {}},
 	}
 	require.NoError(t, worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
 
@@ -746,7 +746,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &pm.ID,
 		PeriodStart:         periodEnd.Add(-24 * time.Hour),
 		CurrentPeriodEndsAt: &periodEnd,
@@ -754,7 +754,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 
 	reason := "rebill declined"
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))
@@ -784,7 +784,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.ProcessorMobius,
+		Rail:                models.RailMobius,
 		PaymentMethodID:     &pm.ID,
 		PeriodStart:         periodEnd.Add(-7 * 24 * time.Hour),
 		CurrentPeriodEndsAt: &periodEnd,
@@ -794,7 +794,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 
 	// First failure: past_due, next retry ~24h out (weekly offsets +1d/+2d).
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))
@@ -808,7 +808,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 
 	// Second failure: still past_due, next retry another 24h out.
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))
@@ -822,7 +822,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 
 	// Third failure: terminal (weekly tier allows 3 failures total).
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Processor:      models.ProcessorMobius,
+		Rail:           models.RailMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))

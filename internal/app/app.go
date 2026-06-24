@@ -82,7 +82,7 @@ type BootstrapOptions struct {
 	Cache                  cache.Cache
 	Clock                  clockwork.Clock
 	ConfiguredMerchant     merchant.ID
-	Processors             config.ProcessorSet
+	Rails                  config.RailSet
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -143,9 +143,9 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 			}
 			return nil
 		}(),
-		Processors: func() config.ProcessorSet {
+		Rails: func() config.RailSet {
 			if opts != nil {
-				return opts.Processors
+				return opts.Rails
 			}
 			return nil
 		}(),

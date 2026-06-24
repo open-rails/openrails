@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/funding"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -31,9 +31,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Per-processor webhook body caps. The primary memory-exhaustion fix is the
+// Per-rail webhook body caps. The primary memory-exhaustion fix is the
 // global 1 MiB BodyLimit now applying to webhook routes (the blanket exemption
-// was removed); these per-processor caps are tighter defense-in-depth. They are
+// was removed); these per-rail caps are tighter defense-in-depth. They are
 // sized with headroom above real payloads to avoid 413-ing legitimate webhooks:
 //   - CCBill background posts are form-encoded but carry many customer/transaction
 //     fields, so 16 KiB rather than a couple KiB.
@@ -89,17 +89,17 @@ func Webhook(r *httprequest.Request) {
 		return
 	}
 	isTestMode := r.State.Config.IsTestMode()
-	if processors.IsNMIBacked(provider) {
+	if rails.IsNMIBacked(provider) {
 		if enqueueNMIWebhook(r, provider, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
 	}
 	switch provider {
-	case subscriptions.ProcessorCCBill:
+	case subscriptions.RailCCBill:
 		if !isTestMode {
 			if !iputil.IsValidCCBillIP(clientIP) {
-				log.WithFields(log.Fields{"client_ip": clientIP, "processor": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
+				log.WithFields(log.Fields{"client_ip": clientIP, "rail": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
 				r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 				return
 			}
@@ -111,7 +111,7 @@ func Webhook(r *httprequest.Request) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
-	case subscriptions.ProcessorStripe:
+	case subscriptions.RailStripe:
 		if enqueueStripeWebhook(r, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -166,13 +166,13 @@ func HostWebhook(r *httprequest.Request) {
 }
 
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) {
-	if processors.IsNMIBacked(provider) {
+	if rails.IsNMIBacked(provider) {
 		if processMerchantNMIWebhook(r, provider, merchantID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
 	}
-	if provider == subscriptions.ProcessorCCBill {
+	if provider == subscriptions.RailCCBill {
 		clientIP := r.GetRemoteIP()
 		if r.State.Config != nil && !r.State.Config.IsTestMode() && !iputil.IsValidCCBillIP(clientIP) {
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
@@ -183,7 +183,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 		return
 	}
-	if provider != subscriptions.ProcessorStripe {
+	if provider != subscriptions.RailStripe {
 		r.ErrorJSON(http.StatusBadRequest, "Provider not supported on merchant webhook surface")
 		return
 	}
@@ -231,7 +231,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Processor:      subscriptions.ProcessorStripe,
+		Rail:           subscriptions.RailStripe,
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
@@ -290,7 +290,7 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Processor:      prepared.Provider,
+		Rail:           prepared.Provider,
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
@@ -336,7 +336,7 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Processor:      subscriptions.ProcessorCCBill,
+		Rail:           subscriptions.RailCCBill,
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
@@ -391,7 +391,7 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	}
 	var secrets []string
 	stripeSecretKey := ""
-	if stripeProc := r.State.Processors.GetStripeProcessor(); stripeProc != nil {
+	if stripeProc := r.State.Rails.GetStripeRail(); stripeProc != nil {
 		stripeSecretKey = strings.TrimSpace(stripeProc.SecretKey)
 		if s := strings.TrimSpace(stripeProc.WebhookSecret); s != "" {
 			secrets = append(secrets, s)
@@ -418,7 +418,7 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	}
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it into the classic {data:{object}} shape so the River
-	// processor only ever sees snapshot-style events.
+	// rail only ever sees snapshot-style events.
 	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), stripeSecretKey, prepared.Body); herr != nil {
 		log.WithError(herr).Error("failed to hydrate thin stripe event")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
@@ -438,7 +438,7 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Processor:      subscriptions.ProcessorStripe,
+		Rail:           subscriptions.RailStripe,
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
@@ -502,7 +502,7 @@ func applyCoinbaseUSDCFundingWebhook(r *httprequest.Request) bool {
 		r.APIError(api.InvalidIDError("usdc_funding_session"))
 		return false
 	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config, r.State.Processors)
+	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config, r.State.Rails)
 	if r.State.SolanaRPC != nil {
 		svc.WithSolanaBalanceReader(r.State.SolanaRPC)
 	}

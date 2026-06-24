@@ -26,10 +26,10 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 	if meta, err = toJSONB(s.Metadata); err != nil {
 		return nil, nil, nil, err
 	}
-	if fields, err = toJSONB(s.ProcessorFields); err != nil {
+	if fields, err = toJSONB(s.RailFields); err != nil {
 		return nil, nil, nil, err
 	}
-	if state, err = toJSONB(s.ProcessorState); err != nil {
+	if state, err = toJSONB(s.RailState); err != nil {
 		return nil, nil, nil, err
 	}
 	return meta, fields, state, nil
@@ -57,7 +57,7 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 		CustomerID:        session.CustomerID,
 		PriceID:           session.PriceID,
 		Mode:              string(session.Mode),
-		Processor:         string(session.Processor),
+		Rail:              string(session.Rail),
 		Status:            string(session.Status),
 		Amount:            session.Amount,
 		Currency:          currency,
@@ -67,8 +67,8 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 		PaymentID:         session.PaymentID,
 		SubscriptionID:    session.SubscriptionID,
 		Metadata:          meta,
-		ProcessorFields:   fields,
-		ProcessorState:    state,
+		RailFields:        fields,
+		RailState:         state,
 		IdempotencyKey:    session.IdempotencyKey,
 		ProviderAccountID: session.ProviderAccountID,
 		CreatedAt:         session.CreatedAt,
@@ -101,7 +101,7 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 		CustomerID:        session.CustomerID,
 		PriceID:           session.PriceID,
 		Mode:              string(session.Mode),
-		Processor:         string(session.Processor),
+		Rail:              string(session.Rail),
 		Status:            string(session.Status),
 		Amount:            session.Amount,
 		Currency:          session.Currency,
@@ -111,8 +111,8 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 		PaymentID:         session.PaymentID,
 		SubscriptionID:    session.SubscriptionID,
 		Metadata:          meta,
-		ProcessorFields:   fields,
-		ProcessorState:    state,
+		RailFields:        fields,
+		RailState:         state,
 		IdempotencyKey:    session.IdempotencyKey,
 		ProviderAccountID: session.ProviderAccountID,
 		UpdatedAt:         updateTimestamp(session.UpdatedAt),
@@ -133,8 +133,8 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
 		return errors.New("checkout session reference is required")
 	}
-	if session.ProcessorState == nil {
-		return errors.New("checkout session processor state is required")
+	if session.RailState == nil {
+		return errors.New("checkout session rail state is required")
 	}
 	ref := strings.TrimSpace(*session.Reference)
 	payer = strings.TrimSpace(payer)
@@ -145,16 +145,16 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 		now = time.Now()
 	}
 	session.UpdatedAt = now
-	state, err := toJSONB(session.ProcessorState)
+	state, err := toJSONB(session.RailState)
 	if err != nil {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).BindSolanaCheckoutSession(ctx, gen.BindSolanaCheckoutSessionParams{
-		ID:             session.ID,
-		Reference:      &ref,
-		ProcessorState: state,
-		UpdatedAt:      now,
-		Payer:          payer,
+		ID:        session.ID,
+		Reference: &ref,
+		RailState: state,
+		UpdatedAt: now,
+		Payer:     payer,
 	})
 	if err != nil {
 		return err
@@ -174,7 +174,7 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 	return checkoutSessionFromGen(row)
 }
 
-func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
+func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error) {
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Cont
 	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
 		CustomerID: tsid,
 		PriceID:    priceID,
-		Processor:  string(processor),
+		Rail:       string(rail),
 		Now:        time.Now(),
 	})
 	if err != nil {

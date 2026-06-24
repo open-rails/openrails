@@ -36,11 +36,11 @@ Buckets are classified by path + method in `classifyBucket`. Defaults
 | `default`         | `default`    | 300         | everything else under `/v1/*`             |
 | `captcha`         | —            | unlimited   | `/v1/captcha/status`, `/v1/captcha/client.js` |
 
-> **Webhooks are per-IP, and all webhooks from a processor share one source-IP
-> bucket** (fixed processor IPs). The high `webhook` default exists so rebill runs
+> **Webhooks are per-IP, and all webhooks from a rail share one source-IP
+> bucket** (fixed rail IPs). The high `webhook` default exists so rebill runs
 > and event bursts are never throttled into 429s (which would delay payment/
 > entitlement processing). Webhooks are independently protected by signature
-> verification, the IP allowlist, and per-processor body caps — the rate limit is
+> verification, the IP allowlist, and per-rail body caps — the rate limit is
 > a DoS floor, not the primary control. Because it is per-IP, raising it does not
 > meaningfully help an attacker (each attacker IP is still capped on its own).
 
@@ -57,7 +57,7 @@ ceiling (`bucketMaxContentLength`):
 | `payment-methods` | 64 KiB             |
 | `default`         | 1 MiB              |
 
-Webhook routes are intentionally absent here — they enforce per-processor caps
+Webhook routes are intentionally absent here — they enforce per-rail caps
 (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) directly in the webhook handler, on
 top of the global 1 MiB body limit.
 

@@ -10,11 +10,11 @@ import (
 func TestCheckoutSessionRequestFingerprintChangesWithRequest(t *testing.T) {
 	base := &CheckoutSessionCreateRequest{
 		PriceID: "price_11111111-1111-1111-1111-111111111111",
-		Payment: CheckoutSessionPaymentRequest{Processor: "stripe", Email: "a@example.com"},
+		Payment: CheckoutSessionPaymentRequest{Rail: "stripe", Email: "a@example.com"},
 	}
 	other := &CheckoutSessionCreateRequest{
 		PriceID: "price_22222222-2222-2222-2222-222222222222",
-		Payment: CheckoutSessionPaymentRequest{Processor: "stripe", Email: "a@example.com"},
+		Payment: CheckoutSessionPaymentRequest{Rail: "stripe", Email: "a@example.com"},
 	}
 
 	require.NotEqual(t, checkoutSessionRequestFingerprint(base), checkoutSessionRequestFingerprint(other))

@@ -9,7 +9,7 @@ import (
 type RegisterPurchaseRequest struct {
 	UserID           string
 	PriceID          uuid.UUID
-	Processor        string
+	Rail             string
 	TransactionID    string
 	Amount           int64
 	AmountProvided   bool

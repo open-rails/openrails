@@ -1,7 +1,7 @@
 # Billing Consistency: Invariants, Taxonomy & the Convergence Engine
 
 Status: design. The single source of truth for **what must always be true** across
-OpenRails' local state and the external payment processors, **how each violation
+OpenRails' local state and the external payment rails, **how each violation
 is named**, and **how it is repaired** — including the rules that keep a bulk
 import of messy legacy data from doing damage.
 
@@ -51,7 +51,7 @@ internal planes.
   allowed to insert or overwrite anything.
 
 **Three planes are internal** — a local row checked against a local yardstick, no
-processor involved:
+rail involved:
 
 - **DERIVE — Derivation**: a grant effect (entitlement / credit / access) vs. the source
   event (payment / subscription / admin action) that should produce it, via the
@@ -80,7 +80,7 @@ consistency checks run.
 
 **Provider actions** are the outbound solution channel. Any diagnostic plane may
 enqueue a `provider_intent` or operator task when the repair must happen at Stripe,
-NMI-backed processors, CCBill, Solana, or another provider. Examples: cancelling an extra
+NMI-backed rails, CCBill, Solana, or another provider. Examples: cancelling an extra
 remote subscription, retrying a scheduled cancellation, or pushing a catalog plan
 definition. Those actions are linked remediation for `life.*` or `consistency.*` findings,
 not `PUSH-*` findings.
@@ -265,10 +265,10 @@ repair task, not as a durable finding taxonomy.
 | Surface / tables | Invariant enforced by Postgres |
 |---|---|
 | Merchant isolation on merchant-owned tables | RLS requires rows to live inside the current `app.merchant_id` scope. Same-merchant composite FKs should be preferred whenever a child references another merchant-owned row. Current hardened example: `subscriptions(price_id, product_id, merchant_id)` -> `prices(id, product_id, merchant_id)`. |
-| Identity maps: `customers`, `processor_customers`, `payment_methods`, `payment_blocklist` | Natural-key duplicates are blocked inside a merchant: one customer per AuthKit org or issuer/subject, one processor customer per customer/provider and provider customer id, one vault token per customer/provider, and one blocklist entry per `(kind,value)`. |
+| Identity maps: `customers`, `rail_customers`, `payment_methods`, `payment_blocklist` | Natural-key duplicates are blocked inside a merchant: one customer per AuthKit org or issuer/subject, one rail customer per customer/provider and provider customer id, one vault token per customer/provider, and one blocklist entry per `(kind,value)`. |
 | Local catalog: `products`, `prices`, `entitlement_features`, `product_entitlement_features` | Product slugs are unique per merchant; price financial substance is unique per product; entitlement lookup keys are unique per merchant; product/feature joins are unique; local status/value enums are checked. |
 | Subscriptions | Local product/price coherence is blocked by `subscriptions_price_product_merchant_fkey`; local provider subscription ids are unique; active/pending/past-due duplicates are blocked per `(merchant, customer, product)` and local active/pending tier group; cancelled/past-due/period fields obey CHECK constraints. |
-| Payments and checkout sessions | Duplicate local provider transactions are blocked by `(merchant, processor, transaction_id)`; payments cannot be materially future-dated; checkout processor references/transactions are unique when present; payment/customer/subscription/price references are FK-backed. |
+| Payments and checkout sessions | Duplicate local provider transactions are blocked by `(merchant, rail, transaction_id)`; payments cannot be materially future-dated; checkout rail references/transactions are unique when present; payment/customer/subscription/price references are FK-backed. |
 | Grant ledger: `grants` | Grant rows are append-only through role privileges; event/kind/source type are checked; credit grants carry positive amount+currency; windows are valid; FKs link customer/product/payment/supersedes; a root grant has at most one terminal event. |
 | Grant effects: `entitlements` | Live entitlement windows cannot overlap; open-ended active duplicates are blocked; revoke fields move together; windows are valid; source type is constrained. |
 | Double-entry ledger: `ledger_accounts`, `ledger_transfers` | Account natural keys are unique; transfers are append-only, positive, same-currency, between distinct accounts, and have valid phases; post/void resolvers require `pending_id`; each pending transfer has at most one resolver. |
@@ -442,7 +442,7 @@ duplicate charge came from overlapping active remote subscriptions, the repair m
 also enqueue/link a provider action to cancel the extra provider subscription and
 stop future billing. `consistency.duplicate.*` also covers duplicate invoice/usage coverage.
 Duplicate local rows for the same provider transaction are structurally blocked by
-`uq_payments_merchant_processor_transaction`; if a legacy/import path still
+`uq_payments_merchant_rail_transaction`; if a legacy/import path still
 materializes one, it is a local mirror repair, not a normal recurring finding.
 Initial subtypes: `provider_charge`, `subscription`, `invoice_usage`,
 `invoice_payment`.
@@ -481,7 +481,7 @@ are desired state and the provider catalog must be pushed back into shape.
 
 ### Adjacent: billing viability (risk, not inconsistency)
 
-"Active sub with a failed/expired payment method" and "sub processor ≠ PM processor"
+"Active sub with a failed/expired payment method" and "sub rail ≠ PM rail"
 are **predictive risk** states, not state inconsistencies — they predict a *future*
 dunning failure. Surfaced as **OPERATOR** notifications (prompt the customer to update
 the card), kept out of the core taxonomy to preserve "no irrelevant consistencies."
@@ -563,14 +563,14 @@ Excluded to avoid redundancy — the schema makes these impossible:
 - more than one local active/pending/past_due subscription per
   `(merchant, customer, product)` or local active/pending tier-group;
 - duplicate local provider transactions via
-  `uq_payments_merchant_processor_transaction`;
+  `uq_payments_merchant_rail_transaction`;
 - double-entry transfer basics: amount > 0, debit != credit, valid phase,
   resolver iff `pending_id`, one resolver per pending transfer, same-currency
   debit/credit accounts, append-only transfer/account roles;
 - append-only grant basics: valid event/kind/source type, credit grants carry
   positive amount+currency, grant windows are valid, and each grant has at most
   one terminal event;
-- natural-key duplicates for customers, processor customers, payment methods,
+- natural-key duplicates for customers, rail customers, payment methods,
   linked wallets, blocklist entries, catalog product slugs, price financial
   substance, invoice periods, invoice item sources, usage-event idempotency, and
   open reconciliation/catalog-drift finding identities.

@@ -35,7 +35,7 @@ func GetUserPayments(r *httprequest.Request) {
 	}
 
 	if paymentType != "" {
-		queryOpts.Filters.Processor = paymentType
+		queryOpts.Filters.Rail = paymentType
 	}
 
 	payments, _, err := r.State.UserSubscriptionService.GetUserPayments(

@@ -106,7 +106,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
 		CustomerID:           tenantSubjectID,
-		Processor:            models.ProcessorMobius,
+		Rail:                 models.RailMobius,
 		VaultID:              "vault_" + uuid.New().String(),
 		BillingID:            &billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -116,7 +116,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   paymentMethod.ID,
 		CustomerID:           paymentMethod.CustomerID,
-		Processor:            string(paymentMethod.Processor),
+		Rail:                 string(paymentMethod.Rail),
 		VaultID:              paymentMethod.VaultID,
 		BillingID:            paymentMethod.BillingID,
 		InitialTransactionID: paymentMethod.InitialTransactionID,
@@ -130,39 +130,39 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	nextRetry := now.Add(-30 * time.Second)
 
 	sub := &models.Subscription{
-		ID:                      subID,
-		CustomerID:              tenantSubjectID,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusPastDue,
-		Processor:               models.ProcessorMobius,
-		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
-		PaymentMethodID:         &paymentMethodID,
-		CurrentPeriodStartsAt:   &periodStart,
-		CurrentPeriodEndsAt:     &periodEnd,
-		StartedAt:               periodStart,
-		NextRetryAt:             &nextRetry,
-		CreatedAt:               now,
-		UpdatedAt:               now,
-		Price:                   price,
-		PaymentMethod:           paymentMethod,
+		ID:                    subID,
+		CustomerID:            tenantSubjectID,
+		ProductID:             productID,
+		PriceID:               priceID,
+		Status:                models.StatusPastDue,
+		Rail:                  models.RailMobius,
+		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
+		PaymentMethodID:       &paymentMethodID,
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &periodEnd,
+		StartedAt:             periodStart,
+		NextRetryAt:           &nextRetry,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		Price:                 price,
+		PaymentMethod:         paymentMethod,
 	}
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID:                      sub.ID,
-		MerchantID:              dbtest.TestMerchantID.UUID(),
-		CustomerID:              sub.CustomerID,
-		ProductID:               sub.ProductID,
-		PriceID:                 &priceID,
-		Status:                  string(sub.Status),
-		Processor:               string(sub.Processor),
-		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		PaymentMethodID:         sub.PaymentMethodID,
-		CurrentPeriodStartsAt:   sub.CurrentPeriodStartsAt,
-		CurrentPeriodEndsAt:     sub.CurrentPeriodEndsAt,
-		StartedAt:               sub.StartedAt,
-		NextRetryAt:             sub.NextRetryAt,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                    sub.ID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
+		CustomerID:            sub.CustomerID,
+		ProductID:             sub.ProductID,
+		PriceID:               &priceID,
+		Status:                string(sub.Status),
+		Rail:                  string(sub.Rail),
+		RailSubscriptionID:    sub.RailSubscriptionID,
+		PaymentMethodID:       sub.PaymentMethodID,
+		CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt,
+		CurrentPeriodEndsAt:   sub.CurrentPeriodEndsAt,
+		StartedAt:             sub.StartedAt,
+		NextRetryAt:           sub.NextRetryAt,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	})
 	require.NoError(t, err)
 
@@ -178,10 +178,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	})
 
 	// Stub NMI direct post endpoint for AttemptManualRebill.
-	processorTxnID := "txn_test_" + uuid.New().String()
+	railTxnID := "txn_test_" + uuid.New().String()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		_, _ = w.Write([]byte("response=1&transactionid=" + processorTxnID))
+		_, _ = w.Write([]byte("response=1&transactionid=" + railTxnID))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -265,7 +265,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, CustomerID: tenantSubjectID, Processor: "mobius",
+		ID: paymentMethodID, CustomerID: tenantSubjectID, Rail: "mobius",
 		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
@@ -277,10 +277,10 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	nextRetry := now.Add(-30 * time.Second)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
-		Status: string(models.StatusPastDue), Processor: "mobius",
-		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
-		PaymentMethodID:         &paymentMethodID,
-		CurrentPeriodStartsAt:   &periodStart, CurrentPeriodEndsAt: &periodEnd,
+		Status: string(models.StatusPastDue), Rail: "mobius",
+		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
+		PaymentMethodID:       &paymentMethodID,
+		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
 		StartedAt: periodStart, NextRetryAt: &nextRetry,
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -291,7 +291,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	durableTxn := "txn_durable_" + uuid.NewString()[:8]
 	orderRef := fmt.Sprintf("rebill-%s-%d", subID, periodEnd.Unix())
 	payloadJSON := fmt.Sprintf(
-		`{"subscription_id":%q,"period_end":%q,"processor":"mobius","order_reference":%q,"attempt":0}`,
+		`{"subscription_id":%q,"period_end":%q,"rail":"mobius","order_reference":%q,"attempt":0}`,
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.provider_intents

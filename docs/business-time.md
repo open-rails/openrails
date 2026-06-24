@@ -39,16 +39,16 @@ New tests should prefer `WithSuiteClock` over `SetMockClock`. `SetMockClock`
 exists as a compatibility helper for older tests that patch the shared runtime
 after construction.
 
-## Processor Test Clocks
+## Rail Test Clocks
 
-Processor-side test clocks and sandboxes are separate from OpenRails app time.
+Rail-side test clocks and sandboxes are separate from OpenRails app time.
 For example, Stripe Test Clocks control Stripe test customers, subscriptions,
 invoices, and webhook timing. The OpenRails fake clock controls how this app
 interprets time when processing those webhooks and updating local records.
 
-When testing processor integrations, advance both sides deliberately:
+When testing rail integrations, advance both sides deliberately:
 
-- Use the processor sandbox/test clock to produce realistic external events.
+- Use the rail sandbox/test clock to produce realistic external events.
 - Use the OpenRails fake clock to verify local billing, entitlements, credits,
   and retry windows.
 

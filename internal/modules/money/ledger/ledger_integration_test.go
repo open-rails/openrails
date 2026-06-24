@@ -55,7 +55,7 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
-	clearing, err := l.EnsureSystemAccount(ctx, ledger.ProcessorClearing, cur)
+	clearing, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, cur)
 	require.NoError(t, err)
 	rev, err := l.EnsureSystemAccount(ctx, ledger.PlatformRevenue, cur)
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 
 	custA, err := l.EnsureCustomerBalance(ctx, customer, curA)
 	require.NoError(t, err)
-	clearingB, err := l.EnsureSystemAccount(ctx, ledger.ProcessorClearing, curB)
+	clearingB, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, curB)
 	require.NoError(t, err)
 
 	// Debit account is in curB, transfer/credit in curA — the trigger rejects it.

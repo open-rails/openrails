@@ -31,7 +31,7 @@ type AdminCancellationLogger interface {
 }
 
 type LifecycleEventLogger interface {
-	LogLifecycleChargeSuccess(context.Context, *models.Subscription, models.Processor, string, int64, string, time.Time, map[string]interface{}) error
-	LogLifecycleCancellation(context.Context, uuid.UUID, string, models.Processor, models.CancelType, bool, time.Time) error
-	LogLifecycleFailure(context.Context, uuid.UUID, string, models.Processor, models.SubscriptionStatus, *string, *string, time.Time) error
+	LogLifecycleChargeSuccess(context.Context, *models.Subscription, models.Rail, string, int64, string, time.Time, map[string]interface{}) error
+	LogLifecycleCancellation(context.Context, uuid.UUID, string, models.Rail, models.CancelType, bool, time.Time) error
+	LogLifecycleFailure(context.Context, uuid.UUID, string, models.Rail, models.SubscriptionStatus, *string, *string, time.Time) error
 }

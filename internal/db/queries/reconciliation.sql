@@ -168,22 +168,22 @@ WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 
 -- Local-state reads for the diff engine
 -- ============================================================================
 
--- name: ReconcileListSubscriptionsByProcessors :many
-SELECT id, customer_id, price_id, product_id, status, processor,
-       processor_subscription_id, user_email, payment_method_id,
+-- name: ReconcileListSubscriptionsByRails :many
+SELECT id, customer_id, price_id, product_id, status, rail,
+       rail_subscription_id, user_email, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
-WHERE processor = ANY (sqlc.arg(processors)::text[])
+WHERE rail = ANY (sqlc.arg(rails)::text[])
   AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, customer_id, processor, transaction_id, amount, status,
+SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
-WHERE processor::text = ANY (sqlc.arg(processors)::text[])
+WHERE rail::text = ANY (sqlc.arg(rails)::text[])
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
   AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
@@ -195,38 +195,38 @@ SELECT ent.id, ent.customer_id, ent.entitlement, ent.source_id,
        ent.start_at, ent.end_at
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
-WHERE sub.processor = ANY (sqlc.arg(processors)::text[])
+WHERE sub.rail = ANY (sqlc.arg(rails)::text[])
   AND (sqlc.narg(provider_account_id)::uuid IS NULL OR sub.provider_account_id = sqlc.narg(provider_account_id)::uuid)
   AND ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
--- name: ReconcileListPaymentMethodsByProcessors :many
-SELECT id, customer_id, processor, vault_id, last_four, card_type,
+-- name: ReconcileListPaymentMethodsByRails :many
+SELECT id, customer_id, rail, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
-WHERE processor = ANY (sqlc.arg(processors)::text[])
+WHERE rail = ANY (sqlc.arg(rails)::text[])
   AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
 FROM openrails.solana_subscriptions;
 
--- Billable prices with their processor link blobs (provider_links): the PS-1
--- materializer maps a remote plan id onto the local price whose processors
+-- Billable prices with their rail link blobs (provider_links): the PS-1
+-- materializer maps a remote plan id onto the local price whose rails
 -- jsonb carries that id under the provider's key. Draft prices are excluded
 -- (not billable); archived prices stay (grandfathered subscriptions bill them).
--- name: ReconcileListPricesWithProcessors :many
-SELECT id, product_id, amount, currency, billing_cycle_days, status, processors
+-- name: ReconcileListPricesWithRails :many
+SELECT id, product_id, amount, currency, billing_cycle_days, status, rails
 FROM openrails.prices
-WHERE processors IS NOT NULL
+WHERE rails IS NOT NULL
   AND status <> 'draft';
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
 -- ============================================================================
 
--- PS-2: the processor says this subscription is dead -> cancel locally.
+-- PS-2: the rail says this subscription is dead -> cancel locally.
 -- Clears the retry schedule (chk_cancelled_no_retry_schedule) and revokes via
 -- the companion entitlement query. 0 rows on a re-run = already converged.
 -- name: ReconcileCancelSubscriptionLocal :execrows
@@ -243,7 +243,7 @@ SET status = 'cancelled',
 WHERE id = sqlc.arg(id)
   AND status IN ('active', 'past_due', 'pending');
 
--- PS-3: adopt the processor's declared status/periods. Only non-terminal
+-- PS-3: adopt the rail's declared status/periods. Only non-terminal
 -- targets route here (terminal remote states go through the cancel applier);
 -- past_due adoption requires a period end (chk_past_due_has_period_end),
 -- guarded by the engine.
@@ -294,15 +294,15 @@ WHERE NOT EXISTS (
       AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(now)::timestamptz)
 );
 
--- PS-4: backfill a processor charge that has no local payment record.
--- Dedupe rides the uq_payments_merchant_processor_transaction identity.
+-- PS-4: backfill a rail charge that has no local payment record.
+-- Dedupe rides the uq_payments_merchant_rail_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
+    sqlc.arg(price_id), sqlc.arg(rail)::openrails.rail_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
@@ -311,16 +311,16 @@ INSERT INTO openrails.payments (
 )
 ON CONFLICT DO NOTHING;
 
--- PS-5: record a processor refund that is missing locally as a negative-
+-- PS-5: record a rail refund that is missing locally as a negative-
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
+    sqlc.arg(price_id), sqlc.arg(rail)::openrails.rail_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
@@ -336,20 +336,20 @@ SET status = 'refunded'
 WHERE id = sqlc.arg(id) AND status <> 'refunded';
 
 -- PS-1 materialization (bootstrap mode, --materialize): create the local
--- subscription for a processor subscription that resolved unambiguously to an
+-- subscription for a rail subscription that resolved unambiguously to an
 -- identity and a price. The entitlements/credits specs snapshot from the
 -- product exactly like a normal signup, so the subscription-sourced
 -- entitlement path works unchanged. Idempotent: a second run inserts nothing
--- when any subscription already carries the processor subscription id (zero
+-- when any subscription already carries the rail subscription id (zero
 -- rows returned = already materialized).
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    merchant_id, price_id, product_id, status, processor, processor_subscription_id,
+    merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, credits_spec_snapshot, customer_id, provider_account_id
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
-       sqlc.arg(processor), sqlc.arg(processor_subscription_id),
+       sqlc.arg(rail), sqlc.arg(rail_subscription_id),
        sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
@@ -360,13 +360,13 @@ JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
-      WHERE s.processor_subscription_id = sqlc.arg(processor_subscription_id)
-        AND s.processor = ANY (sqlc.arg(processors)::text[])
+      WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
+        AND s.rail = ANY (sqlc.arg(rails)::text[])
         AND (sqlc.narg(provider_account_id)::uuid IS NULL OR s.provider_account_id = sqlc.narg(provider_account_id)::uuid)
   )
 RETURNING id, entitlements_spec_snapshot;
 
--- PS-7: adopt the processor's vault metadata for a stored payment method.
+-- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
 UPDATE openrails.payment_methods
 SET last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),

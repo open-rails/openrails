@@ -84,7 +84,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 			continue
 		}
 		sig := *row.LastSignature
-		_, perr := paymentRepo.GetByTransactionID(ctx, models.ProcessorSolana, sig)
+		_, perr := paymentRepo.GetByTransactionID(ctx, models.RailSolana, sig)
 		if perr == nil {
 			continue // ledger is consistent for this pull
 		}
@@ -99,7 +99,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		drift++
 		subID := row.SubscriptionID
 		if alertErr := webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
-			Provider:       string(models.ProcessorSolana),
+			Provider:       string(models.RailSolana),
 			Operation:      "solana_crank_unrecorded_pull",
 			TransactionID:  sig,
 			SubscriptionID: &subID,
