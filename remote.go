@@ -73,6 +73,12 @@ func NewRemote(baseURL string, opts ...RemoteOption) Client {
 	return r
 }
 
+// invalidErr builds the canonical client-side "bad request" error so errors.Is
+// matches ErrInvalid identically to the embedded transport (#338).
+func invalidErr(msg string) error {
+	return NewStatusError(http.StatusBadRequest, "", msg)
+}
+
 // bearer mints the credential for the next call. There is no fallback; a mint
 // failure or empty token errors the call so the issue surfaces.
 func (c *remote) bearer(ctx context.Context) (string, error) {
@@ -170,7 +176,7 @@ type captureBody struct {
 // request_id. A nil error means OpenRails accepted the capture.
 func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
 	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("openrails: capture requires request_id")
+		return invalidErr("capture requires request_id")
 	}
 	body := captureBody{Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
@@ -188,7 +194,7 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 // request_id. Used when the work fails after a successful authorize/admit.
 func (c *remote) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("openrails: release requires request_id")
+		return invalidErr("release requires request_id")
 	}
 	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
 	return c.do(ctx, http.MethodPost, path, nil, nil)
@@ -321,7 +327,7 @@ func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 // treasury surface (#567 — re-pathed off /v1/orgs onto /v1/customers).
 func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
-		return fmt.Errorf("openrails: customer_id required")
+		return invalidErr("customer_id required")
 	}
 	path := "/v1/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations"
 	return c.do(ctx, http.MethodPut, path, map[string]any{"delegations": delegations}, nil)
@@ -351,7 +357,7 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, 
 func (c *remote) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
-		return nil, fmt.Errorf("openrails: subject is required")
+		return nil, invalidErr("subject is required")
 	}
 	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at)
 	if err != nil {
@@ -365,7 +371,7 @@ func (c *remote) ListEntitlements(ctx context.Context, subject string, at time.T
 func (c *remote) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
-		return false, fmt.Errorf("openrails: entitlement is required")
+		return false, invalidErr("entitlement is required")
 	}
 	records, err := c.ListEntitlements(ctx, subject, at)
 	if err != nil {
@@ -385,7 +391,7 @@ func (c *remote) HasEntitlement(ctx context.Context, subject, entitlement string
 func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
-		return nil, fmt.Errorf("openrails: entitlement is required")
+		return nil, invalidErr("entitlement is required")
 	}
 	base := "/v1/merchant/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
 	if !at.IsZero() {
@@ -419,7 +425,7 @@ func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 func (c *remote) ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
-		return nil, fmt.Errorf("openrails: subject is required")
+		return nil, invalidErr("subject is required")
 	}
 	var out []ProductAccessGrant
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/users/"+url.PathEscape(subject)+"/product-access", nil, &out); err != nil {
@@ -438,9 +444,9 @@ func (c *remote) HasProductAccess(ctx context.Context, subject, productID string
 	productID = strings.TrimSpace(productID)
 	switch {
 	case subject == "":
-		return false, fmt.Errorf("openrails: subject is required")
+		return false, invalidErr("subject is required")
 	case productID == "":
-		return false, fmt.Errorf("openrails: product_id is required")
+		return false, invalidErr("product_id is required")
 	}
 	path := "/v1/merchant/users/" + url.PathEscape(subject) + "/product-access?product_id=" + url.QueryEscape(productID)
 	var out ProductAccessCheck

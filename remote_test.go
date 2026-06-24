@@ -3,9 +3,11 @@ package openrails
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestRemoteTrustTierWireNames(t *testing.T) {
@@ -74,5 +76,96 @@ func TestRemoteTrustTierWireNames(t *testing.T) {
 	}
 	if tier != "gold" {
 		t.Fatalf("expected trust_tier response to decode, got %q", tier)
+	}
+}
+
+// TestRemoteValidationErrorParity asserts that client-side pre-flight argument
+// checks return typed *StatusError values whose errors.Is chain includes
+// ErrInvalid — matching the embedded transport's behavior (#338).
+// No live server is required; validation fires before any HTTP call.
+func TestRemoteValidationErrorParity(t *testing.T) {
+	// Use an unreachable URL — none of the tested calls should reach the network.
+	client := NewRemote("http://127.0.0.1:0", WithTokenProvider(func(context.Context) (string, error) {
+		return "test-token", nil
+	}))
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{
+			name: "Capture empty request_id",
+			fn: func() error {
+				return client.Capture(ctx, "", 100, nil)
+			},
+		},
+		{
+			name: "Release empty request_id",
+			fn: func() error {
+				return client.Release(ctx, "")
+			},
+		},
+		{
+			name: "SetCustomerSpendDelegations empty customer_id",
+			fn: func() error {
+				return client.SetCustomerSpendDelegations(ctx, "", nil)
+			},
+		},
+		{
+			name: "ListEntitlements empty subject",
+			fn: func() error {
+				_, err := client.ListEntitlements(ctx, "", time.Time{})
+				return err
+			},
+		},
+		{
+			name: "HasEntitlement empty entitlement",
+			fn: func() error {
+				_, err := client.HasEntitlement(ctx, "user@example.com", "", time.Time{})
+				return err
+			},
+		},
+		{
+			name: "ListCustomersWithEntitlement empty entitlement",
+			fn: func() error {
+				_, err := client.ListCustomersWithEntitlement(ctx, "", time.Time{})
+				return err
+			},
+		},
+		{
+			name: "ListProductAccess empty subject",
+			fn: func() error {
+				_, err := client.ListProductAccess(ctx, "")
+				return err
+			},
+		},
+		{
+			name: "HasProductAccess empty subject",
+			fn: func() error {
+				_, err := client.HasProductAccess(ctx, "", "pro")
+				return err
+			},
+		},
+		{
+			name: "HasProductAccess empty product_id",
+			fn: func() error {
+				_, err := client.HasProductAccess(ctx, "user@example.com", "")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn()
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Errorf("errors.Is(err, ErrInvalid) = false; got %T: %v", err, err)
+			}
+		})
 	}
 }
