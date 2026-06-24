@@ -252,7 +252,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		queueTypes := map[FindingType]bool{}
 		for _, f := range queue {
 			queueTypes[f.Type] = true
-			assert.Equal(t, FindingStatusAdminPending, f.Status)
+			assert.Equal(t, FindingStatusAdminRequired, f.Status)
 		}
 		assert.True(t, queueTypes[FindingRemoteSubMissingLocal], "PS-1 in admin queue")
 		assert.True(t, queueTypes[FindingDuplicateSubscriptions], "PS-8 in admin queue")
@@ -277,7 +277,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	assert.Equal(t, 3, rerunTypes[FindingRemoteSubMissingLocal], "PS-1 persists for the admin")
 	assert.Equal(t, 1, rerunTypes[FindingDuplicateSubscriptions], "PS-8 persists for the admin")
 
-	// Identity is stable: the PS-1 record accumulated occurrences instead of
+	// Identity is stable: the PS-1 records update in place instead of
 	// duplicating rows.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		all, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal)})
@@ -285,7 +285,8 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		require.Len(t, all, 3, "three PS-1 identities (ghost + two unmatched duplicates), one row each")
 		var ghost *FindingRecord
 		for i := range all {
-			assert.Equal(t, 3, all[i].OccurrenceCount, "three runs, one row per identity")
+			assert.Equal(t, advisory.RunID, all[i].FirstSeenRun, "three runs, one row per identity")
+			assert.Equal(t, rerun.RunID, all[i].LastSeenRun, "three runs, one row per identity")
 			if strings.HasPrefix(all[i].SubjectKey, "ghost-") {
 				ghost = &all[i]
 			}
@@ -300,8 +301,8 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		assert.True(t, ok)
 		acked, err := store.GetFinding(ctx, ghost.ID)
 		require.NoError(t, err)
-		assert.Equal(t, FindingStatusResolved, acked.Status)
-		assert.Equal(t, "admin_ack", acked.Resolution)
+		assert.Equal(t, FindingStatusFixed, acked.Status)
+		assert.Equal(t, "admin_fixed", acked.Resolution)
 		assert.Equal(t, "imported by hand", acked.Notes)
 		return nil
 	}))
@@ -317,7 +318,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		dups, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingDuplicateSubscriptions)})
 		require.NoError(t, err)
 		require.Len(t, dups, 1)
-		assert.Equal(t, FindingStatusResolved, dups[0].Status)
+		assert.Equal(t, FindingStatusFixed, dups[0].Status)
 		assert.Equal(t, "auto_vanished", dups[0].Resolution)
 		return nil
 	}))
@@ -329,7 +330,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 // `fix` (enforce) creates the local subscription with remote status/periods,
 // backfills the snapshot's charge, grants entitlements via the
 // subscription-sourced path, and resolves the finding as enforced — while the
-// unresolvable one stays admin_pending.
+// unresolvable one stays requires_review.
 func TestReconcileMaterializeIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -414,13 +415,13 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 	}
 
-	// ---- advisory: both PS-1 stay admin_pending, nothing is created ----------
+	// ---- advisory: both PS-1 stay requires_review, nothing is created ----------
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			if f.Type == FindingRemoteSubMissingLocal {
-				assert.Equal(t, FindingStatusAdminPending, f.Status, "advisory PS-1 stays admin_pending")
+				assert.Equal(t, FindingStatusAdminRequired, f.Status, "advisory PS-1 stays requires_review")
 			}
 		}
 		var n int
@@ -472,7 +473,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			   AND entitlement = $2 AND revoked_at IS NULL`, subID, entName).Scan(&entCount))
 		assert.Equal(t, 1, entCount)
 
-		// Finding resolved as enforced with the resolution evidence.
+		// Finding fixed as enforced with the resolution evidence.
 		findings, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal), Limit: 50})
 		require.NoError(t, err)
 		var resolved, pending *FindingRecord
@@ -491,9 +492,9 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		assert.Equal(t, subID.String(), resolved.ResolutionEvid["materialized_subscription_id"])
 		assert.Equal(t, "vault_id", resolved.ResolutionEvid["identity_via"])
 
-		// Unresolvable: still admin_pending, blocker documented.
+		// Unresolvable: still requires_review, blocker documented.
 		require.NotNil(t, pending)
-		assert.Equal(t, FindingStatusAdminPending, pending.Status)
+		assert.Equal(t, FindingStatusAdminRequired, pending.Status)
 		assert.True(t, pending.RequiresAdmin)
 		blocked, _ := pending.RemoteEvidence["materialize_blocked"].(string)
 		assert.Contains(t, blocked, "identity unresolved")
@@ -529,10 +530,10 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
-	oldPending := uuid.New()    // pending 26h, genuine failure -> admin-queued
+	oldPending := uuid.New()    // pending 26h, genuine failure -> requires-review
 	parkedPending := uuid.New() // pending 26h, kill-switch park -> informational
 	freshPending := uuid.New()  // pending 1h -> no finding
-	oldUnknown := uuid.New()    // unknown_needs_verify 3h -> admin-queued
+	oldUnknown := uuid.New()    // unknown_needs_verify 3h -> requires-review
 	subscriptionID := uuid.New()
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
@@ -588,7 +589,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	assert.NotContains(t, bySubject, freshPending.String(), "a fresh pending intent is not stuck")
 
 	rec := bySubject[oldPending.String()]
-	assert.Equal(t, FindingStatusAdminPending, rec.Status)
+	assert.Equal(t, FindingStatusAdminRequired, rec.Status)
 	assert.True(t, rec.RequiresAdmin)
 	assert.Equal(t, SeverityHigh, rec.Severity)
 	assert.Equal(t, Provider("mobius"), rec.Provider)
@@ -597,18 +598,18 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	assert.Equal(t, "nmi error: connection refused", rec.IntentEvidence["last_failure_reason"])
 
 	parked := bySubject[parkedPending.String()]
-	assert.Equal(t, FindingStatusOpen, parked.Status)
+	assert.Equal(t, FindingStatusReconcileRequired, parked.Status)
 	assert.False(t, parked.RequiresAdmin, "kill-switch park is informational")
 	assert.Equal(t, SeverityLow, parked.Severity)
 
 	unknown := bySubject[oldUnknown.String()]
-	assert.Equal(t, FindingStatusAdminPending, unknown.Status)
+	assert.Equal(t, FindingStatusAdminRequired, unknown.Status)
 	assert.True(t, unknown.RequiresAdmin)
 
 	stuckRep := check.Summary.StuckIntents
 	require.NotNil(t, stuckRep)
 	assert.Equal(t, 3, stuckRep.Total)
-	assert.Equal(t, 2, stuckRep.AdminQueued)
+	assert.Equal(t, 2, stuckRep.AdminRequired)
 	assert.Equal(t, 1, stuckRep.ModeParked)
 	assert.Equal(t, 3, stuckRep.ByIntentType["nmi_delete_subscription"])
 
@@ -635,12 +636,13 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 		assert.Equal(t, "pending", status)
 		assert.Equal(t, 2, attempts)
 
-		// Stable identity: one row per intent, occurrence bumped.
+		// Stable identity: one row per intent, seen again on the second run.
 		all, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Limit: 50})
 		require.NoError(t, err)
 		assert.Len(t, all, 3)
 		for _, f := range all {
-			assert.Equal(t, 2, f.OccurrenceCount)
+			assert.Equal(t, check.RunID, f.FirstSeenRun)
+			assert.Equal(t, res.RunID, f.LastSeenRun)
 		}
 		return nil
 	}))
@@ -662,7 +664,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 		assert.Equal(t, 1, res.Summary.StuckIntents.Total, "only the parked intent is still stuck")
 		assert.Equal(t, int64(2), res.Summary.StuckIntents.AutoResolved)
 
-		recovered, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Status: string(FindingStatusResolved), Limit: 50})
+		recovered, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Status: string(FindingStatusFixed), Limit: 50})
 		require.NoError(t, err)
 		require.Len(t, recovered, 2)
 		for _, f := range recovered {

@@ -16,25 +16,27 @@ import (
 type FindingRecord struct {
 	ID                uuid.UUID      `json:"id"`
 	MerchantID        uuid.UUID      `json:"tenant_id"`
-	Provider          Provider       `json:"provider"`
+	Provider          Provider       `json:"provider,omitempty"`
 	Type              FindingType    `json:"finding_type"`
 	SubjectKey        string         `json:"subject_key"`
 	Severity          Severity       `json:"severity"`
 	Status            FindingStatus  `json:"status"`
-	RequiresAdmin     bool           `json:"requires_admin"`
+	RequiresReview    bool           `json:"requires_review,omitempty"`
+	RequiresAdmin     bool           `json:"-"`
 	RecommendedAction string         `json:"recommended_action,omitempty"`
-	LocalEvidence     map[string]any `json:"local_evidence,omitempty"`
-	RemoteEvidence    map[string]any `json:"remote_evidence,omitempty"`
-	IntentEvidence    map[string]any `json:"intent_evidence,omitempty"`
-	ResolutionEvid    map[string]any `json:"resolution_evidence,omitempty"`
+	Evidence          map[string]any `json:"evidence,omitempty"`
+	LocalEvidence     map[string]any `json:"-"`
+	RemoteEvidence    map[string]any `json:"-"`
+	IntentEvidence    map[string]any `json:"-"`
+	ResolutionEvid    map[string]any `json:"-"`
 	FirstSeenRun      uuid.UUID      `json:"first_seen_run"`
 	LastSeenRun       uuid.UUID      `json:"last_seen_run"`
-	FirstSeenAt       time.Time      `json:"first_seen_at"`
 	LastSeenAt        time.Time      `json:"last_seen_at"`
-	OccurrenceCount   int            `json:"occurrence_count"`
 	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
 	Resolution        string         `json:"resolution,omitempty"`
-	Notes             string         `json:"notes,omitempty"`
+	Notes             string         `json:"operator_notes,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // RunRecord is a persisted reconciliation run.
@@ -58,7 +60,7 @@ type Store interface {
 	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
 	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
 	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
-	ListOpenFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error)
+	ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error)
 	AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error)
 	// AutoResolveVanishedAllProviders is the PS-10 variant: stuck-intent
 	// findings are emitted on every run regardless of provider filters, so
@@ -96,6 +98,31 @@ func unmarshalEvidence(b []byte) map[string]any {
 		return map[string]any{"evidence_decode_error": err.Error()}
 	}
 	return m
+}
+
+func findingEvidence(f Finding) []byte {
+	evidence := map[string]any{}
+	if f.Provider != "" && f.Provider != "self" {
+		evidence["provider"] = string(f.Provider)
+	}
+	if len(f.LocalEvidence) > 0 {
+		evidence["local"] = f.LocalEvidence
+	}
+	if len(f.RemoteEvidence) > 0 {
+		evidence["remote"] = f.RemoteEvidence
+	}
+	if len(f.IntentEvidence) > 0 {
+		evidence["intent"] = f.IntentEvidence
+	}
+	return marshalEvidence(evidence)
+}
+
+func nestedEvidence(evidence map[string]any, key string) map[string]any {
+	if len(evidence) == 0 {
+		return nil
+	}
+	nested, _ := evidence[key].(map[string]any)
+	return nested
 }
 
 func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error) {
@@ -145,16 +172,12 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        tid.UUID(),
-		Provider:          string(f.Provider),
 		FindingType:       string(f.Type),
 		SubjectKey:        f.SubjectKey,
 		Severity:          string(f.Severity),
 		Status:            string(f.Status),
-		RequiresAdmin:     f.RequiresAdmin,
 		RecommendedAction: action,
-		LocalEvidence:     marshalEvidence(f.LocalEvidence),
-		RemoteEvidence:    marshalEvidence(f.RemoteEvidence),
-		IntentEvidence:    marshalEvidence(f.IntentEvidence),
+		Evidence:          findingEvidence(f),
 		RunID:             runID,
 	})
 	if err != nil {
@@ -163,8 +186,9 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	return findingRecordFromRow(row), nil
 }
 
-func (s *PGStore) ListOpenFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
-	rows, err := s.DB.Gen(ctx).ListOpenReconciliationFindingsByProvider(ctx, string(provider))
+func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
+	providerStr := string(provider)
+	rows, err := s.DB.Gen(ctx).ListActionableReconciliationFindingsByProvider(ctx, &providerStr)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +204,9 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, ru
 	for _, t := range types {
 		names = append(names, string(t))
 	}
+	providerStr := string(provider)
 	return s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
-		Provider:     string(provider),
+		Provider:     &providerStr,
 		RunID:        runID,
 		FindingTypes: names,
 	})
@@ -271,9 +296,9 @@ func (s *PGStore) ListFindings(ctx context.Context, filter FindingFilter) ([]Fin
 		filter.Limit = 100
 	}
 	params := gen.ListReconciliationFindingsParams{
-		OnlyAdminQueue: filter.OnlyAdminQueue,
-		PageLimit:      int64(filter.Limit),
-		PageOffset:     int64(filter.Offset),
+		OnlyReviewQueue: filter.OnlyAdminQueue,
+		PageLimit:       int64(filter.Limit),
+		PageOffset:      int64(filter.Offset),
 	}
 	if filter.Status != "" {
 		params.Status = &filter.Status
@@ -302,41 +327,46 @@ func (s *PGStore) AckFinding(ctx context.Context, id uuid.UUID, notes string) (b
 	if notes != "" {
 		notesPtr = &notes
 	}
-	n, err := s.DB.Gen(ctx).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: id, Notes: notesPtr})
+	n, err := s.DB.Gen(ctx).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: id, OperatorNotes: notesPtr})
 	return n > 0, err
 }
 
-// DismissFinding marks a finding dismissed; dismissed identities stay
-// dismissed across re-runs.
+// DismissFinding marks a finding ignored; ignored identities stay
+// ignored across re-runs.
 func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string) (bool, error) {
 	var notesPtr *string
 	if notes != "" {
 		notesPtr = &notes
 	}
-	n, err := s.DB.Gen(ctx).DismissReconciliationFinding(ctx, gen.DismissReconciliationFindingParams{ID: id, Notes: notesPtr})
+	n, err := s.DB.Gen(ctx).DismissReconciliationFinding(ctx, gen.DismissReconciliationFindingParams{ID: id, OperatorNotes: notesPtr})
 	return n > 0, err
 }
 
 func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
+	evidence := unmarshalEvidence(row.Evidence)
+	provider, _ := evidence["provider"].(string)
+	requiresReview := row.Status == string(FindingStatusRequiresReview)
 	rec := FindingRecord{
-		ID:              row.ID,
-		MerchantID:      row.MerchantID,
-		Provider:        Provider(row.Provider),
-		Type:            FindingType(row.FindingType),
-		SubjectKey:      row.SubjectKey,
-		Severity:        Severity(row.Severity),
-		Status:          FindingStatus(row.Status),
-		RequiresAdmin:   row.RequiresAdmin,
-		LocalEvidence:   unmarshalEvidence(row.LocalEvidence),
-		RemoteEvidence:  unmarshalEvidence(row.RemoteEvidence),
-		IntentEvidence:  unmarshalEvidence(row.IntentEvidence),
-		ResolutionEvid:  unmarshalEvidence(row.ResolutionEvidence),
-		FirstSeenRun:    row.FirstSeenRun,
-		LastSeenRun:     row.LastSeenRun,
-		FirstSeenAt:     row.FirstSeenAt,
-		LastSeenAt:      row.LastSeenAt,
-		OccurrenceCount: int(row.OccurrenceCount),
-		ResolvedAt:      row.ResolvedAt,
+		ID:             row.ID,
+		MerchantID:     row.MerchantID,
+		Provider:       Provider(provider),
+		Type:           FindingType(row.FindingType),
+		SubjectKey:     row.SubjectKey,
+		Severity:       Severity(row.Severity),
+		Status:         FindingStatus(row.Status),
+		RequiresReview: requiresReview,
+		RequiresAdmin:  requiresReview,
+		Evidence:       evidence,
+		LocalEvidence:  nestedEvidence(evidence, "local"),
+		RemoteEvidence: nestedEvidence(evidence, "remote"),
+		IntentEvidence: nestedEvidence(evidence, "intent"),
+		ResolutionEvid: nestedEvidence(evidence, "resolution"),
+		FirstSeenRun:   row.FirstSeenRun,
+		LastSeenRun:    row.LastSeenRun,
+		LastSeenAt:     row.LastSeenAt,
+		ResolvedAt:     row.ResolvedAt,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
 	}
 	if row.RecommendedAction != nil {
 		rec.RecommendedAction = *row.RecommendedAction
@@ -344,8 +374,8 @@ func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 	if row.Resolution != nil {
 		rec.Resolution = *row.Resolution
 	}
-	if row.Notes != nil {
-		rec.Notes = *row.Notes
+	if row.OperatorNotes != nil {
+		rec.Notes = *row.OperatorNotes
 	}
 	return rec
 }

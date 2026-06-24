@@ -41,10 +41,25 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Processors: r.Processors, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	// Subscription liveness sync (#367): scheduled provider-truth convergence
-	// for SILENT lapsed subscriptions (active, period lapsed, no webhook
-	// either way). Read-only at the provider; converges through the normal
-	// lifecycle services and resolves #368 renewal grace windows.
+	// Provider Refresh (#574): always-on provider truth refresh. It wraps the
+	// subscription liveness lane (#367), bounded provider event pulls, CCBill
+	// DataLink, and scoped convergence after local refresh writes.
+	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderRefreshWorker{
+		DB:                  r.DB,
+		Config:              r.Config,
+		Processors:          r.Processors,
+		Clock:               clock,
+		NMIClients:          r.NMIClients,
+		CCBillDataLink:      r.CCBillDataLink,
+		SolanaRPC:           r.SolanaRPC,
+		EventLogService:     r.EventLogService,
+		DeferDelete:         r.DeferredDeletes,
+		NotificationService: r.NotificationService,
+	}); err != nil {
+		return fmt.Errorf("add provider refresh worker: %w", err)
+	}
+	// Keep the old narrow worker registered so any queued/manual
+	// openrails.subscription_liveness jobs from older deploys still run.
 	if err := river.AddWorkerSafely(workers, &riverjobs.SubscriptionLivenessWorker{
 		DB:              r.DB,
 		Config:          r.Config,
@@ -315,30 +330,19 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 4 hours: subscription liveness sync (#367) — probe provider truth
-	// for silent lapsed subscriptions and converge. RunOnStart=true: a reboot
-	// after an outage is exactly when the silence cohort is largest.
+	// Every 4 hours: Provider Refresh (#574) — refresh provider truth via
+	// bounded event windows, Subscription Liveness Refresh, and CCBill DataLink.
+	// RunOnStart=true: startup after a stale dump/outage should not wait for
+	// the first 4-hour tick.
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(4*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.SubscriptionLivenessArgs{}, &river.InsertOpts{
+			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-
-	// Every 6 hours: CCBill reconcile
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(6*time.Hour),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.CCBillReconcileArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Webhook retry job removed - webhooks are now processed synchronously only.

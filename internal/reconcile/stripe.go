@@ -70,6 +70,13 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		FetchedAt:    time.Now().UTC(),
 		Capabilities: f.Capabilities(),
 	}
+	if params.SubscriptionID == "" {
+		snap.Coverage.SubscriptionsExhaustive = true
+	}
+	snap.Coverage.TransactionsExhaustive = true
+	snap.Coverage.TransactionsPaginatedComplete = true
+	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
+	snap.Coverage.TransactionWindowUntil = timePtrIfSet(params.Until)
 
 	subPages, err := f.listSubscriptions(ctx, params)
 	if err != nil {
@@ -192,7 +199,7 @@ func (f *StripeFetcher) listRaw(ctx context.Context, path string, params FetchPa
 		}
 		startingAfter = stripeID(page.Data[len(page.Data)-1])
 		if startingAfter == "" {
-			break
+			return nil, fmt.Errorf("stripe %s page has has_more=true but last object has no id", path)
 		}
 	}
 	return all, nil

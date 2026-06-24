@@ -43,8 +43,8 @@ func TestConverge_CleanScopeIsNoOp(t *testing.T) {
 }
 
 // The confirmed-absence gate (§3.2): a MISSING/AUTO finding repairs immediately,
-// but an EXCESS/AUTO finding is HELD until its source domain is reconciled — then
-// the same finding's repair fires on the next pass.
+// but an EXCESS/AUTO finding is reconcile_required until its source domain is
+// reconciled — then the same finding's repair fires on the next pass.
 func TestConverge_ConfirmedAbsenceGate(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -85,17 +85,17 @@ func TestConverge_ConfirmedAbsenceGate(t *testing.T) {
 		return s
 	}
 
-	// Pass 1: subscriptions NOT reconciled → MISSING repaired, EXCESS held.
+	// Pass 1: subscriptions NOT reconciled → MISSING repaired, EXCESS reconcile_required.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID})
 		require.NoError(t, err)
 		require.Equal(t, 2, res.Findings)
 		require.Equal(t, 1, res.AutoFixed)
-		require.Equal(t, 1, res.Held)
+		require.Equal(t, 1, res.ReconcileRequired)
 		require.Equal(t, 1, repaired[missingKey], "MISSING repairs immediately (additive, always safe)")
-		require.Equal(t, 0, repaired[excessKey], "EXCESS held by the confirmed-absence gate")
+		require.Equal(t, 0, repaired[excessKey], "EXCESS blocked by the confirmed-absence gate")
 		require.Equal(t, "auto_fixed", status(ctx, missingKey))
-		require.Equal(t, "held", status(ctx, excessKey))
+		require.Equal(t, "reconcile_required", status(ctx, excessKey))
 		return nil
 	}))
 

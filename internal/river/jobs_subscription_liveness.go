@@ -233,13 +233,11 @@ type livenessDeps struct {
 func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, sub *models.Subscription, deps *livenessDeps) livenessOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
-	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		logEntry.Warn("Liveness: silent lapsed subscription has no period end; skipping")
-		return livenessOutcomeSkipped
-	}
-	periodEnd := sub.CurrentPeriodEndsAt.UTC()
-
 	if sub.Processor == models.ProcessorStripe {
+		periodEnd := time.Time{}
+		if sub.CurrentPeriodEndsAt != nil {
+			periodEnd = sub.CurrentPeriodEndsAt.UTC()
+		}
 		return w.probeStripe(ctx, logEntry, sub, periodEnd, deps)
 	}
 
@@ -253,7 +251,27 @@ func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, su
 		logEntry.WithField("processor", provider).Warn("Liveness: NMI client not configured; will retry next pass")
 		return livenessOutcomeUnreachable
 	}
+	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
+		return w.probeNMIUnknownPeriod(ctx, logEntry, sub, models.Processor(provider), client, deps)
+	}
+	periodEnd := sub.CurrentPeriodEndsAt.UTC()
 	return w.probeNMI(ctx, logEntry, sub, models.Processor(provider), client, periodEnd, deps)
+}
+
+func (w *SubscriptionLivenessWorker) probeNMIUnknownPeriod(
+	ctx context.Context,
+	logEntry *log.Entry,
+	sub *models.Subscription,
+	processor models.Processor,
+	client *nmi.NMIClient,
+	deps *livenessDeps,
+) livenessOutcome {
+	liveness, err := client.GetRecurringLiveness(sub.ProcessorSubscriptionID)
+	if err != nil {
+		logEntry.WithError(err).Warn("Liveness: NMI recurring probe failed for missing-period subscription; will retry next pass")
+		return livenessOutcomeUnreachable
+	}
+	return w.convergeNMILiveness(ctx, logEntry, sub, processor, liveness, deps)
 }
 
 // probeNMI runs the two read-only NMI lookups and converges:
@@ -326,10 +344,18 @@ func (w *SubscriptionLivenessWorker) probeNMI(
 		return livenessOutcomeUnreachable
 	}
 
+	return w.convergeNMILiveness(ctx, logEntry, sub, processor, liveness, deps)
+}
+
+func (w *SubscriptionLivenessWorker) convergeNMILiveness(
+	ctx context.Context,
+	logEntry *log.Entry,
+	sub *models.Subscription,
+	processor models.Processor,
+	liveness nmi.RecurringLiveness,
+	deps *livenessDeps,
+) livenessOutcome {
 	if !liveness.Found {
-		// Remote absent: NMI deletes cancelled subscriptions from the
-		// recurring report entirely, so absence IS terminal. Cancel locally +
-		// revoke entitlements (no remote delete needed — it is already gone).
 		reason := "silent lapse: remote recurring subscription no longer exists at provider"
 		if err := deps.lifecycleRemoteGone.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      processor,

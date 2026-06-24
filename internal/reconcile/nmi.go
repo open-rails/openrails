@@ -62,6 +62,7 @@ func (f *NMIFetcher) Capabilities() Capabilities {
 // nmiQueryTimeFormat is the Query API start_date/end_date (and action <date>)
 // timestamp layout: YYYYMMDDhhmmss.
 const nmiQueryTimeFormat = "20060102150405"
+const nmiQueryPageLimit = 1000
 
 func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
 	snap := &RemoteSnapshot{
@@ -75,12 +76,19 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		return nil, fmt.Errorf("nmi recurring query: %w", err)
 	}
 	snap.Subscriptions = subs
+	if params.SubscriptionID == "" {
+		snap.Coverage.SubscriptionsExhaustive = true
+	}
 
 	txns, err := f.fetchTransactions(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("nmi transaction query: %w", err)
 	}
 	snap.Transactions = txns
+	snap.Coverage.TransactionsExhaustive = true
+	snap.Coverage.TransactionsPaginatedComplete = true
+	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
+	snap.Coverage.TransactionWindowUntil = timePtrIfSet(params.Until)
 
 	vault, err := f.fetchVault(ctx, params)
 	if err != nil {
@@ -129,26 +137,53 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	raw, err := f.Client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{
-		SubscriptionID: params.SubscriptionID,
-		// PageNumber -1 keeps the existing client from emitting page_number=0.
-		PageNumber: -1,
-	})
-	if err != nil {
-		return nil, err
+	var pages []nmiSubscriptionXML
+	if params.SubscriptionID != "" {
+		raw, err := f.Client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{
+			SubscriptionID: params.SubscriptionID,
+			// PageNumber -1 keeps the existing client from emitting page_number=0.
+			PageNumber: -1,
+		})
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := parseNMIRecurringPage(raw)
+		if err != nil {
+			return nil, err
+		}
+		pages = parsed.Subscriptions
+	} else {
+		seenFirst := map[string]bool{}
+		for page := 1; ; page++ {
+			raw, err := f.Client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{
+				ResultLimit: nmiQueryPageLimit,
+				PageNumber:  page,
+				ResultOrder: "asc",
+			})
+			if err != nil {
+				return nil, err
+			}
+			parsed, err := parseNMIRecurringPage(raw)
+			if err != nil {
+				return nil, err
+			}
+			if len(parsed.Subscriptions) == 0 {
+				break
+			}
+			first := strings.TrimSpace(parsed.Subscriptions[0].SubscriptionID)
+			if seenFirst[first] {
+				return nil, fmt.Errorf("nmi recurring pagination repeated page starting at subscription_id=%s; refusing incomplete snapshot", first)
+			}
+			seenFirst[first] = true
+			pages = append(pages, parsed.Subscriptions...)
+			if len(parsed.Subscriptions) < nmiQueryPageLimit {
+				break
+			}
+		}
 	}
-
-	var parsed nmiRecurringResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parse recurring XML: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return nil, fmt.Errorf("nmi error_response: %s", msg)
-	}
-
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	out := make([]RemoteSubscription, 0, len(parsed.Subscriptions))
-	for _, s := range parsed.Subscriptions {
+	out := make([]RemoteSubscription, 0, len(pages))
+	for _, s := range pages {
 		sub := RemoteSubscription{
 			ProcessorSubscriptionID: strings.TrimSpace(s.SubscriptionID),
 			// NMI declares no per-subscription status (see fetcher doc);
@@ -175,6 +210,17 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams)
 		out = append(out, sub)
 	}
 	return out, nil
+}
+
+func parseNMIRecurringPage(raw string) (nmiRecurringResponse, error) {
+	var parsed nmiRecurringResponse
+	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
+		return parsed, fmt.Errorf("parse recurring XML: %w", err)
+	}
+	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
+		return parsed, fmt.Errorf("nmi error_response: %s", msg)
+	}
+	return parsed, nil
 }
 
 // --- report_type=transaction ---
@@ -220,63 +266,91 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	if !params.Until.IsZero() {
 		filter.EndDate = params.Until.UTC().Format(nmiQueryTimeFormat)
 	}
-	raw, err := f.Client.SearchTransactions(filter)
-	if err != nil {
-		return nil, err
-	}
-
-	var parsed nmiTransactionResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parse transaction XML: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return nil, fmt.Errorf("nmi error_response: %s", msg)
-	}
-
+	filter.ResultLimit = nmiQueryPageLimit
 	var out []RemoteTransaction
-	for _, t := range parsed.Transactions {
-		for _, a := range t.Actions {
-			txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
-			if !ok {
-				// settle/check/void/etc. — settlement plumbing, not a
-				// charge-level event the diff engine consumes.
-				continue
-			}
-			success := strings.TrimSpace(a.Success) == "1"
-			if txnType == TransactionTypeSale && !success {
-				txnType = TransactionTypeDecline
-			}
-			txn := RemoteTransaction{
-				TransactionID: strings.TrimSpace(t.TransactionID),
-				// NMI does not echo the recurring subscription_id on
-				// transactions; order_id correlation lives in Raw.
-				SubscriptionID: "",
-				Type:           txnType,
-				Success:        success,
-				Currency:       strings.TrimSpace(t.Currency),
-				Raw: rawJSON(map[string]any{
-					"source":            "nmi_transaction",
-					"condition":         strings.TrimSpace(t.Condition),
-					"order_id":          strings.TrimSpace(t.OrderID),
-					"customerid":        strings.TrimSpace(t.CustomerID),
-					"customer_vault_id": strings.TrimSpace(t.CustomerVaultID),
-					"email":             strings.TrimSpace(t.Email),
-					"action":            a,
-				}),
-			}
-			if cents, err := parseAmountCents(a.Amount); err == nil {
-				txn.AmountCents = cents
-			}
-			if ts, err := time.ParseInLocation(nmiQueryTimeFormat, strings.TrimSpace(a.Date), time.UTC); err == nil {
-				txn.OccurredAt = ts
-			}
-			if !success {
-				txn.DeclineReason = strings.TrimSpace(a.ResponseText)
-			}
-			out = append(out, txn)
+	seenFirst := map[string]bool{}
+	for page := 1; ; page++ {
+		filter.PageNumber = page
+		raw, err := f.Client.SearchTransactions(filter)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := parseNMITransactionPage(raw)
+		if err != nil {
+			return nil, err
+		}
+		if len(parsed.Transactions) == 0 {
+			break
+		}
+		first := strings.TrimSpace(parsed.Transactions[0].TransactionID)
+		if seenFirst[first] {
+			return nil, fmt.Errorf("nmi transaction pagination repeated page starting at transaction_id=%s; refusing incomplete snapshot", first)
+		}
+		seenFirst[first] = true
+		for _, t := range parsed.Transactions {
+			out = append(out, normalizeNMITransaction(t)...)
+		}
+		if len(parsed.Transactions) < nmiQueryPageLimit {
+			break
 		}
 	}
 	return out, nil
+}
+
+func parseNMITransactionPage(raw string) (nmiTransactionResponse, error) {
+	var parsed nmiTransactionResponse
+	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
+		return parsed, fmt.Errorf("parse transaction XML: %w", err)
+	}
+	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
+		return parsed, fmt.Errorf("nmi error_response: %s", msg)
+	}
+	return parsed, nil
+}
+
+func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
+	var out []RemoteTransaction
+	for _, a := range t.Actions {
+		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
+		if !ok {
+			// settle/check/void/etc. — settlement plumbing, not a
+			// charge-level event the diff engine consumes.
+			continue
+		}
+		success := strings.TrimSpace(a.Success) == "1"
+		if txnType == TransactionTypeSale && !success {
+			txnType = TransactionTypeDecline
+		}
+		txn := RemoteTransaction{
+			TransactionID: strings.TrimSpace(t.TransactionID),
+			// NMI does not echo the recurring subscription_id on
+			// transactions; order_id correlation lives in Raw.
+			SubscriptionID: "",
+			Type:           txnType,
+			Success:        success,
+			Currency:       strings.TrimSpace(t.Currency),
+			Raw: rawJSON(map[string]any{
+				"source":            "nmi_transaction",
+				"condition":         strings.TrimSpace(t.Condition),
+				"order_id":          strings.TrimSpace(t.OrderID),
+				"customerid":        strings.TrimSpace(t.CustomerID),
+				"customer_vault_id": strings.TrimSpace(t.CustomerVaultID),
+				"email":             strings.TrimSpace(t.Email),
+				"action":            a,
+			}),
+		}
+		if cents, err := parseAmountCents(a.Amount); err == nil {
+			txn.AmountCents = cents
+		}
+		if ts, err := time.ParseInLocation(nmiQueryTimeFormat, strings.TrimSpace(a.Date), time.UTC); err == nil {
+			txn.OccurredAt = ts
+		}
+		if !success {
+			txn.DeclineReason = strings.TrimSpace(a.ResponseText)
+		}
+		out = append(out, txn)
+	}
+	return out
 }
 
 // normalizeNMIAction maps NMI action_type values onto the normalized

@@ -131,13 +131,14 @@ func NewConvergeEngine(database *db.DB) *ConvergeEngine {
 
 // ConvergeResult is a per-scope tally of what one Converge pass did.
 type ConvergeResult struct {
-	Scope       Scope
-	Findings    int
-	AutoFixed   int
-	Held        int
-	AdminQueued int
-	Operator    int
-	RunID       *uuid.UUID
+	Scope             Scope
+	Findings          int
+	AutoFixed         int
+	ReconcileRequired int
+	RequiresReview    int
+	AdminRequired     int
+	Operator          int
+	RunID             *uuid.UUID
 }
 
 // AfterMutation runs Converge for a customer inline, right after a state mutation
@@ -201,10 +202,11 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 		switch status {
 		case "auto_fixed":
 			res.AutoFixed++
-		case "held":
-			res.Held++
-		case "admin_pending":
-			res.AdminQueued++
+		case "reconcile_required":
+			res.ReconcileRequired++
+		case "requires_review":
+			res.RequiresReview++
+			res.AdminRequired++
 		}
 		if collected[i].Class == ClassOperator {
 			res.Operator++
@@ -213,7 +215,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 
 	summary, _ := json.Marshal(map[string]any{
 		"findings": res.Findings, "auto_fixed": res.AutoFixed,
-		"held": res.Held, "admin_queued": res.AdminQueued, "operator": res.Operator,
+		"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
 	})
 	if _, err := q.FinishReconciliationRun(ctx, gen.FinishReconciliationRunParams{
 		ID: run.ID, Status: "completed", Summary: summary,
@@ -224,8 +226,9 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 }
 
 // remediate decides a finding's ledger status and applies its repair. The
-// confirmed-absence gate (§3.2) holds a destructive EXCESS repair as `held` until
-// its source domain is proven fully reconciled for the merchant.
+// confirmed-absence gate (§3.2) keeps a destructive EXCESS repair in
+// reconcile_required until its source domain is proven fully reconciled for the
+// merchant.
 func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeFinding) (string, error) {
 	if f.Shape == ShapeExcess && f.SourceDomain != DomainNone {
 		reconciled, err := e.DB.Gen(ctx).IsSourceDomainReconciled(ctx, gen.IsSourceDomainReconciledParams{
@@ -235,7 +238,7 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 			return "", fmt.Errorf("converge: gate check %s: %w", f.SourceDomain, err)
 		}
 		if reconciled == nil || !*reconciled {
-			return "held", nil // confirmed-absence gate: do not retract yet
+			return "reconcile_required", nil // confirmed-absence gate: do not retract yet
 		}
 	}
 
@@ -247,21 +250,17 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 			}
 			return "auto_fixed", nil
 		}
-		return "open", nil
+		return "reconcile_required", nil
 	case ClassAdmin, ClassOperator:
-		return "admin_pending", nil // queued for human action (requires_admin)
+		return "requires_review", nil // queued for human review
 	default:
-		return "open", nil
+		return "requires_review", nil
 	}
 }
 
 // persist upserts a finding into the shared ledger. finding_type is the
-// self-describing qualified slug; shape/class + evidence ride in local_evidence.
+// self-describing qualified slug; shape/class + finding details ride in evidence.
 func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) error {
-	provider := f.Provider
-	if provider == "" {
-		provider = "self"
-	}
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),
 	}
@@ -271,20 +270,22 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 	for k, v := range f.Evidence {
 		meta[k] = v
 	}
-	evidence, err := json.Marshal(meta)
+	payload := map[string]any{"local": meta}
+	if f.Provider != "" && f.Provider != "self" {
+		payload["provider"] = f.Provider
+	}
+	evidence, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
 	}
 	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-		MerchantID:    scope.Merchant.UUID(),
-		Provider:      provider,
-		FindingType:   f.Type,
-		SubjectKey:    f.SubjectKey,
-		Severity:      string(f.Severity),
-		Status:        status,
-		RequiresAdmin: status == "admin_pending",
-		LocalEvidence: evidence,
-		RunID:         runID,
+		MerchantID:  scope.Merchant.UUID(),
+		FindingType: f.Type,
+		SubjectKey:  f.SubjectKey,
+		Severity:    string(f.Severity),
+		Status:      status,
+		Evidence:    evidence,
+		RunID:       runID,
 	})
 	if err != nil {
 		return fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)

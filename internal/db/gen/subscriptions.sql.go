@@ -888,13 +888,18 @@ const listSilentLapsedSubscriptions = `-- name: ListSilentLapsedSubscriptions :m
 SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, provider_account_id FROM openrails.subscriptions sub
 WHERE sub.processor = ANY($1::text[])
   AND sub.status = 'active'
-  AND sub.current_period_ends_at IS NOT NULL
-  AND sub.current_period_ends_at <= $2::timestamptz
+  AND (
+    sub.current_period_ends_at IS NULL
+    OR sub.current_period_ends_at <= $2::timestamptz
+  )
   AND NOT EXISTS (
     SELECT 1 FROM openrails.payments p
     WHERE p.subscription_id = sub.id
       AND p.status = 'completed'
-      AND p.purchased_at >= sub.current_period_ends_at
+      AND (
+        sub.current_period_ends_at IS NULL
+        OR p.purchased_at >= sub.current_period_ends_at
+      )
   )
 `
 
@@ -905,11 +910,12 @@ type ListSilentLapsedSubscriptionsParams struct {
 
 // Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
 // subscriptions on provider-truth-probeable processors whose period lapsed
-// past the probe slack with NO signal either way: no renewal (the period
-// would have advanced), no failure webhook (status would be past_due — that
-// cohort is dunning's, excluded here), and no payment recorded at/after the
-// period end. Re-derived every pass, so an unreachable provider needs no
-// durable read-queue: unchanged state simply reappears next cycle.
+// past the probe slack, or whose imported period evidence is missing, with NO
+// signal either way: no renewal (the period would have advanced), no failure
+// webhook (status would be past_due — that cohort is dunning's, excluded here),
+// and no payment recorded at/after the period end when a period end exists.
+// Re-derived every pass, so an unreachable provider needs no durable read-queue:
+// unchanged state simply reappears next cycle.
 func (q *Queries) ListSilentLapsedSubscriptions(ctx context.Context, arg ListSilentLapsedSubscriptionsParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSilentLapsedSubscriptions, arg.Processors, arg.Cutoff)
 	if err != nil {

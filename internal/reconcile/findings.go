@@ -13,7 +13,7 @@ const (
 	// FindingRemoteSubMissingLocal (PS-1): the processor bills a subscription
 	// OpenRails does not know. CRITICAL. Enforce materializes the local
 	// subscription when identity AND plan resolve unambiguously; ambiguous or
-	// unresolvable findings stay admin_pending.
+	// unresolvable findings stay requires_review.
 	FindingRemoteSubMissingLocal FindingType = "pull.subscription.missing"
 	// FindingLocalActiveRemoteDead (PS-2): local says active/past_due, the
 	// processor says cancelled/expired (on NMI: absent from the recurring
@@ -32,14 +32,14 @@ const (
 	// recommendation goes to the admin queue.
 	FindingRefundUnrecorded FindingType = "pull.refund.missing"
 	// FindingChargebackActiveSub (PS-6): chargeback at the processor while the
-	// matched subscription is still active locally. CRITICAL; admin_pending
+	// matched subscription is still active locally. CRITICAL; requires_review
 	// (terminating a paying-ish user over a dispute is a human decision).
 	FindingChargebackActiveSub FindingType = "pull.dispute.chargeback"
 	// FindingVaultMismatch (PS-7): stored payment-method metadata disagrees
 	// with the processor vault. Enforce: adopt the processor record.
 	FindingVaultMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
-	// active subscriptions. Always admin_pending — the fix (cancel+refund at
+	// active subscriptions. Always requires_review — the fix (cancel+refund at
 	// the processor) is remote and human.
 	FindingDuplicateSubscriptions FindingType = "consistency.duplicate.subscription"
 	// FindingEntitlementMismatch (PS-9): entitlements disagree with the
@@ -52,7 +52,7 @@ const (
 	// Provider-independent: emitted on EVERY run from the local ledger alone,
 	// regardless of provider filters; no provider calls. Mode/kill-switch
 	// parks are informational (the executor drains them when the blocker
-	// lifts); everything else is admin_pending — it means provider failures,
+	// lifts); everything else is requires_review — it means provider failures,
 	// bad credentials, or a dead worker. Neither check nor fix ever touches
 	// the intent itself: the executor/verifier own it.
 	FindingStuckIntent FindingType = "life.provider_intent.stuck"
@@ -72,15 +72,12 @@ const (
 type FindingStatus string
 
 const (
-	FindingStatusOpen         FindingStatus = "open"
-	FindingStatusAutoFixed    FindingStatus = "auto_fixed"
-	FindingStatusAdminPending FindingStatus = "admin_pending"
-	FindingStatusResolved     FindingStatus = "resolved"
-	FindingStatusDismissed    FindingStatus = "dismissed"
-	// FindingStatusHeld is a destructive EXCESS repair withheld by the
-	// confirmed-absence gate (§3.2) until its source domain is fully reconciled —
-	// it needs operator triage before approval, so the report surfaces it (#511 G).
-	FindingStatusHeld FindingStatus = "held"
+	FindingStatusAutoFixed         FindingStatus = "auto_fixed"
+	FindingStatusReconcileRequired FindingStatus = "reconcile_required"
+	FindingStatusRequiresReview    FindingStatus = "requires_review"
+	FindingStatusAdminRequired     FindingStatus = FindingStatusRequiresReview
+	FindingStatusFixed             FindingStatus = "fixed"
+	FindingStatusIgnored           FindingStatus = "ignored"
 )
 
 // Mode selects advisory (diff + report, zero local writes) or enforce
@@ -100,7 +97,7 @@ type Finding struct {
 	Type              FindingType
 	SubjectKey        string
 	Severity          Severity
-	Status            FindingStatus // open or admin_pending at emit time
+	Status            FindingStatus // reconcile_required or requires_review at emit time
 	RequiresAdmin     bool
 	RecommendedAction string
 	LocalEvidence     map[string]any
@@ -112,7 +109,7 @@ type Finding struct {
 	IntentEvidence map[string]any
 
 	// Apply is the enforce instruction derived during the diff; nil when the
-	// finding is advisory-only (admin_pending types, intent-annotated drift).
+	// finding is advisory-only (requires_review types, intent-annotated drift).
 	// Never persisted.
 	Apply *ApplyAction `json:"-"`
 }
@@ -134,7 +131,7 @@ type ApplyAction struct {
 // finding whose identity AND plan both resolved unambiguously (applied
 // automatically in enforce mode). Identity comes from the engine's
 // existing matcher (a single vault/email match — zero or multiple candidates
-// keep the finding admin_pending), the plan from catalog provider_links (the
+// keep the finding requires_review), the plan from catalog provider_links (the
 // billable price whose processors[provider] ids carry the remote plan id).
 // The created subscription snapshots the product's entitlements/credits specs
 // like a normal signup, so entitlements flow through the ordinary

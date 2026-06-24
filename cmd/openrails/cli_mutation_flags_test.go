@@ -28,6 +28,9 @@ func TestMutationFlagsAreExposedOnOperatorCommands(t *testing.T) {
 					t.Fatalf("missing --%s", name)
 				}
 			}
+			if tt.name == "pull-provider" && tt.cmd.Flags().Lookup("log-dir") == nil {
+				t.Fatalf("pull-provider missing --log-dir")
+			}
 		})
 	}
 }

@@ -41,49 +41,46 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- Findings: stable-identity upsert + lifecycle
 -- ============================================================================
 
--- Re-runs UPDATE the standing finding for (merchant, provider, finding_type,
--- subject_key). A previously resolved/auto_fixed finding that reappears is
--- REOPENED with the freshly computed status; a dismissed finding stays
--- dismissed (an admin explicitly silenced this identity) but keeps counting
--- occurrences so the dismissal is auditable against reality.
+-- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
+-- A previously fixed/auto_fixed finding that reappears is
+-- REOPENED with the freshly computed status; an ignored finding stays ignored
+-- (an operator explicitly silenced this identity).
 -- name: UpsertReconciliationFinding :one
 INSERT INTO openrails.reconciliation_findings (
-    merchant_id, provider, finding_type, subject_key, severity, status,
-    requires_admin, recommended_action, local_evidence, remote_evidence,
-    intent_evidence, first_seen_run, last_seen_run
+    merchant_id, finding_type, subject_key, severity, status,
+    recommended_action, evidence, resolved_at, resolution,
+    first_seen_run, last_seen_run
 ) VALUES (
-    sqlc.arg(merchant_id), sqlc.arg(provider), sqlc.arg(finding_type),
-    sqlc.arg(subject_key), sqlc.arg(severity), sqlc.arg(status),
-    sqlc.arg(requires_admin), sqlc.narg(recommended_action),
-    sqlc.narg(local_evidence), sqlc.narg(remote_evidence),
-    sqlc.narg(intent_evidence), sqlc.arg(run_id), sqlc.arg(run_id)
+    sqlc.arg(merchant_id), sqlc.arg(finding_type), sqlc.arg(subject_key),
+    sqlc.arg(severity), sqlc.arg(status), sqlc.narg(recommended_action),
+    sqlc.narg(evidence)::jsonb,
+    CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN now() ELSE NULL END,
+    CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
+    sqlc.arg(run_id), sqlc.arg(run_id)
 )
-ON CONFLICT (merchant_id, provider, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN 'ignored'
         ELSE EXCLUDED.status
     END,
-    requires_admin = EXCLUDED.requires_admin,
     recommended_action = EXCLUDED.recommended_action,
-    local_evidence = EXCLUDED.local_evidence,
-    remote_evidence = EXCLUDED.remote_evidence,
-    intent_evidence = EXCLUDED.intent_evidence,
-    resolution_evidence = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution_evidence
-        ELSE NULL
+    evidence = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.evidence
+        ELSE EXCLUDED.evidence
     END,
     resolved_at = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolved_at
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolved_at
+        WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolution
+        WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
     last_seen_run = EXCLUDED.last_seen_run,
     last_seen_at = now(),
-    occurrence_count = openrails.reconciliation_findings.occurrence_count + 1,
     updated_at = now()
 RETURNING *;
 
@@ -93,79 +90,79 @@ SELECT * FROM openrails.reconciliation_findings WHERE id = $1;
 -- name: ListReconciliationFindings :many
 SELECT * FROM openrails.reconciliation_findings
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(provider)::text IS NULL OR evidence->>'provider' = sqlc.narg(provider)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR finding_type = sqlc.narg(finding_type)::text)
-  AND (NOT sqlc.arg(only_admin_queue)::boolean OR (requires_admin AND status = 'admin_pending'))
+  AND (NOT sqlc.arg(only_review_queue)::boolean OR status = 'requires_review')
 ORDER BY last_seen_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
--- name: ListOpenReconciliationFindingsByProvider :many
+-- name: ListActionableReconciliationFindingsByProvider :many
 SELECT * FROM openrails.reconciliation_findings
-WHERE provider = $1 AND status IN ('open', 'admin_pending')
+WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
 -- covering their provider "vanished on their own" (design decision 1).
 -- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE provider = sqlc.arg(provider)
-  AND status IN ('open', 'admin_pending')
+WHERE evidence->>'provider' = sqlc.arg(provider)
+  AND status IN ('reconcile_required', 'requires_review')
   AND last_seen_run <> sqlc.arg(run_id)
   AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
 
 -- PS-10 stuck-intent findings are provider-independent (the subject is the
 -- intent ledger; the finding carries the intent's own provider), so their
--- vanish sweep crosses providers: any open finding of the given types not
+-- vanish sweep crosses providers: any actionable finding of the given types not
 -- refreshed by the just-completed run recovered (the intent reached a
 -- terminal-good status or no longer meets the stuck criteria).
 -- name: AutoResolveVanishedReconciliationFindingsAllProviders :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE status IN ('open', 'admin_pending')
+WHERE status IN ('reconcile_required', 'requires_review')
   AND last_seen_run <> sqlc.arg(run_id)
   AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
 
 -- name: MarkReconciliationFindingVanished :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('open', 'admin_pending');
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
     resolution = 'enforced',
-    resolution_evidence = sqlc.narg(resolution_evidence),
+    evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true),
     resolved_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('open', 'admin_pending');
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: AckReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
-    resolution = 'admin_ack',
-    notes = sqlc.narg(notes),
+SET status = 'fixed',
+    resolution = 'admin_fixed',
+    operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('open', 'admin_pending', 'auto_fixed');
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
 
 -- name: DismissReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'dismissed',
-    resolution = 'dismissed',
-    notes = sqlc.narg(notes),
+SET status = 'ignored',
+    resolution = 'ignored',
+    operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('open', 'admin_pending', 'auto_fixed');
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
 -- ============================================================================
 -- Local-state reads for the diff engine

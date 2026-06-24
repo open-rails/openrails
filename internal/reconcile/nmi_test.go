@@ -2,8 +2,10 @@ package reconcile
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +124,13 @@ func TestNMIFetcher_Fetch(t *testing.T) {
 	require.Equal(t, ProviderNMI, snap.Provider)
 	require.True(t, snap.Capabilities.Subscriptions)
 	require.False(t, snap.Capabilities.Chargebacks)
+	require.True(t, snap.Coverage.SubscriptionsExhaustive)
+	require.True(t, snap.Coverage.TransactionsExhaustive)
+	require.True(t, snap.Coverage.TransactionsPaginatedComplete)
+	require.NotNil(t, snap.Coverage.TransactionWindowSince)
+	require.NotNil(t, snap.Coverage.TransactionWindowUntil)
+	require.True(t, snap.Coverage.TransactionWindowSince.Equal(since))
+	require.True(t, snap.Coverage.TransactionWindowUntil.Equal(until))
 
 	// Subscriptions: future next_charge_date => active, past => past_due.
 	require.Len(t, snap.Subscriptions, 2)
@@ -181,6 +190,8 @@ func TestNMIFetcher_Fetch(t *testing.T) {
 	txnReq := requests[1]
 	require.Equal(t, "20260501000000", txnReq["start_date"])
 	require.Equal(t, "20260611000000", txnReq["end_date"])
+	require.Equal(t, "1", txnReq["page_number"])
+	require.NotEmpty(t, txnReq["result_limit"])
 	// No condition filter: declines must be included.
 	require.NotContains(t, txnReq, "condition")
 }
@@ -194,6 +205,59 @@ func TestNMIFetcher_SubscriptionFilterForwarded(t *testing.T) {
 	_, err := fetcher.Fetch(context.Background(), FetchParams{SubscriptionID: "11494735091"})
 	require.NoError(t, err)
 	require.Equal(t, "11494735091", requests[0]["subscription_id"])
+}
+
+func TestNMIFetcher_PaginatesTransactions(t *testing.T) {
+	t.Parallel()
+
+	var txnPages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		switch r.Form.Get("report_type") {
+		case "recurring":
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+		case "transaction":
+			page := r.Form.Get("page_number")
+			txnPages = append(txnPages, page)
+			switch page {
+			case "1":
+				_, _ = w.Write([]byte(nmiTransactionPageXML(0, nmiQueryPageLimit)))
+			case "2":
+				_, _ = w.Write([]byte(nmiTransactionPageXML(nmiQueryPageLimit, 1)))
+			default:
+				t.Fatalf("unexpected transaction page %q", page)
+			}
+		case "customer_vault":
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><customer_vault></customer_vault></nm_response>`))
+		default:
+			t.Fatalf("unexpected report_type %q", r.Form.Get("report_type"))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+	require.NoError(t, err)
+	client.QueryURL = server.URL
+
+	snap, err := NewNMIFetcher(client).Fetch(context.Background(), FetchParams{
+		Since: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	require.Len(t, snap.Transactions, nmiQueryPageLimit+1)
+	require.Equal(t, []string{"1", "2"}, txnPages)
+	require.True(t, snap.Coverage.TransactionsPaginatedComplete)
+}
+
+func nmiTransactionPageXML(start, count int) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><nm_response>`)
+	for i := 0; i < count; i++ {
+		id := start + i
+		fmt.Fprintf(&b, `<transaction><transaction_id>txn_%04d</transaction_id><condition>complete</condition><currency>USD</currency><action><amount>1.00</amount><action_type>sale</action_type><date>20260501000000</date><success>1</success><response_code>100</response_code></action></transaction>`, id)
+	}
+	b.WriteString(`</nm_response>`)
+	return b.String()
 }
 
 func TestNMIFetcher_ErrorResponse(t *testing.T) {

@@ -69,15 +69,19 @@ func RenderRunTable(w io.Writer, run RunRecord, findings []FindingRecord) error 
 
 	fmt.Fprintf(w, "\nFindings (%d):\n", len(sorted))
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "SEVERITY\tTYPE\tPROVIDER\tSTATUS\tSUBJECT\tSEEN\tRECOMMENDED ACTION")
+	fmt.Fprintln(tw, "SEVERITY\tTYPE\tPROVIDER\tSTATUS\tSUBJECT\tLAST SEEN\tRECOMMENDED ACTION")
 	for _, f := range sorted {
 		action := f.RecommendedAction
 		if len(action) > 96 {
 			action = action[:93] + "..."
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\tx%d\t%s\n",
-			strings.ToUpper(string(f.Severity)), f.Type, f.Provider, f.Status,
-			truncate(f.SubjectKey, 40), f.OccurrenceCount, action)
+		provider := string(f.Provider)
+		if provider == "" {
+			provider = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			strings.ToUpper(string(f.Severity)), f.Type, provider, f.Status,
+			truncate(f.SubjectKey, 40), f.LastSeenAt.Format("2006-01-02 15:04:05"), action)
 	}
 	return tw.Flush()
 }
@@ -101,8 +105,8 @@ func renderSummaryTable(w io.Writer, summary *RunSummary) {
 		}
 		fmt.Fprintf(w, "  remote: %d subscriptions, %d transactions, %d vault entries; local: %d subscriptions\n",
 			rep.RemoteSubscriptions, rep.RemoteTransactions, rep.RemoteVaultEntries, rep.LocalSubscriptions)
-		fmt.Fprintf(w, "  findings: %d new, %d updated, %d admin-pending, %d auto-resolved, %d auto-fixed\n",
-			rep.NewFindings, rep.UpdatedFindings, rep.AdminPending, rep.AutoResolved, rep.AutoFixed)
+		fmt.Fprintf(w, "  findings: %d new, %d updated, %d requires-review, %d auto-resolved, %d auto-fixed\n",
+			rep.NewFindings, rep.UpdatedFindings, rep.AdminRequired, rep.AutoResolved, rep.AutoFixed)
 		if len(rep.FindingsByType) > 0 {
 			types := make([]string, 0, len(rep.FindingsByType))
 			for t := range rep.FindingsByType {
@@ -132,8 +136,8 @@ func renderSummaryTable(w io.Writer, summary *RunSummary) {
 // intent type, then one line per stuck intent. Callers skip it entirely when
 // nothing is stuck.
 func renderStuckIntents(w io.Writer, rep *StuckIntentReport) {
-	fmt.Fprintf(w, "\nStuck provider intents (%d): %d admin-queued, %d mode-parked (informational), %d auto-resolved\n",
-		rep.Total, rep.AdminQueued, rep.ModeParked, rep.AutoResolved)
+	fmt.Fprintf(w, "\nStuck provider intents (%d): %d requires-review, %d mode-parked (informational), %d auto-resolved\n",
+		rep.Total, rep.AdminRequired, rep.ModeParked, rep.AutoResolved)
 	if len(rep.ByIntentType) > 0 {
 		types := make([]string, 0, len(rep.ByIntentType))
 		for t := range rep.ByIntentType {

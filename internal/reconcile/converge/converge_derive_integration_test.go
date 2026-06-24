@@ -157,7 +157,7 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 }
 
 // derive.grant.excess (grant tier): a LIVE grant whose backing payment was
-// REFUNDED is surfaced as ADMIN (admin_pending) — surface-only, never
+// REFUNDED is surfaced for review — surface-only, never
 // auto-retracted (a goodwill refund may intentionally keep access). Idempotent.
 func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 	appDB := startReconcilePostgres(t)
@@ -212,7 +212,7 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status, severity FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.excess' AND subject_key=$2`,
 			merchantID, "grant:"+grantID.String()).Scan(&status, &sev))
-		require.Equal(t, "admin_pending", status, "refunded-payment grant surfaced for operator triage")
+		require.Equal(t, "requires_review", status, "refunded-payment grant surfaced for operator triage")
 
 		// Surface-only: the grant is NOT auto-terminated.
 		terminated, err := appDB.Gen(ctx).IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: merchantID, GrantID: grantID})

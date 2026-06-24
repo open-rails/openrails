@@ -14,21 +14,21 @@ import (
 
 const ackReconciliationFinding = `-- name: AckReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
-    resolution = 'admin_ack',
-    notes = $1,
+SET status = 'fixed',
+    resolution = 'admin_fixed',
+    operator_notes = $1,
     resolved_at = now(),
     updated_at = now()
-WHERE id = $2 AND status IN ('open', 'admin_pending', 'auto_fixed')
+WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed')
 `
 
 type AckReconciliationFindingParams struct {
-	Notes *string
-	ID    uuid.UUID
+	OperatorNotes *string
+	ID            uuid.UUID
 }
 
 func (q *Queries) AckReconciliationFinding(ctx context.Context, arg AckReconciliationFindingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, ackReconciliationFinding, arg.Notes, arg.ID)
+	result, err := q.db.Exec(ctx, ackReconciliationFinding, arg.OperatorNotes, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -37,18 +37,18 @@ func (q *Queries) AckReconciliationFinding(ctx context.Context, arg AckReconcili
 
 const autoResolveVanishedReconciliationFindings = `-- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE provider = $1
-  AND status IN ('open', 'admin_pending')
+WHERE evidence->>'provider' = $1
+  AND status IN ('reconcile_required', 'requires_review')
   AND last_seen_run <> $2
   AND finding_type = ANY ($3::text[])
 `
 
 type AutoResolveVanishedReconciliationFindingsParams struct {
-	Provider     string
+	Provider     *string
 	RunID        uuid.UUID
 	FindingTypes []string
 }
@@ -65,11 +65,11 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 
 const autoResolveVanishedReconciliationFindingsAllProviders = `-- name: AutoResolveVanishedReconciliationFindingsAllProviders :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE status IN ('open', 'admin_pending')
+WHERE status IN ('reconcile_required', 'requires_review')
   AND last_seen_run <> $1
   AND finding_type = ANY ($2::text[])
 `
@@ -81,7 +81,7 @@ type AutoResolveVanishedReconciliationFindingsAllProvidersParams struct {
 
 // PS-10 stuck-intent findings are provider-independent (the subject is the
 // intent ledger; the finding carries the intent's own provider), so their
-// vanish sweep crosses providers: any open finding of the given types not
+// vanish sweep crosses providers: any actionable finding of the given types not
 // refreshed by the just-completed run recovered (the intent reached a
 // terminal-good status or no longer meets the stuck criteria).
 func (q *Queries) AutoResolveVanishedReconciliationFindingsAllProviders(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsAllProvidersParams) (int64, error) {
@@ -146,21 +146,21 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 
 const dismissReconciliationFinding = `-- name: DismissReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'dismissed',
-    resolution = 'dismissed',
-    notes = $1,
+SET status = 'ignored',
+    resolution = 'ignored',
+    operator_notes = $1,
     resolved_at = now(),
     updated_at = now()
-WHERE id = $2 AND status IN ('open', 'admin_pending', 'auto_fixed')
+WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed')
 `
 
 type DismissReconciliationFindingParams struct {
-	Notes *string
-	ID    uuid.UUID
+	OperatorNotes *string
+	ID            uuid.UUID
 }
 
 func (q *Queries) DismissReconciliationFinding(ctx context.Context, arg DismissReconciliationFindingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, dismissReconciliationFinding, arg.Notes, arg.ID)
+	result, err := q.db.Exec(ctx, dismissReconciliationFinding, arg.OperatorNotes, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -222,7 +222,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
@@ -231,27 +231,20 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.Provider,
 		&i.FindingType,
 		&i.SubjectKey,
 		&i.Severity,
 		&i.Status,
-		&i.RequiresAdmin,
 		&i.RecommendedAction,
-		&i.LocalEvidence,
-		&i.RemoteEvidence,
-		&i.IntentEvidence,
-		&i.ResolutionEvidence,
 		&i.FirstSeenRun,
 		&i.LastSeenRun,
-		&i.FirstSeenAt,
 		&i.LastSeenAt,
-		&i.OccurrenceCount,
 		&i.ResolvedAt,
 		&i.Resolution,
-		&i.Notes,
+		&i.OperatorNotes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Evidence,
 	)
 	return i, err
 }
@@ -343,6 +336,49 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 			&i.IntentType,
 			&i.Status,
 			&i.Provider,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings
+WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
+ORDER BY finding_type, subject_key
+`
+
+func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Context, evidence *string) ([]OpenrailsReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listActionableReconciliationFindingsByProvider, evidence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsReconciliationFinding
+	for rows.Next() {
+		var i OpenrailsReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
 		); err != nil {
 			return nil, err
 		}
@@ -471,56 +507,6 @@ func (q *Queries) ListGraceExhaustedSubscriptions(ctx context.Context, arg ListG
 	return items, nil
 }
 
-const listOpenReconciliationFindingsByProvider = `-- name: ListOpenReconciliationFindingsByProvider :many
-SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
-WHERE provider = $1 AND status IN ('open', 'admin_pending')
-ORDER BY finding_type, subject_key
-`
-
-func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, provider string) ([]OpenrailsReconciliationFinding, error) {
-	rows, err := q.db.Query(ctx, listOpenReconciliationFindingsByProvider, provider)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsReconciliationFinding
-	for rows.Next() {
-		var i OpenrailsReconciliationFinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Provider,
-			&i.FindingType,
-			&i.SubjectKey,
-			&i.Severity,
-			&i.Status,
-			&i.RequiresAdmin,
-			&i.RecommendedAction,
-			&i.LocalEvidence,
-			&i.RemoteEvidence,
-			&i.IntentEvidence,
-			&i.ResolutionEvidence,
-			&i.FirstSeenRun,
-			&i.LastSeenRun,
-			&i.FirstSeenAt,
-			&i.LastSeenAt,
-			&i.OccurrenceCount,
-			&i.ResolvedAt,
-			&i.Resolution,
-			&i.Notes,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPeriodOverdueSubscriptions = `-- name: ListPeriodOverdueSubscriptions :many
 SELECT id, current_period_ends_at FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
@@ -565,22 +551,22 @@ func (q *Queries) ListPeriodOverdueSubscriptions(ctx context.Context, arg ListPe
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR provider = $2::text)
+  AND ($2::text IS NULL OR evidence->>'provider' = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
-  AND (NOT $4::boolean OR (requires_admin AND status = 'admin_pending'))
+  AND (NOT $4::boolean OR status = 'requires_review')
 ORDER BY last_seen_at DESC, id
 LIMIT $6 OFFSET $5
 `
 
 type ListReconciliationFindingsParams struct {
-	Status         *string
-	Provider       *string
-	FindingType    *string
-	OnlyAdminQueue bool
-	PageOffset     int64
-	PageLimit      int64
+	Status          *string
+	Provider        *string
+	FindingType     *string
+	OnlyReviewQueue bool
+	PageOffset      int64
+	PageLimit       int64
 }
 
 func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconciliationFindingsParams) ([]OpenrailsReconciliationFinding, error) {
@@ -588,7 +574,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 		arg.Status,
 		arg.Provider,
 		arg.FindingType,
-		arg.OnlyAdminQueue,
+		arg.OnlyReviewQueue,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -602,27 +588,20 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
-			&i.Provider,
 			&i.FindingType,
 			&i.SubjectKey,
 			&i.Severity,
 			&i.Status,
-			&i.RequiresAdmin,
 			&i.RecommendedAction,
-			&i.LocalEvidence,
-			&i.RemoteEvidence,
-			&i.IntentEvidence,
-			&i.ResolutionEvidence,
 			&i.FirstSeenRun,
 			&i.LastSeenRun,
-			&i.FirstSeenAt,
 			&i.LastSeenAt,
-			&i.OccurrenceCount,
 			&i.ResolvedAt,
 			&i.Resolution,
-			&i.Notes,
+			&i.OperatorNotes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Evidence,
 		); err != nil {
 			return nil, err
 		}
@@ -751,10 +730,10 @@ const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAu
 UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
     resolution = 'enforced',
-    resolution_evidence = $1,
+    evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $1::jsonb, true),
     resolved_at = now(),
     updated_at = now()
-WHERE id = $2 AND status IN ('open', 'admin_pending')
+WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
 `
 
 type MarkReconciliationFindingAutoFixedParams struct {
@@ -772,11 +751,11 @@ func (q *Queries) MarkReconciliationFindingAutoFixed(ctx context.Context, arg Ma
 
 const markReconciliationFindingVanished = `-- name: MarkReconciliationFindingVanished :execrows
 UPDATE openrails.reconciliation_findings
-SET status = 'resolved',
+SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE id = $1 AND status IN ('open', 'admin_pending')
+WHERE id = $1 AND status IN ('reconcile_required', 'requires_review')
 `
 
 func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -1530,109 +1509,91 @@ func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscript
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 
 INSERT INTO openrails.reconciliation_findings (
-    merchant_id, provider, finding_type, subject_key, severity, status,
-    requires_admin, recommended_action, local_evidence, remote_evidence,
-    intent_evidence, first_seen_run, last_seen_run
+    merchant_id, finding_type, subject_key, severity, status,
+    recommended_action, evidence, resolved_at, resolution,
+    first_seen_run, last_seen_run
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
-    $7, $8,
-    $9, $10,
-    $11, $12, $12
+    $7::jsonb,
+    CASE WHEN $5::text = 'auto_fixed' THEN now() ELSE NULL END,
+    CASE WHEN $5::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
+    $8, $8
 )
-ON CONFLICT (merchant_id, provider, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN 'ignored'
         ELSE EXCLUDED.status
     END,
-    requires_admin = EXCLUDED.requires_admin,
     recommended_action = EXCLUDED.recommended_action,
-    local_evidence = EXCLUDED.local_evidence,
-    remote_evidence = EXCLUDED.remote_evidence,
-    intent_evidence = EXCLUDED.intent_evidence,
-    resolution_evidence = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution_evidence
-        ELSE NULL
+    evidence = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.evidence
+        ELSE EXCLUDED.evidence
     END,
     resolved_at = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolved_at
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolved_at
+        WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolution
+        WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
     last_seen_run = EXCLUDED.last_seen_run,
     last_seen_at = now(),
-    occurrence_count = openrails.reconciliation_findings.occurrence_count + 1,
     updated_at = now()
-RETURNING id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at
+RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence
 `
 
 type UpsertReconciliationFindingParams struct {
 	MerchantID        uuid.UUID
-	Provider          string
 	FindingType       string
 	SubjectKey        string
 	Severity          string
 	Status            string
-	RequiresAdmin     bool
 	RecommendedAction *string
-	LocalEvidence     []byte
-	RemoteEvidence    []byte
-	IntentEvidence    []byte
+	Evidence          []byte
 	RunID             uuid.UUID
 }
 
 // ============================================================================
 // Findings: stable-identity upsert + lifecycle
 // ============================================================================
-// Re-runs UPDATE the standing finding for (merchant, provider, finding_type,
-// subject_key). A previously resolved/auto_fixed finding that reappears is
-// REOPENED with the freshly computed status; a dismissed finding stays
-// dismissed (an admin explicitly silenced this identity) but keeps counting
-// occurrences so the dismissal is auditable against reality.
+// Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
+// A previously fixed/auto_fixed finding that reappears is
+// REOPENED with the freshly computed status; an ignored finding stays ignored
+// (an operator explicitly silenced this identity).
 func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertReconciliationFindingParams) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, upsertReconciliationFinding,
 		arg.MerchantID,
-		arg.Provider,
 		arg.FindingType,
 		arg.SubjectKey,
 		arg.Severity,
 		arg.Status,
-		arg.RequiresAdmin,
 		arg.RecommendedAction,
-		arg.LocalEvidence,
-		arg.RemoteEvidence,
-		arg.IntentEvidence,
+		arg.Evidence,
 		arg.RunID,
 	)
 	var i OpenrailsReconciliationFinding
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.Provider,
 		&i.FindingType,
 		&i.SubjectKey,
 		&i.Severity,
 		&i.Status,
-		&i.RequiresAdmin,
 		&i.RecommendedAction,
-		&i.LocalEvidence,
-		&i.RemoteEvidence,
-		&i.IntentEvidence,
-		&i.ResolutionEvidence,
 		&i.FirstSeenRun,
 		&i.LastSeenRun,
-		&i.FirstSeenAt,
 		&i.LastSeenAt,
-		&i.OccurrenceCount,
 		&i.ResolvedAt,
 		&i.Resolution,
-		&i.Notes,
+		&i.OperatorNotes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Evidence,
 	)
 	return i, err
 }

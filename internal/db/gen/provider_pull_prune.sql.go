@@ -16,7 +16,10 @@ const listExcessPaymentsForProviderAccount = `-- name: ListExcessPaymentsForProv
 SELECT id FROM openrails.payments
 WHERE merchant_id = $1::uuid
   AND provider_account_id = $2::uuid
-  AND transaction_id <> ALL($3::text[])
+  AND (
+    COALESCE(cardinality($3::text[]), 0) = 0
+    OR transaction_id <> ALL($3::text[])
+  )
   AND ($4::timestamptz IS NULL OR purchased_at >= $4::timestamptz)
   AND ($5::timestamptz IS NULL OR purchased_at <= $5::timestamptz)
 `
@@ -63,7 +66,10 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND provider_account_id = $2::uuid
   AND processor_subscription_id <> ''
-  AND processor_subscription_id <> ALL($3::text[])
+  AND (
+    COALESCE(cardinality($3::text[]), 0) = 0
+    OR processor_subscription_id <> ALL($3::text[])
+  )
 `
 
 type ListExcessSubscriptionsForProviderAccountParams struct {

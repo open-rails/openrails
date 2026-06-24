@@ -216,21 +216,27 @@ WHERE sub.status = 'cancelled'
 -- name: ListSilentLapsedSubscriptions :many
 -- Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
 -- subscriptions on provider-truth-probeable processors whose period lapsed
--- past the probe slack with NO signal either way: no renewal (the period
--- would have advanced), no failure webhook (status would be past_due — that
--- cohort is dunning's, excluded here), and no payment recorded at/after the
--- period end. Re-derived every pass, so an unreachable provider needs no
--- durable read-queue: unchanged state simply reappears next cycle.
+-- past the probe slack, or whose imported period evidence is missing, with NO
+-- signal either way: no renewal (the period would have advanced), no failure
+-- webhook (status would be past_due — that cohort is dunning's, excluded here),
+-- and no payment recorded at/after the period end when a period end exists.
+-- Re-derived every pass, so an unreachable provider needs no durable read-queue:
+-- unchanged state simply reappears next cycle.
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
   AND sub.status = 'active'
-  AND sub.current_period_ends_at IS NOT NULL
-  AND sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
+  AND (
+    sub.current_period_ends_at IS NULL
+    OR sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
+  )
   AND NOT EXISTS (
     SELECT 1 FROM openrails.payments p
     WHERE p.subscription_id = sub.id
       AND p.status = 'completed'
-      AND p.purchased_at >= sub.current_period_ends_at
+      AND (
+        sub.current_period_ends_at IS NULL
+        OR p.purchased_at >= sub.current_period_ends_at
+      )
   );
 
 -- name: GetLatestResumableCancelledSubscription :one

@@ -7,7 +7,169 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 570
+next_id: 575
+
+---
+
+# #574: Expand subscription liveness into always-on Provider Refresh
+
+**Completed:** yes
+**Status:** DONE 2026-06-24 (Codex). Provider Refresh now wraps subscription liveness, bounded provider event windows, CCBill DataLink, durable watermarks, and scoped post-refresh convergence. The scheduled job runs on startup and every 4 hours. Failed provider reads record the attempt without advancing the watermark. Existing reconcile writers backfill charges/refunds and local terminal subscription state; chargebacks remain human-review findings. Imported active subscriptions with missing local period evidence now enter the liveness lane and are corrected from provider truth instead of being skipped forever. `pull-provider` stays the manual full-batch/operator command.
+
+## Proposed Changes
+- Rename/reframe the scheduled provider-read system as **Provider Refresh**.
+- Keep `ConvergeEngine` local-only. Provider Refresh performs provider reads, updates local truth, then triggers scoped convergence for touched subscriptions/customers or merchant-wide when needed.
+- Keep `Subscription Liveness Refresh` as the state lane inside Provider Refresh. It handles stale/silent subscription state: provider charged, declined, still alive with future billing, gone/terminal, or unreachable.
+- Add a **Provider Event Refresh** lane for missed webhook/event backfill: recent payments, refunds, chargebacks/disputes, subscription cancellations/expirations, and other provider events OpenRails can safely read.
+- Run Provider Refresh on startup and every 4 hours. If a provider is unavailable, unconfigured, credential-mismatched, or temporarily down, leave local state unchanged, record/log the failure, and retry on the next pass.
+- Add durable per-merchant/provider/account/domain watermarks for event refresh. Advance a watermark only after a provider/window completes successfully. Never advance on partial fetch, provider error, pagination failure, or credential/account mismatch.
+- Process old watermarks in bounded windows, not one giant catch-up call. Example: `next_window_end = min(watermark + 24h, now - safety_lag)`. Successful windows advance; failed windows retry unchanged.
+- Extend liveness coverage for imported legacy rows that are active but stale/unknown, including rows with missing or stale period data. The importer should preserve legacy facts; Provider Refresh should fill the days/months gap after a stale dump.
+- Use provider-specific refresh strategies:
+  - NMI/Stripe: per-subscription liveness probes plus event-window backfill.
+  - CCBill: scheduled DataLink bulk refresh, because there is no cheap per-record liveness API.
+  - Solana: keep the cranker/reconcile path as the provider-refresh equivalent for on-chain recurring state.
+- Keep remote provider writes out of Provider Refresh. Outbound mutations stay in the provider intent ledger.
+
+## Tasks
+- [x] Introduce Provider Refresh naming in worker/docs/logs while preserving the existing subscription liveness behavior.
+- [x] Add a Provider Refresh scheduler wrapper that runs on startup and every 4 hours, with one heartbeat summary across lanes.
+- [x] Move or wrap the current `SubscriptionLivenessWorker` as the `Subscription Liveness Refresh` lane.
+- [x] Add durable provider event watermarks keyed by merchant, provider, provider account, and event domain.
+- [x] Implement bounded event-window refresh with no watermark advancement on failed/partial provider reads.
+- [x] Backfill missed provider events into local payments/refunds/disputes/subscription terminal state using existing idempotent writers.
+- [x] Extend the subscription liveness cohort to include imported active rows whose provider truth is stale or unknown, including missing/stale period evidence.
+- [x] Add CCBill DataLink bulk refresh to the scheduled Provider Refresh path.
+- [x] After refresh writes, run scoped convergence for affected subjects so entitlements/grants/derived state follow refreshed truth.
+- [x] Update operations docs to distinguish Provider Refresh, Subscription Liveness Refresh, Provider Event Refresh, and manual `pull-provider`.
+- [x] Add focused tests for startup scheduling, provider-unavailable retry, watermark non-advancement, bounded catch-up, and stale legacy import catch-up.
+
+Validation: `task sqlc`; `go test ./internal/app ./internal/river ./internal/db/repo ./internal/migrate ./migrations/postgres`; `go test -tags=integration ./internal/river -count=1`; `git diff --check`.
+
+## Acceptance
+- A stale legacy dump imported days or months after export can be corrected automatically without an operator running `pull-provider`.
+- Provider Refresh runs on startup and every 4 hours.
+- Provider outages or missing credentials never mutate local billing state and never advance event watermarks.
+- Missed webhook/event data catches up automatically from the last successful watermark in bounded windows.
+- Subscription liveness remains read-only at the provider and can repair stale active subscriptions by reading provider truth.
+- `pull-provider` remains available as the manual full-surface batch operation, but routine provider catch-up does not depend on it.
+- `ConvergeEngine` remains local-only; network/provider reads live only in Provider Refresh lanes.
+
+---
+
+# #573: Simplify reconciliation findings ledger shape
+
+**Completed:** yes
+**Status:** DONE 2026-06-24 (Codex). The `openrails.reconciliation_findings` ledger now uses the simplified workflow/schema shape. The table no longer needs `provider='self'`, `requires_admin`, split evidence columns, `first_seen_at`, or `occurrence_count`; provider context lives in `evidence.provider` only for provider-backed findings, and old rows migrate into nested `evidence` payloads. Human-review rows use `requires_review`, terminal rows require `resolved_at` plus a resolution reason, and CLI/log/report output now uses the new review vocabulary.
+
+## Proposed Changes
+- Drop `requires_admin`; status owns workflow. Rename the human-review state to `requires_review` and index that status directly for fast queue reads.
+- Drop top-level `provider` unless a concrete `pull.*` consumer still needs it. Prefer encoding provider/account identity into `subject_key` and/or `evidence` for `pull.*` findings. Internal `derive.*`, `life.*`, and `consistency.*` findings should not need a `self` sentinel.
+- Collapse `local_evidence`, `remote_evidence`, `intent_evidence`, and `resolution_evidence` into one nullable `evidence jsonb`. Use nested keys (`local`, `remote`, `intent`, `resolution`) only when a finding actually has those distinct payloads.
+- Drop `first_seen_at`; it duplicates `created_at` and/or `first_seen_run -> reconciliation_runs.started_at`.
+- Decide `last_seen_at` based on run integrity: keep it only as a denormalized queue sort column, or drop it after making `first_seen_run` / `last_seen_run` real foreign keys and deriving dates from runs.
+- Drop `occurrence_count` unless a real alert/escalation rule uses it. `first_seen_run` and `last_seen_run` are enough to tell whether the same finding reappeared across runs.
+- Keep `resolved_at`, and make it mandatory-by-invariant for terminal statuses such as `auto_fixed`, `fixed`, and `ignored`. Backfill existing terminal rows.
+- Review `resolution` and `notes`: keep one nullable operator-facing text field (`operator_notes`) for manual review, and keep a separate machine-readable resolution reason only if reports need multiple reasons under the same terminal status.
+
+## Tasks
+- [x] Inventory current writer/reader usage of every reconciliation finding column and identify generated sqlc/API/report structs that need a shape change.
+- [x] Add a migration that backfills terminal rows with `resolved_at`, rewrites evidence into `evidence jsonb`, and removes redundant columns in one narrow pass.
+- [x] Update the unique identity/indexes after removing `provider`; likely `UNIQUE (merchant_id, finding_type, subject_key)`.
+- [x] Rename the human-review status (`admin_pending` / `admin_required`) to `requires_review`.
+- [x] Update admin/review queue queries to filter by status only; no `requires_admin` predicate.
+- [x] Add/replace the review queue partial index so `WHERE status = 'requires_review'` is fast.
+- [x] Update convergence and provider-pull writers to populate the simplified evidence shape and terminal `resolved_at`.
+- [x] Update CLI/report/API output labels so operators still see payment IDs, customer/product identifiers, provider details for `pull.*`, and manual notes where relevant.
+- [x] Regenerate sqlc and update focused tests for migration, finding upsert/reopen behavior, terminal timestamps, review queue filtering, and evidence payloads.
+
+Validation: `go test ./cmd/openrails ./internal/migrate ./internal/reconcile ./internal/reconcile/converge ./internal/river`; `go test -tags=integration ./internal/reconcile ./internal/reconcile/converge ./internal/river`; `task sqlc`; `git diff --check`.
+
+## Acceptance
+- No reconciliation finding row needs `provider='self'`, `requires_admin`, four separate evidence columns, `first_seen_at`, or `occurrence_count`.
+- `auto_fixed`, `fixed`, and `ignored` findings always have `resolved_at`.
+- Human-review findings still carry the evidence needed to act, especially duplicate-charge payment IDs, amounts, customer, product, provider/account context, and timestamps.
+- Review/admin queue behavior is fully determined by `status = 'requires_review'`, with no boolean mirror.
+- Existing rows migrate deterministically without losing useful evidence.
+
+---
+
+# #572: Harden provider-pull prune with snapshot completeness guarantees
+
+**Completed:** yes
+**Status:** DONE 2026-06-24 (Codex). `openrails pull-provider --prune` stays a single operator flag, but internally it now prunes only domains whose provider snapshot is provably complete for the relevant scope. Subscription prune requires an exhaustive provider roster. Payment prune requires a complete paginated transaction export for the exact `[since, until]` window. Unsafe domains are counted as `skipped`, and the `.log` keeps specific skip reasons such as `snapshot_not_complete`, `protected_dependents`, or `grant_ledger_entangled`.
+
+## Proposed Changes
+- Added an explicit provider snapshot completeness contract to `reconcile.RemoteSnapshot`, with per-domain coverage for subscription roster completeness, transaction window `since/until`, and completed pagination.
+- `--prune` checks the contract before deleting. A domain that lacks proof is skipped, never deleted.
+- Kept one `--prune` flag. Internally, subscriptions prune only when the subscription roster is exhaustive, and payments prune only when transaction export coverage is exhaustive for the same `[since, until]` window.
+- Hardened NMI by paging `SearchTransactions` with `result_limit`/`page_number` and paging recurring subscription queries.
+- Kept local dependency safety gates: rows absent from the provider but entangled with grants/refunds/checkout sessions remain skipped rather than hard-deleted.
+- Pull-provider stdout summarizes prune `deleted` / `skipped` by table, while the `.log` records specific reasons such as `snapshot_not_complete`, `protected_dependents`, or `grant_ledger_entangled`.
+- Added tests for Stripe coverage metadata, NMI paginated completeness, incomplete snapshot refusal, bounded payment-window prune, and skipped-reason logging.
+
+## Tasks
+- [x] Add per-domain snapshot coverage/completeness fields and propagate them from each provider fetcher.
+- [x] Implement NMI transaction pagination with deterministic `result_limit` / `page_number` looping.
+- [x] Decide and implement NMI recurring subscription pagination or a documented proof that the report is exhaustive without pagination.
+- [x] Make prune refuse deletes for domains without completeness proof, while still logging skipped counts/reasons.
+- [x] Preserve the single `--prune` flag and update stdout/log summaries to show `deleted` / `skipped` by table.
+- [x] Add focused unit and integration coverage for completeness gates, window scoping, NMI pagination, and account-bound prune isolation.
+
+Validation: `go test ./cmd/openrails ./internal/reconcile`; `go test -tags=integration ./internal/reconcile -run 'TestPruneProviderAccountExcess' -count=1`; `go test ./cmd/openrails ./internal/migrate ./internal/reconcile ./internal/river`; `task sqlc`; `git diff --check`.
+
+## Acceptance
+- `--prune` never deletes payments unless the provider transaction snapshot is complete for the exact local payment window being considered.
+- `--prune` never deletes subscriptions unless the provider subscription snapshot is an exhaustive roster for that provider account.
+- Incomplete provider coverage results in `skipped`, not deletion, with row/domain-level reasons in the `.log`.
+- Stripe keeps paginated prune behavior over bounded windows; NMI prune is safe against truncated first-page exports.
+- Pulls for separate provider accounts, including two Stripe accounts, remain isolated by `provider_account_id`; null-bound legacy rows are not pruned.
+
+---
+
+# #571: Pull-provider writes operator change-log artifact
+
+**Completed:** yes
+**Status:** DONE 2026-06-24 (Codex). `openrails pull-provider` no longer dumps the detailed audit to stdout. Each run writes a plain `.log` file under `--log-dir` (default `openrails-pull-provider-logs`) with timestamped logfmt-style events for run metadata, findings, planned local mutations, applied local mutations, prune deletes/skips, converge results, and final summary. Stdout now stays concise: run id/status, finding status counts, planned/applied row counts by table and operation, converge counts, and the log path.
+
+## Tasks
+- [x] Add a default pull-provider `.log` path with an override flag.
+- [x] Include provider-pull run metadata, findings, planned local mutations, applied local mutations, prune deletions, and post-pull converge summary as one-line log events.
+- [x] Make stdout concise: run id, findings counts, created/updated/deleted row counts by table, converge counts, and log path.
+- [x] Cover the artifact writer / summary behavior with focused tests and run targeted validation.
+
+Validation: `go test ./cmd/openrails ./internal/migrate ./internal/reconcile ./internal/river`; `go test -tags=integration ./internal/reconcile -run TestPruneProviderAccountExcess -count=1`; `git diff --check`.
+
+---
+
+# #570: Rename reconciliation finding lifecycle statuses to product workflow terms
+
+**Completed:** yes
+**Status:** DONE 2026-06-24 (Codex). User-facing finding lifecycle names now match the actual operator workflow and avoid ambiguous limbo states. Replaced the old status vocabulary:
+- `resolved` -> `fixed`
+- `dismissed` -> `ignored`
+- `held` -> `reconcile_required`
+- `admin_pending` -> `admin_required`
+- eliminate `open` as an emitted standing state; findings that previously landed as `open` must be classified as either `reconcile_required` when blocked on source/provider reconciliation, or `admin_required` when a human/operator must act.
+
+Keep `auto_fixed` as the automatic-repair status. `fixed` and `auto_fixed` must retain structured resolution evidence describing what changed or why the finding no longer applies. Existing `resolution` values should be reviewed/renamed where needed so reports can distinguish `auto_vanished`, `enforced`, admin-confirmed repair, and ignored findings without relying on vague status names.
+
+## Tasks
+- [x] Define the canonical status set and transition rules: `auto_fixed`, `reconcile_required`, `admin_required`, `fixed`, `ignored`.
+- [x] Update Postgres constraints and migrations without losing existing rows; map old values to new values during migration.
+- [x] Update sqlc queries/generated code and reconciliation store helpers so dismissed/ignored identities stay ignored across reruns, while fixed/auto_fixed findings reopen if the same issue reappears.
+- [x] Update convergence engine status returns: confirmed-absence gate returns `reconcile_required`; human/operator findings return `admin_required`; no path should emit `open`.
+- [x] Ensure `auto_fixed` and `fixed` rows carry `resolution_evidence` or equivalent structured context describing the local repair, admin repair, or vanished condition.
+- [x] Update CLI/admin report filters, labels, and tests to use the new vocabulary.
+- [x] Verify with focused reconciliation/convergence tests plus build/sqlc gates.
+
+Validation: `task sqlc`; `go test ./internal/migrate ./internal/reconcile ./internal/river`; `go test -tags=integration ./internal/reconcile`; `go test -tags=integration ./internal/reconcile/converge ./internal/river`; `git diff --check`. Added a migration rewrite regression for `025_reconciliation_status_workflow_terms.up.sql` so configured Postgres schema names still relocate the canonical `openrails` qualifiers before apply.
+
+## Acceptance
+- No active code path writes `open`, `resolved`, `dismissed`, `held`, or `admin_pending` as a reconciliation finding status.
+- Existing DB rows migrate deterministically to the new terms.
+- Repeated sightings of an ignored finding remain ignored and increment recurrence metadata; repeated sightings of fixed/auto_fixed findings reopen with the newly computed status.
+- Operators can tell from status plus resolution evidence what was automatically fixed, what needs reconcile first, what requires admin action, what was fixed, and what was intentionally ignored.
 
 ---
 

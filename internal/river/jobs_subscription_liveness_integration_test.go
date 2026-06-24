@@ -283,6 +283,34 @@ func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
 	assert.Zero(t, f.directPostHits.Load(), "the liveness worker must never send a provider mutation")
 }
 
+// TestLivenessWorker_MissingPeriodStillProbesProvider (#574): legacy imports can
+// carry an active provider subscription without trustworthy local period
+// evidence. The liveness lane must still ask the provider instead of skipping
+// forever; with no period boundary it uses recurring liveness only.
+func TestLivenessWorker_MissingPeriodStillProbesProvider(t *testing.T) {
+	f := newLivenessFixture(t, models.ProcessorMobius, 36*time.Hour)
+	nextCharge := time.Now().UTC().Add(72 * time.Hour).Format("2006-01-02")
+	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
+<nm_response>
+  <subscription>
+    <subscription_id>%s</subscription_id>
+    <next_charge_date>%s</next_charge_date>
+  </subscription>
+</nm_response>`, f.procSubID, nextCharge)
+	_, err := f.pool.Exec(context.Background(), `UPDATE openrails.subscriptions SET current_period_ends_at = NULL WHERE id = $1`, f.subID)
+	require.NoError(t, err)
+
+	f.run(t)
+
+	status, periodEnd, _, _ := f.subRow(t)
+	assert.Equal(t, string(models.StatusActive), status)
+	require.NotNil(t, periodEnd)
+	wantEnd, err := time.ParseInLocation("2006-01-02", nextCharge, time.UTC)
+	require.NoError(t, err)
+	assert.True(t, periodEnd.Equal(wantEnd), "missing-period legacy row should adopt provider next billing date")
+	assert.Zero(t, f.directPostHits.Load(), "the liveness worker must never send a provider mutation")
+}
+
 // TestLivenessWorker_RemoteAbsentCancelsAndRevokes (#367): the recurring
 // report no longer lists the subscription (at NMI that IS terminal) — cancel
 // locally + revoke subscription-sourced entitlements. No remote delete, no

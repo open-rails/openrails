@@ -148,6 +148,30 @@ type RemoteSnapshot struct {
 	Transactions      []RemoteTransaction  `json:"transactions"`
 	VaultEntries      []RemoteVaultEntry   `json:"vault_entries"`
 	Capabilities      Capabilities         `json:"capabilities"`
+	Coverage          SnapshotCoverage     `json:"coverage"`
+}
+
+// SnapshotCoverage says which provider domains were exhaustively covered by a
+// fetch. Prune must use this contract rather than inferring completeness from
+// non-empty arrays: transaction absence only means anything inside the exact
+// covered window, and only after all provider pages have been read.
+type SnapshotCoverage struct {
+	SubscriptionsExhaustive       bool       `json:"subscriptions_exhaustive,omitempty"`
+	TransactionsExhaustive        bool       `json:"transactions_exhaustive,omitempty"`
+	TransactionsPaginatedComplete bool       `json:"transactions_paginated_complete,omitempty"`
+	TransactionWindowSince        *time.Time `json:"transaction_window_since,omitempty"`
+	TransactionWindowUntil        *time.Time `json:"transaction_window_until,omitempty"`
+}
+
+func (c SnapshotCoverage) CanPruneSubscriptions() bool {
+	return c.SubscriptionsExhaustive
+}
+
+func (c SnapshotCoverage) CanPruneTransactions() bool {
+	return c.TransactionsExhaustive &&
+		c.TransactionsPaginatedComplete &&
+		c.TransactionWindowSince != nil &&
+		c.TransactionWindowUntil != nil
 }
 
 // FetchParams bounds a fetch. Since/Until constrain the transaction window

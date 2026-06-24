@@ -110,16 +110,14 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Subscription: &subID})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 1, res.AdminQueued, "abandoned intent is surfaced, not auto-fixed")
+		require.Equal(t, 1, res.RequiresReview, "abandoned intent is surfaced, not auto-fixed")
 		require.Equal(t, 0, res.AutoFixed)
 
 		var status string
-		var requiresAdmin bool
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, requires_admin FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.provider_intent.abandoned' AND subject_key=$2`,
-			merchantID, "provider_intent:"+intentID.String()).Scan(&status, &requiresAdmin))
-		require.Equal(t, "admin_pending", status)
-		require.True(t, requiresAdmin)
+			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.provider_intent.abandoned' AND subject_key=$2`,
+			merchantID, "provider_intent:"+intentID.String()).Scan(&status))
+		require.Equal(t, "requires_review", status)
 
 		// surface-only: the intent itself is untouched
 		var istatus string

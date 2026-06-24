@@ -753,34 +753,46 @@ type OpenrailsProviderIntent struct {
 	ProviderAccountID *uuid.UUID
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified four-plane slug such as pull.charge.missing, derive.grant_effect.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog (#511).
-type OpenrailsReconciliationFinding struct {
+// Durable Provider Refresh watermarks. A failed or partial provider read records last_error but never advances watermark_at.
+type OpenrailsProviderRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// Provider for pull.* findings (nmi|ccbill|stripe|solana); the literal 'self' for internal derive/life/consistency findings (#511).
-	Provider    string
+	Provider   string
+	// Current provider account row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
+	ProviderAccountID  *uuid.UUID
+	ProviderAccountKey *uuid.UUID
+	// Refresh domain. events currently covers provider transaction/subscription event windows.
+	EventDomain string
+	// Exclusive lower bound for the next successful bounded provider event refresh window.
+	WatermarkAt     time.Time
+	LastAttemptedAt *time.Time
+	LastSucceededAt *time.Time
+	LastError       *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
+type OpenrailsReconciliationFinding struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
 	FindingType string
 	// Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
 	SubjectKey        string
 	Severity          string
 	Status            string
-	RequiresAdmin     bool
 	RecommendedAction *string
-	LocalEvidence     []byte
-	RemoteEvidence    []byte
-	// Class-3 local-intent annotation (design decision 5): e.g. DeletionScheduledAt marker present => "recorded delete never executed; boot rescan replays it" — keeps the admin queue to genuine unknowns.
-	IntentEvidence     []byte
-	ResolutionEvidence []byte
-	FirstSeenRun       uuid.UUID
-	LastSeenRun        uuid.UUID
-	FirstSeenAt        time.Time
-	LastSeenAt         time.Time
-	OccurrenceCount    int32
-	ResolvedAt         *time.Time
-	Resolution         *string
-	Notes              *string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	FirstSeenRun      uuid.UUID
+	LastSeenRun       uuid.UUID
+	LastSeenAt        time.Time
+	ResolvedAt        *time.Time
+	Resolution        *string
+	// Operator-entered notes attached when a finding is fixed or ignored manually.
+	OperatorNotes *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	// Machine-readable finding evidence. Optional nested keys: provider, local, remote, intent, resolution.
+	Evidence []byte
 }
 
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.

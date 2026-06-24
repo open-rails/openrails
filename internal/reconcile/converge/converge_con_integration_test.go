@@ -54,16 +54,14 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 1, res.AdminQueued, "dangling reference is surfaced for admin, not auto-fixed")
+		require.Equal(t, 1, res.RequiresReview, "dangling reference is surfaced for review, not auto-fixed")
 		require.Equal(t, 0, res.AutoFixed)
 
 		var status string
-		var requiresAdmin bool
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, requires_admin FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
-			merchantID, "entitlement:"+entID.String()).Scan(&status, &requiresAdmin))
-		require.Equal(t, "admin_pending", status)
-		require.True(t, requiresAdmin)
+			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
+			merchantID, "entitlement:"+entID.String()).Scan(&status))
+		require.Equal(t, "requires_review", status)
 
 		// surface-only: the entitlement itself is untouched.
 		var revokedAt *time.Time
@@ -77,7 +75,7 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings, "still dangling → still surfaced")
-		require.Equal(t, 1, res.AdminQueued)
+		require.Equal(t, 1, res.RequiresReview)
 
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
@@ -124,7 +122,7 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND local_evidence->>'customer_id'=$2`, merchantID, customer.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`, merchantID, customer.String())
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
@@ -136,15 +134,15 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 1, res.AdminQueued, "duplicate money is surfaced for an operator, not auto-undone")
+		require.Equal(t, 1, res.RequiresReview, "duplicate money is surfaced for an operator, not auto-undone")
 		require.Equal(t, 0, res.AutoFixed)
 
 		var status string
 		var ev map[string]any
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, local_evidence FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND local_evidence->>'customer_id'=$2`,
+			`SELECT status, evidence->'local' FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`,
 			merchantID, customer.String()).Scan(&status, &ev))
-		require.Equal(t, "admin_pending", status)
+		require.Equal(t, "requires_review", status)
 		require.EqualValues(t, 2, ev["charge_count"], "two charges in the duplicate group")
 		require.Len(t, ev["payment_ids"], 2)
 

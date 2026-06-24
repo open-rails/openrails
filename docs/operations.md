@@ -324,16 +324,33 @@ over 2 weeks — same span, more attempts; ours is sparser because each NMI
 decline costs a per-transaction fee. Stripe-billed subscriptions use Stripe's
 dunning; this section governs NMI-backed manual dunning.)
 
-## Subscription liveness sync (#367) + renewal grace (#368)
+## Provider Refresh (#574), subscription liveness (#367), and renewal grace (#368)
+
+`pull-provider` is the manual full-batch/operator command. **Provider
+Refresh** is the always-on provider-read system: a 4-hourly River worker
+(`openrails.provider_refresh`, `RunOnStart=true`, so startup after a stale dump
+or outage does not wait for the first 4-hour tick). It has three lanes:
+
+| Lane | Purpose |
+|---|---|
+| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, and CCBill using durable per-merchant/provider/account/domain watermarks |
+| Subscription Liveness Refresh | the former subscription liveness worker; probes stale/silent active NMI/Stripe subscriptions |
+| CCBill DataLink Refresh | scheduled DataLink active-member bulk refresh, because CCBill has no cheap per-subscription liveness API |
+
+Provider Event Refresh advances a watermark only after the provider/window
+completes successfully. Provider errors, missing credentials, account mismatch,
+pagination failure, or partial reads leave the watermark unchanged and the next
+scheduled/startup pass retries the same bounded window. It writes only local
+truth through the existing idempotent reconciliation writers, then runs scoped
+convergence so entitlements/grants/derived state follow the refreshed provider
+facts. It never mutates a provider.
 
 Dunning owns `past_due` (we SAW the failure). The **silence cohort** —
-`active` subscriptions whose period lapsed with NO webhook either way — now
-has an automated owner too: the subscription liveness sync, a 4-hourly
-state-scan worker (`RunOnStart=true`, so a reboot after an outage sweeps the
-backlog immediately). Per silent subscription it READS provider truth (NMI:
-the period's sale transactions by order reference + the recurring record;
-Stripe: `GET /v1/subscriptions/{id}` + latest invoice) and converges through
-the normal lifecycle services:
+`active` subscriptions whose period lapsed with NO webhook either way — is the
+Subscription Liveness Refresh lane. Per silent subscription it READS provider
+truth (NMI: the period's sale transactions by order reference + the recurring
+record; Stripe: `GET /v1/subscriptions/{id}` + latest invoice) and converges
+through the normal lifecycle services:
 
 | Probe says | Convergence |
 |---|---|
@@ -345,10 +362,11 @@ the normal lifecycle services:
 
 It never charges — charging stays inside dunning, whose derived staleness
 window cancels months-stale subscriptions instead of surprise-charging.
-Mode gating: runs under `full` AND `limited` (probes are reads, convergence
-is local writes — consistent with #366 materialize); skipped under
-`readonly`. Each pass logs an alert-style summary
-(`cohort/repaired/failed/adopted/cancelled/unreachable`).
+Mode gating: Provider Refresh runs under `full` AND `limited` (provider reads
+plus local convergence — consistent with #366 materialize); skipped under
+`readonly`. Each pass logs one Provider Refresh heartbeat across lanes plus the
+lane-specific liveness summary (`cohort/repaired/failed/adopted/cancelled/
+unreachable`).
 
 While the probe resolves the silence, the user keeps access through the
 **renewal grace window** (#368): activation and every renewal pre-append a
@@ -360,16 +378,16 @@ delete the scheduled grace, access ends at period end as the user expects)
 and lapses by its own end_at if silence outlasts the slack. See
 docs/entitlements_timeline.md → "Grace".
 
-**What reconcile (#107) remains for:** everything else — the full-surface
-manual batch tool (all PS finding types, findings ledger, admin queue,
-forensics, enforce mode). The liveness sync is the always-on, narrow,
-per-subscription slice for exactly one failure mode (inbound silence); a
-`pull-provider --insert --overwrite` run before/after a liveness pass converges
+**What reconcile (#107) remains for:** the full-surface operator tool (all PS
+finding types, findings ledger, admin queue, forensics, manual enforce mode).
+Provider Refresh reuses the same read-only fetchers and idempotent local writers
+for routine catch-up, but does not replace manual investigation. A
+`pull-provider --insert --overwrite` run before/after Provider Refresh converges
 to the same state by idempotency. Note: NMI charge detection correlates by the
 order reference OpenRails stamps at signup (the local subscription id).
 Legacy-imported subscriptions whose NMI `orderid` predates OpenRails won't
-match the charge probe — their charged periods converge as period-adoption (no
-access granted) until a webhook or provider-pull backfill lands the payment.
+match the liveness charge probe; the Provider Event Refresh lane is what
+backfills those missed provider events from the durable watermark.
 
 ## Safety levers (recap — full details in README "Operating modes")
 

@@ -235,7 +235,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 		}
 		if len(row.Processors) > 0 {
 			// Tolerate malformed blobs: a price whose links can't decode simply
-			// never matches a remote plan (PS-1 stays admin_pending).
+			// never matches a remote plan (PS-1 stays requires_review).
 			_ = json.Unmarshal(row.Processors, &p.Processors)
 		}
 		state.Prices = append(state.Prices, p)

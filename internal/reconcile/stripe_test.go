@@ -119,6 +119,13 @@ func TestStripeFetcher_Fetch(t *testing.T) {
 	require.Equal(t, ProviderStripe, snap.Provider)
 	require.True(t, snap.Capabilities.Vault)
 	require.True(t, snap.Capabilities.Chargebacks)
+	require.True(t, snap.Coverage.SubscriptionsExhaustive)
+	require.True(t, snap.Coverage.TransactionsExhaustive)
+	require.True(t, snap.Coverage.TransactionsPaginatedComplete)
+	require.NotNil(t, snap.Coverage.TransactionWindowSince)
+	require.NotNil(t, snap.Coverage.TransactionWindowUntil)
+	require.True(t, snap.Coverage.TransactionWindowSince.Equal(since))
+	require.True(t, snap.Coverage.TransactionWindowUntil.Equal(until))
 
 	// Subscriptions across both pages.
 	require.Len(t, snap.Subscriptions, 2)

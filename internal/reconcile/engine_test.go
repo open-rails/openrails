@@ -128,7 +128,7 @@ func (s *memStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding
 	if !ok {
 		rec = &FindingRecord{
 			ID: uuid.New(), Provider: f.Provider, Type: f.Type, SubjectKey: f.SubjectKey,
-			FirstSeenRun: runID, FirstSeenAt: now, OccurrenceCount: 0,
+			FirstSeenRun: runID, CreatedAt: now,
 		}
 		s.findings[key] = rec
 		s.byID[rec.ID] = rec
@@ -139,7 +139,7 @@ func (s *memStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding
 	rec.LocalEvidence = f.LocalEvidence
 	rec.RemoteEvidence = f.RemoteEvidence
 	rec.IntentEvidence = f.IntentEvidence
-	if rec.Status != FindingStatusDismissed {
+	if rec.Status != FindingStatusIgnored {
 		rec.Status = f.Status
 		rec.ResolvedAt = nil
 		rec.Resolution = ""
@@ -147,16 +147,16 @@ func (s *memStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding
 	}
 	rec.LastSeenRun = runID
 	rec.LastSeenAt = now
-	rec.OccurrenceCount++
+	rec.UpdatedAt = now
 	return *rec, nil
 }
 
-func (s *memStore) ListOpenFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
+func (s *memStore) ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []FindingRecord
 	for _, rec := range s.findings {
-		if rec.Provider == provider && (rec.Status == FindingStatusOpen || rec.Status == FindingStatusAdminPending) {
+		if rec.Provider == provider && (rec.Status == FindingStatusReconcileRequired || rec.Status == FindingStatusAdminRequired) {
 			out = append(out, *rec)
 		}
 	}
@@ -176,13 +176,13 @@ func (s *memStore) AutoResolveVanished(ctx context.Context, provider Provider, r
 		if rec.Provider != provider || !typeSet[rec.Type] {
 			continue
 		}
-		if rec.Status != FindingStatusOpen && rec.Status != FindingStatusAdminPending {
+		if rec.Status != FindingStatusReconcileRequired && rec.Status != FindingStatusAdminRequired {
 			continue
 		}
 		if rec.LastSeenRun == runID {
 			continue
 		}
-		rec.Status = FindingStatusResolved
+		rec.Status = FindingStatusFixed
 		rec.Resolution = "auto_vanished"
 		rec.ResolvedAt = &now
 		n++
@@ -203,13 +203,13 @@ func (s *memStore) AutoResolveVanishedAllProviders(ctx context.Context, runID uu
 		if !typeSet[rec.Type] {
 			continue
 		}
-		if rec.Status != FindingStatusOpen && rec.Status != FindingStatusAdminPending {
+		if rec.Status != FindingStatusReconcileRequired && rec.Status != FindingStatusAdminRequired {
 			continue
 		}
 		if rec.LastSeenRun == runID {
 			continue
 		}
-		rec.Status = FindingStatusResolved
+		rec.Status = FindingStatusFixed
 		rec.Resolution = "auto_vanished"
 		rec.ResolvedAt = &now
 		n++
@@ -225,7 +225,7 @@ func (s *memStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error 
 		return fmt.Errorf("no finding %s", id)
 	}
 	now := time.Now()
-	rec.Status = FindingStatusResolved
+	rec.Status = FindingStatusFixed
 	rec.Resolution = "auto_vanished"
 	rec.ResolvedAt = &now
 	return nil
@@ -578,7 +578,7 @@ func findByType(findings []FindingRecord, t FindingType) []FindingRecord {
 func TestDiffTaxonomy(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("PS-1 processor sub missing locally is critical admin_pending with no apply", func(t *testing.T) {
+	t.Run("PS-1 processor sub missing locally is critical requires_review with no apply", func(t *testing.T) {
 		local := &fakeLocal{}
 		known := liveLocalSub(ProviderNMI, "known-1")
 		local.state.Subscriptions = []LocalSubscription{known}
@@ -599,10 +599,10 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.Len(t, ps1, 1)
 		assert.Equal(t, "ghost-7", ps1[0].SubjectKey)
 		assert.Equal(t, SeverityCritical, ps1[0].Severity)
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 		assert.True(t, ps1[0].RequiresAdmin)
 		// Never auto-created, even in enforce mode.
-		assert.Equal(t, FindingStatusAdminPending, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "ghost-7").Status)
+		assert.Equal(t, FindingStatusAdminRequired, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "ghost-7").Status)
 		assert.Zero(t, writer.totalCalls())
 	})
 
@@ -629,7 +629,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, candidates, 1)
 		assert.Equal(t, known.ID.String(), candidates[0]["subscription_id"])
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 	})
 
 	t.Run("PS-2 NMI absence from recurring report cancels locally on enforce", func(t *testing.T) {
@@ -692,7 +692,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.NoError(t, err)
 		ps2 := findByType(res.Findings, FindingLocalActiveRemoteDead)
 		require.Len(t, ps2, 1)
-		assert.Equal(t, FindingStatusOpen, ps2[0].Status)
+		assert.Equal(t, FindingStatusReconcileRequired, ps2[0].Status)
 	})
 
 	t.Run("PS-2 absence is NOT inferred for ccbill (windowed exports)", func(t *testing.T) {
@@ -729,6 +729,17 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.NoError(t, err)
 		ps3 := findByType(res.Findings, FindingStatusMismatch)
 		require.Len(t, ps3, 1)
+		require.Len(t, res.PlannedChanges, 1)
+		assert.Equal(t, "planned", res.PlannedChanges[0].Phase)
+		assert.Equal(t, "subscriptions", res.PlannedChanges[0].Table)
+		assert.Equal(t, "update", res.PlannedChanges[0].Operation)
+		assert.Equal(t, sub.ID.String(), res.PlannedChanges[0].RowID)
+		require.Len(t, res.AppliedChanges, 1)
+		assert.Equal(t, "applied", res.AppliedChanges[0].Phase)
+		assert.Equal(t, "subscriptions", res.AppliedChanges[0].Table)
+		assert.Equal(t, "update", res.AppliedChanges[0].Operation)
+		assert.Equal(t, sub.ID.String(), res.AppliedChanges[0].RowID)
+		assert.Equal(t, 1, res.AppliedChanges[0].RowsAffected)
 		assert.Equal(t, 1, writer.calls["adopt_status"])
 		rec := store.record(ProviderStripe, FindingStatusMismatch, sub.ID.String())
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
@@ -758,7 +769,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.NoError(t, err)
 		ps3 := findByType(res.Findings, FindingStatusMismatch)
 		require.Len(t, ps3, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps3[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps3[0].Status)
 		assert.True(t, ps3[0].RequiresAdmin)
 		assert.Empty(t, ps3[0].IntentEvidence)
 		assert.Zero(t, writer.totalCalls())
@@ -826,7 +837,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.NoError(t, err)
 		ps4 := findByType(res.Findings, FindingChargeMissingLocal)
 		require.Len(t, ps4, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps4[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps4[0].Status)
 		assert.True(t, ps4[0].RequiresAdmin)
 		assert.Contains(t, ps4[0].RecommendedAction, "MULTIPLE")
 		assert.Zero(t, writer.calls["backfill_payment"])
@@ -896,7 +907,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded))
 	})
 
-	t.Run("PS-6 chargeback vs live subscription is critical admin_pending", func(t *testing.T) {
+	t.Run("PS-6 chargeback vs live subscription is critical requires_review", func(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderStripe, "sub_66")
 		local.state.Subscriptions = []LocalSubscription{sub}
@@ -921,7 +932,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		ps6 := findByType(res.Findings, FindingChargebackActiveSub)
 		require.Len(t, ps6, 1)
 		assert.Equal(t, SeverityCritical, ps6[0].Severity)
-		assert.Equal(t, FindingStatusAdminPending, ps6[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps6[0].Status)
 		assert.True(t, ps6[0].RequiresAdmin)
 		assert.Zero(t, writer.totalCalls()) // never auto-applied
 	})
@@ -958,7 +969,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, "2222", st.PaymentMethods[0].LastFour)
 	})
 
-	t.Run("PS-8 duplicate live subscriptions for one subject are admin_pending", func(t *testing.T) {
+	t.Run("PS-8 duplicate live subscriptions for one subject are requires_review", func(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderNMI, "dup-1")
 		sub.TierGroup = "premium"
@@ -980,7 +991,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		require.NoError(t, err)
 		ps8 := findByType(res.Findings, FindingDuplicateSubscriptions)
 		require.Len(t, ps8, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps8[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps8[0].Status)
 		assert.True(t, ps8[0].RequiresAdmin)
 		assert.Zero(t, writer.calls["cancel"]) // duplicates are never auto-resolved
 	})
@@ -1083,7 +1094,6 @@ func TestIdentityStableAcrossRuns(t *testing.T) {
 
 	assert.Equal(t, 1, store.count(), "re-runs must update the standing finding, not duplicate it")
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, 2, rec.OccurrenceCount)
 	assert.Equal(t, res1.RunID, rec.FirstSeenRun)
 	assert.Equal(t, res2.RunID, rec.LastSeenRun)
 }
@@ -1103,7 +1113,7 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 	eng, store, _ := newTestEngine(ProviderStripe, deadSnap, local)
 	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
 	require.NoError(t, err)
-	require.Equal(t, FindingStatusOpen, store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String()).Status)
+	require.Equal(t, FindingStatusReconcileRequired, store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String()).Status)
 
 	// The drift disappears (processor reactivated / first read was wrong).
 	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, snap: &RemoteSnapshot{
@@ -1117,7 +1127,7 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, FindingStatusResolved, rec.Status)
+	assert.Equal(t, FindingStatusFixed, rec.Status)
 	assert.Equal(t, "auto_vanished", rec.Resolution)
 	assert.GreaterOrEqual(t, res2.Summary.Providers["stripe"].AutoResolved, int64(1))
 }
@@ -1146,7 +1156,7 @@ func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 
 	ps3 := findByType(res.Findings, FindingStatusMismatch)
 	require.Len(t, ps3, 1)
-	assert.Equal(t, FindingStatusOpen, ps3[0].Status, "intent-annotated drift must not escalate to the admin queue")
+	assert.Equal(t, FindingStatusReconcileRequired, ps3[0].Status, "intent-annotated drift must not escalate to the admin queue")
 	assert.False(t, ps3[0].RequiresAdmin)
 	require.NotNil(t, ps3[0].IntentEvidence)
 	assert.Contains(t, ps3[0].IntentEvidence["explanation"], "intent executor")
@@ -1242,7 +1252,7 @@ func TestAdvisoryNeverWrites(t *testing.T) {
 	require.NotEmpty(t, res.Findings)
 	assert.Zero(t, writer.totalCalls(), "advisory mode performs zero local writes")
 	rec := store.record(ProviderNMI, FindingLocalActiveRemoteDead, dead.ID.String())
-	assert.Equal(t, FindingStatusOpen, rec.Status)
+	assert.Equal(t, FindingStatusReconcileRequired, rec.Status)
 }
 
 func TestDismissedFindingsStayDismissed(t *testing.T) {
@@ -1264,14 +1274,14 @@ func TestDismissedFindingsStayDismissed(t *testing.T) {
 
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
 	store.mu.Lock()
-	rec.Status = FindingStatusDismissed
+	rec.Status = FindingStatusIgnored
 	store.mu.Unlock()
 
 	_, err = eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}})
 	require.NoError(t, err)
 	rec = store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, FindingStatusDismissed, rec.Status)
-	assert.Zero(t, writer.totalCalls(), "dismissed findings are never applied")
+	assert.Equal(t, FindingStatusIgnored, rec.Status)
+	assert.Zero(t, writer.totalCalls(), "ignored findings are never applied")
 }
 
 func TestDunningForensics(t *testing.T) {
@@ -1363,17 +1373,17 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 func TestMaterializePS1(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("advisory PS-1 stays admin_pending (advisory never writes)", func(t *testing.T) {
+	t.Run("advisory PS-1 stays requires_review (advisory never writes)", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
 		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 		assert.True(t, ps1[0].RequiresAdmin)
 		assert.Zero(t, writer.calls["materialize"])
-		assert.Equal(t, FindingStatusAdminPending, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77").Status)
+		assert.Equal(t, FindingStatusAdminRequired, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77").Status)
 	})
 
 	t.Run("resolvable PS-1 materializes with payment + entitlements and resolves enforced", func(t *testing.T) {
@@ -1422,7 +1432,7 @@ func TestMaterializePS1(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["materialize"])
 	})
 
-	t.Run("ambiguous identity stays admin_pending with the blocker documented", func(t *testing.T) {
+	t.Run("ambiguous identity stays requires_review with the blocker documented", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		// Second subject shares the remote email -> two distinct candidates.
 		other := liveLocalSub(ProviderNMI, "other-1")
@@ -1436,12 +1446,12 @@ func TestMaterializePS1(t *testing.T) {
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "ambiguous")
 		assert.Zero(t, writer.calls["materialize"])
 	})
 
-	t.Run("unresolvable plan stays admin_pending", func(t *testing.T) {
+	t.Run("unresolvable plan stays requires_review", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		local.state.Prices = nil // no provider link anywhere
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
@@ -1449,12 +1459,12 @@ func TestMaterializePS1(t *testing.T) {
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "plan unresolved")
 		assert.Zero(t, writer.calls["materialize"])
 	})
 
-	t.Run("remote past_due without a period end stays admin_pending", func(t *testing.T) {
+	t.Run("remote past_due without a period end stays requires_review", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		snap.Subscriptions[0].Status = SubscriptionStatusPastDue
 		snap.Subscriptions[0].NextBillingAt = nil
@@ -1463,7 +1473,7 @@ func TestMaterializePS1(t *testing.T) {
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
-		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "past_due")
 		assert.Zero(t, writer.calls["materialize"])
 	})

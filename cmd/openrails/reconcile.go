@@ -40,6 +40,7 @@ func newPullProviderCmd() *cobra.Command {
 		merchantSlug    string
 		providerAccount string
 		runIDStr        string
+		logDir          string
 		insert          bool
 		overwrite       bool
 		prune           bool
@@ -56,7 +57,7 @@ func newPullProviderCmd() *cobra.Command {
 			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
 			"that are ABSENT from the provider source. The remote processors are NEVER mutated.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, insert, overwrite, prune)
+			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, logDir, insert, overwrite, prune)
 		},
 	}
 	cmd.Flags().StringSliceVar(&providers, "provider", nil, "Provider(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
@@ -65,6 +66,7 @@ func newPullProviderCmd() *cobra.Command {
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	cmd.Flags().StringVar(&logDir, "log-dir", "openrails-pull-provider-logs", "Directory for pull-provider .log files")
 	cmd.Flags().BoolVar(&insert, "insert", false, "Insert provider-observed records that are missing locally")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing local mirror rows from provider-observed truth")
 	cmd.Flags().BoolVar(&prune, "prune", false, "Delete eligible local subscriptions/payments for the pulled provider account that are ABSENT from the provider source")
@@ -240,7 +242,7 @@ func parseReconcileCLITime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccountStr, sinceStr, untilStr, format, merchantSlug string, insert, overwrite, prune bool) error {
+func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccountStr, sinceStr, untilStr, format, merchantSlug, logDir string, insert, overwrite, prune bool) error {
 	// Plan-only is the safe default; local writes require explicit mutation flags.
 	mode := reconcile.ModeAdvisory
 	if insert || overwrite {
@@ -309,6 +311,8 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 			return runErr
 		}
 
+		var pruneLogs []pullProviderPruneLog
+		var pruneChanges []reconcile.MutationRecord
 		// --prune (opt-in): delete local subscriptions/payments attributed to the
 		// pulled provider account(s) that are ABSENT from the provider source.
 		if prune && runErr == nil {
@@ -323,11 +327,12 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 				if err != nil {
 					return fmt.Errorf("prune %s (%s): %w", provider, binding.AccountID, err)
 				}
-				fmt.Fprintf(os.Stdout, "prune %s: deleted %d excess subscription(s), %d excess payment(s) absent from provider source\n",
-					provider, pr.Subscriptions, pr.Payments)
+				pruneLogs = append(pruneLogs, pullProviderPruneLog{Provider: provider, Binding: binding, Result: pr})
+				pruneChanges = append(pruneChanges, pruneMutationRecords(provider, pr, "applied")...)
 			}
 		}
 
+		var convergeLog *pullProviderConvergeLog
 		// After successful local mutations, run one idempotent Converge(merchant):
 		// the mirror now reflects provider truth, so DERIVE/LIFE/CON converge grant
 		// effects + lifecycle to it. Plan-only never converges (it wrote nothing).
@@ -356,8 +361,14 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 			if cErr != nil {
 				return fmt.Errorf("post-pull converge: %w", cErr)
 			}
-			fmt.Fprintf(os.Stdout, "converged: %d finding(s), %d auto-fixed, %d held, %d admin-queued\n",
-				cres.Findings, cres.AutoFixed, cres.Held, cres.AdminQueued)
+			convergeLog = &pullProviderConvergeLog{
+				RunID:             cres.RunID,
+				Findings:          cres.Findings,
+				AutoFixed:         cres.AutoFixed,
+				ReconcileRequired: cres.ReconcileRequired,
+				RequiresReview:    cres.RequiresReview,
+				AdminRequired:     cres.AdminRequired,
+			}
 		}
 
 		store := &reconcile.PGStore{DB: rt.DB}
@@ -365,11 +376,15 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 		if err != nil {
 			return err
 		}
-		if format == "json" {
-			if err := reconcile.RenderRunJSON(os.Stdout, run, res.Findings); err != nil {
-				return err
-			}
-		} else if err := reconcile.RenderRunTable(os.Stdout, run, res.Findings); err != nil {
+		appliedChanges := append([]reconcile.MutationRecord(nil), res.AppliedChanges...)
+		appliedChanges = append(appliedChanges, pruneChanges...)
+		logPath, err := writePullProviderLog(logDir, run, res, appliedChanges, pruneLogs, convergeLog, pullProviderMutationFlags{
+			Insert: insert, Overwrite: overwrite, Prune: prune,
+		})
+		if err != nil {
+			return err
+		}
+		if err := renderPullProviderStdout(os.Stdout, format, logPath, run, res, appliedChanges, pruneLogs, convergeLog); err != nil {
 			return err
 		}
 		return runErr // non-nil when a provider failed/aborted -> non-zero exit
@@ -457,21 +472,21 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 			return fmt.Errorf("load run: %w", err)
 		}
 
-		// The report shows the standing OPEN findings (incl. the admin queue),
+		// The report shows the standing actionable findings (incl. the admin queue),
 		// not just the ones touched by that run.
-		var open []reconcile.FindingRecord
-		for _, status := range []string{string(reconcile.FindingStatusOpen), string(reconcile.FindingStatusAdminPending), string(reconcile.FindingStatusHeld)} {
+		var actionable []reconcile.FindingRecord
+		for _, status := range []string{string(reconcile.FindingStatusReconcileRequired), string(reconcile.FindingStatusAdminRequired)} {
 			batch, err := store.ListFindings(ctx, reconcile.FindingFilter{Status: status, Limit: 500})
 			if err != nil {
 				return err
 			}
-			open = append(open, batch...)
+			actionable = append(actionable, batch...)
 		}
 
 		if format == "json" {
-			return reconcile.RenderRunJSON(os.Stdout, run, open)
+			return reconcile.RenderRunJSON(os.Stdout, run, actionable)
 		}
-		return reconcile.RenderRunTable(os.Stdout, run, open)
+		return reconcile.RenderRunTable(os.Stdout, run, actionable)
 	})
 }
 

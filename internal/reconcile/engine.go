@@ -117,7 +117,8 @@ type ProviderReport struct {
 	FindingsBySeverity  map[string]int    `json:"findings_by_severity,omitempty"`
 	NewFindings         int               `json:"new_findings"`
 	UpdatedFindings     int               `json:"updated_findings"`
-	AdminPending        int               `json:"admin_pending"`
+	RequiresReview      int               `json:"requires_review"`
+	AdminRequired       int               `json:"-"`
 	AutoResolved        int64             `json:"auto_resolved"`
 	AutoFixed           int               `json:"auto_fixed"`
 	ApplySkipped        int               `json:"apply_skipped,omitempty"`
@@ -137,19 +138,39 @@ type RunSummary struct {
 
 // SummaryTotals aggregates across providers.
 type SummaryTotals struct {
-	Findings     int   `json:"findings"`
-	AdminPending int   `json:"admin_pending"`
-	AutoResolved int64 `json:"auto_resolved"`
-	AutoFixed    int   `json:"auto_fixed"`
+	Findings       int   `json:"findings"`
+	RequiresReview int   `json:"requires_review"`
+	AdminRequired  int   `json:"-"`
+	AutoResolved   int64 `json:"auto_resolved"`
+	AutoFixed      int   `json:"auto_fixed"`
 }
 
 // RunResult is what a run returns to its caller (CLI / admin API).
 type RunResult struct {
-	RunID    uuid.UUID       `json:"run_id"`
-	Mode     Mode            `json:"mode"`
-	Status   string          `json:"status"`
-	Summary  *RunSummary     `json:"summary"`
-	Findings []FindingRecord `json:"findings"`
+	RunID          uuid.UUID        `json:"run_id"`
+	Mode           Mode             `json:"mode"`
+	Status         string           `json:"status"`
+	Summary        *RunSummary      `json:"summary"`
+	Findings       []FindingRecord  `json:"findings"`
+	PlannedChanges []MutationRecord `json:"planned_changes,omitempty"`
+	AppliedChanges []MutationRecord `json:"applied_changes,omitempty"`
+}
+
+// MutationRecord is a row-level local change planned or applied during a
+// provider pull. It is intentionally derived from the reconcile apply action,
+// not persisted; operators get it in the pull-provider log artifact.
+type MutationRecord struct {
+	Phase        string         `json:"phase"`
+	Provider     Provider       `json:"provider"`
+	FindingID    uuid.UUID      `json:"finding_id,omitempty"`
+	FindingType  FindingType    `json:"finding_type,omitempty"`
+	SubjectKey   string         `json:"subject_key,omitempty"`
+	Table        string         `json:"table"`
+	Operation    string         `json:"operation"`
+	RowID        string         `json:"row_id,omitempty"`
+	ExternalID   string         `json:"external_id,omitempty"`
+	RowsAffected int            `json:"rows_affected,omitempty"`
+	Evidence     map[string]any `json:"evidence,omitempty"`
 }
 
 func (e *Engine) now() time.Time {
@@ -241,16 +262,19 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	var providerErrs []string
 
 	for _, p := range providers {
-		rep, records, perr := e.runProvider(ctx, runID, p, params)
+		rep, records, planned, applied, perr := e.runProvider(ctx, runID, p, params)
 		summary.Providers[string(p)] = rep
 		result.Findings = append(result.Findings, records...)
+		result.PlannedChanges = append(result.PlannedChanges, planned...)
+		result.AppliedChanges = append(result.AppliedChanges, applied...)
 		if perr != nil {
 			rep.Error = perr.Error()
 			providerErrs = append(providerErrs, fmt.Sprintf("%s: %v", p, perr))
 			log.WithError(perr).WithField("provider", p).Error("reconcile: provider run failed")
 		}
 		summary.Totals.Findings += rep.NewFindings + rep.UpdatedFindings
-		summary.Totals.AdminPending += rep.AdminPending
+		summary.Totals.RequiresReview += rep.RequiresReview
+		summary.Totals.AdminRequired += rep.AdminRequired
 		summary.Totals.AutoResolved += rep.AutoResolved
 		summary.Totals.AutoFixed += rep.AutoFixed
 	}
@@ -266,7 +290,8 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	}
 	if stuckRep != nil {
 		summary.Totals.Findings += stuckRep.Total
-		summary.Totals.AdminPending += stuckRep.AdminQueued
+		summary.Totals.RequiresReview += stuckRep.RequiresReview
+		summary.Totals.AdminRequired += stuckRep.AdminRequired
 		summary.Totals.AutoResolved += stuckRep.AutoResolved
 	}
 
@@ -294,8 +319,8 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 // runProvider fetches, diffs, persists, applies (enforce), and auto-resolves
 // for one provider. A returned error means the provider's reconciliation did
 // not complete (e.g. fetch failure or circuit-breaker abort) and NOTHING was
-// persisted or resolved for it.
-func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Provider, params RunParams) (*ProviderReport, []FindingRecord, error) {
+// persisted or fixed for it.
+func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Provider, params RunParams) (*ProviderReport, []FindingRecord, []MutationRecord, []MutationRecord, error) {
 	rep := &ProviderReport{
 		Provider:           provider,
 		FindingsByType:     map[string]int{},
@@ -315,7 +340,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		AccountID:         binding.AccountID,
 	})
 	if err != nil {
-		return rep, nil, fmt.Errorf("fetch: %w", err)
+		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	if binding.ID != uuid.Nil {
 		snap.ProviderAccountID = binding.ID.String()
@@ -326,7 +351,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 
 	local, err := e.Local.Load(ctx, provider, nullableProviderAccountID(binding))
 	if err != nil {
-		return rep, nil, fmt.Errorf("load local state: %w", err)
+		return rep, nil, nil, nil, fmt.Errorf("load local state: %w", err)
 	}
 	rep.LocalSubscriptions = len(local.Subscriptions)
 
@@ -346,7 +371,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		remoteLive := len(snap.Subscriptions)
 		if localLive >= e.breakerMinLocal() && float64(remoteLive) < float64(localLive)*e.breakerRatio() {
 			rep.Aborted = true
-			return rep, nil, fmt.Errorf(
+			return rep, nil, nil, nil, fmt.Errorf(
 				"circuit breaker: %s reports only %d live subscriptions against %d locally-live linked subscriptions (< %.0f%%); refusing to treat absence as cancellation — the report is more likely truncated/broken than %d users all cancelled. No findings were generated; investigate the provider report before re-running",
 				provider, remoteLive, localLive, e.breakerRatio()*100, localLive)
 		}
@@ -357,7 +382,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	txnIDs := collectTxnLookupIDs(snap)
 	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, nullableProviderAccountID(binding), txnIDs)
 	if err != nil {
-		return rep, nil, fmt.Errorf("load local payments: %w", err)
+		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
 
 	now := e.now()
@@ -372,32 +397,38 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// Persist findings (stable identity: upsert by (tenant, provider, type,
 	// subject_key)).
 	records := make([]FindingRecord, 0, len(findings))
+	var planned []MutationRecord
+	var appliedChanges []MutationRecord
 	applyByID := map[uuid.UUID]*Finding{}
 	for i := range findings {
 		f := &findings[i]
 		rec, err := e.Store.UpsertFinding(ctx, runID, *f)
 		if err != nil {
-			return rep, records, fmt.Errorf("persist finding %s/%s: %w", f.Type, f.SubjectKey, err)
+			return rep, records, planned, appliedChanges, fmt.Errorf("persist finding %s/%s: %w", f.Type, f.SubjectKey, err)
 		}
 		records = append(records, rec)
+		if f.Apply != nil {
+			planned = append(planned, mutationRecordsForFinding(provider, rec.ID, f, nil, "planned")...)
+		}
 		rep.FindingsByType[string(f.Type)]++
 		rep.FindingsBySeverity[string(f.Severity)]++
-		if rec.OccurrenceCount <= 1 {
+		if rec.FirstSeenRun == runID {
 			rep.NewFindings++
 		} else {
 			rep.UpdatedFindings++
 		}
-		if rec.Status == FindingStatusAdminPending {
-			rep.AdminPending++
+		if rec.Status == FindingStatusAdminRequired {
+			rep.RequiresReview++
+			rep.AdminRequired++
 		}
-		if f.Apply != nil && rec.Status == FindingStatusOpen && params.Mutations.allows(f) {
+		if f.Apply != nil && rec.Status == FindingStatusReconcileRequired && params.Mutations.allows(f) {
 			applyByID[rec.ID] = f
 		}
 	}
 
 	// Enforce: apply the idempotent local writes (one-shot fetch+diff+apply,
 	// design decision 2). Apply failures don't abort the provider — each is
-	// reported and the finding stays open for the next run.
+	// reported and the finding stays reconcile_required for the next run.
 	if params.Mode == ModeEnforce {
 		for i := range records {
 			rec := &records[i]
@@ -405,15 +436,16 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			if !ok {
 				continue
 			}
-			evidence, applied, err := e.applyFinding(ctx, f)
+			evidence, didApply, err := e.applyFinding(ctx, f)
 			if err != nil {
 				rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: %v", f.Type, f.SubjectKey, err))
 				continue
 			}
-			if !applied {
+			if !didApply {
 				rep.ApplySkipped++
 				continue
 			}
+			appliedChanges = append(appliedChanges, mutationRecordsForFinding(provider, rec.ID, f, evidence, "applied")...)
 			log.WithFields(log.Fields{
 				"finding_id":  rec.ID,
 				"type":        f.Type,
@@ -434,18 +466,18 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// vanished on their own (design decision 1)...
 	resolved, err := e.Store.AutoResolveVanished(ctx, provider, runID, stateRosterFindingTypes)
 	if err != nil {
-		return rep, records, fmt.Errorf("auto-resolve vanished findings: %w", err)
+		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
 	}
 	rep.AutoResolved = resolved
 
 	// ...while transaction-window findings (PS-4/5/6) only auto-resolve when
 	// this run's window re-covered the transaction and it no longer diffed.
 	coveredSince, coveredUntil := e.coveredWindow(provider, params, now)
-	open, err := e.Store.ListOpenFindingsByProvider(ctx, provider)
+	actionable, err := e.Store.ListActionableFindingsByProvider(ctx, provider)
 	if err != nil {
-		return rep, records, fmt.Errorf("list open findings: %w", err)
+		return rep, records, planned, appliedChanges, fmt.Errorf("list actionable findings: %w", err)
 	}
-	for _, rec := range open {
+	for _, rec := range actionable {
 		if rec.LastSeenRun == runID {
 			continue
 		}
@@ -462,12 +494,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue // this run did not look at that part of the timeline
 		}
 		if err := e.Store.MarkFindingVanished(ctx, rec.ID); err != nil {
-			return rep, records, fmt.Errorf("auto-resolve windowed finding %s: %w", rec.ID, err)
+			return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve windowed finding %s: %w", rec.ID, err)
 		}
 		rep.AutoResolved++
 	}
 
-	return rep, records, nil
+	return rep, records, planned, appliedChanges, nil
 }
 
 // fetchHistory pulls the third dunning evidence source (ClickHouse analytics

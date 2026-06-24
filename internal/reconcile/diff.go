@@ -370,7 +370,7 @@ const deletionIntentAction = "no admin action needed: the provider intent execut
 type diffOptions struct {
 	// Materialize (set automatically in enforce mode; advisory never writes):
 	// PS-1 findings whose identity and plan both resolve unambiguously carry
-	// a materialize apply action instead of going admin_pending.
+	// a materialize apply action instead of going requires_review.
 	Materialize bool
 }
 
@@ -454,7 +454,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 				Type:          FindingLocalActiveRemoteDead,
 				SubjectKey:    s.ID.String(),
 				Severity:      SeverityHigh,
-				Status:        FindingStatusOpen,
+				Status:        FindingStatusReconcileRequired,
 				LocalEvidence: localSubEvidence(s),
 				RemoteEvidence: map[string]any{
 					"absent_from_recurring_report": true,
@@ -490,7 +490,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		Type:              FindingRemoteSubMissingLocal,
 		SubjectKey:        r.ProcessorSubscriptionID,
 		Severity:          SeverityCritical,
-		Status:            FindingStatusAdminPending,
+		Status:            FindingStatusAdminRequired,
 		RequiresAdmin:     true,
 		RemoteEvidence:    remoteEv,
 		RecommendedAction: "the processor is billing a subscription OpenRails does not know; investigate and either import it locally or cancel it at the processor (remote action, admin-only). Advisory runs never auto-create",
@@ -520,7 +520,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 
 	// Materialization (bootstrap mode v1.1): auto-create ONLY when both
 	// identity and plan resolve unambiguously; anything else stays
-	// admin_pending exactly as without the flag, with the blocker documented.
+	// requires_review exactly as without the flag, with the blocker documented.
 	subjectID, identityVia, identityNote := resolvePS1Identity(r, idx)
 	link, planNote := resolvePS1Plan(r, planIdx)
 	var blockers []string
@@ -575,7 +575,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		}
 	}
 
-	f.Status = FindingStatusOpen
+	f.Status = FindingStatusReconcileRequired
 	f.RequiresAdmin = false
 	f.Apply = &ApplyAction{Materialize: action}
 	f.RecommendedAction = fmt.Sprintf(
@@ -683,7 +683,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			Type:              FindingLocalActiveRemoteDead,
 			SubjectKey:        s.ID.String(),
 			Severity:          SeverityHigh,
-			Status:            FindingStatusOpen,
+			Status:            FindingStatusReconcileRequired,
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "processor reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
@@ -708,7 +708,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			Type:              FindingStatusMismatch,
 			SubjectKey:        s.ID.String(),
 			Severity:          SeverityMedium,
-			Status:            FindingStatusAdminPending,
+			Status:            FindingStatusAdminRequired,
 			RequiresAdmin:     true,
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
@@ -716,7 +716,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
-			f.Status = FindingStatusOpen
+			f.Status = FindingStatusReconcileRequired
 			f.RequiresAdmin = false
 			f.RecommendedAction = deletionIntentAction
 		}
@@ -743,7 +743,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			Type:              FindingStatusMismatch,
 			SubjectKey:        s.ID.String(),
 			Severity:          SeverityMedium,
-			Status:            FindingStatusOpen,
+			Status:            FindingStatusReconcileRequired,
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: fmt.Sprintf("adopt processor status %q (local %q) and its period timestamps", r.Status, s.Status),
@@ -767,7 +767,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 					Type:              FindingStatusMismatch,
 					SubjectKey:        s.ID.String(),
 					Severity:          SeverityMedium,
-					Status:            FindingStatusOpen,
+					Status:            FindingStatusReconcileRequired,
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
 					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the processor's next billing date; adopt the processor's period timestamps", drift.Hours()),
@@ -851,7 +851,7 @@ func diffDuplicates(provider Provider, idx *localIndex, ridx *remoteIndex) []Fin
 			Type:              FindingDuplicateSubscriptions,
 			SubjectKey:        g.key,
 			Severity:          SeverityHigh,
-			Status:            FindingStatusAdminPending,
+			Status:            FindingStatusAdminRequired,
 			RequiresAdmin:     true,
 			LocalEvidence:     localEv,
 			RemoteEvidence:    remoteEv,
@@ -907,12 +907,12 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		Type:           FindingChargeMissingLocal,
 		SubjectKey:     t.TransactionID,
 		Severity:       SeverityHigh,
-		Status:         FindingStatusOpen,
+		Status:         FindingStatusReconcileRequired,
 		RemoteEvidence: remoteTxnEvidence(t),
 	}
 	switch {
 	case sub == nil:
-		f.Status = FindingStatusAdminPending
+		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
 		if ambiguous {
 			f.RecommendedAction = "processor charge has no local payment and its identity matches MULTIPLE local candidates; resolve manually (never guess)"
@@ -920,7 +920,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			f.RecommendedAction = "processor charge has no local payment and no local identity could be resolved; investigate manually"
 		}
 	case sub.PriceID == nil:
-		f.Status = FindingStatusAdminPending
+		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
 		f.LocalEvidence = localSubEvidence(sub)
 		f.RecommendedAction = "processor charge correlates to a local subscription without a price; backfill manually"
@@ -1002,12 +1002,12 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		Type:           FindingRefundUnrecorded,
 		SubjectKey:     t.TransactionID,
 		Severity:       SeverityHigh,
-		Status:         FindingStatusOpen,
+		Status:         FindingStatusReconcileRequired,
 		RemoteEvidence: remoteTxnEvidence(t),
 	}
 
 	if original == nil {
-		f.Status = FindingStatusAdminPending
+		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
 		f.RecommendedAction = "processor refund references no locally-known payment; investigate manually"
 		return f, true
@@ -1079,7 +1079,7 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		Type:              FindingChargebackActiveSub,
 		SubjectKey:        t.TransactionID,
 		Severity:          SeverityCritical,
-		Status:            FindingStatusAdminPending,
+		Status:            FindingStatusAdminRequired,
 		RequiresAdmin:     true,
 		LocalEvidence:     localEv,
 		RemoteEvidence:    remoteTxnEvidence(t),
@@ -1105,7 +1105,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 				Type:       FindingVaultMismatch,
 				SubjectKey: pm.VaultID,
 				Severity:   SeverityMedium,
-				Status:     FindingStatusOpen,
+				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
 					"payment_method_id": pm.ID.String(),
 					"customer_id":       pm.CustomerID.String(),
@@ -1132,7 +1132,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 			Type:       FindingVaultMismatch,
 			SubjectKey: pm.VaultID,
 			Severity:   SeverityMedium,
-			Status:     FindingStatusOpen,
+			Status:     FindingStatusReconcileRequired,
 			LocalEvidence: map[string]any{
 				"payment_method_id": pm.ID.String(),
 				"customer_id":       pm.CustomerID.String(),
@@ -1208,7 +1208,7 @@ func diffEntitlements(provider Provider, local *LocalState, idx *localIndex, now
 				Type:       FindingEntitlementMismatch,
 				SubjectKey: s.ID.String(),
 				Severity:   SeverityHigh,
-				Status:     FindingStatusOpen,
+				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
 					"subscription_id":      s.ID.String(),
 					"customer_id":          s.CustomerID.String(),
@@ -1237,7 +1237,7 @@ func diffEntitlements(provider Provider, local *LocalState, idx *localIndex, now
 				Type:       FindingEntitlementMismatch,
 				SubjectKey: s.ID.String(),
 				Severity:   SeverityHigh,
-				Status:     FindingStatusOpen,
+				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
 					"subscription_id":   s.ID.String(),
 					"customer_id":       s.CustomerID.String(),

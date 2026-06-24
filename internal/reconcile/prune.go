@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -21,10 +22,16 @@ type PruneParams struct {
 
 // PruneResult tallies one provider account's prune pass.
 type PruneResult struct {
-	Subscriptions        int // deleted (Apply) or would-delete (dry-run)
-	SubscriptionsSkipped int // excess but entangled with the #514 grant ledger
-	Payments             int
-	PaymentsSkipped      int // excess but with protected dependents
+	Subscriptions          int // deleted (Apply) or would-delete (dry-run)
+	SubscriptionsSkipped   int // excess but entangled with the #514 grant ledger
+	Payments               int
+	PaymentsSkipped        int // excess but with protected dependents
+	SubscriptionIDs        []uuid.UUID
+	SkippedSubscriptionIDs []uuid.UUID
+	PaymentIDs             []uuid.UUID
+	SkippedPaymentIDs      []uuid.UUID
+	SubscriptionSkipReason string
+	PaymentSkipReason      string
 }
 
 // PruneProviderAccountExcess fetches the provider's current snapshot for the
@@ -75,43 +82,58 @@ func PruneProviderAccountExcess(ctx context.Context, database *db.DB, fetcher Pr
 	q := database.Gen(ctx)
 
 	// --- excess subscriptions (head state: a snapshot lists every active sub) ---
-	excessSubs, err := q.ListExcessSubscriptionsForProviderAccount(ctx, gen.ListExcessSubscriptionsForProviderAccountParams{
-		MerchantID: mid, ProviderAccountID: binding.ID, PresentIds: presentSubs,
-	})
-	if err != nil {
-		return res, fmt.Errorf("list excess subscriptions: %w", err)
-	}
-	for _, subID := range excessSubs {
-		entangled, err := q.SubscriptionHasGrant(ctx, gen.SubscriptionHasGrantParams{MerchantID: mid, SubscriptionID: subID})
+	if !snap.Coverage.CanPruneSubscriptions() {
+		skipped, err := q.ListExcessSubscriptionsForProviderAccount(ctx, gen.ListExcessSubscriptionsForProviderAccountParams{
+			MerchantID: mid, ProviderAccountID: binding.ID, PresentIds: nil,
+		})
 		if err != nil {
-			return res, fmt.Errorf("subscription grant check %s: %w", subID, err)
+			return res, fmt.Errorf("list subscription prune skips: %w", err)
 		}
-		if entangled {
-			res.SubscriptionsSkipped++
-			continue
+		res.SubscriptionsSkipped = len(skipped)
+		res.SkippedSubscriptionIDs = append(res.SkippedSubscriptionIDs, skipped...)
+		res.SubscriptionSkipReason = "snapshot_not_complete"
+	} else {
+		excessSubs, err := q.ListExcessSubscriptionsForProviderAccount(ctx, gen.ListExcessSubscriptionsForProviderAccountParams{
+			MerchantID: mid, ProviderAccountID: binding.ID, PresentIds: presentSubs,
+		})
+		if err != nil {
+			return res, fmt.Errorf("list excess subscriptions: %w", err)
 		}
-		if !params.Apply {
+		for _, subID := range excessSubs {
+			entangled, err := q.SubscriptionHasGrant(ctx, gen.SubscriptionHasGrantParams{MerchantID: mid, SubscriptionID: subID})
+			if err != nil {
+				return res, fmt.Errorf("subscription grant check %s: %w", subID, err)
+			}
+			if entangled {
+				res.SubscriptionsSkipped++
+				res.SkippedSubscriptionIDs = append(res.SkippedSubscriptionIDs, subID)
+				continue
+			}
+			if !params.Apply {
+				res.Subscriptions++
+				res.SubscriptionIDs = append(res.SubscriptionIDs, subID)
+				continue
+			}
+			// Delete dependent mirror rows then the subscription atomically. Payments
+			// (subscription_id) FK is ON DELETE SET NULL; solana_subscriptions cascades.
+			if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				tq := gen.New(tx)
+				if _, e := tq.PruneDeleteCheckoutSessionsBySubscription(ctx, gen.PruneDeleteCheckoutSessionsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID}); e != nil {
+					return e
+				}
+				if _, e := tq.PruneDeleteEntitlementsBySubscription(ctx, gen.PruneDeleteEntitlementsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID}); e != nil {
+					return e
+				}
+				if _, e := tq.PruneDeleteSubscriptionByID(ctx, gen.PruneDeleteSubscriptionByIDParams{MerchantID: mid, ID: subID}); e != nil {
+					return e
+				}
+				return nil
+			}); err != nil {
+				return res, fmt.Errorf("delete excess subscription %s: %w", subID, err)
+			}
 			res.Subscriptions++
-			continue
+			res.SubscriptionIDs = append(res.SubscriptionIDs, subID)
 		}
-		// Delete dependent mirror rows then the subscription atomically. Payments
-		// (subscription_id) FK is ON DELETE SET NULL; solana_subscriptions cascades.
-		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			tq := gen.New(tx)
-			if _, e := tq.PruneDeleteCheckoutSessionsBySubscription(ctx, gen.PruneDeleteCheckoutSessionsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID}); e != nil {
-				return e
-			}
-			if _, e := tq.PruneDeleteEntitlementsBySubscription(ctx, gen.PruneDeleteEntitlementsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID}); e != nil {
-				return e
-			}
-			if _, e := tq.PruneDeleteSubscriptionByID(ctx, gen.PruneDeleteSubscriptionByIDParams{MerchantID: mid, ID: subID}); e != nil {
-				return e
-			}
-			return nil
-		}); err != nil {
-			return res, fmt.Errorf("delete excess subscription %s: %w", subID, err)
-		}
-		res.Subscriptions++
 	}
 
 	// --- excess payments (windowed: a snapshot only proves absence in its window) ---
@@ -124,29 +146,59 @@ func PruneProviderAccountExcess(ctx context.Context, database *db.DB, fetcher Pr
 		u := params.Until
 		until = &u
 	}
-	excessPays, err := q.ListExcessPaymentsForProviderAccount(ctx, gen.ListExcessPaymentsForProviderAccountParams{
-		MerchantID: mid, ProviderAccountID: binding.ID, PresentTxns: presentTxns, Since: since, Until: until,
-	})
-	if err != nil {
-		return res, fmt.Errorf("list excess payments: %w", err)
-	}
-	for _, payID := range excessPays {
-		protected, err := q.PaymentHasProtectedDependents(ctx, gen.PaymentHasProtectedDependentsParams{MerchantID: mid, PaymentID: payID})
+	if !canPruneTransactionWindow(snap.Coverage, params.Since, params.Until) {
+		skipped, err := q.ListExcessPaymentsForProviderAccount(ctx, gen.ListExcessPaymentsForProviderAccountParams{
+			MerchantID: mid, ProviderAccountID: binding.ID, PresentTxns: nil, Since: since, Until: until,
+		})
 		if err != nil {
-			return res, fmt.Errorf("payment dependent check %s: %w", payID, err)
+			return res, fmt.Errorf("list payment prune skips: %w", err)
 		}
-		if protected != nil && *protected {
-			res.PaymentsSkipped++
-			continue
+		res.PaymentsSkipped = len(skipped)
+		res.SkippedPaymentIDs = append(res.SkippedPaymentIDs, skipped...)
+		res.PaymentSkipReason = "snapshot_not_complete"
+	} else {
+		excessPays, err := q.ListExcessPaymentsForProviderAccount(ctx, gen.ListExcessPaymentsForProviderAccountParams{
+			MerchantID: mid, ProviderAccountID: binding.ID, PresentTxns: presentTxns, Since: since, Until: until,
+		})
+		if err != nil {
+			return res, fmt.Errorf("list excess payments: %w", err)
 		}
-		if !params.Apply {
+		for _, payID := range excessPays {
+			protected, err := q.PaymentHasProtectedDependents(ctx, gen.PaymentHasProtectedDependentsParams{MerchantID: mid, PaymentID: payID})
+			if err != nil {
+				return res, fmt.Errorf("payment dependent check %s: %w", payID, err)
+			}
+			if protected != nil && *protected {
+				res.PaymentsSkipped++
+				res.SkippedPaymentIDs = append(res.SkippedPaymentIDs, payID)
+				continue
+			}
+			if !params.Apply {
+				res.Payments++
+				res.PaymentIDs = append(res.PaymentIDs, payID)
+				continue
+			}
+			if _, e := q.PruneDeletePaymentByID(ctx, gen.PruneDeletePaymentByIDParams{MerchantID: mid, ID: payID}); e != nil {
+				return res, fmt.Errorf("delete excess payment %s: %w", payID, e)
+			}
 			res.Payments++
-			continue
+			res.PaymentIDs = append(res.PaymentIDs, payID)
 		}
-		if _, e := q.PruneDeletePaymentByID(ctx, gen.PruneDeletePaymentByIDParams{MerchantID: mid, ID: payID}); e != nil {
-			return res, fmt.Errorf("delete excess payment %s: %w", payID, e)
-		}
-		res.Payments++
 	}
 	return res, nil
+}
+
+func canPruneTransactionWindow(coverage SnapshotCoverage, since, until time.Time) bool {
+	if !coverage.CanPruneTransactions() {
+		return false
+	}
+	return sameCoverageTime(coverage.TransactionWindowSince, since) &&
+		sameCoverageTime(coverage.TransactionWindowUntil, until)
+}
+
+func sameCoverageTime(got *time.Time, want time.Time) bool {
+	if got == nil || want.IsZero() {
+		return false
+	}
+	return got.UTC().Equal(want.UTC())
 }

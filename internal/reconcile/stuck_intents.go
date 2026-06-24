@@ -105,7 +105,7 @@ func (s *PGStuckIntentSource) ListStuck(ctx context.Context, actionCutoff, verif
 // checks ("... (mode=readonly)"). Mode-parked is not broken: the executor drains
 // the queue when the blocker lifts, so the finding is informational.
 // Every OTHER park reason (unconfigured client, relevance-check failure) and
-// every genuine failure stays admin-queued.
+// every genuine failure stays requires-review.
 func isModeParkedReason(reason string) bool {
 	return strings.Contains(reason, "mode=")
 }
@@ -155,12 +155,12 @@ func makeStuckIntentFinding(si *StuckIntent, now time.Time) Finding {
 	}
 	if isModeParkedReason(si.LastFailureReason) {
 		f.Severity = SeverityLow
-		f.Status = FindingStatusOpen
+		f.Status = FindingStatusReconcileRequired
 		f.RecommendedAction = "no admin action needed: the intent is parked by the operating mode / kill switch (see last_failure_reason); the executor drains it when the blocker lifts"
 		return f
 	}
 	f.Severity = SeverityHigh
-	f.Status = FindingStatusAdminPending
+	f.Status = FindingStatusAdminRequired
 	f.RequiresAdmin = true
 	f.RecommendedAction = fmt.Sprintf(
 		"provider intent %s has sat %s for %s; investigate provider failures, credentials, or dead executor/verifier workers — the intent ledger owns the replay, reconcile never touches intents",
@@ -171,12 +171,13 @@ func makeStuckIntentFinding(si *StuckIntent, now time.Time) Finding {
 // StuckIntentReport is the PS-10 section of the run summary: provider intents
 // (#358 ledger) sitting non-terminal beyond the hardcoded stuck thresholds.
 type StuckIntentReport struct {
-	Total        int               `json:"total"`
-	AdminQueued  int               `json:"admin_queued"`
-	ModeParked   int               `json:"mode_parked"`
-	ByIntentType map[string]int    `json:"by_intent_type,omitempty"`
-	Intents      []StuckIntentLine `json:"intents,omitempty"`
-	AutoResolved int64             `json:"auto_resolved"`
+	Total          int               `json:"total"`
+	RequiresReview int               `json:"requires_review"`
+	AdminRequired  int               `json:"-"`
+	ModeParked     int               `json:"mode_parked"`
+	ByIntentType   map[string]int    `json:"by_intent_type,omitempty"`
+	Intents        []StuckIntentLine `json:"intents,omitempty"`
+	AutoResolved   int64             `json:"auto_resolved"`
 }
 
 // StuckIntentLine is one stuck intent's report line, persisted in the run
@@ -234,7 +235,8 @@ func (e *Engine) runStuckIntents(ctx context.Context, runID uuid.UUID, result *R
 			LastFailureReason: si.LastFailureReason,
 		}
 		if f.RequiresAdmin {
-			rep.AdminQueued++
+			rep.RequiresReview++
+			rep.AdminRequired++
 		} else {
 			rep.ModeParked++
 			line.ModeParked = true

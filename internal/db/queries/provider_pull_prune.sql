@@ -9,7 +9,10 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND provider_account_id = sqlc.arg(provider_account_id)::uuid
   AND processor_subscription_id <> ''
-  AND processor_subscription_id <> ALL(sqlc.arg(present_ids)::text[]);
+  AND (
+    COALESCE(cardinality(sqlc.arg(present_ids)::text[]), 0) = 0
+    OR processor_subscription_id <> ALL(sqlc.arg(present_ids)::text[])
+  );
 
 -- name: ListExcessPaymentsForProviderAccount :many
 -- Windowed: only payments inside the pulled [since, until] window are eligible
@@ -17,7 +20,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT id FROM openrails.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND provider_account_id = sqlc.arg(provider_account_id)::uuid
-  AND transaction_id <> ALL(sqlc.arg(present_txns)::text[])
+  AND (
+    COALESCE(cardinality(sqlc.arg(present_txns)::text[]), 0) = 0
+    OR transaction_id <> ALL(sqlc.arg(present_txns)::text[])
+  )
   AND (sqlc.narg(since)::timestamptz IS NULL OR purchased_at >= sqlc.narg(since)::timestamptz)
   AND (sqlc.narg(until)::timestamptz IS NULL OR purchased_at <= sqlc.narg(until)::timestamptz);
 

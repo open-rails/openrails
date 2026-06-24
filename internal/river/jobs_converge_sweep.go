@@ -61,7 +61,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		return fmt.Errorf("converge sweep: list merchants: %w", err)
 	}
 
-	var swept, findings, autoFixed, held, adminQueued int
+	var swept, findings, autoFixed, reconcileRequired, adminRequired int
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		var res converge.ConvergeResult
@@ -78,13 +78,13 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		swept++
 		findings += res.Findings
 		autoFixed += res.AutoFixed
-		held += res.Held
-		adminQueued += res.AdminQueued
+		reconcileRequired += res.ReconcileRequired
+		adminRequired += res.AdminRequired
 	}
 	if findings > 0 {
 		logger.WithFields(log.Fields{
 			"merchants": swept, "findings": findings, "auto_fixed": autoFixed,
-			"held": held, "admin_queued": adminQueued,
+			"reconcile_required": reconcileRequired, "admin_required": adminRequired,
 		}).Info("converge sweep completed")
 	}
 	return nil

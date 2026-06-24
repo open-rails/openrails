@@ -76,6 +76,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		Provider:     ProviderNMI,
 		FetchedAt:    time.Now().UTC(),
 		Capabilities: Capabilities{Subscriptions: true},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Subscriptions: []RemoteSubscription{
 			{ProcessorSubscriptionID: psubKeep, Status: SubscriptionStatusActive},
 		},
@@ -88,6 +89,23 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1`, id).Scan(&n))
 		return n == 1
 	}
+
+	// Incomplete provider coverage: every account-bound local row in the domain
+	// is skipped, and none are compared to a partial snapshot.
+	incompleteSnap := *snap
+	incompleteSnap.Coverage = SnapshotCoverage{}
+	incompleteFetcher := &fakeFetcher{provider: ProviderNMI, snap: &incompleteSnap}
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := PruneProviderAccountExcess(ctx, appDB, incompleteFetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		require.NoError(t, err)
+		require.Equal(t, 0, res.Subscriptions)
+		require.Equal(t, 3, res.SubscriptionsSkipped)
+		require.Equal(t, "snapshot_not_complete", res.SubscriptionSkipReason)
+		require.True(t, subExists(ctx, subKeep))
+		require.True(t, subExists(ctx, subGone))
+		require.True(t, subExists(ctx, subGrant))
+		return nil
+	}))
 
 	// Dry-run: discovers excess, writes nothing.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
@@ -118,6 +136,92 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Subscriptions, "nothing left to delete")
 		require.Equal(t, 1, res.SubscriptionsSkipped)
+		return nil
+	}))
+}
+
+func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	suffix := uuid.NewString()[:8]
+	paID := uuid.New()
+	productID := uuid.New()
+	priceID := uuid.New()
+	payKeep := uuid.New()
+	payGone := uuid.New()
+	var customer uuid.UUID
+	since := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, role, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
+			paID, merchantID, "acct-pay-"+suffix)
+		exec(`INSERT INTO openrails.products (id, slug, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+			productID, "prune-pay-"+suffix, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`,
+			priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
+		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
+			payKeep, priceID, suffix, since.Add(24*time.Hour), customer, merchantID, paID)
+		exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, provider_account_id)
+		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
+			payGone, priceID, suffix, since.Add(48*time.Hour), customer, merchantID, paID)
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payKeep, payGone})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.provider_accounts WHERE id=$1`, paID)
+			return nil
+		})
+	})
+
+	paymentExists := func(ctx context.Context, id uuid.UUID) bool {
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1`, id).Scan(&n))
+		return n == 1
+	}
+	binding := ProviderAccountBinding{ID: paID, ProviderType: "nmi", AccountID: "acct-pay-" + suffix}
+	snap := &RemoteSnapshot{
+		Provider:     ProviderNMI,
+		FetchedAt:    time.Now().UTC(),
+		Capabilities: Capabilities{Transactions: true},
+		Transactions: []RemoteTransaction{{TransactionID: "txn-keep-" + suffix, Type: TransactionTypeSale, Success: true, OccurredAt: since.Add(24 * time.Hour)}},
+	}
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := PruneProviderAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: snap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true})
+		require.NoError(t, err)
+		require.Equal(t, 0, res.Payments)
+		require.Equal(t, 2, res.PaymentsSkipped)
+		require.Equal(t, "snapshot_not_complete", res.PaymentSkipReason)
+		require.True(t, paymentExists(ctx, payKeep))
+		require.True(t, paymentExists(ctx, payGone))
+		return nil
+	}))
+
+	completeSnap := *snap
+	completeSnap.Coverage = SnapshotCoverage{
+		TransactionsExhaustive:        true,
+		TransactionsPaginatedComplete: true,
+		TransactionWindowSince:        timePtrIfSet(since),
+		TransactionWindowUntil:        timePtrIfSet(until),
+	}
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := PruneProviderAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: &completeSnap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Payments)
+		require.Equal(t, 0, res.PaymentsSkipped)
+		require.True(t, paymentExists(ctx, payKeep))
+		require.False(t, paymentExists(ctx, payGone))
 		return nil
 	}))
 }
