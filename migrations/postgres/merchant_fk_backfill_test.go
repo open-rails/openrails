@@ -5,22 +5,25 @@ import (
 	"testing"
 )
 
-// load028Migration reads the raw SQL of migration 028 from the embedded FS.
-func load028Migration(t *testing.T) string {
+// loadBaselineMigration reads the raw SQL of the consolidated baseline (001) from the embedded FS.
+// Originally targeted migration 028; after squashing 001..029 the FK constraints live in 001.
+func loadBaselineMigration(t *testing.T) string {
 	t.Helper()
-	b, err := FS.ReadFile("028_merchant_fk_backfill.up.sql")
+	b, err := FS.ReadFile("001_schema.up.sql")
 	if err != nil {
-		t.Fatalf("read 028_merchant_fk_backfill.up.sql: %v", err)
+		t.Fatalf("read 001_schema.up.sql: %v", err)
 	}
 	return string(b)
 }
 
-// TestMerchantFKBackfillConstraintsPresent asserts that migration 028 adds an
-// ON DELETE RESTRICT merchant FK for every core table that lacked one.
+// TestMerchantFKBackfillConstraintsPresent asserts that the consolidated baseline (001)
+// contains ON DELETE RESTRICT merchant FKs for every core table.
+// Originally validated migration 028; after squashing 001..029 into a single
+// baseline the check now targets 001_schema.up.sql.
 // This is a static SQL-text test (no live DB required); the integration test
 // suite (scripts/test_integration.sh) verifies the constraints actually apply.
 func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
-	sql := collapseWS(load028Migration(t))
+	sql := collapseWS(loadBaselineMigration(t))
 
 	type wantFK struct {
 		table      string
@@ -38,49 +41,85 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.table, func(t *testing.T) {
-			// Constraint name must appear.
-			if !strings.Contains(sql, c.constraint) {
-				t.Errorf("constraint %q not found in 028 migration", c.constraint)
+			// Constraint name must appear in an ADD CONSTRAINT statement.
+			addConstraintStr := "add constraint " + c.constraint
+			if !strings.Contains(sql, addConstraintStr) {
+				t.Errorf("constraint %q not found as ADD CONSTRAINT in baseline migration", c.constraint)
 			}
 			// Must reference merchants(id).
 			wantRef := "references openrails.merchants(id)"
-			// Check in the vicinity of the constraint name.
-			idx := strings.Index(sql, c.constraint)
+			// Extract a bounded snippet: from the ADD CONSTRAINT clause to the next ";".
+			// This prevents false positives from pg_dump comment headers and later FK clauses.
+			idx := strings.Index(sql, addConstraintStr)
 			if idx == -1 {
 				return // already reported above
 			}
-			snippet := sql[idx:]
+			afterName := sql[idx:]
+			semiIdx := strings.Index(afterName, ";")
+			var snippet string
+			if semiIdx >= 0 {
+				snippet = afterName[:semiIdx+1]
+			} else {
+				snippet = afterName[:minLen(len(afterName), 300)]
+			}
 			if !strings.Contains(snippet, wantRef) {
-				t.Errorf("constraint %q does not reference openrails.merchants(id)", c.constraint)
+				t.Errorf("constraint %q does not reference openrails.merchants(id), got: %q", c.constraint, snippet)
 			}
 			// Must be ON DELETE RESTRICT (not CASCADE).
 			if !strings.Contains(snippet, "on delete restrict") {
-				t.Errorf("constraint %q must use ON DELETE RESTRICT, got: %q", c.constraint, snippet[:minLen(len(snippet), 200)])
+				t.Errorf("constraint %q must use ON DELETE RESTRICT, got: %q", c.constraint, snippet)
 			}
 			// Must NOT be ON DELETE CASCADE.
 			if strings.Contains(snippet, "on delete cascade") {
-				t.Errorf("constraint %q must not use ON DELETE CASCADE", c.constraint)
+				t.Errorf("constraint %q must not use ON DELETE CASCADE, got: %q", c.constraint, snippet)
 			}
 		})
 	}
 }
 
 // TestMerchantFKBackfillNoCascadeOnFinancialTables is a belt-and-suspenders
-// guard: the entire 028 migration must not contain ON DELETE CASCADE anywhere.
+// guard: the MERCHANT FKs for core financial tables must use ON DELETE RESTRICT, not CASCADE.
+// The consolidated baseline may have ON DELETE CASCADE for other (non-merchant) FK relationships,
+// so we check each merchant FK constraint snippet individually.
 func TestMerchantFKBackfillNoCascadeOnFinancialTables(t *testing.T) {
-	sql := collapseWS(load028Migration(t))
-	if strings.Contains(sql, "on delete cascade") {
-		t.Error("028 migration must not use ON DELETE CASCADE for any merchant FK")
+	sql := collapseWS(loadBaselineMigration(t))
+	merchantFKConstraints := []string{
+		"products_merchant_fk",
+		"prices_merchant_fk",
+		"entitlement_features_merchant_fk",
+		"product_entitlement_features_merchant_fk",
+		"payment_methods_merchant_fk",
+		"checkout_sessions_merchant_fk",
+		"grants_merchant_fk",
+	}
+	for _, name := range merchantFKConstraints {
+		addStr := "add constraint " + name
+		idx := strings.Index(sql, addStr)
+		if idx == -1 {
+			t.Errorf("merchant FK constraint %q not found as ADD CONSTRAINT in baseline", name)
+			continue
+		}
+		afterName := sql[idx:]
+		semiIdx := strings.Index(afterName, ";")
+		var snippet string
+		if semiIdx >= 0 {
+			snippet = afterName[:semiIdx+1]
+		} else {
+			snippet = afterName[:minLen(len(afterName), 300)]
+		}
+		if strings.Contains(snippet, "on delete cascade") {
+			t.Errorf("merchant FK constraint %q must not use ON DELETE CASCADE, got: %q", name, snippet)
+		}
 	}
 }
 
-// TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables checks that 028 does
-// not re-add FKs for tables already covered by earlier migrations.
+// TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables checks that the baseline
+// does not contain duplicate ADD CONSTRAINT for FKs that were added inline in table
+// definitions. In the consolidated baseline all constraints should appear exactly once.
 // We check for "add constraint <name>" specifically (not mere name occurrence in
-// comments) to avoid false positives from the documentation block at the top of
-// the migration.
+// comments) to avoid false positives.
 func TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables(t *testing.T) {
-	sql := collapseWS(load028Migration(t))
+	sql := collapseWS(loadBaselineMigration(t))
 	alreadyCovered := []string{
 		"customers_merchant_id_fkey",
 		"merchant_configurations_merchant_fk",
@@ -90,8 +129,9 @@ func TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables(t *testing.T) {
 	}
 	for _, name := range alreadyCovered {
 		addConstraint := "add constraint " + name
-		if strings.Contains(sql, addConstraint) {
-			t.Errorf("028 migration must not re-add already-existing FK %q", name)
+		count := strings.Count(sql, addConstraint)
+		if count > 1 {
+			t.Errorf("baseline must not contain duplicate ADD CONSTRAINT for FK %q (found %d)", name, count)
 		}
 	}
 }
