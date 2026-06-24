@@ -806,8 +806,12 @@ func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID, curre
 	return nil
 }
 
-// GetCreditLimit transcribes handlers.ServiceGetCreditLimit (#489).
-func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
+// getCreditLimit transcribes handlers.ServiceGetCreditLimit (#489). It is
+// intentionally unexported: GetCreditLimit is not in the AdminFundingClient
+// interface (the corresponding HTTP route is not registered in the standalone
+// server), so exposing it as a public method would advertise an asymmetric
+// surface consumers cannot reach through openrails.Client.
+func (c *localClient) getCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {

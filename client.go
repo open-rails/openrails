@@ -67,8 +67,14 @@ type PolicySyncClient interface {
 // AdminFundingClient is the small non-hot-path funding/reporting surface used
 // by standalone admin jobs.
 type AdminFundingClient interface {
+	// DepositCredits mints a credit block for a payer (admin funding, promotions,
+	// money-in settlement). Returns the ledger transaction created.
 	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
+	// SetCreditLimit sets the admin-managed arrears credit line for a payer in one
+	// currency. A zero limit removes the credit line.
 	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
+	// UsageRollup returns grouped spend aggregates for a payer and currency over
+	// [from, to]. groupBy selects the aggregation dimension (e.g. "resource", "invoker").
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the merchant (#410).
@@ -139,10 +145,14 @@ type DepositCreditsRequest struct {
 	CustomerID  *CustomerID
 	Invoker     string
 	Currency    string
-	Amount      int64
-	Source      string
-	SourceID    *uuid.UUID
-	ExpiresAt   *time.Time
+	// Amount is the deposit size in the currency's internal precision (e.g. cents for USD).
+	Amount int64
+	// Source identifies the system of record for this deposit (e.g. "stripe", "manual").
+	Source string
+	// SourceID is the idempotency key for the deposit within the Source namespace.
+	// Duplicate (Source, SourceID) pairs are rejected, preventing double-deposits.
+	SourceID  *uuid.UUID
+	ExpiresAt *time.Time
 	Description string
 }
 
@@ -222,11 +232,17 @@ type AdmitResponse struct {
 // OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
 // usage event (a plain capture).
 type CaptureUsage struct {
+	// EventType classifies the usage event (e.g. "inference", "storage"). Required
+	// for the event to be recorded; a blank EventType suppresses the usage event.
 	EventType string
-	Resource  string
-	Metadata  map[string]any
-	Source    string
-	SourceID  string
+	// Resource is the host-defined resource attribution key (e.g. model name, endpoint).
+	Resource string
+	// Metadata holds arbitrary key/value dimensions for analytics rollups.
+	Metadata map[string]any
+	// Source identifies the system that generated this usage event.
+	Source string
+	// SourceID is the idempotency key for this usage event within the Source namespace.
+	SourceID string
 }
 
 // BalanceResponse is the GET /v1/merchant/credits/balance snapshot (handler
@@ -241,30 +257,50 @@ type BalanceResponse struct {
 	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
 }
 
-// CreditAccount is the OpenRails service balance/policy snapshot.
+// CreditAccount is the OpenRails service balance/policy snapshot for one
+// customer + currency pair. All amounts are in the currency's internal
+// precision (e.g. cents for USD).
 type CreditAccount struct {
-	CustomerID            string `json:"customer_id"`
-	Currency              string `json:"currency"`
-	BillingMode           string `json:"billing_mode"`
-	BalanceAmount         int64  `json:"balance_amount"`
-	HeldAmount            int64  `json:"held_amount"`
-	AvailableAmount       int64  `json:"available_amount"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	CustomerID  string `json:"customer_id"`
+	Currency    string `json:"currency"`
+	BillingMode string `json:"billing_mode"`
+	// BalanceAmount is the total prepaid credit balance (excluding holds).
+	BalanceAmount int64 `json:"balance_amount"`
+	// HeldAmount is the sum of outstanding authorization holds not yet captured or released.
+	HeldAmount int64 `json:"held_amount"`
+	// AvailableAmount is BalanceAmount minus HeldAmount — the credit available for new admits.
+	AvailableAmount int64 `json:"available_amount"`
+	// OutstandingOwedAmount is the unpaid postpaid balance (postpaid billing mode only).
+	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
 }
 
 // AccountSettingsInput patches an OpenRails credit account policy.
+// All pointer fields are optional — nil means "no change" for that setting.
+// Amounts are in the currency's internal precision (e.g. cents for USD).
 type AccountSettingsInput struct {
-	BillingMode              *string `json:"billing_mode,omitempty"`
-	MaxSpendPerDay           *int64  `json:"max_spend_per_day,omitempty"`
-	MaxSpendPerMonth         *int64  `json:"max_spend_per_month,omitempty"`
-	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount,omitempty"`
-	LowBalanceThreshold      *int64  `json:"low_balance_threshold,omitempty"`
-	AutoTopupEnabled         *bool   `json:"auto_topup_enabled,omitempty"`
-	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents,omitempty"`
-	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id,omitempty"`
-	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days,omitempty"`
-	HardStopOnBreach         *bool   `json:"hard_stop_on_breach,omitempty"`
-	AlertThresholdPct        *int    `json:"alert_threshold_pct,omitempty"`
+	// BillingMode controls how the account is charged ("prepaid" or "postpaid").
+	BillingMode *string `json:"billing_mode,omitempty"`
+	// MaxSpendPerDay is the rolling-24h spend ceiling in currency-internal units.
+	MaxSpendPerDay *int64 `json:"max_spend_per_day,omitempty"`
+	// MaxSpendPerMonth is the calendar-month spend ceiling in currency-internal units.
+	MaxSpendPerMonth *int64 `json:"max_spend_per_month,omitempty"`
+	// MaxOutstandingOwedAmount caps outstanding postpaid balance in currency-internal units.
+	MaxOutstandingOwedAmount *int64 `json:"max_outstanding_owed_amount,omitempty"`
+	// LowBalanceThreshold triggers a low-balance alert when prepaid balance falls below this.
+	LowBalanceThreshold *int64 `json:"low_balance_threshold,omitempty"`
+	AutoTopupEnabled    *bool  `json:"auto_topup_enabled,omitempty"`
+	// AutoTopupAmountCents is the topup deposit size in currency-internal units.
+	AutoTopupAmountCents   *int64  `json:"auto_topup_amount_cents,omitempty"`
+	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id,omitempty"`
+	// DefaultCreditExpiryDays is the default lifetime in days for credit deposits that
+	// don't carry an explicit ExpiresAt.
+	DefaultCreditExpiryDays *int `json:"default_credit_expiry_days,omitempty"`
+	// HardStopOnBreach rejects new admissions when any spend limit is breached rather
+	// than allowing with a warning.
+	HardStopOnBreach *bool `json:"hard_stop_on_breach,omitempty"`
+	// AlertThresholdPct triggers an alert when the balance falls below this percentage
+	// of the low-balance threshold (0–100).
+	AlertThresholdPct *int `json:"alert_threshold_pct,omitempty"`
 }
 
 // UsageRollupRow is one grouped spend bucket from OpenRails.
@@ -357,15 +393,20 @@ type AbuseUsageResponse struct {
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
+// Source and SourceID are required and together form the idempotency key —
+// duplicate (Source, SourceID) reports are accepted but recorded as Duplicate=true.
 type WastedSpendReport struct {
 	CustomerID  string `json:"customer_id"`
 	Invoker     string `json:"invoker"`
 	InvokerType string `json:"invoker_type,omitempty"`
 	Currency    string `json:"currency,omitempty"`
-	Amount      int64  `json:"amount"`
-	Source      string `json:"source"`
-	SourceID    string `json:"source_id"`
-	Reason      string `json:"reason,omitempty"`
+	// Amount is the wasted spend in the currency's internal precision.
+	Amount int64 `json:"amount"`
+	// Source identifies the system reporting the waste (e.g. "inference-gateway").
+	Source string `json:"source"`
+	// SourceID is the idempotency key for this report within the Source namespace.
+	SourceID string `json:"source_id"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // WastedSpendResponse reports how OpenRails handled a wasted-spend report.

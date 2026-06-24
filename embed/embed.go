@@ -85,16 +85,29 @@ type HandlerOptions = embedded.HTTPHandlerOptions
 type RouteSet = embedded.RouteSet
 
 const (
-	RouteSetCheckout         = embedded.RouteSetCheckout
-	RouteSetCustomer         = embedded.RouteSetCustomer
-	RouteSetMerchantAdmin    = embedded.RouteSetMerchantAdmin
+	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
+	RouteSetCheckout = embedded.RouteSetCheckout
+	// RouteSetCustomer mounts customer-facing billing routes (/v1/me/*, /v1/customers/*).
+	RouteSetCustomer = embedded.RouteSetCustomer
+	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
+	RouteSetMerchantAdmin = embedded.RouteSetMerchantAdmin
+	// RouteSetMerchantSettings mounts provider secrets, catalog pushes, and merchant config routes.
 	RouteSetMerchantSettings = embedded.RouteSetMerchantSettings
-	RouteSetMerchantAPI      = embedded.RouteSetMerchantAPI
-	RouteSetWebhooks         = embedded.RouteSetWebhooks
+	// RouteSetMerchantAPI mounts the host-internal service/API-key surface
+	// (/billing/v1/service/*). Opt in for embedded hosts that want the same
+	// service-credential surface as standalone; most embedded hosts use Client() instead.
+	RouteSetMerchantAPI = embedded.RouteSetMerchantAPI
+	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
+	RouteSetWebhooks = embedded.RouteSetWebhooks
 )
 
 var (
-	EmbeddedDefaultRouteSets   = append([]RouteSet(nil), embedded.EmbeddedDefaultRouteSets...)
+	// EmbeddedDefaultRouteSets is the default embedded HTTP surface: checkout,
+	// customer, merchant_admin, and webhooks. It excludes RouteSetMerchantSettings
+	// and RouteSetMerchantAPI (both opt-in for embedded hosts).
+	EmbeddedDefaultRouteSets = append([]RouteSet(nil), embedded.EmbeddedDefaultRouteSets...)
+	// StandaloneDefaultRouteSets is the full standalone HTTP surface, including
+	// merchant_settings and merchant_api in addition to EmbeddedDefaultRouteSets.
 	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
 )
 
