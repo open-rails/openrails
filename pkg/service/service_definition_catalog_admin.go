@@ -11,6 +11,27 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
+// maxCatalogPageSize bounds caller-supplied pagination so a single request can
+// never force an unbounded result set (DoS-resistance).
+const maxCatalogPageSize = 1000
+
+// clampCatalogPage normalises a (limit, offset) pair:
+//   - limit <= 0 → 100 (default page size)
+//   - limit > maxCatalogPageSize → maxCatalogPageSize (cap)
+//   - offset < 0 → 0 (floor)
+func clampCatalogPage(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > maxCatalogPageSize {
+		limit = maxCatalogPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 // GetProduct returns a product by ID.
 func (s *Service) GetProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
@@ -65,14 +86,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (i
 	if err != nil {
 		return nil, 0, err
 	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	offset := opts.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := clampCatalogPage(opts.Limit, opts.Offset)
 
 	var raws []*models.Product
 	// Use the simplest paginated method that exists on ProductService today.
@@ -190,12 +204,7 @@ func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, li
 	if err != nil {
 		return nil, 0, err
 	}
-	if limit <= 0 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset = clampCatalogPage(limit, offset)
 	raws, total, err := prices.ListPaginated(ctx, filter, limit, offset)
 	if err != nil {
 		return nil, 0, err
