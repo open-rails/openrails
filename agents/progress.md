@@ -7,7 +7,46 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 583
+next_id: 584
+
+---
+
+# #583: Embedded-host boundary cleanup — public permissions pkg + combined MountHandler (etcd lessons)
+
+**Completed:** no
+
+Proposed 2026-06-25 (doujins boundary review + etcd embed-design comparison).
+Embedding hosts (doujins) write more glue against the embed surface than they
+should, and hardcode permission strings openrails owns. Two additive,
+non-breaking changes.
+
+PART A — public `permissions` package (perm-export). openrails' route-gate
+vocabulary (`merchant:*` seller, `customer:*` treasury) lived only in
+`internal/controlplane/catalog.go`, so hosts can't import it and hardcode
+literals — and doujins drifted to vestigial `openrails:self:*` strings that match
+no gate (`/v1/me` self-service needs no grant). New public `permissions/` package
+owns the string constants + the `merchant:*`/`customer:*` owner globs;
+`internal/controlplane` now references it (single source of truth, drift-proof).
+Status: implemented locally, builds, values asserted unchanged.
+
+PART B — `embgin.MountHandler` (etcd lesson #1, mount-glue absorption). Today a
+host builds `SelfHandler(rt.Embedded())` AND `rt.Handler(opts)` separately and
+hand-stitches them + rewrites `/api/openrails/v1/*` → `/billing/v1/*` (doujins
+`newMountHandler` — the bug-prone path; carries 3 re-path comments documenting
+past breaks). New `pkg/embedded/gin.MountHandler(e, MountOptions{RouteSets,
+MountPrefix})` returns ONE prefix-aware handler that internally dispatches
+/me+/customers to the self surface and everything else to the user surface.
+Status: implemented locally, builds.
+
+CROSS-REPO CONSUMER (doujins): imports `openrails/permissions` and stamps
+`permissions.CustomerAll` (self) / `permissions.MerchantAll` (admin) in
+`openrailsembed/auth.go`, replacing the vestigial self-strings; replaces
+`buildMount`/`newMountHandler` (~60 lines) with one `embgin.MountHandler` call.
+Both need an openrails release doujins can pin.
+
+NOT doing (descoped from the etcd review): unify the standalone binary onto
+`embed.Runtime` (lessons #2/#3) — only worth it if standalone stays first-class;
+config translation is irreducible (two products, two Config structs).
 
 ---
 

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/openrails/permissions"
 )
 
 // Permission is an OpenRails permission definition. AuthKit owns `root:`;
@@ -128,36 +129,32 @@ func Groups() []authcore.PersonaDef {
 // `<persona>:*`. `/v1/me/*` self-service needs no grant. Coarse: one permission
 // per role boundary, not per route.
 const (
-	PermMerchantSettingsRead           = "merchant:settings:read"
-	PermMerchantSettingsUpdate         = "merchant:settings:update"
-	PermMerchantPaymentProvidersRead   = "merchant:payment-providers:read"
-	PermMerchantPaymentProvidersUpdate = "merchant:payment-providers:update"
-	PermMerchantCatalogRead            = "merchant:catalog:read"
-	PermMerchantCatalogUpdate          = "merchant:catalog:update"
-	PermMerchantCustomerSettingsRead   = "merchant:customer-settings:read"
-	PermMerchantCustomerSettingsUpdate = "merchant:customer-settings:update"
-	PermMerchantPaymentsRead           = "merchant:payments:read"
-	PermMerchantPaymentsRefund         = "merchant:payments:refund"
-	PermMerchantSubscriptionsRead      = "merchant:subscriptions:read"
-	PermMerchantSubscriptionsUpdate    = "merchant:subscriptions:update"
-	PermMerchantAdmissionsCreate       = "merchant:admissions:create"
-	PermMerchantUsageRead              = "merchant:usage:read"
-	PermMerchantRepairAlertsRead       = "merchant:repair-alerts:read"
+	PermMerchantSettingsRead           = permissions.MerchantSettingsRead
+	PermMerchantSettingsUpdate         = permissions.MerchantSettingsUpdate
+	PermMerchantPaymentProvidersRead   = permissions.MerchantPaymentProvidersRead
+	PermMerchantPaymentProvidersUpdate = permissions.MerchantPaymentProvidersUpdate
+	PermMerchantCatalogRead            = permissions.MerchantCatalogRead
+	PermMerchantCatalogUpdate          = permissions.MerchantCatalogUpdate
+	PermMerchantCustomerSettingsRead   = permissions.MerchantCustomerSettingsRead
+	PermMerchantCustomerSettingsUpdate = permissions.MerchantCustomerSettingsUpdate
+	PermMerchantPaymentsRead           = permissions.MerchantPaymentsRead
+	PermMerchantPaymentsRefund         = permissions.MerchantPaymentsRefund
+	PermMerchantSubscriptionsRead      = permissions.MerchantSubscriptionsRead
+	PermMerchantSubscriptionsUpdate    = permissions.MerchantSubscriptionsUpdate
+	PermMerchantAdmissionsCreate       = permissions.MerchantAdmissionsCreate
+	PermMerchantUsageRead              = permissions.MerchantUsageRead
+	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
-	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Every
-	// customer can delegate spend of its balance — there is no org-vs-individual
-	// distinction. `customer:*` is a top-level persona, disjoint from `merchant:*`.
-	// The payer surface is split (#566) so a finance reader, a billing-mode setter,
-	// a payment-methods manager, and a credit-loader are distinct grants — coarse:
-	// one permission per role boundary, not per route. ---
-	PermCustomerBalanceRead          = "customer:balance:read"
-	PermCustomerBillingUpdate        = "customer:billing:update"
-	PermCustomerPaymentMethodsUpdate = "customer:payment-methods:update"
-	PermCustomerCheckoutCreate       = "customer:checkout:create"
+	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Coarse: one
+	// permission per role boundary, not per route. ---
+	PermCustomerBalanceRead          = permissions.CustomerBalanceRead
+	PermCustomerBillingUpdate        = permissions.CustomerBillingUpdate
+	PermCustomerPaymentMethodsUpdate = permissions.CustomerPaymentMethodsUpdate
+	PermCustomerCheckoutCreate       = permissions.CustomerCheckoutCreate
 
-	PermCustomerSpendDelegationsRead   = "customer:spend-delegations:read"
-	PermCustomerSpendDelegationsUpdate = "customer:spend-delegations:update"
+	PermCustomerSpendDelegationsRead   = permissions.CustomerSpendDelegationsRead
+	PermCustomerSpendDelegationsUpdate = permissions.CustomerSpendDelegationsUpdate
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
