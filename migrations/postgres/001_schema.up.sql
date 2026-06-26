@@ -4811,17 +4811,15 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usdc_funding_sessions TO op
 
 
 --
--- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: openrails; Owner: -
+-- Default privileges for future objects. NO "FOR ROLE <name>": pg_dump hardcodes
+-- the dump-source superuser (`admin`), but embedders run migrations as their own
+-- role — an unqualified ALTER DEFAULT PRIVILEGES targets current_user, so later
+-- migrations' sequences/tables auto-grant to openrails_app (RLS mode) regardless
+-- of the host's DB role name. (#585)
 --
 
-ALTER DEFAULT PRIVILEGES FOR ROLE admin IN SCHEMA openrails GRANT SELECT,USAGE ON SEQUENCES TO openrails_app;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: openrails; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE admin IN SCHEMA openrails GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO openrails_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT,USAGE ON SEQUENCES TO openrails_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO openrails_app;
 
 
 --

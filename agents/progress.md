@@ -7,7 +7,27 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 585
+next_id: 586
+
+---
+
+# #585: Role-agnostic default privileges in 001 (drop hardcoded `FOR ROLE admin`)
+
+**Completed:** yes
+
+The squashed 001 baseline carried `ALTER DEFAULT PRIVILEGES FOR ROLE admin` — a
+pg_dump artifact naming the dump-source superuser. Any host running migrations
+as a role NOT named `admin` either fails ("role admin does not exist") or
+silently never grants future objects to openrails_app (breaking RLS-mode access
+on later migrations). Dropped `FOR ROLE admin` so the clause targets current_user
+(the migration runner), role-agnostic.
+
+- [x] Drop `FOR ROLE admin` from both ALTER DEFAULT PRIVILEGES (sequences + tables).
+- [x] Migration + RLS tests pass (openrails_app still gets the grants).
+
+Note: embedded single-merchant hosts (doujins) connect as a superuser, so RLS +
+these grants are inert there; this matters for non-superuser / multi-merchant
+deployments. No standalone tag needed — rides the next release.
 
 ---
 
