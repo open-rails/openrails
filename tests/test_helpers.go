@@ -20,7 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authtesting "github.com/open-rails/authkit/testing"
+	authtesting "github.com/open-rails/authkit/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
