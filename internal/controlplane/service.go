@@ -28,7 +28,11 @@ import (
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
-	hosted  bool
+	// authClient is the in-process AuthKit engine the host built (client-first,
+	// #142); authSvc adapts it for HTTP, Core()/the delegated verifier use it
+	// directly. The server no longer vends it (.Client() was dropped).
+	authClient *authcore.Client
+	hosted     bool
 	// pool is the schema-aware wrapper used for OpenRails' own control-plane
 	// queries (openrails.* tables). AuthKit's own profiles.* queries go through
 	// authSvc, which holds the raw pool (#471).
@@ -169,7 +173,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 
 	var cp2 *ControlPlane
-	authSvc, err := authhttp.NewServer(coreCfg, pool,
+	// Client-first construction (#142): build the AuthKit engine, then adapt it
+	// with the HTTP server. Core() / the delegated verifier hold this client.
+	authClient, err := authcore.New(coreCfg, pool)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
+	}
+	authSvc, err := authhttp.NewServer(authClient,
 		authhttp.WithPermissionGroupAuthorizer(func(r *http.Request, subjectID, persona, instanceSlug, perm string) (bool, error) {
 			if cp2 == nil {
 				return false, errors.New("controlplane: permission-group authorizer unavailable")
@@ -186,7 +196,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// `openrails` audience. Customer self-service tokens may be permissionless;
 	// any supplied permissions are bounded by the signing remote application's
 	// stored authority in AuthKit.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Client(), APIKeyPrefix)
+	delegatedVerifier, err := newDelegatedVerifier(authClient, APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
@@ -197,11 +207,12 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// remote-app authority is resolved as the additive walk-up of the app's group
 	// roles, kept as raw grant tokens; OpenRails gates them with its own
 	// namespace-glob matcher on every credential type (#565).
-	delegatedVerifier.WithService(authSvc.Client())
+	delegatedVerifier.WithService(authClient)
 
 	cp2 = &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
+		authClient:         authClient,
 		hosted:             options.hosted,
 		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:  delegatedVerifier,
@@ -227,7 +238,7 @@ func (c *ControlPlane) Core() authkit.Client {
 	if c == nil {
 		return nil
 	}
-	return c.authSvc.Client()
+	return c.authClient
 }
 
 // AuthService returns the underlying AuthKit http.Service (for route mounting).
