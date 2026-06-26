@@ -34,6 +34,11 @@ END $$;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
+-- This baseline is fully schema-qualified (openrails.*); own the schema so the
+-- migration FS is self-contained for embedded consumers applying it via
+-- migratekit (idempotent — already-migrated DBs skip this whole migration).
+CREATE SCHEMA IF NOT EXISTS openrails;
+
 --
 -- Name: rail_type; Type: TYPE; Schema: openrails; Owner: -
 --
