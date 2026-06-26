@@ -124,7 +124,7 @@ func TestDelegatedVerify_SucceedsWithoutPermissionsAndAudience(t *testing.T) {
 	require.Empty(t, dp.Permissions)
 }
 
-func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
+func TestResolveDelegatedIgnoresBrowserOriginForAuthorization(t *testing.T) {
 	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
 	require.NoError(t, err)
 	jwks := testJWKS(t, signer)
@@ -133,17 +133,17 @@ func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
 	v, err := newDelegatedVerifier(&authcore.Client{}, "")
 	require.NoError(t, err)
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
-		Slug:           "doujins",
-		Issuer:         testDelegatedIssuer,
-		JWKSURI:        jwks.URL + "/.well-known/jwks.json",
-		AllowedOrigins: []string{"https://doujins.com"},
-		Enabled:        true,
+		Slug:    "doujins",
+		Issuer:  testDelegatedIssuer,
+		JWKSURI: jwks.URL + "/.well-known/jwks.json",
+		Enabled: true,
 	}}, []string{canonicalAudience}))
 	cp := &ControlPlane{delegatedVerifier: v}
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
 
 	_, err = cp.ResolveDelegated(context.Background(), tok, "https://evil.example")
-	require.ErrorIs(t, err, ErrDelegatedOriginNotAllowed)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrDelegatedOriginNotAllowed)
 }
 
 func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {

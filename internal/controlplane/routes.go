@@ -11,9 +11,8 @@ import (
 // login/session/user/JWKS-adjacent capabilities and declared group-management
 // routes OpenRails needs:
 //
-//   - RoutePublic: public AuthKit discovery.
-//   - RouteSession: login, refresh, logout, password reset.
-//   - RouteUser: self-service account routes (me, sessions, password change).
+//   - RouteAuth: public AuthKit discovery plus login, refresh, logout, password reset.
+//   - RouteAccount: self-service account routes (me, sessions, password change).
 //   - RoutePermissionGroups: declared merchant/customer member, API-key, and
 //     remote-application management routes; AuthKit gates every route through
 //     the OpenRails permission-group authorizer.
@@ -23,9 +22,8 @@ import (
 //   - RouteAdmin (AuthKit's own admin surface — OpenRails owns admin routes).
 //   - RouteBrowserOIDC (browser redirects mount separately when enabled).
 var IntentionalRouteGroups = []authhttp.RouteGroup{
-	authhttp.RoutePublic,
-	authhttp.RouteSession,
-	authhttp.RouteUser,
+	authhttp.RouteAuth,
+	authhttp.RouteAccount,
 	authhttp.RoutePermissionGroups,
 }
 

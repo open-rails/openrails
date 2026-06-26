@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -84,7 +83,7 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := strings.TrimSpace(r.Header.Get("Origin"))
-			if origin != "" && authkit.OriginAllowed(origin, allowedOrigins) {
+			if origin != "" && OriginAllowed(origin, allowedOrigins) {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", origin)
 				h.Add("Vary", "Origin")
@@ -98,6 +97,22 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// OriginAllowed reports whether origin is explicitly allow-listed for browser
+// CORS. Matching is exact after trimming whitespace; OpenRails does not grant
+// wildcard browser credentials.
+func OriginAllowed(origin string, allowedOrigins []string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range allowedOrigins {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveMerchantHTTP is the net/http analogue of ResolveMerchant. It pins the

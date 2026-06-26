@@ -139,7 +139,7 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 		return nil, authkit.ErrInvalidAccessToken
 	}
 
-	resolved, err := c.Core().ResolveAPIKeyWithResources(ctx, keyID, secret)
+	groupID, permissions, err := c.Core().ResolveAPIKey(ctx, keyID, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -148,17 +148,17 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 	// minted under — resolved with the same group-based resolver the service-JWT
 	// path uses — never a resource scope. Fails closed when the group backs no
 	// active merchant (stale/deleted), so cross-merchant or orphaned keys are denied.
-	mid, mslug, err := c.merchantForGroupID(ctx, resolved.PermissionGroupID)
+	mid, mslug, err := c.merchantForGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedServiceCredential{
-		OwnerGroupID:  resolved.PermissionGroupID,
+		OwnerGroupID:  groupID,
 		OwnerGroupRef: mslug,
 		MerchantID:    mid,
 		MerchantSlug:  mslug,
-		Permissions:   resolved.Permissions,
+		Permissions:   permissions,
 	}, nil
 }
 

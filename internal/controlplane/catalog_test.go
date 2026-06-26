@@ -101,7 +101,7 @@ func TestCatalog_IsACopy(t *testing.T) {
 func TestGroups_CustomerExposesRemoteApplications(t *testing.T) {
 	for _, group := range Groups() {
 		if group.Name == CustomerType {
-			if !group.Routes.RemoteAppRegistration {
+			if !group.Capabilities.RemoteApplications {
 				t.Fatal("customer groups must expose remote_application registration")
 			}
 			return

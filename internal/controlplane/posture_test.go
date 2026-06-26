@@ -17,9 +17,9 @@ func TestPrivatePostureIsLockedInThisRepo(t *testing.T) {
 		t.Fatalf("MountedRouteGroups() len = %d, want %d", len(got), len(IntentionalRouteGroups))
 	}
 
-	if got := registrationMode(true); got != authcore.RegistrationModeAdminBootstrapOnly {
+	if got := registrationMode(true); got != authcore.RegistrationModeClosed {
 		t.Fatalf("registrationMode(true) = %q, want %q (no public self-registration in this repo)",
-			got, authcore.RegistrationModeAdminBootstrapOnly)
+			got, authcore.RegistrationModeClosed)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/open-rails/authkit"
 )
 
 // ErrRemoteApplicationNotConfigured indicates the control plane has no verifier
@@ -63,7 +65,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		}
 		return nil, ErrDelegatedInvalid
 	}
-	if !cl.IsRemoteApplication() {
+	if cl.PrincipalKind() != authkit.PrincipalKindRemoteApplication {
 		return nil, ErrNotRemoteApplicationToken
 	}
 

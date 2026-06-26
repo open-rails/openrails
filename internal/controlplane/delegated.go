@@ -234,13 +234,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
-	// Browser defense-in-depth only: real authorization is already the validated
-	// delegated JWT shape, issuer, audience, permissions, and merchant
-	// owner mapping below. Do not treat Origin as an API security boundary.
-	allowed, err := c.delegatedVerifier.OriginAllowedForIssuer(ctx, issuer, origin, true)
-	if err != nil || !allowed {
-		return nil, ErrDelegatedOriginNotAllowed
-	}
+	_ = origin // Browser Origin is transport policy, handled by CORS, not token authorization.
 
 	// FEDERATED merchant-signed token (issue #259): the merchant is pinned from the
 	// VALIDATED `iss` via the issuer registry. Because `issuer` is globally unique,

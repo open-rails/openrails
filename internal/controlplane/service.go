@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,12 +80,12 @@ func newOptions(opts []Option) options {
 
 // registrationMode maps the lock flag to an AuthKit registration mode.
 //
-// Standalone passes locked=true, so registration is
-// RegistrationModeAdminBootstrapOnly and no config/env knob can open it.
+// Standalone passes locked=true, so registration is closed and no config/env
+// knob can open it.
 // Embedded hosts can opt into locked=false with WithHostedPosture.
 func registrationMode(locked bool) authcore.RegistrationMode {
 	if locked {
-		return authcore.RegistrationModeAdminBootstrapOnly
+		return authcore.RegistrationModeClosed
 	}
 	return authcore.RegistrationModeOpen
 }
@@ -152,16 +151,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		Frontend:    authcore.FrontendConfig{BaseURL: issuer},
 		APIKeys:     authcore.APIKeysConfig{Prefix: APIKeyPrefix},
 		Environment: strings.TrimSpace(cfg.Env),
-		RBAC: authcore.RBACConfig{
-			Permissions: Catalog(),
-			// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
-			// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
-			// and `customer` (owner/member, `customer:*`). There is NO `org` persona,
-			// and no org⇄merchant coupling. Each type's `owner` role is auto-seeded
-			// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
-			// its own namespace directly; the flat case needs no cross-namespace grant).
-			Groups: Groups(),
-		},
+		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
+		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
+		// and `customer` (owner/member, `customer:*`). There is NO `org` persona,
+		// and no org⇄merchant coupling. Each type's `owner` role is auto-seeded
+		// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
+		// its own namespace directly; the flat case needs no cross-namespace grant).
+		RBAC: Groups(),
 		// Private standalone posture: no public user self-registration. Embedded
 		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
@@ -172,21 +168,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		},
 	}
 
-	var cp2 *ControlPlane
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
 	authClient, err := authcore.New(coreCfg, pool)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
 	}
-	authSvc, err := authhttp.NewServer(authClient,
-		authhttp.WithPermissionGroupAuthorizer(func(r *http.Request, subjectID, persona, instanceSlug, perm string) (bool, error) {
-			if cp2 == nil {
-				return false, errors.New("controlplane: permission-group authorizer unavailable")
-			}
-			return cp2.AuthorizePermissionGroupRoute(r.Context(), subjectID, persona, instanceSlug, perm)
-		}),
-	)
+	authSvc, err := authhttp.NewServer(authClient)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
@@ -209,7 +197,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// namespace-glob matcher on every credential type (#565).
 	delegatedVerifier.WithService(authClient)
 
-	cp2 = &ControlPlane{
+	cp2 := &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
 		authClient:         authClient,

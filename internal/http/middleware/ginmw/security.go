@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
@@ -60,7 +59,7 @@ func CORSFromSource(source CORSOriginSource) gin.HandlerFunc {
 		origin := strings.TrimSpace(c.Request.Header.Get("Origin"))
 		if origin != "" && source != nil {
 			origins, err := source(c.Request.Context())
-			if err == nil && authkit.OriginAllowed(origin, origins) {
+			if err == nil && middleware.OriginAllowed(origin, origins) {
 				h := c.Writer.Header()
 				h.Set("Access-Control-Allow-Origin", origin)
 				h.Add("Vary", "Origin")

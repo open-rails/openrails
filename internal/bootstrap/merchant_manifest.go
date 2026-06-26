@@ -932,7 +932,6 @@ func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *Manife
 		JWKSURI:           strings.TrimSpace(iss.JWKSURI),
 		Mode:              mode,
 		PublicKeys:        iss.PublicKeys,
-		AllowedOrigins:    cleanStrings(iss.AllowedOrigins),
 		Enabled:           true,
 	}
 }

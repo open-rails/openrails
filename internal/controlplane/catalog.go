@@ -28,7 +28,10 @@ import (
 
 // Permission is an OpenRails permission definition. AuthKit owns `root:`;
 // OpenRails defines its app resources in `merchant:*` and `customer:*`.
-type Permission = authcore.PermissionDef
+type Permission struct {
+	Name        string
+	Description string
+}
 
 // Permission-group personas (#567). OpenRails declares exactly TWO flat
 // top-level group types under the intrinsic `root` type:
@@ -57,22 +60,20 @@ const (
 
 // Groups returns the OpenRails permission-group type catalog (#567): the two
 // flat top-level personas (`merchant`, `customer`) declared under `root`. Fixed
-// catalogs, AllowCustomRoles=false (custom roles + deep hierarchy are tensorhub's
+// catalogs, CustomRoles=false (custom roles + deep hierarchy are tensorhub's
 // domain). authkit injects the intrinsic `root` type and auto-seeds each type's
-// `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.Groups.
+// `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.
 func Groups() []authcore.PersonaDef {
 	return []authcore.PersonaDef{
 		{
-			Name:             MerchantType,
-			AllowedParents:   []string{authcore.RootPersona},
-			AllowCustomRoles: false,
+			Name:   MerchantType,
+			Parent: authcore.RootPersona,
 			// authkit auto-generates the staff/credential MANAGEMENT routes from
-			// this profile (members, api-keys, remote-applications). OpenRails
+			// these capabilities (members, api-keys, remote-applications). OpenRails
 			// mounts these and builds none of them (#567).
-			Routes: authcore.ManagementProfile{
-				MemberAssignment:      true,
-				APIKeyMinting:         true,
-				RemoteAppRegistration: true,
+			Capabilities: authcore.PersonaCapabilities{
+				APIKeys:            true,
+				RemoteApplications: true,
 			},
 			Roles: []authcore.RoleDef{
 				// owner (= merchant:*) is auto-seeded; declared elsewhere implicitly.
@@ -98,13 +99,11 @@ func Groups() []authcore.PersonaDef {
 			},
 		},
 		{
-			Name:             CustomerType,
-			AllowedParents:   []string{authcore.RootPersona},
-			AllowCustomRoles: false,
-			Routes: authcore.ManagementProfile{
-				MemberAssignment:      true,
-				APIKeyMinting:         true,
-				RemoteAppRegistration: true,
+			Name:   CustomerType,
+			Parent: authcore.RootPersona,
+			Capabilities: authcore.PersonaCapabilities{
+				APIKeys:            true,
+				RemoteApplications: true,
 			},
 			Roles: []authcore.RoleDef{
 				// owner (= customer:*) is auto-seeded.
@@ -183,9 +182,7 @@ var catalogEntries = []Permission{
 	{Name: PermCustomerSpendDelegationsUpdate, Description: "Customer: replace the customer's balance-sharing (spend-delegation) policy."},
 }
 
-// Catalog returns the OpenRails permission catalog as AuthKit PermissionDefs,
-// suitable for core.Config.Permissions. The returned slice is a copy so
-// callers cannot mutate the package-level catalog.
+// Catalog returns a copy of the OpenRails permission catalog.
 func Catalog() []Permission {
 	out := make([]Permission, len(catalogEntries))
 	copy(out, catalogEntries)

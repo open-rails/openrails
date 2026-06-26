@@ -23,7 +23,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrNoControlPlane
 	}
-	_, principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), authhttp.WithServiceJWTMaxLifetime(authkit.DefaultServiceJWTLifetime))
+	principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), authhttp.WithServiceJWTMaxLifetime(authkit.DefaultServiceJWTLifetime))
 	if err != nil {
 		return nil, err
 	}

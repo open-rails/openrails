@@ -36,16 +36,16 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 	return c.loadRemoteApplications(ctx)
 }
 
-// BrowserCORSOrigins returns the browser Origin allow-list for standalone CORS:
-// the union of enabled AuthKit remote_application.allowed_origins values.
-// Preflight has no JWT issuer, so this is process-wide browser policy only; API
-// authorization remains JWT signature/issuer/audience/permissions plus merchant
-// ownership checks.
+// BrowserCORSOrigins returns the default browser Origin allow-list for standalone
+// CORS. AuthKit no longer owns remote-application origins, so the control plane
+// has no AuthKit-derived browser allow-list; hosts that want browser CORS should
+// wire an OpenRails-owned source at the server layer.
 func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error) {
+	_ = ctx
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
-	return c.delegatedVerifier.RemoteApplicationAllowedOrigins(ctx)
+	return nil, nil
 }
 
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
