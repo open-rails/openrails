@@ -15,7 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -234,7 +235,7 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	customerID := owner.ID
 
 	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
-	require.ErrorIs(t, err, authcore.ErrGroupNotFound)
+	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 
 	token, _, err := cp.Core().IssueAccessToken(ctx, owner.ID, "customer-remote-app-owner@example.test", nil)
 	require.NoError(t, err)

@@ -7,8 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit/authbase"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	authhttp "github.com/open-rails/authkit/http"
 
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -78,7 +77,7 @@ type ResolvedDelegated struct {
 // expose more than strictly necessary — the minter's call, not a gate rule).
 func (r *ResolvedDelegated) HasPermission(perm string) bool {
 	for _, grant := range r.Permissions {
-		if authbase.PermissionTokenCovers(grant, perm) {
+		if authkit.PermissionTokenCovers(grant, perm) {
 			return true
 		}
 	}
@@ -162,7 +161,7 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 // (AddIssuer with JWKS-URL fetching), so at runtime the verifier trusts every
 // registered+enabled merchant issuer — and ONLY those. OpenRails signs no delegated
 // tokens itself; there is no self-issuer.
-func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authhttp.Verifier, error) {
+func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*authhttp.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -192,7 +191,7 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 //     verifier rejects any token carrying `tenant` or `tenant_id`.
 //
 // Returns:
-//   - authcore.ErrAccessTokenExpired for an expired token,
+//   - authkit.ErrAccessTokenExpired for an expired token,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active merchant (cross-merchant / unmapped),
 //   - ErrDelegatedOriginNotAllowed when the optional browser Origin
@@ -213,11 +212,11 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 		// Preserve expiry so the middleware can return a precise reason; map
 		// everything else to a sanitized invalid error (never leak verifier
 		// internals or distinguish bad-signature from wrong-audience to clients).
-		if errors.Is(err, authcore.ErrAccessTokenExpired) {
-			return nil, authcore.ErrAccessTokenExpired
+		if errors.Is(err, authkit.ErrAccessTokenExpired) {
+			return nil, authkit.ErrAccessTokenExpired
 		}
-		if errors.Is(err, authcore.ErrAccessTokenRevoked) {
-			return nil, authcore.ErrAccessTokenRevoked
+		if errors.Is(err, authkit.ErrAccessTokenRevoked) {
+			return nil, authkit.ErrAccessTokenRevoked
 		}
 		return nil, ErrDelegatedInvalid
 	}

@@ -43,7 +43,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	jwtkit "github.com/open-rails/authkit/jwt"
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/redis/go-redis/v9"
@@ -339,14 +340,14 @@ type ServiceJWTCaller struct {
 
 // ensureMerchantGroup idempotently ensures the root + merchant permission-group
 // for slug exist (#567) and returns the merchant group's internal id.
-func (h *Harness) ensureMerchantGroup(core *authcore.Service, slug string) string {
+func (h *Harness) ensureMerchantGroup(core authkit.Client, slug string) string {
 	h.t.Helper()
 	_, err := core.EnsureRootGroup(h.ctx)
 	require.NoError(h.t, err, "ensure root group")
 	require.NoError(h.t, core.SeedPermissionGroupContainment(h.ctx), "seed containment")
 	gid, err := core.ResolveGroupIDForSlug(h.ctx, controlplane.MerchantType, slug)
-	if errors.Is(err, authcore.ErrGroupNotFound) {
-		gid, err = core.CreatePermissionGroup(h.ctx, authcore.CreatePermissionGroupRequest{
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		gid, err = core.CreatePermissionGroup(h.ctx, authkit.CreatePermissionGroupRequest{
 			Persona:       controlplane.MerchantType,
 			InstanceSlug:  slug,
 			ParentPersona: authcore.RootPersona,
@@ -477,11 +478,11 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 	// #567: a remote_application is nested under its controlling merchant
 	// permission-group (PermissionGroupID carries the permission_group_id).
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
-	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
 		Issuer:            issuer.URL(),
-		Mode:              authcore.RemoteAppModeStatic,
+		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
 	})
@@ -496,7 +497,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 	// lazy-loads on first use, but reload makes the test deterministic).
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authcore.RemoteApplicationAccessParams{
+	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authkit.RemoteApplicationAccessParams{
 		Issuer:      issuer.URL(),
 		Audiences:   []string{"openrails"},
 		TTL:         time.Hour,
@@ -525,11 +526,11 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 	h.t.Cleanup(issuer.Close)
 
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
-	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
 		Issuer:            issuer.URL(),
-		Mode:              authcore.RemoteAppModeStatic,
+		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
 	})
@@ -543,7 +544,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	token, err := authcore.MintDelegatedAccessToken(h.ctx, issuer.Signer(), authcore.DelegatedAccessParams{
+	token, err := authcore.MintDelegatedAccessToken(h.ctx, issuer.Signer(), authkit.DelegatedAccessParams{
 		Issuer:           issuer.URL(),
 		Audiences:        []string{"openrails"},
 		DelegatedSubject: subject,
@@ -559,7 +560,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 // mints a service JWT from it. Registering the issuer to the org is the
 // authority root; resources, when present, are still validated against the
 // merchant owned by that org at request time.
-func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string, resources []authcore.APIKeyResource) ServiceJWTCaller {
+func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string, resources []authkit.APIKeyResource) ServiceJWTCaller {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "RegisterServiceJWTIssuer requires the standalone surface")
@@ -572,11 +573,11 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	h.t.Cleanup(issuer.Close)
 
 	groupID := h.ensureMerchantGroup(core, ownerOrgSlug)
-	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
 		Issuer:            issuer.URL(),
-		Mode:              authcore.RemoteAppModeStatic,
+		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
 	})
@@ -590,7 +591,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authcore.ServiceJWTMintOptions{
+	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authkit.ServiceJWTMintOptions{
 		Subject:     "service:" + slug,
 		Audiences:   []string{"openrails"},
 		Permissions: permissions,
@@ -617,7 +618,7 @@ func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string) st
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), merchantSlug)
 	createdBy := h.ensureAPIKeyActor(cp, merchantSlug)
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authkit.APIKeyMintOptions{
 		Name:      name,
 		Role:      roleForPerms(permissions),
 		CreatedBy: createdBy,
@@ -688,7 +689,7 @@ func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), dbtest.TestMerchantSlug)
 	createdBy := h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug)
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authkit.APIKeyMintOptions{
 		Name:      "integrationharness-extra",
 		Role:      controlplane.MerchantRoleOwner,
 		CreatedBy: createdBy,
@@ -719,13 +720,13 @@ func (h *Harness) ensureAPIKeyActor(cp *controlplane.ControlPlane, merchantSlug 
 	return user.ID
 }
 
-func testIssuerRemoteAppKeys(t *testing.T, issuer *authtesting.TestIssuer) []authcore.RemoteAppKey {
+func testIssuerRemoteAppKeys(t *testing.T, issuer *authtesting.TestIssuer) []authkit.RemoteAppKey {
 	t.Helper()
 	signer, ok := issuer.Signer().(jwtkit.PublicKeySigner)
 	require.True(t, ok, "test issuer signer must expose a public key")
 	der, err := x509.MarshalPKIXPublicKey(signer.PublicKey())
 	require.NoError(t, err, "marshal test issuer public key")
-	return []authcore.RemoteAppKey{{
+	return []authkit.RemoteAppKey{{
 		KID:          issuer.Signer().KID(),
 		PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
 	}}

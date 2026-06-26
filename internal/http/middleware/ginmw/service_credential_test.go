@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -36,7 +36,7 @@ func (f fakeServiceCredentialResolver) ResolveServiceJWT(context.Context, string
 	if f.serviceJWTResolved != nil || f.serviceJWTErr != nil {
 		return f.serviceJWTResolved, f.serviceJWTErr
 	}
-	return nil, authcore.ErrInvalidServiceJWT
+	return nil, authkit.ErrInvalidServiceJWT
 }
 
 func newServiceCredentialTestRouter(resolver ServiceCredentialResolver, perm string) *gin.Engine {
@@ -176,7 +176,7 @@ func TestServiceCredentialRequired_DeniesUnknownPermissionSet(t *testing.T) {
 }
 
 func TestServiceCredentialRequired_DeniesExpiredAPIKey(t *testing.T) {
-	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrAccessTokenExpired}
+	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authkit.ErrAccessTokenExpired}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -184,7 +184,7 @@ func TestServiceCredentialRequired_DeniesExpiredAPIKey(t *testing.T) {
 }
 
 func TestServiceCredentialRequired_DeniesRevokedAPIKey(t *testing.T) {
-	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrAccessTokenRevoked}
+	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authkit.ErrAccessTokenRevoked}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -192,7 +192,7 @@ func TestServiceCredentialRequired_DeniesRevokedAPIKey(t *testing.T) {
 }
 
 func TestServiceCredentialRequired_DeniesUnknownAPIKey(t *testing.T) {
-	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authcore.ErrInvalidAccessToken}
+	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: authkit.ErrInvalidAccessToken}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

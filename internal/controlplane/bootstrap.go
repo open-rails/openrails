@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -97,8 +98,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	//    parent=root. No parent org. The initial admin (if any) is seeded as owner
 	//    at creation.
 	groupID, err := core.ResolveGroupIDForSlug(ctx, MerchantType, slug)
-	if errors.Is(err, authcore.ErrGroupNotFound) {
-		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 			Persona:        MerchantType,
 			InstanceSlug:   slug,
 			ParentPersona:  authcore.RootPersona,
@@ -153,7 +154,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 					return nil, fmt.Errorf("controlplane: assign bootstrap api-key actor owner: %w", aerr)
 				}
 			}
-			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, MerchantType, slug, authcore.APIKeyMintOptions{
+			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, MerchantType, slug, authkit.APIKeyMintOptions{
 				Name: BootstrapAdminAPIKeyName,
 				Role: MerchantRoleOwner,
 				// AuthKit v0.62 enforces no-escalation on API-key mints. Bootstrap
@@ -181,7 +182,7 @@ func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, 
 	}
 	if u, err := core.GetUserByUsername(ctx, bootstrapAPIKeyActorUsername); err == nil {
 		return u.ID, nil
-	} else if !errors.Is(err, authcore.ErrUserNotFound) && !errors.Is(err, pgx.ErrNoRows) {
+	} else if !errors.Is(err, authkit.ErrUserNotFound) && !errors.Is(err, pgx.ErrNoRows) {
 		return "", fmt.Errorf("controlplane: lookup bootstrap api-key actor: %w", err)
 	}
 	u, err := core.CreateUser(ctx, bootstrapAPIKeyActorEmail, bootstrapAPIKeyActorUsername)
@@ -196,7 +197,7 @@ func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, 
 
 // anyLiveAPIKey reports whether the merchant group already has at least one
 // non-revoked API key, so bootstrap does not mint a duplicate on re-run.
-func anyLiveAPIKey(toks []authcore.APIKey) bool {
+func anyLiveAPIKey(toks []authkit.APIKey) bool {
 	for _, t := range toks {
 		if t.RevokedAt == nil {
 			return true

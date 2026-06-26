@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/authkit/authbase"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	authhttp "github.com/open-rails/authkit/http"
 )
 
@@ -24,7 +23,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrNoControlPlane
 	}
-	_, principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), authhttp.WithServiceJWTMaxLifetime(authcore.DefaultServiceJWTLifetime))
+	_, principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), authhttp.WithServiceJWTMaxLifetime(authkit.DefaultServiceJWTLifetime))
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +64,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 
 // intersectPermissions returns the elements of claimed that are COVERED by the
 // stored authority, under AuthKit's namespace-anchored glob semantics
-// (authbase.PermMatches). A stored grant may be a wildcard pattern — the merchant
+// (authkit.PermMatches). A stored grant may be a wildcard pattern — the merchant
 // `owner` role resolves to the single token `merchant:*` (#567) — so a claimed
 // concrete permission like `merchant:customer-settings:update` must be matched by
 // COVERAGE, not exact string equality, or every owner-backed service JWT is
@@ -82,7 +81,7 @@ func intersectPermissions(claimed, stored []string) []string {
 	out := make([]string, 0, len(claimed))
 	for _, c := range claimed {
 		for _, g := range stored {
-			if authbase.PermMatches(g, c) {
+			if authkit.PermMatches(g, c) {
 				out = append(out, c)
 				break
 			}

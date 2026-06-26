@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 )
 
 // EnsureCustomerPermissionGroup lazily materializes the AuthKit customer group
@@ -30,11 +31,11 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	}
 
 	groupID, err := core.ResolveGroupIDForSlug(ctx, CustomerType, customerID)
-	if errors.Is(err, authcore.ErrGroupNotFound) {
+	if errors.Is(err, authkit.ErrGroupNotFound) {
 		if ownerSubject == "" {
 			return "", errors.New("controlplane: customer owner subject required")
 		}
-		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
+		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 			Persona:        CustomerType,
 			InstanceSlug:   customerID,
 			ParentPersona:  authcore.RootPersona,

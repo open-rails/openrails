@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	authhttp "github.com/open-rails/authkit/http"
 	jwtkit "github.com/open-rails/authkit/jwt"
 	log "github.com/sirupsen/logrus"
@@ -185,7 +186,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// `openrails` audience. Customer self-service tokens may be permissionless;
 	// any supplied permissions are bounded by the signing remote application's
 	// stored authority in AuthKit.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), APIKeyPrefix)
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Client(), APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
@@ -196,7 +197,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// remote-app authority is resolved as the additive walk-up of the app's group
 	// roles, kept as raw grant tokens; OpenRails gates them with its own
 	// namespace-glob matcher on every credential type (#565).
-	delegatedVerifier.WithService(authSvc.Core())
+	delegatedVerifier.WithService(authSvc.Client())
 
 	cp2 = &ControlPlane{
 		cfg:                cfg,
@@ -222,11 +223,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 
 // Core returns the underlying AuthKit core service used for in-process
 // org/role/API key operations.
-func (c *ControlPlane) Core() *authcore.Service {
+func (c *ControlPlane) Core() authkit.Client {
 	if c == nil {
 		return nil
 	}
-	return c.authSvc.Core()
+	return c.authSvc.Client()
 }
 
 // AuthService returns the underlying AuthKit http.Service (for route mounting).

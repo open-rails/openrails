@@ -7,8 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit/authbase"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -51,7 +50,7 @@ type ResolvedServiceCredential struct {
 // `merchant:catalog:update`; an exact grant still matches exactly).
 func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 	for _, grant := range r.Permissions {
-		if authbase.PermissionTokenCovers(grant, perm) {
+		if authkit.PermissionTokenCovers(grant, perm) {
 			return true
 		}
 	}
@@ -118,7 +117,7 @@ func (c *ControlPlane) TokenPrefix() string {
 // shared-secret API-key marker. Used by the service credential middleware to
 // route a Bearer credential to API-key validation rather than JWT verification.
 func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
-	return authcore.HasAPIKeyPrefix(c.TokenPrefix(), strings.TrimSpace(token))
+	return authkit.HasAPIKeyPrefix(c.TokenPrefix(), strings.TrimSpace(token))
 }
 
 // ResolveAPIKey validates a presented shared-secret API key end-to-end:
@@ -126,7 +125,7 @@ func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
 //   - resolves key id + secret hash via AuthKit core (controlling permission
 //     group, role-resolved permissions, expiry, revocation) — returns
-//     authcore.ErrAccessTokenExpired / ErrAccessTokenRevoked /
+//     authkit.ErrAccessTokenExpired / ErrAccessTokenRevoked /
 //     ErrInvalidAccessToken on those conditions,
 //   - resolves the merchant the credential administers from the permission GROUP
 //     the key was minted under (#567/#569: a merchant IS its group). A key whose
@@ -135,9 +134,9 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	keyID, secret, ok := authcore.ParseAPIKey(c.TokenPrefix(), strings.TrimSpace(token))
+	keyID, secret, ok := authkit.ParseAPIKey(c.TokenPrefix(), strings.TrimSpace(token))
 	if !ok {
-		return nil, authcore.ErrInvalidAccessToken
+		return nil, authkit.ErrInvalidAccessToken
 	}
 
 	resolved, err := c.Core().ResolveAPIKeyWithResources(ctx, keyID, secret)

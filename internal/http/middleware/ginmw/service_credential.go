@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
@@ -83,18 +83,18 @@ func ServiceCredentialRequired(resolver ServiceCredentialResolver) gin.HandlerFu
 		resolved, credentialType, err := resolveServiceCredential(c.Request.Context(), resolver, token)
 		if err != nil {
 			switch {
-			case errors.Is(err, authcore.ErrAccessTokenExpired):
+			case errors.Is(err, authkit.ErrAccessTokenExpired):
 				response.UnauthorizedWithMessage(c, "service_credential_expired")
-			case errors.Is(err, authcore.ErrAccessTokenRevoked):
+			case errors.Is(err, authkit.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "service_credential_revoked")
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
 				// Owning AuthKit org maps to no active OpenRails merchant.
 				response.ForbiddenWithMessage(c, "service_credential_merchant_unresolved")
 			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
 				response.ForbiddenWithMessage(c, "service_credential_resource_scope_denied")
-			case errors.Is(err, authcore.ErrInvalidAccessToken):
+			case errors.Is(err, authkit.ErrInvalidAccessToken):
 				response.UnauthorizedWithMessage(c, "service_credential_invalid")
-			case errors.Is(err, authcore.ErrInvalidServiceJWT):
+			case errors.Is(err, authkit.ErrInvalidServiceJWT):
 				response.UnauthorizedWithMessage(c, "service_jwt_invalid")
 			default:
 				log.WithError(err).Warn("API key resolution failed")
@@ -141,7 +141,7 @@ func resolveServiceCredential(ctx context.Context, resolver ServiceCredentialRes
 		resolved, err := jwtResolver.ResolveServiceJWT(ctx, token)
 		return resolved, CredentialServiceJWT, err
 	}
-	return nil, "", authcore.ErrInvalidAccessToken
+	return nil, "", authkit.ErrInvalidAccessToken
 }
 
 // RequireServiceCredentialCustomerScope gates a route on the resolved

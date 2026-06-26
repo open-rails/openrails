@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -87,7 +87,7 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 
 	// Mint under the merchant permission-group (type=merchant, ref=merchant slug).
 	// #569 (hard cut): identity is the group; no resource scope.
-	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, controlplane.MerchantType, merchantSlug, authcore.APIKeyMintOptions{
+	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, controlplane.MerchantType, merchantSlug, authkit.APIKeyMintOptions{
 		Name: name,
 		Role: role,
 	})

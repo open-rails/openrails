@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
+	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -468,9 +468,9 @@ func bearerToken(header string) string {
 
 func writeServiceCredentialError(r *httprequest.Request, err error) {
 	switch {
-	case errors.Is(err, authcore.ErrAccessTokenExpired):
+	case errors.Is(err, authkit.ErrAccessTokenExpired):
 		r.AbortJSON(http.StatusUnauthorized, "service_credential_expired")
-	case errors.Is(err, authcore.ErrAccessTokenRevoked):
+	case errors.Is(err, authkit.ErrAccessTokenRevoked):
 		r.AbortJSON(http.StatusUnauthorized, "service_credential_revoked")
 	case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
 		r.AbortJSON(http.StatusForbidden, "service_credential_merchant_unresolved")

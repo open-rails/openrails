@@ -11,7 +11,8 @@ import (
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	authhttp "github.com/open-rails/authkit/http"
 	jwtkit "github.com/open-rails/authkit/jwt"
 	"github.com/stretchr/testify/require"
@@ -53,9 +54,9 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 		ID:      "remote-app-1",
 		Slug:    "openrails-test",
 		Issuer:  testDelegatedIssuer,
-		Mode:    authcore.RemoteAppModeStatic,
+		Mode:    authkit.RemoteAppModeStatic,
 		Enabled: true,
-		PublicKeys: []authcore.RemoteAppKey{{
+		PublicKeys: []authkit.RemoteAppKey{{
 			KID:          testDelegatedKID,
 			PublicKeyPEM: testPublicKeyPEM(t, signer.PublicKey()),
 		}},
@@ -86,20 +87,20 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authhttp.DelegatedAcces
 	return tok
 }
 
-type delegatedRemoteAppSource []authcore.RemoteApplication
+type delegatedRemoteAppSource []authkit.RemoteApplication
 
-func (s delegatedRemoteAppSource) ListRemoteApplications(context.Context, bool) ([]authcore.RemoteApplication, error) {
-	return append([]authcore.RemoteApplication(nil), s...), nil
+func (s delegatedRemoteAppSource) ListRemoteApplications(context.Context, bool) ([]authkit.RemoteApplication, error) {
+	return append([]authkit.RemoteApplication(nil), s...), nil
 }
 
-func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer string) (*authcore.RemoteApplication, error) {
+func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer string) (*authkit.RemoteApplication, error) {
 	for i := range s {
 		if s[i].Issuer == issuer {
 			app := s[i]
 			return &app, nil
 		}
 	}
-	return nil, authcore.ErrRemoteApplicationNotFound
+	return nil, authkit.ErrRemoteApplicationNotFound
 }
 
 func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
@@ -129,7 +130,7 @@ func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
 	jwks := testJWKS(t, signer)
 	defer jwks.Close()
 
-	v, err := newDelegatedVerifier(&authcore.Service{}, "")
+	v, err := newDelegatedVerifier(&authcore.Client{}, "")
 	require.NoError(t, err)
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
 		Slug:           "doujins",
@@ -269,4 +270,4 @@ func TestDelegatedVerify_RejectsServiceCredential(t *testing.T) {
 }
 
 // guard: ensure authcore error sentinels are wired for the resolver's mapping.
-var _ = authcore.ErrAccessTokenExpired
+var _ = authkit.ErrAccessTokenExpired

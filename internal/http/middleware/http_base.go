@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -84,7 +84,7 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := strings.TrimSpace(r.Header.Get("Origin"))
-			if origin != "" && authcore.OriginAllowed(origin, allowedOrigins) {
+			if origin != "" && authkit.OriginAllowed(origin, allowedOrigins) {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", origin)
 				h.Add("Vary", "Origin")

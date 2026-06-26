@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
@@ -72,9 +72,9 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		resolved, err := resolver.ResolveDelegated(c.Request.Context(), token, c.Request.Header.Get("Origin"))
 		if err != nil {
 			switch {
-			case errors.Is(err, authcore.ErrAccessTokenExpired):
+			case errors.Is(err, authkit.ErrAccessTokenExpired):
 				response.UnauthorizedWithMessage(c, "delegated_token_expired")
-			case errors.Is(err, authcore.ErrAccessTokenRevoked):
+			case errors.Is(err, authkit.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "delegated_token_revoked")
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved),
 				errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):

@@ -3,7 +3,7 @@ package controlplane
 import (
 	"testing"
 
-	authcore "github.com/open-rails/authkit/core"
+	authcore "github.com/open-rails/authkit/embedded"
 )
 
 // TestPrivatePostureIsLockedInThisRepo guards the default "private by

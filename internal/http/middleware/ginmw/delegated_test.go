@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
@@ -125,7 +125,7 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: authcore.ErrAccessTokenExpired}
+	resolver := fakeDelegatedResolver{err: authkit.ErrAccessTokenExpired}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -133,7 +133,7 @@ func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesRevoked(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: authcore.ErrAccessTokenRevoked}
+	resolver := fakeDelegatedResolver{err: authkit.ErrAccessTokenRevoked}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
 )
 
 func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
@@ -149,13 +149,13 @@ func TestAnyLiveAPIKey(t *testing.T) {
 	if anyLiveAPIKey(nil) {
 		t.Error("nil API keys should not be live")
 	}
-	if anyLiveAPIKey([]authcore.APIKey{{RevokedAt: revoked}}) {
+	if anyLiveAPIKey([]authkit.APIKey{{RevokedAt: revoked}}) {
 		t.Error("only-revoked API keys should not count as live")
 	}
-	if !anyLiveAPIKey([]authcore.APIKey{{RevokedAt: nil}}) {
+	if !anyLiveAPIKey([]authkit.APIKey{{RevokedAt: nil}}) {
 		t.Error("a non-revoked API key should count as live")
 	}
-	if !anyLiveAPIKey([]authcore.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
+	if !anyLiveAPIKey([]authkit.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
 		t.Error("a mix with one live API key should count as live")
 	}
 }

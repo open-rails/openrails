@@ -11,7 +11,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
-	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/authkit"
+	authcore "github.com/open-rails/authkit/embedded"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -85,7 +86,7 @@ type ManifestIssuer struct {
 	// JWKSURI is the issuer's JWKS endpoint. Mutually exclusive with PublicKeys.
 	JWKSURI string `yaml:"jwks_uri,omitempty"`
 	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI.
-	PublicKeys []authcore.RemoteAppKey `yaml:"public_keys,omitempty"`
+	PublicKeys []authkit.RemoteAppKey `yaml:"public_keys,omitempty"`
 	// AllowedOrigins is the browser Origin allow-list for delegated requests.
 	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
 	// Slug overrides the remote_application slug (defaults to "<merchant>-app").
@@ -883,8 +884,8 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 
 	// Idempotently create the merchant permission-group (resolve, else create).
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
-	if errors.Is(err, authcore.ErrGroupNotFound) {
-		groupID, err = core.CreatePermissionGroup(ctx, authcore.CreatePermissionGroupRequest{
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 			Persona:       controlplane.MerchantType,
 			InstanceSlug:  slug,
 			ParentPersona: authcore.RootPersona,
@@ -915,16 +916,16 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 // manifestIssuerToRemoteApplication maps a merchant's manifest issuer onto an
 // AuthKit remote_application registration nested under the merchant group
 // (groupID carried in the OrgID field, retained authbase name — #567).
-func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *ManifestIssuer) authcore.RemoteApplication {
+func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *ManifestIssuer) authkit.RemoteApplication {
 	appSlug := strings.TrimSpace(iss.Slug)
 	if appSlug == "" {
 		appSlug = merchantSlug + "-app"
 	}
-	mode := authcore.RemoteAppModeJWKS
+	mode := authkit.RemoteAppModeJWKS
 	if len(iss.PublicKeys) > 0 {
-		mode = authcore.RemoteAppModeStatic
+		mode = authkit.RemoteAppModeStatic
 	}
-	return authcore.RemoteApplication{
+	return authkit.RemoteApplication{
 		Slug:              appSlug,
 		PermissionGroupID: groupID,
 		Issuer:            strings.TrimSpace(iss.URI),

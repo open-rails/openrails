@@ -12,9 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -41,14 +41,14 @@ func (s stubServiceCredentialResolver) LooksLikeAPIKey(token string) bool {
 
 func (s stubServiceCredentialResolver) ResolveAPIKey(_ context.Context, token string) (*controlplane.ResolvedServiceCredential, error) {
 	if token == "" || s.serviceJWT {
-		return nil, authcore.ErrInvalidAccessToken
+		return nil, authkit.ErrInvalidAccessToken
 	}
 	return s.resolved()
 }
 
 func (s stubServiceCredentialResolver) ResolveServiceJWT(_ context.Context, token string) (*controlplane.ResolvedServiceCredential, error) {
 	if token == "" || !s.serviceJWT {
-		return nil, authcore.ErrInvalidServiceJWT
+		return nil, authkit.ErrInvalidServiceJWT
 	}
 	return s.resolved()
 }

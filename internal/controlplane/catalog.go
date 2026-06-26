@@ -22,7 +22,7 @@ package controlplane
 import (
 	"strings"
 
-	authcore "github.com/open-rails/authkit/core"
+	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/permissions"
 )
 
