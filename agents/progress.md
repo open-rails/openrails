@@ -53,7 +53,8 @@ FS-driven path (doujins) bypasses that, forcing doujins to hand-maintain a
 
 # #583: Embedded-host boundary cleanup — public permissions pkg + combined MountHandler (etcd lessons)
 
-**Completed:** no
+**Completed:** yes
+**Status:** DONE 2026-06-26 (Codex). OpenRails is pinned to authkit v0.72.0 with no local replace. The OpenRails-side embed boundary is complete: public `permissions` constants are the route-gate vocabulary, `embgin.MountHandler` is the combined `/me` + user/admin/webhook mount, current docs show AuthKit client-first construction plus OpenRails `merchant:*`/`customer:*` guards, and stale `openrails:self:*`, `openrails:admin`, `org:*`, and `/v1/service/*` guidance was hard-cut from active docs. Added real integration coverage: `TestEmbeddedMountHandlerEndToEnd` drives `/v1/merchant/credits/deposit` then `/v1/me/balance` through `MountHandler` against real migrated Postgres/Redis. Fixed the integration harness for authkit v0.72.0 by removing the obsolete service-JWT resource-scope API and deleting a skipped legacy org↔merchant assertion. Validation: `go test -tags=integration ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|APIKeyCrossMerchantIsolationHTTP|RemoteApplicationSelfJWTCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAccepts(DelegatedJWT|UserSession)ByPermissionHTTP|DelegatedAdminCrossMerchantIsolationHTTP|DelegatedSelfTokenSubjectIsolationHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP|StandaloneMerchantCatalog(RoutesHTTP|ApplyOptionsOverHTTP|PublishHTTP)|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant)' -count=1 -v`; `go test -tags=integration ./embed -run TestStandaloneMerchantControlBoundaries -count=1 -v`; `go test ./pkg/embedded/gin ./internal/controlplane ./internal/http/routes ./internal/http/middleware/ginmw ./internal/http/routes/ginroutes ./embed -count=1`; `git diff --check`.
 
 Proposed 2026-06-25 (doujins boundary review + etcd embed-design comparison).
 Embedding hosts (doujins) write more glue against the embed surface than they
@@ -78,11 +79,11 @@ MountPrefix})` returns ONE prefix-aware handler that internally dispatches
 /me+/customers to the self surface and everything else to the user surface.
 Status: implemented locally, builds.
 
-CROSS-REPO CONSUMER (doujins): imports `openrails/permissions` and stamps
+NEXT CONSUMER REPO (doujins): imports `openrails/permissions` and stamps
 `permissions.CustomerAll` (self) / `permissions.MerchantAll` (admin) in
 `openrailsembed/auth.go`, replacing the vestigial self-strings; replaces
 `buildMount`/`newMountHandler` (~60 lines) with one `embgin.MountHandler` call.
-Both need an openrails release doujins can pin.
+Do this when adapting the doujins repo; the OpenRails side is complete.
 
 NOT doing (descoped from the etcd review): unify the standalone binary onto
 `embed.Runtime` (lessons #2/#3) — only worth it if standalone stays first-class;

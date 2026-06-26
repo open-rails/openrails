@@ -285,20 +285,22 @@ Marks the notification as read. Response `{ message: "notification marked as rea
 ### POST /v1/me/stripe/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
-## Service API (`/v1/service/*`, machine-credential-authenticated)
+## Merchant API (`/v1/merchant/*`)
 
-Server-to-server endpoints. They live on the SAME public port as everything else
-(issue #222) — there is no private port, mTLS listener, or separate legacy API-key layer. Machine callers
-present one of:
+Merchant endpoints live on the SAME public port as everything else (issue #222)
+- there is no private port, mTLS listener, or separate legacy API-key layer.
+Callers present one of:
 
 ```
 Authorization: Bearer <openrails_st_...>
 Authorization: Bearer <service-jwt-signed-by-registered-issuer>
+Authorization: Bearer <delegated-jwt-or-user-access-token>
 ```
 
 Generated API keys are resolved through the OpenRails-owned AuthKit control
-plane: their owning org maps to an OpenRails merchant, AuthKit resource scopes
-constrain where they may act, and granted permissions gate what they may do.
+plane: their owning permission group maps to an OpenRails merchant, AuthKit
+resource scopes constrain where they may act, and granted permissions gate what
+they may do.
 Every generated API key must carry
 `resources: [{kind:"openrails.merchant", id:"<merchant_uuid>"}]`.
 Subject-scoped tokens additionally carry
@@ -313,27 +315,30 @@ to a merchant is the authorization: OpenRails resolves the issuer to its merchan
 treats the token's `permissions` claim as authoritative, and scopes every
 resource to that merchant (a token can never reach another merchant's resources).
 
-The canonical machine permission vocabulary is AuthKit org-scoped
-`org:<resource>:<action>`:
+The canonical merchant permission vocabulary is OpenRails-owned `merchant:*`.
+Every route passes through the same OpenRails principal gate regardless of
+credential type: API key, service JWT, delegated JWT, or live AuthKit user
+session.
 
-Machine-credential examples:
+Credential examples:
 
 - Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
-  such as `service:doujins-runtime`, permission `org:entitlements:read`,
+  such as `service:doujins-runtime`, permission `merchant:customer-settings:read`,
   resource `openrails.merchant=<merchant_uuid>`, route
-  `GET /v1/service/customers/{customer_id}/entitlements`.
-- Tensorhub balance reserve/capture/release: permissions
-  `org:credits:read`, `org:credits:update`, and
-  `org:credits:spend`; resources include `openrails.merchant=<merchant_uuid>`
-  and, for payer-scoped generated tokens or service-JWT grants,
-  `openrails.customer=<customer_uuid>`.
+  `GET /v1/merchant/customers/{customer_id}/entitlements`.
+- Tensorhub reserve/capture/release: permission `merchant:admissions:create`;
+  resources include `openrails.merchant=<merchant_uuid>` and, for payer-scoped
+  generated tokens or service-JWT grants, `openrails.customer=<customer_uuid>`.
 
 | Route | Required permission |
 |-------|---------------------|
-| `GET /v1/service/customers/{customer_id}/entitlements` | `org:entitlements:read` |
-| `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `org:credits:read` |
-| `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `org:credits:update` |
-| `POST/PATCH /v1/service/credit-types*` (definition writes) | `org:catalog:update` |
+| `GET /v1/merchant/customers/{customer_id}/entitlements`, `GET /v1/merchant/users/{user_id}/product-access`, `GET /v1/merchant/invokers/{invoker}/credits`, `GET /v1/merchant/trust-tier`, `GET /v1/merchant/credit-limit`, `GET /v1/merchant/credits/balance` | `merchant:customer-settings:read` |
+| `POST /v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` |
+| `PUT /v1/merchant/credit-limit`, `POST /v1/merchant/credits/deposit` | `merchant:customer-settings:update` |
+| `POST /v1/merchant/admissions`, `POST /v1/merchant/admissions/{id}/capture`, `POST /v1/merchant/admissions/{id}/release`, `POST /v1/merchant/wasted-spend` | `merchant:admissions:create` |
+| `GET /v1/merchant/settings` | `merchant:settings:read` |
+| `PUT /v1/merchant/settings` | `merchant:settings:update` |
+| `POST /v1/merchant/usage/rollup`, `POST /v1/merchant/usage/resource-revenue` | `merchant:usage:read` |
 
 Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
 after authorizing the action themselves.
@@ -344,68 +349,35 @@ boundary, delegated user = external OIDC `issuer` + `subject`, customer =
 payable identity, generated API key/service JWT = server-to-server
 credentials.
 
-### GET /v1/service/customers/{customer_id}/entitlements
+### GET /v1/merchant/customers/{customer_id}/entitlements
 Returns active entitlements for the payable customer at the current time.
 Optional query param `at` (RFC3339) queries entitlements at a specific time.
-Response: array of entitlement records with `customer_id`. Service
+Response: array of entitlement records with `customer_id`. Merchant
 entitlement reads query `billing.entitlements.customer_id` directly; they
 do not translate the customer through legacy `user_id`.
 
-### GET /v1/service/credits/invokers/{invoker_id}
-Returns credit balance summary for an invoker. Optional query params: `customer_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
+### GET /v1/merchant/invokers/{invoker}/credits
+Returns credit balance summary for an invoker. Optional query params:
+`customer_id` and `type` (defaults to `api_credits`, which must exist in
+`billing.credit_types`).
 Response: `{ type, balance, held_balance }`.
 
-### POST /v1/service/credits/deposit
+### POST /v1/merchant/credits/deposit
 Deposit/grant credits. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
 Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(customer_id, credit_type, source, source_id)`.
 
-### POST /v1/service/credits/withdraw
-Withdraw credits. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id? }`.
-Returns a `CreditTransaction`. On insufficient credits, returns 402 with `insufficient_credits`.
-
-### POST /v1/service/credits/hold
-Reserve credits for long-running jobs. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
-Returns a `CreditTransaction` with `transaction_type='hold'` and `status='active'`. The returned `id` is the durable identifier you later use to capture or release the hold. On insufficient credits, returns 402.
+### POST /v1/merchant/admissions
+Pre-authorize spend and place holds. The returned admission id is the durable
+identifier you later capture or release.
 
 Idempotency:
 - Hold creation is idempotent per `(customer_id, credit_type, source, source_id)`; retries return the existing hold transaction.
 
-### POST /v1/service/credits/holds/{id}/capture
+### POST /v1/merchant/admissions/{id}/capture
 Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
 
-### POST /v1/service/credits/holds/{id}/release
+### POST /v1/merchant/admissions/{id}/release
 Release a hold without spending credits. Response `{ ok: true }`.
-
-### GET /v1/service/credits/transactions/lookup
-Lookup a single credit transaction by its idempotency key.
-
-Query params:
-- `invoker_id` (required)
-- `credit_type` (required)
-- `source` (required)
-- `source_id` (required)
-- `transaction_type` (optional; defaults to `hold`)
-
-Returns a `CreditTransaction` or 404.
-
-### Credit types (definition surface)
-
-These endpoints let the host define credit types in `billing.credit_types` (OpenRails does not seed credit types in production).
-
-### GET /v1/service/credit-types?active_only=true
-List credit types.
-
-### POST /v1/service/credit-types
-Create a credit type. Body: `{ name, display_name, unit, decimal_places }`.
-
-### PATCH /v1/service/credit-types/{name}
-Update mutable fields. Body: `{ display_name?, is_active? }`. `name`, `unit`, and `decimal_places` are treated as immutable.
-
-### POST /v1/service/credit-types/{name}/deactivate
-Marks the credit type inactive.
-
-### POST /v1/service/credit-types/{name}/activate
-Marks the credit type active.
 
 ### Catalog (definition surface)
 

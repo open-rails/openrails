@@ -86,7 +86,6 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 		"or502-jwt-b",
 		merchantB.OrgSlug,
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
-		nil,
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, serviceJWTB.Token, customerB, 4_000)
 	require.Equal(t, http.StatusOK, status, body)
@@ -99,8 +98,6 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	// cross-scope rejection sub-case tested a mechanism that no longer exists. The
 	// service-JWT case above (own-merchant success) plus the group-based cases prove
 	// the boundary holds.
-
-	standalone.RequireProvisionMerchantForOrgRejected("or502-b2", merchantB.OrgSlug)
 }
 
 func postDepositCredits(t *testing.T, baseURL, token string, customer uuid.UUID, amount int64) (int, string) {

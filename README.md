@@ -96,9 +96,10 @@ and rejected for four reasons:
    (RFC 7519 `aud`). Accepting foreign-audience tokens is the classic confused-deputy
    anti-pattern, and OpenRails fails closed on it: a token carrying a normal `sub` is
    rejected on sight.
-4. **Least privilege.** Delegated tokens carry only `openrails:self:*` permissions and a
-   short TTL. Your session token can do everything your app allows; it should never be
-   spendable as a billing credential.
+4. **Least privilege.** Delegated tokens carry only the OpenRails audience, the acting
+   delegated subject, an optional narrow OpenRails permission set, and a short TTL.
+   Your session token can do everything your app allows; it should never be spendable
+   as a billing credential.
 
 The cost is small, because **your backend mints the delegated token itself** — with the
 same signing key it already uses for its own auth, if you like. "Getting a token for
@@ -119,7 +120,7 @@ JWKS). Same seam, two serializations.
 | Backend / server-to-server | Service token (`/v1/merchant/*`) | In-process call — no credential |
 | Browser self-service | Delegated token, minted by your backend (`/v1/me/*`) | Your session credential, via `DelegatedAuthenticator` |
 | User billing routes | AuthKit user JWT (AuthKit-backed deployments) | Your session credential, via `Authenticator` |
-| Admin routes | Live `openrails:admin` permission, checked per request | Same (requires the control plane) |
+| Merchant/admin routes | Live `merchant:*` permissions, checked per request | Same (requires the control plane) |
 
 ---
 
@@ -167,9 +168,9 @@ Your users are not OpenRails users — they are *subjects of your merchant*. The
 to OpenRails directly using a short-lived delegated token that **your backend signs**.
 
 **3a. Register your remote application (one-time setup).** The host application
-is registered in the AuthKit/control-plane model as an owner of the merchant org.
-That stored authority determines which `merchant:*` permissions the host can put
-on delegated JWTs; OpenRails rejects over-claimed delegated tokens.
+is registered in the AuthKit/control-plane model as an owner of the merchant group.
+That stored authority determines which OpenRails permissions the host can put on
+delegated JWTs; OpenRails rejects over-claimed delegated tokens.
 
 **3b. Mint delegated tokens on your backend.** Add one endpoint to your API that exchanges
 a logged-in session for a delegated token. The claim contract:
@@ -179,8 +180,8 @@ a logged-in session for a delegated token. The claim contract:
   "iss": "https://api.yourapp.com",          // your registered issuer
   "aud": ["openrails"],                       // a registered audience
   "delegated_sub": "user-123",                // YOUR user id — becomes the billing subject
-  "permissions": ["openrails:self:billing:read",
-                  "openrails:self:checkout:create"],
+  // permissions omitted for /v1/me/*; add customer:* grants only for
+  // /v1/customers/:customer_id/* shared customer-treasury routes.
   "iat": 1760000000,
   "exp": 1760000300                           // keep it short; minutes, not hours
 }
@@ -197,21 +198,24 @@ token, err := authhttp.MintDelegatedAccessToken(ctx, signer, authhttp.DelegatedA
     Issuer:           "https://api.yourapp.com",
     Audiences:        []string{"openrails"},
     DelegatedSubject: user.ID,
-    Permissions:      []string{"openrails:self:billing:read", "openrails:self:checkout:create"},
+    // No permissions needed for /v1/me/* self-service.
     TTL:              5 * time.Minute,
 })
 ```
 
-Grant only the permissions the page needs:
+Grant only the permissions the page needs. `/v1/me/*` is authenticated
+self-service and needs no grant; shared customer treasury routes require
+explicit `customer:*` grants:
 
 | Permission | Allows |
 |---|---|
-| `openrails:self:billing:read` | Read own balance, credits, usage, invoices, subscriptions, payments |
-| `openrails:self:billing:write` | Configure own account settings (billing mode, caps, auto-top-up) |
-| `openrails:self:checkout:create` | Create own checkout sessions |
-| `openrails:self:subscriptions:cancel` | Cancel / resume / change-tier own subscriptions |
-| `openrails:self:payment-methods:manage` | Add / update / remove own payment methods |
-| `openrails:self:wallets:manage` | Manage own Solana wallet link |
+| none | Call `/v1/me/*` as the token's own `delegated_sub` |
+| `customer:balance:read` | Read a shared customer's balance, transactions, usage, payments, and invoices |
+| `customer:billing:update` | Set a shared customer's billing mode and spend caps |
+| `customer:payment-methods:update` | Manage a shared customer's payment methods and Stripe portal |
+| `customer:checkout:create` | Pre-pay / load credits onto a shared customer balance |
+| `customer:spend-delegations:read` | Read a shared customer's spend-delegation policy |
+| `customer:spend-delegations:update` | Replace a shared customer's spend-delegation policy |
 
 **3c. Call the self-service API from the browser.** Have your frontend fetch the delegated
 token from your exchange endpoint (cache it, re-fetch on expiry — a ~30-line helper makes
@@ -231,9 +235,8 @@ POST /v1/me/checkout                    hosted/tokenized checkout session
 There is no `:user_id` anywhere on this surface — every route is scoped to the token's
 `delegated_sub`, so a browser token can only ever act on its own subject. Browser origin
 policy for delegated calls is configured on the AuthKit `remote_application` issuer record,
-not in OpenRails runtime config. Staff/support actions live under
-`/v1/merchant/*`, using the same token mechanism with `merchant:*`
-permissions.
+not in OpenRails runtime config. Staff/support and machine actions live under
+`/v1/merchant/*` and are gated by `merchant:*` permissions.
 
 ### 4. Webhooks
 
@@ -310,9 +313,9 @@ mux := http.NewServeMux()
 mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
 ```
 
-The handler is framework-neutral `net/http` with zero gin on the request path. Hosts on gin
-can instead use `pkg/embedded/gin` (`embgin.RegisterUserRoutes(e, group, …)` /
-`embgin.StandaloneHandler(e)` for the full standalone surface).
+The handler is framework-neutral `net/http` with zero gin on the request path. Gin hosts
+that want the combined `/me` + user/admin/webhook surface under one mount should use
+`pkg/embedded/gin` (`embgin.MountHandler(e, embgin.MountOptions{MountPrefix: "/billing"})`).
 
 Your frontend now calls these routes with its **normal session credential** — your
 `Authenticator` is the only gate. One system, one token.
@@ -378,27 +381,26 @@ opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
             return nil, billingauth.ErrUnauthenticated
         }
         return &billingauth.DelegatedPrincipal{
-            // Single-merchant deployments use the well-known default merchant id.
-            TenantID:    "00000000-0000-0000-0000-000000000001",
+            // Resolve this explicitly from your deployment/session.
+            MerchantID:  "a5a5a5a5-0000-4000-8000-000000000001",
             SubjectID:   user.ID,                       // the billing subject (= delegated_sub)
             Issuer:      "https://auth.yourapp.com",    // audit: who vouched
-            Permissions: []string{"openrails:self:billing:read",
-                                  "openrails:self:checkout:create"},
+            // Permissions are optional for /v1/me/*; use customer:* only for
+            // shared customer treasury routes.
         }, nil
     })
 ```
 
 The mapping is **explicit and fail-closed**: an empty merchant or subject is rejected with
-401, and a principal carrying any non-`self`/`merchant` permission is refused — the same
-catalog gate real delegated tokens pass through. This interface is the in-process twin of
+401. This interface is the in-process twin of
 the standalone delegated token: same translation, no wire credential, because there is no
 wire. The self surface is mounted by the gin/standalone handler (`embgin.StandaloneHandler`); the
 plain `NewHTTPHandler` mux carries the user/admin/webhook groups.
 
 ### 5. Admin routes
 
-Admin authority is the **live `openrails:admin` permission in the caller's own org**,
-checked per request against the control plane — OpenRails never interprets your role names,
+Admin authority is **live `merchant:*` permission in the caller's merchant group**,
+checked per request against the control plane. OpenRails never interprets your role names,
 and there is no role-string fallback. The standalone service always runs the control plane;
 for embedded hosts it is opt-in
 (`pkg/embedded/controlplane.Attach`); if you don't attach one, omit
@@ -415,8 +417,8 @@ or your own tooling instead — admin routes without a permission checker fail c
   `delegated_sub` standalone) as an opaque principal — it is your user id, and OpenRails
   keys billing state to it verbatim. Identity attributes (email, username) are optional,
   non-authoritative metadata for things like checkout prefill.
-- **Admin authority:** the live `openrails:admin` permission evaluated at request time in
-  the caller's own org (see embedded guide §5). Never derived from role names.
+- **Admin authority:** live `merchant:*` permissions evaluated at request time in
+  the caller's merchant group (see embedded guide §5). Never derived from role names.
 - **Sandbox vs live:** `TEST_MODE=true` routes every rail to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
   card. It defaults on in development, must be explicit for live local runs, and is

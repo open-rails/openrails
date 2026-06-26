@@ -8,7 +8,7 @@ Tensorhub call (#233/#222).
 ## 1. In-repo Go harness (CI) — `tests/unified_billing_e2e_test.go`
 
 Build tag `integration`. Drives the lifecycle through the API-key-authenticated public
-routes (`/v1/service/credits/*`) against a test Postgres, then asserts ledger
+routes (`/v1/merchant/*`) against a test Postgres, then asserts ledger
 rows/statuses/balances directly. Scenarios:
 
 - prepaid hold → **full** capture (balance reduced by full amount, held → 0)
@@ -58,7 +58,7 @@ reconciliation/orphan-holds each have their own integration tests:
 
 ## Cross-service remainder (other repos — see #249)
 
-The live three-service driver — gen-orchestrator calling `/v1/service/credits/*`
+The live three-service driver — gen-orchestrator calling `/v1/merchant/*`
 on job submit/complete with Tensorhub-computed pricing (per_output,
 per_output_second, per_million_tokens, tiered), plus Stripe-test-mode auto-top-up
 driven from a real job — is, per #244's own scoping, owned by the embedding repos

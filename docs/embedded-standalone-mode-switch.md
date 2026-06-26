@@ -36,8 +36,9 @@ Two invariants keep it that way, enforced by `TestPortabilityInvariant`
 
 Related ownership facts: the **permission catalog is owned by OpenRails**, never
 the host (#542) — the host only signs delegated tokens, which OpenRails validates
-against its own catalog. OpenRails defines **no org role of its own** (#543);
-standalone admins are AuthKit org `owner`s (`org:*`).
+against its own catalog. OpenRails declares `merchant` and `customer` permission
+groups; standalone merchant admins are `merchant` group `owner`s
+(`merchant:*`).
 
 ## Procedures
 

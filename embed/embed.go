@@ -30,7 +30,7 @@ import (
 // DelegatedAuthenticator (issue #339) is the host-pluggable identity seam for
 // the browser-direct self-service surface: a host that verifies its own
 // credentials supplies a billingauth.DelegatedAuthenticator returning the
-// explicitly mapped {tenant, subject, permissions} principal, and the
+// explicitly mapped {merchant, subject, permissions} principal, and the
 // standalone gin handler (pkg/embedded/gin.StandaloneHandler over Runtime.Embedded())
 // mounts /v1/me/* + /v1/customers/* authenticated by it — no control
 // plane required. For example:
@@ -42,9 +42,9 @@ import (
 //				return nil, billingauth.ErrUnauthenticated
 //			}
 //			return &billingauth.DelegatedPrincipal{
-//				MerchantID:    hostCfg.OpenRailsTenantID, // explicit per-deployment mapping to a real tenant
+//				MerchantID:  hostCfg.OpenRailsMerchantID, // explicit per-deployment merchant mapping
 //				SubjectID:   user.CanonicalID,
-//				Permissions: []string{"self:billing:read"},
+//				// Permissions are optional for /v1/me/*; use customer:* only for /v1/customers/*.
 //			}, nil
 //		})
 type Options struct {
@@ -65,10 +65,10 @@ type Options struct {
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
 
-	// Merchant binds this embedded engine to a single tenant at construction:
+	// Merchant binds this embedded engine to a single merchant at construction:
 	// doujins/hentai0 set it to their merchant slug. It is resolved to an
 	// internal merchant id during New and stored as construction state, not
-	// loaded from config.yaml/.env. To serve another tenant, construct another
+	// loaded from config.yaml/.env. To serve another merchant, construct another
 	// engine/client.
 	Merchant string
 
@@ -94,7 +94,7 @@ const (
 	// RouteSetMerchantSettings mounts provider secrets, catalog pushes, and merchant config routes.
 	RouteSetMerchantSettings = embedded.RouteSetMerchantSettings
 	// RouteSetMerchantAPI mounts the host-internal service/API-key surface
-	// (/billing/v1/service/*). Opt in for embedded hosts that want the same
+	// (/billing/v1/merchant/*). Opt in for embedded hosts that want the same
 	// service-credential surface as standalone; most embedded hosts use Client() instead.
 	RouteSetMerchantAPI = embedded.RouteSetMerchantAPI
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
@@ -273,7 +273,7 @@ func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
 // passthrough to pkg/embedded.NewHTTPHandler. The service-credential-authenticated
-// /billing/v1/service/* surface is opt-in via embedded.RouteSetMerchantAPI; an
+// /billing/v1/merchant/* surface is opt-in via embedded.RouteSetMerchantAPI; an
 // embedded host normally uses Client() instead.
 func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
 	asm := embedhttp.FromApp(r.emb.App())

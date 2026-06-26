@@ -7,7 +7,7 @@
 // dbtest Postgres:
 //
 //   - Server 1, EMBEDDED no-auth HOST (≈ doujins minus auth): embed.New +
-//     the real embedded /v1/service/* surface on httptest, behind the REAL
+//     the real embedded /v1/merchant/* surface on httptest, behind the REAL
 //     ServiceCredentialRequired middleware wired to a TRUSTING resolver (no auth).
 //   - Server 2, STANDALONE real server + real AuthKit: the actual standalone gin
 //     server with the control plane attached, authenticated by a REAL minted

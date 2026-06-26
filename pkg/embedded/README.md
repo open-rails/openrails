@@ -9,6 +9,7 @@ application instead of running it as a standalone service.
 import (
     "github.com/open-rails/openrails/config"
     "github.com/open-rails/openrails/pkg/embedded"
+    embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 func main() {
@@ -43,10 +44,13 @@ func main() {
     }
     defer openrails.Close(context.Background())
 
-    // Mount OpenRails routes on your router
+    // Mount OpenRails routes on your router.
     router := gin.Default()
-    openrails.RegisterUserRoutes(router.Group("/billing/v1"), embedded.RouteOptions{})
-    openrails.RegisterWebhookRoutes(router.Group("/billing/v1/webhooks"))
+    billing, err := embgin.MountHandler(openrails, embgin.MountOptions{MountPrefix: "/billing"})
+    if err != nil {
+        log.Fatal(err)
+    }
+    router.Any("/billing/*path", gin.WrapH(billing))
 }
 ```
 
@@ -275,7 +279,7 @@ openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
 // Server-to-server operations: embedded hosts call the in-process Service()
 // facade (below) after authorizing the action themselves. Hosts that need HTTP
 // loopback parity can opt into embedded.RouteSetMerchantAPI; standalone machine
-// callers use OpenRails-issued API keys against the public /v1/service/* routes.
+// callers use OpenRails-issued API keys against the public /v1/merchant/* routes.
 ```
 
 ## In-Process Service API

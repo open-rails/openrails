@@ -44,9 +44,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	authtesting "github.com/open-rails/authkit/authtest"
 	authcore "github.com/open-rails/authkit/embedded"
 	jwtkit "github.com/open-rails/authkit/jwt"
-	authtesting "github.com/open-rails/authkit/authtest"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
@@ -393,20 +393,6 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	}
 }
 
-// RequireProvisionMerchantForOrgRejected is a legacy assertion: under #527 the
-// merchant directory enforced one merchant per owner org. #567 drops that 1:1
-// coupling — permission_group_id now holds the merchant's own permission-group id, so
-// the constraint no longer applies. Retained as a no-op-equivalent guard that
-// simply links a second merchant (which now succeeds).
-//
-// Deprecated: org↔merchant 1:1 is gone (#567 supersedes #527). Kept only so
-// callers still compile; it no longer asserts a rejection.
-func (s *Surface) RequireProvisionMerchantForOrgRejected(slug, orgSlug string) {
-	h := s.h
-	h.t.Helper()
-	h.t.Skip("org↔merchant 1:1 (uq_merchants_owner_org_id) removed under #567; this assertion is obsolete")
-}
-
 // CreateAuthKitOrg creates a top-level merchant permission-group through the
 // standalone control plane (there is no `org` persona under #567) and returns its
 // slug. Kept under the old name for caller source-compat.
@@ -558,9 +544,9 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 
 // RegisterServiceJWTIssuer registers a remote_application issuer for an org and
 // mints a service JWT from it. Registering the issuer to the org is the
-// authority root; resources, when present, are still validated against the
-// merchant owned by that org at request time.
-func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string, resources []authkit.APIKeyResource) ServiceJWTCaller {
+// authority root; AuthKit no longer carries opaque resource scopes on service
+// JWTs, so the issuer's permission group is the merchant boundary.
+func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string) ServiceJWTCaller {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "RegisterServiceJWTIssuer requires the standalone surface")
@@ -595,7 +581,6 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Subject:     "service:" + slug,
 		Audiences:   []string{"openrails"},
 		Permissions: permissions,
-		Resources:   resources,
 		JTI:         uuid.NewString(),
 	})
 	require.NoError(h.t, err, "mint service JWT")
