@@ -30,9 +30,22 @@ var ErrProviderReadOnly = errors.New("stripe: provider writes are blocked (mode=
 // DefaultTimeout is applied when a caller passes timeout <= 0.
 const DefaultTimeout = 20 * time.Second
 
+// VersionHeader is Stripe's API-version request header.
+const VersionHeader = "Stripe-Version"
+
+// APIVersion is the Stripe API version OpenRails' hand-written request/response
+// parsers are coded against. We pin it on every outbound request (instead of
+// floating on the account's default version) so a Stripe-side version roll can
+// not silently change field shapes under us. Bump deliberately, only after
+// testing the new version — and pin the webhook endpoint to the SAME version in
+// the Stripe dashboard (inbound events don't pass through this client). Latest
+// stable Stripe release train as of 2026-06-26 (#587).
+const APIVersion = "2026-06-24.dahlia"
+
 // guardTransport rejects mutating HTTP methods before they reach the network
-// when readOnly is set. Reads (GET/HEAD) always pass through to the base
-// transport.
+// when readOnly is set (reads always pass), and pins the Stripe API version on
+// every outbound request. Both concerns live here because this is the one
+// transport every Stripe call flows through.
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
@@ -46,6 +59,12 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		default:
 			return nil, ErrProviderReadOnly
 		}
+	}
+	// Pin the API version (#587). Clone so we don't mutate the caller's request
+	// (RoundTripper contract); a caller that set its own version is preserved.
+	if req.Header.Get(VersionHeader) == "" {
+		req = req.Clone(req.Context())
+		req.Header.Set(VersionHeader, APIVersion)
 	}
 	base := t.base
 	if base == nil {

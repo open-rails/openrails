@@ -104,6 +104,43 @@ func TestTimeoutDefaults(t *testing.T) {
 	require.Equal(t, DefaultTimeout, ReadOnlyClient(-1).Timeout)
 }
 
+// TestPinsStripeVersionHeader proves every outbound request carries the pinned
+// Stripe-Version (#587), on both reads and writes, and that a caller-set version
+// is left untouched.
+func TestPinsStripeVersionHeader(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get(VersionHeader)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	client := Client(nil, 0)
+
+	// GET pins the version.
+	resp, err := client.Get(srv.URL + "/v1/balance")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, APIVersion, got)
+
+	// POST pins the version.
+	got = ""
+	resp, err = client.Post(srv.URL+"/v1/customers", "application/x-www-form-urlencoded", strings.NewReader("email=a@b.c"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, APIVersion, got)
+
+	// A caller-set version is preserved (override wins).
+	got = ""
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/balance", nil)
+	require.NoError(t, err)
+	req.Header.Set(VersionHeader, "2099-01-01.custom")
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, "2099-01-01.custom", got)
+}
+
 // TestReadonlyModeBlocksServiceWrite proves the gate composes with a real
 // errors.Is check at a caller boundary, the way service code consumes it.
 func TestSentinelSurvivesWrapping(t *testing.T) {

@@ -250,6 +250,21 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		}
 	}
 
+	// #586: when entitlements change, re-sync the product's Stripe Features so the
+	// mirror matches OpenRails. An emptied spec detaches all OpenRails-managed
+	// features. Best-effort, like the propagation above. Only runs once a Stripe
+	// Product exists for this product (i.e. a price has linked it).
+	if !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
+		if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
+			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
+			keys := make([]string, 0, len(p.EntitlementsSpec))
+			for k := range p.EntitlementsSpec {
+				keys = append(keys, k)
+			}
+			_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys)
+		}
+	}
+
 	return productToCatalogProduct(p), nil
 }
 

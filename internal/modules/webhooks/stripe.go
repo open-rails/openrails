@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -55,10 +56,11 @@ func (s *StripeWebhookService) now() time.Time {
 }
 
 type stripeEvent struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Created int64           `json:"created"`
-	Data    stripeEventData `json:"data"`
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Created    int64           `json:"created"`
+	APIVersion string          `json:"api_version"`
+	Data       stripeEventData `json:"data"`
 }
 
 type stripeEventData struct {
@@ -216,6 +218,19 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	eventType := strings.TrimSpace(evt.Type)
 	if eventID == "" || eventType == "" {
 		return fmt.Errorf("stripe event missing id or type")
+	}
+
+	// Inbound events don't pass through the outbound client, so the webhook
+	// endpoint's API version is pinned in the Stripe dashboard, not by us. Warn
+	// (don't reject — the parsers tolerate adjacent shapes) when it drifts from
+	// the version we're coded against, so the dashboard pin can be corrected (#587).
+	if v := strings.TrimSpace(evt.APIVersion); v != "" && v != stripeapi.APIVersion {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"event_id":           eventID,
+			"event_type":         eventType,
+			"event_api_version":  v,
+			"pinned_api_version": stripeapi.APIVersion,
+		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
 	}
 
 	if s.DeduplicationService != nil {

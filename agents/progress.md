@@ -7,7 +7,112 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 586
+next_id: 588
+
+---
+
+# #587: Pin a Stripe API version (Stripe-Version header) instead of floating on the account default
+
+**Completed:** yes — DONE 2026-06-26. Pinned `Stripe-Version: 2026-06-24.dahlia`
+(Stripe's latest stable as of today) on the choke-point client. All four scope
+items below are checked. Adapting our parsers to dahlia required NO code changes:
+audited the known breaking changes since our implicit baseline — `billed_until`
+(not read), Billing meter-event validation (we don't use meters), the invoice
+`parent`/`pricing.price_details` reshaping (already handled in stripe.go), and
+subscription `current_period_end` moving to items (we pass it in from OpenRails
+state, never parse it from Stripe). Payouts/Treasury/Issuing/Radar/Batch-job
+changes don't touch our surface. Files: internal/integrations/stripeapi/stripeapi.go
+(+ test), internal/modules/webhooks/stripe.go (api_version drift warning).
+
+Proposed 2026-06-26. OpenRails pins NO Stripe API version anywhere — no stripe-go
+SDK (all Stripe HTTP is hand-rolled through the choke-point client
+internal/integrations/stripeapi/stripeapi.go), and no `Stripe-Version` header on
+any request. So every API response AND every webhook is served in the Stripe
+ACCOUNT's default API version (whatever the dashboard is set to / the account was
+last upgraded to), which can change out from under us. Because we hand-parse JSON,
+a Stripe-side version roll can silently change field shapes and break parsing.
+Inversion worth stating: we are NOT "hardcoded to version X" — we are pinned to
+nothing and float with the account default; the fix is to pin to a known X we test
+against.
+
+Target version: **`2026-06-24.dahlia`** — Stripe's latest stable release train as
+of 2026-06-26 (newer than the 2026-05-27.dahlia first noted; verified against
+https://docs.stripe.com/changelog at implementation time).
+
+Scope:
+- [x] Add a `const APIVersion = "2026-06-24.dahlia"` and set `Stripe-Version: <that>` on every request from the shared `stripeapi` client — single choke-point in `guardTransport.RoundTrip` covers all outbound Stripe calls (catalog, subscriptions, checkout, invoices, portal, refunds, reconcile). Clones the request so the RoundTripper contract holds; a caller-set version is preserved.
+- [x] Pin to that named constant; bump deliberately ONLY after testing a newer version — never float, never re-fetch "latest" at runtime.
+- [x] Webhooks don't flow through the outbound client: added a non-fatal warning when an inbound event's `api_version` differs from the pinned version (parsers tolerate adjacent shapes, so don't reject). OPS ACTION still required: pin the webhook endpoint's API version in the Stripe dashboard to `2026-06-24.dahlia`.
+- [x] Test: `TestPinsStripeVersionHeader` asserts the header is present on GET + POST and that a caller override is preserved; existing webhook parse tests still green with the new `api_version` field.
+
+---
+
+# #586: Sync product-feature entitlements into Stripe so the Stripe catalog mirror matches OpenRails
+
+**Completed:** yes — DONE 2026-06-26. New Stripe Entitlements (Features) client in
+internal/modules/catalog/stripe_entitlements.go: CreateFeature / ListFeatures /
+ListProductFeatures / AttachFeatureToProduct / DetachProductFeature, plus
+`SyncProductFeatures(stripeProductID, desiredKeys)` — the idempotent reconcile
+(find-or-create a Feature per entitlement string at lookup_key = the string,
+attach the missing, detach the no-longer-desired OpenRails-MANAGED ones; never
+touches operator/third-party features). Wired into the PUSH path: the Stripe
+adapter's AutoCreate (pkg/service/catalog_provider_stripe.go) syncs features right
+after it ensures the Stripe Product during a price link, and Service.UpdateProduct
+(pkg/service/service_definition_catalog.go) re-syncs on an entitlements edit
+(emptying the spec detaches all managed features). Both are BEST-EFFORT (a sync
+failure logs + lets drift surface on reconcile; never fails the price link / DB
+write), matching the existing Stripe propagations. One-way OpenRails→Stripe; the
+window ledger stays the cross-rail active-access truth. ponytail: Feature `name` =
+the entitlement string (friendlier names from `entitlement_features` are a
+follow-up). Added the version-pin (#587) so these calls carry Stripe-Version too.
+
+Tests: internal/modules/catalog/stripe_entitlements_test.go drives the reconcile
+against a stateful fake Stripe (create+attach, idempotent rerun, partial detach,
+full detach on empty, and "never detach an unmanaged feature"). Catalog
+publish/apply integration tests (StandaloneMerchantCatalog*) stay green — the new
+push is dormant when no Stripe rail is configured (the harness case). Real-Stripe
+validation against a sandbox is the one thing unit/integration coverage can't do
+here; left for a sandbox run.
+
+Proposed 2026-06-26. We already mirror products + prices into Stripe
+(internal/modules/catalog/stripe_catalog.go: `/v1/products`, `/v1/prices` +
+`openrails_*` ownership metadata). The mirror is INCOMPLETE: product entitlements
+are never pushed, so a synced Stripe product shows price but no features —
+inconsistent with the OpenRails definition. Close the gap so the catalog mirror is
+faithful: same prices AND same entitlements as OpenRails. Sibling of #134
+(stripe-meter-connector): same one-way OpenRails→Stripe mirror pattern, for the
+catalog's entitlements instead of usage meters. OpenRails stays source of truth.
+
+Entitlements are just STRINGS: `product.EntitlementsSpec` is a `map[string]*int`
+whose keys are the entitlement names (`"premium"`) and whose `*int` value is an
+optional grant duration in days. Purchase grants iterate those keys directly
+(internal/modules/checkout/purchase_service.go), so the spec IS the product's
+entitlement definition. They map 1:1 onto Stripe: each distinct key → a Stripe
+Feature (`lookup_key` = the string), attached to the synced product. The
+`entitlement_features` table is an OPTIONAL naming layer (gives a string a display
+name/metadata); use its `name` for the Stripe Feature when present, else fall back
+to the string itself (Stripe requires a `name`). The `*int` duration has no Stripe
+equivalent (Stripe product-features carry no per-feature duration) — it stays
+OpenRails-only, one more reason OpenRails remains the active-access truth.
+
+Keep two levels distinct:
+- CATALOG level (THIS issue) — Stripe Features + Product Features. Rail-INDEPENDENT
+  catalog metadata (a product's feature list is not customer-specific). Completes
+  the existing product+price mirror so Stripe == OpenRails for product definitions.
+  One-way OpenRails → Stripe.
+- CUSTOMER level (explicitly NOT this issue) — Stripe's per-customer computed
+  active-entitlements. Once product-features exist, Stripe auto-derives these for
+  Stripe customers; fine as a Stripe-native convenience, but OpenRails' entitlement-
+  window ledger stays the source of truth for ACTIVE access because it spans all
+  rails (Stripe/NMI/CCBill/Solana). Never read Stripe active-entitlements back as
+  authority — they'd be empty for non-Stripe customers.
+
+Scope:
+- [x] `POST /v1/entitlements/features` per distinct entitlement string, idempotent via `lookup_key` (find-or-create); `name` = the string (entitlement_features friendly-name = follow-up); ownership marked via `metadata[openrails_managed]=true`.
+- [x] `POST /v1/products/{stripe_id}/features` to attach the features in each product's `EntitlementsSpec`; `DELETE` to detach when a key is removed.
+- [x] Wired into the PUSH path (catalog_provider_stripe.go AutoCreate + service_definition_catalog.go UpdateProduct), Stripe-rail merchants only, best-effort. NOTE: NOT the pull/drift job (jobs_catalog_reconciliation.go is alert-only by design); the push is where definitions flow to Stripe.
+- [x] One-way only (OpenRails → Stripe). The window ledger stays the cross-rail truth for active access.
+- [x] Doc note in code (stripe_entitlements.go header): product-features mirror the catalog; Stripe active-entitlements are Stripe-customer-only and NOT authoritative.
 
 ---
 
