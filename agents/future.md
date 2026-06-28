@@ -1299,6 +1299,19 @@ Do **not** build Avalara/Anrok/Stripe-Tax in core. Follow OpenRails' established
 - Tax-inclusive pricing support, or exclusive-only initially?
 - Async-tax finalization gating — needed now, or only once a real async provider is wired?
 
+## Stripe sync note (ties to #586 catalog mirror)
+
+The `TaxCalculator` seam is the engine and stays rail-neutral; this is only the
+Stripe-rail mirror angle. When mirroring catalog to Stripe (#586 sibling), also
+push tax metadata so the Stripe-hosted side is consistent: set `tax_behavior`
+(`inclusive|exclusive`) on mirrored Prices and a `tax_code` on mirrored Products.
+For Stripe-hosted Checkout, a merchant can opt into `automatic_tax[enabled]=true`
+so Stripe Tax computes for THAT rail — treat Stripe Tax as ONE possible
+host-supplied `TaxCalculator` implementation (its result snapshotted onto the
+OpenRails invoice at finalization), never as core. Non-Stripe rails keep using the
+host calculator. One-way OpenRails → Stripe; OpenRails invoice tax lines remain the
+source of truth.
+
 ## Acceptance
 
 - A host can supply a `TaxCalculator`; invoices carry correct tax line items + totals; VAT-ID + reverse-charge are captured and snapshotted; with no calculator wired, behavior is identical to today.
@@ -1333,6 +1346,19 @@ Steal **UniBee's** model specifically (it's richer than Lago's and maps cleanly 
 - [ ] Add `discount_total` + discount line items to invoices; define discount-vs-tax ordering with #576.
 - [ ] Migrate/retire the free-text `discount_*` columns (keep as denormalized annotation or drop).
 - [ ] Integration tests: %-off recurring, fixed-amount per-currency, new-customers-only rejection on renewal, upgrade-only gate, redemption-limit exhaustion, discounted-tier-change proration.
+
+## Stripe sync note (ties to #586 catalog mirror)
+
+Expands the "optionally map to Stripe Coupon/promotion_code" line above. Same
+one-way mirror pattern as products/prices/entitlements (#586): mirror each coupon
+DEFINITION → a Stripe Coupon (+ a Promotion Code for the user-facing code),
+idempotent and `openrails_*`-marked for ownership; on Stripe-hosted Checkout
+sessions pass the resolved discount via `discounts[]` (or `allow_promotion_codes=true`
+to let Stripe-native promo codes apply) so Stripe's invoice/receipt reflects the
+discount. OpenRails' redemption ledger stays the cross-rail source of truth — never
+read redemption state back from Stripe (it would be empty for NMI/CCBill/Solana).
+Cheap interim before the full object lands: set `allow_promotion_codes=true` on the
+Stripe Checkout session so Stripe-managed promo codes work on the Stripe rail today.
 
 ## Open Questions
 

@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -615,9 +614,6 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		if rt.CheckoutService.NMISaleService != nil {
 			rt.CheckoutService.NMISaleService.NMIClients = clients
 		}
-	}
-	if rt.CheckoutSessionService != nil {
-		rt.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Rails, clients))
 	}
 }
 

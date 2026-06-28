@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -195,6 +196,22 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 			return nil, err
 		}
 		stripeProductID = id
+	}
+
+	// #586: mirror this product's entitlements onto the Stripe Product as
+	// Features, so the Stripe catalog carries the SAME entitlements as OpenRails.
+	// One-way (OpenRails -> Stripe); OpenRails stays the source of truth.
+	// Best-effort: a feature-sync failure must not fail the price link — catalog
+	// drift surfaces on the next reconcile, like the other Stripe propagations.
+	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.EntitlementsSpec) > 0 {
+		keys := make([]string, 0, len(in.Product.EntitlementsSpec))
+		for k := range in.Product.EntitlementsSpec {
+			keys = append(keys, k)
+		}
+		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
+				Warn("stripe entitlement-feature sync failed (best-effort); drift surfaces on reconcile")
+		}
 	}
 
 	// Step 3: find-or-create the Stripe Price under the content lookup_key.

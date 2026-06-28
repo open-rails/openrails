@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -55,10 +56,11 @@ func (s *StripeWebhookService) now() time.Time {
 }
 
 type stripeEvent struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Created int64           `json:"created"`
-	Data    stripeEventData `json:"data"`
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Created    int64           `json:"created"`
+	APIVersion string          `json:"api_version"`
+	Data       stripeEventData `json:"data"`
 }
 
 type stripeEventData struct {
@@ -218,12 +220,48 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 		return fmt.Errorf("stripe event missing id or type")
 	}
 
+	// Inbound events don't pass through the outbound client, so the webhook
+	// endpoint's API version is pinned in the Stripe dashboard, not by us. Warn
+	// (don't reject — the parsers tolerate adjacent shapes) when it drifts from
+	// the version we're coded against, so the dashboard pin can be corrected (#587).
+	if v := strings.TrimSpace(evt.APIVersion); v != "" && v != stripeapi.APIVersion {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"event_id":           eventID,
+			"event_type":         eventType,
+			"event_api_version":  v,
+			"pinned_api_version": stripeapi.APIVersion,
+		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
+	}
+
 	if s.DeduplicationService != nil {
 		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe, evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt.Data.Object)
 		})
 	}
 	return s.handleEvent(ctx, eventType, evt.Data.Object)
+}
+
+// HandledStripeEventTypes is the canonical list of Stripe event types OpenRails
+// acts on — the single source of truth for what a managed webhook endpoint should
+// subscribe to (#590 auto-registration reads this for enabled_events). KEEP IN
+// SYNC with the handleEvent switch below.
+var HandledStripeEventTypes = []string{
+	"invoice.paid",
+	"invoice.payment_failed",
+	"invoice_payment.paid",
+	"checkout.session.completed",
+	"checkout.session.async_payment_succeeded",
+	"checkout.session.async_payment_failed",
+	"checkout.session.expired",
+	"customer.subscription.updated",
+	"customer.subscription.deleted",
+	"refund.created",
+	"refund.updated",
+	"charge.succeeded",
+	"payment_method.attached",
+	"charge.refunded",
+	"charge.dispute.created",
+	"charge.dispute.closed",
 }
 
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, obj json.RawMessage) error {

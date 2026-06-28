@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -400,53 +399,30 @@ func resolveReconcileProviderAccountTarget(ctx context.Context, rt *reconcileRun
 	if err != nil {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Rails, rt.NMIClients)
-	identity, ok := resolver.FindProviderAccount(ctx, account.ProviderType, account.Environment, account.AccountID)
-	if !ok {
-		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("provider account %s (%s:%s:%s) is not configured in this runtime", id, account.ProviderType, account.Environment, account.AccountID)
-	}
 	provider := reconcile.Provider(account.ProviderType)
-	return provider, identity.ProviderKey, reconcile.ProviderAccountBinding{
+	// Provider-account identity is operator-declared (#592): select the configured
+	// rail by provider type rather than resolving it from live credentials.
+	providerKey := account.ProviderType
+	if rt.Rails != nil {
+		if key, _, kerr := rt.Rails.PrimaryRailByType(account.ProviderType); kerr == nil && key != "" {
+			providerKey = key
+		}
+	}
+	return provider, providerKey, reconcile.ProviderAccountBinding{
 		ID:           account.ID,
 		ProviderType: account.ProviderType,
 		AccountID:    account.AccountID,
 	}, nil
 }
 
-func reconcileProviderAccountBindings(ctx context.Context, rt *reconcileRuntime, fetchers map[reconcile.Provider]reconcile.RailFetcher, selected []reconcile.Provider, explicit map[reconcile.Provider]reconcile.ProviderAccountBinding) (map[reconcile.Provider]reconcile.ProviderAccountBinding, error) {
-	merchantID, ok := merchant.FromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("merchant context not set")
-	}
-	providers := selected
-	if len(providers) == 0 {
-		providers = make([]reconcile.Provider, 0, len(fetchers))
-		for p := range fetchers {
-			providers = append(providers, p)
-		}
-	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Rails, rt.NMIClients)
-	store := intents.NewStore(rt.DB).WithProviderAccounts(resolver)
-	out := make(map[reconcile.Provider]reconcile.ProviderAccountBinding, len(providers))
-	for _, provider := range providers {
-		if binding, ok := explicit[provider]; ok {
-			out[provider] = binding
-			continue
-		}
-		fetcher, ok := fetchers[provider]
-		if !ok {
-			continue
-		}
-		providerKey := reconcile.ProviderKeyFor(provider, fetcher)
-		account, err := store.VerifyOrBindPrimaryProviderAccount(ctx, uuid.UUID(merchantID), providerKey)
-		if err != nil {
-			return nil, fmt.Errorf("verify provider account for %s (%s): %w", provider, providerKey, err)
-		}
-		out[provider] = reconcile.ProviderAccountBinding{
-			ID:           account.ID,
-			ProviderType: account.ProviderType,
-			AccountID:    account.AccountID,
-		}
+func reconcileProviderAccountBindings(_ context.Context, _ *reconcileRuntime, _ map[reconcile.Provider]reconcile.RailFetcher, _ []reconcile.Provider, explicit map[reconcile.Provider]reconcile.ProviderAccountBinding) (map[reconcile.Provider]reconcile.ProviderAccountBinding, error) {
+	// Runtime provider-account identity resolution was removed (#592). Only
+	// explicitly targeted (--provider-account) bindings are honored; otherwise
+	// reconcile runs account-agnostic (the historical default). provider_accounts
+	// is now an operator-declared catalog, no longer auto-bound from live creds.
+	out := make(map[reconcile.Provider]reconcile.ProviderAccountBinding, len(explicit))
+	for provider, binding := range explicit {
+		out[provider] = binding
 	}
 	return out, nil
 }

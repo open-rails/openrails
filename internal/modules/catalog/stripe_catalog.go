@@ -17,6 +17,19 @@ import (
 type StripeCatalogService struct {
 	Config *config.Config
 	Rails  config.RailSet
+	// BaseURL overrides the Stripe API root (https://api.stripe.com). Empty in
+	// production; tests point it at an httptest server. Only the entitlements
+	// (Features) methods read it via baseURL(); the older methods hardcode the
+	// real host.
+	BaseURL string
+}
+
+// baseURL returns the Stripe API root, honoring the test override.
+func (s *StripeCatalogService) baseURL() string {
+	if s != nil && strings.TrimSpace(s.BaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
+	}
+	return "https://api.stripe.com"
 }
 
 func (s *StripeCatalogService) stripeRail() *config.RailConfig {
@@ -607,6 +620,27 @@ func stripeIntervalForDays(days int) (interval string, intervalCount int) {
 // Status >= 400 is not an error; callers inspect status for 404 vs other failures.
 func (s *StripeCatalogService) stripeGet(ctx context.Context, secretKey, endpoint string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := s.httpClient().Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return body, resp.StatusCode, nil
+}
+
+// stripeDelete executes a DELETE against the Stripe API and returns the body and
+// status. Status >= 400 is not an error; callers inspect status (404 is benign
+// for "already gone" detach paths).
+func (s *StripeCatalogService) stripeDelete(ctx context.Context, secretKey, endpoint string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return nil, 0, err
 	}

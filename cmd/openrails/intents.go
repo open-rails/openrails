@@ -74,48 +74,7 @@ func newIntentsCmd() *cobra.Command {
 	logCmd.Flags().IntVar(&logLimit, "limit", 500, "Maximum rows to list")
 	cmd.AddCommand(logCmd)
 
-	var (
-		rebindProvider string
-		rebindMerchant string
-		rebindYes      bool
-	)
-	rebindCmd := &cobra.Command{
-		Use:   "rebind-account",
-		Short: "Rebind LIVE intents of a provider to the CURRENT provider account (#518 escape hatch after a confirmed account change)",
-		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsRebindAccount(c, rebindProvider, rebindMerchant, rebindYes)
-		},
-	}
-	rebindCmd.Flags().StringVar(&rebindProvider, "provider", "", "Provider whose live intents to rebind (required)")
-	rebindCmd.Flags().StringVar(&rebindMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
-	rebindCmd.Flags().BoolVar(&rebindYes, "yes", false, "Confirm: the current credentials point at the same (or deliberately adopted) provider account")
-	cmd.AddCommand(rebindCmd)
 	return cmd
-}
-
-func runIntentsRebindAccount(cmd *cobra.Command, provider, merchantSlug string, yes bool) error {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider == "" {
-		return fmt.Errorf("--provider is required")
-	}
-	if !yes {
-		return fmt.Errorf("rebind-account rebinds every live %s intent to the CURRENT provider account; intents will then execute against the CURRENT credentials. Confirm with --yes after verifying the credential change does not point at a different provider account", provider)
-	}
-	return withReconcileRuntime(cmd, merchantSlug, func(ctx context.Context, rt *reconcileRuntime) error {
-		merchantID, ok := merchant.FromContext(ctx)
-		if !ok {
-			return fmt.Errorf("merchant context not set")
-		}
-		resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Rails, rt.NMIClients)
-		account, n, err := intents.NewStore(rt.DB).WithProviderAccounts(resolver).
-			RebindProviderIntentsToCurrentAccount(ctx, uuid.UUID(merchantID), provider)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Rebound %d live intent(s) of provider %q to %s account %s (%s)\n",
-			n, provider, account.ProviderType, account.AccountID, account.ID)
-		return nil
-	})
 }
 
 // intentsStatusFilters maps CLI vocabulary onto ledger statuses.

@@ -2,7 +2,6 @@ package intents
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +16,6 @@ import (
 type ledger interface {
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error)
-	GetProviderAccount(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderAccount, error)
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsProviderIntent, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
@@ -29,10 +27,6 @@ type ledger interface {
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
-}
-
-type providerAccountFinder interface {
-	FindProviderAccount(ctx context.Context, providerType, environment, accountID string) (ProviderAccountIdentity, bool)
 }
 
 const (
@@ -58,49 +52,9 @@ type Runner struct {
 	Registry *Registry
 	// Config gates execution by origin x operating mode. nil (tests) = full.
 	Config ModeView
-	// ProviderAccounts gates execution AND verification on the provider account:
-	// an intent bound to a different provider account than the current
-	// credentials resolve to is parked (execute) / deferred (verify), never run.
-	// Verify against the wrong account is as wrong as executing: NMI
-	// "absent = success" answered by the wrong account falsely resolves the
-	// intent. nil resolver, an unbound intent, or an unresolvable current
-	// provider account skip the check.
-	ProviderAccounts ProviderAccountResolver
-	Clock            clockwork.Clock
-	Lease            time.Duration
-	Batch            int64
-}
-
-// accountMismatch reports whether the intent was enqueued against a DIFFERENT
-// provider account than the currently configured credentials can reach (#518).
-func (r *Runner) accountMismatch(ctx context.Context, intent gen.OpenrailsProviderIntent) (string, bool) {
-	if r.ProviderAccounts == nil || intent.ProviderAccountID == nil {
-		return "", false
-	}
-	expected, err := r.Store.GetProviderAccount(ctx, *intent.ProviderAccountID)
-	if err != nil {
-		return fmt.Sprintf("provider account binding %s could not be loaded: %v", intent.ProviderAccountID.String(), err), true
-	}
-	if finder, ok := r.ProviderAccounts.(providerAccountFinder); ok {
-		current, ok := finder.FindProviderAccount(ctx, expected.ProviderType, expected.Environment, expected.AccountID)
-		if !ok || current.AccountID == "" {
-			return fmt.Sprintf("provider account %s:%s:%s is not configured in this runtime", expected.ProviderType, expected.Environment, expected.AccountID), true
-		}
-		return "", false
-	}
-	current, ok := r.ProviderAccounts.ResolveProviderAccount(ctx, intent.Provider)
-	if !ok || current.AccountID == "" {
-		return "", false
-	}
-	currentEnv := normalizedProviderEnvironment(current.Environment)
-	expectedEnv := normalizedProviderEnvironment(expected.Environment)
-	if expected.ProviderType == current.ProviderType && expectedEnv == currentEnv && expected.AccountID == current.AccountID {
-		return "", false
-	}
-	return accountMismatchReason(
-		expected.ProviderType+":"+expectedEnv+":"+expected.AccountID,
-		current.ProviderType+":"+currentEnv+":"+current.AccountID,
-	), true
+	Clock  clockwork.Clock
+	Lease  time.Duration
+	Batch  int64
 }
 
 func (r *Runner) now() time.Time {
@@ -206,11 +160,6 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 		return
 	}
 
-	if reason, mismatch := r.accountMismatch(ctx, intent); mismatch {
-		r.park(ctx, logEntry, stats, intent.ID, now, reason)
-		return
-	}
-
 	if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
 		r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
 		return
@@ -302,19 +251,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 			stats.Superseded++
 			continue
 		}
-		// Verification is read-only: no mode gate. The ACCOUNT gate still
-		// applies (#365): a verify answered by the wrong provider account is
-		// as wrong as an execute — NMI "absent = success" would falsely
-		// resolve the intent. Defer the verify instead.
-		if reason, mismatch := r.accountMismatch(ctx, intent); mismatch {
-			if err := r.Store.MarkUnknown(ctx, intent.ID, r.now().Add(ParkRetryInterval), reason); err != nil {
-				logEntry.WithError(err).Error("intent verifier: defer on account mismatch failed")
-				continue
-			}
-			stats.Unknown++
-			logEntry.WithField("reason", reason).Warn("intent verify deferred: provider account changed since enqueue")
-			continue
-		}
+		// Verification is read-only: no mode gate.
 		r.apply(ctx, logEntry, &stats, handler, intent, handler.Verify(ctx, intent), true)
 	}
 	return stats, nil

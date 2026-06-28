@@ -125,8 +125,9 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
-	// The decision is on the ledger: pending, system-origin, window-bounded,
-	// #518 provider account binding stamped.
+	// The decision is on the ledger: pending, system-origin, window-bounded.
+	// (#592 ripped out the #365/#518 provider-account binding/identity resolution,
+	// so the materialized intent carries no provider_account_id.)
 	var status, origin, intentType string
 	var providerAccountID *uuid.UUID
 	var expiresAt *time.Time
@@ -137,7 +138,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
 	assert.Equal(t, intents.TypeManualRebill, intentType)
-	require.NotNil(t, providerAccountID)
+	require.Nil(t, providerAccountID, "#592 ripped out provider-account binding; materialized intents carry none")
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 
 	// No lifecycle movement, and the forensic retry fields are untouched

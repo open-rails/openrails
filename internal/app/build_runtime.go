@@ -374,9 +374,9 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.ProviderAccounts(), intents.OriginUser,
+	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginUser,
 		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.ProviderAccounts(), intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
@@ -877,7 +877,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailSet,
 		railSet,
 		clock,
 	)
-	checkoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccountsWithDB(cfg, railSet, nmiClients, database))
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
