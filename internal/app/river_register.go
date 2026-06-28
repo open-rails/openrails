@@ -126,20 +126,18 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:               r.DB,
-		Config:           r.Config,
-		Clock:            clock,
-		Registry:         intentRegistry,
-		ProviderAccounts: r.ProviderAccounts(),
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:               r.DB,
-		Config:           r.Config,
-		Clock:            clock,
-		Registry:         intentRegistry,
-		ProviderAccounts: r.ProviderAccounts(),
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
@@ -242,10 +240,9 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // working — a typed-nil ModeView would panic inside the gate.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
-		Store:            intents.NewStore(r.DB).WithProviderAccounts(r.ProviderAccounts()),
-		Registry:         registry,
-		Clock:            clock,
-		ProviderAccounts: r.ProviderAccounts(),
+		Store:    intents.NewStore(r.DB),
+		Registry: registry,
+		Clock:    clock,
 	}
 	if r.Config != nil {
 		runner.Config = r.Config

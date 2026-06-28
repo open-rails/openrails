@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -179,9 +178,10 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
-		fetcher := fetchers[provider]
-		accountID, bindings := w.providerAccountBinding(ctx, mid, provider, fetcher)
-		providerRes := w.runProviderEventWindows(ctx, mid, provider, accountID, bindings, fetchers)
+		// Runtime provider-account identity resolution was removed (#592):
+		// watermarks key globally per merchant+provider and reconcile runs
+		// account-agnostic (provider_accounts is an operator-declared catalog).
+		providerRes := w.runProviderEventWindows(ctx, mid, provider, nil, nil, fetchers)
 		result.add(providerRes)
 	}
 	return result
@@ -201,30 +201,6 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i] < providers[j] })
 	return providers
-}
-
-func (w *ProviderRefreshWorker) providerAccountBinding(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, fetcher reconcile.RailFetcher) (*uuid.UUID, map[reconcile.Provider]reconcile.ProviderAccountBinding) {
-	providerKey := reconcile.ProviderKeyFor(provider, fetcher)
-	if providerKey == "" {
-		providerKey = string(provider)
-	}
-	resolver := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Rails, w.NMIClients, w.DB)
-	store := intents.NewStore(w.DB).WithProviderAccounts(resolver)
-	account, err := store.VerifyOrBindPrimaryProviderAccount(ctx, mid, providerKey)
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"provider":     provider,
-			"provider_key": providerKey,
-		}).Warn("Provider Refresh: provider account unresolved; using global watermark")
-		return nil, nil
-	}
-	return &account.ID, map[reconcile.Provider]reconcile.ProviderAccountBinding{
-		provider: {
-			ID:           account.ID,
-			ProviderType: account.ProviderType,
-			AccountID:    account.AccountID,
-		},
-	}
 }
 
 func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.ProviderAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {

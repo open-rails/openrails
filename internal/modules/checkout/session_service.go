@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -103,7 +102,6 @@ type CheckoutSessionService struct {
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
-	providerAccounts         intents.ProviderAccountResolver
 	config                   *config.Config
 	rails                    config.RailSet
 	clock                    clockwork.Clock
@@ -270,13 +268,6 @@ func (s *CheckoutSessionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// SetProviderAccounts wires the #518 provider-account resolver. When present,
-// newly-created provider checkout sessions are stamped with the provider account
-// row selected for the configured primary account of that provider type.
-func (s *CheckoutSessionService) SetProviderAccounts(resolver intents.ProviderAccountResolver) {
-	s.providerAccounts = resolver
-}
-
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return nil, fmt.Errorf("%w: user is required", ErrCheckoutSessionValidation)
@@ -401,10 +392,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if err := s.validatePayment(ctx, rail, &req.Payment, user); err != nil {
 		return nil, fmt.Errorf("error validating payment: %w", err)
 	}
-	providerAccountID, err := s.providerAccountIDForCheckout(ctx, rail)
-	if err != nil {
-		return nil, err
-	}
 
 	now := s.now()
 	ttl := defaultCheckoutSessionTTL
@@ -426,7 +413,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		RailState:         map[string]any{},
 		CreatedAt:         now,
 		UpdatedAt:         now,
-		ProviderAccountID: providerAccountID,
+		ProviderAccountID: nil,
 		LastFour:          &req.Payment.LastFour,
 		CardType:          &req.Payment.CardType,
 		ExpiryDate:        &req.Payment.ExpiryDate,
@@ -451,50 +438,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	return s.sessionToResponse(session), nil
-}
-
-func (s *CheckoutSessionService) providerAccountIDForCheckout(ctx context.Context, rail string) (*uuid.UUID, error) {
-	if s.providerAccounts == nil || s.db == nil {
-		return nil, nil
-	}
-	providerKey, err := s.providerKeyForCheckout(rail)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	account, err := intents.NewStore(s.db).
-		WithProviderAccounts(s.providerAccounts).
-		VerifyOrBindPrimaryProviderAccount(ctx, tid.UUID(), providerKey)
-	if err != nil {
-		return nil, fmt.Errorf("%w: bind provider account for checkout rail %q: %v", ErrCheckoutSessionValidation, rail, err)
-	}
-	return &account.ID, nil
-}
-
-func (s *CheckoutSessionService) providerKeyForCheckout(rail string) (string, error) {
-	rail = strings.ToLower(strings.TrimSpace(rail))
-	if rail == "" {
-		return "", fmt.Errorf("rail is required")
-	}
-	if s.rails == nil {
-		return rail, nil
-	}
-	if proc := s.rails.GetRail(rail); proc != nil {
-		return rail, nil
-	}
-	switch rail {
-	case config.RailTypeStripe, config.RailTypeCCBill, config.RailTypeSolana, config.RailTypeNMI:
-		key, _, err := s.rails.PrimaryRailByType(rail)
-		if err != nil {
-			return "", err
-		}
-		return key, nil
-	default:
-		return rail, nil
-	}
 }
 
 func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutSessionResponse, error) {

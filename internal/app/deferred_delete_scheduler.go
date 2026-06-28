@@ -34,8 +34,8 @@ type intentDeferredDeleteScheduler struct {
 	reason string
 }
 
-func newIntentDeferredDeleteScheduler(d *db.DB, providerAccounts intents.ProviderAccountResolver, origin intents.Origin, reason string) *intentDeferredDeleteScheduler {
-	return &intentDeferredDeleteScheduler{db: d, store: intents.NewStore(d).WithProviderAccounts(providerAccounts), origin: origin, reason: reason}
+func newIntentDeferredDeleteScheduler(d *db.DB, origin intents.Origin, reason string) *intentDeferredDeleteScheduler {
+	return &intentDeferredDeleteScheduler{db: d, store: intents.NewStore(d), origin: origin, reason: reason}
 }
 
 // WithTx rebinds the scheduler onto the caller's transaction: the intent
@@ -47,7 +47,7 @@ func (s *intentDeferredDeleteScheduler) WithTx(tx pgx.Tx) subscriptions.Deferred
 	txdb := s.db.NewWithPgxTx(tx)
 	return &intentDeferredDeleteScheduler{
 		db:     txdb,
-		store:  intents.NewStore(txdb).WithProviderAccounts(s.store.ProviderAccounts),
+		store:  intents.NewStore(txdb),
 		origin: s.origin,
 		reason: s.reason,
 	}
@@ -132,7 +132,7 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 	if r.Clock != nil {
 		now = r.Clock.Now().UTC()
 	}
-	store := intents.NewStore(r.DB).WithProviderAccounts(r.ProviderAccounts())
+	store := intents.NewStore(r.DB)
 
 	converted := 0
 	for _, sub := range rows {

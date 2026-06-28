@@ -7,7 +7,303 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 591
+next_id: 593
+
+---
+
+# #592: Rip out the runtime provider-account IDENTITY resolution + the #365/#518 account-mismatch guard (keep provider_accounts operator-declared)
+
+**Completed:** yes — DONE 2026-06-28 (Claude). Ripped the entire runtime identity
+apparatus. DELETED internal/intents/provider_account.go (RuntimeProviderAccounts,
+ResolveProviderAccount, FindProviderAccount, nmiAccount, stripeAccountID,
+accountMismatchReason, ProviderAccountResolver/Identity, dbProviderType) +
+nmi.AccountIdentity() + the Stripe `GET /v1/account` whoami. Removed the
+runner.go account-mismatch guard (execute park + verify defer) and the store.go
+runtime stamping/VerifyOrBind/Rebind — intents now enqueue with provider_account_id
+NULL. Unwired the resolver from runtime/build_runtime/deferred_delete/checkout/
+river(jobs_provider_intents,jobs_dunning,jobs_provider_refresh,river_register)/cmd.
+Manifest now REQUIRES a declared account_id (auto-discovery removed); CCBill still
+derives from declarative account_config. `provider_accounts` table + all
+provider_account_id columns KEPT as a pure operator-declared catalog.
+
+DELIBERATE behavior changes: (1) no runtime account-repoint detection (the dropped
+guard — documented tradeoff); (2) Provider Refresh (#574) reconciles
+account-agnostic per merchant+provider (its documented fallback); (3)
+`reconcile pull-provider --prune` only prunes an explicitly `--provider-account`-
+targeted account (safe tightening); (4) Stripe/NMI manifest entries must declare
+account_id.
+
+VALIDATION: `go build ./...` + `go build -tags=integration ./...` both green;
+`go vet` clean on touched pkgs. REAL integration tests (testcontainers, no mocks):
+internal/intents (the ledger core) PASS. internal/river = 18 pass / 13 fail, and
+ALL 13 failures are the PRE-EXISTING `*_merchant_fk` fixture-seeding issue (zero
+logic/panic/assertion failures) — proven pre-existing by stashing this change and
+reproducing the identical FK error (same class as the known isolated-run fixture
+fragility; the full self-cleaning suite owns it). Diffs reviewed: runner.go/store.go
+removed only the guard/stamping, pipeline otherwise identical.
+
+Follow-up unblocked: doujins #426 binds migrated rows to the operator-declared
+provider_accounts (CCBill `945280/0000`, NMI Gateway ID `579145`) — no fingerprint,
+no runtime verification.
+
+STATUS 2026-06-28 (Claude): PLAN. Decision (owner): the live "whoami" identity
+resolution + the account-mismatch guard aren't useful or reliable — rip them out.
+Supersedes the earlier "fix NMI identity" plan that lived under this id.
+
+## Why (the unreliable part)
+The intent ledger (#518/#365/#366) tries to RESOLVE each provider's account identity
+from the LIVE credential and then VERIFY that an intent's bound account still matches:
+- NMI: `NMIClient.AccountIdentity()` returns `company + " <" + email + ">"` (mutable
+  display fields from query.php profile). Confirmed via NMI docs + a live sandbox probe
+  that NMI exposes NO stable numeric id to the merchant key (the dashboard "Gateway ID"
+  579145/1233466 is dashboard- or partner-API-only). So the NMI "identity" silently
+  changes when someone edits the profile.
+- Stripe: a `GET /v1/account` "whoami" per secret key.
+- The guard (`runner.go accountMismatch`) parks execution / defers verification when the
+  live fingerprint ≠ the bound account.
+
+Net: an identity that's mutable (NMI), an extra network call + cache per rail, and a
+park/defer failure mode — guarding against a rare, operator-caused event (swapping a key
+to a *different* account mid-flight). Cost > value. Remove it.
+
+## Two layers — rip layer 1, keep layer 2
+1. RIP — runtime identity RESOLUTION + the mismatch GUARD (the flaky part).
+2. KEEP — `provider_accounts` as an OPERATOR-DECLARED table (manifest `account_id`),
+   with `provider_account_id` tagged on intents / checkout_sessions /
+   external_provider_mutation_logs for routing + reporting. It's load-bearing
+   (manifest/checkout/logs/CLI) and not itself unreliable; it just stops being
+   runtime-VERIFIED. The declared account_id is a durable LABEL (CCBill/Solana already
+   work exactly this way: config-supplied, unverified).
+
+## Rip list (layer 1), file by file
+- internal/intents/provider_account.go — delete the live-credential resolution:
+  `nmiAccount`, `stripeAccountID`, the NMI/Stripe branches of `ResolveProviderAccount`,
+  `FindProviderAccount`, `accountMismatchReason`, the nmi/stripe caches. Collapse the
+  resolver to a DECLARED-account lookup only (`dbPrimaryProviderAccount` reads the
+  operator-declared primary from `provider_accounts` — no whoami) for stamping.
+- internal/intents/runner.go — delete `accountMismatch` + the park-on-mismatch (execute)
+  and defer-on-mismatch (verify, ~line 306) call sites; drop the `ProviderAccounts`
+  guard field + `providerAccountFinder`.
+- internal/intents/store.go — stamp `provider_account_id` from the DECLARED primary
+  (lookup), not from a live resolve (line 78); delete `VerifyOrBindPrimaryProviderAccount`
+  + `RebindProviderIntentsToCurrentAccount` (reconcile resolved-vs-bound → moot); keep
+  `upsertProviderAccount`/promote only if still used by manifest seeding, else drop.
+- internal/integrations/nmi/client.go — delete `AccountIdentity()`.
+- internal/bootstrap/merchant_manifest.go:726 — delete the `client.AccountIdentity()`
+  verify-on-bootstrap call; manifests just declare `account_id`.
+- Wiring: internal/app/runtime.go (intentProviderAccounts resolver),
+  internal/app/build_runtime.go (SetProviderAccounts), deferred_delete_scheduler.go
+  (providerAccounts param), internal/modules/checkout/session_service.go
+  (SetProviderAccounts + usage), internal/river/jobs_provider_intents.go (guard wiring
+  l.43/86), cmd/openrails/{intents.go,reconcile.go} (Rebind/FindProviderAccount/
+  VerifyOrBind CLI subcommands).
+- Delete the dead guard tests across internal/intents.
+
+## Keep (layer 2) — provider_accounts stays declarative
+- Table `openrails.provider_accounts` + `provider_account_id` on provider_intents /
+  checkout_sessions / external_provider_mutation_logs.
+- Manifest `provider_accounts[]` (bootstrap_manifest.go / merchant_manifest.go): operator
+  declares `account_id` (+ secrets). This is the ONLY source of account identity now.
+
+## Explicit tradeoff (accepted)
+DROP runtime account-repoint detection: a credential silently swapped to a *different*
+account won't be caught — it'll just act under whatever the key addresses. Acceptable:
+the check was unreliable (NMI) and the event is rare + operator-caused; operators own
+their keys. Document it where the guard used to live.
+
+## Optional TIER 2 (separate, larger — only if multi-account-per-provider is YAGNI)
+Drop layer 2 entirely: remove the `provider_accounts` table, all `provider_account_id`
+columns, and manifest `provider_accounts[]`; collapse to one-account-per-rail
+(`PROCESSORS_*` config). Bigger blast radius (checkout/logs/manifest schema) — decide
+separately; not part of this issue unless requested.
+
+## Downstream
+- doujins #426 (bind migrated NMI/CCBill rows): SIMPLIFIES — provider_accounts is purely
+  operator-declared, migrator binds to the declared `account_id` (CCBill `945280/0000`;
+  NMI = operator's Gateway ID). No fingerprint, no runtime verification. Was blocked on
+  "stable id"; now just needs the operator to declare it. Update #426 accordingly.
+- #588 (provider-account generalization): re-evaluate against the slimmed model.
+
+## Tasks
+- [ ] Remove the guard + live resolution per the rip list; keep declared-account stamping.
+- [ ] Delete `AccountIdentity()` + the bootstrap verify call.
+- [ ] Unwire the resolver everywhere (runtime/checkout/river/cmd/deferred-delete).
+- [ ] Source `provider_account_id` stamping from the operator-declared primary only.
+- [ ] Document the dropped account-repoint protection where the guard was.
+- [ ] Tests: intents stamp the declared account; no park/defer-on-mismatch path remains;
+      manifest-declared provider_accounts still drive stamping.
+
+## References
+- internal/intents/provider_account.go, runner.go (accountMismatch ~74-104, ~306), store.go
+  (stamp 72-100, VerifyOrBind/Rebind 141-189); internal/integrations/nmi/client.go:54;
+  internal/bootstrap/{bootstrap_manifest.go,merchant_manifest.go} (provider_accounts[]);
+  checkout/session_service.go; river/jobs_provider_intents.go; cmd/openrails/{intents,reconcile}.go.
+- Origin: #518 provider-account binding, #365 verify-account guard, #366 materialize; #588 generalization.
+- Research backing the NMI half: NMI Query API docs (no merchant-key Gateway-ID retrieval) +
+  live sandbox probe (empty platform_id). https://docs.nmi.com/reference/query
+
+---
+
+# #591: platform identity & billing model — customer/merchant anchors (authkit groups); merged merchant_external_account; vault + lifecycle axes
+
+**Completed:** no
+
+STATUS 2026-06-28 (Claude): PLAN / north-star, REVISED to the converged model (owner-reviewed).
+Umbrella for #588, #589, doujins #426. **Build incrementally** — today's model keeps working; the
+platform layer lands as additive migrations (one new anchor table + a table merge + nullable /
+defaulted columns), never a hot-table rewrite.
+
+## Vision
+OpenRails becomes a platform (Stripe Link / Shop Pay): a customer registers on OpenRails, saves a
+card into OpenRails' OWN vault (self-hosted HyperSwitch, PCI), and OpenRails drives the
+subscription lifecycle. This must COEXIST with today's model (provider tokenizes/vaults; provider
+OR OpenRails drives the lifecycle), per-merchant AND per-customer — so it's data-driven, never a
+global mode switch.
+
+## Identity = authkit (do NOT rebuild it in billing)
+authkit primitives (verified in ~/authkit): a **persona** is a permission-namespace type
+(`PersonaDef`); a **permission group** is an instance (`CreatePermissionGroup`, contract.go:277);
+**owner** is the group's apex role (contract.go:48); **principal kind** is the auth method and
+`user` is ONE of five (principal.go:7-11): user, api_key, remote_application, delegated, service.
+authz = `Can(subject, kind, persona, instance, perm)`.
+- `customer` and `merchant` are **personas**; a specific one is a **permission group**; the
+  registering `user` holds `owner` in each it creates — a user can own a customer AND a merchant group.
+- authkit owns identity+authz; openrails owns BILLING keyed by the **group id** (opaque, NO FK;
+  invoker-opaque + de-conflation patterns).
+
+## THE RULE: bill by permission-group identity, never by user_id
+openrails never keys billing by `user_id` — it keys by the **group** (the customer/merchant
+permission-group id). This makes user-owns-both, ownership transfer, team membership, and
+api_key/delegated/service actors all Just Work via authkit with zero re-keying. openrails is
+principal-kind-agnostic: it runs `Can()` and uses the opaque invoker label for budgets/audit;
+never branches on kind. No owner/roles/team tables in openrails.
+
+## Tables (7; converged with owner 2026-06-28)
+1. **customer** — thin anchor; PK = customer permission-group-id. The entry ownership hangs off.
+2. **merchant** — thin anchor; PK = merchant permission-group-id.
+3. **merchant_external_account** — a (merchant x rail) account: `merchant_id, provider_type
+   (nmi|stripe|ccbill|solana), account_id, creds_ref, owner (merchant|platform), role, env`.
+   MERGES the two we'd split — a merchant's own gateway AND "charge this merchant's customers
+   against us" (owner=platform). "mobius" is a ROW here (provider_type=nmi), NOT a rail value.
+4. **payment_methods** — `customer_id` (buyer, global); `stored_in -> merchant_external_account`
+   (the vault: a merchant gateway, or the platform vault); rail handle = ONE or TWO keys
+   (`rail_method_ref` always; `rail_customer_ref` for rails that need the customer handle to
+   charge, e.g. NMI vault+billing). Replaces vault_id/billing_id; adds
+   network_transaction_id/mandate_ref (off-session/MIT); kind/fingerprint deferred.
+5. **payments** — `customer_id + merchant_id + charged_via -> merchant_external_account`.
+6. **subscriptions** — `customer_id + merchant_id + payment_method_id + lifecycle_owner`.
+7. **merchant_customer_config** — thin, sparse per-(merchant, customer) CONFIG sidecar:
+   `merchant_id, customer_id, default_payment_method_id, standing (e.g. blocked),
+   merchant_external_customer_ref (the merchant's own CRM id for this buyer)`. A row exists only
+   when there's something to store.
+
+`merchant_customer_config` is NOT a routing "edge": per-relationship STATE (balance, entitlements,
+budgets) stays in the existing purpose-built tables keyed `(customer_id, merchant_id)` —
+`ledger_accounts`, `entitlements`, `invoker_spend_limits` (they already carry both ids). The config
+table only holds the loose per-relationship fields that otherwise have no home.
+
+## Multi-tenant RLS (tenant separation — still required)
+Many merchants share ONE database, so row-level security stays the tenant boundary (today's
+`FORCE ROW LEVEL SECURITY` + `merchant_isolation` policy pattern). Two RLS axes:
+- **merchant-scoped tables** (`merchant_external_account`, `payments`, `subscriptions`,
+  `entitlements`, `ledger_accounts`, `invoker_spend_limits`, `merchant_customer_config`) →
+  policy `merchant_id = current_setting('app.merchant_id')`. A merchant tenant NEVER sees another
+  merchant's rows. Unchanged from today.
+- **customer-global tables** (`customer`, and platform-vaulted `payment_methods`) span merchants,
+  so they are NOT merchant-scoped — they use a **customer** context
+  (`customer_id = current_setting('app.customer_id')`, the portal). A merchant session must NOT be
+  able to SELECT a customer's cross-merchant card (privacy); a merchant charge reaches it only via a
+  mediated charge op, not a direct read.
+- `payment_methods` spans both: merchant-vaulted rows (owner=merchant, `merchant_id` set) → merchant
+  RLS; platform-vaulted rows (owner=platform, customer-global) → customer RLS. Policy: visible if
+  `merchant_id = app.merchant_id` OR `customer_id = app.customer_id`.
+Invariant: a merchant tenant sees neither another merchant's rows (isolation) nor a customer's
+cross-merchant card (privacy).
+
+## rail = type, not brand
+`rail` / `provider_type` is the integration (nmi/stripe/ccbill/solana). A specific account
+("mobius" = doujins' NMI account) is a `merchant_external_account` ROW, not a rail value — drop
+`mobius` from the rail enum; the rail type is derivable from the account a method/charge binds to.
+(Detail in #588.)
+
+## Two orthogonal axes (data-driven, coexist — NOT one mode enum)
+1. **Vault ownership** = `payment_methods.stored_in -> merchant_external_account` — the EXACT account
+   the token lives in. The rail token is account-specific; it CANNOT be charged via any other account.
+   - `owner=platform` (the single shared HyperSwitch vault): card is **customer-global** — any
+     merchant may charge it (with consent), Link/Shop-Pay style. No binding table.
+     `payment_methods.merchant_id` = NULL.
+   - `owner=merchant` (a merchant's own gateway): card is **locked to that one account** — NOT
+     transferable across merchants, NOR across provider accounts (even same type / same merchant; a
+     Stripe/mobius token only works in the account that vaulted it). `merchant_id` = that account's
+     merchant. (Implication: switching a merchant's gateway account = re-collect/re-vault; tokens
+     don't migrate.) The denormalized `merchant_id` (NULL for platform) is what drives merchant RLS.
+2. **Lifecycle ownership** = `subscriptions.lifecycle_owner (openrails|provider) DEFAULT
+   'openrails'`. openrails -> our dunning/scheduler/liveness run (charge the vault); provider ->
+   the rail drives it, we mirror webhooks and our jobs `WHERE lifecycle_owner='openrails'` skip it.
+
+Today's doujins NMI/mobius = vault owner **merchant** (doujins' own NMI account "mobius") +
+lifecycle owner **openrails** (NMI doesn't auto-rebill, so we drive dunning). The platform vision
+= owner=platform + lifecycle=openrails. That two-combo reality is why the axes stay orthogonal.
+
+## Evolvability invariants (what makes it additive)
+1. bill by **group id** (opaque), not user_id; no authz/owner/roles in openrails.
+2. per-(customer,merchant) facts carry `(customer_id, merchant_id)` (they already do) — no edge table.
+3. `payment_methods`: surrogate PK, customer-scoped, identity NOT hardwired to (merchant,vault);
+   `stored_in` decoupled so flipping to the platform vault is a re-point, not a rewrite (#588).
+4. `subscriptions.lifecycle_owner` + `merchant_external_account.owner` default to today's behavior
+   (one-column, additive).
+5. charge by (instrument, merchant_external_account), never (merchant, vault_id).
+
+## RLS hardening (refines the RLS section — privacy holes to avoid)
+- the `merchant_id = app.merchant_id OR customer_id = app.customer_id` policy is the IDEA, not the
+  impl: a merchant session must NEVER read a customer's platform-vaulted cards (they span other
+  merchants). So: merchant tenant sessions see ONLY merchant-vaulted rows (owner=merchant, their
+  merchant_id); platform-vaulted rows are invisible to ANY merchant session.
+- charging a platform-vaulted card for a merchant runs in the PRIVILEGED billing-engine context
+  (SECURITY DEFINER / engine role above tenant RLS) that resolves the card server-side — the
+  merchant never gets row read access (no setting `app.customer_id` inside a merchant session).
+- `app.merchant_id` / `app.customer_id` are set ONLY from the authenticated authkit principal,
+  never from request input (else a merchant forges a customer context). RLS ⊆ trusted session vars.
+- the `customer` anchor + customer-global payment_methods are customer-context only; a merchant
+  learns a `customer_id` solely via its OWN merchant-scoped rows, never by reading the customer table.
+
+## Cross-merchant reuse needs consent (not just a shared vault)
+A platform-vaulted card saved at merchant A is NOT automatically chargeable by merchant B. Reuse
+requires per-(customer, merchant) **consent** (Link/Shop-Pay style) — also the card-network
+stored-credential/MIT requirement (ties to `network_transaction_id`/`mandate_ref`). Model it as a
+per-(customer, merchant) consent record (a `merchant_customer_config` flag, or a dedicated row).
+
+## Open questions
+1. **Platform vault: shared vs per-merchant — RESOLVED (owner, 2026-06-28).** The platform vault is a
+   SINGLE shared account (owner=platform); a card stored there is **customer-global, usable by any
+   merchant** (Link/Shop-Pay). A provider-vaulted card (owner=merchant) is **bound to its exact
+   `stored_in` account** — not transferable across merchants OR across provider accounts (even same
+   type / same merchant), because the rail token is account-specific. `payment_methods.stored_in`
+   captures both; no per-merchant platform vault rows. "Merchant bills via platform" = the merchant is
+   the beneficiary (`payments.merchant_id`) on a charge against the shared platform vault + consent —
+   not a separate vault row.
+2. `lifecycle_owner=provider` needs per-rail webhook ingestion to mirror state — real infra, not just
+   the column.
+3. dropping `rail` from payment_methods depends on universal account binding → doujins #426 first.
+
+## "Additive" honesty
+The EARLY phase is genuinely additive (rail=type, rail_method_ref, defaulted lifecycle_owner/owner —
+no behavior change). The FULL pivot (payment_methods re-scoped customer-global, customer-context RLS,
+portal, consent) is a real migration on a heavily-FK'd table + the RLS model — staged, not a
+column-add. Don't undersell it.
+
+## Phasing
+- now: #588 instrument restructure + rail=type; bake invariants into doujins #426.
+- later (each additive): `customer` anchor + nullable customer-group key; merge provider tables ->
+  `merchant_external_account` + `owner`; self-hosted HyperSwitch as an owner=platform account;
+  `subscriptions.lifecycle_owner`; read-only consumer portal (cross-merchant read by customer group).
+
+## References
+- authkit: principal.go:7-11 (kinds), contract.go:277 (CreatePermissionGroup) / :48 (owner),
+  README RBAC (personas/groups/Can).
+- openrails: payment_methods, rail_customers, provider_accounts (-> merchant_external_account),
+  subscriptions, ledger_accounts, entitlements; jobs_dunning, jobs_subscription_liveness.
+- Children: #588 (instrument model), #589 (listing API + health), doujins #426 (account binding).
 
 ---
 
@@ -181,6 +477,13 @@ extend the response with the derived fields above.
 - Failure source-of-truth: external_provider_mutation_logs, ClickHouse payment_events,
   payments/money_ledger. Charge→method attribution gap noted above. Related: #588.
 
+## Platform-model alignment (see #591)
+- methods are scoped to the **customer permission group**; self-list = the customer's own group,
+  admin/merchant list-for-user = an authkit `Can(persona, instance, perm)` check — authz via
+  authkit, not a bespoke admin flag.
+- the derived "active/valid + last charge/failure" health is also what surfaces dunning-ineligible
+  cases (e.g. doujins's 15 active subs with no method on file) — same read path.
+
 ---
 
 # #588: rail-agnostic payment-method (instrument) model — generalize beyond vault_id/billing_id
@@ -267,6 +570,23 @@ after a single rail.
   internal/integrations/nmi/{payments,subscriptions,vault}.go.
 - Spreedly: developer.spreedly.com/docs/using-payment-methods, /docs/third-party-vaulting.
 - HyperSwitch: docs.hyperswitch.io/integration-guide/workflows/vault, .../payment-methods-management.
+
+## Platform-model alignment (see #591)
+- payment methods belong to the **customer** (the buyer), keyed by the customer permission-group
+  identity (opaque), NEVER by `user_id`. authkit owns identity/authz; openrails owns the billing row.
+- the instrument identity must be **customer-capable**: surrogate PK + `customer_id` +
+  uniqueness NOT hardwired to (merchant, vault) → flipping to the platform vault is a re-point,
+  not a rewrite.
+- **vault location** = `stored_in -> merchant_external_account` (the merged rail-account table;
+  `provider_accounts` renamed/merged, see #591). `owner=platform` = OpenRails' HyperSwitch vault →
+  one customer-scoped row per card, chargeable across merchants, NO binding table. `owner=merchant`
+  = the merchant's gateway (card siloed). Charge by (instrument, merchant_external_account), never
+  (merchant, vault_id). Lifecycle axis lives on subscriptions (`lifecycle_owner`), independent of vault.
+- `rail` here is the **type** (nmi/stripe/...), derivable from the bound `merchant_external_account`;
+  "mobius" is an account row, not a rail value (drop it from the rail enum).
+- **RLS**: merchant-vaulted methods are merchant-scoped (`merchant_id`); platform-vaulted methods are
+  customer-scoped and must NOT be merchant-readable (cross-merchant privacy). Policy: visible if
+  `merchant_id = app.merchant_id` OR `customer_id = app.customer_id` (see #591 RLS section).
 
 ---
 

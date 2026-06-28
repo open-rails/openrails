@@ -1,7 +1,6 @@
 package nmi
 
 import (
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -44,41 +43,6 @@ type NMIClient struct {
 // own tokenization timeout is separate (client-side Collect.js); this protects
 // the server->gateway add_customer/sale/query call.
 const nmiRequestTimeout = 25 * time.Second
-
-// AccountIdentity identifies the NMI ACCOUNT these credentials address (#365
-// intent account guard) by querying the gateway's own profile report
-// (query.php report_type=profile — read-only, stays available under
-// mode=readonly). The identity derives from the merchant record, NOT the
-// credential, so rotating the security key within the same account keeps the
-// same fingerprint.
-func (c *NMIClient) AccountIdentity() (string, error) {
-	raw, err := c.sendQueryRequest(url.Values{
-		"security_key": {c.SecurityKey},
-		"report_type":  {"profile"},
-	})
-	if err != nil {
-		return "", fmt.Errorf("nmi profile query failed: %w", err)
-	}
-	var profile struct {
-		Error    string `xml:"error_response"`
-		Merchant struct {
-			Company string `xml:"company"`
-			Email   string `xml:"email"`
-		} `xml:"merchant"`
-	}
-	if err := xml.Unmarshal([]byte(raw), &profile); err != nil {
-		return "", fmt.Errorf("nmi profile response unparseable: %w", err)
-	}
-	if strings.TrimSpace(profile.Error) != "" {
-		return "", fmt.Errorf("nmi profile query rejected: %s", strings.TrimSpace(profile.Error))
-	}
-	company := strings.TrimSpace(profile.Merchant.Company)
-	email := strings.TrimSpace(profile.Merchant.Email)
-	if company == "" && email == "" {
-		return "", errors.New("nmi profile response carries no merchant identity")
-	}
-	return "nmi:" + company + " <" + email + ">", nil
-}
 
 type CustomerVaultError struct {
 	Message        string

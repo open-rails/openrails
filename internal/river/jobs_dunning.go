@@ -91,14 +91,12 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	providerAccounts := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Rails, w.NMIClients, w.DB)
 	runner := &intents.Runner{
-		Store: intents.NewStore(w.DB).WithProviderAccounts(providerAccounts),
+		Store: intents.NewStore(w.DB),
 		Registry: intents.NewRegistry(
 			intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService),
 		),
-		Clock:            w.Clock,
-		ProviderAccounts: providerAccounts,
+		Clock: w.Clock,
 	}
 	if w.Config != nil {
 		runner.Config = w.Config

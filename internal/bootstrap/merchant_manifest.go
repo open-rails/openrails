@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 
@@ -20,8 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -695,45 +692,9 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 		}, nil
 	}
 	switch providerType {
-	case config.RailTypeStripe:
-		key, ok, err := secrets.ResolveIfPresent("secret_key")
-		if err != nil {
-			return manifestProviderIdentity{}, fmt.Errorf("resolve stripe secret_key for account discovery: %w", err)
-		}
-		if !ok {
-			return manifestProviderIdentity{}, fmt.Errorf("provider account stripe account_id is required unless secrets.secret_key is present for account discovery")
-		}
-		accountID, err := discoverStripeAccountID(ctx, cfg, key)
-		if err != nil {
-			return manifestProviderIdentity{}, fmt.Errorf("discover stripe account identity: %w", err)
-		}
-		return manifestProviderIdentity{
-			AccountID: accountID,
-			Evidence:  map[string]any{"source": "stripe.get_account"},
-		}, nil
-	case config.RailTypeNMI:
-		key, ok, err := secrets.ResolveIfPresent("production_key")
-		if err != nil {
-			return manifestProviderIdentity{}, fmt.Errorf("resolve nmi production_key for account discovery: %w", err)
-		}
-		if !ok {
-			return manifestProviderIdentity{}, fmt.Errorf("provider account nmi account_id is required unless secrets.production_key/security_key is present for profile discovery")
-		}
-		client, err := nmi.NewClient("bootstrap-"+providerType, &config.NMIProviderSettings{SecurityKey: key}, cfg != nil && cfg.IsTestMode())
-		if err != nil {
-			return manifestProviderIdentity{}, fmt.Errorf("build nmi identity client: %w", err)
-		}
-		identity, err := client.AccountIdentity()
-		if err != nil {
-			return manifestProviderIdentity{}, fmt.Errorf("discover nmi account identity: %w", err)
-		}
-		accountID := strings.TrimPrefix(identity, "nmi:")
-		return manifestProviderIdentity{
-			AccountID:   accountID,
-			DisplayName: stringPtrIfNotEmpty(accountID),
-			Evidence:    map[string]any{"source": "nmi.profile"},
-		}, nil
 	case config.RailTypeCCBill:
+		// CCBill identity is derived from DECLARATIVE config (client_acc_num),
+		// not a network whoami, so it is retained (#592).
 		raw, ok, err := secrets.ResolveIfPresent("account_config")
 		if err != nil {
 			return manifestProviderIdentity{}, fmt.Errorf("resolve ccbill account_config for account discovery: %w", err)
@@ -749,37 +710,11 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 			AccountID: accountID,
 			Evidence:  map[string]any{"source": "ccbill.account_config"},
 		}, nil
-	case config.RailTypeSolana:
-		return manifestProviderIdentity{}, fmt.Errorf("provider account solana account_id is required; declare the public wallet/authority explicitly")
 	default:
-		return manifestProviderIdentity{}, fmt.Errorf("provider account %q account_id is required", providerType)
+		// Auto-discovery via live credentials was removed (#592): account_id must
+		// be declared in the manifest for stripe/nmi/solana.
+		return manifestProviderIdentity{}, fmt.Errorf("provider account_id is required for %s (auto-discovery removed; declare account_id in the manifest)", providerType)
 	}
-}
-
-func discoverStripeAccountID(ctx context.Context, cfg *config.Config, secretKey string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.stripe.com/v1/account", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(secretKey))
-	resp, err := stripeapi.Client(cfg, 0).Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("stripe /v1/account returned %d", resp.StatusCode)
-	}
-	var payload struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(payload.ID) == "" {
-		return "", fmt.Errorf("stripe /v1/account response missing id")
-	}
-	return strings.TrimSpace(payload.ID), nil
 }
 
 func ccbillAccountIDFromConfig(raw string) (string, error) {
@@ -972,14 +907,4 @@ func AnyMerchantProvisioned(ctx context.Context, cp *controlplane.ControlPlane, 
 	var exists bool
 	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.merchants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
 	return exists, err
-}
-
-func cleanStrings(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
 }

@@ -19,19 +19,9 @@ import (
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB
-	// ProviderAccounts stamps provider_account_id at enqueue. nil = no binding
-	// (tests, supersede-only callers): intents enqueue with NULL and execute
-	// ungated, same as pre-#518 rows.
-	ProviderAccounts ProviderAccountResolver
 }
 
 func NewStore(d *db.DB) *Store { return &Store{db: d} }
-
-// WithProviderAccounts attaches the provider-account resolver (chainable).
-func (s *Store) WithProviderAccounts(src ProviderAccountResolver) *Store {
-	s.ProviderAccounts = src
-	return s
-}
 
 // EnqueueParams describes one logical intent. MerchantID is stamped explicitly;
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
@@ -69,20 +59,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
-	// #518: bind the provider account the producer is configured against.
-	// Best-effort — an unresolvable account identity stamps NULL (executes
-	// ungated) rather than failing the enqueue: ledger durability beats the
-	// guard.
-	var providerAccountID *uuid.UUID
-	if s.ProviderAccounts != nil {
-		if identity, ok := s.ProviderAccounts.ResolveProviderAccount(ctx, p.Provider); ok && identity.AccountID != "" {
-			row, err := s.upsertProviderAccount(ctx, p.MerchantID, identity)
-			if err != nil {
-				return gen.OpenrailsProviderIntent{}, fmt.Errorf("intents: upsert provider account: %w", err)
-			}
-			providerAccountID = &row.ID
-		}
-	}
+	// provider_account_id is no longer resolved at runtime (#592): provider
+	// accounts are an operator-declared catalog, intents enqueue unbound.
 	return s.db.Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
 		MerchantID:        p.MerchantID,
 		Provider:          p.Provider,
@@ -96,109 +74,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 		Origin:            string(p.Origin),
 		OriginReason:      originReason,
 		ExpiresAt:         p.ExpiresAt,
-		ProviderAccountID: providerAccountID,
+		ProviderAccountID: nil,
 	})
-}
-
-func (s *Store) upsertProviderAccount(ctx context.Context, merchantID uuid.UUID, identity ProviderAccountIdentity) (gen.OpenrailsProviderAccount, error) {
-	var evidence []byte
-	if len(identity.Evidence) > 0 {
-		b, err := json.Marshal(identity.Evidence)
-		if err != nil {
-			return gen.OpenrailsProviderAccount{}, fmt.Errorf("marshal evidence: %w", err)
-		}
-		evidence = b
-	}
-	var displayName *string
-	if identity.DisplayName != "" {
-		displayName = &identity.DisplayName
-	}
-	return s.db.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
-		MerchantID:     merchantID,
-		ProviderType:   identity.ProviderType,
-		Environment:    stringPtr(normalizedProviderEnvironment(identity.Environment)),
-		AccountID:      identity.AccountID,
-		DisplayName:    displayName,
-		VaultSecretRef: nil,
-		Role:           nil,
-		Status:         nil,
-		Evidence:       evidence,
-		LastVerifiedAt: ptrTime(time.Now().UTC()),
-	})
-}
-
-func ptrTime(t time.Time) *time.Time { return &t }
-
-func stringPtr(v string) *string { return &v }
-
-// VerifyOrBindPrimaryProviderAccount resolves providerKey with the current
-// credentials, records that provider-returned account identity, and promotes it
-// as the merchant's enabled primary for that provider type. The providerKey is
-// only the local config selector; the durable identity is provider_type +
-// account_id. If the same selector now resolves to a different account, that is
-// treated as an intentional primary rotation: old rows stay bound to their
-// provider_account_id while new default work uses the newly promoted account.
-func (s *Store) VerifyOrBindPrimaryProviderAccount(ctx context.Context, merchantID uuid.UUID, providerKey string) (gen.OpenrailsProviderAccount, error) {
-	if s.ProviderAccounts == nil {
-		return gen.OpenrailsProviderAccount{}, fmt.Errorf("intents: provider account resolver unavailable")
-	}
-	identity, ok := s.ProviderAccounts.ResolveProviderAccount(ctx, providerKey)
-	if !ok || identity.AccountID == "" {
-		return gen.OpenrailsProviderAccount{}, fmt.Errorf("intents: no provider account resolvable for provider %q", providerKey)
-	}
-	account, err := s.upsertProviderAccount(ctx, merchantID, identity)
-	if err != nil {
-		return gen.OpenrailsProviderAccount{}, err
-	}
-	if err := s.db.Gen(ctx).DemoteOtherPrimaryProviderAccounts(ctx, gen.DemoteOtherPrimaryProviderAccountsParams{
-		ID:           account.ID,
-		MerchantID:   merchantID,
-		ProviderType: account.ProviderType,
-		Environment:  stringPtr(account.Environment),
-	}); err != nil {
-		return gen.OpenrailsProviderAccount{}, err
-	}
-	return s.db.Gen(ctx).PromoteProviderAccountToPrimary(ctx, gen.PromoteProviderAccountToPrimaryParams{
-		ID:           account.ID,
-		MerchantID:   merchantID,
-		ProviderType: account.ProviderType,
-		Environment:  stringPtr(account.Environment),
-	})
-}
-
-func normalizedProviderEnvironment(raw string) string {
-	env, err := normalizeProviderEnvironment(raw)
-	if err != nil {
-		return "live"
-	}
-	return env
-}
-
-// RebindProviderIntentsToCurrentAccount rebinds every LIVE intent of the
-// provider to the CURRENT account (#518 escape hatch — operator confirmed the
-// credential change does not point at a different account, or adopts the new
-// one deliberately).
-func (s *Store) RebindProviderIntentsToCurrentAccount(ctx context.Context, merchantID uuid.UUID, provider string) (gen.OpenrailsProviderAccount, int64, error) {
-	if s.ProviderAccounts == nil {
-		return gen.OpenrailsProviderAccount{}, 0, fmt.Errorf("intents: provider account resolver unavailable")
-	}
-	identity, ok := s.ProviderAccounts.ResolveProviderAccount(ctx, provider)
-	if !ok || identity.AccountID == "" {
-		return gen.OpenrailsProviderAccount{}, 0, fmt.Errorf("intents: no provider account resolvable for provider %q", provider)
-	}
-	account, err := s.upsertProviderAccount(ctx, merchantID, identity)
-	if err != nil {
-		return gen.OpenrailsProviderAccount{}, 0, err
-	}
-	n, err := s.db.Gen(ctx).RebindProviderIntentsToAccount(ctx, gen.RebindProviderIntentsToAccountParams{
-		ProviderAccountID: &account.ID,
-		Provider:          provider,
-	})
-	return account, n, err
-}
-
-func (s *Store) GetProviderAccount(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderAccount, error) {
-	return s.db.Gen(ctx).GetProviderAccount(ctx, id)
 }
 
 // SupersedeBySubject marks every live (pending / failed_retryable /

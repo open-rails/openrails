@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -150,23 +148,6 @@ type Runtime struct {
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
-
-	// intentProviderAccounts is the shared #518 provider-account resolver — one
-	// instance so the Stripe account-id cache is reused across every
-	// producer/executor. Built lazily by ProviderAccounts().
-	intentProviderAccounts     *intents.RuntimeProviderAccounts
-	intentProviderAccountsOnce sync.Once
-}
-
-// ProviderAccounts returns the provider-account resolver over the runtime's
-// live provider credentials. Producers bind it at enqueue; the executor/verifier
-// compare against it and park intents enqueued under a different provider
-// account.
-func (r *Runtime) ProviderAccounts() intents.ProviderAccountResolver {
-	r.intentProviderAccountsOnce.Do(func() {
-		r.intentProviderAccounts = intents.NewRuntimeProviderAccountsWithDB(r.Config, r.Rails, r.NMIClients, r.DB)
-	})
-	return r.intentProviderAccounts
 }
 
 func (r *Runtime) FXRateHealth() (time.Time, bool) {

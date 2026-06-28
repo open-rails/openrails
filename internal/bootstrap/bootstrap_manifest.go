@@ -180,29 +180,25 @@ func validateManifestProviderAccount(slug string, idx int, account ManifestProvi
 		}
 	}
 	if strings.TrimSpace(account.AccountID) == "" && !manifestProviderAccountHasDiscoverableIdentity(providerType, account.Secrets) {
-		return fmt.Errorf("merchant %q provider_accounts[%d].account_id is required unless provider secrets can identify the account", slug, idx)
+		return fmt.Errorf("merchant %q provider_accounts[%d].account_id is required (auto-discovery removed; declare account_id, or for ccbill provide secrets.account_config)", slug, idx)
 	}
 	return nil
 }
 
+// manifestProviderAccountHasDiscoverableIdentity reports whether the account_id
+// can be derived without a declared value. Live-credential auto-discovery
+// (stripe/nmi whoami) was removed (#592); only CCBill's account_id is derivable
+// from DECLARATIVE config (account_config).
 func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets map[string]ManifestSecretSource) bool {
-	values, err := newManifestSecretValues(normalizeManifestProviderType(providerType), secrets)
+	if normalizeManifestProviderType(providerType) != config.RailTypeCCBill {
+		return false
+	}
+	values, err := newManifestSecretValues(config.RailTypeCCBill, secrets)
 	if err != nil {
 		return false
 	}
-	switch normalizeManifestProviderType(providerType) {
-	case config.RailTypeStripe:
-		_, ok := values.sources["secret_key"]
-		return ok
-	case config.RailTypeNMI:
-		_, ok := values.sources["production_key"]
-		return ok
-	case config.RailTypeCCBill:
-		_, ok := values.sources["account_config"]
-		return ok
-	default:
-		return false
-	}
+	_, ok := values.sources["account_config"]
+	return ok
 }
 
 const (
