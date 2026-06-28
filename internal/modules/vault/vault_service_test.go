@@ -128,7 +128,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "vault_123", pm.VaultID)
+	require.Equal(t, "vault_123", pm.RailCustomerRef)
 	require.Len(t, pms.created, 1)
 
 	form := <-seen

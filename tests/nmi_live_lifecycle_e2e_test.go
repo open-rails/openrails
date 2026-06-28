@@ -102,7 +102,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	subUser := uuid.NewString()
 	oneOffPM := mkVaultedPM(oneOffUser)
 	subPM := mkVaultedPM(subUser)
-	t.Logf("vaulted NMI sandbox cards: one_off_pm=%s(vault=%s) sub_pm=%s(vault=%s)", oneOffPM.ID, oneOffPM.VaultID, subPM.ID, subPM.VaultID)
+	t.Logf("vaulted NMI sandbox cards: one_off_pm=%s(vault=%s) sub_pm=%s(vault=%s)", oneOffPM.ID, oneOffPM.RailCustomerRef, subPM.ID, subPM.RailCustomerRef)
 
 	oneOffRouter := newHostSeamSelfRouter(t, suite, oneOffUser, nil)
 	subRouter := newHostSeamSelfRouter(t, suite, subUser, nil)

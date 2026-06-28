@@ -16,10 +16,11 @@ type PaymentMethod struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	Rail       Rail      `json:"rail"` // Rail: mobius, ccbill, solana
 
-	// Rail-specific vault/payment method identifiers
-	VaultID              string  `json:"-"` // Primary identifier in rail's system
-	BillingID            *string `json:"-"` // Secondary identifier (e.g., subscription ID)
-	InitialTransactionID string  `json:"-"` // Transaction that created this vault
+	// Two-slot rail handle (#588): the customer-scope ref and the instrument-scope
+	// ref, replacing the overloaded vault_id (+ NMI-ism billing_id).
+	RailCustomerRef      string `json:"-"` // customer-scope handle (NMI customer_vault_id; "" for Stripe — see rail_customers)
+	RailMethodRef        string `json:"-"` // instrument-scope handle (NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token)
+	InitialTransactionID string `json:"-"` // Transaction that created this vault
 
 	// Payment method metadata
 	LastFour   *string        `json:"last_four"`   // Last 4 digits of card

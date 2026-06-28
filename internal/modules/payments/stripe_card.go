@@ -164,7 +164,7 @@ type StripeCardSubscriptionLinker interface {
 //
 // It is the single shared implementation behind both the webhook handler
 // (charge.succeeded / payment_method.attached) and the reconcile backfill. The
-// upsert is keyed by (rail=stripe, vault_id); the subscription link is only
+// upsert is keyed by (rail=stripe, rail_method_ref=pm_); the subscription link is only
 // written when it changes. Both make it idempotent and safe to re-run.
 func UpsertStripeCardForCustomer(
 	ctx context.Context,
@@ -196,14 +196,14 @@ func UpsertStripeCardForCustomer(
 	}
 
 	methods := repo.NewPaymentMethodRepo(database)
-	pm, err := methods.GetByVaultID(ctx, string(models.RailStripe), vaultID)
+	pm, err := methods.GetByRailMethodRef(ctx, string(models.RailStripe), vaultID)
 	switch {
 	case errors.Is(err, repo.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 			Rail:                 models.RailStripe,
-			VaultID:              vaultID,
+			RailMethodRef:        vaultID, // Stripe pm_ token is the instrument-scope handle
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,
 			LastFour:             &card.Last4,

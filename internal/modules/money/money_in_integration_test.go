@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -126,14 +127,21 @@ func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 
 func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, vaultID string) uuid.UUID {
 	t.Helper()
-	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
+	params := gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           payer.UUID(),
 		Rail:                 rail,
-		VaultID:              vaultID,
 		InitialTransactionID: "init_" + pm.String(),
-	})
+	}
+	// Mirror the migration's per-rail handle placement: NMI keeps the customer
+	// vault in rail_customer_ref; other rails put the instrument in rail_method_ref.
+	if rails.IsNMIBacked(rail) {
+		params.RailCustomerRef = vaultID
+	} else {
+		params.RailMethodRef = vaultID
+	}
+	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm)

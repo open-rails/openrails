@@ -43,7 +43,8 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 			return "", nil, errors.New("payment method belongs to a different payment provider")
 		}
 
-		return pm.VaultID, nil, nil
+		// NMI-backed only (checked above): the customer vault id is the customer-scope handle.
+		return pm.RailCustomerRef, nil, nil
 	}
 
 	if req.PaymentToken == "" {
@@ -86,7 +87,7 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 		return "", nil, err
 	}
 
-	return pm.VaultID, pm, nil
+	return pm.RailCustomerRef, pm, nil
 }
 
 func ResolveCheckoutFirstName(req *CheckoutRequest, user *UserIdentity) string {

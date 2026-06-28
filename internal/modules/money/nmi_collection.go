@@ -36,7 +36,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 	if a == nil || a.Client == nil {
 		return ChargeResult{}, fmt.Errorf("nmi collection adapter not initialized")
 	}
-	vaultID := strings.TrimSpace(method.VaultID)
+	vaultID := strings.TrimSpace(method.RailCustomerRef)
 	if vaultID == "" {
 		return ChargeResult{}, fmt.Errorf("nmi payment method missing customer vault id")
 	}

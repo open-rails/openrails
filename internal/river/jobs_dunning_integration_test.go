@@ -107,8 +107,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:                   paymentMethodID,
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailMobius,
-		VaultID:              "vault_" + uuid.New().String(),
-		BillingID:            &billingID,
+		RailCustomerRef:      "vault_" + uuid.New().String(),
+		RailMethodRef:        billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -117,8 +117,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:                   paymentMethod.ID,
 		CustomerID:           paymentMethod.CustomerID,
 		Rail:                 string(paymentMethod.Rail),
-		VaultID:              paymentMethod.VaultID,
-		BillingID:            paymentMethod.BillingID,
+		RailCustomerRef:      paymentMethod.RailCustomerRef,
+		RailMethodRef:        paymentMethod.RailMethodRef,
 		InitialTransactionID: paymentMethod.InitialTransactionID,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -266,7 +266,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, CustomerID: tenantSubjectID, Rail: "mobius",
-		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
+		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
 	})

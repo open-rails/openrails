@@ -469,7 +469,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if !ok {
 		return nil, fmt.Errorf("payment rail not available")
 	}
-	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.RailSubscriptionID, pm.VaultID); err != nil {
+	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.RailSubscriptionID, pm.RailCustomerRef); err != nil {
 		return nil, fmt.Errorf("update payment method with rail: %w", err)
 	}
 

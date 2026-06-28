@@ -202,7 +202,9 @@ WHERE sub.rail = ANY (sqlc.arg(rails)::text[])
   AND ent.deleted_at IS NULL;
 
 -- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, vault_id, last_four, card_type,
+-- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
+-- here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
+SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])

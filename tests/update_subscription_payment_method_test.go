@@ -106,7 +106,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		// Verify NMI was called with update_subscription
 		assert.Contains(t, mock.LastRequest["recurring"], "update_subscription", "Should call NMI with update_subscription")
 		assert.Contains(t, mock.LastRequest["subscription_id"], railSubID, "Should send subscription ID")
-		assert.Contains(t, mock.LastRequest["customer_vault_id"], newPM.VaultID, "Should send new vault ID")
+		assert.Contains(t, mock.LastRequest["customer_vault_id"], newPM.RailCustomerRef, "Should send new vault ID")
 
 		// Verify subscription was updated in database
 		updatedSub := suite.GetSubscription(sub.ID)

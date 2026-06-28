@@ -27,7 +27,7 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 	if a == nil || a.DB == nil || a.Service == nil {
 		return ChargeResult{}, fmt.Errorf("stripe collection adapter not initialized")
 	}
-	paymentMethodID := strings.TrimSpace(method.VaultID)
+	paymentMethodID := strings.TrimSpace(method.RailMethodRef)
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return ChargeResult{}, fmt.Errorf("stripe payment method missing reusable payment_method id")
 	}

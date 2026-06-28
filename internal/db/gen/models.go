@@ -610,10 +610,7 @@ type OpenrailsPaymentBlocklist struct {
 type OpenrailsPaymentMethod struct {
 	ID uuid.UUID
 	// Payment rail type: nmi, ccbill, stripe, etc.
-	Rail string
-	// Primary payment method identifier in the rail system
-	VaultID              string
-	BillingID            *string
+	Rail                 string
 	InitialTransactionID string
 	LastFour             *string
 	CardType             *string
@@ -625,6 +622,10 @@ type OpenrailsPaymentMethod struct {
 	CustomerID           uuid.UUID
 	// Provider account that produced this vaulted payment method mirror row.
 	ProviderAccountID *uuid.UUID
+	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customers (Stripe).
+	RailCustomerRef string
+	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
+	RailMethodRef string
 }
 
 // Pricing tiers for products with rail-specific identifiers

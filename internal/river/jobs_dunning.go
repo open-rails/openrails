@@ -344,7 +344,7 @@ func (w *DunningWorker) processSubscription(
 	// exists, so no provider mutation is recorded — straight to the failure
 	// policy, exactly as before.
 	pm := sub.PaymentMethod
-	if pm == nil || pm.VaultID == "" || pm.BillingID == nil || *pm.BillingID == "" {
+	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
 		reason := "payment method unavailable for rebill"
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Rail:           rail,

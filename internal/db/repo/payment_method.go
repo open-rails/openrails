@@ -42,8 +42,8 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		MerchantID:           tid.UUID(),
 		CustomerID:           m.CustomerID,
 		Rail:                 string(m.Rail),
-		VaultID:              m.VaultID,
-		BillingID:            m.BillingID,
+		RailCustomerRef:      m.RailCustomerRef,
+		RailMethodRef:        m.RailMethodRef,
 		InitialTransactionID: m.InitialTransactionID,
 		LastFour:             m.LastFour,
 		CardType:             m.CardType,
@@ -189,10 +189,10 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	return methods, total, nil
 }
 
-func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, rail, vaultID string) (*models.PaymentMethod, error) {
-	row, err := r.db.Gen(ctx).GetPaymentMethodByVaultID(ctx, gen.GetPaymentMethodByVaultIDParams{
-		Rail:    rail,
-		VaultID: vaultID,
+func (r *PaymentMethodRepo) GetByRailMethodRef(ctx context.Context, rail, methodRef string) (*models.PaymentMethod, error) {
+	row, err := r.db.Gen(ctx).GetPaymentMethodByRailMethodRef(ctx, gen.GetPaymentMethodByRailMethodRefParams{
+		Rail:          rail,
+		RailMethodRef: methodRef,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -226,8 +226,8 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 		ID:                   method.ID,
 		CustomerID:           method.CustomerID,
 		Rail:                 string(method.Rail),
-		VaultID:              method.VaultID,
-		BillingID:            method.BillingID,
+		RailCustomerRef:      method.RailCustomerRef,
+		RailMethodRef:        method.RailMethodRef,
 		InitialTransactionID: method.InitialTransactionID,
 		LastFour:             method.LastFour,
 		CardType:             method.CardType,

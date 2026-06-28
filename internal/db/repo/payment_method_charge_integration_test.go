@@ -37,12 +37,12 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 	// A method with charge history, and a second method with none.
 	charged := &models.PaymentMethod{
 		ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
-		VaultID: "vault-charged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
+		RailCustomerRef: "vault-charged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, charged))
 	uncharged := &models.PaymentMethod{
 		ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
-		VaultID: "vault-uncharged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
+		RailCustomerRef: "vault-uncharged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, uncharged))
 
@@ -93,4 +93,37 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 
 	_, ok = got[uncharged.ID]
 	require.False(t, ok, "method with no charge history must be absent from the map")
+}
+
+// #588: the two-slot model lets one customer vault (rail_customer_ref) hold MORE
+// THAN ONE stored instrument (rail_method_ref) — the NMI multi-billing case the old
+// vault_id-only uniqueness forbade. Same (customer_ref, method_ref) pair still dedupes.
+func TestMultiInstrumentPerVaultUniqueness(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	pool := dbtest.SharedPGXPool(t)
+	dbi, err := db.NewWithPGXPool(pool, "")
+	require.NoError(t, err)
+
+	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
+	now := time.Now().UTC().Truncate(time.Second)
+	r := NewPaymentMethodRepo(dbi)
+
+	vault := "cv-" + uuid.NewString()
+	mk := func(methodRef string) *models.PaymentMethod {
+		return &models.PaymentMethod{
+			ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
+			RailCustomerRef: vault, RailMethodRef: methodRef, CreatedAt: now, UpdatedAt: now,
+		}
+	}
+	first := mk("bill-1")
+	second := mk("bill-2")
+	dup := mk("bill-1")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = ANY($1)`,
+			[]uuid.UUID{first.ID, second.ID, dup.ID})
+	})
+
+	require.NoError(t, r.Create(ctx, first), "first instrument on the vault")
+	require.NoError(t, r.Create(ctx, second), "second instrument on the SAME vault must be allowed")
+	require.Error(t, r.Create(ctx, dup), "an exact (vault, instrument) duplicate must still be rejected")
 }

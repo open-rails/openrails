@@ -161,15 +161,17 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsP
 		return Retryable("load subscription: " + err.Error())
 	}
 	pm := sub.PaymentMethod
-	if pm == nil || pm.VaultID == "" || pm.BillingID == nil || *pm.BillingID == "" {
+	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
 		// Terminal for the attempt: nothing was sent. The worker (or the next
 		// dunning pass, off this evidence) applies the failure policy.
+		// NMI needs both the customer vault (rail_customer_ref) and the billing
+		// record (rail_method_ref) to rebill.
 		return TerminalWithEvidence("payment method unavailable for rebill", map[string]any{"declined": false})
 	}
 
 	rebillResp, err := client.AttemptManualRebill(nmi.ManualRebillParams{
-		VaultID:        pm.VaultID,
-		BillingID:      *pm.BillingID,
+		VaultID:        pm.RailCustomerRef,
+		BillingID:      pm.RailMethodRef,
 		SubscriptionID: sub.RailSubscriptionID,
 		OrderID:        p.OrderReference,
 		PONumber:       p.OrderReference,

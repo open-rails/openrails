@@ -1039,12 +1039,12 @@ func TestVaultTimestamps(t *testing.T) {
 
 	// Create a payment method directly
 	pm := &models.PaymentMethod{
-		ID:         uuid.New(),
-		CustomerID: suite.ensureCustomer(ctx, userID),
-		Rail:       models.RailMobius,
-		VaultID:    "test-vault-" + uuid.New().String()[:8],
-		CreatedAt:  mockClock.Now(),
-		UpdatedAt:  mockClock.Now(),
+		ID:              uuid.New(),
+		CustomerID:      suite.ensureCustomer(ctx, userID),
+		Rail:            models.RailMobius,
+		RailCustomerRef: "test-vault-" + uuid.New().String()[:8],
+		CreatedAt:       mockClock.Now(),
+		UpdatedAt:       mockClock.Now(),
 	}
 	suite.InsertPaymentMethod(ctx, pm)
 

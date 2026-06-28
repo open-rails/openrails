@@ -119,9 +119,9 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	err = nmiClient.UpdateSubscriptionPaymentSource(subscription.RailSubscriptionID, paymentMethod.VaultID)
+	err = nmiClient.UpdateSubscriptionPaymentSource(subscription.RailSubscriptionID, paymentMethod.RailCustomerRef)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.VaultID, "payment_method_id": paymentMethod.ID}).Error("Failed to update subscription payment source with NMI")
+		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID}).Error("Failed to update subscription payment source with NMI")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
 		return
 	}

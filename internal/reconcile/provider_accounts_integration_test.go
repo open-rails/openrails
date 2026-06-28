@@ -73,7 +73,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			end := now.Add(29 * 24 * time.Hour)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payment_methods
-				   (id, rail, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
+				   (id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
 				 VALUES ($1, 'mobius', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
 				pmID, marker, marker, dbtest.TestMerchantID.UUID(), customerID, account.ID)
 			require.NoError(t, err)

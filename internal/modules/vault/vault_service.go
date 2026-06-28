@@ -205,7 +205,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		ID:                   uuidutil.NewV7(),
 		CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 		Rail:                 models.Rail(rail),
-		VaultID:              nmiResponse.CustomerVaultID,
+		RailCustomerRef:      nmiResponse.CustomerVaultID, // NMI customer vault; the billing record (rail_method_ref) is added later
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
@@ -222,7 +222,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		return nil, fmt.Errorf("failed to store vault locally: %w", err)
 	}
 
-	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.VaultID}).Info("Successfully created payment vault")
+	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment vault")
 	return pm, nil
 }
 
@@ -385,7 +385,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
 
-	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.VaultID}
+	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}
 
 	paymentTokenUpdated := false
 	if req.PaymentToken != nil {
@@ -434,7 +434,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	}
 
 	if err := client.UpdateCustomerVault(upd); err != nil {
-		log.WithError(err).WithField("vault_id", pm.VaultID).Error("Failed to update vault in NMI")
+		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update vault in NMI")
 		return nil, fmt.Errorf("failed to update payment vault: %w", err)
 	}
 
@@ -443,10 +443,10 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	}
 	pm.UpdatedAt = s.now()
 	if err := s.PaymentMethodService.Update(ctx, pm); err != nil {
-		log.WithError(err).WithField("vault_id", pm.VaultID).Error("Failed to update local vault record")
+		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update local vault record")
 		return nil, fmt.Errorf("failed to update local vault record: %w", err)
 	}
-	log.WithField("vault_id", pm.VaultID).Info("Successfully updated payment vault")
+	log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully updated payment vault")
 	return pm, nil
 }
 
@@ -467,7 +467,7 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
 	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for vault")
+		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for vault")
 		return fmt.Errorf("failed to check vault usage: %w", err)
 	}
 
@@ -494,17 +494,17 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
 
-	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.VaultID}); err != nil {
-		log.WithError(err).WithField("vault_id", pm.VaultID).Error("Failed to delete vault from NMI")
+	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
+		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault from NMI")
 		return fmt.Errorf("failed to delete payment vault: %w", err)
 	}
 
 	if err := s.PaymentMethodService.Delete(ctx, pm.ID); err != nil {
-		log.WithError(err).WithField("vault_id", pm.VaultID).Error("Failed to delete vault locally")
+		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault locally")
 		return fmt.Errorf("failed to delete local vault record: %w", err)
 	}
 
-	log.WithField("vault_id", pm.VaultID).Info("Successfully deleted payment vault")
+	log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment vault")
 	return nil
 }
 

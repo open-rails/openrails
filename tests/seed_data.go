@@ -669,8 +669,8 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailMobius,
-		VaultID:              "vault-" + uuid.New().String()[:8],
-		BillingID:            strPtr("billing-" + uuid.New().String()[:8]),
+		RailCustomerRef:      "vault-" + uuid.New().String()[:8],
+		RailMethodRef:        "billing-" + uuid.New().String()[:8],
 		InitialTransactionID: "txn-" + uuid.New().String()[:8],
 		LastFour:             strPtr("4242"),
 		CardType:             strPtr("Visa"),
@@ -684,7 +684,9 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	return pm
 }
 
-// CreateTestPaymentMethodWithOptions creates a payment method with custom options
+// CreateTestPaymentMethodWithOptions creates a payment method with custom options.
+// VaultID/BillingID are the test-ergonomic names for the two-slot rail handle
+// (customer-scope / instrument-scope) mapped onto rail_customer_ref / rail_method_ref.
 type PaymentMethodOptions struct {
 	UserID               string
 	Rail                 models.Rail
@@ -694,7 +696,6 @@ type PaymentMethodOptions struct {
 	LastFour             string
 	CardType             string
 	ExpiryDate           string
-	FailureReason        *string
 }
 
 func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts PaymentMethodOptions) *models.PaymentMethod {
@@ -717,13 +718,12 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
 		Rail:                 opts.Rail,
-		VaultID:              opts.VaultID,
-		BillingID:            strPtrOrNil(opts.BillingID),
+		RailCustomerRef:      opts.VaultID,
+		RailMethodRef:        opts.BillingID,
 		InitialTransactionID: opts.InitialTransactionID,
 		LastFour:             strPtrOrNil(opts.LastFour),
 		CardType:             strPtrOrNil(opts.CardType),
 		ExpiryDate:           strPtrOrNil(opts.ExpiryDate),
-		FailureReason:        opts.FailureReason,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}

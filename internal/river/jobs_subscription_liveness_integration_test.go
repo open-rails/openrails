@@ -87,7 +87,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	billingID := "bill_" + uuid.New().String()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: f.paymentMethodID, CustomerID: tenantSubjectID, Rail: string(rail),
-		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
+		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)

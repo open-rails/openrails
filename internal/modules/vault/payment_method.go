@@ -74,13 +74,14 @@ func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, 
 	return items, total, nil
 }
 
-// GetByVaultID finds a NMI payment method by vault ID
-func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vaultID string) (*models.PaymentMethod, error) {
+// GetByRailMethodRef finds a payment method by its instrument-scope rail handle
+// (e.g. a Stripe pm_ token) for the given rail.
+func (s *PaymentMethodService) GetByRailMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, errors.New("provider is required")
 	}
-	pm, err := s.repo.GetByVaultID(ctx, provider, vaultID)
+	pm, err := s.repo.GetByRailMethodRef(ctx, provider, methodRef)
 	if err != nil {
 		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound

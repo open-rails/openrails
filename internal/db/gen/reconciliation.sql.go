@@ -971,7 +971,7 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, vault_id, last_four, card_type,
+SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY ($1::text[])
@@ -993,6 +993,8 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	ExpiryDate *string
 }
 
+// Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
+// here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.ProviderAccountID)
 	if err != nil {

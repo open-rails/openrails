@@ -2,12 +2,12 @@
 
 -- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
-    id, merchant_id, customer_id, rail, vault_id, billing_id,
+    id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
     metadata, created_at, updated_at
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(billing_id),
-    $5, sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
+    $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
+    sqlc.arg(initial_transaction_id), sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -37,9 +37,9 @@ WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
--- name: GetPaymentMethodByVaultID :one
+-- name: GetPaymentMethodByRailMethodRef :one
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = $1 AND pm.vault_id = $2
+WHERE pm.rail = $1 AND pm.rail_method_ref = $2
 LIMIT 1;
 
 -- name: GetPaymentMethodByInitialTransactionID :one
@@ -51,9 +51,9 @@ LIMIT 1;
 UPDATE openrails.payment_methods SET
     customer_id = $2,
     rail = $3,
-    vault_id = $4,
-    billing_id = sqlc.narg(billing_id),
-    initial_transaction_id = $5,
+    rail_customer_ref = sqlc.arg(rail_customer_ref),
+    rail_method_ref = sqlc.arg(rail_method_ref),
+    initial_transaction_id = sqlc.arg(initial_transaction_id),
     last_four = sqlc.narg(last_four),
     card_type = sqlc.narg(card_type),
     expiry_date = sqlc.narg(expiry_date),
