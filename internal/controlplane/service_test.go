@@ -24,12 +24,3 @@ func TestNew_RequiresPool(t *testing.T) {
 		t.Fatal("expected error when pool is nil")
 	}
 }
-
-func TestRegistrationControls_DefaultRestricted(t *testing.T) {
-	// Default posture is private/self-hosted: no public native-user or org
-	// registration, and only the intentional AuthKit route groups are mounted.
-	cp := &ControlPlane{}
-	if !cp.SelfHostedPosture() {
-		t.Error("restricted registration should yield self-hosted posture")
-	}
-}

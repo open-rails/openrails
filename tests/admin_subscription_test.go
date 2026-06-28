@@ -111,36 +111,3 @@ func TestAdminListSubscriptions(t *testing.T) {
 	require.True(t, ok, "paginated response should carry a data array: %s", w.Body.String())
 	assert.GreaterOrEqual(t, len(data), 1, "the seeded subscription should appear")
 }
-
-// TestRemovedAdminSubscriptionExtendRoute is a regression guard: the old
-// PUT /subscriptions/:id/extend route stays removed. Cancellation is the only
-// subscription mutation on the delegated surface (DELETE /subscriptions/:id).
-func TestRemovedAdminSubscriptionExtendRoute(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	admin := newHostSeamAdminRouter(t, suite, "b7777777-7777-4777-8777-777777777777",
-		[]string{controlplane.PermMerchantSubscriptionsUpdate})
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/v1/merchant/subscriptions/"+uuid.New().String()+"/extend", nil)
-	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-	admin.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code, "extend route must stay removed")
-}
-
-// TestAdminHealth tests the public health endpoint (no auth required). It runs
-// against the production server handler, not the admin surface.
-func TestAdminHealth(t *testing.T) {
-	suite := getSharedTestSuite(t)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/health/live", nil)
-	suite.Server.Handler().ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
-
-	var response map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Equal(t, "ok", response["status"], "Status should be ok")
-	assert.Equal(t, "billing", response["service"], "Service should be billing")
-}

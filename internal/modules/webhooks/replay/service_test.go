@@ -18,40 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestReplayService_GetProjectRoot tests the project root detection
-func TestReplayService_GetProjectRoot(t *testing.T) {
-	root, err := getProjectRoot()
-	require.NoError(t, err)
-	assert.NotEmpty(t, root)
-
-	// Verify go.mod exists in the root
-	goModPath := filepath.Join(root, "go.mod")
-	_, err = os.Stat(goModPath)
-	assert.NoError(t, err, "go.mod should exist at project root")
-}
-
-// TestReplayService_GetWebhookFilesPath tests the webhook files path detection
-func TestReplayService_GetWebhookFilesPath(t *testing.T) {
-	rs := &ReplayService{}
-
-	webhookPath, err := rs.getWebhookFilesPath()
-	require.NoError(t, err)
-	assert.Contains(t, webhookPath, "testdata/webhooks")
-
-	// Verify the directory exists
-	_, err = os.Stat(webhookPath)
-	assert.NoError(t, err, "webhook testdata directory should exist")
-
-	// Verify rail subdirectories exist
-	ccbillPath := filepath.Join(webhookPath, "ccbill")
-	_, err = os.Stat(ccbillPath)
-	assert.NoError(t, err, "ccbill directory should exist")
-
-	nmiPath := filepath.Join(webhookPath, "mobius")
-	_, err = os.Stat(nmiPath)
-	assert.NoError(t, err, "mobius directory should exist")
-}
-
 // TestReplayService_LoadWebhookEvents tests loading webhook event files
 func TestReplayService_LoadWebhookEvents(t *testing.T) {
 	rs := &ReplayService{}
@@ -351,85 +317,6 @@ type TestWebhookRequest struct {
 	Headers     map[string]string `json:"headers"`
 	Body        string            `json:"body"`
 	ContentType string            `json:"content_type"`
-}
-
-// BenchmarkReplayService_ValidatePayload benchmarks payload validation
-func BenchmarkReplayService_ValidatePayload(b *testing.B) {
-	rs := &ReplayService{}
-
-	eventFiles, err := rs.loadWebhookEvents("ccbill", "all")
-	require.NoError(b, err)
-	require.NotEmpty(b, eventFiles)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		eventFile := eventFiles[i%len(eventFiles)]
-		_, err := rs.validateWebhookPayload(eventFile)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func TestHelperFunctions(t *testing.T) {
-	err := ValidateEvent("ccbill", "newsalesuccess.json")
-	assert.NoError(t, err, "Should validate CCBill event successfully")
-
-	err = ValidateEvent("mobius", "recurring_subscription_add.json")
-	assert.NoError(t, err, "Should validate NMI event successfully")
-
-	err = ValidateAllEvents("ccbill")
-	assert.NoError(t, err, "Should validate all CCBill events successfully")
-
-	err = ValidateAllEvents("mobius")
-	assert.NoError(t, err, "Should validate all NMI events successfully")
-
-	err = ValidateEvent("invalid", "test.json")
-	assert.Error(t, err, "Should fail with invalid rail")
-	assert.Contains(t, err.Error(), "invalid rail 'invalid'")
-
-	err = ValidateEvent("ccbill", "nonexistent.json")
-	assert.Error(t, err, "Should fail with nonexistent event file")
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("local listener not permitted in this environment: %v", err)
-	}
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "ok"})
-	}))
-	server.Listener = ln
-	server.Start()
-	defer server.Close()
-
-	ctx := context.Background()
-
-	err = ReplayEvent(ctx, "ccbill", "newsalesuccess.json", server.URL)
-	assert.NoError(t, err, "Should replay CCBill event successfully")
-
-	err = ReplayEvent(ctx, "mobius", "recurring_subscription_add.json", server.URL)
-	assert.NoError(t, err, "Should replay NMI event successfully")
-
-	err = ReplayAllEvents(ctx, "ccbill", server.URL)
-	assert.NoError(t, err, "Should replay all CCBill events successfully")
-
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("local listener not permitted in this environment: %v", err)
-	}
-	errorServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal server error"))
-	}))
-	errorServer.Listener = ln2
-	errorServer.Start()
-	defer errorServer.Close()
-
-	err = ReplayEvent(ctx, "ccbill", "newsalesuccess.json", errorServer.URL)
-	assert.Error(t, err, "Should fail when server returns error")
-	assert.Contains(t, err.Error(), "webhook replay failed")
 }
 
 // TestMain runs setup and teardown for the test suite

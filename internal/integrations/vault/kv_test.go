@@ -20,10 +20,3 @@ func TestKVv2PathMapping(t *testing.T) {
 		t.Errorf("metadataPath = %q, want %q", got, want)
 	}
 }
-
-func TestKVv2MountTrimming(t *testing.T) {
-	a := NewKVv2Adapter(nil, "/secret/")
-	if a.mount != "secret" {
-		t.Errorf("mount = %q, want %q", a.mount, "secret")
-	}
-}

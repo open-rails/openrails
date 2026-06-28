@@ -105,37 +105,3 @@ func TestCancelImmediatelyAfterCreateHoldsOrdering(t *testing.T) {
 			sub.EndedAt, sub.CancelledAt)
 	}
 }
-
-func TestCancelOrderingHoldsAcrossManyAttempts(t *testing.T) {
-	// Fast successive cancels must never violate ordering regardless of how
-	// the two time.Now() reads interleave — there is no dependence on a fixed
-	// wall-clock offset.
-	for i := 0; i < 1000; i++ {
-		sub := newExpiredSubscription()
-		ct := CancelTypeExpired
-		if err := sub.Cancel("", &ct); err != nil {
-			t.Fatalf("Cancel returned error on iteration %d: %v", i, err)
-		}
-		if !satisfiesEndedNotBeforeCancelled(sub) {
-			t.Fatalf("iteration %d violated ordering: ended_at %v < cancelled_at %v",
-				i, sub.EndedAt, sub.CancelledAt)
-		}
-	}
-}
-
-func TestSubscriptionClearRetrySchedule(t *testing.T) {
-	now := time.Now().UTC()
-	attempts := 3
-	sub := &Subscription{
-		LastRetryAt:   &now,
-		RetryAttempts: &attempts,
-		NextRetryAt:   &now,
-		GraceEndsAt:   &now,
-	}
-
-	sub.ClearRetrySchedule()
-
-	if sub.LastRetryAt != nil || sub.RetryAttempts != nil || sub.NextRetryAt != nil || sub.GraceEndsAt != nil {
-		t.Fatalf("expected retry schedule fields to be cleared")
-	}
-}

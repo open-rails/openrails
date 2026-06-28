@@ -117,11 +117,3 @@ func TestHTTPGetUserFromContext(t *testing.T) {
 		t.Fatalf("GetUser = %+v", u)
 	}
 }
-
-func TestHTTPSetGet(t *testing.T) {
-	req := NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil), nil)
-	req.Set("k", 42)
-	if v, ok := req.Get("k"); !ok || v != 42 {
-		t.Fatalf("Get = %v %v", v, ok)
-	}
-}

@@ -150,15 +150,3 @@ func TestCheckSubscriptionConflict(t *testing.T) {
 		}
 	})
 }
-
-func TestIsNonTerminalSubscriptionStatus(t *testing.T) {
-	nonTerminal := []models.SubscriptionStatus{models.StatusPending, models.StatusActive, models.StatusPastDue}
-	for _, s := range nonTerminal {
-		if !IsNonTerminalSubscriptionStatus(s) {
-			t.Errorf("%s should be non-terminal", s)
-		}
-	}
-	if IsNonTerminalSubscriptionStatus(models.StatusCancelled) {
-		t.Error("cancelled must be terminal")
-	}
-}

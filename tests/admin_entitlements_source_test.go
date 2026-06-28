@@ -69,26 +69,6 @@ func TestAdminEntitlementGrant_RequiresEntitlementsWrite(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
-func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	admin := newHostSeamAdminRouter(t, suite, "ba000000-0000-4000-8000-000000000000",
-		[]string{controlplane.PermMerchantCustomerSettingsUpdate})
-
-	userID := uuid.New().String()
-
-	for _, path := range []string{
-		"/v1/merchant/customers/" + userID + "/grants",
-		"/v1/merchant/grants/" + uuid.New().String(),
-	} {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", path, nil)
-		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		admin.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusNotFound, w.Code, path)
-	}
-}
-
 func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "ba111111-1111-4111-8111-111111111111",

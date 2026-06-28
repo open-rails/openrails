@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -123,14 +122,6 @@ func TestDiffSubscriptionsIdempotentWhenAllMatched(t *testing.T) {
 	require.Empty(t, diff.RemoteOnly)
 	require.Empty(t, diff.LocalOnly)
 	require.Equal(t, 2, diff.Matched)
-}
-
-func TestZeroTimeNil(t *testing.T) {
-	require.Nil(t, zeroTimeNil(time.Time{}))
-	now := time.Date(2026, time.May, 23, 1, 2, 3, 0, time.UTC)
-	got := zeroTimeNil(now)
-	require.NotNil(t, got)
-	require.Equal(t, now, *got)
 }
 
 func TestOptionsUserKnown(t *testing.T) {

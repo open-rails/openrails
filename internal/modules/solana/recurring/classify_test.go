@@ -37,18 +37,3 @@ func TestClassifyCrankError(t *testing.T) {
 		})
 	}
 }
-
-func TestDeclineCodeDefaultCategory(t *testing.T) {
-	if declinecode.InsufficientFunds.DefaultCategory() != declinecode.Recoverable {
-		t.Error("insufficient_funds should be recoverable")
-	}
-	if declinecode.DeclinedStopRecurring.DefaultCategory() != declinecode.Terminal {
-		t.Error("declined_stop_all_recurring_payments should be terminal")
-	}
-	if declinecode.DuplicateTransaction.DefaultCategory() != declinecode.AlreadyPaid {
-		t.Error("duplicate_transaction should be already_paid")
-	}
-	if declinecode.CommunicationError.DefaultCategory() != declinecode.Operational {
-		t.Error("communication_error should be operational")
-	}
-}

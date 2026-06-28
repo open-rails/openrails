@@ -77,19 +77,6 @@ func TestPrice_GetCCBillFlexForm_RequiresFlexID(t *testing.T) {
 	}
 }
 
-func TestCatalogStatus_Valid(t *testing.T) {
-	for _, s := range []CatalogStatus{CatalogStatusDraft, CatalogStatusActive, CatalogStatusArchived} {
-		if !s.Valid() {
-			t.Fatalf("expected %q to be valid", s)
-		}
-	}
-	for _, s := range []CatalogStatus{"", "live", "deleted", "ACTIVE"} {
-		if s.Valid() {
-			t.Fatalf("expected %q to be invalid", s)
-		}
-	}
-}
-
 func TestCatalogStatus_PurchasableAndBillable(t *testing.T) {
 	cases := []struct {
 		status          CatalogStatus

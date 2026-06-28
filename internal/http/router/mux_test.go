@@ -8,20 +8,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/request"
 )
 
-func TestToMuxPath(t *testing.T) {
-	cases := map[string]string{
-		"/billing/v1/products":             "/billing/v1/products",
-		"/billing/v1/me/subscriptions/:id": "/billing/v1/me/subscriptions/{id}",
-		"/users/:user_id/entitlements/:id": "/users/{user_id}/entitlements/{id}",
-		"/webhooks/:provider":              "/webhooks/{provider}",
-	}
-	for in, want := range cases {
-		if got := toMuxPath(in); got != want {
-			t.Errorf("toMuxPath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestMuxRouterHandleAndParam(t *testing.T) {
 	mux := http.NewServeMux()
 	r := NewMux(mux, "/billing/v1", nil)

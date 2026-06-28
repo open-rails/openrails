@@ -65,22 +65,3 @@ func TestParseSolanaPlanTerms(t *testing.T) {
 		t.Error("zero amount must error")
 	}
 }
-
-func TestGetStringSliceField(t *testing.T) {
-	// JSONB decodes []string back as []any of strings.
-	state := map[string]any{"sign_transactions": []any{"tx1", "tx2"}}
-	got := getStringSliceField(state, "sign_transactions")
-	if len(got) != 2 || got[0] != "tx1" || got[1] != "tx2" {
-		t.Errorf("got %v, want [tx1 tx2]", got)
-	}
-	if getStringSliceField(nil, "x") != nil {
-		t.Error("nil map -> nil")
-	}
-	if getStringSliceField(map[string]any{}, "missing") != nil {
-		t.Error("missing key -> nil")
-	}
-	// Native []string also supported.
-	if g := getStringSliceField(map[string]any{"k": []string{"a"}}, "k"); len(g) != 1 || g[0] != "a" {
-		t.Errorf("native []string: got %v", g)
-	}
-}

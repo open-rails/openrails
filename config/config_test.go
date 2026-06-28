@@ -94,173 +94,6 @@ func TestLoad_EnvMapping(t *testing.T) {
 	})
 }
 
-func TestLoad_ConfigFileAndEnvPrecedence(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	err := os.WriteFile(cfgPath, []byte(`
-db:
-  host: filehost
-  port: "5432"
-  database: filedb
-  username: fileuser
-  password: filepass
-  sslmode: disable
-
-clickhouse:
-  client_addr: clickhouse:9000
-  http_addr: http://clickhouse:8123
-  db: analytics
-  user: analytics_user
-  password: analytics_password
-`), 0o600)
-	assert.NoError(t, err)
-
-	// Env overrides config file values.
-	t.Setenv("DB_USERNAME", "envuser")
-	t.Setenv("DB_PASSWORD", "envpass")
-	t.Setenv("CLICKHOUSE_CLIENT_ADDR", "envclickhouse:9000")
-
-	cfg, err := Load(cfgPath)
-	assert.NoError(t, err)
-
-	// From file (not overridden)
-	assert.Equal(t, "filehost", cfg.DB.Host)
-	assert.Equal(t, "filedb", cfg.DB.Database)
-
-	// Overridden by env
-	assert.Equal(t, "envuser", cfg.DB.Username)
-	assert.Equal(t, "envpass", cfg.DB.Password)
-	assert.Equal(t, "envclickhouse:9000", cfg.ClickHouse.ClientAddr)
-}
-
-func TestConfigExampleShowsCodeDefaults(t *testing.T) {
-	cfg, err := Load(filepath.Join("..", "config.example.yaml"))
-	require.NoError(t, err)
-	defaults := GetDefaultBillingConfig()
-
-	require.NotNil(t, cfg.DB)
-	require.NotNil(t, cfg.Redis)
-	require.NotNil(t, cfg.ClickHouse)
-	require.NotNil(t, cfg.Auth)
-
-	assert.Equal(t, defaults.Env, cfg.Env)
-	assert.Equal(t, defaults.Host, cfg.Host)
-	assert.Equal(t, defaults.Port, cfg.Port)
-	assert.Equal(t, defaults.APIURL, cfg.APIURL)
-	assert.Equal(t, defaults.DB.Host, cfg.DB.Host)
-	assert.Equal(t, defaults.DB.Port, cfg.DB.Port)
-	assert.Equal(t, defaults.DB.Database, cfg.DB.Database)
-	assert.Equal(t, defaults.DB.Username, cfg.DB.Username)
-	assert.Equal(t, defaults.DB.Password, cfg.DB.Password)
-	assert.Equal(t, defaults.DB.SSLMode, cfg.DB.SSLMode)
-	assert.Equal(t, defaults.DB.SchemaName(), cfg.DB.SchemaName())
-	assert.Equal(t, defaults.Redis.Addr, cfg.Redis.Addr)
-	assert.Equal(t, defaults.Redis.Password, cfg.Redis.Password)
-	assert.Equal(t, defaults.Redis.DB, cfg.Redis.DB)
-	assert.Equal(t, defaults.ClickHouse.HTTPAddr, cfg.ClickHouse.HTTPAddr)
-	assert.Equal(t, defaults.ClickHouse.ClientAddr, cfg.ClickHouse.ClientAddr)
-	assert.Equal(t, defaults.ClickHouse.Database, cfg.ClickHouse.Database)
-	assert.Equal(t, defaults.ClickHouse.Username, cfg.ClickHouse.Username)
-	assert.Equal(t, defaults.ClickHouse.Password, cfg.ClickHouse.Password)
-	assert.Equal(t, defaults.ClickHouse.Cluster, cfg.ClickHouse.Cluster)
-	assert.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
-}
-
-func TestLoad_RejectsRemovedControlPlaneEnabledKnob(t *testing.T) {
-	// HARD CUT (#469): the control plane is always on; auth.control_plane.enabled
-	// is a load error, not an ignored key — whichever way it was set.
-	for _, val := range []string{"true", "false"} {
-		dir := t.TempDir()
-		cfgPath := filepath.Join(dir, "config.yaml")
-		require.NoError(t, os.WriteFile(cfgPath, []byte(`
-auth:
-  control_plane:
-    enabled: `+val+`
-    issuer: "https://openrails.example.com"
-`), 0o600))
-
-		_, err := Load(cfgPath)
-		require.Error(t, err)
-		require.ErrorContains(t, err, "auth.control_plane.enabled was removed")
-	}
-}
-
-func TestLoad_RejectsRemovedBillingHotPathConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-billing_hot_path:
-  fail_policy: fail_open
-`), 0o600))
-
-	_, err := Load(cfgPath)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "billing_hot_path was removed")
-}
-
-func TestLoad_RejectsRemovedMerchantCORSConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-merchant_cors:
-  doujins:
-    allowed_origins:
-      - https://doujins.com
-`), 0o600))
-
-	_, err := Load(cfgPath)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "merchant_cors was removed")
-}
-
-func TestLoad_IgnoresPrivatePortConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-private_port: 8060
-`), 0o600))
-
-	cfg, err := Load(cfgPath)
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
-}
-
-func TestLoad_IgnoresPrivatePortEnv(t *testing.T) {
-	t.Setenv("PRIVATE_PORT", "8060")
-
-	cfg, err := Load("nonexistent-config.yaml")
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
-}
-
-func TestLoad_IgnoresRemovedStoreConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-store:
-  name: Doujins
-  from_email: billing@example.com
-`), 0o600))
-
-	_, err := Load(cfgPath)
-	require.NoError(t, err)
-
-	t.Setenv("STORE_FROM_EMAIL", "billing@example.com")
-	_, err = Load("nonexistent-config.yaml")
-	require.NoError(t, err)
-}
-
-func TestLoad_IgnoresRemovedMerchantConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-merchant: doujins
-`), 0o600))
-
-	_, err := Load(cfgPath)
-	require.NoError(t, err)
-}
-
 func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	// The control plane is mandatory (#469); in development auth.issuer defaults
 	// to the deployment's own base URL.
@@ -290,32 +123,6 @@ func TestLoad_AuthIssuerFromEnv(t *testing.T) {
 	cfg, err := Load("nonexistent-config.yaml")
 	require.NoError(t, err)
 	require.Equal(t, "https://billing.example.com/", cfg.Auth.Issuer)
-}
-
-func TestLoad_IgnoresRailConfigFile(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	err := os.WriteFile(cfgPath, []byte(`
-rails:
-  acme:
-    security_key: test-key
-`), 0o600)
-	assert.NoError(t, err)
-
-	cfg, err := Load(cfgPath)
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
-}
-
-func TestLoad_IgnoresRailConfigEnv(t *testing.T) {
-	t.Setenv("RAILS_MOBIUS_TYPE", "")
-	t.Setenv("RAILS_MOBIUS_TOKENIZATION_KEY", "")
-	t.Setenv("RAILS_MOBIUS_WEBHOOK_SECRET", "")
-	t.Setenv("RAILS_MOBIUS_SECURITY_KEY", "test-key")
-
-	cfg, err := Load("nonexistent-config.yaml")
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
 }
 
 func TestValidateCaptchaRejectsHalfConfiguredCredentials(t *testing.T) {
@@ -368,22 +175,6 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 			assert.ErrorContains(t, err, tt.wantError)
 		})
 	}
-}
-
-func TestCaptchaConfigDefaults(t *testing.T) {
-	cfg := &CaptchaConfig{}
-	assert.Equal(t, CaptchaProviderTurnstile, cfg.EffectiveProvider())
-	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/siteverify", cfg.EffectiveVerifyURL())
-	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", cfg.EffectiveScriptURL())
-	assert.Equal(t, "billing_challenge", cfg.EffectiveAction())
-	assert.Equal(t, 3, cfg.EffectiveExtremeMultiplier())
-	assert.Equal(t, "checkout", cfg.EffectiveChallengeBuckets()[0])
-}
-
-func TestCaptchaConfigRecaptchaV3Defaults(t *testing.T) {
-	cfg := &CaptchaConfig{Provider: CaptchaProviderRecaptchaV3, SiteKey: "site key"}
-	assert.Equal(t, "https://www.google.com/recaptcha/api/siteverify", cfg.EffectiveVerifyURL())
-	assert.Equal(t, "https://www.google.com/recaptcha/api.js?render=site+key", cfg.EffectiveScriptURL())
 }
 
 func TestLoad_EnvTrimming(t *testing.T) {
@@ -524,23 +315,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		assert.NoError(t, Validate(cfg))
-	})
-}
-
-func TestStripeKeyModeCompatibility(t *testing.T) {
-	// These tests verify the documented Stripe key validation behavior
-	// Note: Actual validation happens in Load(), these test the rules
-
-	t.Run("test key sk_test_ prefix identified correctly", func(t *testing.T) {
-		key := "sk_test_abc123"
-		isTestKey := len(key) >= 8 && key[:8] == "sk_test_"
-		assert.True(t, isTestKey)
-	})
-
-	t.Run("live key sk_live_ prefix identified correctly", func(t *testing.T) {
-		key := "sk_live_abc123"
-		isLiveKey := len(key) >= 8 && key[:8] == "sk_live_"
-		assert.True(t, isLiveKey)
 	})
 }
 

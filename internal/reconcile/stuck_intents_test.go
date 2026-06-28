@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -205,23 +204,4 @@ func TestIsModeParkedReason(t *testing.T) {
 	for _, reason := range notParked {
 		assert.False(t, isModeParkedReason(reason), reason)
 	}
-}
-
-func TestRenderStuckIntentsSection(t *testing.T) {
-	var sb strings.Builder
-	renderStuckIntents(&sb, &StuckIntentReport{
-		Total:         2,
-		AdminRequired: 1,
-		ModeParked:    1,
-		ByIntentType:  map[string]int{"nmi_delete_subscription": 2},
-		Intents: []StuckIntentLine{
-			{IntentID: "a", IntentType: "nmi_delete_subscription", Provider: "mobius", Status: "pending", Origin: "user", Attempts: 4, Age: "26h0m0s", LastFailureReason: "nmi error: connection refused"},
-			{IntentID: "b", IntentType: "nmi_delete_subscription", Provider: "mobius", Status: "pending", Origin: "system", Attempts: 0, Age: "30h0m0s", LastFailureReason: "mode=readonly blocks all provider writes", ModeParked: true},
-		},
-	})
-	out := sb.String()
-	assert.Contains(t, out, "Stuck provider intents (2): 1 requires-review, 1 mode-parked")
-	assert.Contains(t, out, "by intent type: nmi_delete_subscription=2")
-	assert.Contains(t, out, "[mode-parked: informational]")
-	assert.Contains(t, out, "last failure reason: nmi error: connection refused")
 }

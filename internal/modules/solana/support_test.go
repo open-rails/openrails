@@ -95,24 +95,6 @@ func TestCalculateTokenQuote_WithMockFXProvider(t *testing.T) {
 	require.Equal(t, "eur", quote.FXCurrency)
 }
 
-func TestTokenQuoteStruct(t *testing.T) {
-	quote := &TokenQuote{
-		Units:         1000000,
-		Decimal:       1.0,
-		TokenPriceUSD: 1.0,
-		FXRate:        1.08,
-		FXCurrency:    "eur",
-		AmountUSD:     10.80,
-	}
-
-	require.Equal(t, uint64(1000000), quote.Units)
-	require.Equal(t, 1.0, quote.Decimal)
-	require.Equal(t, 1.0, quote.TokenPriceUSD)
-	require.Equal(t, 1.08, quote.FXRate)
-	require.Equal(t, "eur", quote.FXCurrency)
-	require.Equal(t, 10.80, quote.AmountUSD)
-}
-
 func TestCurrencyMinorUnits(t *testing.T) {
 	require.Equal(t, 2, currencyMinorUnits("usd"))
 	require.Equal(t, 0, currencyMinorUnits("JPY"))

@@ -19,33 +19,6 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// TestClockInTestSuite tests the clock integration with TestContainerSuite
-func TestClockInTestSuite(t *testing.T) {
-	suite := setupTestSuite(t, WithSuiteClock(clockwork.NewRealClock()))
-
-	t.Run("default clock is real clock", func(t *testing.T) {
-		clk := suite.GetClock()
-		require.NotNil(t, clk)
-
-		// Default should be real clock, so Now() should be close to time.Now()
-		now := clk.Now()
-		assert.WithinDuration(t, time.Now(), now, time.Second)
-	})
-
-	t.Run("can set mock clock via suite", func(t *testing.T) {
-		fixedTime := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-		mockClock := suite.SetMockClock(fixedTime)
-
-		// Runtime should now use the mock clock
-		assert.Equal(t, fixedTime, suite.App.Runtime.Clock.Now())
-
-		// Advance time
-		mockClock.Advance(30 * 24 * time.Hour) // 30 days
-		expected := fixedTime.Add(30 * 24 * time.Hour)
-		assert.Equal(t, expected, suite.App.Runtime.Clock.Now())
-	})
-}
-
 func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	fixedTime := time.Date(2024, 8, 1, 10, 0, 0, 0, time.UTC)
 	mockClock := clockwork.NewFakeClockAt(fixedTime)

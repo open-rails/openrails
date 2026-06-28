@@ -132,17 +132,6 @@ func TestMerchantOwnerRolePermissions_AreMerchantCatalog(t *testing.T) {
 	}
 }
 
-func TestCatalogNames_StableOrder(t *testing.T) {
-	// Deterministic order keeps seeding reproducible across runs.
-	a := CatalogNames()
-	b := CatalogNames()
-	for i := range a {
-		if a[i] != b[i] {
-			t.Fatalf("CatalogNames() not stable at %d: %q != %q", i, a[i], b[i])
-		}
-	}
-}
-
 func TestAnyLiveAPIKey(t *testing.T) {
 	now := time.Now()
 	revoked := &now

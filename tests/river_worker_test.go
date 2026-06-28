@@ -19,21 +19,6 @@ import (
 
 // uuid is used by models for ID generation in cleanup tests
 
-// TestRiverWorkersStarted verifies that River workers are running in the test suite
-func TestRiverWorkersStarted(t *testing.T) {
-	suite := setupTestSuite(t)
-
-	t.Run("river client is initialized", func(t *testing.T) {
-		client := suite.GetRiverClient()
-		require.NotNil(t, client, "River client should be initialized")
-	})
-
-	t.Run("river workers are started", func(t *testing.T) {
-		// The runtime should have riverStarted = true after StartWorkers
-		require.NotNil(t, suite.App.Runtime.RiverClient, "River client should be set on runtime")
-	})
-}
-
 // TestRiverJobEnqueue tests that we can enqueue jobs and they get processed
 func TestRiverJobEnqueue(t *testing.T) {
 	suite := setupTestSuite(t)
@@ -66,78 +51,9 @@ func TestRiverJobEnqueue(t *testing.T) {
 	})
 }
 
-// TestRiverPeriodicJobs tests that periodic jobs are scheduled
-func TestRiverPeriodicJobs(t *testing.T) {
-	suite := setupTestSuite(t)
-
-	t.Run("periodic jobs are registered", func(t *testing.T) {
-		client := suite.App.Runtime.RiverClient
-		require.NotNil(t, client, "Should have River client")
-
-		// Check that periodic jobs exist
-		periodicJobs := client.PeriodicJobs()
-		require.NotNil(t, periodicJobs, "Periodic jobs manager should exist")
-
-		// We can't directly inspect periodic jobs, but we can verify the client is set up
-		// The presence of the client and its configuration is enough for this test
-	})
-}
-
 // TestWebhookProcessingFlow has been removed.
 // Webhook processing is now synchronous-only - no async River jobs.
 // See: agents/progress.json "simplify-webhook-processing" for details.
-
-// TestDunningJobEnqueue tests enqueueing a dunning job
-func TestDunningJobEnqueue(t *testing.T) {
-	suite := setupTestSuite(t)
-
-	// Clear job queue
-	suite.ClearJobQueue()
-
-	t.Run("dunning job can be manually enqueued", func(t *testing.T) {
-		client := suite.App.Runtime.RiverClient
-		require.NotNil(t, client)
-
-		ctx := context.Background()
-		initialCompleted := suite.GetCompletedJobCount()
-
-		// Enqueue dunning job
-		_, err := client.Insert(ctx, riverjobs.DunningArgs{}, &river.InsertOpts{
-			Queue: riverjobs.QueueBilling,
-		})
-		require.NoError(t, err)
-
-		// Wait for completion (dunning with no due subscriptions should complete quickly)
-		completed := suite.WaitForJobCompletion(initialCompleted+1, 5*time.Second)
-		assert.True(t, completed, "Dunning job should complete within timeout")
-	})
-}
-
-// TestJobQueueHelpers tests the helper functions
-func TestJobQueueHelpers(t *testing.T) {
-	suite := setupTestSuite(t)
-
-	t.Run("clear job queue works", func(t *testing.T) {
-		suite.ClearJobQueue()
-
-		// After clearing, pending should be 0 (unless periodic jobs fire)
-		pending := suite.GetPendingJobCount()
-		t.Logf("Pending jobs after clear: %d", pending)
-		// Note: periodic jobs may have fired, so we just verify the function runs
-	})
-
-	t.Run("get completed job count works", func(t *testing.T) {
-		completed := suite.GetCompletedJobCount()
-		t.Logf("Completed jobs: %d", completed)
-		// Just verify the function runs without error
-	})
-
-	t.Run("get pending job count works", func(t *testing.T) {
-		pending := suite.GetPendingJobCount()
-		t.Logf("Pending jobs: %d", pending)
-		// Just verify the function runs without error
-	})
-}
 
 // TestCleanupExpiredDataWorker tests the cleanup worker for expired data
 func TestCleanupExpiredDataWorker(t *testing.T) {

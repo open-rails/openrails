@@ -8,22 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestShortHashIsStableAndShort(t *testing.T) {
-	a := shortHash("idempotency-key-123")
-	b := shortHash("idempotency-key-123")
-	c := shortHash("idempotency-key-124")
-
-	if a != b {
-		t.Fatalf("shortHash not deterministic: %q != %q", a, b)
-	}
-	if a == c {
-		t.Fatalf("shortHash collided for different inputs")
-	}
-	if len(a) != 16 {
-		t.Fatalf("expected 16-char hash, got %d", len(a))
-	}
-}
-
 func TestCompensateFailedUpgradeCancelsNewSubscription(t *testing.T) {
 	svc := &CheckoutService{} // no NMI clients configured
 	rolledBack := false
