@@ -15,7 +15,6 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
-	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -159,39 +158,30 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Idempotently provision the bound merchant (a billing bucket) from the
-	// explicit embedded construction option through the same #527 merchant
-	// provisioning boundary used by standalone manifests. Embedded OpenRails runs
-	// NO AuthKit here and creates no AuthKit objects; the merchant's permission
-	// group is the host's group of the SAME slug (#541 — merchant slug == group
-	// slug), so OpenRails neither creates nor records it (permission_group_id stays
-	// NULL in embedded, set only in standalone where OpenRails owns the group).
-	var boundMerchant merchant.ID
-	if opts.Merchant != "" {
-		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
-			tn, rerr := boot.ProvisionMerchant(ctx, boot.ProvisionMerchantRequest{
-				Config:   opts.Config,
-				Database: a.Runtime.DB,
-				Merchant: embeddedManifestMerchant(opts.Merchant, opts.MerchantSettings),
-				Options:  boot.MerchantManifestReconcileOptions{Insert: true},
-			})
-			if rerr != nil {
-				_ = emb.Close(ctx)
-				return nil, fmt.Errorf("openrails embed: %w", rerr)
-			}
-			boundMerchant = tn.ID
-			a.Runtime.ConfiguredMerchant = boundMerchant
-		}
-	}
 	svc, err := emb.Service()
 	if err != nil {
 		_ = emb.Close(ctx)
 		return nil, err
 	}
+	r := &Runtime{emb: emb, svc: svc}
 
-	r := &Runtime{emb: emb, svc: svc, tenantID: boundMerchant}
+	// Idempotently provision the bound merchant (a billing bucket) through the same
+	// public, declarative path embedders use (#593 — UpsertMerchantConfig),
+	// replacing the old construction side-effect. Embedded OpenRails runs NO
+	// AuthKit and creates no AuthKit objects; the merchant's permission group is
+	// the host's group of the SAME slug (#541), so permission_group_id stays NULL
+	// in embedded (set only in standalone, where OpenRails owns the group).
+	if opts.Merchant != "" {
+		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
+			if _, rerr := r.UpsertMerchantConfig(ctx, opts.Merchant, merchantConfigFromOptions(opts)); rerr != nil {
+				_ = emb.Close(ctx)
+				return nil, rerr
+			}
+		}
+	}
+
 	if hasMerchantSettings(opts.MerchantSettings) {
-		if boundMerchant.IsZero() {
+		if r.tenantID.IsZero() {
 			_ = emb.Close(ctx)
 			return nil, fmt.Errorf("openrails embed: MerchantSettings requires Merchant")
 		}
@@ -225,26 +215,21 @@ func startupMerchantSettings(merchantSlug string, in openrails.MerchantSettings)
 	return in
 }
 
-func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantSettings) boot.ManifestMerchant {
-	displayName := merchantSlug
-	profile := boot.ManifestMerchantProfile{}
-	if cfg.Profile != nil {
-		displayName = cfg.Profile.DisplayName
-		profile = boot.ManifestMerchantProfile{
-			DisplayName: cfg.Profile.DisplayName,
-			LogoURL:     cfg.Profile.LogoURL,
-			FromEmail:   cfg.Profile.FromEmail,
-			SupportURL:  cfg.Profile.SupportURL,
+// merchantConfigFromOptions maps the embed construction options onto the public
+// MerchantConfig that UpsertMerchantConfig applies (profile only — provider
+// accounts are added explicitly via UpsertMerchantConfig).
+func merchantConfigFromOptions(opts Options) MerchantConfig {
+	var profile *MerchantProfile
+	if opts.MerchantSettings.Profile != nil {
+		p := opts.MerchantSettings.Profile
+		profile = &MerchantProfile{
+			DisplayName: p.DisplayName,
+			LogoURL:     p.LogoURL,
+			FromEmail:   p.FromEmail,
+			SupportURL:  p.SupportURL,
 		}
 	}
-	if displayName == "" {
-		displayName = merchantSlug
-	}
-	return boot.ManifestMerchant{
-		Slug:        merchantSlug,
-		DisplayName: displayName,
-		Profile:     profile,
-	}
+	return MerchantConfig{Profile: profile}
 }
 
 // Client returns the openrails.Client adapter over the in-process engine. Each
