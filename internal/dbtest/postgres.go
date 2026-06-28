@@ -317,6 +317,17 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 	if err := migrate.RunPostgres(ctx, cfg); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
+
+	// Seed the canonical test merchant once per provisioned DB so every test has a
+	// valid merchant FK target. Many integration tests insert merchant-scoped rows
+	// (products, prices, subscriptions, payment_methods, ...) against TestMerchantID
+	// without first calling EnsureTestMerchant; seeding it here makes that robust and
+	// order-independent. Idempotent — EnsureTestMerchant remains a safe no-op.
+	if _, err := sqlDB.ExecContext(ctx,
+		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) DO NOTHING`,
+		TestMerchantID.UUID(), TestMerchantSlug); err != nil {
+		return fmt.Errorf("seed test merchant: %w", err)
+	}
 	return nil
 }
 

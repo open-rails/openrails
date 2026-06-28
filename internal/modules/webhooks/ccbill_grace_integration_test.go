@@ -44,6 +44,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
 		Slug:             "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
@@ -56,6 +57,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               priceID,
 		ProductID:        productID,
 		Amount:           999,
@@ -68,6 +70,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,
 		CustomerID:            tenantSubjectID,
 		ProductID:             productID,
@@ -186,6 +189,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
 		Slug:             "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
@@ -198,6 +202,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               priceID,
 		ProductID:        productID,
 		Amount:           999,
@@ -210,6 +215,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,
 		CustomerID:            tenantSubjectID,
 		ProductID:             productID,

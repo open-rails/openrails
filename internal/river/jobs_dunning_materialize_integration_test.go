@@ -37,6 +37,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID, paymentMethodID, subID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
@@ -61,7 +62,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, CustomerID: tenantSubjectID, Rail: string(models.RailMobius),
+		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailMobius),
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
@@ -167,6 +168,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()

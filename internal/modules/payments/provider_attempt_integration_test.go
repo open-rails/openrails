@@ -35,6 +35,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	description := "Provider attempt test product"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Slug:        "provider_attempt_" + uuid.New().String(),
 		DisplayName: "Provider Attempt Test",
 		Description: &description,
@@ -46,6 +47,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	billingCycleDays := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Amount:           2300,
 		Currency:         "USD",

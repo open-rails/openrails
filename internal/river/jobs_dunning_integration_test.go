@@ -36,6 +36,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
@@ -115,6 +116,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   paymentMethod.ID,
+		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           paymentMethod.CustomerID,
 		Rail:                 string(paymentMethod.Rail),
 		RailCustomerRef:      paymentMethod.RailCustomerRef,
@@ -233,6 +235,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -265,7 +268,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, CustomerID: tenantSubjectID, Rail: "mobius",
+		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "mobius",
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,

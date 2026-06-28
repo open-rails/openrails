@@ -45,6 +45,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	desc := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &desc,
@@ -59,6 +60,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	cycle := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Status:           string(models.CatalogStatusActive),
 		Amount:           100,
@@ -71,6 +73,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
 		CustomerID:            tenantSubjectID,
 		ProductID:             productID,
 		PriceID:               &priceID,
@@ -163,6 +166,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	desc := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &desc,
@@ -177,6 +181,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	cycle := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Status:           string(models.CatalogStatusActive),
 		Amount:           100,
@@ -189,6 +194,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
 		CustomerID:            tenantSubjectID,
 		ProductID:             productID,
 		PriceID:               &priceID,

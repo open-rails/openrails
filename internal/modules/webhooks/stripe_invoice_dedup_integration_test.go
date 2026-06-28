@@ -39,6 +39,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	entitlementsSpecJSON := []byte(`{"premium":null}`)
 	description := "Test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
 		Slug:             "dedup_product_" + uuid.New().String(),
 		DisplayName:      "Dedup Product",
@@ -51,6 +52,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               priceID,
 		ProductID:        productID,
 		Amount:           2900,

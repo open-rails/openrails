@@ -26,6 +26,7 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
 
 	suffix := uuid.NewString()[:8]
 	feature := "feat_" + suffix

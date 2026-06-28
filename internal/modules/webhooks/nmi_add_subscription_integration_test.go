@@ -173,6 +173,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 
 	description := "Test premium product"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
 		Slug:             "nmi_add_subscription_" + uuid.New().String(),
 		DisplayName:      "Premium Membership",
@@ -193,6 +194,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 	billingCycleDays := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               priceID,
 		ProductID:        productID,
 		Amount:           2399,
@@ -217,6 +219,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	snapshotJSON, err := json.Marshal(models.CloneEntitlementsSpec(entitlementsSpec))
 	require.NoError(t, err)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+		MerchantID:               dbtest.TestMerchantID.UUID(),
 		ID:                       subscriptionID,
 		CustomerID:               tenantSubjectID,
 		ProductID:                productID,

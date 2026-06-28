@@ -55,6 +55,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	f := &livenessFixture{
@@ -86,7 +87,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, f.userID)
 	billingID := "bill_" + uuid.New().String()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: f.paymentMethodID, CustomerID: tenantSubjectID, Rail: string(rail),
+		ID: f.paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(rail),
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})

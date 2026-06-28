@@ -260,6 +260,7 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 		require.NoError(t, err)
 	}
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               product.ID,
 		Slug:             product.Slug,
 		DisplayName:      product.DisplayName,
@@ -277,6 +278,7 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 		cycleDays = &d
 	}
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               price.ID,
 		ProductID:        price.ProductID,
 		Amount:           price.Amount,
