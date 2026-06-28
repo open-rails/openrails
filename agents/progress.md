@@ -7,7 +7,91 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 598
+next_id: 599
+
+---
+
+# #598: Speculative — eliminate catalog-derived entitlement rows and derive access from product ownership
+
+**Completed:** no
+
+Decision 2026-06-28: this is a speculative simplification candidate, not an approved
+hard cut yet. The current `openrails.entitlements` table may be duplicate state for
+catalog-derived access if product ownership windows plus current product definitions can
+answer the same reads. Evaluate replacing catalog-derived entitlement rows with derived
+reads, while preserving manual/non-catalog grants and audit history.
+
+## Hypothesis
+Catalog-derived entitlements do not need their own source-of-truth rows.
+
+Source-of-truth facts should be:
+- product catalog: `product_slug -> entitlements/spend limits/linked products`.
+- product ownership windows: `customer owns product_slug from starts_at to ends_at`,
+  including grace windows.
+- `grants`: append-only audit log for "customer got ownership/credit/manual entitlement
+  because of payment/import/admin action."
+
+Effective entitlements can then be derived at read time:
+
+```text
+active product ownership windows
++ current product definitions
++ manual/non-catalog entitlement grants
+= active entitlements
+```
+
+## Why consider this
+- Catalog changes become instant by construction: changing `premium -> pro` changes
+  effective reads for active owners without rewriting per-customer entitlement rows.
+- Grace/dunning becomes an ownership-window concern instead of special entitlement
+  timeline mutation.
+- Less duplicated state: no separate catalog-derived entitlement lifecycle to keep in
+  sync with subscriptions, product ownership, catalog mutation, provider pull, and grace.
+- Auditing remains in `grants`: the audit event is "user got product ownership", not
+  "user got whatever entitlements the product happened to grant that day."
+
+## What must remain supported
+- Manual comp/support entitlements that are not represented by product ownership.
+- Imported legacy one-off entitlements that cannot be mapped to product ownership.
+- Reverse lookup: list customers with entitlement X.
+- Batch active entitlement lookup for AuthKit/token enrichment.
+- Historical audit: answer what caused access and when ownership/grace started/ended.
+- Performance for hot reads without making every request scan huge ownership/catalog sets.
+
+## Possible end state
+Prefer the smallest end state that holds:
+
+1. `product_ownership` is source of truth for product access windows.
+2. Manual/non-catalog entitlements live in a small manual grant table or in `grants`
+   with enough typed fields to query them.
+3. Catalog-derived entitlements are computed from ownership + current product spec.
+4. If performance requires materialization, keep `effective_entitlements` as a
+   rebuildable projection/cache, not a source-of-truth table.
+5. Delete or stop writing `openrails.entitlements` only after every read/write path has
+   moved to source-of-truth ownership/manual grants or the projection boundary.
+
+## Risks / reasons to reject
+- Reverse entitlement lookup may need an indexed projection.
+- Existing dunning/grace/refund code may rely on entitlement timeline rows more deeply
+  than expected.
+- Long-lived JWTs can still be stale after catalog changes unless token freshness is
+  enforced elsewhere.
+- Historical "what entitlement did this user have on date X?" may require catalog
+  version history, not just current product definitions.
+- Migration may be too risky if the current entitlement table is already serving as a
+  useful compatibility projection.
+
+## Tasks
+- [ ] Inventory every writer to `openrails.entitlements` and classify it as catalog-derived, manual/imported, or projection maintenance.
+- [ ] Inventory every reader of active entitlement names/records and classify whether it can derive from ownership + catalog or needs an indexed projection.
+- [ ] Define product ownership window schema keyed by merchant + customer + product slug, including subscription, one-time, admin, import, grace, revoke, refund, and provider-pull sources.
+- [ ] Define manual/non-catalog entitlement storage; do not mix these with catalog-derived entitlements.
+- [ ] Prototype derived active entitlement query for one customer and batch customers.
+- [ ] Prototype reverse lookup `entitlement -> customers`, using either derived joins or a rebuildable projection.
+- [ ] Decide whether `openrails.entitlements` can be deleted or should be renamed/reframed as `effective_entitlements` projection.
+- [ ] Add migration/backfill plan from current subscription/product_access/entitlement rows into product ownership windows plus manual grants.
+- [ ] Add tests for catalog mutation changing effective entitlements immediately, grace preserving ownership-derived access, grace expiry removing derived access, manual grants coexisting with catalog-derived access, and reverse lookup.
+- [ ] Only after tests/proof: delete or stop source-of-truth writes to `openrails.entitlements`.
 
 ---
 
