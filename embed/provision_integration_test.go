@@ -19,7 +19,7 @@ import (
 // TestUpsertMerchantConfig_SeedsProviderAccounts verifies the #593 public
 // provisioning API: an embedded host declares its merchant's rail provider
 // accounts via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
-// land bound to the merchant, and a re-apply is idempotent. This is the call
+// land bound to the merchant, and re-running it is idempotent. This is the call
 // doujins #426 makes from `migrate legacy`.
 func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	ctx := context.Background()
@@ -36,17 +36,16 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	mc := embed.MerchantConfig{
-		ProviderAccounts: []embed.ProviderAccount{
+	m := embed.ManifestMerchant{
+		Slug: slug,
+		ProviderAccounts: []embed.ManifestProviderAccount{
 			{ProviderType: "nmi", Environment: "live", AccountID: "579145"},
 			{ProviderType: "ccbill", Environment: "live", AccountID: "945280/0000"},
 		},
 	}
-	res, err := rt.UpsertMerchantConfig(ctx, slug, mc)
+	id, err := rt.UpsertMerchantConfig(ctx, m)
 	require.NoError(t, err)
-	require.Equal(t, slug, res.Slug)
-	require.Equal(t, 2, res.ProviderAccounts)
-	require.NotEmpty(t, res.MerchantID)
+	require.False(t, id.IsZero())
 
 	// provider_accounts is RLS-scoped: read it on a connection pinned to the
 	// merchant so the policy admits its rows.
@@ -55,7 +54,7 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
 		defer conn.Release()
-		_, err = conn.Exec(ctx, "SELECT set_config('app.merchant_id', $1, false)", res.MerchantID)
+		_, err = conn.Exec(ctx, "SELECT set_config('app.merchant_id', $1, false)", id.UUID().String())
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, conn.QueryRow(ctx,
@@ -65,8 +64,8 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	}
 	require.Equal(t, 2, countProviderAccounts(), "both declared provider accounts are seeded")
 
-	// Re-apply is idempotent — no error, no duplicate rows.
-	_, err = rt.UpsertMerchantConfig(ctx, slug, mc)
+	// Re-running is idempotent — no error, no duplicate rows.
+	_, err = rt.UpsertMerchantConfig(ctx, m)
 	require.NoError(t, err)
-	require.Equal(t, 2, countProviderAccounts(), "re-apply does not duplicate provider accounts")
+	require.Equal(t, 2, countProviderAccounts(), "re-run does not duplicate provider accounts")
 }
