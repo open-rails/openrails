@@ -1103,9 +1103,6 @@ func paymentMethodFromModel(pm *models.PaymentMethod) PaymentMethod {
 		Rail:    string(pm.Rail),
 		Created: api.ToUnix(pm.CreatedAt),
 	}
-	if pm.FailureReason != nil {
-		result.FailureReason = pm.FailureReason
-	}
 	if pm.LastFour != nil || pm.CardType != nil {
 		result.Card = &CardDetails{
 			Brand: pm.CardType,

@@ -618,7 +618,6 @@ type OpenrailsPaymentMethod struct {
 	LastFour             *string
 	CardType             *string
 	ExpiryDate           *string
-	FailureReason        *string
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time

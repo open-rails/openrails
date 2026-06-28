@@ -67,9 +67,6 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	if method.CustomerID != req.Payer.UUID() {
 		return ChargeResult{}, fmt.Errorf("payment method belongs to another customer")
 	}
-	if method.FailureReason != nil && strings.TrimSpace(*method.FailureReason) != "" {
-		return ChargeResult{}, fmt.Errorf("payment method is not eligible for invoice collection")
-	}
 
 	rail := normalizeRail(method.Rail)
 	if rail == "" {

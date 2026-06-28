@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -154,8 +155,18 @@ type paymentMethodResponse struct {
 	Metadata       map[string]string            `json:"metadata,omitempty"`
 	Livemode       bool                         `json:"livemode"`
 	Created        int64                        `json:"created"`
-	FailureReason  *string                      `json:"failure_reason,omitempty"`
+	Health         *paymentMethodHealth         `json:"health,omitempty"`
 	Subscriptions  []subscriptionSummary        `json:"subscriptions,omitempty"`
+}
+
+// paymentMethodHealth is the #589 DERIVED per-method health, computed at query
+// time (never a stored column). last_charge_* come from openrails.payments via the
+// subscription link; expiry_status from the card's expiry vs now.
+type paymentMethodHealth struct {
+	ExpiryStatus      string     `json:"expiry_status,omitempty"`       // card only: valid|expiring_soon|expired
+	LastChargedAt     *time.Time `json:"last_charged_at,omitempty"`     // most recent charge time
+	LastChargeOutcome string     `json:"last_charge_outcome,omitempty"` // success|failed|refunded|pending
+	Active            bool       `json:"active"`                        // usable: not expired and last charge not failed
 }
 
 type paymentMethodBillingDetails struct {
@@ -235,7 +246,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(paymentMethodToAPI(pm))
+	r.SuccessJSON(paymentMethodToAPI(pm, nil))
 }
 
 func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *vault.CreateVaultRequest {
@@ -378,7 +389,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(paymentMethodToAPI(updated))
+	r.SuccessJSON(paymentMethodToAPI(updated, nil))
 }
 
 func firstNonNilString(values ...*string) *string {
@@ -442,7 +453,20 @@ func ListPaymentMethods(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(api.NewList(paymentMethodsToAPI(methods), totalItems, req.Limit, req.Offset))
+	charges := paymentMethodCharges(r, methods)
+	r.SuccessJSON(api.NewList(paymentMethodsToAPI(methods, charges), totalItems, req.Limit, req.Offset))
+}
+
+// paymentMethodCharges loads the derived last-charge health for the listed
+// methods. Enrichment is best-effort: a lookup failure degrades to no health
+// rather than failing the listing.
+func paymentMethodCharges(r *httprequest.Request, methods []*models.PaymentMethod) map[uuid.UUID]models.PaymentMethodCharge {
+	charges, err := r.State.PaymentMethodService.LatestCharges(r.Request.Context(), methods)
+	if err != nil {
+		log.WithError(err).Warn("failed to derive payment-method charge health; returning methods without it")
+		return nil
+	}
+	return charges
 }
 
 func DeletePaymentMethod(r *httprequest.Request) {
@@ -507,7 +531,7 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method deleted successfully"})
 }
 
-func paymentMethodToAPI(pm *models.PaymentMethod) paymentMethodResponse {
+func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) paymentMethodResponse {
 	card := &paymentMethodCardDetails{Brand: pm.CardType, Last4: pm.LastFour}
 	if pm.ExpiryDate != nil {
 		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
@@ -536,8 +560,60 @@ func paymentMethodToAPI(pm *models.PaymentMethod) paymentMethodResponse {
 		Card:           card,
 		Created:        api.ToUnix(pm.CreatedAt),
 		Metadata:       metadata,
-		FailureReason:  pm.FailureReason,
+		Health:         paymentMethodHealthFrom(pm, charge),
 		Subscriptions:  subs,
+	}
+}
+
+// paymentMethodHealthFrom derives #589 health: expiry from the card, last-charge
+// from the (optional) derived charge record. A method is "active" unless its card
+// is expired or its most recent charge hard-failed.
+func paymentMethodHealthFrom(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) *paymentMethodHealth {
+	h := &paymentMethodHealth{Active: true, ExpiryStatus: cardExpiryStatus(pm.ExpiryDate)}
+	if charge != nil {
+		t := charge.LastChargedAt
+		h.LastChargedAt = &t
+		h.LastChargeOutcome = chargeOutcome(charge.Status)
+	}
+	if h.ExpiryStatus == "expired" || h.LastChargeOutcome == "failed" {
+		h.Active = false
+	}
+	return h
+}
+
+// cardExpiryStatus classifies a card's "MM/YY" expiry vs now; "" for non-cards or
+// unparseable input. A card is valid through the END of its expiry month.
+func cardExpiryStatus(expiry *string) string {
+	if expiry == nil {
+		return ""
+	}
+	month, year, ok := sharedformat.ParseExpiry(*expiry)
+	if !ok {
+		return ""
+	}
+	firstAfterExpiry := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	now := time.Now().UTC()
+	switch {
+	case !now.Before(firstAfterExpiry):
+		return "expired"
+	case now.AddDate(0, 0, 60).After(firstAfterExpiry):
+		return "expiring_soon"
+	default:
+		return "valid"
+	}
+}
+
+// chargeOutcome maps a raw purchase_status to the listing's outcome vocabulary.
+func chargeOutcome(status string) string {
+	switch status {
+	case "completed":
+		return "success"
+	case "failed":
+		return "failed"
+	case "refunded":
+		return "refunded"
+	default:
+		return status
 	}
 }
 
@@ -593,10 +669,14 @@ func stringPtrFromMap(metadata map[string]string, key string) *string {
 	return &value
 }
 
-func paymentMethodsToAPI(methods []*models.PaymentMethod) []paymentMethodResponse {
+func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []paymentMethodResponse {
 	result := make([]paymentMethodResponse, len(methods))
 	for i, pm := range methods {
-		result[i] = paymentMethodToAPI(pm)
+		var charge *models.PaymentMethodCharge
+		if c, ok := charges[pm.ID]; ok {
+			charge = &c
+		}
+		result[i] = paymentMethodToAPI(pm, charge)
 	}
 	return result
 }

@@ -324,27 +324,6 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	require.Len(t, adapter.charges, 1, "merchant scope failure must not dispatch")
 }
 
-func TestScopedCharger_RejectsFailedPaymentMethod(t *testing.T) {
-	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailMobius))
-	_, err := pool.Exec(ctx, "UPDATE openrails.payment_methods SET failure_reason = 'card_declined' WHERE id = $1", pm)
-	require.NoError(t, err)
-
-	adapter := &fakeCollectionAdapter{}
-	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
-		string(models.RailMobius): adapter,
-	})
-	_, err = ch.ChargeSavedMethod(ctx, money.ChargeRequest{
-		MerchantID:      dbtest.TestMerchantID.UUID(),
-		Payer:           payer,
-		PaymentMethodID: pm,
-		AmountCents:     123,
-		IdempotencyKey:  "failed-method",
-	})
-	require.ErrorContains(t, err, "not eligible")
-	require.Empty(t, adapter.charges)
-}
-
 func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailCCBill))

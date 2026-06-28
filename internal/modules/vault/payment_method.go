@@ -44,6 +44,18 @@ func (s *PaymentMethodService) GetByUserID(ctx context.Context, userID string) (
 	return s.repo.GetByUserID(ctx, userID)
 }
 
+// LatestCharges returns the derived last-charge health (#589) keyed by payment
+// method id for the supplied methods. Methods with no charge history are absent.
+func (s *PaymentMethodService) LatestCharges(ctx context.Context, methods []*models.PaymentMethod) (map[uuid.UUID]models.PaymentMethodCharge, error) {
+	ids := make([]uuid.UUID, 0, len(methods))
+	for _, m := range methods {
+		if m != nil {
+			ids = append(ids, m.ID)
+		}
+	}
+	return s.repo.LatestChargeByMethodIDs(ctx, ids)
+}
+
 func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
 	if userID == "" {
 		return nil, 0, errors.New("user ID is required")

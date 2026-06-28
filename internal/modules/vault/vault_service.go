@@ -438,7 +438,6 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, fmt.Errorf("failed to update payment vault: %w", err)
 	}
 
-	pm.FailureReason = nil
 	if paymentTokenUpdated {
 		applyUpdatedCardMetadata(pm, req)
 	}

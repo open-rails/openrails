@@ -3,11 +3,58 @@ package handlers
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/stretchr/testify/require"
 )
+
+// #589: derived payment-method health is computed at query time, so the pure
+// derivation logic is unit-tested without a DB.
+func TestCardExpiryStatus(t *testing.T) {
+	ptr := func(s string) *string { return &s }
+	require.Equal(t, "", cardExpiryStatus(nil), "non-card / no expiry")
+	require.Equal(t, "", cardExpiryStatus(ptr("not-a-date")), "unparseable")
+	require.Equal(t, "expired", cardExpiryStatus(ptr("01/20")), "Jan 2020 is long past")
+	require.Equal(t, "valid", cardExpiryStatus(ptr("12/99")), "year 2099 is far future")
+
+	// A card whose month is the current month is still valid through month-end.
+	now := time.Now().UTC()
+	thisMonth := now.Format("01/06")
+	require.NotEqual(t, "expired", cardExpiryStatus(&thisMonth), "valid through end of expiry month")
+}
+
+func TestChargeOutcome(t *testing.T) {
+	require.Equal(t, "success", chargeOutcome("completed"))
+	require.Equal(t, "failed", chargeOutcome("failed"))
+	require.Equal(t, "refunded", chargeOutcome("refunded"))
+	require.Equal(t, "pending", chargeOutcome("pending"))
+}
+
+func TestPaymentMethodHealthFrom(t *testing.T) {
+	ptr := func(s string) *string { return &s }
+	valid := ptr("12/99")
+	expired := ptr("01/20")
+
+	// No charge history, valid card -> active.
+	h := paymentMethodHealthFrom(&models.PaymentMethod{ExpiryDate: valid}, nil)
+	require.True(t, h.Active)
+	require.Nil(t, h.LastChargedAt)
+	require.Equal(t, "valid", h.ExpiryStatus)
+
+	// Last charge failed -> not active, outcome surfaced.
+	at := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
+	h = paymentMethodHealthFrom(&models.PaymentMethod{ExpiryDate: valid}, &models.PaymentMethodCharge{LastChargedAt: at, Status: "failed"})
+	require.False(t, h.Active)
+	require.Equal(t, "failed", h.LastChargeOutcome)
+	require.Equal(t, at, *h.LastChargedAt)
+
+	// Expired card -> not active even with a successful last charge.
+	h = paymentMethodHealthFrom(&models.PaymentMethod{ExpiryDate: expired}, &models.PaymentMethodCharge{LastChargedAt: at, Status: "completed"})
+	require.False(t, h.Active)
+	require.Equal(t, "success", h.LastChargeOutcome)
+}
 
 func TestCreateVaultRequestFromPaymentMethodRequestMinimalInternationalMetadata(t *testing.T) {
 	cases := []struct {
@@ -118,7 +165,7 @@ func TestPaymentMethodToAPIIncludesStoredBillingMetadata(t *testing.T) {
 		},
 	}
 
-	got := paymentMethodToAPI(pm)
+	got := paymentMethodToAPI(pm, nil)
 
 	require.NotNil(t, got.BillingDetails)
 	require.Equal(t, "Ada Lovelace", *got.BillingDetails.Name)

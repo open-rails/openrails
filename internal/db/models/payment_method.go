@@ -22,15 +22,21 @@ type PaymentMethod struct {
 	InitialTransactionID string  `json:"-"` // Transaction that created this vault
 
 	// Payment method metadata
-	LastFour      *string        `json:"last_four"`      // Last 4 digits of card
-	CardType      *string        `json:"card_type"`      // "Visa", "MasterCard", etc.
-	ExpiryDate    *string        `json:"expiry_date"`    // "MM/YY" format
-	FailureReason *string        `json:"failure_reason"` // Reason if inactive
-	Metadata      map[string]any `json:"metadata,omitempty"`
+	LastFour   *string        `json:"last_four"`   // Last 4 digits of card
+	CardType   *string        `json:"card_type"`   // "Visa", "MasterCard", etc.
+	ExpiryDate *string        `json:"expiry_date"` // "MM/YY" format
+	Metadata   map[string]any `json:"metadata,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
 	Subscriptions []*Subscription `json:"subscriptions,omitempty"`
+}
+
+// PaymentMethodCharge is the DERIVED last-charge health for a payment method
+// (#589) — computed at query time from openrails.payments, never a stored column.
+type PaymentMethodCharge struct {
+	LastChargedAt time.Time
+	Status        string // raw purchase_status: completed|failed|refunded|pending
 }

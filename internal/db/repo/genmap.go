@@ -210,7 +210,6 @@ func paymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*models.PaymentMethod, 
 		LastFour:             p.LastFour,
 		CardType:             p.CardType,
 		ExpiryDate:           p.ExpiryDate,
-		FailureReason:        p.FailureReason,
 		CreatedAt:            p.CreatedAt,
 		UpdatedAt:            p.UpdatedAt,
 	}

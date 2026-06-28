@@ -48,7 +48,6 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		LastFour:             m.LastFour,
 		CardType:             m.CardType,
 		ExpiryDate:           m.ExpiryDate,
-		FailureReason:        m.FailureReason,
 		Metadata:             meta,
 		CreatedAt:            m.CreatedAt,
 		UpdatedAt:            m.UpdatedAt,
@@ -233,7 +232,6 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 		LastFour:             method.LastFour,
 		CardType:             method.CardType,
 		ExpiryDate:           method.ExpiryDate,
-		FailureReason:        method.FailureReason,
 		Metadata:             meta,
 		UpdatedAt:            updateTimestamp(method.UpdatedAt),
 	})
@@ -304,4 +302,28 @@ func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*mod
 		return nil, err
 	}
 	return pm, nil
+}
+
+// LatestChargeByMethodIDs returns the most recent charge (time + raw status) per
+// payment-method id, derived via the subscription link (#589). Methods with no
+// charge history are simply absent from the map.
+func (r *PaymentMethodRepo) LatestChargeByMethodIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.PaymentMethodCharge, error) {
+	out := make(map[uuid.UUID]models.PaymentMethodCharge, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Gen(ctx).ListLatestChargeByPaymentMethodIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.PaymentMethodID == nil {
+			continue
+		}
+		out[*row.PaymentMethodID] = models.PaymentMethodCharge{
+			LastChargedAt: row.PurchasedAt,
+			Status:        string(row.Status),
+		}
+	}
+	return out, nil
 }

@@ -314,7 +314,6 @@ type PaymentMethod struct {
 	Type           string // "card"
 	Rail           string // "mobius", "ccbill", "stripe", etc.
 	Created        int64  // Unix epoch seconds
-	FailureReason  *string
 	BillingDetails *BillingDetails
 	Card           *CardDetails
 	Subscriptions  []SubscriptionSummary
