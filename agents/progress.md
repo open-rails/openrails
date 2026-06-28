@@ -7,7 +7,249 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 593
+next_id: 598
+
+---
+
+# #597: Provider adoption/import — rebuild local billing mirror from provider truth when identity/catalog resolve
+
+**Completed:** no
+
+Decision 2026-06-28: `pull-provider` stays reconciliation against an existing
+OpenRails mirror. A different command should handle adoption/import: create local
+customers, payment methods, subscriptions, payments, and derived grants from provider
+state only when ownership and catalog mapping are deterministic.
+
+## Goal
+Support this recovery/bootstrap path:
+
+1. A host migrates users/subjects locally.
+2. OpenRails has provider credentials and catalog mappings.
+3. `adopt-provider` reads NMI/CCBill/Stripe/Solana provider state.
+4. It resolves each provider object to a local merchant subject + local price/product.
+5. It creates the missing OpenRails billing mirror rows.
+6. `pull-provider` then verifies/repairs drift.
+
+## Non-goal
+No probabilistic imports. Email is report evidence, not authority. Provider customer ids
+are rail-local ids, not OpenRails subjects. Provider plan ids are not OpenRails catalog
+semantics unless metadata or a manifest maps them.
+
+## Resolution order
+1. Provider metadata recovery envelope:
+   - merchant slug/id
+   - OpenRails subject
+   - product slug
+   - price key/id
+   - checkout/subscription/payment/payment-method ids when available
+2. Adoption manifest:
+   - provider customer/vault/subscription ids -> host subject ids
+   - provider plan/price ids -> OpenRails price keys/ids
+   - CCBill numeric price/subscription ids or flex/form ids -> OpenRails price keys
+   - provider account bindings
+3. Otherwise unresolved. Emit a report row; do not create local billing state.
+
+## CLI shape
+
+```bash
+openrails adopt-provider --provider nmi --manifest adoption.yaml
+openrails adopt-provider --provider nmi --manifest adoption.yaml --insert
+```
+
+Default is plan-only. `--insert` applies only deterministic rows.
+
+## Materialized rows
+- `customers` for resolved host subjects.
+- payment-method/vault references tied to provider account + customer.
+- subscriptions tied to resolved customer + price.
+- payments tied to resolved customer/subscription/price.
+- grants/entitlements/credits/product ownership/spend limits derived from the local
+  product benefit bucket, not from provider catalog guesses.
+- provider-account bindings on adopted rows.
+
+## Tasks
+- [ ] Define `adoption.yaml` schema for legacy mappings.
+- [ ] Add plan-only `adopt-provider` command and report format.
+- [ ] Reuse existing provider fetchers; do not duplicate rail clients.
+- [ ] Implement deterministic resolver: metadata first, manifest second, unresolved third.
+- [ ] Implement insert path for customers, vault refs, subscriptions, payments.
+- [ ] Derive grants from local product benefits after subscription/payment creation.
+- [ ] Add tests: metadata-only adoption, manifest-only adoption, unresolved rows, ambiguous rows, idempotent re-run.
+- [ ] Document: adoption imports provider truth; `pull-provider` reconciles after adoption.
+
+---
+
+# #596: Stamp OpenRails recovery metadata on every provider-created object
+
+**Completed:** no
+
+Decision 2026-06-28: provider adoption is only safe if OpenRails-created provider
+objects carry canonical OpenRails breadcrumbs. Add a single recovery envelope and
+stamp it wherever each provider supports metadata or stable operator fields.
+
+## Recovery envelope
+
+Logical fields:
+
+```text
+openrails_version
+merchant_slug
+merchant_id
+subject
+product_slug
+price_key
+price_id
+checkout_session_id
+subscription_id
+payment_id
+payment_method_id
+provider_account_id
+```
+
+Use the subset each provider supports, but keep one canonical internal shape.
+
+## Provider behavior
+- Stripe: product metadata and price `lookup_key`; keep `prod_...` / `price_...` as links.
+- NMI: product `product_sku`, product `product_description`, recurring `plan_id`, `plan_name`,
+  and order/customer/vault metadata fields that survive query/report reads.
+- CCBill: form/flex/custom fields that survive DataLink exports; numeric admin price ids are
+  provider links, not OpenRails identity.
+- Solana: plan/payment memo/account metadata where feasible.
+
+## Tasks
+- [ ] Add canonical `RecoveryMetadata` type + serializer/parser.
+- [ ] Stamp metadata during catalog/provider price creation.
+- [ ] Stamp metadata during checkout/session creation.
+- [ ] Stamp metadata during subscription creation/update.
+- [ ] Stamp metadata during payment-method vault creation.
+- [ ] Stamp metadata during payment creation/refund where providers support it.
+- [ ] Extend provider fetchers to parse the envelope back into remote snapshots.
+- [ ] Tests per rail: created provider payload includes metadata; fetched snapshot recovers it.
+
+---
+
+# #595: Deterministic, bidirectional catalog identity for products and prices
+
+**Completed:** no
+
+Decision 2026-06-28: OpenRails catalog identity should be recoverable from natural
+descriptors. Products are mutable benefit buckets. Prices are immutable commercial
+terms pointing at a product.
+
+## Product identity and label
+Product slug is the canonical immutable identifier used in APIs, manifests, provider
+metadata, and DB relationships. Scope it by merchant. A separate product UUID or stored
+product key is duplicate state if slug is immutable; use `(merchant_id, slug)` as the
+DB key. The product's benefits/settings are mutable; ownership of the product remains
+stable.
+
+`display_name` is the mutable user-facing label. Provider mapping should follow the
+same split where possible: NMI uses a unique product SKU for identity and product
+description for the user-facing name.
+
+## Price identity
+Price natural key:
+
+```text
+price:<merchant_slug>:<product_slug>:<currency>:<amount>:<interval>:<interval_count>
+```
+
+Examples:
+
+```text
+price:doujins:premium:usd:2500:month:1
+price:doujins:api-credits-100:usd:10000:none:0
+```
+
+Price key should be deterministic from that natural key. Amount/currency/duration/
+product-link changes create a new price. Mutable price fields should be operational
+only: status/archive, provider links, timestamps.
+
+## Bidirectional mapping
+- local merchant + product slug -> provider product via provider links.
+- local price key -> provider price/plan via provider links.
+- provider product/price -> local product slug and price key via stamped metadata.
+- legacy provider product/price -> local product slug and price key via adoption manifest.
+
+## Provider identifier mapping
+- Stripe product: prefer caller-owned product `id` derived from product slug when allowed;
+  otherwise store `product_slug` in metadata and keep Stripe's `prod_...` id as a provider link.
+- Stripe price: provider `price_...` is an opaque link; use deterministic `lookup_key` for
+  the OpenRails price key and stamp metadata as backup.
+- NMI product: map `product_sku = product slug`; map `product_description = display_name`.
+- NMI recurring plan: map `plan_id = price key`; map `plan_name = display_name`.
+- CCBill: no OpenRails-owned product slug object. Store `form_name`, `flex_id`, and any
+  numeric Pricing Admin price/subscription ids as provider links; resolve legacy rows via
+  adoption manifest.
+
+## Tasks
+- [ ] Add canonical product slug validation and price-key builder.
+- [ ] Make products use immutable natural identity (`merchant_id + slug`) instead of a separate product UUID/key.
+- [ ] Store mutable product `display_name` separately from immutable product `slug`.
+- [ ] Store price natural keys or make them derivable from existing columns.
+- [ ] Enforce price uniqueness by merchant + product + currency + amount + recurrence.
+- [ ] Keep product slug mutable fields separate from identity fields.
+- [ ] Update provider link logic with Stripe/NMI direct identifiers and CCBill link-only identifiers.
+- [ ] Add tests for stable product slug, changed product benefits preserving ownership, changed price terms creating a new price key.
+
+---
+
+# #594: Product benefit buckets — entitlements, credits, ownership grants, and spend limits
+
+**Completed:** no
+
+Decision 2026-06-28: a product is the mutable bucket of benefits a user gets by
+owning/subscribing to that product. Price is only the commercial term. Product benefits
+must model all OpenRails-owned access and billing effects directly.
+
+## Target manifest shape
+
+```yaml
+products:
+  - slug: premium
+    display_name: Premium
+    entitlements:
+      - premium
+    credits:
+      - currency: usd
+        amount: 2500
+        expires_after_days: null
+    product_ownership:
+      - product-b
+      - product-c
+    spend_limits:
+      - window: 5h
+        amount: 1000
+        currency: usd
+      - window: 7d
+        amount: 7000
+        currency: usd
+```
+
+Examples this must cover:
+- `premium`, `premium-plus` entitlement grants.
+- API-credit packs: pay $25 for $25 credits, or $100 for $110 credits.
+- Product ownership chaining: buy product-A, also own product-B and product-C.
+- Spend/rate limits: product-A grants 5h/$10 + 7d/$70; product-B grants 2x that.
+
+## Semantics
+- Product identity is stable; benefits are mutable.
+- Active holders/subscribers should converge to the current product benefit bucket.
+- Grants must remain auditable: source product/subscription/payment is preserved.
+- Provider catalog never owns these semantics; providers only receive sellable products/prices.
+
+## Storage approach
+Lazy path first: extend the current product JSON specs rather than splitting tables
+immediately. Split later only if querying/reporting demands it.
+
+## Tasks
+- [ ] Extend catalog manifest with flattened product benefit fields.
+- [ ] Map existing `entitlements` and `credits` into the new benefit model.
+- [ ] Add product ownership grants to the product benefit application path.
+- [ ] Add spend-limit/rate-limit grants to the product benefit application path.
+- [ ] Add explicit credit expiry support in product credit grants.
+- [ ] Update convergence so product benefit changes update active holders.
+- [ ] Tests: purchase applies all benefit kinds; product mutation updates active holders; provider adoption derives grants from benefits.
 
 ---
 
