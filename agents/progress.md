@@ -7,7 +7,266 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 588
+next_id: 591
+
+---
+
+# #590: Auto-register + reconcile the Stripe webhook endpoint (OpenRails owns the endpoint + signing secret)
+
+**Completed:** partial — CORE DONE + LIVE-VALIDATED 2026-06-26. Built the
+webhook-endpoint client + reconcile in internal/modules/catalog/stripe_webhooks.go
+(`CreateWebhookEndpoint` returns the `whsec_`; `ListWebhookEndpoints`,
+`UpdateWebhookEndpoint`, `DeleteWebhookEndpoint`; `ReconcileWebhookEndpoint` =
+find-or-create by `openrails_managed` marker, in-place patch of url/events/disabled
+with the secret surviving, delete+recreate on api_version drift OR lost secret,
+ignores unmanaged endpoints). `enabled_events` single source = `HandledStripeEventTypes`
+in internal/modules/webhooks/stripe.go (reconcile takes events as a param to avoid
+the webhooks→catalog import cycle). Endpoint pinned to `stripeapi.APIVersion`.
+
+DECISION: register a SNAPSHOT endpoint for the first cut (the mature path the
+handler is built around); thin-event Destinations are a follow-up.
+
+VALIDATED AGAINST REAL STRIPE (test account, restricted `rk_test_` key,
+`-tags=stripelive`): TestLiveWebhookEndpointReconcile — real create returns a
+secret + endpoint pinned to our version + our events; idempotent unchanged; URL
+drift patches IN PLACE (same endpoint id, no recreate); events drift patches in
+place. TestLiveWebhookDeliveryThroughTunnel — stood up a real cloudflared quick
+tunnel, registered a managed endpoint at it, created a real product, and the
+`product.created` webhook was ACTUALLY DELIVERED through the tunnel and its
+signature VERIFIED with the auto-captured secret via `sigverify.VerifyStripe` (the
+same verifier production uses). Both self-clean.
+
+REMAINING (the integration wiring — deliberately deferred; needs deployment-mode-
+aware design + dual-mode testing I can't validate solo): persisting the captured
+`whsec_` to the RIGHT place is mode-dependent — multi-merchant verification reads
+the per-merchant secret store (`MerchantSecretStore.Put(merchantID,
+merchants.SecretStripeWebhookSigning, …)`), but standalone/config verification
+reads `stripeProc.WebhookSecret` from config Rails. Get this wrong and webhook
+verification silently breaks, so it's not safe to blind-wire overnight. Also
+remaining: the public-URL config source, the create-at-credential-setup hook, and
+the periodic reconcile River job (URL-drift self-heal). The reusable core +
+ReconcileWebhookEndpoint is ready for these to call.
+
+Proposed 2026-06-26. Follow-up to #587 (version pin) and #586 (catalog push).
+Today the operator manually configures the Stripe webhook endpoint in the
+dashboard per merchant: create endpoint → paste the OpenRails URL → pick event
+types → set API version → reveal the signing secret → copy `whsec_` into the
+merchant's stripe rail config (`WebhookSecret` / `WebhookSecretThin`, read by
+`prepareStripeMultiSecret` in internal/http/handlers/webhook.go). Five fiddly,
+error-prone steps; the classic silent failures are a wrong/under-selected event
+list and a mistyped/stale secret. Make OpenRails do it programmatically.
+
+GOAL: OpenRails registers + keeps-correct its own Stripe webhook endpoint, so the
+operator only supplies the Stripe secret key. Closes the #587 OPS ACTION (the
+endpoint's `api_version` gets pinned to `stripeapi.APIVersion` from code, no
+dashboard step).
+
+VERSION DECISION (owner, 2026-06-26, see #587): the endpoint's `api_version` is the
+SAME single hardcoded `stripeapi.APIVersion` const used for outbound — not
+per-merchant, not a config field. One value, both directions, bumped only by a
+deliberate code change + breaking-change audit.
+
+DESIGN DECISION (confirmed with owner 2026-06-26): OpenRails OWNS the webhook
+secret lifecycle — capture the `whsec_` returned on create, store it encrypted in
+the merchant's stripe rail secret(s), use it for verification, and re-capture on
+any recreate. (The alternative — auto-register URL only, operator still hand-copies
+the secret — keeps the two most painful/breakage-prone steps, so rejected.)
+
+Key facts that shape it:
+- The signing secret is returned ONLY on the create response (`POST
+  /v1/webhook_endpoints`); it can't be fetched later. So create MUST capture +
+  persist it, or verification breaks.
+- Endpoint identity for find-or-create = a stable `metadata[openrails_managed]=true`
+  marker, NOT the URL — the URL is the field that drifts, so it can't be the key.
+- COST ASYMMETRY: `url`, `enabled_events`, `disabled` are updatable in place
+  (`POST /v1/webhook_endpoints/{id}`) → patch, secret SURVIVES, cheap. `api_version`
+  is NOT updatable → a version bump forces delete + recreate → secret ROTATES →
+  must re-capture + re-store. So a redeploy/URL change self-heals cheaply; only a
+  deliberate version bump is the expensive reconcile.
+- Two endpoint flavors exist (snapshot vs thin events, separate secrets:
+  `WebhookSecret` / `WebhookSecretThin`). DECIDE: register a thin-event endpoint
+  (thin + our pinned hydration in `hydrateThinStripeEvent` = version-robust
+  inbound — attractive), a snapshot endpoint, or both. Lean thin-first.
+
+TWO triggers:
+1. CREATE at Stripe credential setup (the merchant-adds-secret-key moment, where
+   the balance/`/v1/account` check already runs) — first-time registration.
+2. PERIODIC RECONCILE as a background River job (sibling to
+   jobs_catalog_reconciliation), sweeping merchants with Stripe configured — this
+   is what catches later config drift (URL changed on redeploy, events list grew,
+   endpoint auto-disabled by Stripe). NOT inline at process boot: multi-merchant
+   boot must not fan out network writes across every merchant's Stripe account.
+   (Embedded single-merchant hosts like doujins MAY reconcile at startup — one
+   merchant, one write.)
+
+Reconcile (desired = our config+code, actual = the registered endpoint):
+- missing → create (capture+store secret).
+- `url` mismatch → update in place.
+- `enabled_events` mismatch → update in place (desired = exactly the types
+  `handleEvent` switches on; keep this list in one place so it can't drift).
+- `disabled` → re-enable.
+- `api_version` mismatch (we bumped the pin) → delete + recreate → re-capture +
+  re-store secret. Comment loudly so a future bump can't silently break verify.
+- secret not on hand (e.g. DB restore lost it; can't re-fetch) → delete + recreate.
+
+Scope:
+- [x] Stripe webhook-endpoints client: Create / List / Update / Delete (through the
+      stripeapi choke-point — writes blocked in readonly, version header attached).
+- [x] `enabled_events` single source of truth (`HandledStripeEventTypes`, kept next to the `handleEvent` switch).
+- [ ] Public webhook URL from config; skip cleanly + log when absent (embedded/local/no public URL). [DEFERRED — wiring]
+- [ ] Persist the returned `whsec_` to the mode-correct store (per-merchant secret store vs config Rails); wire to what `prepareStripeMultiSecret` reads. [DEFERRED — mode-aware]
+- [ ] Create-at-credential-setup hook (idempotent find-or-create by `openrails_managed` marker). [DEFERRED — wiring]
+- [ ] Periodic reconcile River job (drift-fix per the rules above), best-effort, never blocks boot. [DEFERRED — wiring]
+- [x] Decided: SNAPSHOT endpoint for first cut (thin Event Destinations = follow-up).
+- [x] Tests: mock unit tests (idempotency, url/events in-place patch, version recreate, lost-secret recreate, ignore-unmanaged) + LIVE create/reconcile/delete + LIVE delivery-through-tunnel with signature verify.
+
+---
+
+# #589: payment-methods listing API with derived health/status (drop failure_reason denorm)
+
+**Completed:** no
+
+STATUS 2026-06-27 (Claude): PLAN. Turn the saved-payment-method surface into a proper listing
+API that returns *derived* health per method, and drop the `payment_methods.failure_reason`
+display-only denorm in favor of query-time derivation.
+
+## Goal
+A "list payment methods" surface for two audiences:
+- **user self-list** — a user lists their own saved methods.
+- **admin list-for-user** — an admin lists a specific user's saved methods.
+Each method returns *derived* health/status useful for UI, e.g. `last charge: 2026-06-24,
+failed`, card expired, active/valid:
+- `expiry_status` — derived from the card row vs now (card kind only).
+- `last_charged_at` + `last_charge_outcome` (success/failed).
+- `active`/`valid` — composite: not expired, not revoked, last charge not hard-failed.
+- `last_failure` (reason + when) — REPLACES the `failure_reason` column.
+
+## Why drop failure_reason
+- It's a display-only denorm: only consumer is the payment-methods read path
+  (`internal/http/handlers/payment_methods.go` ~:539); charge paths never read it; no path
+  writes a real failure into it → vestigial + goes stale.
+- Failure source of truth is the append-only stores: `external_provider_mutation_logs`
+  (per-attempt: phase=failed, reason, evidence) + ClickHouse payment_events — NOT
+  `provider_intents` (transient outbox, overwritten per retry, drains/expires).
+
+## ⚠️ Design gap to resolve first: charges aren't attributed to a payment_method
+`payments`, `provider_intents`, and `external_provider_mutation_logs` have **no
+`payment_method_id`** — they link to a *subscription* (`subscriptions.payment_method_id`), not
+the method. So "last charge for THIS method" can only be derived TRANSITIVELY (method →
+subscriptions on that method → their payments), which MISSES one-off / invoice / top-up vault
+charges (RunSale never records which stored method it used). DECIDE:
+- (a) accept transitive (subscription-scoped) derivation — incomplete for one-offs; or
+- (b) add `payment_method_id` to `payments` (and likely `provider_intents` /
+  `external_provider_mutation_logs`) for direct attribution. RECOMMENDED — it's the only way to
+  get accurate "last charge per method" for non-subscription charges, and it makes the listing
+  derivation a simple join.
+
+## Existing surface
+`ListPaymentMethods` already exists (`internal/http/handlers/payment_methods.go:393`,
+paginated via `listPaymentMethodsQuery`). Audit it for the self vs admin-for-user split and
+extend the response with the derived fields above.
+
+## Tasks
+- [ ] decide attribution: transitive vs add `payment_method_id` to payments/intents/logs
+      (recommended) — prerequisite for accurate per-method charge history.
+- [ ] list API: confirm/add user-self + admin-for-user variants (scoped by customer).
+- [ ] response: add expiry_status, last_charged_at, last_charge_outcome, active/valid, last_failure.
+- [ ] derive last_failure / last_charge from the append-only stores (never provider_intents).
+- [ ] drop `payment_methods.failure_reason` (migration) + struct field + UpdatePaymentMethod
+      param + any setters; grep for remaining readers.
+
+## References
+- internal/http/handlers/payment_methods.go (:157 response, :393 ListPaymentMethods, :539);
+  internal/db/repo/payment_method.go (UpdatePaymentMethod); internal/db/gen/payment_methods.sql.go.
+- Failure source-of-truth: external_provider_mutation_logs, ClickHouse payment_events,
+  payments/money_ledger. Charge→method attribution gap noted above. Related: #588.
+
+---
+
+# #588: rail-agnostic payment-method (instrument) model — generalize beyond vault_id/billing_id
+
+**Completed:** no
+
+STATUS 2026-06-27 (Claude): PLAN (greenfield design, not started). Captured so it isn't
+lost. **No urgency:** today every consumer is effectively one-instrument-per-customer per
+rail, so the current model is unambiguous. Act on this when onboarding a rail (or usage)
+with multiple stored instruments under one customer — i.e. NMI multi-billing vaults, or a
+customer with several Stripe/HyperSwitch cards.
+
+## Problem
+`payment_methods` encodes instrument identity as `(merchant, rail, vault_id)` with
+`billing_id` as a secondary nullable column, and that doesn't generalize across rails:
+- `vault_id` is **overloaded** — for Stripe/Spreedly/HyperSwitch it's the *instrument* token
+  (`pm_…` / spreedly token / `payment_method_id`); for NMI it's the *customer container*
+  (`customer_vault_id`) and the real instrument is the pair `(customer_vault_id, billing_id)`.
+  Today the code already double-writes NMI's `customer_vault_id` into both
+  `payment_methods.vault_id` and `rail_customers.rail_customer_id` — the tell that the model
+  doesn't fit.
+- `billing_id` is an NMI-ism, and the unique indexes (`uq_payment_methods_*` on
+  `(merchant, rail, vault_id)`, scoped by provider_account_id) do NOT include it → only **one
+  method per vault** is representable; an NMI customer vault with >1 billing record collides.
+- card-centric columns (`last_four`/`card_type`/`expiry_date`) don't fit non-card rails
+  (crypto/ACH/wallet).
+- the recurring/MIT anchor exists only as NMI-flavored `initial_transaction_id`; there's no
+  generalized network-transaction-id / mandate concept for off-session charges.
+
+## Insight
+Every rail has at most TWO opaque handles — a customer-scope one and an instrument-scope one
+— plus the provider-account scope. NMI is the only one that requires BOTH on the charge call;
+the others charge on the instrument token alone. Model the two slots explicitly; name nothing
+after a single rail.
+
+| rail | customer-scope | instrument-scope | charge needs |
+|---|---|---|---|
+| NMI | customer_vault_id | billing_id | both |
+| Stripe | cus_ | pm_ | method (+customer off-session) |
+| HyperSwitch/Juspay | customer_id | payment_method_id | method (+customer) |
+| Spreedly | — (token-centric) | token | method |
+
+## Proposed design
+- `rail_customers` (normalize as one per customer×rail×provider_account): `rail_customer_ref`
+  = cus_/customer_vault_id/customer_id; `''` for token-only rails.
+  UNIQUE(merchant_id, rail, provider_account_id, rail_customer_ref).
+- `payment_methods`:
+  - `id uuid PK` — stable internal identity; subscriptions/payments FK to this, NEVER to a
+    rail token (rails rotate/re-vault tokens).
+  - `rail_customer_id` → rail_customers (nullable for token-only rails).
+  - `rail_method_ref text NOT NULL` — **replaces vault_id + billing_id** (pm_/billing_id/token/
+    payment_method_id). No `vault`/`billing` naming.
+  - `network_transaction_id text`, `mandate_ref text` — generalized off-session/MIT anchors
+    (supersede `initial_transaction_id`; add connector mandate for HyperSwitch/SEPA).
+  - `kind text NOT NULL` (card|bank_account|wallet|crypto…), `fingerprint`, nullable card
+    descriptors (brand/last_four/exp), `status`, `metadata jsonb`.
+  - UNIQUE(merchant_id, rail, provider_account_id, rail_customer_id, rail_method_ref) —
+    composite, customer-scoped. No-op for single-token rails (globally-unique method ref);
+    fixes the NMI multi-card case.
+- Charge adapter resolves the two slots per rail: NMI→{customer_vault_id, billing_id};
+  Stripe→{payment_method, customer}; HyperSwitch→{payment_method_id, customer_id};
+  Spreedly→{payment_method_token}.
+
+## Tasks
+- [ ] schema migration: restructure payment_methods (vault_id/billing_id → rail_method_ref;
+      add network_transaction_id/mandate_ref/kind/fingerprint; composite unique index); add
+      rail_customer_ref where missing.
+- [ ] rail adapters resolve charge handles from the two-slot model (nmi/stripe/spreedly/
+      hyperswitch); thread network_transaction_id/mandate_ref into off-session/MIT calls.
+- [ ] backfill existing rows (vault_id→rail_method_ref or rail_customer_ref by rail;
+      initial_transaction_id→network_transaction_id) — data migration, never a hard cut.
+- [ ] consumer impact: doujins legacy_migrate writes vault_id/billing_id directly (target
+      models + raw SQL in customers_vaults/subscriptions/wallet_transactions handlers) — bump
+      together (authkit+openrails+doujins semver-sync) and update doujins after.
+
+## Risks / compat
+- Breaking schema change for any embedded host → coordinate semver bump with consumers.
+- Provide a data migration for live billing data; never a hard cut.
+- doujins's shipped legacy migration is one-card-per-vault → unaffected today.
+
+## References
+- migrations/postgres/001_schema.up.sql (payment_methods, rail_customers, provider_accounts,
+  uq_payment_methods_*); internal/modules/payments/stripe_card.go;
+  internal/integrations/nmi/{payments,subscriptions,vault}.go.
+- Spreedly: developer.spreedly.com/docs/using-payment-methods, /docs/third-party-vaulting.
+- HyperSwitch: docs.hyperswitch.io/integration-guide/workflows/vault, .../payment-methods-management.
 
 ---
 
@@ -38,6 +297,14 @@ against.
 Target version: **`2026-06-24.dahlia`** — Stripe's latest stable release train as
 of 2026-06-26 (newer than the 2026-05-27.dahlia first noted; verified against
 https://docs.stripe.com/changelog at implementation time).
+
+DECISION (owner, 2026-06-26): SINGLE hardcoded const for BOTH the outbound header
+and the webhook endpoint (#590 reads the same const). NOT per-merchant (the version
+is a property of our parser code, not a merchant — per-merchant would force
+multi-version parsing) and NOT a config field (a knob just lets an operator pin a
+version their parsers weren't written for — pure footgun). "Latest" = latest at
+pin/test time, not auto-tracking; it moves only by a deliberate code bump + the
+breaking-change audit. Source-available patch is the emergency escape hatch.
 
 Scope:
 - [x] Add a `const APIVersion = "2026-06-24.dahlia"` and set `Stripe-Version: <that>` on every request from the shared `stripeapi` client — single choke-point in `guardTransport.RoundTrip` covers all outbound Stripe calls (catalog, subscriptions, checkout, invoices, portal, refunds, reconcile). Clones the request so the RoundTripper contract holds; a caller-set version is preserved.

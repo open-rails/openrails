@@ -241,6 +241,29 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	return s.handleEvent(ctx, eventType, evt.Data.Object)
 }
 
+// HandledStripeEventTypes is the canonical list of Stripe event types OpenRails
+// acts on — the single source of truth for what a managed webhook endpoint should
+// subscribe to (#590 auto-registration reads this for enabled_events). KEEP IN
+// SYNC with the handleEvent switch below.
+var HandledStripeEventTypes = []string{
+	"invoice.paid",
+	"invoice.payment_failed",
+	"invoice_payment.paid",
+	"checkout.session.completed",
+	"checkout.session.async_payment_succeeded",
+	"checkout.session.async_payment_failed",
+	"checkout.session.expired",
+	"customer.subscription.updated",
+	"customer.subscription.deleted",
+	"refund.created",
+	"refund.updated",
+	"charge.succeeded",
+	"payment_method.attached",
+	"charge.refunded",
+	"charge.dispute.created",
+	"charge.dispute.closed",
+}
+
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, obj json.RawMessage) error {
 	switch eventType {
 	case "invoice.paid":
