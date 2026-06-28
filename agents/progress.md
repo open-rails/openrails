@@ -25,7 +25,9 @@ reads, while preserving manual/non-catalog grants and audit history.
 Catalog-derived entitlements do not need their own source-of-truth rows.
 
 Source-of-truth facts should be:
-- product catalog: `product_slug -> entitlements/spend limits/linked products`.
+- entitlement feature registry: durable feature keys like Stripe `Feature.lookup_key`
+  (`premium`, `premium-plus`) plus optional display metadata.
+- product catalog: `product_slug -> entitlement feature keys/spend limits/linked products`.
 - product ownership windows: `customer owns product_slug from starts_at to ends_at`,
   including grace windows.
 - `grants`: append-only audit log for "customer got ownership/credit/manual entitlement
@@ -35,14 +37,42 @@ Effective entitlements can then be derived at read time:
 
 ```text
 active product ownership windows
-+ current product definitions
++ current product definitions and entitlement feature keys
 + manual/non-catalog entitlement grants
 = active entitlements
 ```
 
+## Stripe-like feature registry, not Stripe-like active rows
+Adopt the useful Stripe shape: durable entitlement feature definitions with stable keys.
+Do not adopt catalog-derived active entitlement rows as source of truth.
+
+Catalog shape can stay lazy:
+
+```yaml
+entitlements:
+  - key: premium
+    display_name: Premium
+    description: Premium site access
+
+products:
+  - slug: premium-monthly
+    display_name: Premium Monthly
+    entitlements:
+      - premium
+```
+
+Product-level `entitlements: ["premium"]` may auto-create missing feature definitions
+with `key = "premium"` if no display metadata is needed. Top-level definitions exist
+to catch typos, carry UI/admin labels, and mirror provider feature registries where useful.
+Entitlement feature keys are URL-safe lookup keys in the entitlement namespace. They may
+share the same literal value as product slugs because product and entitlement identity
+are separate namespaces.
+
 ## Why consider this
 - Catalog changes become instant by construction: changing `premium -> pro` changes
   effective reads for active owners without rewriting per-customer entitlement rows.
+- Durable feature keys make entitlement names a merchant contract, not throwaway strings,
+  and let validation catch misspellings before catalog apply.
 - Grace/dunning becomes an ownership-window concern instead of special entitlement
   timeline mutation.
 - Less duplicated state: no separate catalog-derived entitlement lifecycle to keep in
@@ -57,17 +87,20 @@ active product ownership windows
 - Batch active entitlement lookup for AuthKit/token enrichment.
 - Historical audit: answer what caused access and when ownership/grace started/ended.
 - Performance for hot reads without making every request scan huge ownership/catalog sets.
+- Durable entitlement feature CRUD/metadata for UI and API consumers that need labels or
+  descriptions, while keeping product references as stable keys.
 
 ## Possible end state
 Prefer the smallest end state that holds:
 
 1. `product_ownership` is source of truth for product access windows.
-2. Manual/non-catalog entitlements live in a small manual grant table or in `grants`
+2. `entitlement_features` is the durable registry of valid feature keys and metadata.
+3. Manual/non-catalog entitlements live in a small manual grant table or in `grants`
    with enough typed fields to query them.
-3. Catalog-derived entitlements are computed from ownership + current product spec.
-4. If performance requires materialization, keep `effective_entitlements` as a
+4. Catalog-derived entitlements are computed from ownership + current product spec.
+5. If performance requires materialization, keep `effective_entitlements` as a
    rebuildable projection/cache, not a source-of-truth table.
-5. Delete or stop writing `openrails.entitlements` only after every read/write path has
+6. Delete or stop writing `openrails.entitlements` only after every read/write path has
    moved to source-of-truth ownership/manual grants or the projection boundary.
 
 ## Risks / reasons to reject
@@ -78,12 +111,17 @@ Prefer the smallest end state that holds:
   enforced elsewhere.
 - Historical "what entitlement did this user have on date X?" may require catalog
   version history, not just current product definitions.
+- Auto-creating feature keys from product references may hide typos unless catalog apply
+  has a strict mode or warnings.
 - Migration may be too risky if the current entitlement table is already serving as a
   useful compatibility projection.
 
 ## Tasks
 - [ ] Inventory every writer to `openrails.entitlements` and classify it as catalog-derived, manual/imported, or projection maintenance.
 - [ ] Inventory every reader of active entitlement names/records and classify whether it can derive from ownership + catalog or needs an indexed projection.
+- [ ] Inventory current `entitlement_features` usage and decide whether it already satisfies the durable feature registry role.
+- [ ] Define catalog shape for optional top-level entitlement feature definitions; allow product references by key.
+- [ ] Validate product entitlement keys against the durable registry, with a deliberate decision on auto-create vs strict mode.
 - [ ] Define product ownership window schema keyed by merchant + customer + product slug, including subscription, one-time, admin, import, grace, revoke, refund, and provider-pull sources.
 - [ ] Define manual/non-catalog entitlement storage; do not mix these with catalog-derived entitlements.
 - [ ] Prototype derived active entitlement query for one customer and batch customers.
@@ -227,6 +265,11 @@ product key is duplicate state if slug is immutable; use `(merchant_id, slug)` a
 DB key. The product's benefits/settings are mutable; ownership of the product remains
 stable.
 
+Use `slug` for products because products are API/URL-facing resources. Use `key` for
+entitlement features because they are abstract feature flags/lookup keys. Both must be
+URL-safe strings, but they live in separate namespaces: product `premium` and
+entitlement key `premium` may both exist and do not collide.
+
 `display_name` is the mutable user-facing label. Provider mapping should follow the
 same split where possible: NMI uses a unique product SKU for identity and product
 description for the user-facing name.
@@ -267,7 +310,7 @@ operational only: status/archive, provider links, timestamps.
   adoption manifest.
 
 ## Tasks
-- [ ] Add canonical product slug validation and price-key builder.
+- [ ] Add canonical URL-safe product slug / entitlement key validation and price-key builder.
 - [ ] Make products use immutable natural identity (`merchant_id + slug`) instead of a separate product UUID/key.
 - [ ] Store mutable product `display_name` separately from immutable product `slug`.
 - [ ] Store price natural keys or make them derivable from existing columns.
@@ -355,11 +398,12 @@ Examples this must cover:
 - Durable product ownership windows are the source of truth for access. Subscriptions,
   one-time purchases, imports, and admin grants create/extend/revoke ownership windows
   for product slugs.
-- Effective entitlements are derived from active product ownership plus the current
-  product catalog definition. Changing `premium -> pro`, adding an entitlement,
-  removing an entitlement, changing linked product ownership, or changing spend limits
-  updates effective OpenRails benefits for every current owner without rewriting
-  per-user catalog-derived entitlement rows.
+- Effective entitlements are derived from active product ownership plus a benefit
+  snapshot for the current paid/grace window, with additive catalog changes applied
+  immediately. If a user bought product-A while it granted entitlement-A, and the
+  catalog changes product-A to grant entitlement-B, the user keeps entitlement-A until
+  the current ownership window ends and also receives entitlement-B for the remainder
+  of that window. New windows/purchases use the new product definition.
 - Grace is an ownership-window state/extension, not an entitlement special case. A
   subscription in grace still owns the product until `grace_ends_at`; when grace ends,
   product ownership ends and derived benefits disappear.
@@ -398,7 +442,9 @@ immediately. Split later only if querying/reporting demands it.
 - [ ] Map existing `entitlements` and `credits` into the new benefit model.
 - [ ] Apply credit grants from successful payments/renewals, not from continuous ownership recomputation.
 - [ ] Make product ownership windows the source of truth for subscription, one-time purchase, import, grace, and admin access.
-- [ ] Derive effective entitlements from active ownership windows plus current product definitions.
+- [ ] Store or derive current-window benefit snapshots so removals do not revoke current paid/grace access.
+- [ ] Apply additive catalog changes to active windows immediately; apply removals on next ownership window/payment unless an explicit revoke/migration action is run.
+- [ ] Derive effective entitlements from active ownership windows, current-window benefit snapshots, additive catalog changes, and manual grants.
 - [ ] Treat `grants` as the audit ledger for ownership/credit/manual-entitlement events.
 - [ ] Demote current entitlement rows to manual grants and/or rebuildable compatibility projection.
 - [ ] Add product ownership grants to the product benefit application path.
@@ -681,26 +727,6 @@ Scope:
 - [ ] Periodic reconcile River job (drift-fix per the rules above), best-effort, never blocks boot. [DEFERRED — wiring]
 - [x] Decided: SNAPSHOT endpoint for first cut (thin Event Destinations = follow-up).
 - [x] Tests: mock unit tests (idempotency, url/events in-place patch, version recreate, lost-secret recreate, ignore-unmanaged) + LIVE create/reconcile/delete + LIVE delivery-through-tunnel with signature verify.
-
----
-
-# #584: Migration baseline 001 self-creates the `openrails` schema
-
-**Completed:** no
-
-Proposed 2026-06-25 (doujins embedded-migration review).
-The squashed `migrations/postgres/001_schema.up.sql` baseline is fully
-schema-qualified (`openrails.*`) but never runs `CREATE SCHEMA openrails`, so the
-migration FS is NOT self-contained: any consumer applying it via migratekit must
-pre-create the schema first. openrails' own standalone migrator already does
-`CREATE SCHEMA IF NOT EXISTS` (internal/migrate/migrator.go), but the embedded
-FS-driven path (doujins) bypasses that, forcing doujins to hand-maintain a
-`CREATE SCHEMA IF NOT EXISTS openrails` pre-step. Make the FS own its schema.
-
-- [x] Prepend `CREATE SCHEMA IF NOT EXISTS openrails;` to 001 (before the first
-      `openrails.`-qualified object), idempotent so already-migrated DBs skip it.
-- [x] Confirm migration tests still pass (schema pre-create becomes redundant, not conflicting).
-- [x] Tag + release (v0.65.1); doujins drops `openrails` from its host-side ensureBaseSchemas list.
 
 ---
 

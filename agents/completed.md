@@ -16336,3 +16336,26 @@ merchant secret store when provider accounts are present. Reconciled from two co
 into one file (embed/provision.go); the competing package-func `embed.ProvisionMerchant` was dropped.
 doujins legacy-migrate (#426) adopted it. Tested: embed/provision_test.go (ParseMerchantConfig) +
 embed/provision_integration_test.go (RLS-scoped readback) — green.
+
+---
+
+# #584: Migration baseline 001 self-creates the `openrails` schema
+
+**Completed:** yes — DONE (shipped v0.65.1). 001 self-creates the schema (CREATE SCHEMA IF NOT EXISTS openrails at line 40); all tasks checked; the 'no' header was stale.
+
+Proposed 2026-06-25 (doujins embedded-migration review).
+The squashed `migrations/postgres/001_schema.up.sql` baseline is fully
+schema-qualified (`openrails.*`) but never runs `CREATE SCHEMA openrails`, so the
+migration FS is NOT self-contained: any consumer applying it via migratekit must
+pre-create the schema first. openrails' own standalone migrator already does
+`CREATE SCHEMA IF NOT EXISTS` (internal/migrate/migrator.go), but the embedded
+FS-driven path (doujins) bypasses that, forcing doujins to hand-maintain a
+`CREATE SCHEMA IF NOT EXISTS openrails` pre-step. Make the FS own its schema.
+
+- [x] Prepend `CREATE SCHEMA IF NOT EXISTS openrails;` to 001 (before the first
+      `openrails.`-qualified object), idempotent so already-migrated DBs skip it.
+- [x] Confirm migration tests still pass (schema pre-create becomes redundant, not conflicting).
+- [x] Tag + release (v0.65.1); doujins drops `openrails` from its host-side ensureBaseSchemas list.
+
+---
+
