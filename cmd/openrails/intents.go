@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -44,7 +45,7 @@ func newIntentsCmd() *cobra.Command {
 			return runIntentsList(c, status, provider, intentType, format, merchantSlug, limit)
 		},
 	}
-	cmd.Flags().StringVar(&status, "status", "pending", "Status filter: pending, in_flight, succeeded, failed_retryable, failed (terminal), unknown, superseded, expired, all")
+	cmd.Flags().StringVar(&status, "status", "active", "Status filter: active (the live working set: pending, in_flight, failed_retryable, unknown), pending, in_flight, succeeded, failed_retryable, failed (terminal), unknown, superseded, expired, all")
 	cmd.Flags().StringVar(&provider, "provider", "", "Provider filter (e.g. mobius, stripe)")
 	cmd.Flags().StringVar(&intentType, "type", "", "Intent type filter (e.g. nmi_delete_subscription, manual_rebill, stripe_refund)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
@@ -82,6 +83,18 @@ func newIntentsLogCmd() *cobra.Command {
 	return cmd
 }
 
+// activeStatuses is the live working set — the statuses the executor/verifier
+// can still act on (mirrors the idx_provider_intents_due partial index). This
+// is the default `openrails intents` view (#607): succeeded tombstones,
+// terminal/superseded/expired rows are queryable via --status but stay out of
+// the everyday "what's queued" picture.
+var activeStatuses = []string{
+	intents.StatusPending,
+	intents.StatusInFlight,
+	intents.StatusFailedRetryable,
+	intents.StatusUnknownNeedsVerify,
+}
+
 // intentsStatusFilters maps CLI vocabulary onto ledger statuses.
 var intentsStatusFilters = map[string]string{
 	"pending":                        intents.StatusPending,
@@ -106,14 +119,25 @@ func executesUnder(origin string) string {
 }
 
 func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, merchantSlug string, limit int) error {
-	var statusFilter *string
+	// statusFilters is the set of status predicates to union over. A single nil
+	// entry means "no status predicate" (--status=all). The default "active"
+	// view unions the live working set; any concrete status is a single filter.
+	var statusFilters []*string
 	status = strings.ToLower(strings.TrimSpace(status))
-	if status != "all" {
+	switch status {
+	case "all":
+		statusFilters = []*string{nil}
+	case "active":
+		for _, s := range activeStatuses {
+			s := s
+			statusFilters = append(statusFilters, &s)
+		}
+	default:
 		mapped, ok := intentsStatusFilters[status]
 		if !ok {
 			return fmt.Errorf("invalid --status %q", status)
 		}
-		statusFilter = &mapped
+		statusFilters = []*string{&mapped}
 	}
 	var providerFilter *string
 	if p := strings.ToLower(strings.TrimSpace(provider)); p != "" {
@@ -129,18 +153,36 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 
 	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
 		q := database.Gen(ctx)
-		total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
-			Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
-		})
-		if err != nil {
-			return fmt.Errorf("count provider intents: %w", err)
+		// Union over statusFilters: one count+list per status predicate (the
+		// generated query takes a single optional status), then merge, sort by
+		// created_at DESC and cap at limit. For a single concrete status (or
+		// --status=all) this is exactly one round trip.
+		var total int64
+		var rows []gen.OpenrailsProviderIntent
+		for _, statusFilter := range statusFilters {
+			n, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
+				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
+			})
+			if err != nil {
+				return fmt.Errorf("count provider intents: %w", err)
+			}
+			total += n
+			part, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
+				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
+				PageLimit: int64(limit), PageOffset: 0,
+			})
+			if err != nil {
+				return fmt.Errorf("list provider intents: %w", err)
+			}
+			rows = append(rows, part...)
 		}
-		rows, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
-			Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
-			PageLimit: int64(limit), PageOffset: 0,
-		})
-		if err != nil {
-			return fmt.Errorf("list provider intents: %w", err)
+		if len(statusFilters) > 1 {
+			sort.SliceStable(rows, func(i, j int) bool {
+				return rows[i].CreatedAt.After(rows[j].CreatedAt)
+			})
+			if len(rows) > limit {
+				rows = rows[:limit]
+			}
 		}
 
 		if format == "json" {

@@ -4,6 +4,7 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -192,7 +193,11 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 	got := fx.intent(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
 	require.NotNil(t, got.ExecutedAt)
-	assert.Contains(t, string(got.ResultEvidence), `"deleted": true`)
+	// #607: the succeeded tombstone is slimmed — nmi_delete's forensic evidence
+	// (deleted:true) is dropped from Postgres but retained in the mutation log
+	// (asserted below), and the payload is pruned.
+	assert.Empty(t, got.ResultEvidence, "forensic evidence pruned from the tombstone")
+	assert.Nil(t, got.Payload, "payload pruned from the tombstone")
 	assert.EqualValues(t, 1, fake.queryCalls.Load(), "verify-then-execute reads first")
 	assert.EqualValues(t, 1, fake.deleteCalls.Load())
 	assert.Nil(t, fx.deletionMarker(t), "success finalizes the read model (marker cleared)")
@@ -238,7 +243,7 @@ func TestExecutorVerifiedAbsentIsSuccess(t *testing.T) {
 
 	got := fx.intent(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	assert.Contains(t, string(got.ResultEvidence), `"verified_absent": true`)
+	assert.Empty(t, got.ResultEvidence, "#607: forensic evidence pruned from the succeeded tombstone")
 	assert.Zero(t, fake.deleteCalls.Load(), "nothing to delete; no write sent")
 	assert.Nil(t, fx.deletionMarker(t))
 }
@@ -274,7 +279,7 @@ func TestAmbiguousOutcomeRoutesThroughVerifier(t *testing.T) {
 
 	got = fx.intent(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	assert.Contains(t, string(got.ResultEvidence), `"verified_absent": true`)
+	assert.Empty(t, got.ResultEvidence, "#607: forensic evidence pruned even when the verifier resolves the success")
 	assert.Nil(t, fx.deletionMarker(t))
 }
 
@@ -454,6 +459,162 @@ func TestSucceededIntentIsNeverRevived(t *testing.T) {
 	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, fake.deleteCalls.Load(), "no second delete")
+}
+
+// pruneTestHandler always succeeds with rich evidence: two result-pointer keys
+// the dunning repair path reads back (transaction_id, response_code) plus bulk
+// forensic keys that prune (#607) must drop. It counts Execute calls so a test
+// can prove the dedupe tombstone survives the prune and never re-charges.
+type pruneTestHandler struct{ calls *atomic.Int64 }
+
+const typePruneTest = "prune_test_intent"
+
+func (h *pruneTestHandler) Type() string { return typePruneTest }
+func (h *pruneTestHandler) CheckRelevance(context.Context, gen.OpenrailsProviderIntent) (Relevance, error) {
+	return StillRelevant(), nil
+}
+func (h *pruneTestHandler) Execute(context.Context, gen.OpenrailsProviderIntent) Outcome {
+	h.calls.Add(1)
+	return Succeeded(map[string]any{
+		"transaction_id": "txn-abc-123",
+		"response_code":  1,
+		"gateway_raw":    "verbose forensic blob that ClickHouse already retains",
+		"auth_code":      "XYZ789",
+	})
+}
+func (h *pruneTestHandler) Verify(context.Context, gen.OpenrailsProviderIntent) Outcome {
+	return Ambiguous("unused")
+}
+func (h *pruneTestHandler) Backoff(int32) time.Duration { return time.Minute }
+
+// TestSucceededIntentIsPrunedToSlimTombstone (#607): after a successful
+// execute the provider_intents row STILL EXISTS (it is the effectively-once
+// dedupe tombstone) but its heavy payload is dropped and result_evidence is
+// reduced to the pointer keys. A re-enqueue + re-execute with the same
+// idempotency key returns the same succeeded row WITHOUT re-charging, proving
+// the dedupe survived the prune.
+func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
+	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
+	ctx := context.Background()
+	var calls atomic.Int64
+
+	runner := &Runner{
+		Store:    fx.store,
+		Registry: NewRegistry(&pruneTestHandler{calls: &calls}),
+		Config:   fullModeConfig(),
+	}
+
+	idemKey := "prune-test-" + uuid.NewString()
+	enqueue := func() gen.OpenrailsProviderIntent {
+		t.Helper()
+		row, err := fx.store.Enqueue(ctx, EnqueueParams{
+			MerchantID:     dbtest.TestMerchantID.UUID(),
+			Provider:       "mobius",
+			IntentType:     typePruneTest,
+			SubscriptionID: &fx.subID, // so the fixture cleanup reaps the row
+			Payload:        map[string]any{"big": "heavy payload that must be pruned on success", "rebill_amount": 4999},
+			IdempotencyKey: idemKey,
+			NextAttemptAt:  time.Now().Add(-time.Minute),
+			Origin:         OriginSystem,
+			OriginReason:   "prune integration test",
+		})
+		require.NoError(t, err)
+		return row
+	}
+
+	row := enqueue()
+	require.NotEmpty(t, row.Payload, "payload present before execution")
+
+	// (1) Execute -> success -> prune.
+	_, err := runner.EnqueueAndExecute(ctx, EnqueueParams{
+		MerchantID:     dbtest.TestMerchantID.UUID(),
+		Provider:       "mobius",
+		IntentType:     typePruneTest,
+		SubscriptionID: &fx.subID,
+		Payload:        map[string]any{"big": "heavy payload that must be pruned on success"},
+		IdempotencyKey: idemKey,
+		NextAttemptAt:  time.Now().Add(-time.Minute),
+		Origin:         OriginSystem,
+		OriginReason:   "prune integration test",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, calls.Load(), "executed exactly once")
+
+	// (a) Row STILL EXISTS (count=1), status succeeded, payload pruned to NULL,
+	// result_evidence slimmed to ONLY the pointer keys.
+	status, payload, evidence := readRaw(t, fx, row.ID)
+	assert.Equal(t, StatusSucceeded, status)
+	assert.Nil(t, payload, "payload pruned to NULL on success")
+	require.NotNil(t, evidence, "result_evidence retained as slim tombstone")
+	assert.Contains(t, *evidence, `"transaction_id"`)
+	assert.Contains(t, *evidence, "txn-abc-123")
+	assert.Contains(t, *evidence, `"response_code"`)
+	assert.NotContains(t, *evidence, "gateway_raw", "bulk forensics dropped from Postgres")
+	assert.NotContains(t, *evidence, "auth_code", "bulk forensics dropped from Postgres")
+
+	// The dunning repair path reads these back off the slim tombstone.
+	tomb := fx.intent(t, row.ID)
+	assert.Equal(t, "txn-abc-123", manualRebillEvidenceStringForTest(tomb, "transaction_id"))
+
+	var count int
+	require.NoError(t, fx.db.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1 AND idempotency_key = $2",
+		dbtest.TestMerchantID.UUID(), idemKey).Scan(&count))
+	assert.Equal(t, 1, count, "tombstone row retained (dedupe guard)")
+
+	// (b) Re-enqueue + re-execute with the same idempotency key: same row,
+	// still succeeded, NO re-charge (Execute counter stays at 1).
+	again, err := runner.EnqueueAndExecute(ctx, EnqueueParams{
+		MerchantID:     dbtest.TestMerchantID.UUID(),
+		Provider:       "mobius",
+		IntentType:     typePruneTest,
+		SubscriptionID: &fx.subID,
+		Payload:        map[string]any{"big": "re-enqueue payload should not revive a succeeded row"},
+		IdempotencyKey: idemKey,
+		NextAttemptAt:  time.Now().Add(-time.Minute),
+		Origin:         OriginSystem,
+		OriginReason:   "prune integration test re-enqueue",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, row.ID, again.ID, "same logical intent, same row")
+	assert.Equal(t, StatusSucceeded, again.Status, "succeeded is immutable to re-enqueue")
+	assert.EqualValues(t, 1, calls.Load(), "dedupe survived the prune: no second charge")
+
+	// Payload stayed pruned (the re-enqueue did NOT resurrect the heavy payload).
+	_, payload2, _ := readRaw(t, fx, row.ID)
+	assert.Nil(t, payload2, "re-enqueue of a succeeded row leaves payload pruned")
+
+	// (c) A second scheduled executor pass post-prune does NOT double-execute.
+	_, err = runner.RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, calls.Load(), "scheduled pass never re-claims a succeeded tombstone")
+}
+
+// readRaw reads the row's status/payload/result_evidence straight from
+// Postgres (not via the gen row) so the test asserts on the literal stored
+// column values.
+func readRaw(t *testing.T, fx intentFixture, id uuid.UUID) (status string, payload, evidence *string) {
+	t.Helper()
+	err := fx.db.Pool().QueryRow(context.Background(),
+		`SELECT status, payload::text, result_evidence::text
+		   FROM openrails.provider_intents WHERE id = $1`, id).Scan(&status, &payload, &evidence)
+	require.NoError(t, err)
+	return status, payload, evidence
+}
+
+// manualRebillEvidenceStringForTest mirrors the dunning repair path's read of
+// one string key off result_evidence, proving the slim tombstone still answers
+// it.
+func manualRebillEvidenceStringForTest(intent gen.OpenrailsProviderIntent, key string) string {
+	if len(intent.ResultEvidence) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(intent.ResultEvidence, &m); err != nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return s
 }
 
 // TestRelevanceWindowExpiry: an intent past its expires_at is expired by the

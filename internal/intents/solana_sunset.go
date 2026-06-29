@@ -104,6 +104,14 @@ func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, rpc *sol
 }
 
 func (h *SolanaSunsetPlanHandler) Type() string { return TypeSolanaSunsetPlan }
+
+// PrunePolicy keeps the result_evidence on a succeeded sunset tombstone
+// (#607): the catalog status view renders its verification booleans
+// (sunset/already_sunset/verified_sunset/...) off the succeeded row
+// (pkg/service/catalog_extras.go). The payload (plan PDA) is dropped.
+func (h *SolanaSunsetPlanHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
+	return false, true
+}
 func (h *SolanaSunsetPlanHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
