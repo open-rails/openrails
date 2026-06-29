@@ -34,10 +34,14 @@ func main() {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
-			// --mode rides the same koanf pipeline as everything else by
-			// overwriting the MODE env var before Load: flag beats env beats
-			// yaml. Validation in Load rejects unknown values.
-			if mode, err := cmd.Flags().GetString("mode"); err == nil && strings.TrimSpace(mode) != "" {
+			// --provider-write-mode rides the same koanf pipeline as everything
+			// else by overwriting PROVIDER_WRITE_MODE before Load: flag beats env
+			// beats yaml. --mode is retained as a deprecated alias.
+			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
+				if err := os.Setenv("PROVIDER_WRITE_MODE", strings.TrimSpace(mode)); err != nil {
+					return fmt.Errorf("failed to apply --provider-write-mode: %w", err)
+				}
+			} else if mode, err := cmd.Flags().GetString("mode"); err == nil && strings.TrimSpace(mode) != "" {
 				if err := os.Setenv("MODE", strings.TrimSpace(mode)); err != nil {
 					return fmt.Errorf("failed to apply --mode: %w", err)
 				}
@@ -70,7 +74,9 @@ func main() {
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
-		String("mode", "", "Operating mode (behavior): full | limited | readonly (overrides MODE env and config.yaml; required outside development)")
+		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required outside development)")
+	rootCmd.PersistentFlags().
+		String("mode", "", "Deprecated alias for --provider-write-mode")
 	rootCmd.PersistentFlags().
 		Bool("test-mode", false, "Use sandbox rail credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
 

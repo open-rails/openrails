@@ -166,6 +166,21 @@ func TestEmbeddedMerchantSettingsOptInMountsSettingsRoutes(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestMerchantSettingsRoutesRequireMutableCredentials(t *testing.T) {
+	asm := &embedhttp.Assembler{
+		Cfg:            &config.Config{Captcha: &config.CaptchaConfig{}},
+		Runtime:        &app.Runtime{},
+		Authenticator:  stubAuthenticator{},
+		CredentialMode: embedhttp.CredentialModeFixed,
+	}
+	require.PanicsWithError(t,
+		"embedded billing: merchant settings routes require mutable_credentials",
+		func() {
+			_ = asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings}})
+		},
+	)
+}
+
 func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
 	asm := &embedhttp.Assembler{
 		Cfg:                       &config.Config{Captcha: &config.CaptchaConfig{}},

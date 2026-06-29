@@ -392,19 +392,25 @@ func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
 // with zero gin on the request path. The gin Server holds the standalone surface
 // (newPublicEngine); embedded hosts use this gin-free handler via pkg/embedded.
 func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
+	credentialMode := opts.CredentialMode
+	if credentialMode == "" {
+		credentialMode = embedhttp.CredentialModeMutable
+	}
 	asm := &embedhttp.Assembler{
-		Cfg:           s.cfg,
-		Runtime:       s.runtime,
-		CaptchaStore:  s.captchaStore,
-		RDB:           s.rdb,
-		Authenticator: s.embeddedAuthenticator(),
+		Cfg:            s.cfg,
+		Runtime:        s.runtime,
+		CaptchaStore:   s.captchaStore,
+		RDB:            s.rdb,
+		Authenticator:  s.embeddedAuthenticator(),
+		CredentialMode: credentialMode,
 	}
 	// The control plane is always present on this surface (#469); it is the
 	// live admin-permission checker.
 	asm.AdminChecker = s.controlPlane
 	asm.ServiceCredentialResolver = s.controlPlane
 	return asm.NewHTTPHandler(embedhttp.Options{
-		RouteSets: opts.RouteSets,
+		RouteSets:      opts.RouteSets,
+		CredentialMode: credentialMode,
 	})
 }
 

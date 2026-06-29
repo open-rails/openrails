@@ -25,5 +25,6 @@ var (
 // Note: health/debug endpoints are intentionally not part of embedded handler options.
 // Standalone mode owns service-level health routes.
 type HTTPHandlerOptions struct {
-	RouteSets []RouteSet
+	RouteSets      []RouteSet
+	CredentialMode embedhttp.CredentialMode
 }

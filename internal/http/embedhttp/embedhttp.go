@@ -39,7 +39,8 @@ const EmbeddedV1Prefix = "/billing/v1"
 // Options controls which billing HTTP route groups are included in the returned
 // handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 type Options struct {
-	RouteSets []RouteSet
+	RouteSets      []RouteSet
+	CredentialMode CredentialMode
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -66,6 +67,7 @@ type Assembler struct {
 	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	ConfiguredMerchant     merchant.ID
+	CredentialMode         CredentialMode
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -94,6 +96,7 @@ func FromApp(a *app.App) *Assembler {
 		RDB:                       a.RedisClient,
 		Authenticator:             a.Authenticator,
 		DelegatedAuthenticator:    a.DelegatedAuthenticator,
+		CredentialMode:            CredentialMode(a.CredentialMode),
 	}
 	if a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
@@ -116,7 +119,14 @@ func FromApp(a *app.App) *Assembler {
 // standalone engine's authProvider.Optional() → RateLimit order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	routeSets := routeSetMap(opts.RouteSets)
-	if err := s.validateAuthBoundary(routeSets); err != nil {
+	credentialMode := opts.CredentialMode
+	if credentialMode == "" && s != nil {
+		credentialMode = s.CredentialMode
+	}
+	if credentialMode == "" {
+		credentialMode = CredentialModeFixed
+	}
+	if err := s.validateAuthBoundary(routeSets, credentialMode); err != nil {
 		panic(err)
 	}
 	mux := http.NewServeMux()
@@ -189,9 +199,12 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	)
 }
 
-func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
+func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool, credentialMode CredentialMode) error {
 	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetMerchantSettings]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
+	}
+	if routeSets[RouteSetMerchantSettings] && credentialMode != CredentialModeMutable {
+		return fmt.Errorf("embedded billing: merchant settings routes require mutable_credentials")
 	}
 	if routeSets[RouteSetMerchantAPI] && (s == nil || (s.ServiceCredentialResolver == nil && s.DelegatedAuthenticator == nil)) {
 		return fmt.Errorf("embedded billing: merchant API route group requires Options.ServiceCredentialResolver or Options.DelegatedAuthenticator")

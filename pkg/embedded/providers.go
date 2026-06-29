@@ -79,6 +79,22 @@ func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 		return nil
 	}
 	out := *in
+	if in.NMI != nil {
+		v := *in.NMI
+		out.NMI = &v
+	}
+	if in.CCBill != nil {
+		v := *in.CCBill
+		out.CCBill = &v
+	}
+	if in.Stripe != nil {
+		v := *in.Stripe
+		out.Stripe = &v
+	}
+	if in.Solana != nil {
+		v := *in.Solana
+		out.Solana = &v
+	}
 	if in.AllowedCIDRs != nil {
 		out.AllowedCIDRs = append([]string(nil), in.AllowedCIDRs...)
 	}

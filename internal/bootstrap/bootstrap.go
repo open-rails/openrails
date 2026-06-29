@@ -29,6 +29,7 @@ type Options struct {
 	Clock                  clockwork.Clock
 	ConfiguredMerchant     merchant.ID
 	Rails                  config.RailSet
+	CredentialMode         app.CredentialMode
 }
 
 // NewApp constructs the long-lived application runtime.
@@ -42,6 +43,7 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		Clock:                  optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 		ConfiguredMerchant:     optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
 		Rails:                  optsValue(opts, func(o *Options) config.RailSet { return o.Rails }),
+		CredentialMode:         optsValue(opts, func(o *Options) app.CredentialMode { return o.CredentialMode }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

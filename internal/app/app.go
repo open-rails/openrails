@@ -17,6 +17,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+type CredentialMode string
+
+const (
+	CredentialModeFixed   CredentialMode = "fixed_credentials"
+	CredentialModeMutable CredentialMode = "mutable_credentials"
+)
+
 // App encapsulates the long-lived dependencies shared across transports.
 type App struct {
 	Config      *config.Config
@@ -42,7 +49,8 @@ type App struct {
 	// path ALWAYS attaches the concrete *controlplane.ControlPlane via
 	// SetControlPlane (#469) and recovers it with a type assertion (see
 	// pkg/embedded/controlplane).
-	ControlPlane any
+	ControlPlane   any
+	CredentialMode CredentialMode
 
 	stopRedisMonitor context.CancelFunc
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
@@ -83,6 +91,7 @@ type BootstrapOptions struct {
 	Clock                  clockwork.Clock
 	ConfiguredMerchant     merchant.ID
 	Rails                  config.RailSet
+	CredentialMode         CredentialMode
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -118,6 +127,10 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 	if opts != nil {
 		authenticator = opts.Authenticator
 		delegatedAuthenticator = opts.DelegatedAuthenticator
+	}
+	credentialMode := CredentialModeFixed
+	if opts != nil && opts.CredentialMode != "" {
+		credentialMode = opts.CredentialMode
 	}
 
 	var dbOverride *db.DB
@@ -179,6 +192,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		RedisClient:            runtime.RedisClient,
 		Authenticator:          authenticator,
 		DelegatedAuthenticator: delegatedAuthenticator,
+		CredentialMode:         credentialMode,
 		stopRedisMonitor:       stop,
 	}
 

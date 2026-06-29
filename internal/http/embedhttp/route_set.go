@@ -3,6 +3,8 @@ package embedhttp
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet string
 
+type CredentialMode string
+
 const (
 	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
 	RouteSetCheckout RouteSet = "checkout"
@@ -16,6 +18,9 @@ const (
 	RouteSetMerchantAPI RouteSet = "merchant_api"
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
 	RouteSetWebhooks RouteSet = "webhooks"
+
+	CredentialModeFixed   CredentialMode = "fixed_credentials"
+	CredentialModeMutable CredentialMode = "mutable_credentials"
 )
 
 // EmbeddedDefaultRouteSets is the default embedded HTTP surface. It excludes

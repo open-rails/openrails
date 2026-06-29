@@ -391,12 +391,12 @@ backfills those missed provider events from the durable watermark.
 
 ## Safety levers (recap — full details in README "Operating modes")
 
-- `mode = full | limited | readonly` — behavior dial. `limited`: nothing
+- `provider_write_mode = full | limited | readonly` — behavior dial. `limited`: nothing
   system-initiated touches a provider; everything user/admin-asked works.
   `readonly`: zero provider writes, wire-enforced on all three rails (NMI
   direct-post, Stripe transport, Solana transaction submission).
 - `test_mode = true|false` — credential sandbox enforcement, orthogonal to
-  mode: sandbox routing + Stripe live-key refusal + the NMI boot probe (one
+  provider_write_mode: sandbox routing + Stripe live-key refusal + the NMI boot probe (one
   auth on the non-issued test card; a decline proves production credentials
   and refuses the boot) + Solana devnet. Probe verdicts cache for 12h in
   `billing.probe_verdicts` (#348), keyed by sha256 of the key: a fresh `live`
@@ -405,8 +405,9 @@ backfills those missed provider events from the durable watermark.
   rotated key or stale verdict re-probes, and cache failures degrade to
   probing. Dev-only.
 **Cutover posture** (migration/reconciliation against production
-credentials): use `MODE=limited` when OpenRails should keep serving reactive
+credentials): use `PROVIDER_WRITE_MODE=limited` when OpenRails should keep serving reactive
 customer/admin flows while system-origin provider writes stay parked, or
-`MODE=readonly` for strict observation. Exit by moving to `MODE=full`. All
+`PROVIDER_WRITE_MODE=readonly` for strict observation. Exit by moving to
+`PROVIDER_WRITE_MODE=full`. All
 paused work is delayed,
 not lost; missed billing periods are never back-billed.

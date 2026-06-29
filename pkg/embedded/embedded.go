@@ -19,6 +19,7 @@ import (
 
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet = embedhttp.RouteSet
+type CredentialMode = embedhttp.CredentialMode
 
 const (
 	RouteSetCheckout         = embedhttp.RouteSetCheckout
@@ -27,6 +28,8 @@ const (
 	RouteSetMerchantSettings = embedhttp.RouteSetMerchantSettings
 	RouteSetMerchantAPI      = embedhttp.RouteSetMerchantAPI
 	RouteSetWebhooks         = embedhttp.RouteSetWebhooks
+	CredentialModeFixed      = embedhttp.CredentialModeFixed
+	CredentialModeMutable    = embedhttp.CredentialModeMutable
 )
 
 var (
@@ -62,6 +65,9 @@ type Options struct {
 	// selectors; durable provider-account identity is resolved from the provider
 	// itself.
 	PaymentProviders []PaymentProvider
+	// CredentialMode controls whether embedded OpenRails may expose routes that
+	// mutate provider credentials. Empty defaults to fixed credentials.
+	CredentialMode embedhttp.CredentialMode
 }
 
 type Embedded struct {
@@ -88,6 +94,7 @@ func New(opts Options) (*Embedded, error) {
 		DelegatedAuthenticator: opts.DelegatedAuthenticator,
 		Cache:                  opts.Cache,
 		Rails:                  rails,
+		CredentialMode:         app.CredentialMode(opts.CredentialMode),
 	})
 	if err != nil {
 		return nil, err
@@ -112,7 +119,8 @@ func (e *Embedded) App() *app.App {
 // Note: billing health endpoints are not exposed in embedded mode.
 // If a host wants billing readiness, call IsBillingReady and include it in the host's /readyz.
 type HTTPHandlerOptions struct {
-	RouteSets []RouteSet
+	RouteSets      []RouteSet
+	CredentialMode embedhttp.CredentialMode
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
@@ -123,7 +131,8 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 		return nil
 	}
 	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
-		RouteSets: opts.RouteSets,
+		RouteSets:      opts.RouteSets,
+		CredentialMode: opts.CredentialMode,
 	})
 }
 

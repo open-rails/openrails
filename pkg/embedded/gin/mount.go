@@ -13,6 +13,9 @@ type MountOptions struct {
 	// RouteSets selects the gin-free user surface (checkout, merchant-admin,
 	// webhooks). The self surface (/me, /customers) is always included.
 	RouteSets []embedded.RouteSet
+	// CredentialMode controls whether merchant settings/provider credential
+	// mutation routes may be mounted. Empty defaults to fixed credentials.
+	CredentialMode embedded.CredentialMode
 	// MountPrefix is the host path the whole surface is mounted under (e.g.
 	// "/api/openrails"); incoming paths are MountPrefix + "/v1/...". Empty means
 	// paths already arrive canonical ("/v1/...").
@@ -33,7 +36,7 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	if a := e.App(); a != nil && a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
 	}
-	user := asm.NewHTTPHandler(embedhttp.Options{RouteSets: opts.RouteSets})
+	user := asm.NewHTTPHandler(embedhttp.Options{RouteSets: opts.RouteSets, CredentialMode: embedhttp.CredentialMode(opts.CredentialMode)})
 
 	// base is the canonical embedded mount ("/billing"); both handlers serve at
 	// base + "/v1/...".
