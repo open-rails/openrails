@@ -24,6 +24,12 @@ the internal money unit to **micro-USD ("micros"; 1 USD = 1_000_000)**, the
 idiomatic choice (Stripe/Google use micros). $23.00 = `23_000_000`; the catalog
 YAML writes amounts with `_` digit separators for readability.
 
+This also UNIFIES the unit. #599 (metered rating) already specifies its `rate` /
+`per_units` in **micros** (e.g. `{rate: 200_000, per_units: 1_000_000}` = $0.20 /
+1M requests), so leaving flat `prices.amount`/`payments` in cents would split the
+system across two money units — converging on micros everywhere is the consistent
+end state.
+
 ## Scope (the unit is pervasive — every money column + helper)
 - Columns: `prices.amount` + `prices.initial_amount` (#602); `payments.amount` /
   `list_amount`; subscription/credit/grant amounts; `money_ledger` / ledger
