@@ -7,7 +7,56 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 603
+next_id: 604
+
+---
+
+# #603: Money in micro-USD (micros) instead of cents — sub-cent precision for metered/usage pricing
+
+**Completed:** no
+
+Proposed 2026-06-28 (owner). OpenRails currently stores ALL money in CENTS
+(integer minor units; `moneyutil.CentsToMajorUnits = cents/100`, `prices.amount`,
+`payments.amount`, the ledger — existing doujins data is `1900`/`2300` = $19/$23).
+Cents cannot express SUB-CENT prices, which #599 (metered/usage rating: usage ×
+rate) and fine-grained proration/discount math need — e.g. $0.0001 per unit. Move
+the internal money unit to **micro-USD ("micros"; 1 USD = 1_000_000)**, the
+idiomatic choice (Stripe/Google use micros). $23.00 = `23_000_000`; the catalog
+YAML writes amounts with `_` digit separators for readability.
+
+## Scope (the unit is pervasive — every money column + helper)
+- Columns: `prices.amount` + `prices.initial_amount` (#602); `payments.amount` /
+  `list_amount`; subscription/credit/grant amounts; `money_ledger` / ledger
+  transfers; spend-limit/budget amounts; ClickHouse `payment_events`.
+- `internal/shared/moneyutil`: `ParseDecimalToCents`/`FormatCentsDecimal`/
+  `CentsToMajorUnits` → micro equivalents (÷1_000_000, 6 dp); add a typed
+  `Micros int64` maybe.
+- Catalog manifest + converge + service validation already amount-agnostic; just
+  the magnitudes change.
+
+## Provider boundary (the hard part)
+NMI/CCBill/Stripe charge in **minor units (cents)**, not micros. So:
+- Outbound charge: convert micros → cents with a DEFINED rounding (half-up?) at
+  the provider edge; a price not representable in whole cents (e.g. $0.0001) is
+  only billable via AGGREGATED metered billing (sum usage until ≥ 1¢), never a
+  single sub-cent charge — document this constraint.
+- Inbound (webhooks/reconciliation/migration): provider cents → micros (× 10_000);
+  amount matching in reconciliation must compare in a common unit.
+
+## Migration (value-preserving hard cut, like #588)
+- One migration multiplies every existing money column by 10_000 (cents → micros);
+  no value changes, only the unit. Mirror across Postgres + ClickHouse.
+- doujins catalog: `2300` → `23_000_000`, `1900` → `19_000_000`, intro
+  `1995`→`19_950_000` / recurring `1495`→`14_950_000`, etc.
+
+## Tasks
+- [ ] Decide precision (micros = 1e-6) + whether to introduce a `Micros` type.
+- [ ] Migration: ×10_000 all money columns (Postgres + ClickHouse), value-preserving.
+- [ ] Rework `moneyutil` (parse/format/convert) + every caller.
+- [ ] Provider edge: micros↔cents conversion with explicit rounding; block/aggregate
+      sub-cent single charges; reconciliation matches in a common unit.
+- [ ] Update catalog YAML (doujins) to micros with `_` separators.
+- [ ] Tests: round-trip, provider rounding, reconciliation, sub-cent metered (#599).
 
 ---
 
