@@ -78,6 +78,15 @@ func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opt
 			res.ProductsArchived++
 		}
 	}
+	if plan != nil && plan.Manifest != nil && (opts.Insert || opts.Overwrite || opts.Prune) {
+		if syncer, ok := applier.(interface {
+			SyncCatalogSidecars(context.Context, *Manifest) error
+		}); ok {
+			if err := syncer.SyncCatalogSidecars(ctx, plan.Manifest); err != nil {
+				return res, fmt.Errorf("sync catalog sidecars: %w", err)
+			}
+		}
+	}
 	return res, nil
 }
 

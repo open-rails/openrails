@@ -38,7 +38,8 @@ const (
 // OpenRails (current). It is computed without mutating anything, printed, and
 // then converged by Apply.
 type ApplyPlan struct {
-	Groups []GroupPlan `json:"groups"`
+	Groups   []GroupPlan `json:"groups"`
+	Manifest *Manifest   `json:"-"`
 }
 
 // PlanOptions controls how the manifest is compared to the live catalog.
@@ -94,7 +95,7 @@ func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error)
 // PlanWithOptions computes the convergence diff using explicit reconciliation
 // semantics.
 func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts PlanOptions) (*ApplyPlan, error) {
-	plan := &ApplyPlan{}
+	plan := &ApplyPlan{Manifest: m}
 	for _, group := range m.TierGroups {
 		gp := GroupPlan{Slug: group.Slug}
 
@@ -467,6 +468,9 @@ func PriceLabel(productSlug string, price Price) string {
 	interval := price.Interval
 	if interval == "" {
 		interval = "month"
+	}
+	if interval == "once" {
+		return fmt.Sprintf("%s %s once", productSlug, formatMoney(price.UnitAmount, price.Currency))
 	}
 	if price.IntervalCount > 1 {
 		interval = fmt.Sprintf("%d %ss", price.IntervalCount, interval)

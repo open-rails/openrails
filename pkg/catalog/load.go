@@ -17,6 +17,9 @@ const SupportedVersion = 1
 // matching cozy-art's mapping (month=30, year=365). OpenRails prices store a
 // BillingCycleDays integer rather than an interval enum.
 func intervalDays(interval string, count int) int {
+	if normalizeSlug(interval) == "once" {
+		return 0
+	}
 	if count <= 0 {
 		count = 1
 	}
@@ -86,11 +89,11 @@ func (m *Manifest) validate() error {
 		return fmt.Errorf("unsupported catalog manifest version %d (want %d)", m.Version, SupportedVersion)
 	}
 	m.DefaultProviders = normalizeProviders(m.DefaultProviders)
-	if err := m.normalizeFlatProducts(); err != nil {
+	if err := m.normalizeProducts(); err != nil {
 		return err
 	}
 	if len(m.TierGroups) == 0 {
-		return errors.New("catalog manifest must define tier_groups or products")
+		return errors.New("catalog manifest must define products")
 	}
 	meterKinds, err := m.validateMeters()
 	if err != nil {
@@ -181,12 +184,13 @@ func (m *Manifest) validateProduct(groupSlug string, product *Product, productSl
 	return nil
 }
 
-func (m *Manifest) normalizeFlatProducts() error {
+func (m *Manifest) normalizeProducts() error {
+	if len(m.Products) == 0 && len(m.TierGroups) > 0 {
+		return errors.New("catalog manifest must define products, not tier_groups")
+	}
+	m.TierGroups = nil
 	if len(m.Products) == 0 {
 		return nil
-	}
-	if len(m.TierGroups) > 0 {
-		return errors.New("catalog manifest must use either tier_groups or top-level products, not both")
 	}
 	groups := map[string]int{}
 	for _, p := range m.Products {
@@ -214,9 +218,9 @@ func validateCredits(productSlug string, credits Credits) error {
 			credit.Unit = credit.Currency
 			credits[key] = credit
 		}
-		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validLedgerCurrency(unit) {
-			return fmt.Errorf("product %q credit %q has invalid unit %q", productSlug, key, credit.Unit)
-		}
+			if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
+				return fmt.Errorf("product %q credit %q has invalid unit %q", productSlug, key, credit.Unit)
+			}
 		if credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productSlug, key)
 		}
@@ -255,8 +259,8 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if price.Interval == "" {
 		price.Interval = "month"
 	}
-	if price.Interval != "month" && price.Interval != "year" {
-		return fmt.Errorf("product %q price #%d interval must be month or year", product.Slug, idx+1)
+	if price.Interval != "once" && price.Interval != "month" && price.Interval != "year" {
+		return fmt.Errorf("product %q price #%d interval must be once, month, or year", product.Slug, idx+1)
 	}
 	if price.IntervalCount <= 0 {
 		price.IntervalCount = 1
@@ -272,19 +276,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 
 	if price.Providers != nil {
 		price.Providers = normalizeProviders(price.Providers)
-	}
-
-	// Fold the cozy-art stripe_price_id shorthand into provider_links.stripe.
-	if sid := strings.TrimSpace(price.StripePriceID); sid != "" {
-		if price.ProviderLinks == nil {
-			price.ProviderLinks = map[string]map[string]string{}
-		}
-		if price.ProviderLinks["stripe"] == nil {
-			price.ProviderLinks["stripe"] = map[string]string{}
-		}
-		if _, ok := price.ProviderLinks["stripe"]["price_id"]; !ok {
-			price.ProviderLinks["stripe"]["price_id"] = sid
-		}
 	}
 
 	// Per-provider eligibility (shape-only; no chain calls). Solana settles
@@ -445,6 +436,11 @@ func validLedgerCurrency(value string) bool {
 		}
 	}
 	return true
+}
+
+func validCreditUnit(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return validLedgerCurrency(value) || normalizeSlug(value) == value
 }
 
 func validPriceCurrency(value string) bool {

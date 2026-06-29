@@ -7,7 +7,263 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 612
+next_id: 621
+
+---
+
+# #612: end-to-end catalog provider sync, usage reporting, and metered invoicing
+
+**Completed:** no
+**Status:** EPIC — PLANNED 2026-06-29, REVIEWED 2026-06-29 (Claude). Prove the runtime lifecycle for rich v1 catalog products (provider sync, app-reported usage, metered rating, invoice finalization, collection) through real OpenRails HTTP surfaces. Too large for one issue — split into children A–G (see Recommended split); the three real wiring gaps + the native no-provider proof come first.
+
+Added 2026-06-29 (Codex). Issue #611 proves the catalog manifest/example can declare the full v1 product surface. This issue proves the declared products actually work at runtime: pushing provider-backed products into Stripe/NMI, reporting usage for metered resources, rating VM/storage usage, finalizing invoices, and collecting through supported rails. Tests must exercise real OpenRails HTTP/DB/Redis paths, not mocks-only unit tests.
+
+REVIEW 2026-06-29 (Claude), grounded in the code. The DIRECTION is right but the issue overstates
+greenfield and is an EPIC, not one issue. Reframe before working it.
+
+ALREADY EXISTS — do NOT rebuild (verified):
+- `internal/integrationharness/` ALREADY boots the real standalone gin server AND the embedded
+  surface against a shared migrated Postgres (OpenRails + AuthKit `profiles.*`) + shared Redis
+  (`harness.go`, `merchant_catalog_http_test.go`). The "add an integration suite" task is EXTEND.
+- Catalog publish over HTTP: `internal/http/handlers/merchant_catalog_publish.go` +
+  `POST /v1/merchant/catalog/publish` + `cmd/openrails/catalog_apply.go`. #611 owns proving this
+  WRITE path; #612 must consume an already-published catalog, NOT re-prove publish.
+- Rating + money primitives: `metered_rating.go` (`AccrueMeteredAggregate`), `arrears.go`
+  (`AccrueOwed` → arrears ledger), `invoice.go` / `invoice_items.go`, Stripe collection
+  (`subscriptions/stripe_invoice_collection.go`). Usage-limit ENFORCEMENT exists
+  (`admission/spendgate/policy.go` `EffectiveWindows`). Sidecar schema/repo coverage exists
+  (`migrations/postgres/034_catalog_benefits_metering.up.sql`,
+  `internal/db/repo/catalog_platform_sidecars_integration_test.go`).
+
+THE REAL RUNTIME GAPS — what #612 should actually close (all verified open):
+1. METER SIDECAR → RATING: `AccrueMeteredAggregate` takes a `MeteredRate` param and has NO catalog
+   caller — nothing reads a `catalog_price_metered` sidecar to drive the rate. Wire it.
+2. BUNDLE INCLUDES → MATERIALIZATION: `grants.go` materializes entitlements + credit deposits but
+   has NO `includes`/bundle handling — buying a bundle does not grant its included products.
+3. USAGE-LIMIT SPEC → CUSTOMER BINDING: spendgate ENFORCES windows but nothing CREATES a
+   customer-scoped binding from a catalog usage-limit spec at grant/subscribe/purchase time.
+
+SCOPE: as one issue this is an ocean — 4 rails × 8 use cases × (publish→sync→report→rate→invoice→
+collect) + idempotency + embedded AND remote. Unreviewable and unschedulable. Make #612 an EPIC and
+split (mirrors authkit #143→#145-149). The three gaps above are the actual missing wiring; provider
+sync/collection are mostly adapters over machinery that already exists, so sequence them AFTER the
+no-provider native proof.
+
+## Child issues
+
+- #614: OpenRails-NATIVE lifecycle proof (the CI-default acceptance): publish → grant → report usage →
+     rate → finalize invoice → mark payable, in the existing harness, no provider secrets. The spine; do FIRST.
+- #615: Meter sidecar → rating wiring + DigitalOcean/Runpod metered invoice proof (gap #1).
+- #616: Bundle `includes` → materialization on purchase (gap #2).
+- #617: Usage-limit spec → customer binding at grant time + Claude-Code 5x/20x admission proof (gap #3).
+- #618: Stripe test-mode sync + collection (opt-in; fail-loud when creds set).
+- #619: NMI sandbox sync + collection (opt-in).
+- #620: Solana money-movement proof: catalog metadata stays internal; Solana carries only plan/payment ids.
+
+A–D are OpenRails-native and unblock acceptance without secrets; E–G are provider adapters, opt-in.
+
+## Goal
+
+Prove the full lifecycle for the complex catalog use cases:
+
+- Push the v1 catalog into OpenRails through the real `push-merchant-catalog` / `POST /v1/merchant/catalog/publish` path.
+- Sync provider-backed catalog products/prices to Stripe and NMI as far as those providers support the data model.
+- Keep Solana as a money-movement rail: verify recurring/one-time Solana prices preserve OpenRails-owned billing/product metadata internally and only require Solana plan/payment identifiers where applicable.
+- Let embedded and remote host apps report usage for metered products, such as VM runtime and cloud storage.
+- Rate metered usage from catalog meter definitions into owed balances or invoice items.
+- Finalize a billing-period invoice and collect it through Stripe/NMI where credentials are available.
+
+## Provider Matrix
+
+- [ ] Stripe test mode: catalog product/price sync, recurring price, intro/free-trial price where Stripe supports it, one-time product price, invoice-item collection for metered invoice totals.
+- [ ] NMI sandbox: recurring plan sync where supported, one-time/charge behavior where supported, invoice collection through NMI vault/charge path.
+- [ ] Solana/devnet or local validator: prove OpenRails catalog metadata remains internal and Solana is only used for payment/recurring transfer identifiers; do not pretend Solana stores rich billing metadata.
+- [ ] DB-only/OpenRails-native prices: usage-limited and metered products that intentionally do not sync to external providers.
+
+## Runtime Use Cases To Prove
+
+- [ ] Doujins-style single premium entitlement: checkout/subscription grants the premium entitlement and renewals maintain it.
+- [ ] SaaS multi-tier ladder: lower tier to higher tier upgrade is recognized by `tier_group`/`tier_rank`; free trial then recurring renewal stores and bills correctly.
+- [ ] AI credits: purchase/subscription grants custom `ai-image-credit` balances and they can be spent through existing credit paths.
+- [ ] API prepay: purchase grants custom `api-credit` balances for fal.ai-style API spend.
+- [ ] Content marketplace: one-off movie/video purchase creates durable ownership/product-access records.
+- [ ] Bundle product: buying a bundle grants or materializes access for its included products, not only the parent product.
+- [ ] Claude Code-style rate limits: 5x and 20x plans materialize usage-limit policy windows for the customer and admission checks enforce the correct window.
+- [ ] DigitalOcean/Runpod-style metered billing: app reports VM runtime and storage usage; OpenRails rates usage from catalog meter sidecars; end-of-period invoice has correct line items and total.
+
+## Integration Test Plan
+
+- [ ] EXTEND the existing `internal/integrationharness` (already boots standalone + embedded over shared Postgres + Redis) with the lifecycle assertions below — do not stand up a new harness.
+- [ ] Start from an already-published catalog (reuse #611's publish path + fixture, unique slugs per run); this issue consumes the catalog, it does NOT re-prove publish.
+- [ ] Drive remote host usage reporting through the public/merchant HTTP surface that a separate app would call.
+- [ ] Drive embedded usage reporting through the embedded service/HTTP surface where host-owned auth is bypassed but OpenRails engine, DB, Redis, and services are real.
+- [ ] Query the real DB only for assertions that are not exposed through HTTP yet: meter sidecars, invoice item source rows, product include rows, usage-limit bindings.
+- [ ] Assert month-end invoice finalization from reported VM/storage usage: usage rows covered exactly once, invoice item totals match rated usage, invoice totals/payment state are correct.
+- [ ] Assert collection paths:
+      Stripe/NMI sandbox tests are opt-in via credentials and fail loudly when enabled;
+      default CI still runs the real OpenRails HTTP/DB/Redis lifecycle without live provider secrets.
+- [ ] Re-run the same invoice collection idempotently and prove duplicate usage/invoice/payment rows are not created.
+- [ ] Keep existing unit tests as parser/rating helpers only; they are not acceptance proof for this issue.
+
+## Implementation Tasks
+
+- [ ] Inventory the current usage-reporting HTTP/embedded surfaces and decide the canonical app-reporting API for metered catalog usage.
+- [ ] Wire catalog meter sidecars into the usage rating path so `catalog_price_metered` drives invoice item amounts.
+- [ ] Wire product `includes` into ownership/materialization so bundle purchases grant included products.
+- [ ] Wire product usage-limit specs into customer-scoped usage bindings at grant/subscription/purchase time.
+- [ ] Add or fix provider sync gaps for Stripe/NMI discovered by the provider matrix tests; keep provider-specific limitations explicit in docs and assertions.
+- [ ] Add docs that explain OpenRails owns rich catalog/billing metadata; providers are payment/sync adapters with smaller metadata surfaces.
+
+## Acceptance
+
+- One focused command runs the non-provider lifecycle proof against a real OpenRails HTTP server and real Postgres/Redis.
+- Separate opt-in commands run Stripe test-mode and NMI sandbox provider proofs when credentials are set.
+- The DigitalOcean/Runpod case is proven end to end: report VM/storage usage, finalize invoice, collect or mark payable, and verify exact line totals.
+- The tests do not rely on mocks as acceptance criteria; mocks may only support narrow error-path unit coverage.
+- Opt-in provider tests FAIL LOUDLY when credentials are set — they must run, never silently skip — so a configured CI cannot pass while the provider path is broken.
+
+## Non-goals
+
+- Refunds, voids, disputes, and chargebacks — out of scope; this issue proves the forward lifecycle only.
+- Full embedded × remote matrix for every use case. Prove the canonical app-reporting API end-to-end ONCE; smoke that both mounts reach it rather than re-running all 8 use cases on both surfaces.
+- Provider features beyond what the rail natively supports (e.g. rich catalog metadata on Solana) — assert OpenRails owns the metadata, do not pretend the provider stores it.
+- Re-proving #611's publish/persist write path (sidecars, registry rows, includes rows) — depend on it.
+
+## Depends on / coordinates with
+
+- #611 (catalog declare + publish + persist): #612 starts where #611 ends — from a published catalog.
+
+---
+
+# #620: Solana catalog money-movement proof
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: prove Solana stays a payment rail while OpenRails keeps catalog, product, entitlement, usage, and invoice metadata internally.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Add an opt-in integration proof for Solana/devnet or local validator using a published catalog product.
+- [ ] Assert Solana inputs/outputs carry only payment/plan identifiers needed for money movement.
+- [ ] Assert OpenRails DB remains the source of truth for product metadata, granted benefits, and invoice/payment state.
+- [ ] Fail loudly when Solana test credentials/config are set but the provider proof cannot run.
+
+## Acceptance
+
+- Solana provider proof is skipped only when unconfigured and fails when configured but broken.
+- The test proves OpenRails-owned catalog metadata is not expected to round-trip through Solana.
+
+---
+
+# #619: NMI sandbox catalog sync and collection proof
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: prove the NMI sandbox path can collect OpenRails-owned catalog charges without pretending NMI supports richer catalog semantics than it does.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Add opt-in NMI sandbox integration coverage starting from an already-published catalog.
+- [ ] Exercise the supported recurring/one-time charge path against real OpenRails invoice/payment state.
+- [ ] Document or assert provider limitations instead of adding compatibility shims.
+- [ ] Fail loudly when NMI credentials are set but the provider proof cannot run.
+
+## Acceptance
+
+- Configured NMI sandbox tests collect or fail with a real provider error; they do not silently skip.
+- Default CI still runs without NMI secrets.
+
+---
+
+# #618: Stripe test-mode catalog sync and collection proof
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: prove Stripe test-mode sync/collection over the existing provider machinery, with OpenRails still owning catalog semantics.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Add opt-in Stripe test-mode integration coverage starting from an already-published catalog.
+- [ ] Exercise recurring price, one-time price, free-trial/intro behavior where Stripe supports it, and invoice-item collection for metered totals.
+- [ ] Assert provider ids are stored and reused idempotently.
+- [ ] Fail loudly when Stripe credentials are set but the provider proof cannot run.
+
+## Acceptance
+
+- Configured Stripe tests sync/collect through real Stripe test mode and fail on broken credentials or behavior.
+- Default CI still runs without Stripe secrets.
+
+---
+
+# #617: catalog usage-limit specs create customer bindings
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: wire catalog-declared usage-limit specs into customer-scoped admission bindings when a qualifying product is granted.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Trace the grant/subscription/purchase path that already materializes entitlements and credits.
+- [ ] Reuse the existing spendgate policy/binding model; do not create a parallel limiter.
+- [ ] Create customer bindings from catalog usage-limit specs at grant time.
+- [ ] Add integration coverage for Claude Code-style 5x and 20x plans through real admission checks.
+
+## Acceptance
+
+- Buying/granting the 5x plan creates the expected customer windows and admission enforces them.
+- Buying/granting the 20x plan creates stronger windows without stale 5x bindings shadowing it.
+
+---
+
+# #616: catalog bundle includes materialize on grant
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: buying or granting a bundle product must materialize access to its included products.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Trace `grants.go` and the existing ownership/access materialization path.
+- [ ] Reuse the persisted `product_includes` data from #611.
+- [ ] Grant included product access when the parent bundle is granted.
+- [ ] Make the operation idempotent.
+
+## Acceptance
+
+- A real integration test buys/grants a bundle and proves included products are accessible.
+- Replaying the grant does not duplicate ownership/access rows.
+
+---
+
+# #615: catalog meter sidecars drive rating
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: wire `catalog_price_metered` sidecars into metered rating so catalog-declared VM/storage prices produce invoiceable totals.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [ ] Find the canonical usage-reporting path and keep it as the single app-facing API.
+- [ ] Load the matching catalog metered price sidecar before calling `AccrueMeteredAggregate`.
+- [ ] Rate VM runtime and storage usage using the catalog rate, unit, and interval.
+- [ ] Add idempotency coverage so usage is rated once per billing period/source.
+
+## Acceptance
+
+- A real integration test reports VM/storage usage, rates it from catalog sidecars, finalizes an invoice, and verifies exact line totals.
+- Re-running rating/finalization does not duplicate owed or invoice item rows.
 
 ---
 
@@ -68,171 +324,6 @@ Make the catalog example and integration coverage exhaustive for the planned v1 
 
 ---
 
-# #610: explicit credential mutability posture for embedded vs standalone runtimes
-
-**Completed:** yes
-**Status:** DONE 2026-06-29: embedded fixed-credential posture is explicit, standalone builds the writable merchant secret store, fixed embedded runtimes read from `embedded.PaymentProviders` and cannot write provider-account secrets through `UpsertMerchantConfig`, merchant settings routes fail closed unless mutable credentials are selected, and checkout/vault/Solana worker paths use read-only merchant secret interfaces. Verified with focused package tests and `go test ./...` on the worktree branch.
-
-Added 2026-06-29 (Codex). OpenRails currently has both read/write merchant
-secret-store machinery and fixed runtime provider configs, but the product
-posture is implicit. Make credential mutability an explicit runtime decision:
-embedded host apps normally run with fixed credentials supplied by the host;
-standalone/multi-tenant OpenRails may run with mutable merchant credentials.
-
-## Goal
-
-Define and enforce two runtime credential modes:
-
-- `fixed_credentials`: OpenRails can read/use provider credentials supplied at
-  boot by the host, but cannot mutate provider credentials. Merchant
-  payment-provider configuration routes are unavailable. This is the normal
-  embedded Doujins/Hentai0/Cozy shape.
-- `mutable_credentials`: OpenRails owns a writable merchant secret store
-  (DB+envelope or Vault) and may expose merchant/admin routes that create,
-  rotate, disable, or delete provider credentials. This is standalone or true
-  multi-tenant OpenRails.
-
-In embedded mode, OpenRails should not need Vault client credentials merely to
-run billing. If credentials come from HashiCorp Vault, the host deployment
-should project them into the host process, and the host should pass fixed
-credential material into embedded OpenRails.
-
-## Tasks
-
-- [x] Add a first-class credential posture field/API on embedded/standalone
-      startup, defaulting embedded runtimes to `fixed_credentials` and
-      standalone runtimes to `mutable_credentials` only when a writable secret
-      backend is configured.
-- [x] Gate `RouteSetMerchantSettings` and the
-      `/v1/merchant/payment-providers*` write surface on mutable credentials.
-      In fixed mode, do not mount those routes; if directly registered, return a
-      clear startup error rather than a runtime surprise.
-- [x] Split provider credential inputs from writable merchant secret stores:
-      fixed mode receives provider credentials/read-only secret snapshots from
-      `embedded.PaymentProviders` or a read-only injected store; mutable mode
-      builds a writable `MerchantSecretStore`.
-- [x] Make checkout/vault/worker paths read through a common credential
-      resolver interface so fixed and mutable modes share lookup behavior
-      without giving fixed mode write capability.
-- [x] Keep Vault support only behind mutable mode unless a caller explicitly
-      injects a read-only Vault-derived resolver; OpenRails should not log into
-      HashiCorp Vault just because it is embedded.
-- [x] Update docs/tests: embedded defaults exclude merchant-settings routes,
-      fixed mode cannot write provider credentials, mutable mode can, and
-      route-set registration fails closed when the posture disagrees.
-- [x] Coordinate the Doujins consumer cleanup in `/home/fidika/doujins`
-      issue `#429`.
-
-## Non-goals
-
-- Do not remove standalone Vault/DB secret-store support.
-- Do not add provider-secret write APIs to embedded fixed-credential hosts.
-- Do not require hosts to use HashiCorp Vault; host secret projection is an ops
-  concern outside OpenRails.
-
----
-
-# #609: replace flat rail provider config with typed blocks and routing
-
-**Completed:** yes
-**Status:** DONE 2026-06-29: config now accepts typed provider blocks, `routing` replaces `role` with a compatibility alias, and `provider_write_mode` replaces `mode` with a compatibility alias. Docs/examples/tests are updated, Doujins consumer changes are in place, and `go test ./...` passes.
-
-Added 2026-06-29 (Codex). The current `config.RailConfig` combines NMI,
-CCBill, Stripe, and Solana fields in one flat struct, and its `role` field is
-really provider routing, not RBAC. Replace the public config shape with typed
-per-provider blocks and rename `role` to `routing`.
-
-## Goal
-
-Make payment-provider config read like what it is:
-
-```yaml
-rails:
-  - name: mobius
-    type: nmi
-    routing: default
-    nmi:
-      security_key: ...
-      tokenization_key: ...
-      webhook_secret: ...
-  - name: stripe_old
-    type: stripe
-    routing: legacy
-    stripe:
-      secret_key: ...
-```
-
-Keep unmarshalling simple: use pointer substructs, not Go interfaces. Validate
-exactly one provider block matches `type`, then normalize once at boot into the
-existing runtime `RailSet`/provider routing model.
-
-## Tasks
-
-- [x] Add the new config DTOs: `RailConfig{Name, Type, Routing, NMI, Stripe,
-      CCBill, Solana}` plus provider-specific structs.
-- [x] Rename config routing constants/helpers from `RailRole*` /
-      `EffectiveRole` to `RailRouting*` / `EffectiveRouting`; values should be
-      `default`, `manual`, and `legacy`.
-- [x] Accept old `role` as a temporary compatibility alias; reject configs that
-      set both `role` and `routing` to different values.
-- [x] Normalize the new typed DTOs into the current runtime rail representation
-      at one boundary so checkout, vault, webhook, reconcile, and worker code do
-      not learn the config input shape.
-- [x] Update standalone YAML/docs/examples and embedded README snippets to use
-      typed blocks plus `routing`.
-- [x] Update validation tests for: one matching provider block, wrong block for
-      type, legacy flat config compatibility, legacy `role` alias, conflicting
-      `role`/`routing`, and one default route per provider type.
-- [x] Publish the change with release notes calling out the compatibility alias
-      and the host-app follow-up for Doujins.
-
-## Non-goals
-
-- Do not add interface-based unmarshalling.
-- Do not redesign provider account storage unless a concrete caller requires it;
-  this issue is about the public rail config/input shape.
-
----
-
-# #608: authkit-owned-standalone-authority-bootstrap
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29: AuthKit `v0.74.0` was tagged/pushed and OpenRails now depends on it. The old `push-bootstrap` first-authority path has been replaced with `push-auth-bootstrap`, which loads AuthKit bootstrap YAML and calls `ApplyBootstrapManifest`; startup bootstrap uses AuthKit's once-only marker. OpenRails no longer parses its own first-authority manifest shape. Validation: `go test -p 1 ./...` passed.
-
-OpenRails standalone bootstrap should use AuthKit's intended root-of-trust path: declare/import the initial operator user, seed root `owner` through AuthKit's bootstrap semantics, and register trusted remote applications. OpenRails should keep merchant/provider/catalog bootstrap separate.
-
-## Metadata
-
-- Category: cleanup
-- Status: completed
-- Passes: true
-
-## Desired model
-
-- Delete the current `push-bootstrap` implementation that parses `authority.bootstrap_merchant_slug` and calls `ControlPlane.Bootstrap` as the first-authority path.
-- Add a boring standalone command, `push-auth-bootstrap`, that reads an AuthKit bootstrap YAML file and calls `ApplyBootstrapManifest`.
-- Use AuthKit's manifest structs, validation, idempotency, seed-if-absent root owner behavior, and result counters instead of duplicating authority rules in OpenRails.
-- Keep the command explicitly standalone-only: it requires OpenRails' embedded AuthKit/control-plane wiring and is not part of embedded host app runtime surfaces.
-- Keep OpenRails merchant config, provider secrets, catalog, and merchant-local API-key provisioning in the existing merchant/bootstrap commands.
-
-## Non-goals
-
-- Do not keep compatibility for the old `config/bootstrap.example.yaml` authority shape.
-- Do not make OpenRails create/import users outside AuthKit's bootstrap path.
-- Do not merge merchant/provider/catalog bootstrap into AuthKit authority bootstrap.
-- Do not make this command useful for embedded host apps.
-
-**Tasks:**
-- [x] Replace `config/bootstrap.example.yaml` with an AuthKit-shaped authority example or rename it so the standalone authority file is clearly AuthKit-owned.
-- [x] Remove the OpenRails `BootstrapManifest` / `BootstrapAuthorityManifest` path if it has no remaining caller after the command swap.
-- [x] Replace `push-bootstrap` wiring with the new AuthKit authority command, or hard-cut the command name if the old name would keep the wrong mental model.
-- [x] Wire the command to load AuthKit bootstrap YAML and call the embedded AuthKit client's `ApplyBootstrapManifest` with explicit operator flags (`--file`, dry-run/apply semantics, startup-only/name if still useful).
-- [x] Audit `ControlPlane.Bootstrap`; keep it only for merchant-local permission-group/API-key bootstrap used by embedded tests, harnesses, and `mint-merchant-api-key`.
-- [x] Update standalone startup bootstrap, docs, and examples so first identity/bootstrap instructions point at AuthKit authority YAML first, then OpenRails merchant config/catalog.
-- [x] Add focused tests proving the command uses AuthKit bootstrap parsing and rejects old OpenRails/merchant manifest shapes.
-
----
-
 # #607: provider-intents-as-boring-outbound-queue
 
 **Completed:** no
@@ -240,10 +331,45 @@ OpenRails standalone bootstrap should use AuthKit's intended root-of-trust path:
 
 Make provider intents easier to reason about: pending/retryable/in-flight/dead work belongs in Postgres; historical attempts/results belong in ClickHouse; successful work should leave the queue.
 
+REVIEW 2026-06-29 (Claude) — STOP before building: the core move (DELETE successful rows) breaks
+effectively-once and can DOUBLE-CHARGE. Grounded in the schema + code:
+
+- `provider_intents` is the "durable, effectively-once outbox for ALL outbound provider mutations"
+  (#358). Dedup is the UNIQUE index `uq_provider_intents_merchant_idempotency_key` on
+  `(merchant_id, idempotency_key)`. The column comment is explicit: "Re-enqueues conflict here ...
+  anything else untouched — effectively-once per logical intent." The SUCCEEDED row IS the dedupe
+  tombstone — a re-enqueue with the same key hits the conflict and becomes a no-op instead of
+  re-running the provider mutation.
+- So "delete successful rows" DIRECTLY removes effectively-once: after deletion a re-enqueue with the
+  same idempotency_key finds no conflict → inserts a fresh `pending` intent → the executor runs the
+  provider call AGAIN → double charge / duplicate refund / duplicate subscription. Retries and webhook
+  replays are exactly when this fires.
+- The non-goal "do not add a dedupe table unless a replay bug proves it is needed" is BACKWARDS: the
+  existing row IS the dedupe record. Delete it and forbid a replacement and you have removed
+  idempotency from a PAYMENTS queue — the replay bug is then structurally guaranteed.
+
+BETTER DESIGN — separate the WORKING SET from the DEDUPE TOMBSTONE (both already exist):
+1. Boring-queue reads come FREE, no deletes. `idx_provider_intents_due` is ALREADY a partial index over
+   active states (pending/in_flight/failed_retryable/unknown_needs_verify), so `openrails intents`
+   ("what work exists now?") already excludes succeeded rows. Point the CLI at the active set —
+   succeeded work leaves the WORKING SET without leaving the TABLE.
+2. Bound growth by trimming WEIGHT, not IDENTITY. After logging the rich attempt to ClickHouse, prune
+   the heavy columns (`payload`, `result_evidence`) on succeeded/superseded/expired rows but RETAIN the
+   slim tombstone (`merchant_id`, `idempotency_key`, terminal status, `executed_at`, result pointer).
+   Or move it to a slim `provider_intent_dedupe` archive that enqueue ALSO checks. Delete the bytes,
+   never the identity.
+3. The dedupe check MUST stay in Postgres. The issue itself says execution must not depend on ClickHouse
+   — so ClickHouse holds HISTORY but can NEVER be the idempotency source. "delete row + rely on
+   ClickHouse" violates the issue's own non-goal.
+
+Net: keep the boring-queue ergonomics (the goal is right); drop only the "DELETE succeeded rows"
+mechanism (the means is unsafe). The table stays the effectively-once outbox; the CLI gets its clean
+"current work" view from the partial index. Desired model / tasks / non-goals below revised accordingly.
+
 ## Metadata
 
 - Category: cleanup
-- Status: not_started
+- Status: not_started (REVISED 2026-06-29 — redesign before build)
 - Passes: false
 
 ## Desired model
@@ -251,27 +377,28 @@ Make provider intents easier to reason about: pending/retryable/in-flight/dead w
 - `provider_intents` is the durable outbound queue, not an audit ledger.
 - Live queue states are the only normal residents: `pending`, `in_flight`, `failed_retryable`, `unknown_needs_verify`.
 - Operator-attention states may remain temporarily: `failed_terminal` as dead-letter, maybe parked/retryable states while blocked.
-- Successful, superseded, and expired work is logged to ClickHouse and removed from the queue once the transition is committed.
-- `openrails intents` answers "what work exists now?"
+- Successful, superseded, and expired work is logged to ClickHouse and leaves the WORKING SET once the transition is committed — but its slim dedupe tombstone (merchant_id, idempotency_key, terminal status) STAYS in Postgres. The active partial index, not row deletion, is what makes it leave the queue view.
+- `openrails intents` answers "what work exists now?" (reads the active partial index, not the whole table)
 - `openrails intents-log` answers "what happened historically?"
 - ClickHouse remains optional/degraded analytics/audit storage; provider execution must not depend on ClickHouse being reachable.
 
 ## Non-goals
 
-- Do not add a second tombstone/dedupe table unless a real replay bug proves it is needed.
-- Do not make ClickHouse a source of truth for billing/provider decisions.
+- Do not DELETE the dedupe record. The succeeded `provider_intents` row (UNIQUE on merchant_id+idempotency_key) IS the effectively-once tombstone; keep it (slimmed) or move it to a durable Postgres archive enqueue also checks. A slim dedupe table is REQUIRED here, not forbidden — only a SECOND redundant one is.
+- Do not make ClickHouse a source of truth for billing/provider decisions OR for idempotency — the dedupe check must read Postgres only.
 - Do not preserve compatibility for the old "provider_intents as forever ledger" mental model.
 
 **Tasks:**
 - [ ] Rename comments/docs/help text that call `provider_intents` a ledger where that implies permanent history; use queue/outbox/dead-letter wording.
-- [ ] Delete successful provider-intent rows after the success transition, with provider mutation events already written to ClickHouse.
-- [ ] Delete or prune `superseded` and `expired` provider-intent rows after logging the terminal event; keep only if a caller still needs them for immediate response shape.
+- [ ] Point `openrails intents` (the "current work" view) at the ACTIVE partial index (`idx_provider_intents_due` states), so succeeded rows leave the working set with NO row deletion.
+- [ ] On the success transition, log the rich attempt to ClickHouse, then PRUNE the heavy columns (`payload`, `result_evidence`) on the succeeded row while RETAINING the slim dedupe tombstone (merchant_id, idempotency_key, terminal status, executed_at, result pointer). Do NOT delete the row — effectively-once depends on it.
+- [ ] Same prune-not-delete for `superseded`/`expired`: trim weight, keep the identity row so re-enqueue stays a no-op.
 - [ ] Treat `failed_terminal` as the dead-letter state: keep it visible in `openrails intents`, then add an explicit operator action or bounded prune path later if needed.
-- [ ] Update `EnqueueAndExecute` so synchronous callers get a useful result even when success deletes the queue row.
+- [ ] Keep `EnqueueAndExecute`'s effectively-once contract intact: a re-enqueue on an existing (now slimmed) succeeded tombstone returns the prior result and does NOT re-execute the provider call.
 - [ ] Update CLI output/tests so `openrails intents --status=succeeded` is no longer expected to show historical successes; use `openrails intents-log --phase=succeeded`.
 - [ ] Remove remaining writes/reads of the Postgres `external_provider_mutation_logs` path once ClickHouse provider mutation events cover the CLI/history use case.
 - [ ] Remove the Postgres `external_provider_mutation_logs` table from the greenfield schema and merchant-delete/export bookkeeping after the app no longer uses it.
-- [ ] Keep focused tests proving: success deletes queue row, retryable/dead rows stay, logs are emitted/spooled, and duplicate enqueue behavior is acceptable without permanent success tombstones.
+- [ ] Keep focused tests proving: success leaves the active working set but a re-enqueue with the same idempotency_key still no-ops (NO second provider call); retryable/dead rows stay; logs are emitted/spooled; and a webhook-replay / retry after success does NOT double-execute.
 
 ---
 

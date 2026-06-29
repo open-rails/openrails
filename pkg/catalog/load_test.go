@@ -21,31 +21,32 @@ const goodManifest = `
 version: 1
 default_providers: [stripe]
 
-tier_groups:
-  - slug: cozy
-    display_name: Cozy Art Plans
-    products:
-      - slug: initiate
-        display_name: Novice
-        tier_rank: 1
-        entitlements: [tier:initiate]
-        prices:
-          - currency: usd
-            unit_amount: 1200
-            interval: month
-      - slug: craftsman
-        display_name: Craftsman
-        tier_rank: 2
-        entitlements: [tier:craftsman]
-        prices:
-          - currency: usd
-            unit_amount: 2900
-            interval: month
-          - currency: usd
-            unit_amount: 1500
-            interval: month
-            stripe_price_id: price_legacy123
-            legacy_import: true
+products:
+  - slug: initiate
+    display_name: Novice
+    tier_group: cozy
+    tier_rank: 1
+    entitlements: [tier:initiate]
+    prices:
+      - currency: usd
+        unit_amount: 1200
+        interval: month
+  - slug: craftsman
+    display_name: Craftsman
+    tier_group: cozy
+    tier_rank: 2
+    entitlements: [tier:craftsman]
+    prices:
+      - currency: usd
+        unit_amount: 2900
+        interval: month
+      - currency: usd
+        unit_amount: 1500
+        interval: month
+        provider_links:
+          stripe:
+            price_id: price_legacy123
+        legacy_import: true
 `
 
 func TestLoad_Good(t *testing.T) {
@@ -72,9 +73,8 @@ func TestLoad_Good(t *testing.T) {
 	if legacy.Status != StatusArchived {
 		t.Fatalf("legacy import should be archived, got %q", legacy.Status)
 	}
-	// stripe_price_id shorthand folds into provider_links.stripe.price_id.
 	if got := legacy.ProviderLinks["stripe"]["price_id"]; got != "price_legacy123" {
-		t.Fatalf("stripe_price_id not folded: %q", got)
+		t.Fatalf("provider_links.stripe.price_id not preserved: %q", got)
 	}
 	// default_providers inherited.
 	if got := m.providersFor(craftsman, craftsman.Prices[0]); len(got) != 1 || got[0] != "stripe" {
@@ -83,25 +83,50 @@ func TestLoad_Good(t *testing.T) {
 }
 
 func TestLoad_BadVersion(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 2\ntier_groups: []\n"))
+	_, err := Load(writeManifest(t, "version: 2\nproducts: []\n"))
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("want unsupported version error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsTierGroups(t *testing.T) {
+	_, err := Load(writeManifest(t, "version: 1\ntier_groups: []\n"))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want tier_groups unknown-field error, got %v", err)
+	}
+}
+
+func TestValidateRejectsTierGroupsOnly(t *testing.T) {
+	m := &Manifest{
+		Version:    SupportedVersion,
+		TierGroups: []TierGroup{{Slug: "old", Products: []Product{{Slug: "p", DisplayName: "P"}}}},
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "not tier_groups") {
+		t.Fatalf("want tier_groups-only rejection, got %v", err)
+	}
+}
+
+func TestValidateProductsIsIdempotent(t *testing.T) {
+	m, err := Load(writeManifest(t, goodManifest))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("second Validate: %v", err)
 	}
 }
 
 func TestLoad_DuplicatePriceByTerms(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - slug: p
-        display_name: P
-        tier_rank: 1
-        prices:
-          - {currency: usd, unit_amount: 1000, interval: month}
-          - {currency: usd, unit_amount: 1000, interval: month}
+products:
+  - slug: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, interval: month}
+      - {currency: usd, unit_amount: 1000, interval: month}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -112,15 +137,9 @@ tier_groups:
 func TestLoad_DuplicateProductSlug(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g1
-    display_name: G1
-    products:
-      - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - slug: g2
-    display_name: G2
-    products:
-      - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate product slug") {
@@ -131,12 +150,9 @@ tier_groups:
 func TestLoad_MissingTierRank(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - {slug: p1, display_name: P1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: p2, display_name: P2, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "tier_rank is required") {
@@ -147,11 +163,8 @@ tier_groups:
 func TestLoad_TierRankOptionalForSingleProduct(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - {slug: p, display_name: P, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -165,13 +178,10 @@ tier_groups:
 func TestLoad_TierRankAllowsZeroAndNegative(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - {slug: free, display_name: Free, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: starter, display_name: Starter, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: pro, display_name: Pro, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -192,25 +202,19 @@ func TestLoad_TierRankDirectionSurvivesRenumberAndNegativePrepend(t *testing.T) 
 			name: "renumber",
 			body: `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - {slug: starter, display_name: Starter, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: pro, display_name: Pro, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `,
 		},
 		{
 			name: "prepend-negative",
 			body: `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - {slug: free, display_name: Free, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: starter, display_name: Starter, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - {slug: pro, display_name: Pro, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+products:
+  - {slug: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `,
 		},
 	}
@@ -241,16 +245,14 @@ func ranksBySlug(m *Manifest) map[string]int {
 func TestLoad_SolanaNonStablecoinRejected(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - slug: p
-        display_name: P
-        tier_rank: 1
-        providers: [solana]
-        prices:
-          - {currency: eur, unit_amount: 1000, interval: month}
+products:
+  - slug: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    providers: [solana]
+    prices:
+      - {currency: eur, unit_amount: 1000, interval: month}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
@@ -362,16 +364,14 @@ products:
 func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - slug: p
-        display_name: P
-        tier_rank: 1
-        providers: [solana]
-        prices:
-          - {currency: usdc, unit_amount: 1000, interval: month}
+products:
+  - slug: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    providers: [solana]
+    prices:
+      - {currency: usdc, unit_amount: 1000, interval: month}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("usdc + solana should be accepted, got %v", err)
@@ -381,18 +381,16 @@ tier_groups:
 func TestLoad_BadInterval(t *testing.T) {
 	body := `
 version: 1
-tier_groups:
-  - slug: g
-    display_name: G
-    products:
-      - slug: p
-        display_name: P
-        tier_rank: 1
-        prices:
-          - {currency: usd, unit_amount: 1000, interval: week}
+products:
+  - slug: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, interval: week}
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "interval must be month or year") {
+	if err == nil || !strings.Contains(err.Error(), "interval must be once, month, or year") {
 		t.Fatalf("want interval error, got %v", err)
 	}
 }

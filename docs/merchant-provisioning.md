@@ -13,7 +13,7 @@ OpenRails splits provisioning into three file-backed surfaces:
   manifest: initial users, trusted remote applications, and root roles.
 - `push-merchant-config` declares merchants, profile/config, provider accounts,
   provider secrets, and optional host-app issuer ownership.
-- `push-merchant-catalog` declares products, prices, tier groups, and provider
+- `push-merchant-catalog` declares products, prices, product tier metadata, and provider
   catalog links.
 
 The merchant config manifest carries an inline `issuer` (the host application's
@@ -146,8 +146,8 @@ merchants:
 Catalog manifests are explicitly catalog-scoped and may contain one or more
 merchant catalog entries:
 
-See `config/catalog.example.yaml` for a fuller example with tier
-groups, products, prices, provider fan-out, and provider links.
+See `config/catalog.example.yaml` for a fuller example with products, prices,
+provider fan-out, and provider links.
 
 ```yaml
 version: 1

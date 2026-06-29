@@ -12,14 +12,20 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/catalog"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -88,19 +94,17 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	productSlug := "plan-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := &catalog.Manifest{
 		Version: catalog.SupportedVersion,
-		TierGroups: []catalog.TierGroup{{
-			Slug: groupSlug,
-			Products: []catalog.Product{{
-				Slug:        productSlug,
-				DisplayName: "Plan Product",
-				Description: "inserted through HTTP-backed catalog apply",
-				TierRank:    intPtr(1),
-				Prices: []catalog.Price{{
-					UnitAmount:    1299,
-					Currency:      "usd",
-					Interval:      "month",
-					IntervalCount: 1,
-				}},
+		Products: []catalog.Product{{
+			Slug:        productSlug,
+			DisplayName: "Plan Product",
+			Description: "inserted through HTTP-backed catalog apply",
+			TierGroup:   groupSlug,
+			TierRank:    intPtr(1),
+			Prices: []catalog.Price{{
+				UnitAmount:    1299,
+				Currency:      "usd",
+				Interval:      "month",
+				IntervalCount: 1,
 			}},
 		}},
 	}
@@ -124,15 +128,14 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	require.Equal(t, "Plan Product", product.DisplayName)
 
 	updatedManifest := *manifest
-	updatedManifest.TierGroups = []catalog.TierGroup{{
-		Slug: groupSlug,
-		Products: []catalog.Product{{
-			Slug:        productSlug,
-			DisplayName: "Plan Product Updated",
-			Description: "updated through HTTP-backed catalog apply",
-			TierRank:    intPtr(2),
-			Prices:      manifest.TierGroups[0].Products[0].Prices,
-		}},
+	updatedManifest.TierGroups = nil
+	updatedManifest.Products = []catalog.Product{{
+		Slug:        productSlug,
+		DisplayName: "Plan Product Updated",
+		Description: "updated through HTTP-backed catalog apply",
+		TierGroup:   groupSlug,
+		TierRank:    intPtr(2),
+		Prices:      manifest.Products[0].Prices,
 	}}
 	require.NoError(t, updatedManifest.Validate())
 	plan, err = catalog.Plan(ctx, applier, &updatedManifest)
@@ -186,19 +189,17 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	productSlug := "publish-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
-		TierGroups: []catalog.TierGroup{{
-			Slug: groupSlug,
-			Products: []catalog.Product{{
-				Slug:        productSlug,
-				DisplayName: "Publish Product",
-				Description: "published through the live merchant catalog route",
-				TierRank:    intPtr(1),
-				Prices: []catalog.Price{{
-					UnitAmount:    1499,
-					Currency:      "usd",
-					Interval:      "month",
-					IntervalCount: 1,
-				}},
+		Products: []catalog.Product{{
+			Slug:        productSlug,
+			DisplayName: "Publish Product",
+			Description: "published through the live merchant catalog route",
+			TierGroup:   groupSlug,
+			TierRank:    intPtr(1),
+			Prices: []catalog.Price{{
+				UnitAmount:    1499,
+				Currency:      "usd",
+				Interval:      "month",
+				IntervalCount: 1,
 			}},
 		}},
 	}
@@ -254,6 +255,239 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(foundBody, &product))
 	require.Equal(t, productSlug, product.Slug)
+}
+
+func TestNativeCatalogLifecycleHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	standalone := h.StartStandalone("usd")
+	embedded := h.StartEmbeddedHost("usd")
+
+	token := standalone.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-native-lifecycle-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+
+	productSlug := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Products: []catalog.Product{{
+			Slug:         productSlug,
+			DisplayName:  "Native Lifecycle Product",
+			Description:  "published catalog anchor for native lifecycle proof",
+			Entitlements: []string{"native-lifecycle-premium"},
+			Credits: catalog.Credits{
+				"native-lifecycle-usd": {Currency: "usd", Amount: 10_000},
+			},
+			Prices: []catalog.Price{{
+				UnitAmount:    10_000,
+				Currency:      "usd",
+				Interval:      "once",
+				IntervalCount: 1,
+				Providers:     []string{},
+			}},
+		}},
+	}
+	require.NoError(t, manifest.Validate())
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var product billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &product))
+	require.NotEqual(t, uuid.Nil, product.ID)
+
+	for _, surface := range []*Surface{standalone, embedded} {
+		t.Run(surface.Name, func(t *testing.T) {
+			proveNativeCatalogLifecycle(t, h, surface, product.ID)
+		})
+	}
+}
+
+func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	standalone := h.StartStandalone("usd")
+	embedded := h.StartEmbeddedHost("usd")
+
+	token := standalone.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-metered-usage-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+	productSlug := "metered-usage-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	meterKey := "vm-seconds-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Meters: []catalog.Meter{{
+			Key:  meterKey,
+			Kind: "counter",
+		}},
+		Products: []catalog.Product{{
+			Slug:        productSlug,
+			DisplayName: "Metered Usage Product",
+			Prices: []catalog.Price{{
+				UnitAmount:    0,
+				Currency:      "usd",
+				Interval:      "month",
+				IntervalCount: 1,
+				Providers:     []string{},
+				Metered: &catalog.MeteredPrice{
+					Meter:    meterKey,
+					Rate:     250_000,
+					PerUnits: 100,
+				},
+			}},
+		}},
+	}
+	require.NoError(t, manifest.Validate())
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var product billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &product))
+	prices, err := (httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}).ListPricesByProduct(ctx, product.ID, true)
+	require.NoError(t, err)
+	require.Len(t, prices, 1)
+
+	for _, surface := range []*Surface{standalone, embedded} {
+		t.Run(surface.Name, func(t *testing.T) {
+			proveCatalogMeteredUsage(t, h, surface, prices[0].ID)
+		})
+	}
+}
+
+func proveCatalogMeteredUsage(t *testing.T, h *Harness, surface *Surface, priceID uuid.UUID) {
+	t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, h.DSN)
+	pool := dbi.Pool()
+	payerID := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+	})
+
+	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/usage/metered", surface.Token, map[string]any{
+		"customer_id": payerID.String(),
+		"currency":    "usd",
+		"price_id":    priceID.String(),
+		"source_id":   "period-" + surface.Name + "-" + uuid.NewString(),
+		"aggregate":   420,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+	var rated struct {
+		Amount int64 `json:"amount"`
+	}
+	require.NoError(t, json.Unmarshal(body, &rated))
+	require.Equal(t, int64(1_050_000), rated.Amount)
+
+	inv, err := money.NewMoneyService(dbi).FinalizeInvoice(ctx, identity.CustomerID(payerID), money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "open", inv.Status)
+	require.Equal(t, int64(1_050_000), inv.AmountDue)
+}
+
+func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, productID uuid.UUID) {
+	t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, h.DSN)
+	pool := dbi.Pool()
+	payer := openrails.CustomerID(uuid.New())
+	payerID := payer.UUID()
+	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payerID.String())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+	})
+
+	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	entitlementGrant, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: payerID,
+		Product:  &productID,
+		Kind:     grants.Entitlement,
+		Source:   grants.Purchase,
+		SourceID: uuid.NewString(),
+		Spec:     &grants.Spec{Entitlements: []string{"native-lifecycle-premium"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, entitlementGrant))
+
+	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/customers/"+payerID.String()+"/entitlements", surface.Token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var entitlementRows []struct {
+		Entitlement string `json:"entitlement"`
+	}
+	require.NoError(t, json.Unmarshal(body, &entitlementRows))
+	require.Len(t, entitlementRows, 1)
+	require.Equal(t, "native-lifecycle-premium", entitlementRows[0].Entitlement)
+
+	client := surface.Client()
+	depositSourceID := uuid.New()
+	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
+		CustomerID: &payer,
+		Invoker:    payerID.String(),
+		Currency:   "usd",
+		Amount:     10_000,
+		Source:     "catalog-native-lifecycle",
+		SourceID:   &depositSourceID,
+	})
+	require.NoError(t, err)
+	balance, err := client.Balance(ctx, payerID.String())
+	require.NoError(t, err)
+	require.Equal(t, int64(10_000), balance.BalanceAmount)
+
+	requestID := "native-lifecycle-" + surface.Name + "-" + uuid.NewString()
+	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
+		CustomerID:      payerID.String(),
+		Invoker:         payerID.String(),
+		InvokerType:     string(identity.InvokerTypePayer),
+		Resource:        "vm-small",
+		Currency:        "usd",
+		EstimatedAmount: 2_500,
+		RequestID:       requestID,
+		Source:          "native-lifecycle",
+	}})
+	require.NoError(t, err)
+	require.Len(t, verdicts, 1)
+	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
+	require.NoError(t, client.Capture(ctx, requestID, 2_000, &openrails.CaptureUsage{
+		EventType: "vm-runtime",
+		Resource:  "vm-small",
+		Metadata:  map[string]any{"tier": "basic"},
+		Source:    "native-lifecycle",
+		SourceID:  requestID,
+	}))
+
+	from := time.Now().Add(-time.Hour)
+	to := time.Now().Add(time.Hour)
+
+	rows, err := client.UsageRollup(ctx, payerID.String(), "usd", from, to, "resource")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "vm-small", rows[0].Key)
+	require.Equal(t, int64(2_000), rows[0].TotalAmount)
+
+	inv, err := money.NewMoneyService(dbi).FinalizeInvoice(ctx, identity.CustomerID(payerID), money.DefaultCurrency, from, to)
+	require.NoError(t, err)
+	require.Equal(t, "paid", inv.Status)
+	require.Equal(t, int64(2_000), inv.UsageTotal)
+	require.Equal(t, int64(0), inv.AmountDue)
+
+	invAgain, err := money.NewMoneyService(dbi).FinalizeInvoice(ctx, identity.CustomerID(payerID), money.DefaultCurrency, from, to)
+	require.NoError(t, err)
+	require.Equal(t, inv.ID, invAgain.ID)
 }
 
 func requestJSON(t *testing.T, method, url, token string, body any) (int, []byte) {

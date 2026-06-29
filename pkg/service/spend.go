@@ -107,6 +107,34 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, curre
 	return out, err
 }
 
+type MeteredUsageRequest struct {
+	CustomerID identity.CustomerID
+	Currency   string
+	PriceID    uuid.UUID
+	SourceID   string
+	Aggregate  int64
+}
+
+func (s *Service) AccrueMeteredUsage(ctx context.Context, req MeteredUsageRequest) (int64, error) {
+	if req.CustomerID.IsZero() {
+		return 0, fmt.Errorf("customer_id required")
+	}
+	if req.PriceID == uuid.Nil {
+		return 0, fmt.Errorf("price_id required")
+	}
+	if req.SourceID == "" {
+		return 0, fmt.Errorf("source_id required")
+	}
+	if req.Aggregate < 0 {
+		return 0, fmt.Errorf("aggregate must be >= 0")
+	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return 0, err
+	}
+	return s.moneyService().AccrueCatalogMeteredAggregate(ctx, req.CustomerID, currency, req.PriceID, req.SourceID, req.Aggregate)
+}
+
 // InvoiceLineItemDTO is one metered-usage line on an invoice: the per-event_type
 // (per model/endpoint) total amount, event count, and summed dimensions. It
 // mirrors models.InvoiceLineItem on the public facade so HTTP/library callers

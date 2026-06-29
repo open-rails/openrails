@@ -149,20 +149,19 @@ func findProduct(plan *ApplyPlan, slug string) *ProductPlan {
 const planManifest = `
 version: 1
 default_providers: [stripe]
-tier_groups:
-  - slug: cozy
-    display_name: Cozy
-    products:
-      - slug: initiate
-        display_name: Novice
-        tier_rank: 1
-        prices:
-          - {currency: usd, unit_amount: 1200, interval: month}
-      - slug: craftsman
-        display_name: Craftsman
-        tier_rank: 2
-        prices:
-          - {currency: usd, unit_amount: 1300, interval: month}
+products:
+  - slug: initiate
+    display_name: Novice
+    tier_group: cozy
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1200, interval: month}
+  - slug: craftsman
+    display_name: Craftsman
+    tier_group: cozy
+    tier_rank: 2
+    prices:
+      - {currency: usd, unit_amount: 1300, interval: month}
 `
 
 func TestPlan_CreateWhenEmpty(t *testing.T) {

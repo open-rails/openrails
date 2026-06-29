@@ -1,8 +1,8 @@
 // Package catalog implements a terraform-style declarative "catalog-as-code"
 // apply for the OpenRails billing catalog (issue #162).
 //
-// A manifest is a YAML file describing the desired catalog: a tree of
-// tier_groups > products > prices. Applying it converges OpenRails (and, via
+// A manifest is a YAML file describing the desired catalog: products > prices.
+// Applying it converges OpenRails (and, via
 // the existing declarative-provider dispatch in issue #208, every configured
 // payment rail) onto that desired state. The pipeline is the proven
 // cozy-art shape — load → validate → plan → print → apply — with two
@@ -14,10 +14,9 @@
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //
-// The schema is kept drop-in compatible with cozy-art's billing_catalog.yaml,
-// extended with a per-product / per-price `providers:` list (issue #208) and
-// optional `provider_links` so a single apply fans out across Stripe, NMI,
-// CCBill and Solana.
+// The schema includes per-product / per-price `providers:` lists and optional
+// `provider_links` so a single apply fans out across Stripe, NMI, CCBill and
+// Solana.
 package catalog
 
 // Manifest is the root of a catalog-as-code document.
@@ -29,10 +28,11 @@ package catalog
 type Manifest struct {
 	Version          int          `json:"version" yaml:"version"`
 	DefaultProviders []string     `json:"default_providers,omitempty" yaml:"default_providers,omitempty"`
-	TierGroups       []TierGroup  `json:"tier_groups" yaml:"tier_groups"`
 	Products         []Product    `json:"products,omitempty" yaml:"products,omitempty"`
 	Meters           []Meter      `json:"meters,omitempty" yaml:"meters,omitempty"`
 	UsageLimits      []UsageLimit `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
+
+	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
 
 type Meter struct {
@@ -52,7 +52,6 @@ type UsageLimitWindow struct {
 }
 
 // TierGroup is a named grouping of products (e.g. a subscription plan family).
-// Mirrors cozy-art's tier_groups nesting for drop-in compatibility.
 type TierGroup struct {
 	Slug        string    `json:"slug" yaml:"slug"`
 	DisplayName string    `json:"display_name" yaml:"display_name"`
@@ -132,11 +131,6 @@ type Price struct {
 	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
-
-	// StripePriceID is a cozy-art-compatible shorthand for
-	// provider_links.stripe.price_id. When set it is folded into ProviderLinks
-	// during load. This keeps cozy-art's billing_catalog.yaml loadable as-is.
-	StripePriceID string `json:"stripe_price_id,omitempty" yaml:"stripe_price_id,omitempty"`
 
 	// LegacyImport, when true, declares a historical price that already has
 	// subscribers but is no longer purchasable: it is created/converged to

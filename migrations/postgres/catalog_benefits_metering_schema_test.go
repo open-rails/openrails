@@ -17,13 +17,15 @@ func TestCatalogBenefitsMeteringMigration(t *testing.T) {
 		"CREATE TABLE openrails.product_usage_limit_bindings",
 		"CREATE TABLE openrails.catalog_meters",
 		"CREATE TABLE openrails.catalog_price_metered",
+		"CREATE TABLE openrails.product_includes",
 		"catalog_meters_kind_check CHECK",
 		"catalog_price_metered_rate_positive CHECK",
 		"COMMENT ON TABLE openrails.catalog_meters IS '#599 billing meter registry",
 		"COMMENT ON TABLE openrails.product_usage_limit_bindings IS '#594 materialized product-derived usage-limit bindings",
+		"COMMENT ON TABLE openrails.product_includes IS '#611 catalog bundle includes",
 		"ENABLE ROW LEVEL SECURITY",
 	} {
-		if !strings.Contains(sql, want) {
+		if !strings.Contains(sql, want) && !strings.Contains(readMigration(t, "035_catalog_product_includes.up.sql"), want) {
 			t.Errorf("catalog benefit/metering migration missing %q", want)
 		}
 	}
@@ -38,4 +40,13 @@ func TestCatalogBenefitsMeteringMigration(t *testing.T) {
 			t.Errorf("catalog benefit/metering migration should stay sidecar/no-hot-counter; found %q", forbidden)
 		}
 	}
+}
+
+func readMigration(t *testing.T, name string) string {
+	t.Helper()
+	b, err := FS.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
 }

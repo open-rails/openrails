@@ -2,12 +2,16 @@ package money
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type MeterKind string
@@ -71,6 +75,45 @@ func (s *MoneyService) AccrueMeteredAggregate(ctx context.Context, payer identit
 		return 0, err
 	}
 	return amount, nil
+}
+
+func (s *MoneyService) AccrueCatalogMeteredAggregate(ctx context.Context, payer identity.CustomerID, currency string, priceID uuid.UUID, sourceID string, aggregate int64) (int64, error) {
+	if priceID == uuid.Nil {
+		return 0, fmt.Errorf("price_id required")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var meter string
+	var kind string
+	var rateMicros int64
+	var perUnits int64
+	var perSeconds *int64
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return s.db.Pool().QueryRow(ctx, `
+SELECT cpm.meter_key, cm.kind, cpm.rate_micros, cpm.per_units, cpm.per_seconds
+FROM openrails.catalog_price_metered cpm
+JOIN openrails.catalog_meters cm
+  ON cm.merchant_id = cpm.merchant_id AND cm.key = cpm.meter_key
+WHERE cpm.merchant_id = $1 AND cpm.price_id = $2`,
+			tid.UUID(), priceID).Scan(&meter, &kind, &rateMicros, &perUnits, &perSeconds)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("catalog metered price %s not found", priceID)
+	}
+	if err != nil {
+		return 0, err
+	}
+	rate := MeteredRate{
+		Kind:       MeterKind(kind),
+		RateMicros: rateMicros,
+		PerUnits:   perUnits,
+	}
+	if perSeconds != nil {
+		rate.Per = time.Duration(*perSeconds) * time.Second
+	}
+	return s.AccrueMeteredAggregate(ctx, payer, currency, meter, sourceID, aggregate, rate)
 }
 
 func divRoundHalfUp(a, b, denom int64) (int64, error) {

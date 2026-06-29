@@ -18032,3 +18032,232 @@ Scope:
 - [x] Tests: mock unit tests (idempotency, url/events in-place patch, version recreate, lost-secret recreate, ignore-unmanaged) + LIVE create/reconcile/delete + LIVE delivery-through-tunnel with signature verify.
 
 ---
+
+# #613: exported embedded catalog push helper
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29: `pkg/embedded.PushMerchantCatalog` now owns catalog manifest parsing, plan/apply execution, mutation flags, provider-extra reporting, and minimal runtime construction. The `openrails push-merchant-catalog` Cobra command calls that helper. The helper supports file-backed and in-memory manifest input plus an optional host-supplied pgx pool for embedded consumers. Validation: `go test ./pkg/embedded ./cmd/openrails ./pkg/catalog`, `go run ./cmd/openrails push-merchant-catalog --help`, and a real plan-only `go run ./cmd/openrails push-merchant-catalog --file <temp catalog>` passed.
+
+Added 2026-06-29 (Codex). OpenRails already has the right catalog convergence path in `cmd/openrails/catalog_apply.go`: load YAML, resolve merchant, build a minimal catalog runtime, plan with `pkg/catalog`, and apply with explicit mutation flags. That behavior should be available as a small exported embedded helper so host apps can expose their own `push-catalog` / `upsert-catalog` command over their compiled catalog source of truth.
+
+## Goal
+
+Expose a boring Go API for pushing a declared merchant catalog from embedded hosts:
+
+```go
+embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{...})
+```
+
+The helper should cover the common command behavior: parse a catalog manifest, plan, optionally apply `insert` / `overwrite` / `prune`, and write the same human-readable output the CLI uses.
+
+## Tasks
+
+- [x] Extract the command-private catalog manifest load/plan/apply path from `cmd/openrails/catalog_apply.go` into an exported package reachable by embedded consumers.
+- [x] Support both file-backed and in-memory manifest input so apps like Doujins can push their compiled `config/openrails-bootstrap.yaml` without writing a temp file.
+- [x] Keep mutation semantics identical to the current CLI: no flags means plan-only; `Insert`, `Overwrite`, and `Prune` compose.
+- [x] Make `openrails push-merchant-catalog` call the exported helper instead of maintaining its own separate implementation.
+- [x] Keep provider extras reporting/prune behavior in one place, or explicitly leave it CLI-only if the provider runtime requirements make that simpler.
+- [x] Add focused tests for manifest parsing, plan-only behavior, and the CLI-to-helper wiring.
+
+## Non-goals
+
+- Do not build a generic embedded CLI framework.
+- Do not make embedded hosts shell out to the `openrails` binary.
+- Do not merge catalog push with AuthKit authority bootstrap or merchant-secret config.
+- Do not make server startup reapply arbitrary external catalog files.
+
+## Consumers
+
+- Doujins tracker: `/home/fidika/doujins/agents/progress.md` issue `#430`.
+
+---
+
+# #614: native catalog lifecycle proof
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): added the CI-default native lifecycle proof to the existing OpenRails integration harness. `TestNativeCatalogLifecycleHTTP` starts the real standalone server and embedded service surface over shared migrated Postgres + Redis, publishes a catalog product, anchors an entitlement grant to the published product, funds the payer through the public credit-deposit HTTP route, admits/captures usage through both HTTP surfaces, verifies usage rollup, finalizes a real invoice, and proves invoice finalization idempotency. Catalog-metered sidecar rating remains #615.
+
+Verified 2026-06-29:
+- `go test -tags=integration ./internal/integrationharness -run TestNativeCatalogLifecycleHTTP -count=1`
+- `go test -tags=integration ./internal/integrationharness -run 'Test(StandaloneMerchantCatalog|NativeCatalogLifecycle)' -count=1`
+
+Parent: #612.
+Depends on: #611.
+
+## Tasks
+
+- [x] Extend `internal/integrationharness`; do not create a new harness.
+- [x] Start from a published catalog fixture from #611.
+- [x] Drive grant/funding, usage report, invoice finalization, and paid/payable-state assertions through real OpenRails surfaces where those surfaces exist.
+- [x] Smoke both standalone and embedded mounts only enough to prove they reach the same lifecycle path.
+
+## Acceptance
+
+- [x] One focused integration command proves the non-provider lifecycle against real Gin/Postgres/Redis:
+      `go test -tags=integration ./internal/integrationharness -run TestNativeCatalogLifecycleHTTP -count=1`.
+- [x] Provider adapters are not required for this test to pass.
+
+---
+
+# #610: explicit credential mutability posture for embedded vs standalone runtimes
+
+**Completed:** yes
+**Status:** DONE 2026-06-29: embedded fixed-credential posture is explicit, standalone builds the writable merchant secret store, fixed embedded runtimes read from `embedded.PaymentProviders` and cannot write provider-account secrets through `UpsertMerchantConfig`, merchant settings routes fail closed unless mutable credentials are selected, and checkout/vault/Solana worker paths use read-only merchant secret interfaces. Verified with focused package tests and `go test ./...` on the worktree branch.
+
+Added 2026-06-29 (Codex). OpenRails currently has both read/write merchant
+secret-store machinery and fixed runtime provider configs, but the product
+posture is implicit. Make credential mutability an explicit runtime decision:
+embedded host apps normally run with fixed credentials supplied by the host;
+standalone/multi-tenant OpenRails may run with mutable merchant credentials.
+
+## Goal
+
+Define and enforce two runtime credential modes:
+
+- `fixed_credentials`: OpenRails can read/use provider credentials supplied at
+  boot by the host, but cannot mutate provider credentials. Merchant
+  payment-provider configuration routes are unavailable. This is the normal
+  embedded Doujins/Hentai0/Cozy shape.
+- `mutable_credentials`: OpenRails owns a writable merchant secret store
+  (DB+envelope or Vault) and may expose merchant/admin routes that create,
+  rotate, disable, or delete provider credentials. This is standalone or true
+  multi-tenant OpenRails.
+
+In embedded mode, OpenRails should not need Vault client credentials merely to
+run billing. If credentials come from HashiCorp Vault, the host deployment
+should project them into the host process, and the host should pass fixed
+credential material into embedded OpenRails.
+
+## Tasks
+
+- [x] Add a first-class credential posture field/API on embedded/standalone
+      startup, defaulting embedded runtimes to `fixed_credentials` and
+      standalone runtimes to `mutable_credentials` only when a writable secret
+      backend is configured.
+- [x] Gate `RouteSetMerchantSettings` and the
+      `/v1/merchant/payment-providers*` write surface on mutable credentials.
+      In fixed mode, do not mount those routes; if directly registered, return a
+      clear startup error rather than a runtime surprise.
+- [x] Split provider credential inputs from writable merchant secret stores:
+      fixed mode receives provider credentials/read-only secret snapshots from
+      `embedded.PaymentProviders` or a read-only injected store; mutable mode
+      builds a writable `MerchantSecretStore`.
+- [x] Make checkout/vault/worker paths read through a common credential
+      resolver interface so fixed and mutable modes share lookup behavior
+      without giving fixed mode write capability.
+- [x] Keep Vault support only behind mutable mode unless a caller explicitly
+      injects a read-only Vault-derived resolver; OpenRails should not log into
+      HashiCorp Vault just because it is embedded.
+- [x] Update docs/tests: embedded defaults exclude merchant-settings routes,
+      fixed mode cannot write provider credentials, mutable mode can, and
+      route-set registration fails closed when the posture disagrees.
+- [x] Coordinate the Doujins consumer cleanup in `/home/fidika/doujins`
+      issue `#429`.
+
+## Non-goals
+
+- Do not remove standalone Vault/DB secret-store support.
+- Do not add provider-secret write APIs to embedded fixed-credential hosts.
+- Do not require hosts to use HashiCorp Vault; host secret projection is an ops
+  concern outside OpenRails.
+
+---
+
+# #609: replace flat rail provider config with typed blocks and routing
+
+**Completed:** yes
+**Status:** DONE 2026-06-29: config now accepts typed provider blocks, `routing` replaces `role` with a compatibility alias, and `provider_write_mode` replaces `mode` with a compatibility alias. Docs/examples/tests are updated, Doujins consumer changes are in place, and `go test ./...` passes.
+
+Added 2026-06-29 (Codex). The current `config.RailConfig` combines NMI,
+CCBill, Stripe, and Solana fields in one flat struct, and its `role` field is
+really provider routing, not RBAC. Replace the public config shape with typed
+per-provider blocks and rename `role` to `routing`.
+
+## Goal
+
+Make payment-provider config read like what it is:
+
+```yaml
+rails:
+  - name: mobius
+    type: nmi
+    routing: default
+    nmi:
+      security_key: ...
+      tokenization_key: ...
+      webhook_secret: ...
+  - name: stripe_old
+    type: stripe
+    routing: legacy
+    stripe:
+      secret_key: ...
+```
+
+Keep unmarshalling simple: use pointer substructs, not Go interfaces. Validate
+exactly one provider block matches `type`, then normalize once at boot into the
+existing runtime `RailSet`/provider routing model.
+
+## Tasks
+
+- [x] Add the new config DTOs: `RailConfig{Name, Type, Routing, NMI, Stripe,
+      CCBill, Solana}` plus provider-specific structs.
+- [x] Rename config routing constants/helpers from `RailRole*` /
+      `EffectiveRole` to `RailRouting*` / `EffectiveRouting`; values should be
+      `default`, `manual`, and `legacy`.
+- [x] Accept old `role` as a temporary compatibility alias; reject configs that
+      set both `role` and `routing` to different values.
+- [x] Normalize the new typed DTOs into the current runtime rail representation
+      at one boundary so checkout, vault, webhook, reconcile, and worker code do
+      not learn the config input shape.
+- [x] Update standalone YAML/docs/examples and embedded README snippets to use
+      typed blocks plus `routing`.
+- [x] Update validation tests for: one matching provider block, wrong block for
+      type, legacy flat config compatibility, legacy `role` alias, conflicting
+      `role`/`routing`, and one default route per provider type.
+- [x] Publish the change with release notes calling out the compatibility alias
+      and the host-app follow-up for Doujins.
+
+## Non-goals
+
+- Do not add interface-based unmarshalling.
+- Do not redesign provider account storage unless a concrete caller requires it;
+  this issue is about the public rail config/input shape.
+
+---
+
+# #608: authkit-owned-standalone-authority-bootstrap
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29: AuthKit `v0.74.0` was tagged/pushed and OpenRails now depends on it. The old `push-bootstrap` first-authority path has been replaced with `push-auth-bootstrap`, which loads AuthKit bootstrap YAML and calls `ApplyBootstrapManifest`; startup bootstrap uses AuthKit's once-only marker. OpenRails no longer parses its own first-authority manifest shape. Validation: `go test -p 1 ./...` passed.
+
+OpenRails standalone bootstrap should use AuthKit's intended root-of-trust path: declare/import the initial operator user, seed root `owner` through AuthKit's bootstrap semantics, and register trusted remote applications. OpenRails should keep merchant/provider/catalog bootstrap separate.
+
+## Metadata
+
+- Category: cleanup
+- Status: completed
+- Passes: true
+
+## Desired model
+
+- Delete the current `push-bootstrap` implementation that parses `authority.bootstrap_merchant_slug` and calls `ControlPlane.Bootstrap` as the first-authority path.
+- Add a boring standalone command, `push-auth-bootstrap`, that reads an AuthKit bootstrap YAML file and calls `ApplyBootstrapManifest`.
+- Use AuthKit's manifest structs, validation, idempotency, seed-if-absent root owner behavior, and result counters instead of duplicating authority rules in OpenRails.
+- Keep the command explicitly standalone-only: it requires OpenRails' embedded AuthKit/control-plane wiring and is not part of embedded host app runtime surfaces.
+- Keep OpenRails merchant config, provider secrets, catalog, and merchant-local API-key provisioning in the existing merchant/bootstrap commands.
+
+## Non-goals
+
+- Do not keep compatibility for the old `config/bootstrap.example.yaml` authority shape.
+- Do not make OpenRails create/import users outside AuthKit's bootstrap path.
+- Do not merge merchant/provider/catalog bootstrap into AuthKit authority bootstrap.
+- Do not make this command useful for embedded host apps.
+
+**Tasks:**
+- [x] Replace `config/bootstrap.example.yaml` with an AuthKit-shaped authority example or rename it so the standalone authority file is clearly AuthKit-owned.
+- [x] Remove the OpenRails `BootstrapManifest` / `BootstrapAuthorityManifest` path if it has no remaining caller after the command swap.
+- [x] Replace `push-bootstrap` wiring with the new AuthKit authority command, or hard-cut the command name if the old name would keep the wrong mental model.
+- [x] Wire the command to load AuthKit bootstrap YAML and call the embedded AuthKit client's `ApplyBootstrapManifest` with explicit operator flags (`--file`, dry-run/apply semantics, startup-only/name if still useful).
+- [x] Audit `ControlPlane.Bootstrap`; keep it only for merchant-local permission-group/API-key bootstrap used by embedded tests, harnesses, and `mint-merchant-api-key`.
+- [x] Update standalone startup bootstrap, docs, and examples so first identity/bootstrap instructions point at AuthKit authority YAML first, then OpenRails merchant config/catalog.
+- [x] Add focused tests proving the command uses AuthKit bootstrap parsing and rejects old OpenRails/merchant manifest shapes.

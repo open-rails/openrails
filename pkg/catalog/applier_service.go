@@ -1,6 +1,9 @@
 package catalog
 
 import (
+	"context"
+	"fmt"
+
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -13,8 +16,76 @@ import (
 // NewServiceApplier returns the service as an Applier. A compile-time assertion
 // below guarantees *service.Service implements every method.
 func NewServiceApplier(svc *billingservice.Service) Applier {
-	return svc
+	return serviceApplier{Service: svc}
 }
 
-// Compile-time guarantee that the OpenRails facade satisfies Applier.
-var _ Applier = (*billingservice.Service)(nil)
+type serviceApplier struct {
+	*billingservice.Service
+}
+
+func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) error {
+	if a.Service == nil || m == nil {
+		return nil
+	}
+	req := billingservice.SyncCatalogSidecarsRequest{
+		UsageLimits: make([]billingservice.CatalogUsageLimitSpec, 0, len(m.UsageLimits)),
+		Meters:      make([]billingservice.CatalogMeterSpec, 0, len(m.Meters)),
+	}
+	for _, limit := range m.UsageLimits {
+		windows := make([]billingservice.CatalogUsageLimitWindowSpec, 0, len(limit.Windows))
+		for _, window := range limit.Windows {
+			windows = append(windows, billingservice.CatalogUsageLimitWindowSpec{
+				Window: window.Window,
+				Amount: window.Amount,
+			})
+		}
+		req.UsageLimits = append(req.UsageLimits, billingservice.CatalogUsageLimitSpec{
+			Key:     limit.Key,
+			Measure: limit.Measure,
+			Windows: windows,
+		})
+	}
+	for _, meter := range m.Meters {
+		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{Key: meter.Key, Kind: meter.Kind})
+	}
+	for _, product := range m.Products {
+		if len(product.Includes) > 0 {
+			req.ProductIncludes = append(req.ProductIncludes, billingservice.CatalogProductIncludesSpec{
+				ProductSlug:   product.Slug,
+				IncludedSlugs: append([]string(nil), product.Includes...),
+			})
+		}
+		for _, price := range product.Prices {
+			if price.Metered == nil {
+				continue
+			}
+			cycleDays := intervalDays(price.Interval, price.IntervalCount)
+			var cycle *int
+			if cycleDays > 0 {
+				cycle = &cycleDays
+			}
+			var perSeconds *int64
+			if price.Metered.Per != "" {
+				d, err := ParseDurationSpec(price.Metered.Per)
+				if err != nil {
+					return fmt.Errorf("product %q price %s metered per: %w", product.Slug, PriceLabel(product.Slug, price), err)
+				}
+				seconds := int64(d.Seconds())
+				perSeconds = &seconds
+			}
+			req.MeteredPrices = append(req.MeteredPrices, billingservice.CatalogMeteredPriceSpec{
+				ProductSlug:      product.Slug,
+				UnitAmount:       price.UnitAmount,
+				Currency:         price.Currency,
+				BillingCycleDays: cycle,
+				MeterKey:         price.Metered.Meter,
+				RateMicros:       price.Metered.Rate,
+				PerUnits:         price.Metered.PerUnits,
+				PerSeconds:       perSeconds,
+			})
+		}
+	}
+	return a.Service.SyncCatalogSidecars(ctx, req)
+}
+
+var _ Applier = serviceApplier{}
