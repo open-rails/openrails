@@ -43,7 +43,11 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	if a := e.App(); a != nil && a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
 	}
-	user := asm.NewHTTPHandler(embedhttp.Options{RouteSets: opts.RouteSets})
+	userRouteSets := routeSetsWithoutCustomer(opts.RouteSets)
+	user := http.NotFoundHandler()
+	if len(userRouteSets) > 0 {
+		user = asm.NewHTTPHandler(embedhttp.Options{RouteSets: userRouteSets})
+	}
 
 	// base is the canonical embedded mount ("/billing"); both handlers serve at
 	// base + "/v1/...".
@@ -61,6 +65,19 @@ func routeSetSelected(routeSets []embedded.RouteSet, want embedded.RouteSet) boo
 		}
 	}
 	return false
+}
+
+func routeSetsWithoutCustomer(routeSets []embedded.RouteSet) []embedded.RouteSet {
+	if len(routeSets) == 0 {
+		routeSets = embedded.EmbeddedDefaultRouteSets
+	}
+	out := make([]embedded.RouteSet, 0, len(routeSets))
+	for _, routeSet := range routeSets {
+		if routeSet != embedded.RouteSetCustomer {
+			out = append(out, routeSet)
+		}
+	}
+	return out
 }
 
 // combinedMount strips mountPrefix, rewrites to the canonical base, and routes

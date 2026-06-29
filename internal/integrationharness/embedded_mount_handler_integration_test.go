@@ -56,9 +56,10 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	handler, err := embgin.MountHandler(rt.Embedded(), embgin.MountOptions{
-		MountPrefix: "/api/openrails",
-		RouteSets:   []embedded.RouteSet{embedded.RouteSetMerchantAPI},
-		Gate:        httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
+		MountPrefix:            "/api/openrails",
+		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
+		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
+		DelegatedAuthenticator: authn,
 	})
 	require.NoError(t, err)
 

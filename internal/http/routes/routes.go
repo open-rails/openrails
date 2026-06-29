@@ -271,7 +271,17 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 }
 
 func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
-	if resolved, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
+	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
+		if err != nil {
+			switch {
+			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_merchant_unresolved"}
+			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_resource_scope_denied"}
+			default:
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
+			}
+		}
 		if resolved == nil {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
 		}
@@ -392,41 +402,41 @@ func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserCo
 	return uc, true
 }
 
-func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, bool) {
+func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {
 	resolver := g.ServiceCredentialResolver
 	if resolver == nil || r == nil {
-		return nil, false
+		return nil, nil, false
 	}
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
-		return nil, false
+		return nil, nil, false
 	}
 	if resolver.LooksLikeAPIKey(token) {
 		resolved, err := resolver.ResolveAPIKey(ctx, token)
 		if err != nil {
-			return nil, true
+			return nil, err, true
 		}
-		return resolved, true
+		return resolved, nil, true
 	}
 	if !controlplane.LooksLikeJWT(token) {
-		return nil, false
+		return nil, nil, false
 	}
 	if raResolver, ok := resolver.(remoteApplicationResolver); ok {
 		resolved, err := raResolver.ResolveRemoteApplication(ctx, token)
 		if err == nil {
-			return resolved, true
+			return resolved, nil, true
 		}
 		if allowJWTFallthrough && errors.Is(err, controlplane.ErrDelegatedInvalid) {
-			return nil, false
+			return nil, nil, false
 		}
 		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
-			return nil, true
+			return nil, err, true
 		}
 	}
 	if jwtResolver, ok := resolver.(serviceJWTResolver); ok {
 		resolved, err := jwtResolver.ResolveServiceJWT(ctx, token)
 		if err == nil {
-			return resolved, true
+			return resolved, nil, true
 		}
 		// A VERIFIED service JWT that is definitively rejected (cross-merchant
 		// resource scope, or its issuer owns no merchant) must surface as 403 — not
@@ -435,10 +445,10 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 		// falls through so delegated/user tokens reach their own resolvers.
 		if errors.Is(err, controlplane.ErrServiceCredentialScopeDenied) ||
 			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
-			return nil, true
+			return nil, err, true
 		}
 	}
-	return nil, false
+	return nil, nil, false
 }
 
 func bearerToken(header string) string {

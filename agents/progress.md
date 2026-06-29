@@ -642,7 +642,7 @@ for one decision. Replace with plain route-set membership.
   all `HTTPHandlerOptions.CredentialMode` plumbing.
 - Deleted the `RegisterMerchantSettingsRoutes` wrapper; callers register catalog
   and payment providers explicitly.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
 
 ## Current state
 
@@ -743,7 +743,7 @@ reimplements as a hand-rolled dispatch.
 - Direct gin route helpers no longer fall back to app-stored auth; they use
   explicit `RouteOptions.AuthProvider`, `RouteOptions.Gate`, or
   `RouteOptions.DelegatedAuthenticator`.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
 
 ## What was intentionally not deleted
 
@@ -873,7 +873,7 @@ become explicit caller actions.
 - Kept `Runtime.UpsertMerchantConfig` as the explicit provisioning path.
 - Deleted constructor-provisioning integration coverage and kept explicit
   `UpsertMerchantConfig` coverage.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
 
 ## Context
 
