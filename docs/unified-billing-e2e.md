@@ -39,10 +39,6 @@ Run against `~/cozy/e2e` (openrails:3053 is not host-published, so run from a
 container on the e2e network):
 
 ```sh
-OPENRAILS_API_KEY=$(docker compose exec -T openrails /usr/local/bin/openrails \
-  --config /app/config/openrails.config.yaml mint-merchant-api-key --merchant default \
-  | grep -o '"api_key":"[^"]*"' | cut -d'"' -f4)
-
 docker run --rm --network e2e_default \
   -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
   -e OPENRAILS_API_KEY="$OPENRAILS_API_KEY" -e BASE_URL=http://openrails:3053 \

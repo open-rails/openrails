@@ -139,20 +139,10 @@ func main() {
 		},
 	}
 
-	mintMerchantAPIKeyCmd := &cobra.Command{
-		Use:   "mint-merchant-api-key",
-		Short: "Mint a merchant-scoped OpenRails API key and print the one-time secret",
-		Args:  cobra.NoArgs,
-		RunE:  mintMerchantAPIKey,
-	}
-	mintMerchantAPIKeyCmd.Flags().String("name", "openrails-merchant-api-key", "API key display name")
-	mintMerchantAPIKeyCmd.Flags().String("merchant", "", "OpenRails merchant slug or id")
-	mintMerchantAPIKeyCmd.Flags().String("role", "", "Merchant role to mint against: owner, support, or viewer (default owner)")
-
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

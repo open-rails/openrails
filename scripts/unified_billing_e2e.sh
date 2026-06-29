@@ -19,11 +19,8 @@
 #   USER_ID=66666666-6666-6666-6666-666666666666 \
 #     sh scripts/unified_billing_e2e.sh
 #
-# In ~/cozy/e2e: mint the API key with
-#   docker compose exec -T openrails /usr/local/bin/openrails \
-#     --config /app/config/openrails.config.yaml mint-merchant-api-key
-# then run this from a container ON the e2e_default network (openrails:3053 is
-# not host-published):
+# In ~/cozy/e2e: provide a merchant API key, then run this from a container ON
+# the e2e_default network (openrails:3053 is not host-published):
 #   docker run --rm --network e2e_default \
 #     -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
 #     -e OPENRAILS_API_KEY=... -e BASE_URL=http://openrails:3053 \
