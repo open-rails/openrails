@@ -81,9 +81,23 @@ func (s *MoneyService) AccrueCatalogMeteredAggregate(ctx context.Context, payer 
 	if priceID == uuid.Nil {
 		return 0, fmt.Errorf("price_id required")
 	}
-	tid, err := merchant.Require(ctx)
+	meter, rate, err := s.lookupCatalogMeteredRate(ctx, priceID)
 	if err != nil {
 		return 0, err
+	}
+	return s.AccrueMeteredAggregate(ctx, payer, currency, meter, sourceID, aggregate, rate)
+}
+
+// lookupCatalogMeteredRate resolves the catalog metered sidecar for priceID into
+// its meter_key and MeteredRate (kind/rate/per). The sidecar is the source of
+// truth for how reported usage is rated: catalog_price_metered carries the
+// per-price rate, catalog_meters carries the meter kind, joined on
+// (merchant_id, meter_key). RLS-scoped to the request merchant; explicit
+// merchant_id predicate keeps it fail-closed.
+func (s *MoneyService) lookupCatalogMeteredRate(ctx context.Context, priceID uuid.UUID) (string, MeteredRate, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", MeteredRate{}, err
 	}
 	var meter string
 	var kind string
@@ -100,10 +114,10 @@ WHERE cpm.merchant_id = $1 AND cpm.price_id = $2`,
 			tid.UUID(), priceID).Scan(&meter, &kind, &rateMicros, &perUnits, &perSeconds)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("catalog metered price %s not found", priceID)
+		return "", MeteredRate{}, fmt.Errorf("catalog metered price %s not found", priceID)
 	}
 	if err != nil {
-		return 0, err
+		return "", MeteredRate{}, err
 	}
 	rate := MeteredRate{
 		Kind:       MeterKind(kind),
@@ -113,7 +127,137 @@ WHERE cpm.merchant_id = $1 AND cpm.price_id = $2`,
 	if perSeconds != nil {
 		rate.Per = time.Duration(*perSeconds) * time.Second
 	}
-	return s.AccrueMeteredAggregate(ctx, payer, currency, meter, sourceID, aggregate, rate)
+	return meter, rate, nil
+}
+
+// RateMeteredUsageFromEvents is the bridge from reported usage (openrails.usage_events,
+// written by RecordUsage) to catalog metered pricing on an invoice (#615). It
+// resolves the sidecar meter_key+kind for priceID, aggregates the payer's matching
+// usage over [from, to), and accrues the rated cost as a pending owed invoice item
+// at a DETERMINISTIC period source_id so a re-finalize of the same window never
+// double-accrues. Returns the rated amount in micros (0 when there is no usage).
+//
+// Aggregation convention (the meter_key IS the dimension key, and equals the
+// usage event_type — RecordUsage records usage under event_type == meter_key):
+//
+//   - An event's metered quantity lives in dimensions[meter_key].
+//   - counter meters: aggregate = SUM over matching events of
+//     COALESCE((dimensions->>meter_key)::bigint, 1) — the per-event unit count,
+//     defaulting to 1 (count the event itself) when the dimension is absent.
+//   - gauge meters: aggregate = SUM over matching events of
+//     COALESCE((dimensions->>meter_key)::bigint, 0) — the per-event unit-seconds,
+//     0 when the dimension is absent.
+//
+// Events match on (merchant_id, customer_id, currency, event_type=meter_key,
+// occurred_at ∈ [from, to)). RateMeteredAggregate then rounds once over the full
+// period aggregate, so integer-micros math is exact and rate-once.
+func (s *MoneyService) RateMeteredUsageFromEvents(ctx context.Context, payer identity.CustomerID, currency string, priceID uuid.UUID, from, to time.Time) (int64, error) {
+	if priceID == uuid.Nil {
+		return 0, fmt.Errorf("price_id required")
+	}
+	if payer.IsZero() {
+		return 0, fmt.Errorf("payer required")
+	}
+	if !to.After(from) {
+		return 0, fmt.Errorf("invalid period: to must be after from")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return 0, err
+	}
+	meter, rate, err := s.lookupCatalogMeteredRate(ctx, priceID)
+	if err != nil {
+		return 0, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Per-event default contribution when dimensions[meter_key] is absent:
+	// counter counts the row (1), gauge contributes nothing (0).
+	missingDefault := int64(0)
+	if rate.Kind == MeterKindCounter {
+		missingDefault = 1
+	}
+
+	var aggregate int64
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return s.db.Pool().QueryRow(ctx, `
+SELECT COALESCE(SUM(COALESCE((dimensions ->> $4)::bigint, $5::bigint)), 0)::bigint
+FROM openrails.usage_events
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND event_type = $4
+  AND occurred_at >= $6::timestamptz AND occurred_at < $7::timestamptz`,
+			tid.UUID(), payer.UUID(), cur, meter, missingDefault, from.UTC(), to.UTC()).Scan(&aggregate)
+	})
+	if err != nil {
+		return 0, err
+	}
+	if aggregate <= 0 {
+		return 0, nil
+	}
+
+	return s.AccrueMeteredAggregate(ctx, payer, cur, meter, meteredPeriodSourceID(from, to), aggregate, rate)
+}
+
+// meteredPeriodSourceID derives a deterministic idempotency source_id for a
+// metered accrual over [from, to). Re-running the sweep for the same window
+// yields the same source_id, so AccrueOwed (idempotent on (payer, source,
+// source_id)) refuses to double-accrue.
+func meteredPeriodSourceID(from, to time.Time) string {
+	return fmt.Sprintf("period:%d-%d", from.UTC().Unix(), to.UTC().Unix())
+}
+
+// sweepCatalogMeteredUsage rates every catalog metered sidecar the payer reported
+// usage for in [from, to) into pending owed invoice items, BEFORE invoice
+// finalization rolls them up. Bounded to "meters the customer actually reported
+// usage for in the period" by joining distinct reported event_types to the
+// merchant's catalog_price_metered.meter_key. Idempotent via the deterministic
+// period source_id, so re-finalize is a no-op.
+func (s *MoneyService) sweepCatalogMeteredUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	cur := normalizeCurrency(currency)
+
+	var priceIDs []uuid.UUID
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		rows, qerr := s.db.Pool().Query(ctx, `
+SELECT DISTINCT cpm.price_id
+FROM openrails.catalog_price_metered cpm
+JOIN (
+    SELECT DISTINCT event_type
+    FROM openrails.usage_events
+    WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+      AND occurred_at >= $4::timestamptz AND occurred_at < $5::timestamptz
+) ue ON ue.event_type = cpm.meter_key
+WHERE cpm.merchant_id = $1`,
+			tid.UUID(), payer.UUID(), cur, from.UTC(), to.UTC())
+		if qerr != nil {
+			return qerr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id uuid.UUID
+			if serr := rows.Scan(&id); serr != nil {
+				return serr
+			}
+			priceIDs = append(priceIDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, priceID := range priceIDs {
+		if _, err := s.RateMeteredUsageFromEvents(ctx, payer, cur, priceID, from, to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func divRoundHalfUp(a, b, denom int64) (int64, error) {

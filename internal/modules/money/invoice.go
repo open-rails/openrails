@@ -49,6 +49,16 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		return nil, err
 	}
 
+	// #615: rate reported usage (openrails.usage_events) into pending owed invoice
+	// items via the catalog metered sidecars the payer reported usage for in this
+	// period, BEFORE the finalize transaction rolls pending items onto the invoice.
+	// Runs in its own transactions (AccrueOwed) so the committed owed accruals are
+	// visible to the finalize tx below; idempotent on a deterministic period
+	// source_id, so a re-finalize accrues nothing new.
+	if err := s.sweepCatalogMeteredUsage(ctx, payer, cur, from.UTC(), to.UTC()); err != nil {
+		return nil, err
+	}
+
 	var inv *models.Invoice
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
