@@ -69,6 +69,15 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.True(t, cfg.IsTestMode())
 	})
 
+	t.Run("maps PROVIDER_WRITE_MODE to provider_write_mode", func(t *testing.T) {
+		t.Setenv("PROVIDER_WRITE_MODE", "limited")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		require.Equal(t, ProviderWriteModeLimited, cfg.GetProviderWriteMode())
+		require.True(t, cfg.IsLimitedMode())
+	})
+
 	t.Run("defaults to sandbox in development when test_mode is unset (#355)", func(t *testing.T) {
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
@@ -265,14 +274,14 @@ func TestProductionTestModeValidation(t *testing.T) {
 	t.Run("prod env rejects test_mode=true", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeFull
+		cfg.ProviderWriteMode = ProviderWriteModeFull
 		cfg.TestMode = true
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsDev(), "env=prod should not be dev")
 		assert.ErrorContains(t, Validate(cfg), "test_mode=true is not allowed outside development")
 	})
 
-	t.Run("prod env requires an explicit mode", func(t *testing.T) {
+	t.Run("prod env requires an explicit provider_write_mode", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.DB.Username = "billing_app"
@@ -280,7 +289,7 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.ClickHouse.Username = "prod_analytics"
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
-		assert.ErrorContains(t, Validate(cfg), "mode is required outside development")
+		assert.ErrorContains(t, Validate(cfg), "provider_write_mode is required outside development")
 	})
 
 	t.Run("a zero-value struct is live + full behavior (Load applies the dev sandbox default separately)", func(t *testing.T) {
@@ -291,7 +300,7 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.Env = "dev"
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsTestMode(), "zero-value test_mode is live; the dev sandbox default is a Load() concern")
-		assert.False(t, cfg.IsLimitedMode(), "unset mode in dev defaults to full behavior")
+		assert.False(t, cfg.IsLimitedMode(), "unset provider_write_mode in dev defaults to full behavior")
 		assert.NoError(t, Validate(cfg))
 	})
 
@@ -305,10 +314,10 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("prod env accepts mode=full", func(t *testing.T) {
+	t.Run("prod env accepts provider_write_mode=full", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeFull
+		cfg.ProviderWriteMode = ProviderWriteModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.ClickHouse.Username = "prod_analytics"
@@ -322,8 +331,8 @@ func TestProductionTestModeValidation(t *testing.T) {
 // single Stripe rail carrying the given secret key and test_mode setting.
 func stripeTestModeConfig(secretKey string, testMode bool) (*Config, RailSet) {
 	return &Config{
-			Mode:     ModeFull,
-			TestMode: testMode,
+			ProviderWriteMode: ProviderWriteModeFull,
+			TestMode:          testMode,
 		}, RailSet{
 			"stripe": {
 				Type:      string(RailTypeStripe),
@@ -382,10 +391,10 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	})
 
 	t.Run("validates every stripe rail", func(t *testing.T) {
-		cfg := &Config{Mode: ModeFull, TestMode: false}
+		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
 		rails := RailSet{
 			"stripe_primary": {Type: RailTypeStripe, SecretKey: "sk_live_primary"},
-			"stripe_legacy":  {Type: RailTypeStripe, Role: RailRoleLegacy, SecretKey: "sk_test_legacy"},
+			"stripe_legacy":  {Type: RailTypeStripe, Routing: RailRoutingLegacy, SecretKey: "sk_test_legacy"},
 		}
 		require.NoError(t, validateStripeKeyForTestMode(cfg, rails))
 		require.Equal(t, "sk_live_primary", rails["stripe_primary"].SecretKey)
@@ -395,7 +404,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 
 func TestPrimaryRailByType(t *testing.T) {
 	rails := RailSet{
-		"stripe_old": {Type: RailTypeStripe, Role: RailRoleLegacy, SecretKey: "sk_live_old"},
+		"stripe_old": {Type: RailTypeStripe, Routing: RailRoutingLegacy, SecretKey: "sk_live_old"},
 		"stripe_new": {Type: RailTypeStripe, SecretKey: "sk_live_new"},
 		"mobius":     {Type: RailTypeNMI, SecurityKey: "sec"},
 	}
@@ -407,11 +416,11 @@ func TestPrimaryRailByType(t *testing.T) {
 
 	rails["stripe_other"] = &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_other"}
 	_, _, err = rails.PrimaryRailByType(RailTypeStripe)
-	require.ErrorContains(t, err, "multiple primary rails")
-	require.ErrorContains(t, ValidateRailSet(&Config{Mode: ModeFull}, RailSet{
+	require.ErrorContains(t, err, "multiple default rails")
+	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, RailSet{
 		"stripe_a": {Type: RailTypeStripe, SecretKey: "sk_live_a"},
 		"stripe_b": {Type: RailTypeStripe, SecretKey: "sk_live_b"},
-	}), "multiple primary rails")
+	}), "multiple default rails")
 }
 
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
@@ -430,7 +439,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	// test key with live credentials expected: disabled with a warning, not fatal
 	cfg2 := GetDefaultBillingConfig()
 	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg2.Mode = ModeLimited
+	cfg2.ProviderWriteMode = ProviderWriteModeLimited
 	rails2 := RailSet{
 		"stripe": {
 			Type:      "stripe",
@@ -439,6 +448,54 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	}
 	require.NoError(t, ValidateRailSet(cfg2, rails2))
 	require.Equal(t, "", rails2["stripe"].SecretKey)
+}
+
+func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
+	cfg := &Config{}
+	rails := RailSet{
+		"mobius": {
+			Type:    RailTypeNMI,
+			Routing: RailRoutingDefault,
+			NMI: &NMIRailConfig{
+				SecurityKey:     "sec",
+				TokenizationKey: "tok",
+				WebhookSecret:   "wh",
+			},
+		},
+		"stripe_old": {
+			Type:    RailTypeStripe,
+			Routing: RailRoutingLegacy,
+			Stripe:  &StripeRailConfig{SecretKey: "sk_live_old"},
+		},
+	}
+	require.NoError(t, ValidateRailSet(cfg, rails))
+	require.Equal(t, "sec", rails["mobius"].SecurityKey)
+	require.Equal(t, "tok", rails["mobius"].TokenizationKey)
+	require.Equal(t, "sk_live_old", rails["stripe_old"].SecretKey)
+	require.Equal(t, RailRoutingLegacy, rails["stripe_old"].EffectiveRouting())
+}
+
+func TestRailConfigRejectsConflictingRoutingAndRole(t *testing.T) {
+	err := ValidateRailSet(&Config{}, RailSet{
+		"stripe": {Type: RailTypeStripe, Routing: RailRoutingDefault, Role: RailRoleLegacy},
+	})
+	require.ErrorContains(t, err, "conflicting routing")
+}
+
+func TestRailConfigAcceptsLegacyRoleAlias(t *testing.T) {
+	rails := RailSet{
+		"stripe_manual": {Type: RailTypeStripe, Role: RailRoleSecondary, SecretKey: "sk_live_manual"},
+		"stripe":        {Type: RailTypeStripe, SecretKey: "sk_live_default"},
+	}
+	require.NoError(t, ValidateRailSet(&Config{}, rails))
+	require.Equal(t, RailRoutingManual, rails["stripe_manual"].EffectiveRouting())
+}
+
+func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
+	err := ValidateRailSet(&Config{}, RailSet{
+		"stripe": {Type: RailTypeStripe, NMI: &NMIRailConfig{SecurityKey: "sec"}},
+	})
+	require.ErrorContains(t, err, "type stripe must use stripe block")
 }
 
 // TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret (and,
@@ -601,30 +658,34 @@ func TestOperatingModes(t *testing.T) {
 	require.False(t, (&Config{}).IsProviderReadOnly())
 	require.False(t, (&Config{}).IsTestMode())
 
-	require.False(t, (&Config{Mode: ModeFull}).IsLimitedMode())
-	require.False(t, (&Config{Mode: ModeFull}).IsProviderReadOnly())
+	require.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsLimitedMode())
+	require.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsProviderReadOnly())
 
-	limited := &Config{Mode: ModeLimited}
+	limited := &Config{ProviderWriteMode: ProviderWriteModeLimited}
 	require.True(t, limited.IsLimitedMode())
 	require.False(t, limited.IsProviderReadOnly())
 
-	ro := &Config{Mode: ModeReadOnly}
+	ro := &Config{ProviderWriteMode: ProviderWriteModeReadOnly}
 	require.True(t, ro.IsLimitedMode())
 	require.True(t, ro.IsProviderReadOnly())
 
 	// mode is pure behavior: test_mode does not change the behavior gates
-	roSandbox := &Config{Mode: ModeReadOnly, TestMode: true}
+	roSandbox := &Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: true}
 	require.True(t, roSandbox.IsLimitedMode())
 	require.True(t, roSandbox.IsProviderReadOnly())
 
 	// case/space tolerant; unknown normalizes to "" pre-validation
-	require.True(t, (&Config{Mode: " Limited "}).IsLimitedMode())
-	require.False(t, (&Config{Mode: "redaonly"}).IsLimitedMode())
-	require.Error(t, Validate(&Config{Mode: "redaonly"}))
+	require.True(t, (&Config{ProviderWriteMode: " Limited "}).IsLimitedMode())
+	require.False(t, (&Config{ProviderWriteMode: "redaonly"}).IsLimitedMode())
+	require.Error(t, Validate(&Config{ProviderWriteMode: "redaonly"}))
 
 	// hard cut (#355): the old mode values are gone, not aliased
-	require.ErrorContains(t, Validate(&Config{Mode: "test"}), "must be one of full, limited, readonly")
-	require.ErrorContains(t, Validate(&Config{Mode: "production"}), "must be one of full, limited, readonly")
+	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "test"}), "must be one of full, limited, readonly")
+	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "production"}), "must be one of full, limited, readonly")
+
+	// legacy mode remains a compatibility alias while consumers migrate
+	require.True(t, (&Config{Mode: ModeLimited}).IsLimitedMode())
+	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: ProviderWriteModeFull, Mode: ModeLimited}), "conflicts")
 }
 
 func TestFlexiblePortRange(t *testing.T) {

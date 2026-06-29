@@ -56,13 +56,16 @@ type Config struct {
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
-	// Mode is the behavior dial (#346, #355): how much OpenRails is allowed to
-	// do against payment providers. It is independent from TestMode. One of:
+	// ProviderWriteMode is the behavior dial (#346, #355): how much OpenRails is
+	// allowed to do against payment providers. It is independent from TestMode.
+	// One of:
 	//   - "full":     normal operation
 	//   - "limited":  no system-initiated provider writes
 	//   - "readonly": no provider writes
 	// Unset defaults to "full" in development; outside development an explicit
-	// mode is REQUIRED (Validate refuses to boot without one).
+	// provider_write_mode is REQUIRED (Validate refuses to boot without one).
+	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
+	// Mode is a deprecated compatibility alias for provider_write_mode.
 	Mode string `koanf:"mode,omitempty"`
 
 	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode. When
@@ -298,6 +301,11 @@ const (
 	RailTypeStripe = "stripe"
 	RailTypeSolana = "solana"
 
+	RailRoutingDefault = "default"
+	RailRoutingManual  = "manual"
+	RailRoutingLegacy  = "legacy"
+
+	// Deprecated: use RailRoutingDefault/Manual/Legacy for config routing.
 	RailRolePrimary   = "primary"
 	RailRoleSecondary = "secondary"
 	RailRoleLegacy    = "legacy"
@@ -311,12 +319,9 @@ var ReservedRailNames = map[string]string{
 	"solana": RailTypeSolana,
 }
 
-// RailConfig is the unified configuration for all payment rails.
-// The Type field determines which fields are relevant:
-//   - type: nmi     → NMI fields (security_key, webhook_secret, etc.)
-//   - type: ccbill  → CCBill fields (client_acc_num, client_sub_acc, salt, etc.)
-//   - type: stripe  → Stripe fields (secret_key, webhook_secret)
-//   - type: solana  → Solana fields (recipient_wallet, rpc_endpoint, etc.)
+// RailConfig is one configured payment rail. New config should put provider
+// fields under the matching typed block (nmi/ccbill/stripe/solana); legacy flat
+// fields remain accepted and are normalized into the same runtime shape.
 //
 // Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
 // Non-reserved names (e.g., "acme") require type: nmi.
@@ -325,11 +330,18 @@ type RailConfig struct {
 	// Required for non-reserved rail names.
 	// For reserved names (ccbill, stripe, solana), type is inferred from the name.
 	Type string `koanf:"type"`
-	// Role selects routine routing for this configured credential set. Empty is
-	// primary for existing single-provider configs. secondary is enabled for
-	// explicit/manual targeting; legacy is retained for old rows/rebills/refunds
-	// and should not receive new default work.
+	// Routing selects routine routing for this configured credential set. Empty
+	// is default for existing single-provider configs. manual is available only
+	// for explicit targeting; legacy is retained for old rows/rebills/refunds and
+	// should not receive new default work.
+	Routing string `koanf:"routing"`
+	// Role is a deprecated compatibility alias for routing.
 	Role string `koanf:"role"`
+
+	NMI    *NMIRailConfig    `koanf:"nmi"`
+	CCBill *CCBillRailConfig `koanf:"ccbill"`
+	Stripe *StripeRailConfig `koanf:"stripe"`
+	Solana *SolanaRailConfig `koanf:"solana"`
 
 	// --- NMI fields (type: nmi) ---
 	SecurityKey     string `koanf:"security_key"`
@@ -384,6 +396,35 @@ type RailConfig struct {
 	PrivateKey string `koanf:"private_key"`
 }
 
+type NMIRailConfig struct {
+	SecurityKey     string `koanf:"security_key"`
+	TokenizationKey string `koanf:"tokenization_key"`
+	WebhookSecret   string `koanf:"webhook_secret"`
+}
+
+type CCBillRailConfig struct {
+	Salt             string   `koanf:"salt"`
+	ClientSubAcc     string   `koanf:"client_sub_acc"`
+	ClientAccNum     string   `koanf:"client_acc_num"`
+	DataLinkUsername string   `koanf:"datalink_username"`
+	DataLinkPassword string   `koanf:"datalink_password"`
+	AllowedCIDRs     []string `koanf:"allowed_cidrs"`
+}
+
+type StripeRailConfig struct {
+	SecretKey         string `koanf:"secret_key"`
+	WebhookSecret     string `koanf:"webhook_secret"`
+	WebhookSecretThin string `koanf:"webhook_secret_thin"`
+}
+
+type SolanaRailConfig struct {
+	HeliusAPIKey                    string                 `koanf:"helius_api_key"`
+	RecipientWallet                 string                 `koanf:"recipient_wallet"`
+	Tokens                          map[string]TokenConfig `koanf:"tokens"`
+	SolanaPayRecurringSubscriptions bool                   `koanf:"solana_pay_recurring_subscriptions"`
+	PrivateKey                      string                 `koanf:"private_key"`
+}
+
 // RailSet is an in-memory set of payment-provider credential entries. It
 // is not part of config.yaml/.env; private standalone installs seed provider
 // credentials through merchant bootstrap/Vault state, and embedded hosts may
@@ -403,17 +444,97 @@ func (p *RailConfig) GetEffectiveType(name string) string {
 	return ""
 }
 
-// EffectiveRole returns primary when role is omitted, preserving the existing
-// one-config-per-provider behavior.
-func (p *RailConfig) EffectiveRole() string {
+// EffectiveRouting returns default when routing is omitted, preserving the
+// existing one-config-per-provider behavior.
+func (p *RailConfig) EffectiveRouting() string {
 	if p == nil {
 		return ""
 	}
+	routing := strings.ToLower(strings.TrimSpace(p.Routing))
 	role := strings.ToLower(strings.TrimSpace(p.Role))
-	if role == "" {
-		return RailRolePrimary
+	if routing == "" {
+		switch role {
+		case "", RailRolePrimary:
+			return RailRoutingDefault
+		case RailRoleSecondary:
+			return RailRoutingManual
+		case RailRoleLegacy:
+			return RailRoutingLegacy
+		default:
+			return role
+		}
 	}
-	return role
+	return routing
+}
+
+// EffectiveRole is a deprecated compatibility wrapper for callers that have not
+// been renamed yet.
+func (p *RailConfig) EffectiveRole() string {
+	return p.EffectiveRouting()
+}
+
+func (p *RailConfig) normalizeTypedBlock(name string) error {
+	if p == nil {
+		return nil
+	}
+	effectiveType := p.GetEffectiveType(name)
+	blockCount := 0
+	if p.NMI != nil {
+		blockCount++
+	}
+	if p.CCBill != nil {
+		blockCount++
+	}
+	if p.Stripe != nil {
+		blockCount++
+	}
+	if p.Solana != nil {
+		blockCount++
+	}
+	if blockCount == 0 {
+		return nil
+	}
+	if blockCount > 1 {
+		return fmt.Errorf("rail '%s' must set exactly one provider block matching type %q", name, effectiveType)
+	}
+	switch effectiveType {
+	case RailTypeNMI:
+		if p.NMI == nil {
+			return fmt.Errorf("rail '%s' type nmi must use nmi block", name)
+		}
+		p.SecurityKey = p.NMI.SecurityKey
+		p.TokenizationKey = p.NMI.TokenizationKey
+		p.WebhookSecret = p.NMI.WebhookSecret
+	case RailTypeCCBill:
+		if p.CCBill == nil {
+			return fmt.Errorf("rail '%s' type ccbill must use ccbill block", name)
+		}
+		p.Salt = p.CCBill.Salt
+		p.ClientSubAcc = p.CCBill.ClientSubAcc
+		p.ClientAccNum = p.CCBill.ClientAccNum
+		p.DataLinkUsername = p.CCBill.DataLinkUsername
+		p.DataLinkPassword = p.CCBill.DataLinkPassword
+		p.AllowedCIDRs = p.CCBill.AllowedCIDRs
+	case RailTypeStripe:
+		if p.Stripe == nil {
+			return fmt.Errorf("rail '%s' type stripe must use stripe block", name)
+		}
+		p.SecretKey = p.Stripe.SecretKey
+		p.WebhookSecret = p.Stripe.WebhookSecret
+		p.WebhookSecretThin = p.Stripe.WebhookSecretThin
+	case RailTypeSolana:
+		if p.Solana == nil {
+			return fmt.Errorf("rail '%s' type solana must use solana block", name)
+		}
+		p.HeliusAPIKey = p.Solana.HeliusAPIKey
+		p.RecipientWallet = p.Solana.RecipientWallet
+		p.Tokens = p.Solana.Tokens
+		p.SolanaPayRecurringSubscriptions = p.Solana.SolanaPayRecurringSubscriptions
+		p.PrivateKey = p.Solana.PrivateKey
+	default:
+		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
+	}
+	return nil
 }
 
 // IsNMI returns true if this rail config is for an NMI-backed rail.
@@ -519,22 +640,31 @@ type TokenConfig struct {
 // RateLimitsConfig is a map of endpoint identifier -> rate limit config
 type RateLimitsConfig map[string]*RateLimit
 
-// Operating modes (#346, #355) — see Config.Mode. The former mode=test is
-// gone (sandbox is the orthogonal test_mode axis) and "production" is renamed
-// "full".
+// Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
+// mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
+// is renamed "full".
 const (
-	ModeFull     = "full"
-	ModeLimited  = "limited"
-	ModeReadOnly = "readonly"
+	ProviderWriteModeFull     = "full"
+	ProviderWriteModeLimited  = "limited"
+	ProviderWriteModeReadOnly = "readonly"
+
+	// Deprecated: use ProviderWriteMode*.
+	ModeFull     = ProviderWriteModeFull
+	ModeLimited  = ProviderWriteModeLimited
+	ModeReadOnly = ProviderWriteModeReadOnly
 )
 
-// ValidModes contains all valid operating-mode values ("" = unset; dev only).
-var ValidModes = map[string]bool{
-	"":           true,
-	ModeFull:     true,
-	ModeLimited:  true,
-	ModeReadOnly: true,
+// ValidProviderWriteModes contains all valid provider write values ("" = unset;
+// dev only).
+var ValidProviderWriteModes = map[string]bool{
+	"":                        true,
+	ProviderWriteModeFull:     true,
+	ProviderWriteModeLimited:  true,
+	ProviderWriteModeReadOnly: true,
 }
+
+// Deprecated: use ValidProviderWriteModes.
+var ValidModes = ValidProviderWriteModes
 
 // SendGridConfig holds process-wide SendGrid API configuration. Sender/display
 // metadata is merchant-scoped and loaded from merchant_configurations.
@@ -671,10 +801,14 @@ func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
-	// Operating mode must be a known value — a typo'd mode (e.g. "redaonly")
-	// must never silently boot with full behavior (#346).
-	if !ValidModes[strings.ToLower(strings.TrimSpace(cfg.Mode))] {
-		return fmt.Errorf("invalid mode %q: must be one of full, limited, readonly", cfg.Mode)
+	// Provider write mode must be a known value — a typo (e.g. "redaonly") must
+	// never silently boot with full behavior (#346).
+	providerWriteMode, err := cfg.normalizedProviderWriteMode()
+	if err != nil {
+		return err
+	}
+	if !ValidProviderWriteModes[providerWriteMode] {
+		return fmt.Errorf("invalid provider_write_mode %q: must be one of full, limited, readonly", providerWriteMode)
 	}
 
 	// Port range (#349): UnmarshalText validates string-typed values, but an
@@ -693,10 +827,10 @@ func Validate(cfg *Config) error {
 		}
 		// Outside development the operating mode must be declared explicitly —
 		// "I forgot to set it" must never silently pick a behavior.
-		switch cfg.GetMode() {
-		case ModeFull, ModeLimited, ModeReadOnly:
+		switch cfg.GetProviderWriteMode() {
+		case ProviderWriteModeFull, ProviderWriteModeLimited, ProviderWriteModeReadOnly:
 		default:
-			return fmt.Errorf("mode is required outside development: set mode (or env MODE) to one of full, limited, readonly")
+			return fmt.Errorf("provider_write_mode is required outside development: set provider_write_mode (or env PROVIDER_WRITE_MODE) to one of full, limited, readonly")
 		}
 		if cfg.DB != nil {
 			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
@@ -823,16 +957,28 @@ func validateRails(cfg *Config, rails RailSet, isDev bool) error {
 		if proc == nil {
 			continue
 		}
-		switch role := proc.EffectiveRole(); role {
-		case RailRolePrimary, RailRoleSecondary, RailRoleLegacy:
+		if strings.TrimSpace(proc.Routing) != "" && strings.TrimSpace(proc.Role) != "" {
+			routingOnly := *proc
+			routingOnly.Role = ""
+			roleOnly := *proc
+			roleOnly.Routing = ""
+			if routingOnly.EffectiveRouting() != roleOnly.EffectiveRouting() {
+				return fmt.Errorf("rail '%s' sets conflicting routing %q and legacy role %q", name, proc.Routing, proc.Role)
+			}
+		}
+		if err := proc.normalizeTypedBlock(name); err != nil {
+			return err
+		}
+		switch routing := proc.EffectiveRouting(); routing {
+		case RailRoutingDefault, RailRoutingManual, RailRoutingLegacy:
 		default:
-			return fmt.Errorf("rail '%s' has unknown role '%s'", name, proc.Role)
+			return fmt.Errorf("rail '%s' has unknown routing '%s'", name, proc.EffectiveRouting())
 		}
 
 		effectiveType := proc.GetEffectiveType(name)
-		if proc.EffectiveRole() == RailRolePrimary {
+		if proc.EffectiveRouting() == RailRoutingDefault {
 			if existing := primaryByType[effectiveType]; existing != "" {
-				return fmt.Errorf("multiple primary rails configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
+				return fmt.Errorf("multiple default rails configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
 			}
 			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
 		}
@@ -968,9 +1114,9 @@ func (set RailSet) RailKeysByType(providerType string) []string {
 	return keys
 }
 
-// PrimaryRailByType returns the configured primary credential set for a
-// provider type. Existing configs with one entry and no role keep working
-// because an empty role is primary. Multiple primaries are a configuration
+// PrimaryRailByType returns the configured default credential set for a
+// provider type. Existing configs with one entry and no routing keep working
+// because an empty routing is default. Multiple defaults are a configuration
 // error: OpenRails cannot guess where default new work should route.
 func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, error) {
 	keys := set.RailKeysByType(providerType)
@@ -980,11 +1126,11 @@ func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, 
 	)
 	for _, key := range keys {
 		proc := set[key]
-		if proc.EffectiveRole() != RailRolePrimary {
+		if proc.EffectiveRouting() != RailRoutingDefault {
 			continue
 		}
 		if primary != nil {
-			return "", nil, fmt.Errorf("multiple primary rails configured for type %q: %q and %q", providerType, primaryKey, key)
+			return "", nil, fmt.Errorf("multiple default rails configured for type %q: %q and %q", providerType, primaryKey, key)
 		}
 		primaryKey, primary = key, proc
 	}
@@ -1036,25 +1182,45 @@ func (set RailSet) IsNMIRail(name string) bool {
 	return set.GetRailType(name) == RailTypeNMI
 }
 
-// GetMode returns the normalized operating mode ("" when unset).
+func (cfg *Config) normalizedProviderWriteMode() (string, error) {
+	if cfg == nil {
+		return "", nil
+	}
+	providerWriteMode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode))
+	legacyMode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if providerWriteMode != "" && legacyMode != "" && providerWriteMode != legacyMode {
+		return "", fmt.Errorf("provider_write_mode %q conflicts with legacy mode %q", cfg.ProviderWriteMode, cfg.Mode)
+	}
+	if providerWriteMode == "" {
+		providerWriteMode = legacyMode
+	}
+	return providerWriteMode, nil
+}
+
+// GetProviderWriteMode returns the normalized provider write mode ("" when unset).
 // Unknown values are rejected by Validate; here they normalize to "" so a
-// pre-validation caller never misreads a typo as a real mode. Unset means the
-// dev default (full behavior) — that only ever serves development, because
-// Validate requires an explicit mode outside it.
-func (cfg *Config) GetMode() string {
-	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
-	if !ValidModes[mode] {
+// pre-validation caller never misreads a typo as a real policy. Unset means
+// the dev default (full behavior) — that only ever serves development, because
+// Validate requires an explicit provider_write_mode outside it.
+func (cfg *Config) GetProviderWriteMode() string {
+	mode, err := cfg.normalizedProviderWriteMode()
+	if err != nil || !ValidProviderWriteModes[mode] {
 		return ""
 	}
 	return mode
 }
 
+// GetMode is a deprecated compatibility wrapper for GetProviderWriteMode.
+func (cfg *Config) GetMode() string {
+	return cfg.GetProviderWriteMode()
+}
+
 // IsTestMode returns true if payment rails should use sandbox/test
 // environments and the sandbox-credential guarantees apply (#355): Stripe
 // live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
-// Orthogonal to Mode (pure behavior). When unset, Load defaults it to sandbox
-// in development and live outside it (#355); Validate rejects test_mode=true
-// outside development.
+// Orthogonal to ProviderWriteMode (pure behavior). When unset, Load defaults it
+// to sandbox in development and live outside it (#355); Validate rejects
+// test_mode=true outside development.
 func (cfg *Config) IsTestMode() bool {
 	return cfg.TestMode
 }
@@ -1064,15 +1230,15 @@ func (cfg *Config) IsTestMode() bool {
 // pulls, catalog provider-object writes) are disabled, leaving only reactive,
 // user-initiated operations. True in limited and readonly modes.
 func (cfg *Config) IsLimitedMode() bool {
-	mode := cfg.GetMode()
-	return mode == ModeLimited || mode == ModeReadOnly
+	mode := cfg.GetProviderWriteMode()
+	return mode == ProviderWriteModeLimited || mode == ProviderWriteModeReadOnly
 }
 
 // IsProviderReadOnly returns true if EVERY provider write — even reactive,
-// user-initiated ones — must be blocked (mode=readonly). Reads (query APIs,
-// verification) stay allowed.
+// user-initiated ones — must be blocked (provider_write_mode=readonly). Reads
+// (query APIs, verification) stay allowed.
 func (cfg *Config) IsProviderReadOnly() bool {
-	return cfg.GetMode() == ModeReadOnly
+	return cfg.GetProviderWriteMode() == ProviderWriteModeReadOnly
 }
 
 // IsDev returns true if the environment is development.
@@ -1268,6 +1434,12 @@ func Load(configPath string) (*Config, error) {
 		// Special case: TEST_MODE -> test_mode (top-level bool, not nested test.env)
 		if s == "test_mode" {
 			return "test_mode"
+		}
+		if s == "provider_write_mode" {
+			return "provider_write_mode"
+		}
+		if s == "mode" {
+			return "mode"
 		}
 
 		// Canonical Vault env vars: VAULT_ADDR is HashiCorp's standard name for
@@ -1478,18 +1650,18 @@ func LogStartupStatus(cfg *Config) {
 }
 
 func logOperatingModeStatus(cfg *Config) {
-	switch cfg.GetMode() {
-	case ModeReadOnly:
-		log.Warn("⚠️  MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
+	switch cfg.GetProviderWriteMode() {
+	case ProviderWriteModeReadOnly:
+		log.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
 		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
-		log.Info("   Set mode=limited or mode=full to allow writes")
-	case ModeLimited:
-		log.Warn("⚠️  MODE=limited - No proactive payment-provider operations will be performed")
+		log.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
+	case ProviderWriteModeLimited:
+		log.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
 		log.Info("   Dunning charges/cancellations, auto-top-ups, arrears collection, Solana pulls and catalog provider writes are paused")
 		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
-		log.Info("   Set mode=full to resume proactive operations")
-	case ModeFull:
-		log.Info("Mode: full (complete behavior - charges, dunning, deletes all run)")
+		log.Info("   Set provider_write_mode=full to resume proactive operations")
+	case ProviderWriteModeFull:
+		log.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
 	}
 }
 

@@ -7,7 +7,133 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 609
+next_id: 611
+
+---
+
+# #610: explicit credential mutability posture for embedded vs standalone runtimes
+
+**Completed:** no
+**Status:** PARTIAL 2026-06-29: embedded fixed-credential posture is now explicit, standalone defaults to mutable credentials, merchant settings route registration fails closed unless mutable credentials are selected, and `go test ./...` passes. Remaining deeper cleanup is the resolver/store split so fixed and mutable modes share a read path without exposing writes.
+
+Added 2026-06-29 (Codex). OpenRails currently has both read/write merchant
+secret-store machinery and fixed runtime provider configs, but the product
+posture is implicit. Make credential mutability an explicit runtime decision:
+embedded host apps normally run with fixed credentials supplied by the host;
+standalone/multi-tenant OpenRails may run with mutable merchant credentials.
+
+## Goal
+
+Define and enforce two runtime credential modes:
+
+- `fixed_credentials`: OpenRails can read/use provider credentials supplied at
+  boot by the host, but cannot mutate provider credentials. Merchant
+  payment-provider configuration routes are unavailable. This is the normal
+  embedded Doujins/Hentai0/Cozy shape.
+- `mutable_credentials`: OpenRails owns a writable merchant secret store
+  (DB+envelope or Vault) and may expose merchant/admin routes that create,
+  rotate, disable, or delete provider credentials. This is standalone or true
+  multi-tenant OpenRails.
+
+In embedded mode, OpenRails should not need Vault client credentials merely to
+run billing. If credentials come from HashiCorp Vault, the host deployment
+should project them into the host process, and the host should pass fixed
+credential material into embedded OpenRails.
+
+## Tasks
+
+- [x] Add a first-class credential posture field/API on embedded/standalone
+      startup, defaulting embedded runtimes to `fixed_credentials` and
+      standalone runtimes to `mutable_credentials` only when a writable secret
+      backend is configured.
+- [x] Gate `RouteSetMerchantSettings` and the
+      `/v1/merchant/payment-providers*` write surface on mutable credentials.
+      In fixed mode, do not mount those routes; if directly registered, return a
+      clear startup error rather than a runtime surprise.
+- [ ] Split provider credential inputs from writable merchant secret stores:
+      fixed mode receives provider credentials/read-only secret snapshots from
+      `embedded.PaymentProviders` or a read-only injected store; mutable mode
+      builds a writable `MerchantSecretStore`.
+- [ ] Make checkout/vault/worker paths read through a common credential
+      resolver interface so fixed and mutable modes share lookup behavior
+      without giving fixed mode write capability.
+- [ ] Keep Vault support only behind mutable mode unless a caller explicitly
+      injects a read-only Vault-derived resolver; OpenRails should not log into
+      HashiCorp Vault just because it is embedded.
+- [x] Update docs/tests: embedded defaults exclude merchant-settings routes,
+      fixed mode cannot write provider credentials, mutable mode can, and
+      route-set registration fails closed when the posture disagrees.
+- [x] Coordinate the Doujins consumer cleanup in `/home/fidika/doujins`
+      issue `#429`.
+
+## Non-goals
+
+- Do not remove standalone Vault/DB secret-store support.
+- Do not add provider-secret write APIs to embedded fixed-credential hosts.
+- Do not require hosts to use HashiCorp Vault; host secret projection is an ops
+  concern outside OpenRails.
+
+---
+
+# #609: replace flat rail provider config with typed blocks and routing
+
+**Completed:** yes
+**Status:** DONE 2026-06-29: config now accepts typed provider blocks, `routing` replaces `role` with a compatibility alias, and `provider_write_mode` replaces `mode` with a compatibility alias. Docs/examples/tests are updated, Doujins consumer changes are in place, and `go test ./...` passes.
+
+Added 2026-06-29 (Codex). The current `config.RailConfig` combines NMI,
+CCBill, Stripe, and Solana fields in one flat struct, and its `role` field is
+really provider routing, not RBAC. Replace the public config shape with typed
+per-provider blocks and rename `role` to `routing`.
+
+## Goal
+
+Make payment-provider config read like what it is:
+
+```yaml
+rails:
+  - name: mobius
+    type: nmi
+    routing: default
+    nmi:
+      security_key: ...
+      tokenization_key: ...
+      webhook_secret: ...
+  - name: stripe_old
+    type: stripe
+    routing: legacy
+    stripe:
+      secret_key: ...
+```
+
+Keep unmarshalling simple: use pointer substructs, not Go interfaces. Validate
+exactly one provider block matches `type`, then normalize once at boot into the
+existing runtime `RailSet`/provider routing model.
+
+## Tasks
+
+- [x] Add the new config DTOs: `RailConfig{Name, Type, Routing, NMI, Stripe,
+      CCBill, Solana}` plus provider-specific structs.
+- [x] Rename config routing constants/helpers from `RailRole*` /
+      `EffectiveRole` to `RailRouting*` / `EffectiveRouting`; values should be
+      `default`, `manual`, and `legacy`.
+- [x] Accept old `role` as a temporary compatibility alias; reject configs that
+      set both `role` and `routing` to different values.
+- [x] Normalize the new typed DTOs into the current runtime rail representation
+      at one boundary so checkout, vault, webhook, reconcile, and worker code do
+      not learn the config input shape.
+- [x] Update standalone YAML/docs/examples and embedded README snippets to use
+      typed blocks plus `routing`.
+- [x] Update validation tests for: one matching provider block, wrong block for
+      type, legacy flat config compatibility, legacy `role` alias, conflicting
+      `role`/`routing`, and one default route per provider type.
+- [x] Publish the change with release notes calling out the compatibility alias
+      and the host-app follow-up for Doujins.
+
+## Non-goals
+
+- Do not add interface-based unmarshalling.
+- Do not redesign provider account storage unless a concrete caller requires it;
+  this issue is about the public rail config/input shape.
 
 ---
 

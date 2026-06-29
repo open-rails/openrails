@@ -6,8 +6,8 @@
 # deployment concerns.
 
 env: development
-mode: full          # full | limited | readonly; required outside development
-test_mode: true      # sandbox credentials; development only
+provider_write_mode: full # full | limited | readonly; required outside development
+test_mode: true           # sandbox credentials; development only
 
 host: 0.0.0.0
 port: 3053

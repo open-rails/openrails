@@ -435,23 +435,25 @@ and `.env.example`.
 
 Two orthogonal settings:
 
-- **`mode`** (yaml) / `MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml) —
+- **`provider_write_mode`** (yaml) / `PROVIDER_WRITE_MODE` (env) /
+  `--provider-write-mode` (CLI flag; flag beats env beats yaml) —
   the pure **behavior** dial: how much OpenRails may do against the payment providers.
-  One of `full | limited | readonly`.
+  One of `full | limited | readonly`. `mode` / `MODE` / `--mode` remain as deprecated
+  compatibility aliases.
 - **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
   **credential** axis: `true` enforces sandbox rail credentials. Default `false`.
 
-| `MODE=` | What runs |
+| `PROVIDER_WRITE_MODE=` | What runs |
 |---|---|
 | `full` | Full behavior — charges, dunning, deletes all run. |
 | `limited` | **Reactive-only provider writes.** Nothing system-initiated touches a provider: no dunning charges, no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Local dunning decisions still materialize: stale past-due subscriptions cancel/downgrade locally, and in-window charges become parked system-origin intents. Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their rail-side delete), resumes, refunds, webhooks. |
 | `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. For reconciliation/forensics boots. |
 
-### `test_mode` — sandbox credentials, orthogonal to mode
+### `test_mode` — sandbox credentials, orthogonal to provider write mode
 
-`TEST_MODE=true` is sandbox money with whatever behavior `mode` selects (typically
-`full`): every rail routes to its test/sandbox environment, and the **credential
-guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
+`TEST_MODE=true` is sandbox money with whatever behavior `provider_write_mode` selects
+(typically `full`): every rail routes to its test/sandbox environment, and the
+**credential guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
 configured NMI account is probed at boot with one auth on the non-issued test card —
 only a simulator can approve it, so a decline proves a live account and refuses the boot
 (NMI sandbox accounts are otherwise undetectable — same URL, unmarked keys). Probe
@@ -462,9 +464,9 @@ crash-looping supervisor pays one declined auth total, not one per restart — a
 re-probes (cache failures degrade to probing); CCBill uses
 `sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_mode=true` is
 **rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
-is exactly `TEST_MODE=true` + `MODE=full`.
+is exactly `TEST_MODE=true` + `PROVIDER_WRITE_MODE=full`.
 
-At a glance — what each mode permits (the `test_mode` axis applies orthogonally: with
+At a glance — what each provider write mode permits (the `test_mode` axis applies orthogonally: with
 `TEST_MODE=true` the same matrix holds against sandbox rails, so no real money can
 move in any mode):
 
@@ -486,12 +488,11 @@ everything), `readonly` draws it at *the wire* (nothing writes to a provider, no
 customer clicking buy). Typical uses: `limited` = migration cutover with the site fully
 usable; `readonly` = reconciliation/forensics boots that must only observe.
 
-`mode` is **required outside development** (the server refuses to boot without one);
-unset in dev defaults to `full`. **Behavior change (#355):** the dev default is now
-**live credentials + full behavior** — a dev boot with real rail credentials in
-`.env` and no flags will move real money. Set `TEST_MODE=true` (or `--test-mode`) for the
-old sandbox-by-default behavior. The old `mode=test` and `mode=production` values and
-the `test_mode` boolean no longer exist.
+`provider_write_mode` is **required outside development** (the server refuses to boot
+without one); unset in dev defaults to `full`. `test_mode` defaults to sandbox in
+development and live outside development. Set `TEST_MODE=false` (or `--test-mode=false`)
+for a deliberate live local run. The old `mode=test` and `mode=production` values no
+longer exist.
 
 The dunning **schedule** is not a knob — it is a hardcoded function of the price's
 billing cycle (#359):
@@ -530,15 +531,15 @@ set **before first start** — imported stale `past_due` subscriptions are immed
 and full-behavior modes would start charging them within hours:
 
 ```bash
-MODE=limited
+PROVIDER_WRITE_MODE=limited
 ```
 
-(or `MODE=readonly` for a strictly-observing boot where even user checkouts must fail.)
+(or `PROVIDER_WRITE_MODE=readonly` for a strictly-observing boot where even user checkouts must fail.)
 
 Exit path, in order: (1) unset `DISABLE_RAIL_SUBSCRIPTION_DELETIONS` and restart —
 deletes skipped while the switch was on parked as pending intents on the provider intent
 ledger (#358) and the scheduled intent executor drains them; (2) once converged,
-set `MODE=full` — dunning resumes, and the derived staleness window guarantees the stale
+set `PROVIDER_WRITE_MODE=full` — dunning resumes, and the derived staleness window guarantees the stale
 backlog is cancelled + downgraded rather than charged.
 
 All paused work is **delayed, not lost** — the workers are state-scan loops, so the first
@@ -548,13 +549,13 @@ subscription that skipped whole periods gets exactly ONE pull with the new perio
 at the pull moment (the on-chain program independently caps pulls at one plan-amount per
 period), and dunning past the window cancels instead of charging.
 
-Under `MODE=limited` the paused backlog is also **visible, not just implied** (#366): the
+Under `PROVIDER_WRITE_MODE=limited` the paused backlog is also **visible, not just implied** (#366): the
 dunning scan still runs and *materializes* its decisions — months-stale past_due subs
 (the migration-import shape) are cancelled + downgraded locally right away (no charge),
 and in-window charges are enqueued as
 **parked** system-origin intents. So after a migration the cutover sequence is: boot
 `limited` → the first dunning cycle materializes the backlog → `openrails intents` shows
-the real drain forecast → review (and `refingerprint` if credentials moved) → `MODE=full`
+the real drain forecast → review (and `refingerprint` if credentials moved) → `PROVIDER_WRITE_MODE=full`
 drains exactly what you saw. Under `readonly` nothing materializes — that mode stays a
 pure observer for forensics.
 
