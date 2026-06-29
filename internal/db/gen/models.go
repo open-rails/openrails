@@ -486,7 +486,7 @@ type OpenrailsMerchant struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
-	// Human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
+	// human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
 	DisplayName *string
 }
 

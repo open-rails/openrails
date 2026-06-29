@@ -27,7 +27,12 @@ type GetMerchantBySlugRow struct {
 func (q *Queries) GetMerchantBySlug(ctx context.Context, slug string) (GetMerchantBySlugRow, error) {
 	row := q.db.QueryRow(ctx, getMerchantBySlug, slug)
 	var i GetMerchantBySlugRow
-	err := row.Scan(&i.ID, &i.Slug, &i.Status, &i.DisplayName)
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Status,
+		&i.DisplayName,
+	)
 	return i, err
 }
 

@@ -83,6 +83,44 @@ func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg Entitlement
 	return exists, err
 }
 
+const entitlementWindowOverlaps = `-- name: EntitlementWindowOverlaps :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.entitlements e
+    WHERE e.merchant_id = $1::uuid
+      AND e.customer_id = $2::uuid
+      AND e.entitlement = $3::text
+      AND e.revoked_at IS NULL
+      AND e.deleted_at IS NULL
+      AND e.period && tstzrange($4::timestamptz, $5::timestamptz, '[)')
+) AS overlaps
+`
+
+type EntitlementWindowOverlapsParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	LowerBound  time.Time
+	UpperBound  time.Time
+}
+
+// #631 overlap precheck for derive-1: does the customer already hold a LIVE
+// (non-revoked, non-deleted) entitlement for this feature whose window overlaps
+// [lower, upper)? derive-1 SKIPs the grant when true, so it never trips the
+// entitlements_customer_no_overlap exclusion constraint. Half-open [) semantics
+// match the constraint (abutting monthly windows do NOT overlap).
+func (q *Queries) EntitlementWindowOverlaps(ctx context.Context, arg EntitlementWindowOverlapsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, entitlementWindowOverlaps,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Entitlement,
+		arg.LowerBound,
+		arg.UpperBound,
+	)
+	var overlaps bool
+	err := row.Scan(&overlaps)
+	return overlaps, err
+}
+
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
 SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
 WHERE merchant_id = $1::uuid
@@ -1016,6 +1054,159 @@ func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUn
 	for rows.Next() {
 		var i ListUngrantedGrantablePaymentsRow
 		if err := rows.Scan(&i.ID, &i.Amount, &i.Currency); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUngrantedSubscriptions = `-- name: ListUngrantedSubscriptions :many
+SELECT s.id, s.customer_id, s.product_id, s.status,
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
+       pd.entitlements_spec
+FROM openrails.subscriptions s
+JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.status IN ('active', 'cancelled')
+  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
+  AND COALESCE(s.current_period_ends_at, s.ended_at) >= $3::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
+        AND g.source_type = 'subscription' AND g.source_id = s.id::text
+  )
+ORDER BY COALESCE(s.current_period_starts_at, s.started_at)
+`
+
+type ListUngrantedSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	ScanSince  time.Time
+}
+
+type ListUngrantedSubscriptionsRow struct {
+	ID                    uuid.UUID
+	CustomerID            uuid.UUID
+	ProductID             uuid.UUID
+	Status                OpenrailsSubscriptionStatus
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	StartedAt             time.Time
+	EndedAt               *time.Time
+	EntitlementsSpec      []byte
+}
+
+// #631 DERIVE `derive.grant.missing.subscription`: subscriptions in an access-
+// granting state (active/cancelled) for a product that PROMISES entitlements,
+// with NO subscription-sourced grant yet. After the migrate/convergence split the
+// doujins migrate moves subscriptions as source-of-truth (#724) but no longer
+// writes their entitlements — derive-1 materializes the grant + entitlement window
+// from the stored subscription. Window is computed Go-side (mirrors the retired
+// migrate logic): [COALESCE(current_period_starts_at,started_at),
+// COALESCE(current_period_ends_at,ended_at)). Only active+cancelled grant access
+// (pending/expired/failed/past_due do not). Bounded to windows ending within
+// scan_since (3y) — a past-ended window is harmless but skipping ancient ones
+// keeps the sweep cheap. customer_id nullable (#575): NULL = merchant-wide sweep.
+func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngrantedSubscriptionsParams) ([]ListUngrantedSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listUngrantedSubscriptions, arg.MerchantID, arg.CustomerID, arg.ScanSince)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUngrantedSubscriptionsRow
+	for rows.Next() {
+		var i ListUngrantedSubscriptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Status,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.EntitlementsSpec,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
+SELECT p.id, p.customer_id, p.purchased_at,
+       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
+       pd.entitlements_spec
+FROM openrails.payments p
+JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+WHERE p.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND p.rail = 'solana'
+  AND p.status = 'completed'
+  AND p.amount > 0
+  AND p.subscription_id IS NULL
+  AND p.metadata->>'expiration_rfc3339' IS NOT NULL
+  AND p.metadata->>'expiration_rfc3339' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
+  AND (p.metadata->>'expiration_rfc3339')::timestamptz > p.purchased_at
+  AND (p.metadata->>'expiration_rfc3339')::timestamptz >= $3::timestamptz
+  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
+        AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
+  )
+ORDER BY p.purchased_at
+`
+
+type ListUngrantedWalletPaymentsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	ScanSince  time.Time
+}
+
+type ListUngrantedWalletPaymentsRow struct {
+	ID               uuid.UUID
+	CustomerID       uuid.UUID
+	PurchasedAt      time.Time
+	ExpiresAt        time.Time
+	EntitlementsSpec []byte
+}
+
+// #631 DERIVE `derive.grant.missing.wallet`: completed solana wallet payments
+// carrying a stored access window (metadata.expiration_rfc3339) for a grantable
+// product, with NO grant yet. The doujins migrate moved these payments as
+// source-of-truth (rail=solana, amount>0) but no longer derives their membership
+// entitlement — derive-1 materializes grant + window [purchased_at,
+// expiration_rfc3339). Distinct from the general `derive.grant.missing` (payments)
+// ADMIN finding: the explicit stored expiration makes the window unambiguous, so
+// this migrated cohort auto-repairs instead of waiting for an operator.
+func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngrantedWalletPaymentsParams) ([]ListUngrantedWalletPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, listUngrantedWalletPayments, arg.MerchantID, arg.CustomerID, arg.ScanSince)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUngrantedWalletPaymentsRow
+	for rows.Next() {
+		var i ListUngrantedWalletPaymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.PurchasedAt,
+			&i.ExpiresAt,
+			&i.EntitlementsSpec,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

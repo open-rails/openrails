@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -588,4 +590,135 @@ func specFeatures(raw []byte) ([]string, error) {
 		return nil, fmt.Errorf("grants: parse spec_snapshot: %w", err)
 	}
 	return s.Entitlements, nil
+}
+
+// --- #631 derive-1 from stored sources -------------------------------------
+//
+// derive-1 today only repairs EXISTING grants (MissingEffects/Unretracted) and
+// SURFACES ungranted one-off payments for an operator. After the migrate/
+// convergence split the doujins migrate inserts source-of-truth subscriptions +
+// solana wallet payments but NO grants/entitlements (#724) — so the engine must
+// CREATE the grant + entitlement window from the bare source. These detections
+// are source-keyed (source_type+source_id), so they are a NO-OP for live data
+// (which already carries its grant) and only fire on the migrated cohort.
+
+// UngrantedSubscriptions returns active/cancelled subscriptions for a grantable
+// product with no subscription-sourced grant yet — the detection behind
+// `derive.subscription.missing` (#631). scanSince bounds the scan to
+// windows ending on/after it (3y). customer nil = merchant-wide sweep.
+func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedSubscriptionsRow, error) {
+	return l.q.ListUngrantedSubscriptions(ctx, gen.ListUngrantedSubscriptionsParams{
+		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
+	})
+}
+
+// UngrantedWalletPayments returns completed solana wallet payments carrying a
+// stored access window with no grant yet — the detection behind
+// `derive.wallet.missing` (#631). customer nil = merchant-wide sweep.
+func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedWalletPaymentsRow, error) {
+	return l.q.ListUngrantedWalletPayments(ctx, gen.ListUngrantedWalletPaymentsParams{
+		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
+	})
+}
+
+// DeriveSubscriptionGrant creates the entitlement grant(s) + window for a
+// subscription that has none (derive-1). The window is the subscription period
+// [COALESCE(period_start,started_at), COALESCE(period_end,ended_at)); access-state
+// gating already happened in the detection query. Re-runnable: once a grant
+// exists the detection excludes the sub.
+func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngrantedSubscriptionsRow) error {
+	start, end, ok := subscriptionWindow(sub)
+	if !ok {
+		return nil
+	}
+	return l.deriveEntitlementWindows(ctx, sub.CustomerID, Subscription, sub.ID.String(), nil, productSpecKeys(sub.EntitlementsSpec), start, end)
+}
+
+// DeriveWalletGrant creates the entitlement grant(s) + window for a solana wallet
+// payment that has none (derive-1). Window = [purchased_at, expiration_rfc3339);
+// grant source is `purchase` (→ `one_off` entitlement), payment-linked so the
+// refund check sees it.
+func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWalletPaymentsRow) error {
+	if !pay.ExpiresAt.After(pay.PurchasedAt) {
+		return nil
+	}
+	pid := pay.ID
+	return l.deriveEntitlementWindows(ctx, pay.CustomerID, Purchase, pay.ID.String(), &pid, productSpecKeys(pay.EntitlementsSpec), pay.PurchasedAt.UTC(), pay.ExpiresAt.UTC())
+}
+
+// deriveEntitlementWindows grants + materializes one entitlement window per
+// feature, SKIPPING any feature that overlaps an existing live entitlement (so a
+// CreateEntitlement can never trip the no-overlap exclusion constraint). One grant
+// per (source, feature), mirroring the live entitlement path. The overlap check
+// sees rows committed earlier in the same converge run (each create auto-commits
+// on the shared conn), so sequential derives within a run stay consistent.
+// ponytail: v1 drops a feature's window entirely when it overlaps; #631-followup
+// (O2) clips/merges partial overlaps. A fully-overlapped sub re-fires each sweep
+// until the overlapping window expires, then converges — bounded, self-healing.
+func (l *Ledger) deriveEntitlementWindows(ctx context.Context, customer uuid.UUID, source SourceType, sourceID string, payment *uuid.UUID, feats []string, start, end time.Time) error {
+	for _, f := range feats {
+		overlaps, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
+			MerchantID: l.merchant, CustomerID: customer, Entitlement: f, LowerBound: start, UpperBound: end,
+		})
+		if err != nil {
+			return fmt.Errorf("grants: derive-1 overlap check %q: %w", f, err)
+		}
+		if overlaps {
+			continue
+		}
+		endCopy := end
+		g, err := l.Grant(ctx, GrantInput{
+			Customer: customer, Kind: Entitlement, Source: source, SourceID: sourceID, Payment: payment,
+			Spec: &Spec{Entitlements: []string{f}}, StartsAt: start, EndsAt: &endCopy,
+		})
+		if err != nil {
+			return fmt.Errorf("grants: derive-1 grant %s/%q: %w", sourceID, f, err)
+		}
+		if err := l.MaterializeGrant(ctx, g); err != nil {
+			return fmt.Errorf("grants: derive-1 materialize %s/%q: %w", sourceID, f, err)
+		}
+	}
+	return nil
+}
+
+// subscriptionWindow mirrors the retired migrate logic: start =
+// current_period_starts_at ?? started_at, end = current_period_ends_at ??
+// ended_at; valid only if end is strictly after start.
+func subscriptionWindow(s gen.ListUngrantedSubscriptionsRow) (time.Time, time.Time, bool) {
+	start := s.StartedAt
+	if s.CurrentPeriodStartsAt != nil && !s.CurrentPeriodStartsAt.IsZero() {
+		start = *s.CurrentPeriodStartsAt
+	}
+	var end time.Time
+	switch {
+	case s.CurrentPeriodEndsAt != nil && !s.CurrentPeriodEndsAt.IsZero():
+		end = *s.CurrentPeriodEndsAt
+	case s.EndedAt != nil && !s.EndedAt.IsZero():
+		end = *s.EndedAt
+	}
+	if start.IsZero() || end.IsZero() || !end.After(start) {
+		return time.Time{}, time.Time{}, false
+	}
+	return start.UTC(), end.UTC(), true
+}
+
+// productSpecKeys returns the entitlement feature names — the keys of a product's
+// entitlements_spec ({name: hours} JSONB). Mirrors the retired migrate's
+// billingProductEntitlementNames (sorted, trimmed, empties dropped).
+func productSpecKeys(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		if k = strings.TrimSpace(k); k != "" {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

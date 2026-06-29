@@ -24,6 +24,13 @@ const pendingStaleAfter = 72 * time.Hour
 // the dunning grace cap (subscriptions.graceSlackCap = 48h).
 const periodGrace = 48 * time.Hour
 
+// deriveBackfillWindow bounds derive-1 (#631): only subscriptions/payments whose
+// access window ends within this lookback are derived. Banking-aligned 3y
+// (replaces the migrate's old 1-year hack). A past-ended window is harmless
+// (not live); the bound just keeps the merchant-wide sweep cheap.
+// ponytail: const, not a config knob — make it a knob if a merchant needs to tune it.
+const deriveBackfillWindow = 3 * 365 * 24 * time.Hour
+
 // The three internal-plane passes, run in DERIVE → LIFE → CON order (sources must
 // be truthful before grant effects are derived; lifecycle state must be current
 // before final consistency checks). Each is fleshed out in #511 Phase D — the
@@ -134,6 +141,52 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Provider:   "self",
 			Evidence:   map[string]any{"payment_id": p.ID.String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
 			// surface-only: re-granting re-runs derive-1 (product-spec-dependent).
+		})
+	}
+
+	// derive.subscription.missing (#631) — a stored subscription in an
+	// access-granting state for a grantable product with NO grant. Unlike the
+	// payment finding above this is AUTO-repaired: the window is unambiguous (the
+	// subscription period), so the engine materializes grant + entitlement. NO-OP
+	// for live subs (they already carry their grant); fires on the migrated cohort
+	// after the migrate stops writing entitlements (#724).
+	scanSince := p.e.Now().Add(-deriveBackfillWindow)
+	ungrantedSubs, err := gl.UngrantedSubscriptions(ctx, customer, scanSince)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan ungranted subscriptions: %w", err)
+	}
+	for i := range ungrantedSubs {
+		s := ungrantedSubs[i]
+		out = append(out, ConvergeFinding{
+			Type:       "derive.subscription.missing",
+			Shape:      ShapeMissing,
+			Class:      ClassAuto,
+			Severity:   "high",
+			SubjectKey: "subscription:" + s.ID.String(),
+			Provider:   "self",
+			Evidence:   map[string]any{"subscription_id": s.ID.String(), "status": string(s.Status), "cause": "subscription_without_grant"},
+			Repair:     func(ctx context.Context) error { return gl.DeriveSubscriptionGrant(ctx, s) },
+		})
+	}
+
+	// derive.wallet.missing (#631) — a completed solana wallet payment with a
+	// stored access window and NO grant. AUTO-repaired (the stored expiration is the
+	// unambiguous window). NO-OP for live; fires on the migrated wallet cohort.
+	ungrantedWallet, err := gl.UngrantedWalletPayments(ctx, customer, scanSince)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan ungranted wallet payments: %w", err)
+	}
+	for i := range ungrantedWallet {
+		w := ungrantedWallet[i]
+		out = append(out, ConvergeFinding{
+			Type:       "derive.wallet.missing",
+			Shape:      ShapeMissing,
+			Class:      ClassAuto,
+			Severity:   "high",
+			SubjectKey: "payment:" + w.ID.String(),
+			Provider:   "self",
+			Evidence:   map[string]any{"payment_id": w.ID.String(), "cause": "wallet_payment_without_grant"},
+			Repair:     func(ctx context.Context) error { return gl.DeriveWalletGrant(ctx, w) },
 		})
 	}
 
