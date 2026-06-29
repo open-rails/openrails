@@ -39,6 +39,38 @@ func TestCCBillAdapter_Attach(t *testing.T) {
 	if _, err := a.Attach(context.Background(), map[string]string{"form_name": "premium"}, autoCreateContext{}); err == nil {
 		t.Fatal("expected error when flex_id missing")
 	}
+
+	// #601: Recurring Billing Option id alone (legacy/archived tier, no FlexForm).
+	ids, err = a.Attach(context.Background(), map[string]string{
+		models.RailKeyCCBillRecurringBillingOption: "0000000931",
+	}, autoCreateContext{})
+	if err != nil {
+		t.Fatalf("RBO-only link must be accepted: %v", err)
+	}
+	if ids[models.RailKeyCCBillRecurringBillingOption] != "0000000931" {
+		t.Fatalf("RBO not preserved: %v", ids)
+	}
+	if _, ok := ids[models.RailKeyCCBillFlexID]; ok {
+		t.Fatalf("RBO-only link must not invent a FlexForm: %v", ids)
+	}
+
+	// RBO + FlexForm together (current $23 plan).
+	ids, err = a.Attach(context.Background(), map[string]string{
+		models.RailKeyCCBillFormName:               "basic-monthly",
+		models.RailKeyCCBillFlexID:                 "abc-123",
+		models.RailKeyCCBillRecurringBillingOption: "0000007498",
+	}, autoCreateContext{})
+	if err != nil {
+		t.Fatalf("RBO + FlexForm must be accepted: %v", err)
+	}
+	if ids[models.RailKeyCCBillRecurringBillingOption] != "0000007498" || ids[models.RailKeyCCBillFlexID] != "abc-123" {
+		t.Fatalf("RBO + FlexForm not both preserved: %v", ids)
+	}
+
+	// Empty link (no FlexForm, no RBO) is still an error.
+	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
+		t.Fatal("expected error for an empty ccbill link")
+	}
 }
 
 func TestCCBillAdapter_AutoCreatePending(t *testing.T) {

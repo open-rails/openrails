@@ -202,8 +202,14 @@ const (
 	RailKeyProvider        = "provider"
 	RailKeyCCBillFormName  = "form_name"
 	RailKeyCCBillFlexID    = "flex_id"
-	RailKeyStripePriceID   = "price_id"
-	RailKeyStripeProductID = "product_id"
+	// RailKeyCCBillRecurringBillingOption is CCBill's price/product/plan identity
+	// (#601) — the "Recurring Billing Option" id (a zero-padded numeric, e.g.
+	// "0000042836"). It is DISTINCT from the FlexForm (form_name/flex_id, the
+	// hosted purchase-flow page): legacy/archived tiers carry an RBO with no
+	// FlexForm, and reconciliation keys on the RBO.
+	RailKeyCCBillRecurringBillingOption = "recurring_billing_option_id"
+	RailKeyStripePriceID                = "price_id"
+	RailKeyStripeProductID              = "product_id"
 )
 
 // GetRailConfig returns the configuration for a specific rail, or nil if not configured
@@ -243,6 +249,17 @@ func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
 	}
 
 	return formName, flexID, true
+}
+
+// GetCCBillRecurringBillingOption returns the CCBill Recurring Billing Option id
+// (the price/product/plan identity, #601), independent of the FlexForm.
+func (p *Price) GetCCBillRecurringBillingOption() (rboID string, ok bool) {
+	config := p.GetRailConfig(RailCCBill)
+	if config == nil {
+		return "", false
+	}
+	rboID = strings.TrimSpace(config[RailKeyCCBillRecurringBillingOption])
+	return rboID, rboID != ""
 }
 
 // GetSolanaConfig returns the Solana rail configuration

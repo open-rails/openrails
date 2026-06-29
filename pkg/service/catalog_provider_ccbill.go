@@ -37,21 +37,34 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	}
 }
 
-// Attach stores the operator-supplied form_name + flex_id. CCBill exposes no
-// public read API for FlexForms, so OpenRails cannot verify the form exists or
-// matches the price's money terms — the ids are accepted as operator-owned
+// Attach stores the operator-supplied CCBill link. Two independent identifiers
+// (#601): the FlexForm (form_name + flex_id) is the hosted purchase-flow page;
+// the Recurring Billing Option (recurring_billing_option_id) is the price/plan
+// identity. A link may carry the RBO alone (legacy/archived tiers have no
+// FlexForm), a FlexForm alone, or both — but a FlexForm needs BOTH halves.
+// CCBill exposes no public read API, so the ids are accepted as operator-owned
 // (the one provider in the shared model without remote link validation).
 func (a *ccbillAdapter) Attach(_ context.Context, link map[string]string, _ autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	formName := strings.TrimSpace(link[models.RailKeyCCBillFormName])
 	flexID := strings.TrimSpace(link[models.RailKeyCCBillFlexID])
-	if formName == "" || flexID == "" {
-		return nil, fmt.Errorf("ccbill link requires provider_links.ccbill.form_name and flex_id")
+	rboID := strings.TrimSpace(link[models.RailKeyCCBillRecurringBillingOption])
+
+	out := map[string]string{}
+	switch {
+	case formName != "" && flexID != "":
+		out[models.RailKeyCCBillFormName] = formName
+		out[models.RailKeyCCBillFlexID] = flexID
+	case formName != "" || flexID != "":
+		return nil, fmt.Errorf("ccbill FlexForm link requires both form_name and flex_id")
 	}
-	return map[string]string{
-		models.RailKeyCCBillFormName: formName,
-		models.RailKeyCCBillFlexID:   flexID,
-	}, nil
+	if rboID != "" {
+		out[models.RailKeyCCBillRecurringBillingOption] = rboID
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("ccbill link requires a FlexForm (form_name + flex_id) and/or a recurring_billing_option_id")
+	}
+	return out, nil
 }
 
 func (a *ccbillAdapter) AutoCreate(_ context.Context, _ autoCreateContext) (map[string]string, error) {
