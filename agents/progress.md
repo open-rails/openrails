@@ -7,59 +7,141 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 605
+next_id: 607
 
 ---
 
-# #604: Catalog manifest restructure — merchants→products (tier_group as an attribute) + flexible tier_rank
+# #606: EPIC + sequencing — "Catalog & Money v2" (#594–#604), with a plan review
 
 **Completed:** no
 
-Proposed 2026-06-28 (owner). The catalog manifest nesting feels wrong:
-`catalogs → name(=merchant slug) → tier_groups → products → prices`. The
-`tier_groups` level only earns its keep when a group holds MORE THAN ONE
-mutually-exclusive product (it usually holds one), and keying the top list by
-`name` (which must equal a merchant slug) is implicit. Flatten + clarify.
+Added 2026-06-28 (Claude review of the plan). #594–#604 are not independent — they
+are one program redefining the catalog/product/price/money model, and they have a
+strict dependency order that wasn't written down. They also overlapped in places.
+This epic records the review + the build order so they don't get built out of sequence.
 
-## Proposed shape (confirm before building)
-```yaml
-merchants:
-  - slug: doujins
-    products:
-      - slug: premium
-        display_name: Premium
-        tier_group: premium      # just an attribute (string label), not a nesting level
-        tier_rank: 0             # relative key; 0 and negatives allowed
-        entitlements: [premium]
-        prices: [...]
-```
-- `catalogs` (keyed by `name`) → `merchants` (keyed by `slug`) — explicit.
-- Drop the `tier_groups` nesting; `tier_group` becomes a product attribute. Products
-  sharing a `tier_group` are the mutually-exclusive upgrade/downgrade set.
+## Findings from the review
+- **Micros (#603) is the FOUNDATION, not a late refinement.** #594 AND #599 already
+  write their manifests in micros (`10_000_000`, `200_000`/`1_000_000`), but the shipped
+  base money is cents. Building #594/#599 before #603 means designing on a unit the base
+  doesn't yet use. Lock #603 first (or jointly with #594).
+- **#595 (key identity) is the other foundation.** #594's manifest, #596's recovery
+  envelope (`product_key`/`price_key`), and #597's adoption resolution all key on the
+  immutable product `key` + price natural key #595 defines. It must land before them.
+- **#604 was duplicative.** Its manifest reshape == #594 (flat `products:`) + #595
+  (`key`); narrowed #604 to just tier_rank (relative/0-negative/explicit). Done.
+- **#601/#602 are PARTIAL, not stale.** Catalog expression shipped (v0.71.2/v0.71.3);
+  the RBO reconciliation (#601) and per-rail intro/trial CHARGE orchestration (#602)
+  remain — correctly still `Completed: no` with status notes.
+- **#591 (older "platform identity & billing model") needs reconciliation.** It predates
+  and overlaps #594/#595 (identity/anchors) and is partly superseded by #592 (SHIPPED —
+  provider-account de-conflation). Re-read #591 against #592/#594/#595; close, split, or
+  rescope it rather than build it as written. (ACTION: owner to triage #591.)
+- **#598 is DECIDED (keep flat entitlements ledger); its impl lives in #594.** Good — no
+  separate work; #594 owns materialize-at-grant-time.
+
+## Recommended build order
+1. **Foundations (do first, ideally together):** #603 (money → micros) + #595 (product
+   `key` + price natural key). #604's tier_rank rides with #595.
+2. **Core model:** #594 (benefit buckets: entitlements/credits/usage_limits/ownership +
+   materialize-at-grant per #598). The manifest reshape lands here.
+3. **On top of the model:** #599 (metered prices — needs micros + the usage/meter pattern)
+   and #596 (recovery metadata — needs product_key/price_key + benefit_fingerprint).
+4. **Adoption + ops:** #597 (pull-provider adoption — needs #595 identity + #596 envelope +
+   #594 benefits to derive grants) and #600 (invoice cadence — mostly independent config).
+5. **Triage:** #591 (reconcile vs #592/#594/#595 before any build).
+
+## Tasks
+- [ ] Owner: confirm the build order + the micros/keys foundation-first sequencing.
+- [ ] Owner: triage #591 against #592 (shipped) + #594/#595 — close/split/rescope.
+- [ ] As each issue starts, pin its manifest/identity assumptions to #594/#595/#603 (one
+      source of truth for the shape + the money unit + the keys).
+
+---
+
+# #605: Residual "org" naming cleanup — bootstrap/merchant manifests + example YAMLs (follow-up to #567)
+
+**Completed:** no
+
+Context 2026-06-28: #567 migrated OpenRails to AuthKit's permission-group model — dropped the
+`org` persona, renamed `merchants.owner_org_id`→`permission_group_id`, re-pathed `/v1/orgs/*`→
+`/v1/customers/*`. But that rename stopped at the DB column + Go identifiers; the **provisioning
+manifests, example YAMLs, comments, and CLI help still speak "org"**, which is now wrong
+vocabulary (the "org" here IS the merchant's own permission-group, 1:1). Pure naming/docs debt —
+NO behavior or schema change.
+
+## Stale spots (verified 2026-06-28)
+- `internal/bootstrap/bootstrap_manifest.go`: field `authority.bootstrap_org_slug` (Go
+  `BootstrapOrgSlug`, `BootstrapOptions.BootstrapOrgSlug`, the Validate error string) + comment
+  "names the merchant/backing org".
+- `internal/bootstrap/merchant_manifest.go`: comments "made the `owner` of the merchant's backing
+  org", "creates missing merchant/org/issuer/...", "backing AuthKit org", "creates/records no
+  backing org".
+- `config/bootstrap.example.yaml`: `bootstrap_org_slug:` + "merchant/backing org referenced below".
+- `config/merchants.example.yaml`: comment "registered as the OWNER of the merchant's backing org".
+- `cmd/openrails` `push-merchant-config` help: "(org + issuer-as-owner + secrets + profile)".
+- Sweep `internal/controlplane` + `internal/bootstrap` for residual `org`/`Org` that means the OLD
+  OpenRails org (NOT tensorhub's `org` persona, which is legitimately tensorhub's and stays).
+
+## Approach
+Rename to merchant / permission-group vocabulary. The field already equals the merchant slug, so:
+- `bootstrap_org_slug` → `bootstrap_merchant_slug`. DECIDE: hard-cut + version bump (consistent
+  with #567's no-alias style) vs. accept the old key as a deprecated alias for one release (it's
+  operator-facing deploy config, so an alias is friendlier). Recommend a one-release alias.
+- "backing org" / "merchant/org" comments → "the merchant's permission-group".
+- help string → "(merchant group + issuer-as-owner + secrets + profile)".
+- Leave tensorhub's `org` persona references intact (org is tensorhub's, not OpenRails' — #567).
+
+## Non-goals
+- No behavior/DB change — naming, comments, help, examples only.
+- Catalog-side staleness is OUT of scope and already tracked: `config/catalog.example.yaml` uses
+  cents (#603 cents→micros), the flat tier_groups→products shape (#604 manifest restructure), and
+  lacks meters/metered prices (#599). Those issues own updating the catalog example.
+
+## Tasks
+- [ ] Rename `bootstrap_org_slug`→`bootstrap_merchant_slug` (struct field + `BootstrapOptions` +
+  Validate message) in `bootstrap_manifest.go` and `config/bootstrap.example.yaml`; decide
+  alias-vs-hard-cut (bump if hard cut).
+- [ ] Sweep "backing org" / "merchant/org" comments in `bootstrap_manifest.go` +
+  `merchant_manifest.go` → "merchant permission-group".
+- [ ] Update `push-merchant-config` Short/Long help: drop "org" → "merchant group".
+- [ ] Update `config/merchants.example.yaml` comments (issuer = owner of the merchant's group).
+- [ ] grep `internal/controlplane` + `internal/bootstrap` for residual OpenRails-`org` identifiers/
+  strings and rename; keep tensorhub's `org` persona references untouched.
+- [ ] Build + vet (incl. `-tags=integration`) green; confirm zero functional/DB diff.
+
+---
+
+# #604: tier_rank — relative, renumber-safe, 0/negative, explicit (manifest shape owned by #594/#595)
+
+**Completed:** no
+
+Proposed 2026-06-28 (owner). REVISED 2026-06-28 (Claude review): the manifest
+RESHAPE this issue first proposed (a flat `products:` list keyed by an immutable
+`key`, dropping the `tier_groups` / `catalogs:name` nesting) is ALREADY owned by
+**#594** (its benefit-bucket manifest shows exactly that flat `products:` shape) and
+**#595** (product `key` identity replacing `slug`). To avoid two competing manifest
+specs, this issue is NARROWED to the one thing #594/#595 don't cover — tier_rank
+semantics — and defers the shape to them. See the #606 sequencing epic.
 
 ## tier_rank: relative, renumber-safe, 0/negative allowed
 - `tier_rank` lives ONLY on `products` (NOT denormalized onto subscriptions/payments,
   confirmed), and every runtime use is a RELATIVE `<`/`>`/`>=` (upgrade = higher,
-  downgrade = lower). So renumbering is safe with zero data migration — e.g. insert a
-  lower tier by bumping the others up, OR prepend a NEGATIVE rank without touching them.
+  downgrade = lower). So renumbering is safe with zero data migration — insert a lower
+  tier by bumping the others up, OR prepend a NEGATIVE rank without touching them.
 - Make `tier_rank` an EXPLICIT manifest field (`*int`, so "omitted" ≠ "0"; the DB
   default is 0) and require it when a `tier_group` has >1 product, so two products
   don't silently collide at the default 0.
 - Drop the loader's `tier_rank > 0` rule (pkg/catalog/load.go:136) — allow 0/negative.
 
-## Open design decisions
-- Where the tier-group display label lives now (it was `tier_groups[].display_name`):
-  derive from the lead product, an optional `tier_groups:` metadata map, or drop it.
-- Back-compat: HARD CUT (new format only) + rewrite the doujins/cozy configs, vs a
-  transitional dual-parse. Lean hard-cut (matches #588 style).
+## Flagged for #594/#595 (not owned here)
+- Top-level keying: `merchants: [{slug, products}]` (explicit) vs today's
+  `catalogs: [{name = merchant slug}]` (implicit) — pick one in #594/#595.
+- Where a tier-group display label lives once `tier_group` is a product attribute.
 
 ## Tasks
-- [ ] Pin the final manifest shape (this issue's sketch) with the owner.
-- [ ] New parser in pkg/catalog (manifest.go/load.go): merchants→products, tier_group attr.
 - [ ] tier_rank: `*int`, allow 0/negative, explicit-when-grouped; drop the >0 rule.
-- [ ] Converge maps the flattened shape onto products/prices unchanged downstream.
-- [ ] Rewrite doujins config/openrails-bootstrap.yaml + any cozy-art catalog onto it.
-- [ ] Tests: parse, tier_group grouping, renumber/insert-negative upgrade-direction.
+- [ ] Tests: renumber + prepend-negative preserve upgrade/downgrade direction.
 
 ---
 
