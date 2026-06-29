@@ -147,6 +147,34 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 	return nil
 }
 
+// ListIncludedProductIDs returns the product ids directly included by productID
+// (bundle membership persisted at catalog-publish time in openrails.product_includes;
+// migration 035). Used by the grant path to materialize a bundle's contents as
+// child ownership grants (#616). Raw pgx (no sqlc) — the query is merchant-scoped
+// both by the explicit merchant_id predicate and the RLS app.merchant_id GUC.
+func (r *ProductAccessGrantRepo) ListIncludedProductIDs(ctx context.Context, productID uuid.UUID) ([]uuid.UUID, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Qx(ctx).Query(ctx,
+		`SELECT included_product_id FROM openrails.product_includes WHERE merchant_id = $1 AND product_id = $2`,
+		tid.UUID(), productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // GetBySource returns the ownership grant for a (user, product, source)
 // idempotency key, or nil. Prefers a live grant; falls back to the most recent.
 func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string, productID uuid.UUID, sourceID string) (*models.ProductAccessGrant, error) {

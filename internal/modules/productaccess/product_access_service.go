@@ -124,12 +124,85 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 		}
 		out = grant
 		created = true
+
+		// #616: a granted bundle also grants its included products. Walk the
+		// product_includes tree (transitively, cycle-safe) and materialize a child
+		// ownership grant for each included product in this same tx, so the whole
+		// grant is atomic and idempotent.
+		if err := s.materializeIncludes(ctx, r, params, now, endsAt); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, false, err
 	}
 	return out, created, nil
+}
+
+// maxIncludeDepth bounds bundle nesting as a backstop; the visited set already
+// guarantees termination on cycles, so this only trips on pathologically deep
+// (≥64 distinct levels) include chains.
+const maxIncludeDepth = 64
+
+// materializeIncludes grants every product transitively included by
+// params.ProductID (bundle membership in openrails.product_includes, #616) to the
+// same customer, in the caller's tx. Child grants reuse a deterministic SourceID
+// (parent SourceID + ":incl:" + childID) so re-running is a no-op via GetBySource.
+// A visited set seeded with the parent makes nesting (A→B→C) work and cycles
+// (A→B→A) terminate; maxIncludeDepth is a backstop.
+func (s *Service) materializeIncludes(ctx context.Context, r *repo.ProductAccessGrantRepo, params GrantParams, now time.Time, endsAt *time.Time) error {
+	visited := map[uuid.UUID]bool{params.ProductID: true}
+	type node struct {
+		id    uuid.UUID
+		depth int
+	}
+	queue := []node{{id: params.ProductID, depth: 0}}
+	customerID := identity.CustomerIDFromString(params.UserID).UUID()
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.depth >= maxIncludeDepth {
+			return fmt.Errorf("bundle includes exceeded max depth %d at product %s", maxIncludeDepth, cur.id)
+		}
+
+		children, err := r.ListIncludedProductIDs(ctx, cur.id)
+		if err != nil {
+			return fmt.Errorf("list included products for %s: %w", cur.id, err)
+		}
+		for _, childID := range children {
+			if visited[childID] {
+				continue
+			}
+			visited[childID] = true
+
+			childSourceID := params.SourceID + ":incl:" + childID.String()
+			existing, err := r.GetBySource(ctx, params.UserID, childID, childSourceID)
+			if err != nil {
+				return fmt.Errorf("check existing included grant for %s: %w", childID, err)
+			}
+			if existing == nil {
+				child := &models.ProductAccessGrant{
+					CustomerID: customerID,
+					ProductID:  childID,
+					SourceType: params.SourceType,
+					SourceID:   childSourceID,
+					PaymentID:  params.PaymentID,
+					Status:     models.ProductAccessStatusActive,
+					StartsAt:   now,
+					EndsAt:     endsAt,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+				}
+				if err := r.Insert(ctx, child); err != nil {
+					return fmt.Errorf("insert included grant for %s: %w", childID, err)
+				}
+			}
+			queue = append(queue, node{id: childID, depth: cur.depth + 1})
+		}
+	}
+	return nil
 }
 
 // GetGrant returns a single grant by id (merchant-scoped), or nil if not found.
