@@ -11,17 +11,25 @@ next_id: 603
 
 ---
 
-# #602: Introductory pricing — express "$X first period then $Y recurring" for a recurring price
+# #602: Introductory & trial pricing — express "$X (or $0 trial) first period then $Y recurring"
 
 **Completed:** no
 
 Proposed 2026-06-28 (owner). OpenRails prices currently model a SINGLE flat
 recurring amount (`amount` + `billing_cycle_days`). Real provider offers commonly
-have a DIFFERENT first/initial period price than the recurring price — e.g. the
-doujins legacy CCBill plan `0000000931`: **$19.95 for the first 30 days, then
-$14.95 every 30 days thereafter**. Today we can only approximate it as a flat
-$14.95 (or $15.00), losing the intro-period semantics; migrated subscribers and
-new checkouts can't faithfully express or reconcile it.
+have a DIFFERENT first/initial period than the recurring price. Two shapes to
+support, which are the same primitive (an initial period at its own price/length):
+- **Intro / step-down**: a different first-period PRICE — e.g. doujins legacy
+  CCBill plan `0000000931`: **$19.95 for the first 30 days, then $14.95 every 30
+  days thereafter**.
+- **Free trial**: a first period at **$0** for a (usually shorter) length — e.g.
+  **$0 for 7 days, then $15 every 30 days**. Stripe models this natively
+  (`trial_period_days` / a trial phase then the recurring price), so the catalog
+  should express it portably.
+
+Today we can only approximate either as a flat recurring amount, losing the
+initial-period semantics; migrated subscribers and new checkouts can't faithfully
+express or reconcile them.
 
 ## Goal
 Model a recurring price whose FIRST billing period differs from subsequent ones:
@@ -36,25 +44,33 @@ Extend the price with an optional intro/trial block:
 amount: 1495            # recurring (the steady-state rate)
 billing_cycle_days: 30
 intro:
-  amount: 1995          # first-period price
-  period_days: 30       # first-period length (CCBill "initial period")
+  amount: 1995          # first-period price ($0 for a free trial)
+  period_days: 30       # first-period length (CCBill "initial period"; e.g. 7 for a trial)
   periods: 1            # how many initial periods at the intro rate (usually 1)
 ```
-A flat price omits `intro` (today's behavior unchanged).
+A flat price omits `intro` (today's behavior unchanged). A free trial is the same
+block with `amount: 0` (e.g. `amount: 0, period_days: 7`). Validation must allow a
+$0 initial amount (distinct from "no intro").
 
 ## Provider mapping
 - **CCBill**: native — a Recurring Billing Option has distinct initial price/period
-  vs recurring price/period (see #601). Map intro -> initial, recurring -> recurring.
+  vs recurring price/period (see #601). Map intro -> initial, recurring -> recurring;
+  $0 initial = a trial.
+- **Stripe**: native — `trial_period_days` for $0 trials, and a first invoice /
+  schedule phase for a non-zero step-down. Map `intro` onto whichever Stripe
+  primitive fits ($0 -> trial, non-zero -> first-phase price).
 - **NMI/mobius**: flat-only in practice (doujins NMI plans `premium`/`premium_new`
   are flat $19/$23); express intro via an add-on/one-time first charge or leave
   unsupported per rail.
-- **Stripe/Solana**: evaluate (Stripe supports trial/one-time-then-recurring).
+- **Solana**: evaluate.
 
 ## Tasks
 - [ ] Decide storage: extend `prices` (intro_* columns) vs a child period table.
 - [ ] Manifest + catalog converge support for the intro block.
-- [ ] Charge paths bill intro-once-then-recurring per rail (start CCBill).
-- [ ] Reconciliation matches a provider sub on intro OR recurring rate.
+- [ ] Charge paths bill intro-once-then-recurring per rail (start CCBill + Stripe).
+- [ ] Support `amount: 0` initial as a free trial (e.g. $0/7d then $15/30d); skip
+      the first charge for the trial window, then bill recurring.
+- [ ] Reconciliation matches a provider sub on intro/trial OR recurring rate.
 - [ ] Migrate doujins legacy `$19.95 -> $14.95` (CCBill RBO 0000000931) onto it.
 
 ---
@@ -96,11 +112,15 @@ Treat the two as separate, independently-settable CCBill identifiers on a price:
 - doujins: hardcode `recurring_billing_option_id` 0000007498/0000001412/0000000931
   on the $23/$19/$15 prices (currently blocked on this).
 
+## Status 2026-06-28 (Claude): catalog support SHIPPED (v0.71.2) — the RBO id is a
+## first-class CCBill rail key, settable independently of the FlexForm; doujins
+## hardcoded its three RBO ids. Reconciliation/webhook keying on the RBO remains.
+
 ## Tasks
-- [ ] Add `RailKeyCCBillRecurringBillingOption` + accessor.
-- [ ] Relax CCBill Attach + product_catalog validation (RBO and/or FlexForm).
+- [x] Add `RailKeyCCBillRecurringBillingOption` + accessor.
+- [x] Relax CCBill Attach + product_catalog validation (RBO and/or FlexForm).
 - [ ] Reconciliation/webhook mapping keys on the RBO id.
-- [ ] doujins bootstrap: hardcode the three RBO ids (+ keep the $23 FlexForm).
+- [x] doujins bootstrap: hardcode the three RBO ids (+ keep the $23 FlexForm).
 
 ---
 
@@ -149,10 +169,16 @@ is opt-in per price; host-priced events (#289) keep working unchanged.
 
 ## What a metered price is
 Two pieces, mirroring OpenMeter (Meter) / Lago (billable metric): a first-class **meter** and a
-**price** that references it. A `meter` is a top-level registry entry — like #594's `usage_limits`
-— naming a usage stream + its `kind` (gauge|counter). A metered `price` references a `meter` and
-adds the `rate` (+ `per`). The SAME meter is referenced by both metered prices (to charge) and
-usage_limits (to cap), so a stream's identity + kind are defined ONCE.
+**price** that references it. A `meter` is a top-level registry entry (same PATTERN as #594's
+`usage_limits` registry, but a DISTINCT concept — see below) naming a usage stream + its `kind`
+(gauge|counter). A metered `price` references a `meter` and adds the `rate` (+ `per`); `kind` is on
+the meter so a stream's identity + kind are defined ONCE, referenced by one or more prices.
+
+Meter ≠ usage_limit. A `usage_limit` (#594) is a quota GIVEN AHEAD — a granted allowance enforced
+at admission (#298), prepaid-shaped, "you may use up to X." A `meter` is something BILLED LATER —
+measured then rated into a charge, postpaid-shaped, "you used X, you owe $Y." They may observe the
+same event stream but are independent objects with independent lifecycles; neither references the
+other. (A "free tier then pay" is tiered pricing on the meter — deferred — not a usage_limit.)
 
 ```yaml
 # top-level meter registry (like `usage_limits`) — names the stream + its kind, ONCE
@@ -179,10 +205,12 @@ products:
         metered: { meter: api_calls, rate: 2_000 }                 # $0.002/call (counter, no per)
 ```
 
-- `meter` (top-level registry, like `usage_limits`) = a named usage stream the host reports
-  against (the #289 usage_event `event_type`) + its `kind`. Defined ONCE and referenced by many:
-  metered prices (to charge) and usage_limits (to cap). The running tally is per
-  `(customer, meter)` (or `(customer, meter, resource)` when instance-tagged — see Host hooks).
+- `meter` (top-level registry, same PATTERN as `usage_limits` but a DISTINCT billing concept) = a
+  named usage stream the host reports against (the #289 usage_event `event_type`) + its `kind`.
+  Defined ONCE for BILLING and referenced by one or more metered prices. It is NOT a usage_limit
+  (those are granted quotas, #594/#298); a meter and a limit may watch the same event stream but
+  neither references the other. The running tally is per `(customer, meter)` (or
+  `(customer, meter, resource)` when instance-tagged — see Host hooks).
 - `kind` (on the METER, not the price — it's intrinsic to the stream) = `gauge` (a level HELD
   over time — VMs, storage; time-integrated, persists across periods) or `counter` (discrete
   EVENTS — API calls, egress; summed, resets each period). Prometheus's gauge-vs-counter; replaces
@@ -277,8 +305,9 @@ No fractional units — choose a fine enough integer one.
   running VMs; Lago's weighted_sum, which OpenMeter lacks). BOTH core. Peak/value-at-close
   (`max`/`latest`) deferred.
 - Opt-in: a price with no `metered` block stays host-priced (#289); both coexist.
-- One `meter`, two uses: the SAME meter is referenced by a usage_limit (cap, admission #298) AND
-  a metered price (charge) — independent bindings over one stream defined once.
+- Meter ≠ usage_limit: a `usage_limit` (#594) is a quota given AHEAD (admission #298); a `meter`
+  is BILLED LATER (rated → invoiced). Separate objects, separate lifecycles — they may watch the
+  same event stream but neither references the other.
 
 ## Non-goals (v1)
 - Tiered / graduated / volume pricing ("first 100GB free, next 1TB at $X"). Big feature; defer
@@ -305,8 +334,10 @@ meter decides which value field to read and how to aggregate. Lago event {transa
 external_subscription_id, code, timestamp, properties} + billable metric {code, aggregation,
 field_name, recurring}; OpenMeter CloudEvent + Meter {slug, eventType, valueProperty JSONPath,
 aggregation, groupBy}. Lessons: (1) the meter is FIRST-CLASS and reused — define `kind`/aggregation
-ONCE and reference from many prices AND caps (→ promote OpenRails `measure` to a top-level meter
-like `usage_limits`, `kind` on the meter not the price; ADOPTED 2026-06-28). (2)
+ONCE and reference from many prices (→ promote OpenRails `measure` to a top-level meter registry,
+same pattern as `usage_limits`, `kind` on the meter not the price; ADOPTED 2026-06-28). OpenRails
+DEVIATES on one point: the billing `meter` is kept SEPARATE from the granted `usage_limit` quota
+(#594) — billed-later vs given-ahead are distinct lifecycles, even when they watch one stream. (2)
 events bucket into periods by TIMESTAMP not arrival (#289 `OccurredAt` already does this). (3)
 prefer ONE event per occurrence over a pre-summed count (preserves granularity for later pricing).
 (4) flow metering (SUM/COUNT) is the PRIMARY case in both → `counter` stays core; OpenMeter has NO
@@ -339,9 +370,11 @@ OpenRails already has meter (#289 usage_events) + aggregate (rollups) + invoice/
 tiered/graduated/volume "charge model" is a distinct concern in all of them → v1 non-goal.
 
 ## Tasks
-- [ ] Add a top-level `meters` registry (key + `kind` gauge|counter) — like `usage_limits`;
-  validate URL-safe unique keys. Point both #594 `usage_limits` and metered prices at it (one
-  meter, referenced as cap and/or charge); `kind` lives on the meter, not the price.
+- [ ] Add a top-level `meters` registry (key + `kind` gauge|counter) for BILLING — same pattern as
+  `usage_limits` but DISTINCT from it; validate URL-safe unique keys. Referenced by metered prices
+  only (`kind` on the meter, not the price). Do NOT couple it to #594 usage_limits — a meter
+  (billed later) and a usage_limit (granted ahead) are separate concepts that may merely watch the
+  same event stream.
 - [ ] Extend the #594 price model with an optional `metered` block referencing a `meter` + `rate`
   (micros/unit) + `per` (gauge only). Validate ISO money currency only, positive rate, `per`
   required for gauge meter / absent for counter meter, parseable `per`.
@@ -363,7 +396,7 @@ tiered/graduated/volume "charge model" is a distinct concern in all of them → 
   aggregates per meter. Rate per (customer, meter, resource) when tagged.
 - [ ] Tests: counter (sum) accrues; storage gauge (weighted_sum time-integral, persists across
   periods); rate-the-aggregate rounds once (no per-event drift); custom-currency rate rejected;
-  one meter referenced by both a usage_limit (cap) and a metered price (charge) are independent.
+  a meter (billing) and a usage_limit (#594 cap) over the same event stream operate independently.
 
 ---
 
