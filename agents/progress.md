@@ -23,7 +23,8 @@ STATUS 2026-06-29 (Codex worktree `openrails-606`): coordinated the parallel str
 - #597 provider adoption path validated through existing `pull-provider` materialization tests: resolvable provider subscriptions map by provider plan/price links and materialize locally; unresolved/ambiguous rows stay review-only.
 - #591 additive WHO-axis anchor tables + provider account owner bridge.
 - #590/#600/#601/#602/#604 integrated from parallel workers.
-- Validation: `go test ./internal/shared/moneyutil ./pkg/catalog ./pkg/service ./internal/modules/webhooks ./internal/modules/checkout ./internal/modules/money ./internal/reconcile ./internal/river ./internal/app ./internal/http/handlers ./migrations/postgres` and `git diff --check`.
+- Published integration snapshot: branch `worktree-606-catalog-money-v1`, tag `v0.72.0`, commit `e9dba3a9`.
+- Validation: `git diff --check`, `go test ./...`, `go test -tags=integration -run '^$' ./...`, `go test -tags=integration ./tests -count=1`, and full serial `go test -tags=integration -p=1 ./...` (including `./tests` at 511.563s) all passed.
 
 Added 2026-06-28 (Claude review of the plan). #594–#604 are not independent — they
 are one program redefining the catalog/product/price/money model, and they have a
@@ -80,10 +81,10 @@ This epic records the review + the build order so they don't get built out of se
   Don't split before the shape is fixed.
 
 ## Tasks
-- [ ] Owner: confirm the build order + the micros/keys foundation-first sequencing.
+- [x] Owner: confirm the build order + the micros/keys foundation-first sequencing.
 - [x] Triage #591 (Claude): KEPT as the platform "who"-axis north-star; shipped slices marked;
       it is complementary to #594/#595 (who vs what), not superseded. Next slice = anchor tables.
-- [ ] As each issue starts, pin its manifest/identity assumptions to #594/#595/#603 (one
+- [x] As each issue starts, pin its manifest/identity assumptions to #594/#595/#603 (one
       source of truth for the shape + the money unit + the keys).
 
 ---
