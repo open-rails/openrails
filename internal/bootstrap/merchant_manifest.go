@@ -65,10 +65,10 @@ type ManifestMerchant struct {
 	DisplayName string `yaml:"display_name"`
 	// Issuer is the host application's JWKS/public-key trust for THIS merchant
 	// (#527). When set, it is registered as a remote_application and made the
-	// `owner` of the merchant's backing org, so the host app's delegated tokens
+	// `owner` of the merchant's permission-group, so the host app's delegated tokens
 	// fully administer this merchant — and only this merchant. Optional: a
 	// merchant with no issuer (e.g. embedded mode, where the host authenticates
-	// in-process) is still provisioned with its backing org.
+	// in-process) is still provisioned with its permission-group.
 	Issuer           *ManifestIssuer           `yaml:"issuer,omitempty"`
 	Profile          ManifestMerchantProfile   `yaml:"profile,omitempty"`
 	ProviderAccounts []ManifestProviderAccount `yaml:"provider_accounts,omitempty"`
@@ -117,14 +117,14 @@ type ManifestSecretSource struct {
 // (both false) is additive + seed-once. Startup provisioning always uses the
 // default; the destructive tiers are opt-in via the CLI and never run on boot.
 type MerchantManifestReconcileOptions struct {
-	// Insert creates missing merchant/org/issuer/profile/provider-account/secret
+	// Insert creates missing merchant/issuer/profile/provider-account/secret
 	// state declared by the manifest. Manual CLI runs default to plan-only until
 	// this or another mutation flag is set.
 	Insert bool
 	// Overwrite re-asserts manifest values over existing state. Without it,
 	// SECRETS are seed-once: a secret already present is left untouched, so a
 	// value rotated out of band (via the admin API) is never reverted to the
-	// manifest seed. Merchant/org/issuer/profile are idempotently ensured either
+	// manifest seed. Merchant/issuer/profile are idempotently ensured either
 	// way (they are declarative identity, not rotated out of band).
 	Overwrite bool
 	// Prune deletes secrets that exist for a manifest merchant but are absent
@@ -153,7 +153,7 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 
 // ProvisionMerchant is the single OpenRails merchant-provisioning boundary
 // (#527). Standalone calls it with a control plane, which creates/ensures the
-// backing AuthKit org and optional issuer-as-owner before recording
+// AuthKit permission-group and optional issuer-as-owner before recording
 // permission_group_id. Embedded calls it with only Database, which registers an
 // ownerless merchant row and applies the same profile/provider-account
 // configuration path without touching AuthKit or startup bootstrap markers.
@@ -264,10 +264,10 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 
 func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, mt ManifestMerchant) (*merchants.Merchant, error) {
 	if cp == nil {
-		// Embedded: OpenRails runs no AuthKit, so it creates/records no backing org.
-		// The merchant's backing org is the host's AuthKit org of the SAME slug
+		// Embedded: OpenRails runs no AuthKit, so it creates/records no permission-group.
+		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
 		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
-		// is set only in standalone, where OpenRails owns the org.
+		// is set only in standalone, where OpenRails owns the group.
 		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug})
 		if err != nil {
 			return nil, err
@@ -885,7 +885,7 @@ func unlockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Contr
 	}
 }
 
-// AnyMerchantProvisioned reports whether any of the given org slugs is already
+// AnyMerchantProvisioned reports whether any of the given merchant slugs is already
 // provisioned in the control plane. The server uses this for first-run
 // detection: it auto-applies the bootstrap manifest only when NONE of the
 // manifest's merchants exist yet (#327). Checking the manifest's own slugs — not a

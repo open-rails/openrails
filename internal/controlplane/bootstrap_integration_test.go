@@ -120,13 +120,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 
 	// First run: creates the operator org, seeds role/perms, mints an API key,
 	// and records the merchant owner.
-	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
-	require.True(t, res1.OrgCreated, "first run should create the bootstrap (default) org")
+	require.True(t, res1.MerchantGroupCreated, "first run should create the merchant group")
 	require.True(t, res1.APIKeyMinted, "first run should mint the initial admin API key")
 	require.NotEmpty(t, res1.APIKeySecret)
-	require.NotEmpty(t, res1.BootstrapOrgID)
+	require.NotEmpty(t, res1.BootstrapMerchantGroupID)
 
 	// #567: the merchant permission-group's internal id is recorded on the
 	// merchant directory row via the permission_group_id column (repurposed to hold the
@@ -135,7 +135,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT permission_group_id FROM openrails.merchants WHERE id = $1::uuid`,
 		dbtest.TestMerchantID.String()).Scan(&groupID))
-	require.Equal(t, res1.BootstrapOrgID, groupID)
+	require.Equal(t, res1.BootstrapMerchantGroupID, groupID)
 
 	// #567: an admin assigned the merchant `owner` role auto-holds `merchant:*`,
 	// so it can perform any merchant operation (here: admit) but never a
@@ -144,13 +144,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	// known subject below in TestBootstrap_SeedsPermissionCatalog.)
 
 	// Second run: idempotent. No new group, no new API key.
-	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
-	require.False(t, res2.OrgCreated, "re-run must not recreate the merchant group")
+	require.False(t, res2.MerchantGroupCreated, "re-run must not recreate the merchant group")
 	require.False(t, res2.APIKeyMinted, "re-run must not mint a second API key")
 	require.Empty(t, res2.APIKeySecret)
-	require.Equal(t, res1.BootstrapOrgID, res2.BootstrapOrgID)
+	require.Equal(t, res1.BootstrapMerchantGroupID, res2.BootstrapMerchantGroupID)
 
 	// Exactly one API key exists after two runs (under the merchant group).
 	apiKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
@@ -177,7 +177,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	adminRec, err := cp.Core().CreateUser(ctx, "bootstrap-admin@example.test", "bootstrapadmin")
 	require.NoError(t, err)
 	adminUser := adminRec.ID
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
 
 	// #567: the merchant `owner` (auto-holds `merchant:*`) effectively holds every
@@ -193,7 +193,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.False(t, platformDenied, "merchant owner must not reach platform permissions")
 
 	// Re-running keeps the grant stable (owner still holds merchant:*).
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
 	stillOwner, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantAdmissionsCreate)
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	merchantOwner, err := cp.Core().CreateUser(ctx, "merchant-owner@example.test", "merchantowner")
 	require.NoError(t, err)
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{
-		BootstrapOrgSlug:   dbtest.TestMerchantSlug,
+		BootstrapMerchantSlug:   dbtest.TestMerchantSlug,
 		InitialAdminUserID: merchantOwner.ID,
 		MintInitialAPIKey:  false,
 	})

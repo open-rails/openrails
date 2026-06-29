@@ -26,7 +26,7 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		{
 			name: "merchant config rejects bootstrap authority",
 			cmd:  newPushMerchantConfigCmd(),
-			body: "version: 1\nauthority:\n  bootstrap_org_slug: local-stack\n",
+			body: "version: 1\nauthority:\n  bootstrap_merchant_slug: local-stack\n",
 			want: "authority",
 		},
 		{

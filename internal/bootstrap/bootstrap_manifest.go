@@ -28,10 +28,10 @@ type BootstrapManifest struct {
 }
 
 type BootstrapAuthorityManifest struct {
-	// BootstrapOrgSlug names the merchant/backing org whose OpenRails admin role
+	// BootstrapMerchantSlug names the merchant/permission-group whose OpenRails admin role
 	// should be seeded. OpenRails does not have a global admin org in this repo;
 	// admin authority is merchant-scoped, so the merchant must already exist.
-	BootstrapOrgSlug   string `yaml:"bootstrap_org_slug"`
+	BootstrapMerchantSlug   string `yaml:"bootstrap_merchant_slug"`
 	InitialAdminUserID string `yaml:"initial_admin_user_id,omitempty"`
 	// MintInitialAPIKey defaults true when omitted. Set false when the
 	// deploy will create admin access through another AuthKit path.
@@ -67,8 +67,8 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if strings.TrimSpace(m.Authority.BootstrapOrgSlug) == "" {
-		return fmt.Errorf("bootstrap manifest authority.bootstrap_org_slug is required")
+	if strings.TrimSpace(m.Authority.BootstrapMerchantSlug) == "" {
+		return fmt.Errorf("bootstrap manifest authority.bootstrap_merchant_slug is required")
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func (m *BootstrapManifest) BootstrapOptions() controlplane.BootstrapOptions {
 		mintInitialAPIKey = *m.Authority.MintInitialAPIKey
 	}
 	return controlplane.BootstrapOptions{
-		BootstrapOrgSlug:   strings.ToLower(strings.TrimSpace(m.Authority.BootstrapOrgSlug)),
+		BootstrapMerchantSlug:   strings.ToLower(strings.TrimSpace(m.Authority.BootstrapMerchantSlug)),
 		InitialAdminUserID: strings.TrimSpace(m.Authority.InitialAdminUserID),
 		MintInitialAPIKey:  mintInitialAPIKey,
 	}
@@ -130,7 +130,7 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 }
 
 // validateManifestIssuer checks the per-merchant host-app issuer (#527). The
-// issuer is registered as the OWNER of the merchant's backing org, so its
+// issuer is registered as the OWNER of the merchant's permission-group, so its
 // delegated tokens administer that one merchant. Exactly one trust source —
 // jwks_uri (preferred, auto-rotating) XOR public_keys (static, manual) — must
 // be declared.

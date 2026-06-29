@@ -145,7 +145,9 @@ func main() {
 	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission(s) the minted key should carry; repeat or comma-separate. The CLI ensures an org role with exactly these permissions and mints against it. Defaults to full merchant API permissions. Mutually exclusive with --role.")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newDataCmd(), newAuthCmd())
+	// Drop cobra's auto-generated `completion` subcommand.
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

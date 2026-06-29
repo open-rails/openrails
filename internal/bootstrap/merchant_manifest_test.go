@@ -10,7 +10,7 @@ import (
 
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
-	// host-app issuer (registered as owner of its backing org), provider
+	// host-app issuer (registered as owner of its permission-group), provider
 	// accounts + secrets, and profile. No auth/users/orgs section.
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
@@ -68,7 +68,7 @@ func TestParseBootstrapManifest(t *testing.T) {
 	raw := []byte(`
 version: 1
 authority:
-  bootstrap_org_slug: local-stack
+  bootstrap_merchant_slug: local-stack
   initial_admin_user_id: usr_admin
   mint_initial_api_key: false
 `)
@@ -76,7 +76,7 @@ authority:
 	require.NoError(t, err)
 
 	opts := manifest.BootstrapOptions()
-	require.Equal(t, "local-stack", opts.BootstrapOrgSlug)
+	require.Equal(t, "local-stack", opts.BootstrapMerchantSlug)
 	require.Equal(t, "usr_admin", opts.InitialAdminUserID)
 	require.False(t, opts.MintInitialAPIKey)
 }
@@ -87,7 +87,7 @@ func TestExampleBootstrapManifestParses(t *testing.T) {
 
 	manifest, err := ParseBootstrapManifest(raw)
 	require.NoError(t, err)
-	require.Equal(t, "local-stack", manifest.BootstrapOptions().BootstrapOrgSlug)
+	require.Equal(t, "local-stack", manifest.BootstrapOptions().BootstrapMerchantSlug)
 }
 
 func TestParseBootstrapManifestValidationErrors(t *testing.T) {
@@ -114,12 +114,12 @@ func TestParseBootstrapManifestValidationErrors(t *testing.T) {
 		{
 			name: "missing authority",
 			body: "version: 1\n",
-			want: "authority.bootstrap_org_slug",
+			want: "authority.bootstrap_merchant_slug",
 		},
 		{
-			name: "missing bootstrap org slug",
+			name: "missing bootstrap merchant slug",
 			body: "version: 1\nauthority: {}\n",
-			want: "authority.bootstrap_org_slug",
+			want: "authority.bootstrap_merchant_slug",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,7 +156,7 @@ merchants:
 		},
 		{
 			name: "bootstrap authority belongs to push-bootstrap",
-			body: "version: 1\nauthority:\n  bootstrap_org_slug: local-stack\n",
+			body: "version: 1\nauthority:\n  bootstrap_merchant_slug: local-stack\n",
 			want: "authority",
 		},
 		{

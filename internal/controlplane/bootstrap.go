@@ -22,12 +22,12 @@ const (
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
-	BootstrapOrgSlug string
-	// BootstrapOrgID is the merchant permission-group's internal id (#567).
-	BootstrapOrgID string
-	// OrgCreated is true if the merchant permission-group was created on this run
+	BootstrapMerchantSlug string
+	// BootstrapMerchantGroupID is the merchant permission-group's internal id (#567).
+	BootstrapMerchantGroupID string
+	// MerchantGroupCreated is true if the merchant permission-group was created on this run
 	// (false if it already existed).
-	OrgCreated bool
+	MerchantGroupCreated bool
 	// APIKeyMinted is true if an initial admin API key was minted on this run
 	// (false if one already existed). When true, APIKeySecret holds the one-time
 	// plaintext key — it is NOT persisted by AuthKit and cannot be recovered.
@@ -38,12 +38,12 @@ type BootstrapResult struct {
 
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
-	// BootstrapOrgSlug is the merchant slug (the merchant permission-group's
+	// BootstrapMerchantSlug is the merchant slug (the merchant permission-group's
 	// resource ref, #567) under which the admin owner + deployment admin API key
 	// are seeded. It is also the slug used to locate the openrails.merchants
 	// directory row: there is NO default merchant, so an empty slug is an error and
 	// a matching openrails.merchants row must already exist.
-	BootstrapOrgSlug string
+	BootstrapMerchantSlug string
 
 	// InitialAdminUserID, when set, is assigned the merchant `owner` role
 	// (= `merchant:*`). Optional: self-hosted bootstrap may seed the admin API key
@@ -76,13 +76,13 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		return nil, errors.New("controlplane: core service unavailable")
 	}
 
-	slug := strings.ToLower(strings.TrimSpace(opts.BootstrapOrgSlug))
+	slug := strings.ToLower(strings.TrimSpace(opts.BootstrapMerchantSlug))
 	if slug == "" {
 		// No default merchant (#336): bootstrap must name the merchant slug to seed.
-		return nil, errors.New("controlplane: bootstrap requires a merchant slug (BootstrapOrgSlug)")
+		return nil, errors.New("controlplane: bootstrap requires a merchant slug (BootstrapMerchantSlug)")
 	}
 
-	res := &BootstrapResult{BootstrapOrgSlug: slug}
+	res := &BootstrapResult{BootstrapMerchantSlug: slug}
 
 	// 0. Ensure the singleton root group exists and the declared containment is
 	//    seeded (idempotent) before creating typed groups.
@@ -108,7 +108,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		if err != nil {
 			return nil, fmt.Errorf("controlplane: create merchant group %q: %w", slug, err)
 		}
-		res.OrgCreated = true
+		res.MerchantGroupCreated = true
 		log.WithField("merchant", slug).Info("controlplane: created merchant permission-group")
 	} else if err != nil {
 		return nil, fmt.Errorf("controlplane: resolve merchant group %q: %w", slug, err)
@@ -120,7 +120,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		log.WithFields(log.Fields{"merchant": slug, "user_id": adminID}).
 			Info("controlplane: assigned merchant owner to initial admin")
 	}
-	res.BootstrapOrgID = groupID
+	res.BootstrapMerchantGroupID = groupID
 
 	// 2. Record the merchant group's internal id on the directory row
 	//    (openrails.merchants.permission_group_id, repurposed under #567 to hold the
@@ -131,7 +131,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	// issuer/credential authz can map this merchant -> its group (#567). #569: the
 	// returned merchant id is no longer needed at mint time (identity is the group,
 	// not a resource scope).
-	if _, err := c.recordOwnerOrgBySlug(ctx, slug, groupID); err != nil {
+	if _, err := c.recordMerchantGroupBySlug(ctx, slug, groupID); err != nil {
 		return nil, err
 	}
 
@@ -206,7 +206,7 @@ func anyLiveAPIKey(toks []authkit.APIKey) bool {
 	return false
 }
 
-// recordOwnerOrgBySlug writes the merchant permission-group's internal id onto
+// recordMerchantGroupBySlug writes the merchant permission-group's internal id onto
 // the bootstrap merchant's directory row (openrails.merchants.permission_group_id,
 // repurposed under #567 to hold the controlling group id), keyed by slug, and
 // returns the resolved OpenRails merchant id. openrails.* is OpenRails-owned
@@ -214,7 +214,7 @@ func anyLiveAPIKey(toks []authkit.APIKey) bool {
 // There is no default merchant the row could fall back to (#480), so a missing
 // directory row is an error the caller must surface (register the merchant
 // before bootstrap).
-func (c *ControlPlane) recordOwnerOrgBySlug(ctx context.Context, slug, groupID string) (merchant.ID, error) {
+func (c *ControlPlane) recordMerchantGroupBySlug(ctx context.Context, slug, groupID string) (merchant.ID, error) {
 	if c.pool == nil {
 		return merchant.ID{}, errors.New("controlplane: pgx pool unavailable for merchant directory update")
 	}

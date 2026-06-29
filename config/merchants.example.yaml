@@ -6,7 +6,7 @@ version: 1
 #
 # There is NO auth/users section: OpenRails owns authority, the host app owns
 # identity. Each merchant declares its own host-app `issuer`, which is registered
-# as the OWNER of the merchant's backing org — the host app's delegated tokens
+# as the OWNER of the merchant's permission-group — the host app's delegated tokens
 # then fully administer THIS merchant only (and nothing else).
 #
 # Secrets: {env: ...} or {file: ...} normally; {vault: ...} when a Vault backend
