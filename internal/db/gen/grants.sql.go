@@ -12,6 +12,31 @@ import (
 	"github.com/google/uuid"
 )
 
+const adminGrantExistsForSource = `-- name: AdminGrantExistsForSource :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.grants g
+    WHERE g.merchant_id = $1::uuid
+      AND g.event = 'grant' AND g.kind = 'entitlement'
+      AND g.source_type = 'admin' AND g.source_id = $2::text
+) AS exists
+`
+
+type AdminGrantExistsForSourceParams struct {
+	MerchantID uuid.UUID
+	SourceID   string
+}
+
+// #636 idempotency for admin-grant import: is there already an entitlement grant
+// from this admin source? Lets the doujins migrate hand admin comps over as grants
+// (source_type=admin) and re-run safely — convergence derive-2 projects the
+// entitlement, so doujins never writes entitlements directly.
+func (q *Queries) AdminGrantExistsForSource(ctx context.Context, arg AdminGrantExistsForSourceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, adminGrantExistsForSource, arg.MerchantID, arg.SourceID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const createProductUsageLimitBinding = `-- name: CreateProductUsageLimitBinding :exec
 INSERT INTO openrails.product_usage_limit_bindings (
     id, merchant_id, customer_id, usage_limit_key, measure, windows,
@@ -1102,7 +1127,7 @@ type ListUngrantedSubscriptionsRow struct {
 	EntitlementsSpec      []byte
 }
 
-// #631 DERIVE `derive.grant.missing.subscription`: subscriptions in an access-
+// #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
 // granting state (active/cancelled) for a product that PROMISES entitlements,
 // with NO subscription-sourced grant yet. After the migrate/convergence split the
 // doujins migrate moves subscriptions as source-of-truth (#724) but no longer
@@ -1183,7 +1208,7 @@ type ListUngrantedWalletPaymentsRow struct {
 	EntitlementsSpec []byte
 }
 
-// #631 DERIVE `derive.grant.missing.wallet`: completed solana wallet payments
+// #631 DERIVE `derive.wallet.missing`: completed solana wallet payments
 // carrying a stored access window (metadata.expiration_rfc3339) for a grantable
 // product, with NO grant yet. The doujins migrate moved these payments as
 // source-of-truth (rail=solana, amount>0) but no longer derives their membership

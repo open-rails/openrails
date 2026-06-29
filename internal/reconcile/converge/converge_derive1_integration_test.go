@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -229,6 +230,74 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 		require.WithinDuration(t, purchased, entStart, time.Second)
 		require.WithinDuration(t, expires, entEnd, time.Second)
 		require.Equal(t, "one_off", srcType, "purchase-sourced grant materializes as one_off entitlement")
+		return nil
+	}))
+}
+
+// #636 admin comp as source-of-truth: GrantAdmin records an admin-sourced
+// entitlement grant + materializes its entitlement (source_type=admin),
+// idempotent by sourceID, and supports an indefinite (nil-end) window.
+func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	var custBounded, custIndef uuid.UUID
+	start := time.Now().UTC().Add(-240 * time.Hour)
+	end := time.Now().UTC().Add(480 * time.Hour)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		custBounded = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		custIndef = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			for _, c := range []uuid.UUID{custBounded, custIndef} {
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+			}
+			return nil
+		})
+	})
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		gl := grants.New(appDB.Gen(ctx), merchantID)
+
+		// Bounded comp.
+		created, err := gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
+		require.NoError(t, err)
+		require.True(t, created, "first import creates the grant")
+
+		var n int
+		var srcType string
+		var endAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			merchantID, custBounded).Scan(&n))
+		require.Equal(t, 1, n, "admin comp → one entitlement")
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT source_type, end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			merchantID, custBounded).Scan(&srcType, &endAt))
+		require.Equal(t, "admin", srcType)
+		require.NotNil(t, endAt)
+
+		// Idempotent re-run.
+		created, err = gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
+		require.NoError(t, err)
+		require.False(t, created, "same sourceID → skipped")
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			merchantID, custBounded).Scan(&n))
+		require.Equal(t, 1, n, "re-run is a no-op")
+
+		// Indefinite comp (nil end → end_at NULL).
+		created, err = gl.GrantAdmin(ctx, custIndef, "comp-indef", []string{"premium"}, start, nil)
+		require.NoError(t, err)
+		require.True(t, created)
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			merchantID, custIndef).Scan(&endAt))
+		require.Nil(t, endAt, "indefinite comp → open-ended entitlement")
 		return nil
 	}))
 }

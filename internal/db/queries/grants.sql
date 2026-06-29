@@ -452,3 +452,15 @@ SELECT EXISTS (
       AND e.deleted_at IS NULL
       AND e.period && tstzrange(sqlc.arg(lower_bound)::timestamptz, sqlc.arg(upper_bound)::timestamptz, '[)')
 ) AS overlaps;
+
+-- #636 idempotency for admin-grant import: is there already an entitlement grant
+-- from this admin source? Lets the doujins migrate hand admin comps over as grants
+-- (source_type=admin) and re-run safely — convergence derive-2 projects the
+-- entitlement, so doujins never writes entitlements directly.
+-- name: AdminGrantExistsForSource :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.grants g
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND g.event = 'grant' AND g.kind = 'entitlement'
+      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
+) AS exists;
