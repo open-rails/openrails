@@ -10,10 +10,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -256,6 +259,62 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(foundBody, &product))
 	require.Equal(t, productSlug, product.Slug)
+}
+
+func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+	token := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-example-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+
+	manifest := loadExampleCatalogForHTTP(t)
+	expectedProducts, expectedPrices := catalogShapeCounts(manifest)
+
+	planStatus, planBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+	})
+	require.Equal(t, http.StatusOK, planStatus, string(planBody))
+	var planned struct {
+		Plan   *catalog.ApplyPlan   `json:"plan"`
+		Result *catalog.ApplyResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(planBody, &planned))
+	require.NotNil(t, planned.Plan)
+	require.Nil(t, planned.Result)
+	require.Equal(t, expectedProducts, countProductActions(planned.Plan, catalog.ProductCreate))
+	require.Equal(t, expectedPrices, countPriceActions(planned.Plan, catalog.PriceCreate))
+	require.Zero(t, exampleProductCount(t, ctx, h, manifest))
+
+	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
+	var applied struct {
+		Plan   *catalog.ApplyPlan   `json:"plan"`
+		Result *catalog.ApplyResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(applyBody, &applied))
+	require.NotNil(t, applied.Result)
+	require.Equal(t, expectedProducts, applied.Result.ProductsCreated)
+	require.Equal(t, expectedPrices, applied.Result.PricesCreated)
+
+	assertExampleCatalogRows(t, ctx, h, manifest, expectedProducts, expectedPrices)
+
+	againStatus, againBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+	})
+	require.Equal(t, http.StatusOK, againStatus, string(againBody))
+	var again struct {
+		Plan *catalog.ApplyPlan `json:"plan"`
+	}
+	require.NoError(t, json.Unmarshal(againBody, &again))
+	require.Zero(t, countProductActions(again.Plan, catalog.ProductCreate))
+	require.Zero(t, countPriceActions(again.Plan, catalog.PriceCreate))
 }
 
 func TestNativeCatalogLifecycleHTTP(t *testing.T) {
@@ -1179,4 +1238,217 @@ func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*b
 	var out billingservice.CatalogPrice
 	require.NoError(a.t, json.Unmarshal(body, &out))
 	return &out, nil
+}
+
+type exampleCatalogFile struct {
+	Version  int                   `yaml:"version"`
+	Catalogs []exampleCatalogEntry `yaml:"catalogs"`
+}
+
+type exampleCatalogEntry struct {
+	Merchant    string               `yaml:"merchant"`
+	Products    []catalog.Product    `yaml:"products"`
+	Meters      []catalog.Meter      `yaml:"meters"`
+	UsageLimits []catalog.UsageLimit `yaml:"usage_limits"`
+}
+
+func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
+	require.NoError(t, err)
+	var file exampleCatalogFile
+	require.NoError(t, yaml.UnmarshalWithOptions(raw, &file, yaml.DisallowUnknownField()))
+	require.Equal(t, catalog.SupportedVersion, file.Version)
+	require.Len(t, file.Catalogs, 1)
+
+	entry := file.Catalogs[0]
+	suffix := "-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	meterKeys := map[string]string{}
+	for i := range entry.Meters {
+		old := entry.Meters[i].Key
+		entry.Meters[i].Key += suffix
+		meterKeys[old] = entry.Meters[i].Key
+	}
+	limitKeys := map[string]string{}
+	for i := range entry.UsageLimits {
+		old := entry.UsageLimits[i].Key
+		entry.UsageLimits[i].Key += suffix
+		limitKeys[old] = entry.UsageLimits[i].Key
+	}
+	for i := range entry.Products {
+		entry.Products[i].Key += suffix
+		if entry.Products[i].TierGroup != "" {
+			entry.Products[i].TierGroup += suffix
+		}
+		for j := range entry.Products[i].UsageLimits {
+			entry.Products[i].UsageLimits[j] = limitKeys[entry.Products[i].UsageLimits[j]]
+		}
+		for j := range entry.Products[i].Includes {
+			entry.Products[i].Includes[j] += suffix
+		}
+		for j := range entry.Products[i].Prices {
+			entry.Products[i].Prices[j].Providers = nil
+			entry.Products[i].Prices[j].ProviderLinks = nil
+			if mp := entry.Products[i].Prices[j].Metered; mp != nil {
+				mp.Meter = meterKeys[mp.Meter]
+			}
+		}
+	}
+	m := catalog.Manifest{
+		Version:     file.Version,
+		Products:    entry.Products,
+		Meters:      entry.Meters,
+		UsageLimits: entry.UsageLimits,
+	}
+	require.NoError(t, m.Validate())
+	return m
+}
+
+func catalogShapeCounts(m catalog.Manifest) (products int, prices int) {
+	for _, p := range m.Products {
+		products++
+		prices += len(p.Prices)
+	}
+	return products, prices
+}
+
+func countProductActions(plan *catalog.ApplyPlan, action catalog.ProductAction) int {
+	if plan == nil {
+		return 0
+	}
+	var n int
+	for _, g := range plan.Groups {
+		for _, p := range g.Products {
+			if p.Action == action {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func countPriceActions(plan *catalog.ApplyPlan, action catalog.PriceAction) int {
+	if plan == nil {
+		return 0
+	}
+	var n int
+	for _, g := range plan.Groups {
+		for _, p := range g.Products {
+			for _, price := range p.Prices {
+				if price.Action == action {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+func exampleProductCount(t *testing.T, ctx context.Context, h *Harness, m catalog.Manifest) int {
+	t.Helper()
+	var n int
+	require.NoError(t, h.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM openrails.products WHERE merchant_id = $1 AND slug = ANY($2::text[])`,
+		dbtest.TestMerchantID.UUID(), exampleProductKeys(m)).Scan(&n))
+	return n
+}
+
+func assertExampleCatalogRows(t *testing.T, ctx context.Context, h *Harness, m catalog.Manifest, expectedProducts, expectedPrices int) {
+	t.Helper()
+	pool := h.Pool()
+	keys := exampleProductKeys(m)
+	require.Equal(t, expectedProducts, exampleProductCount(t, ctx, h, m))
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.prices pr
+JOIN openrails.products p ON p.id = pr.product_id
+WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+	require.Equal(t, expectedPrices, n)
+
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.catalog_usage_limits WHERE merchant_id = $1 AND key = ANY($2::text[])`,
+		dbtest.TestMerchantID.UUID(), exampleUsageLimitKeys(m)).Scan(&n))
+	require.Equal(t, len(m.UsageLimits), n)
+
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])`,
+		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
+	require.Equal(t, len(m.Meters), n)
+
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.product_includes pi
+JOIN openrails.products p ON p.id = pi.product_id
+WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+	require.Equal(t, exampleIncludesCount(m), n)
+
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.product_usage_limits pul
+JOIN openrails.products p ON p.id = pul.product_id
+WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+	require.Equal(t, exampleProductUsageLimitCount(m), n)
+
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.catalog_price_metered WHERE merchant_id = $1 AND meter_key = ANY($2::text[])`,
+		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
+	require.Equal(t, exampleMeteredPriceCount(m), n)
+
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.prices pr
+JOIN openrails.products p ON p.id = pr.product_id
+WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[]) AND pr.trial_unit_amount = 0 AND pr.trial_duration_days = 7`,
+		dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+	require.Equal(t, 1, n)
+}
+
+func exampleProductKeys(m catalog.Manifest) []string {
+	keys := make([]string, 0, len(m.Products))
+	for _, p := range m.Products {
+		keys = append(keys, p.Key)
+	}
+	return keys
+}
+
+func exampleUsageLimitKeys(m catalog.Manifest) []string {
+	keys := make([]string, 0, len(m.UsageLimits))
+	for _, limit := range m.UsageLimits {
+		keys = append(keys, limit.Key)
+	}
+	return keys
+}
+
+func exampleMeterKeys(m catalog.Manifest) []string {
+	keys := make([]string, 0, len(m.Meters))
+	for _, meter := range m.Meters {
+		keys = append(keys, meter.Key)
+	}
+	return keys
+}
+
+func exampleIncludesCount(m catalog.Manifest) int {
+	var n int
+	for _, p := range m.Products {
+		n += len(p.Includes)
+	}
+	return n
+}
+
+func exampleProductUsageLimitCount(m catalog.Manifest) int {
+	var n int
+	for _, p := range m.Products {
+		n += len(p.UsageLimits)
+	}
+	return n
+}
+
+func exampleMeteredPriceCount(m catalog.Manifest) int {
+	var n int
+	for _, p := range m.Products {
+		for _, price := range p.Prices {
+			if price.Metered != nil {
+				n++
+			}
+		}
+	}
+	return n
 }

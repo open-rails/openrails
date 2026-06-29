@@ -110,11 +110,13 @@ CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    owner text DEFAULT 'merchant' NOT NULL,
     CONSTRAINT provider_accounts_pkey PRIMARY KEY (id),
     CONSTRAINT provider_accounts_nonempty CHECK (btrim(provider_type) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
     CONSTRAINT provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
     CONSTRAINT provider_accounts_role_check CHECK (role = ANY (ARRAY['primary','secondary','legacy'])),
     CONSTRAINT provider_accounts_status_check CHECK (status = ANY (ARRAY['enabled','disabled'])),
+    CONSTRAINT provider_accounts_owner_check CHECK (owner = ANY (ARRAY['merchant','platform'])),
     CONSTRAINT provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
 ALTER TABLE ONLY openrails.provider_accounts FORCE ROW LEVEL SECURITY;

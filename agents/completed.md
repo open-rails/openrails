@@ -9,6 +9,54 @@
 
 ---
 
+# #621: catalog prices own providers explicitly
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): removed `default_providers` and product-level `providers` from catalog manifests. Provider sync/routing is declared only on the price itself; omitted/empty price providers means OpenRails-native/no external provider sync. OpenRails examples/tests and Doujins bootstrap were updated.
+
+## Verification
+
+- `go test ./pkg/catalog ./pkg/embedded ./cmd/openrails`
+- Doujins: `go test ./config ./internal/billing/openrailsembed`
+
+---
+
+# #607: provider-intents-as-boring-outbound-queue
+
+**Completed:** yes
+**Status:** DONE 2026-06-29 (Claude): `provider_intents` now behaves as the active outbound work queue without breaking effectively-once semantics. Succeeded rows remain as slim dedupe tombstones keyed by `(merchant_id, idempotency_key)`; heavy payload/result evidence is pruned after ClickHouse logging, and `openrails intents` defaults to the active working set. The unsafe "delete succeeded rows" plan was rejected because it would permit duplicate provider execution.
+
+## Verification
+
+- `TestSucceededIntentIsPrunedToSlimTombstone`
+- Full `internal/intents`, `internal/river`, and `pkg/service` suites passed against real Postgres per tracker status.
+
+---
+
+# #622: catalog prices need explicit product-access windows
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (verified by Codex): access-window price model is the active hard-cut v1 shape. Prices use `duration`, `auto_renew`, and optional `trial`; old `interval`/`intro` compatibility tasks were discarded as over-engineering for an unlaunched catalog. The canonical example and integration coverage now exercise finite one-off access, durable ownership, auto-renewing plans, and trial-then-recurring pricing.
+
+## Verification
+
+- `go test ./pkg/embedded -run TestExampleCatalogManifestParses -count=1`
+- `go test -tags=integration ./internal/integrationharness -run 'Test(ExampleCatalogPublishesOverHTTP|NativeCatalogRemainingProductUseCasesHTTP|StandaloneMerchantCatalogPublishHTTP)' -count=1`
+
+---
+
+# #611: exhaustive v1 catalog bootstrap examples and real HTTP coverage
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): `config/catalog.example.yaml` is the canonical flat v1 catalog bootstrap example, covering premium entitlement, SaaS tiers, trial pricing, AI credits, API credits, content ownership/rental, bundles, Claude Code-style usage limits, and VM/storage metered billing. `TestExampleCatalogPublishesOverHTTP` unwraps that real example, makes per-test unique DB-only keys, publishes it through the real standalone HTTP catalog route, verifies plan-only writes nothing, applies every product/price, asserts DB sidecars for meters/usage limits/includes/metered prices/trial rows, and proves a second plan is idempotent. Provider-specific external behavior remains covered by #612's live Stripe/NMI tests rather than duplicating provider calls here.
+
+## Verification
+
+- `go test ./pkg/embedded -run TestExampleCatalogManifestParses -count=1`
+- `go test -tags=integration ./internal/integrationharness -run 'Test(ExampleCatalogPublishesOverHTTP|NativeCatalogRemainingProductUseCasesHTTP|StandaloneMerchantCatalogPublishHTTP)' -count=1`
+
+---
+
 # #612: end-to-end catalog provider sync, usage reporting, and metered invoicing
 
 **Completed:** yes
