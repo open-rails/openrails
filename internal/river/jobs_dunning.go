@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
@@ -245,6 +246,21 @@ func (w *DunningWorker) processSubscription(
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
 	rail := models.Rail(provider)
+
+	// #635: a provider-auto-billed subscription is charged by the provider itself,
+	// not by us — a vault-less NMI recurring sub auto-charges keyed on the remote
+	// subscription id (we hold no card to rebill). OpenRails must NOT manual-rebill
+	// it, nor expire/fail it when the local period lapses: that would revoke access
+	// the provider is still billing for (the ~19k migrated vault-less Mobius subs).
+	// They are reconciled against provider truth via provider-pull (#632/#633), not
+	// dunning. (CCBill never reaches here — ListDueDunningSubscriptions is NMI-only.)
+	// Returning Failed is a benign no-op skip: it only bumps the run's fail counter,
+	// changes no state, and the inline converge after this call still runs.
+	if subscriptionProviderAutoBilled(provider, sub.PaymentMethod) {
+		logEntry.WithField("rail", provider).
+			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill/expiry, awaiting provider-pull reconciliation (#632/#633)")
+		return dunningOutcomeFailed
+	}
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
@@ -626,6 +642,22 @@ func rebillOrderReference(sub *models.Subscription) string {
 		return ""
 	}
 	return fmt.Sprintf("rebill-%s-%d", sub.ID, sub.CurrentPeriodEndsAt.UTC().Unix())
+}
+
+// subscriptionProviderAutoBilled reports whether the provider bills this
+// subscription on its own side, so OpenRails must not manual-rebill or terminate
+// it (#635): CCBill always (it bills independently); NMI/mobius only when there is
+// no stored vault (a vault-less recurring sub auto-charges on the remote
+// subscription id). An NMI sub WITH a vault is our-rebill — returns false.
+func subscriptionProviderAutoBilled(rail string, pm *models.PaymentMethod) bool {
+	switch normalizeRail(rail) {
+	case "ccbill":
+		return true
+	case "nmi", "mobius":
+		return pm == nil || strings.TrimSpace(pm.RailMethodRef) == ""
+	default:
+		return false
+	}
 }
 
 func resolveSubscriptionRail(sub *models.Subscription) string {
