@@ -64,14 +64,23 @@ $0 initial amount (distinct from "no intro").
   unsupported per rail.
 - **Solana**: evaluate.
 
+## Status 2026-06-28 (Claude): EXPRESSION shipped (v0.71.3) — a price can carry an
+## intro/trial first period (initial_amount/initial_period_days), end-to-end:
+## migration 031, model GetIntro(), manifest `intro:` block, converge, service
+## validation ($0 trial allowed). Integration-tested (intro/trial/flat round-trip).
+## doujins legacy $19.95->$14.95 (CCBill RBO 0000000931) now modeled. REMAINING:
+## per-rail charge orchestration (bill intro-once-then-recurring / skip the trial
+## window) + reconciliation keying — not needed for the legacy CCBill case (CCBill
+## bills via the RBO; openrails records), needed for openrails-native intro billing.
+
 ## Tasks
-- [ ] Decide storage: extend `prices` (intro_* columns) vs a child period table.
-- [ ] Manifest + catalog converge support for the intro block.
+- [x] Decide storage: extend `prices` (initial_amount + initial_period_days cols, migration 031).
+- [x] Manifest + catalog converge support for the intro block.
 - [ ] Charge paths bill intro-once-then-recurring per rail (start CCBill + Stripe).
-- [ ] Support `amount: 0` initial as a free trial (e.g. $0/7d then $15/30d); skip
-      the first charge for the trial window, then bill recurring.
+- [x] Express `amount: 0` initial as a free trial (model + validation + round-trip test);
+      the charge-side "skip the first charge for the trial window" rides on the charge task above.
 - [ ] Reconciliation matches a provider sub on intro/trial OR recurring rate.
-- [ ] Migrate doujins legacy `$19.95 -> $14.95` (CCBill RBO 0000000931) onto it.
+- [x] Migrate doujins legacy `$19.95 -> $14.95` (CCBill RBO 0000000931) onto it.
 
 ---
 
@@ -215,21 +224,36 @@ products:
   over time — VMs, storage; time-integrated, persists across periods) or `counter` (discrete
   EVENTS — API calls, egress; summed, resets each period). Prometheus's gauge-vs-counter; replaces
   aggregation+recurring. Rare peak/value-at-close (`max`/`latest`) deferred.
-- `rate` (on the price) = micros per meter-unit per `per`; ISO money currency ONLY (custom
-  counters can't be arrears — #474), consistent with the ledger model (#594).
+- `rate` (on the price) = micros per `per_units` meter-units (per `per` time, for gauges); ISO
+  money currency ONLY (custom counters can't be arrears — #474), consistent with the ledger (#594).
+- `per_units` (on the price, default 1) = the rate's UNIT denominator, so fine-grained prices stay
+  clean integer micros: `{ rate: 200_000, per_units: 1_000_000 }` = $0.20 per 1M requests (an
+  effective 0.2 micros/request that integer-micros can't hold directly). Quote the way clouds do.
 - `per` (on the price) = the rate's TIME denominator for gauge meters — "$rate per unit per
   `per`" (VM `1h`, storage `30d`); reuses the #594 duration grammar. Omitted for counter meters
   (priced per event, not per time). It is the only time field on a price: when the invoice CLOSES
   is the customer billing cycle (#600), and how often OpenRails accrues is arbitrary/internal (the
   integral can be evaluated at any instant) — neither belongs on the price.
 
+## Precision (micros + `per_units`)
+Amounts/ledger stay micro-USD (1e-6). For typical cloud rates micros has ample headroom: 1¢/hour =
+10_000 micros; $0.10/GB-month = 100 micros/MB; $0.023/GB-month = 23 micros/MB; even RAM at
+~$0.007/GB-hr = 7 micros/MB. VMs/RAM/storage/bandwidth all fit comfortably. The ONLY sub-micro case
+is rates per a TINY unit — per request/token/byte (e.g. $0.20/1M requests = 0.2 micros/request).
+Handle it WITHOUT a finer money scale: `per_units` (default 1) quotes the rate per a unit-count
+(200_000 micros per 1_000_000 requests), keeping the rate an integer ≥1 micro; and rating NEVER
+rounds per event — it aggregates the whole period, computes `aggregate × rate ÷ (per_units ×
+per_seconds)` in a wide int64 intermediate, and rounds to micros ONCE, so the effective fractional
+per-unit rate is exact at the accrual.
+
 ## How it bills
 A rating job (River) runs periodically — the frequency is INTERNAL and arbitrary, because the
 integral can be evaluated at any instant ("owed so far" = integral up to now). Each run computes
 the meter's aggregate since the last accrual (by the meter's `kind`): for a `counter`, the summed events; for a `gauge`,
 the time-integral of the level (unit·seconds). It multiplies by `rate` ONCE (rounding once —
-NEVER per event; sub-unit per-event rounding drifts), normalizing a gauge by `per`
-(cost = integral_unit_seconds × rate ÷ `per`_seconds), and `AccrueOwed` (#302) the result. The
+NEVER per event; sub-unit per-event rounding drifts), dividing by `per_units` (and, for a gauge,
+by `per`_seconds): cost = aggregate × rate ÷ (`per_units` × `per`_seconds), in a wide int64
+intermediate, rounded to micros ONCE. Then `AccrueOwed` (#302) the result. The
 existing `InvoiceWorker` (#303) closes the invoice on the customer's billing cycle (#600) and
 `ChargeOutstanding` (#301) collects. Metered prices are pure rating on top of the built engine —
 no new ledger, no new collection path.
@@ -376,11 +400,13 @@ tiered/graduated/volume "charge model" is a distinct concern in all of them → 
   (billed later) and a usage_limit (granted ahead) are separate concepts that may merely watch the
   same event stream.
 - [ ] Extend the #594 price model with an optional `metered` block referencing a `meter` + `rate`
-  (micros/unit) + `per` (gauge only). Validate ISO money currency only, positive rate, `per`
-  required for gauge meter / absent for counter meter, parseable `per`.
+  (micros) + `per` (gauge only) + `per_units` (default 1, the rate's unit denominator for sub-micro
+  prices). Validate ISO money currency only, positive rate, `per` required for gauge / absent for
+  counter, parseable `per`, `per_units` ≥ 1.
 - [ ] Rating job (internal cadence, arbitrary), by the meter's `kind`: `counter` → sum events;
-  `gauge` → time-integral of the level (unit·seconds); multiply by rate ONCE, gauges normalized by
-  `per` (integral × rate ÷ `per`_seconds); `AccrueOwed`; idempotent per (customer, meter, accrual).
+  `gauge` → time-integral of the level (unit·seconds); cost = aggregate × rate ÷ (`per_units` ×
+  `per`_seconds) in a wide int64 intermediate, rounded to micros ONCE (never per event);
+  `AccrueOwed`; idempotent per (customer, meter, accrual).
 - [ ] Gauge = a level per `(customer, meter[, resource])` that persists until the next change event
   (no per-period reset, no `recurring` flag); time-integrate the piecewise-constant level. Document:
   app emits absolute gauge samples on change, not deltas.
@@ -520,24 +546,25 @@ separate namespaces.
 
 ---
 
-# #597: Provider adoption/import — rebuild local billing mirror from provider truth when identity/catalog resolve
+# #597: `pull-provider` adoption/import — rebuild local billing mirror from provider truth when identity/catalog resolve
 
 **Completed:** no
 
-Decision 2026-06-28: `pull-provider` stays reconciliation against an existing
-OpenRails mirror. A different command should handle adoption/import: create local
-customers, payment methods, subscriptions, payments, and derived grants from provider
-state only when ownership and catalog mapping are deterministic.
+Decision 2026-06-28: `pull-provider` owns provider reconciliation and provider
+adoption. Against an existing mirror it repairs drift. Against a blank or partially
+incomplete database it should create local customers, payment methods, subscriptions,
+payments, and derived grants from provider state only when ownership and catalog
+mapping are deterministic.
 
 ## Goal
 Support this recovery/bootstrap path:
 
 1. A host migrates users/subjects locally.
 2. OpenRails has provider credentials and catalog mappings.
-3. `adopt-provider` reads NMI/CCBill/Stripe/Solana provider state.
+3. `pull-provider` reads NMI/CCBill/Stripe/Solana provider state.
 4. It resolves each provider object to a local merchant subject + local price/product.
 5. It creates the missing OpenRails billing mirror rows.
-6. `pull-provider` then verifies/repairs drift.
+6. It verifies/repairs drift for rows that already exist.
 
 ## Non-goal
 No probabilistic imports. Email is report evidence, not authority. Provider customer ids
@@ -547,22 +574,59 @@ semantics unless metadata or a manifest maps them.
 ## Resolution order
 1. Provider metadata recovery envelope:
    - merchant slug/id
-   - OpenRails subject
+   - canonical host subject / AuthKit user id
+   - OpenRails customer / permission-group id when known
    - product key
    - price key/id
    - checkout/subscription/payment/payment-method ids when available
 2. Adoption manifest:
-   - provider customer/vault/subscription ids -> host subject ids
+   - provider customer/vault/subscription ids -> host subject ids or OpenRails
+     customer/permission-group ids
    - provider plan/price ids -> OpenRails price keys/ids
    - CCBill numeric price/subscription ids or flex/form ids -> OpenRails price keys
    - provider account bindings
 3. Otherwise unresolved. Emit a report row; do not create local billing state.
 
+Customer association is never inferred from email/name/card details. Adoption resolves a
+subscription/payment by reading the stamped subject/customer envelope from the subscription
+first, then provider customer/vault, then checkout/payment/order records, then the manifest.
+If none of those provide a deterministic local subject/customer mapping, the row stays
+unresolved.
+
+## Provider-data recoverability
+Recoverable from provider records, when deterministic ids or recovery metadata were
+stamped before the loss:
+- provider customers, vault/payment-method references, subscriptions, payments, refunds,
+  provider account links, and status/timestamps exposed by the rail.
+- product/price shell: product key/display fields, price key, amount, currency,
+  billing period, and provider ids/links.
+- local customer association, only from stamped canonical subject/customer fields or
+  an adoption manifest.
+- Stripe-only mirrors, if OpenRails deliberately used the Stripe primitives: entitlement
+  features attached to products, billing credit grants/balances, and meter/price
+  structure.
+- NMI/CCBill equivalents only where the rail exposes durable ids/report fields or
+  custom/merchant-defined fields OpenRails stamped.
+
+Not recoverable from provider records alone:
+- `includes` product ownership.
+- OpenRails usage-limit/admission policy and Redis counter state.
+- custom ledgers/counters and non-provider balances.
+- permission-group delegation.
+- full `grants` provenance, manual/admin grants, and local benefit-change history.
+- customer association when neither stamped metadata nor a manifest maps the provider
+  object to the local subject/customer.
+
+`pull-provider` should recover every deterministic field it can, but its report must
+show each field source: provider-native, recovery metadata, adoption manifest, local
+catalog, or unresolved. Provider-native benefit objects can seed missing local rows, but
+OpenRails catalog/adoption manifests remain the source for OpenRails-only benefits.
+
 ## CLI shape
 
 ```bash
-openrails adopt-provider --provider nmi --manifest adoption.yaml
-openrails adopt-provider --provider nmi --manifest adoption.yaml --insert
+openrails pull-provider --provider nmi --manifest adoption.yaml
+openrails pull-provider --provider nmi --manifest adoption.yaml --insert
 ```
 
 Default is plan-only. `--insert` applies only deterministic rows.
@@ -580,13 +644,17 @@ Default is plan-only. `--insert` applies only deterministic rows.
 
 ## Tasks
 - [ ] Define `adoption.yaml` schema for legacy mappings.
-- [ ] Add plan-only `adopt-provider` command and report format.
+- [ ] Extend `pull-provider` plan output to report adoption candidates, source of truth per field,
+  unresolved rows, and intended inserts.
 - [ ] Reuse existing provider fetchers; do not duplicate rail clients.
 - [ ] Implement deterministic resolver: metadata first, manifest second, unresolved third.
 - [ ] Implement insert path for customers, vault refs, subscriptions, payments.
 - [ ] Derive grants from local product benefits after subscription/payment creation.
 - [ ] Add tests: metadata-only adoption, manifest-only adoption, unresolved rows, ambiguous rows, idempotent re-run.
-- [ ] Document: adoption imports provider truth; `pull-provider` reconciles after adoption.
+- [ ] Document the per-provider recoverability matrix: what can be recovered from provider-native
+  data, what requires stamped metadata, what requires a manifest/local catalog, and what is
+  unrecoverable.
+- [ ] Document: `pull-provider` reconciles existing rows and imports missing rows where deterministic.
 
 ---
 
@@ -606,10 +674,17 @@ Logical fields:
 openrails_version
 merchant_slug
 merchant_id
+subject_issuer
 subject
+authkit_user_id
+customer_id
+permission_group_id
 product_key
 price_key
 price_id
+catalog_version
+catalog_fingerprint
+benefit_fingerprint
 checkout_session_id
 subscription_id
 payment_id
@@ -622,8 +697,12 @@ Use the subset each provider supports, but keep one canonical internal shape.
 ## Provider behavior
 - Stripe: deterministic product `id` when safe for the connected account, product metadata
   as backup, and deterministic price `lookup_key`; keep `prod_...` / `price_...` as links.
+  Stamp the envelope onto customer, product, price, checkout/session, subscription,
+  payment intent/invoice/refund objects where Stripe supports metadata. Metadata stores
+  compact keys and fingerprints, not the full OpenRails benefit spec.
 - NMI: product `product_sku`, product `product_description`, recurring `plan_id`, `plan_name`,
-  and order/customer/vault metadata fields that survive query/report reads.
+  and order/customer/vault merchant-defined fields that survive query/report reads. Treat
+  NMI as a fixed breadcrumb surface, not an arbitrary metadata document store.
 - CCBill: form/flex/custom fields that survive DataLink exports; numeric admin price ids are
   provider links, not OpenRails identity.
 - Solana: plan/payment memo/account metadata where feasible.
@@ -642,7 +721,11 @@ Use the subset each provider supports, but keep one canonical internal shape.
 - [ ] Stamp metadata during payment-method vault creation.
 - [ ] Stamp metadata during payment creation/refund where providers support it.
 - [ ] Extend provider fetchers to parse the envelope back into remote snapshots.
-- [ ] Tests per rail: created provider payload includes metadata; fetched snapshot recovers it.
+- [ ] Ensure subject/customer breadcrumbs are stamped redundantly enough that a provider
+  subscription/payment can be reattached to a migrated local user after a blank-DB restore.
+- [ ] Tests per rail: created provider payload includes metadata; fetched snapshot recovers it;
+  adoption links subscription/payment to a migrated user from metadata and refuses email-only
+  matching.
 
 ---
 
