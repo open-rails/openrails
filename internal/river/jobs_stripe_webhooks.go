@@ -25,7 +25,7 @@ type StripeWebhookReconcileWorker struct {
 	river.WorkerDefaults[StripeWebhookReconcileArgs]
 	DB        *db.DB
 	Config    *config.Config
-	Rails     config.RailSet
+	Rails     config.ProviderAccountSet
 	Merchants *merchants.Service
 }
 

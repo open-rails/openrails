@@ -177,7 +177,7 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 
 // cancelWithNMI cancels a subscription with NMI if applicable
 func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscription) error {
-	if !rails.IsNMIBackedRail(subscription.Rail) {
+	if !rails.IsNMI(subscription.Rail) {
 		return nil // Not an NMI-backed subscription, nothing to do
 	}
 
@@ -215,13 +215,13 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return fmt.Errorf("subscription is not active")
 	}
 
-	if !rails.IsNMIBackedRail(subscription.Rail) && subscription.Rail != models.RailStripe {
+	if !rails.IsNMI(subscription.Rail) && subscription.Rail != models.RailStripe {
 		return fmt.Errorf("cancel operation not supported for rail '%s'", subscription.Rail)
 	}
 
 	// Cancel with payment rail first.
 	switch {
-	case rails.IsNMIBackedRail(subscription.Rail):
+	case rails.IsNMI(subscription.Rail):
 		if err := s.cancelWithNMI(subscription); err != nil {
 			return err
 		}

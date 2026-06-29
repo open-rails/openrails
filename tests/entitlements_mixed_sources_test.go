@@ -71,7 +71,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		ProductID:             productID,
 		PriceID:               priceID,
 		Status:                models.StatusActive,
-		Rail:                  models.RailMobius,
+		Rail:                  models.RailNMI,
 		RailSubscriptionID:    "sub_" + uuid.New().String()[:8],
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
@@ -99,7 +99,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:      userID,
 		PriceID:     priceID,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		Amount:      111,
 		Currency:    "usd",
 		PurchasedAt: clock.Now().UTC(),

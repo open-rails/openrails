@@ -66,11 +66,11 @@ func TestRefundIntentForRoutesByRail(t *testing.T) {
 	assert.Equal(t, "stripe", provider)
 	assert.Equal(t, StripeRefundIntentIdempotencyKey("ch_1", 500, ""), key)
 
-	nmiPayment := &models.Payment{Rail: models.RailMobius}
+	nmiPayment := &models.Payment{Rail: models.RailNMI}
 	typ, provider, key, err = RefundIntentFor(nmiPayment, "txn_1", 500, "ignored for nmi")
 	require.NoError(t, err)
 	assert.Equal(t, TypeNMIRefund, typ)
-	assert.Equal(t, "mobius", provider)
+	assert.Equal(t, "nmi", provider)
 	assert.Equal(t, NMIRefundIdempotencyKey("txn_1", 500), key)
 
 	_, _, _, err = RefundIntentFor(nil, "x", 1, "")
@@ -217,9 +217,9 @@ func stripeTestConfig() *config.Config {
 	return &config.Config{}
 }
 
-func stripeTestRails() config.RailSet {
-	return config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
+func stripeTestRails() config.ProviderAccountSet {
+	return config.ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
 

@@ -96,7 +96,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
 		MerchantID:        tid.UUID(),
 		PriceID:           a.PriceID,
-		Rail:              gen.OpenrailsRailType(a.Rail),
+		Rail:              string(a.Rail),
 		TransactionID:     a.TransactionID,
 		Amount:            moneyutil.CentsToMicros(a.AmountCents),
 		Currency:          currency,
@@ -140,7 +140,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
 		MerchantID:        tid.UUID(),
 		PriceID:           a.PriceID,
-		Rail:              gen.OpenrailsRailType(a.Rail),
+		Rail:              string(a.Rail),
 		TransactionID:     a.TransactionID,
 		Amount:            amount,
 		Currency:          currency,

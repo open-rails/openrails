@@ -17,14 +17,14 @@ import (
 // pagination and optional provider / kind / resource_type filters. The
 // provider filter ('stripe' | 'nmi') disambiguates the shared field_drift kind.
 //
-//	GET /merchant/catalog/drift?provider=nmi&kind=field_drift&resource_type=price&limit=&offset=
+//	GET /merchant/catalog/drift?rail=nmi&kind=field_drift&resource_type=price&limit=&offset=
 func AdminListCatalogDrift(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
 	filter := billingservice.CatalogDriftFilter{
-		Provider:     strings.TrimSpace(r.Query("provider")),
+		Rail:         strings.TrimSpace(r.Query("rail")),
 		Kind:         strings.TrimSpace(r.Query("kind")),
 		ResourceType: strings.TrimSpace(r.Query("resource_type")),
 		Limit:        parseIntDefault(r.Query("limit"), 100),
@@ -44,19 +44,19 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 }
 
 // AdminListCatalogOrphans lists open orphan drift events across providers. The
-// optional ?provider= filter ('stripe' | 'nmi') scopes it to one rail and
+// optional ?rail= filter ('stripe' | 'nmi') scopes it to one rail and
 // selects the matching orphan kind; with no provider it returns orphans from
 // every provider. (CCBill is never reconciled — no catalog-list API — so it
 // never appears here.)
 //
-//	GET /merchant/catalog/orphans?provider=nmi&resource_type=price
+//	GET /merchant/catalog/orphans?rail=nmi&resource_type=price
 func AdminListCatalogOrphans(r *httprequest.Request) {
-	provider := strings.TrimSpace(r.Query("provider"))
+	provider := strings.TrimSpace(r.Query("rail"))
 	listOrphans(r, provider)
 }
 
 // AdminListStripeOrphans is the operator-friendly convenience alias for
-// GET /merchant/catalog/orphans?provider=stripe.
+// GET /merchant/catalog/orphans?rail=stripe.
 //
 //	GET /merchant/catalog/stripe/orphans
 func AdminListStripeOrphans(r *httprequest.Request) {
@@ -81,7 +81,7 @@ func listOrphans(r *httprequest.Request, provider string) {
 		kind = "orphan_in_nmi"
 	}
 	filter := billingservice.CatalogDriftFilter{
-		Provider:     provider,
+		Rail:         provider,
 		Kind:         kind,
 		ResourceType: strings.TrimSpace(r.Query("resource_type")),
 		Limit:        parseIntDefault(r.Query("limit"), 100),

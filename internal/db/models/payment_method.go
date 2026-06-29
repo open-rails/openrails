@@ -14,7 +14,7 @@ type PaymentMethod struct {
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
-	Rail       Rail      `json:"rail"` // Rail: mobius, ccbill, solana
+	Rail       Rail      `json:"rail"` // Rail: nmi, ccbill, solana
 
 	// Two-slot rail handle (#588): the customer-scope ref and the instrument-scope
 	// ref, replacing the overloaded vault_id (+ NMI-ism billing_id).

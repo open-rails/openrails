@@ -96,7 +96,7 @@ func dbCatalogRowsLoader(d *db.DB) catalogRowsLoader {
 // handlers; the per-type bits (object kind, read, write) are parameterized.
 type stripeArchiveCore struct {
 	Config      *config.Config
-	Rails       config.RailSet
+	Rails       config.ProviderAccountSet
 	Stripe      stripeCatalogAPI
 	LoadCatalog catalogRowsLoader
 	Policy      BackoffPolicy
@@ -208,7 +208,7 @@ type StripeArchiveProductHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails config.RailSet, _ clockwork.Clock) *StripeArchiveProductHandler {
+func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails config.ProviderAccountSet, _ clockwork.Clock) *StripeArchiveProductHandler {
 	return &StripeArchiveProductHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,
@@ -266,7 +266,7 @@ type StripeArchivePriceHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails config.RailSet, _ clockwork.Clock) *StripeArchivePriceHandler {
+func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails config.ProviderAccountSet, _ clockwork.Clock) *StripeArchivePriceHandler {
 	return &StripeArchivePriceHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,

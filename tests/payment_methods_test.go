@@ -112,14 +112,14 @@ func TestListPaymentMethods(t *testing.T) {
 	// Create some test payment methods
 	pm1 := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 		UserID:   userID,
-		Rail:     models.RailMobius,
+		Rail:     models.RailNMI,
 		LastFour: "4242",
 		CardType: "Visa",
 	})
 
 	pm2 := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 		UserID:   userID,
-		Rail:     models.RailMobius,
+		Rail:     models.RailNMI,
 		LastFour: "1234",
 		CardType: "Mastercard",
 	})
@@ -197,7 +197,7 @@ func TestCreatePaymentMethod(t *testing.T) {
 			"zip":           "90210",
 			"country":       "US",
 			"email":         email,
-			"provider":      "mobius",
+			"provider":      "nmi",
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -215,7 +215,7 @@ func TestCreatePaymentMethod(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, response["id"], "Should return payment method ID")
-		assert.Equal(t, "mobius", response["rail"], "Rail should be mobius")
+		assert.Equal(t, "nmi", response["rail"], "Rail should be nmi")
 	})
 
 	t.Run("returns error without payment_token", func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		// Create a payment method to delete
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID: userID,
-			Rail:   models.RailMobius,
+			Rail:   models.RailNMI,
 		})
 
 		w := httptest.NewRecorder()
@@ -285,7 +285,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		otherUserID := uuid.New().String()
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID: otherUserID,
-			Rail:   models.RailMobius,
+			Rail:   models.RailNMI,
 		})
 
 		w := httptest.NewRecorder()
@@ -323,7 +323,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		// Create a payment method to update
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID: userID,
-			Rail:   models.RailMobius,
+			Rail:   models.RailNMI,
 		})
 
 		body := map[string]string{
@@ -352,7 +352,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 	t.Run("returns error without payment_token", func(t *testing.T) {
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID: userID,
-			Rail:   models.RailMobius,
+			Rail:   models.RailNMI,
 		})
 
 		body := map[string]string{
@@ -392,7 +392,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		otherUserID := uuid.New().String()
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID: otherUserID,
-			Rail:   models.RailMobius,
+			Rail:   models.RailNMI,
 		})
 
 		body := map[string]string{

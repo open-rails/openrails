@@ -91,7 +91,7 @@ func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 		return CancelModeReversible
 	case sub.Rail == models.RailCCBill:
 		return CancelModeExternalPortal
-	case rails.IsNMIBackedRail(sub.Rail):
+	case rails.IsNMI(sub.Rail):
 		// NMI is reversible only while a deferred delete is still pending and the
 		// paid-through window is in the future. nmiDeletePending encapsulates that.
 		if nmiDeletePending(sub, now) {

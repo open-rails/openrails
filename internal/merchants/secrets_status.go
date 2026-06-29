@@ -53,7 +53,7 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		st := MerchantSecretStatus{
 			SecretDefinition: SecretDefinition{
 				Name:             name,
-				Provider:         providerType,
+				Rail:             providerType,
 				Purpose:          key,
 				DisplayLabel:     providerType + " " + key,
 				ManualVault:      true,
@@ -151,7 +151,7 @@ func validateSecretValueLocal(name, value string) error {
 		case providerType == "stripe" && key == "webhook_signing_secret_thin":
 			name = SecretStripeWebhookSigningThin
 		case providerType == "nmi" && key == "tokenization_url":
-			name = SecretNMIMobiusTokenizationURL
+			name = SecretNMITokenizationURL
 		}
 	}
 	switch name {
@@ -163,7 +163,7 @@ func validateSecretValueLocal(name, value string) error {
 		if !strings.HasPrefix(value, "whsec_") {
 			return errors.New("invalid_format")
 		}
-	case SecretNMIMobiusTokenizationURL:
+	case SecretNMITokenizationURL:
 		u, err := url.Parse(value)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return errors.New("invalid_format")

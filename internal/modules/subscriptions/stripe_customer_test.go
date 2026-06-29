@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,9 +17,9 @@ func testStripeConfig() *config.Config {
 	return &config.Config{}
 }
 
-func testStripeRails() config.RailSet {
-	return config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
+func testStripeRails() config.ProviderAccountSet {
+	return config.ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
 

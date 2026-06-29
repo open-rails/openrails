@@ -113,7 +113,7 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:             f.userID,
 		PriceID:            f.priceID,
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: &procSubID,
 		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
@@ -134,7 +134,7 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 	// Idempotence: re-pushing the same grace (e.g. a replayed webhook) lands
 	// in the covered branch — still exactly one live grace window.
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: procSubID,
 		TransactionID:      "txn_renew_" + uuid.New().String(),
 	}))
@@ -164,7 +164,7 @@ func TestGraceWindow_UserCancelDeletesFutureGrace(t *testing.T) {
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:             f.userID,
 		PriceID:            f.priceID,
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: &procSubID,
 		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
@@ -199,7 +199,7 @@ func TestGraceWindow_DailyCycleSlackCap(t *testing.T) {
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:             f.userID,
 		PriceID:            f.priceID,
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: &procSubID,
 		TransactionID:      "txn_create_" + uuid.New().String(),
 	})
@@ -244,7 +244,7 @@ func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:                f.userID,
 		PriceID:               f.priceID,
-		Rail:                  models.RailMobius,
+		Rail:                  models.RailNMI,
 		RailSubscriptionID:    &procSubID,
 		CurrentPeriodStartsAt: &staleStart,
 		CurrentPeriodEndsAt:   &staleEnd,
@@ -259,7 +259,7 @@ func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
 	// forward: -90d -> -60d) advances the lifecycle + records the payment but
 	// still mints no windows — no resurrection access, no resurrection grace.
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: procSubID,
 		TransactionID:      "txn_stale_renew_" + uuid.New().String(),
 	}))

@@ -304,7 +304,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::openrails.rail_type,
+    sqlc.arg(price_id), sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
@@ -322,7 +322,7 @@ INSERT INTO openrails.payments (
     customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::openrails.rail_type,
+    sqlc.arg(price_id), sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),

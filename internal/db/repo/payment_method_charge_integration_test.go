@@ -36,12 +36,12 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 
 	// A method with charge history, and a second method with none.
 	charged := &models.PaymentMethod{
-		ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
+		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
 		RailCustomerRef: "vault-charged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, charged))
 	uncharged := &models.PaymentMethod{
-		ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
+		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
 		RailCustomerRef: "vault-uncharged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, uncharged))
@@ -111,7 +111,7 @@ func TestMultiInstrumentPerVaultUniqueness(t *testing.T) {
 	vault := "cv-" + uuid.NewString()
 	mk := func(methodRef string) *models.PaymentMethod {
 		return &models.PaymentMethod{
-			ID: uuid.New(), CustomerID: customerID, Rail: models.RailMobius,
+			ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
 			RailCustomerRef: vault, RailMethodRef: methodRef, CreatedAt: now, UpdatedAt: now,
 		}
 	}

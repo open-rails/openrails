@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -133,14 +133,14 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if rails.IsConfigured(r.State.Rails, rail) {
 		return true
 	}
-	if !rails.IsNMIBacked(rail) || r.State.Merchants == nil {
+	if !rails.IsNMI(models.Rail(rail)) || r.State.Merchants == nil {
 		return false
 	}
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok {
 		return false
 	}
-	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, config.RailTypeNMI, "live", "security_key")
+	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {

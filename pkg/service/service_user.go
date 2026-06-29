@@ -444,7 +444,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if sub.CustomerID.String() != userID {
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
-	if !rails.IsNMIBackedRail(sub.Rail) {
+	if !rails.IsNMI(sub.Rail) {
 		return nil, fmt.Errorf("only NMI-backed subscriptions can have their payment method updated")
 	}
 	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
@@ -458,7 +458,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if pm.CustomerID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
-	if !rails.IsNMIBackedRail(pm.Rail) {
+	if !rails.IsNMI(pm.Rail) {
 		return nil, fmt.Errorf("only NMI-backed payment methods can be used")
 	}
 	if !rails.SameRail(pm.Rail, sub.Rail) {
@@ -871,7 +871,7 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
-	var solanaProc *config.RailConfig
+	var solanaProc *config.ProviderAccountConfig
 	if s.rt != nil {
 		solanaProc = s.rt.Rails.GetSolanaRail()
 	}

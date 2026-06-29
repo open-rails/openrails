@@ -44,7 +44,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.RailSet
+	Rails                        config.ProviderAccountSet
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -143,7 +143,7 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.RailSet
+	Rails                        config.ProviderAccountSet
 	EntitlementService           *entitlements.EntitlementService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -236,7 +236,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		return nil
 	}
 
-	if rails.IsNMIBackedRail(sub.Rail) {
+	if rails.IsNMI(sub.Rail) {
 		// NMI in-window resume (issue 216). The NMI subscription was never
 		// deleted (the delete was deferred), so no rail-side call is needed.
 		// We (1) supersede the pending deferred-delete intent on the ledger

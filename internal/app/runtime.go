@@ -52,7 +52,7 @@ type Runtime struct {
 
 	// Rails is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
-	Rails config.RailSet
+	Rails config.ProviderAccountSet
 
 	Clock            clockwork.Clock
 	HealthManager    *health.ServiceHealthManager

@@ -111,7 +111,7 @@ func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *m
 	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
 	if planID != "" {
 		p.Rails = map[string]map[string]string{
-			string(models.RailMobius): {models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
+			string(models.RailNMI): {models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
 		}
 	}
 	return p

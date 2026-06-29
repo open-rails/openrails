@@ -59,7 +59,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Currency:            "usd",
 		AccessDurationHours: &billingDays, AutoRenew: true,
 		Rails: map[string]map[string]string{
-			string(models.RailMobius): {
+			string(models.RailNMI): {
 				models.RailKeyPlanID: "plan_test_999",
 			},
 		},
@@ -77,7 +77,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		PeriodStart:         periodStart,
 		CurrentPeriodEndsAt: &paidEnd,
 		PaymentMethodID:     &pm.ID,
@@ -111,7 +111,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
 	}))
@@ -166,7 +166,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		PeriodStart:         periodStart,
 		CurrentPeriodEndsAt: &paidEnd,
 		PaymentMethodID:     &pm.ID,
@@ -195,7 +195,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
 	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
 	}))

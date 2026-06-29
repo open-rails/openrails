@@ -80,7 +80,7 @@ import (
 // product key / price content key) — the archive intents' relevance re-checks
 // it against the live local catalog.
 type CatalogExtra struct {
-	Provider   string `json:"provider"`    // "stripe" | "mobius" | "solana"
+	Provider   string `json:"provider"`    // "stripe" | "nmi" | "solana"
 	ObjectType string `json:"object_type"` // "product" | "price" | "plan"
 	ExternalID string `json:"external_id"`
 	Label      string `json:"label,omitempty"` // name / lookup_key / plan name / content key
@@ -177,7 +177,7 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 	}
 	var nmiLister nmiPlanLister
 	if s.rt != nil && s.rt.NMIClients != nil {
-		if client, ok := s.rt.NMIClients["mobius"]; ok && client != nil {
+		if client, ok := s.rt.NMIClients[string(models.RailNMI)]; ok && client != nil {
 			nmiLister = client
 		}
 	}
@@ -222,7 +222,7 @@ func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister stri
 		report.Extras = append(report.Extras, computeNMIExtras(plans, snap)...)
 	} else {
 		report.Notes = append(report.Notes, CatalogExtrasNote{
-			Provider: "mobius",
+			Provider: string(models.RailNMI),
 			Note:     "not configured; NMI recurring-plan extras not scanned",
 		})
 	}
@@ -326,7 +326,7 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 // computeNMIExtras is the pure NMI diff: recurring plans on the account whose
 // plan_id is not referenced by any local price. Owned = the plan_id matches the
 // content-addressed "<product-key>-<currency>-<amount>-<cycle>" shape OpenRails mints
-// (mobiusDeterministicPlanID). NMI plans have no active flag, so Active is
+// (nmiDeterministicPlanID). NMI plans have no active flag, so Active is
 // always true.
 func computeNMIExtras(plans []nmiPlan, snap localCatalogSnapshot) []CatalogExtra {
 	known := make(map[string]struct{}, len(snap.nmiPlanIDByOpenRailsPrice))
@@ -344,7 +344,7 @@ func computeNMIExtras(plans []nmiPlan, snap localCatalogSnapshot) []CatalogExtra
 			continue
 		}
 		out = append(out, CatalogExtra{
-			Provider:   "mobius",
+			Provider:   string(models.RailNMI),
 			ObjectType: "plan",
 			ExternalID: p.PlanID,
 			Label:      strings.TrimSpace(p.PlanName),
@@ -439,7 +439,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 // isContentAddressedNMIPlanID reports whether a plan_id matches the
 // content-addressed shape OpenRails mints: "<product-key>-<currency>-<amount>-<cycle>"
 // where currency is a 3-letter code, amount is an integer, and cycle is a day
-// count or "onetime" (see mobiusDeterministicPlanID). The product key may itself
+// count or "onetime" (see nmiDeterministicPlanID). The product key may itself
 // contain hyphens, so the id is parsed from the right. Operator-chosen plan ids
 // that happen not to match this shape are treated as foreign (never archived).
 func isContentAddressedNMIPlanID(planID string) bool {
@@ -590,7 +590,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 			enqueue(e, intentType, "stripe",
 				intents.StripeArchiveIdempotencyKey(intentType, e.ExternalID),
 				intents.StripeArchivePayload{ObjectID: e.ExternalID, MarkerKey: e.MarkerKey, Label: e.Label})
-		case e.Provider == "mobius":
+		case e.Provider == string(models.RailNMI):
 			// LOG-ONLY by design: see the file header for the verified NMI
 			// semantics. No NMI write — and no NMI intent type — exists.
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{

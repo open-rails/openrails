@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -118,10 +118,10 @@ func validateManifestProviderAccount(slug string, idx int, account ManifestProvi
 // (stripe/nmi whoami) was removed (#592); only CCBill's account_id is derivable
 // from DECLARATIVE config (account_config).
 func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets map[string]ManifestSecretSource) bool {
-	if normalizeManifestProviderType(providerType) != config.RailTypeCCBill {
+	if normalizeManifestProviderType(providerType) != string(models.RailCCBill) {
 		return false
 	}
-	values, err := newManifestSecretValues(config.RailTypeCCBill, secrets)
+	values, err := newManifestSecretValues(string(models.RailCCBill), secrets)
 	if err != nil {
 		return false
 	}

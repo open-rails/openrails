@@ -76,7 +76,7 @@ type localCatalogSnapshot struct {
 	stripeProductIDs map[string]string // stripe product id -> openrails product id
 	// stripePriceIDs is the set of stripe price ids OpenRails believes it owns.
 	stripePriceIDs map[string]string // stripe price id -> openrails price id
-	// nmiPlanIDByOpenRailsPrice maps OpenRails price id -> stored mobius plan_id.
+	// nmiPlanIDByOpenRailsPrice maps OpenRails price id -> stored nmi plan_id.
 	nmiPlanIDByOpenRailsPrice map[string]string
 }
 
@@ -330,7 +330,7 @@ func dollarStringToCents(dollars string) int64 {
 // computeNMICatalogDrift is the pure NMI diff: given the full list of NMI
 // recurring plans and the OpenRails snapshot, it returns the NMI drift events
 // that should be open. NMI plans are matched to OpenRails prices by the stored
-// mobius plan_id. Idempotent and side-effect-free.
+// nmi plan_id. Idempotent and side-effect-free.
 func computeNMICatalogDrift(
 	plans []nmiPlan,
 	snap localCatalogSnapshot,
@@ -535,8 +535,8 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 				snap.stripeProductIDs[id] = pr.ProductID.String()
 			}
 		}
-		if mobius := pr.Rails[string(models.RailMobius)]; mobius != nil {
-			if planID := strings.TrimSpace(mobius[models.RailKeyPlanID]); planID != "" {
+		if nmiLink := pr.Rails[string(models.RailNMI)]; nmiLink != nil {
+			if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 				snap.nmiPlanIDByOpenRailsPrice[pr.ID.String()] = planID
 			}
 		}
@@ -606,7 +606,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 
 	var nmiLister nmiPlanLister
 	if s.rt != nil && s.rt.NMIClients != nil {
-		if client, ok := s.rt.NMIClients["mobius"]; ok && client != nil {
+		if client, ok := s.rt.NMIClients[string(models.RailNMI)]; ok && client != nil {
 			nmiLister = client
 		}
 	}
@@ -866,7 +866,7 @@ func derefText(s *string) string {
 
 // CatalogDriftFilter narrows the open-drift listing.
 type CatalogDriftFilter struct {
-	Provider     string
+	Rail         string
 	Kind         string
 	ResourceType string
 	Limit        int
@@ -890,7 +890,7 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 		offset = 0
 	}
 
-	provider := nilIfEmptyText(strings.TrimSpace(filter.Provider))
+	provider := nilIfEmptyText(strings.TrimSpace(filter.Rail))
 	kind := nilIfEmptyText(strings.TrimSpace(filter.Kind))
 	resourceType := nilIfEmptyText(strings.TrimSpace(filter.ResourceType))
 

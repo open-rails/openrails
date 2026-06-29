@@ -83,7 +83,7 @@ func NewSolanaPayPoller(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	rails config.RailSet,
+	rails config.ProviderAccountSet,
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
 	purchaseRegistrar purchaseRegistrar,

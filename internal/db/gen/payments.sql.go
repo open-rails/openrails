@@ -96,7 +96,7 @@ WHERE purch.customer_id = $1
 
 type CountPaymentOutcomesBySubjectRailParams struct {
 	CustomerID uuid.UUID
-	Rail       OpenrailsRailType
+	Rail       string
 }
 
 type CountPaymentOutcomesBySubjectRailRow struct {
@@ -195,7 +195,7 @@ INSERT INTO openrails.payments (
 type CreatePaymentParams struct {
 	ID                       uuid.UUID
 	PriceID                  uuid.UUID
-	Rail                     OpenrailsRailType
+	Rail                     string
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
@@ -280,7 +280,7 @@ ON CONFLICT DO NOTHING
 type CreatePaymentIfNotExistsParams struct {
 	ID                       uuid.UUID
 	PriceID                  uuid.UUID
-	Rail                     OpenrailsRailType
+	Rail                     string
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
@@ -396,7 +396,7 @@ LIMIT 1
 
 type GetLatestPaymentByCustomerRailParams struct {
 	CustomerID uuid.UUID
-	Rail       OpenrailsRailType
+	Rail       string
 }
 
 func (q *Queries) GetLatestPaymentByCustomerRail(ctx context.Context, arg GetLatestPaymentByCustomerRailParams) (OpenrailsPayment, error) {
@@ -551,7 +551,7 @@ WHERE purch.rail = $1 AND purch.transaction_id = $2
 `
 
 type GetPaymentByTransactionIDParams struct {
-	Rail          OpenrailsRailType
+	Rail          string
 	TransactionID string
 }
 
@@ -905,7 +905,7 @@ WHERE purch.rail = $1
 ORDER BY purch.purchased_at DESC
 `
 
-func (q *Queries) ListPaymentsByRail(ctx context.Context, rail OpenrailsRailType) ([]OpenrailsPayment, error) {
+func (q *Queries) ListPaymentsByRail(ctx context.Context, rail string) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByRail, rail)
 	if err != nil {
 		return nil, err
@@ -1166,7 +1166,7 @@ LIMIT 2
 `
 
 type MatchChargebackPaymentsParams struct {
-	Rail        OpenrailsRailType
+	Rail        string
 	AmountCents int64
 	Last4       string
 	FromAt      time.Time

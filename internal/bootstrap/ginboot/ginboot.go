@@ -46,7 +46,7 @@ type Options struct {
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 
 	ConfiguredMerchant merchant.ID
-	Rails              config.RailSet
+	Rails              config.ProviderAccountSet
 }
 
 // NewServer constructs the application runtime and the gin HTTP server graph
@@ -58,7 +58,7 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 		Cache:              optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
 		Clock:              optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 		ConfiguredMerchant: optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
-		Rails:              optsValue(opts, func(o *Options) config.RailSet { return o.Rails }),
+		Rails:              optsValue(opts, func(o *Options) config.ProviderAccountSet { return o.Rails }),
 	})
 	if err != nil {
 		return nil, err

@@ -117,7 +117,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	}
 
 	pm, err := svc.CreateVault(ctx, "11111111-1111-1111-1111-111111111111", &CreateVaultRequest{
-		Provider:     "mobius",
+		Provider:     "nmi",
 		PaymentToken: "provider-token",
 		NameOnCard:   "Ada Lovelace",
 		LastFour:     "xx4242",
@@ -149,7 +149,7 @@ func TestVaultFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.
 		Rails:  vaultTestRails("static-mobius-key"),
 	}
 
-	client, err := svc.resolveNMIClient(ctx, "mobius")
+	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "static-mobius-key", client.SecurityKey)
 }
@@ -163,7 +163,7 @@ func TestVaultProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t
 		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "mobius")
+	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing scoped merchant NMI secret")
 }
@@ -174,7 +174,7 @@ func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *test
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "mobius")
+	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing client")
 }
@@ -188,7 +188,7 @@ func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "mobius")
+	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merchants.ErrSecretBackendUnavailable), "err = %v", err)
 }
@@ -216,9 +216,9 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 		Rails:  vaultTestRails(""),
 	}
 
-	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "mobius")
+	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "nmi")
 	require.NoError(t, err)
-	clientB, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantB), "mobius")
+	clientB, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantB), "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "merchant-a-key", clientA.SecurityKey)
 	require.Equal(t, "merchant-b-key", clientB.SecurityKey)
@@ -259,10 +259,10 @@ func vaultTestConfig(testMode bool) *config.Config {
 	}
 }
 
-func vaultTestRails(mobiusKey string) config.RailSet {
-	return config.RailSet{
+func vaultTestRails(mobiusKey string) config.ProviderAccountSet {
+	return config.ProviderAccountSet{
 		"mobius": {
-			Type: config.RailTypeNMI,
+			Rail: models.RailNMI,
 			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},
 		},
 	}

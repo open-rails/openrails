@@ -125,7 +125,7 @@ type Price struct {
 	//   provider_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
-	//     mobius: {plan_id: premium}                           # NMI recurring plan; find-or-create at this id
+	//     nmi: {plan_id: premium}                           # NMI recurring plan; find-or-create at this id
 	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`

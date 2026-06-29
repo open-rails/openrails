@@ -22,9 +22,7 @@ func TestSubscriptionProviderAutoBilled(t *testing.T) {
 		{"ccbill auto-billed even with pm", "ccbill", withVault, true},
 		{"nmi vault-less → auto-billed", "nmi", nil, true},
 		{"nmi empty pm → auto-billed", "nmi", noVault, true},
-		{"mobius vault-less → auto-billed", "mobius", nil, true},
 		{"nmi with vault → our-rebill", "nmi", withVault, false},
-		{"mobius with vault → our-rebill", "mobius", withVault, false},
 		{"stripe → not this path", "stripe", nil, false},
 		{"unknown rail → false", "paypal", nil, false},
 	}

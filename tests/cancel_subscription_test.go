@@ -110,7 +110,7 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 		UserID:    userID,
 		PriceID:   priceID,
 		Status:    models.StatusCancelled,
-		Rail:      models.RailMobius,
+		Rail:      models.RailNMI,
 		RailSubID: "test-nmi-cancelled-" + uuid.NewString(),
 	})
 
@@ -140,7 +140,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 		UserID:    userBID,
 		PriceID:   priceID,
 		Status:    models.StatusActive,
-		Rail:      models.RailMobius,
+		Rail:      models.RailNMI,
 		RailSubID: "test-mobius-sub-" + uuid.NewString(),
 	})
 

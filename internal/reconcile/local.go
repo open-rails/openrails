@@ -9,16 +9,17 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // localRailNames maps a reconcile Provider onto the rail name(s)
 // used by local billing rows. NMI subscriptions historically carry either
-// "mobius" (the branded gateway) or "nmi".
+// the gateway rail "nmi".
 func localRailNames(p Provider) []string {
 	switch p {
 	case ProviderNMI:
-		return []string{"nmi", "mobius"}
+		return []string{string(models.RailNMI)}
 	case ProviderCCBill:
 		return []string{"ccbill"}
 	case ProviderStripe:

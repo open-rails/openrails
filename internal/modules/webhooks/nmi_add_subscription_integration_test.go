@@ -154,7 +154,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 
 	now := time.Date(2026, time.May, 18, 13, 28, 21, 0, time.UTC)
 	fakeClock := clockwork.NewFakeClockAt(now)
-	provider := string(models.RailMobius)
+	provider := string(models.RailNMI)
 	planID := "premium_test_" + uuid.New().String()
 	providerSubID := "nmi_sub_" + uuid.New().String()
 	transactionID := "txn_" + uuid.New().String()
@@ -227,7 +227,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		PriceID:                  &priceID,
 		EntitlementsSpecSnapshot: snapshotJSON,
 		Status:                   string(models.StatusPending),
-		Rail:                     string(models.RailMobius),
+		Rail:                     string(models.RailNMI),
 		RailSubscriptionID:       providerSubID,
 		StartedAt:                now,
 		GatewayResponse:          metadataBytes,

@@ -132,7 +132,7 @@ func (rs *ReplayService) validateWebhookPayload(filePath string) (*ReplayResult,
 		return result, nil
 	}
 
-	if result.Rail == "mobius" {
+	if result.Rail == "nmi" {
 		if payloadArray, ok := payload.([]interface{}); ok && len(payloadArray) > 0 {
 			if firstEvent, ok := payloadArray[0].(map[string]interface{}); ok {
 				if eventType, exists := firstEvent["event_type"]; exists {
@@ -173,7 +173,7 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 		return result, nil
 	}
 
-	if result.Rail == "mobius" {
+	if result.Rail == "nmi" {
 		if payloadArray, ok := payload.([]interface{}); ok && len(payloadArray) > 0 {
 			if firstEvent, ok := payloadArray[0].(map[string]interface{}); ok {
 				if eventType, exists := firstEvent["event_type"]; exists {
@@ -356,7 +356,7 @@ func (rs *ReplayService) ReplayCCBillWebhooks(ctx context.Context, eventFilter s
 
 // ReplayNMIWebhooks replays NMI webhook events.
 func (rs *ReplayService) ReplayNMIWebhooks(ctx context.Context, eventFilter string) (int, int, error) {
-	eventFiles, err := rs.loadWebhookEvents("mobius", eventFilter)
+	eventFiles, err := rs.loadWebhookEvents("nmi", eventFilter)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to load NMI webhook events: %w", err)
 	}
@@ -365,7 +365,7 @@ func (rs *ReplayService) ReplayNMIWebhooks(ctx context.Context, eventFilter stri
 		fmt.Printf("  Found %d NMI event file(s)\n", len(eventFiles))
 	}
 
-	return rs.processWebhookEvents(ctx, eventFiles, "mobius")
+	return rs.processWebhookEvents(ctx, eventFiles, "nmi")
 }
 
 // ReplayEvent replays a single webhook event to the target URL.
@@ -384,10 +384,10 @@ func ReplayEvent(ctx context.Context, rail, eventFile, targetURL string) error {
 	switch rail {
 	case "ccbill":
 		_, failures, err = rs.ReplayCCBillWebhooks(ctx, eventFile)
-	case "mobius":
+	case "nmi":
 		_, failures, err = rs.ReplayNMIWebhooks(ctx, eventFile)
 	default:
-		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or mobius", rail)
+		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or nmi", rail)
 	}
 
 	if err != nil {
@@ -419,10 +419,10 @@ func ValidateEvent(rail, eventFile string) error {
 	switch rail {
 	case "ccbill":
 		_, failures, err = rs.ReplayCCBillWebhooks(context.Background(), eventFile)
-	case "mobius":
+	case "nmi":
 		_, failures, err = rs.ReplayNMIWebhooks(context.Background(), eventFile)
 	default:
-		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or mobius", rail)
+		return fmt.Errorf("invalid rail '%s'. Must be: ccbill or nmi", rail)
 	}
 
 	if err != nil {

@@ -65,8 +65,8 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: true},
-		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}},
+		Rails: config.ProviderAccountSet{
+			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}},
 		},
 	}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
@@ -109,7 +109,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID})
 	})
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailMobius), vaultID)
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailNMI), vaultID)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -122,7 +122,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.RailMobius): client,
+		string(models.RailNMI): client,
 	}))
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)

@@ -30,7 +30,7 @@ type VaultService struct {
 	MerchantSecrets      merchants.MerchantSecretReader
 	ProviderSecrets      merchants.ProviderAccountSecretResolver
 	Config               *config.Config
-	Rails                config.RailSet
+	Rails                config.ProviderAccountSet
 	DB                   *db.DB
 	clock                clockwork.Clock
 	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
@@ -139,7 +139,7 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.RailSet, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.ProviderAccountSet, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
@@ -221,19 +221,15 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
-		return nil, errors.New("provider is required")
+		return nil, errors.New("rail is required")
 	}
 
-	secretKey := ""
-	if provider == "mobius" {
-		secretKey = "production_key"
-	}
-	if secretKey != "" && s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil {
+	if rails.IsNMI(models.Rail(provider)) && s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
-		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, config.RailTypeNMI, "live", secretKey)
+		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, string(models.RailNMI), "live", "production_key")
 		if err != nil {
 			return nil, fmt.Errorf("resolve merchant NMI secret: %w", err)
 		}
@@ -247,11 +243,11 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 			}
 			return nil, errors.New("missing scoped merchant NMI secret for provider account")
 		} else if value := strings.TrimSpace(sec.Value); value != "" {
-			proc := cloneRailConfig(s.railConfig(provider))
+			proc := cloneRailConfig(s.primaryNMIConfig())
 			if proc == nil {
-				proc = &config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{}}
+				proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
 			}
-			proc.Type = config.RailTypeNMI
+			proc.Rail = models.RailNMI
 			if proc.NMI == nil {
 				proc.NMI = &config.NMIRailConfig{}
 			}
@@ -266,8 +262,10 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 			return client, nil
 		}
 	}
-	if proc := s.railConfig(provider); proc != nil && rails.IsNMIBacked(provider) {
-		return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+	if rails.IsNMI(models.Rail(provider)) {
+		if proc := s.primaryNMIConfig(); proc != nil {
+			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+		}
 	}
 	return nil, errors.New("missing client")
 }
@@ -280,14 +278,23 @@ func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSe
 	return nmi.NewClient(provider, cfg, testMode)
 }
 
-func (s *VaultService) railConfig(name string) *config.RailConfig {
+func (s *VaultService) railConfig(name string) *config.ProviderAccountConfig {
 	if s == nil {
 		return nil
 	}
 	return s.Rails.GetRail(name)
 }
 
-func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
+// primaryNMIConfig returns the configured primary NMI provider account, if any.
+func (s *VaultService) primaryNMIConfig() *config.ProviderAccountConfig {
+	if s == nil {
+		return nil
+	}
+	_, proc, _ := s.Rails.PrimaryRailByType(models.RailNMI)
+	return proc
+}
+
+func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
 	if in == nil {
 		return nil
 	}

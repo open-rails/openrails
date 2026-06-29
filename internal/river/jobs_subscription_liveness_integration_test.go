@@ -154,7 +154,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 
 	f.worker = &SubscriptionLivenessWorker{
 		DB:         dbi,
-		NMIClients: map[string]*nmi.NMIClient{"mobius": client},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client},
 	}
 	return f
 }
@@ -188,7 +188,7 @@ func (f *livenessFixture) successSaleXML(txnID string, at time.Time) string {
 // advances, the payment is backfilled EXACTLY once (a second pass is a
 // no-op), paid + grace entitlement windows land, and no charge is ever sent.
 func TestLivenessWorker_ChargedRepair(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 3*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 3*24*time.Hour)
 	txnID := "txn_repair_" + uuid.New().String()
 	f.transactionXML = f.successSaleXML(txnID, time.Now().UTC().Add(-3*24*time.Hour))
 
@@ -228,7 +228,7 @@ func TestLivenessWorker_ChargedRepair(t *testing.T) {
 // decline moves the subscription to past_due with the #359 retry schedule —
 // dunning owns it from here. No charge from this worker.
 func TestLivenessWorker_DeclinedRoutesIntoDunning(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 2*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 2*24*time.Hour)
 	f.transactionXML = fmt.Sprintf(`<?xml version="1.0"?>
 <nm_response>
   <transaction>
@@ -253,7 +253,7 @@ func TestLivenessWorker_DeclinedRoutesIntoDunning(t *testing.T) {
 // the remote period end is adopted locally and NO entitlement window is
 // granted (adoption alone never grants access).
 func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 36*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 36*time.Hour)
 	nextCharge := time.Now().UTC().Add(48 * time.Hour).Format("2006-01-02")
 	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
 <nm_response>
@@ -289,7 +289,7 @@ func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
 // evidence. The liveness lane must still ask the provider instead of skipping
 // forever; with no period boundary it uses recurring liveness only.
 func TestLivenessWorker_MissingPeriodStillProbesProvider(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 36*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 36*time.Hour)
 	nextCharge := time.Now().UTC().Add(72 * time.Hour).Format("2006-01-02")
 	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
 <nm_response>
@@ -317,7 +317,7 @@ func TestLivenessWorker_MissingPeriodStillProbesProvider(t *testing.T) {
 // locally + revoke subscription-sourced entitlements. No remote delete, no
 // charge.
 func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 5*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 5*24*time.Hour)
 	ctx := context.Background()
 
 	// Give the user a lingering entitlement window from the subscription so
@@ -351,7 +351,7 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 // failing provider read changes nothing; the state-scan re-derives the same
 // cohort next pass — retry comes free, no durable read-queue.
 func TestLivenessWorker_UnreachableProviderLeavesStateUntouched(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 2*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 2*24*time.Hour)
 	f.queryStatus = http.StatusInternalServerError
 
 	var beforeEnd *time.Time
@@ -385,7 +385,7 @@ func TestLivenessWorker_UnreachableProviderLeavesStateUntouched(t *testing.T) {
 // cancels rather than surprise-charging. This worker's no-charge property is
 // structural: zero direct-post requests under every outcome.
 func TestLivenessWorker_MonthsStaleNeverCharges(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 120*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 120*24*time.Hour)
 	// Remote record exists but stalled months ago.
 	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
 <nm_response>
@@ -459,7 +459,7 @@ func TestLivenessWorker_StripeCanceledRemotely(t *testing.T) {
 // TestLivenessWorker_ReadonlyModeSkips (#346/#367): readonly boots are pure
 // observers — the pass runs no probes and converges nothing.
 func TestLivenessWorker_ReadonlyModeSkips(t *testing.T) {
-	f := newLivenessFixture(t, models.RailMobius, 2*24*time.Hour)
+	f := newLivenessFixture(t, models.RailNMI, 2*24*time.Hour)
 	f.transactionXML = f.successSaleXML("txn_should_not_apply", time.Now().UTC().Add(-24*time.Hour))
 	f.worker.Config = &config.Config{Mode: config.ModeReadOnly}
 

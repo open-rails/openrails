@@ -308,7 +308,7 @@ func (s *CCBillWebhookService) stableDedupeEventKey() string {
 
 type CCBillWebhookEventType = string
 
-const CCBillRailType models.Rail = "ccbill"
+const CCBillRail models.Rail = "ccbill"
 
 const (
 	EventTypeNewSaleSuccess     CCBillWebhookEventType = "NewSaleSuccess"

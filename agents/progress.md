@@ -1216,128 +1216,63 @@ internal/modules/webhooks, ExpiryHours redeclared in internal/db/models/product_
 
 # #630: model-rail-as-gateway-provider-account-as-instance
 
-**Completed:** no
-**Status:** PLANNED 2026-06-29. Corrective follow-up to #582. #582 renamed
-`processor → rail` but entrenched a three-way conflation; this issue models the
-layers logically. Breaking DB/API allowed (pre-production), same as #582.
+**Completed:** yes
+**Status: COMPLETED 2026-06-29.** Hard cut, no aliases. Follow-on to #582.
+Rebased onto master (which carries the completed #622 billing→hours refactor);
+all #630 conflicts resolved as the union of master's #622/typed-block changes AND
+the rail de-slop rename.
 
-The clean model (matches HyperSwitch connector/MCA and Spreedly gateway_type/
-gateway-instance):
-- **rail** = the gateway integration you code against (`nmi`, `stripe`, `ccbill`,
-  `solana`, `paypal`). One adapter per rail under `internal/integrations/<rail>`.
-- **provider account** = a credentialed account ON a rail (credentials + the
-  rail's native `account_id`). 1..N per rail. `mobius`/`paykings` are provider
-  accounts on rail `nmi`; a single-account rail (stripe/ccbill/solana) just names
-  its one account after the rail.
-- **payment method / channel** = the buyer's instrument (card/wallet) — and the
-  admin/manual/cash *channels* are NOT rails.
+## The model landed
+- **rail** = the gateway integration (`nmi`, `stripe`, `ccbill`, `solana`, `paypal`):
+  `models.Rail`, gateways only. One adapter per rail under `internal/integrations/<rail>`.
+- **provider account** = a credentialed account ON a rail (1..N). Kept
+  `provider_accounts`/`provider_account_id`; config `RailConfig`→`ProviderAccountConfig`,
+  `RailSet`→`ProviderAccountSet`, field `Type`→`Rail models.Rail`. `mobius`/`paykings`
+  are provider-account NAMES on rail `nmi`.
+- **channel** = off-rail recording sources `admin`/`manual`: new `models.Channel`
+  (`ChannelAdmin`/`ChannelManual`), stored in the same text `rail` source column,
+  kept distinct as a separate Go enum.
 
-## Metadata
+## Inventory categories (all done)
+1. Rail enum = gateways only: add `RailNMI`; remove `RailMobius`/`RailAdmin`/`RailManual`; add `Channel`.
+2. Collapsed dual enum: removed `config.RailType*`, `RailConfig.Type`, `GetEffectiveType`,
+   `GetRailType`, `IsNMIRail` → `EffectiveRail()`/`ByRail()`/`RailOf()`.
+3. Deleted NMI-backed name-set machinery (`IsNMIBacked`/`NMIBackedRails`/`InitNMIBackedRails`/
+   `IsNMIBackedRail`/`GetNMIBackedRailsList`) → stateless `rails.IsNMI(rail)` (= `rail==RailNMI`).
+4. Catalog adapter `catalog_provider_mobius.go`→`catalog_provider_nmi.go`,
+   `mobiusAdapter`→`nmiAdapter`, `mobiusDeterministicPlanID`→`nmiDeterministicPlanID`,
+   registry key `"mobius"`→`"nmi"`.
+5. Killed `mobius`-hardcoded-gateway in merchants/checkout/vault/embedded/product_catalog;
+   `NMIClients` keyed by rail. `mobius` survives as a provider-account NAME (intentional residual).
+6. Secrets `SecretNMIMobius*`→`SecretNMI*` (values stay `nmi/mobius/<purpose>` = rail/account/purpose).
+7. `provider`→`rail` for `--rail` CLI, `?rail=` drift filter, `CanonicalRail`,
+   `Prepared/WebhookProcessArgs.Rail`, `SecretDefinition.Rail`, `price.go GetByNMIPlan`,
+   `generatedProviderName`. Kept `provider_accounts`/`provider_account_id` + `provider_type`
+   column + `provider_intents.provider`/`provider_refresh_watermarks.provider` (#582-preserved).
 
-- Category: refactor
-- Status: planned
-- Passes: false
+## DB / generated
+- Dropped the `openrails.rail_type` ENUM; `payments.rail` ENUM→`text` (removes `OpenrailsRailType`).
+- Migration `044_rail_as_gateway_value_migration.up.sql` (renumbered past master's new migrations):
+  converts `payments.rail` enum→text, collapses `mobius`→`nmi` across all rail columns +
+  `prices.rails` JSONB key, backfills `provider_account_id`, drops the enum. Idempotent / no-op on
+  a fresh DB. admin/manual rows stay in the text column as channel values.
+- sqlc regenerated (`reconciliation.sql`/`prices.sql` casts→text, arg `provider`→`rail`):
+  `sqlc generate` + `sqlc vet` PASS.
+- ClickHouse: plain string `rail` columns — no change. `docs/glossary-rails.md` rewritten.
 
-## The slop this removes
+## Grep-gate: CLEAN
+No `RailType`/`GetEffectiveType`/`GetRailType`/`IsNMIBacked`/`NMIBackedRails`/`GetNMIRails`/
+`RailMobius`/`RailAdmin`/`RailManual`/`mobiusAdapter`/`catalog_provider_mobius`, and no
+`provider`/`providerType` holding a gateway value outside the kept `provider_accounts` concept.
+Intentional residuals: `mobius` as a provider-account name (config keys, `nmi/mobius/*` secret
+addressing, default link `provider` value, reconcile MID docs, legacy CH `mobius_schedulers`),
+the legacy `mobius`→`nmi` webhook-URL fold; `processor` only in NMI acquirer wire
+(`json:"processor_id"`, decline strings) + ledger `processor_clearing` + blocklist
+`processor_customer` (all #582-preserved).
 
-Today there are TWO near-duplicate enums that agree for ccbill/stripe and diverge
-exactly at the white-label case:
-- `models.Rail` (`internal/db/models/rail.go`): `mobius` (an ACCOUNT), `ccbill`,
-  `stripe`, `solana`, `paypal` (GATEWAYS), `admin`, `manual` (CHANNELS). No
-  `nmi` value — the gateway is only in a comment (`// Card payments via NMI gateway`).
-- `config.RailType` / `RailConfig.Type` (`config/config.go`): `nmi`, `ccbill`,
-  `stripe`, `solana` — the actual GATEWAY, plus `GetEffectiveType`/`GetRailType`
-  derivation glue.
-
-One `Rail` (gateway) enum + a provider-account layer collapses both. `RailType`,
-`GetEffectiveType`, `GetRailType`, and the `IsNMIBacked(name)` name-set
-(`NMIBackedRails` map) all disappear — `account.Rail == RailNMI` replaces them.
-
-## Full slop inventory (codebase sweep 2026-06-29) — scope = remove ALL of it
-
-Everything below exists ONLY because the rail-name is the account, not the
-gateway. Blast radius: ~110 `.go` files touch `models.Rail`.
-
-1. **Dual enum + derivation glue (~96 refs).** `models.Rail` (mixes
-   gateway/account/method values) vs `config.RailType` (gateway). Remove
-   `GetEffectiveType` (11), `GetRailType` (3), `RailType*` consts, `RailConfig.Type`
-   → one `Rail`.
-2. **NMI-backed name-set machinery (~65 refs)** in
-   `internal/modules/payments/rails/nmi.go`: `IsNMIBacked`, `NMIBackedRails`,
-   `InitNMIBackedRails`, `IsNMIRail`, `IsNMIBackedRail`, `GetNMIRails`,
-   `GetNMIBackedRailsList` — a runtime account-name→gateway map. All collapse to
-   `account.Rail == RailNMI`. Plus ~14 "NMI-backed rails" prose comments
-   (handlers, river jobs, intents) → "rail nmi".
-3. **Type-keyed scans over the account-keyed set:** `PrimaryRailByType`,
-   `RailKeysByType`, `GetCCBillRail`/`GetStripeRail`/`GetSolanaRail`, `GetNMIRails`
-   (config) → "the account(s) whose `Rail == X`".
-4. **`mobius` (an account) hardcoded to drive GATEWAY behavior:**
-   - `internal/merchants/secrets.go:183`, `credentials.go:72,104` (`case "mobius"`).
-   - `internal/modules/checkout/merchant_rail_secrets.go:88` + the vault twin
-     (`if provider == "mobius" { secretKey = "production_key" }`).
-   - `pkg/embedded/catalog_push.go:189` (`catalogPushUsesProvider(…, "mobius")`).
-   - `internal/db/models/product_catalog.go` (`SetNMIConfig` keys on `RailMobius`;
-     comments `Keys: "mobius"/"ccbill"/...`).
-   - **`pkg/service/catalog_provider_mobius.go`** — the catalog adapter is named
-     after the ACCOUNT (`mobiusAdapter`, `Name()=="mobius"`, registered `"mobius":`)
-     while the ccbill/solana/stripe adapters are named after the GATEWAY. Rename →
-     `catalog_provider_nmi.go` / `nmiAdapter` / `"nmi"`.
-5. **Secret names jam both layers:** `SecretNMIMobiusProductionKey` /
-   `…TokenizationKey` / `…TokenizationURL` / `…WebhookSigning`
-   (`internal/merchants/secrets.go`) = gateway+account in one identifier.
-6. **`provider` overloaded to hold a GATEWAY value** (#582 deferred this as Option
-   A; fix it here): `--provider=stripe|nmi` CLI, `admin_catalog_drift ?provider=`,
-   `webhookutil provider=="nmi"`, `secrets_status providerType=="nmi"`,
-   `secrets.go Provider:"nmi"`, `price.go provider != "nmi"`,
-   `pkg/embedded/providers.go generatedProviderName(providerType)`. Rename the
-   type-holding `provider`/`providerType` → `rail`; keep `provider_accounts` /
-   `provider_account_id` as the account concept.
-
-## Target model
-
-- `models.Rail` enum = GATEWAYS only: `RailNMI` (new), `RailStripe`, `RailCCBill`,
-  `RailSolana`, `RailPayPal`. Drop `RailMobius` (becomes a provider-account name on
-  `nmi`) and `RailAdmin`/`RailManual` (become a separate channel concept).
-- `config.RailSet` (keyed by account name, each entry `RailConfig` with `.Type`) →
-  a provider-account set keyed by account name, each carrying `Rail` (the gateway,
-  was `Type`) + credentials + `account_id`. `provider_accounts` (DB) is already
-  this layer — align it (`account.rail` column = gateway; `account_id` = native id).
-- `admin`/`manual` channels: model as a `Channel`/`Source` enum (off-rail
-  payment recording), not a rail. Decide the exact shape.
-
-## Hard parts / decisions
-
-- **`mobius` → `nmi` as the rail id** (the #582 "out of scope" item): existing
-  rows/config use rail=`mobius`. Data migration: rows with rail `mobius` get
-  rail `nmi` + provider-account `mobius`; same for any white-label account. Audit
-  all `models.Rail` string values (`"mobius"`) in DB columns, JSON, ClickHouse,
-  configs, and host apps.
-- **admin/manual**: are they a channel, a payment-method source, or kept as
-  pseudo-rails for now? Decide before touching `models.Rail`.
-- **Breaking surface**: `models.Rail` is referenced widely (post-#582 ~280 files);
-  the rail column values change for white-label rows; embedded/HTTP consumers that
-  send/read `rail: "mobius"` must adopt `rail: "nmi"` + account. Coordinate a
-  consumer bump (doujins/hentai0 use NMI/mobius).
-- Keep `provider_accounts`/`provider_account_id` naming (already correct as the
-  account layer) — this issue makes `models.Rail` agree with it.
-
-## Acceptance
-
-- One gateway `Rail` enum (no `RailType`/`GetEffectiveType`/`GetRailType`,
-  no `NMIBackedRails` name-set; grep clean).
-- `mobius`/`paykings` exist only as provider-account names on rail `nmi`; `nmi` is
-  a first-class rail value.
-- admin/manual no longer in the `Rail` enum.
-- Build + integration tests green; data migration for existing white-label rows.
-
-## References
-
-- Builds on #582 (rename done). Vocabulary researched against HyperSwitch
-  (connector + merchant connector account) and Spreedly (gateway_type +
-  gateway-instance); both use exactly this two-layer split and do not model the
-  ISO company separately (it is a label on the account).
-
----
+## Verification (post-rebase)
+- `go build ./...` and `go vet ./...`: see STATUS in commit; base #622 breakage is gone.
+- sqlc generate + vet PASS. Integration money-path tests run per DB availability.
 
 # #631: convergence derive-1 — grants+entitlements from stored subscriptions+payments
 

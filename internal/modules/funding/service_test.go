@@ -275,10 +275,10 @@ func testFundingConfig() *config.Config {
 	return &config.Config{}
 }
 
-func testFundingRails() config.RailSet {
-	return config.RailSet{
+func testFundingRails() config.ProviderAccountSet {
+	return config.ProviderAccountSet{
 		"solana": {
-			Type: config.RailTypeSolana,
+			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{
 				Tokens: map[string]config.TokenConfig{
 					"USDC": {

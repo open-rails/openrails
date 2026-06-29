@@ -95,7 +95,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_usd_999",
 						},
 						// CCBillPriceID matches flexId from testdata/webhooks/ccbill/newsalesuccess.json
@@ -116,7 +116,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(2160), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_quarterly_usd_2499",
 						},
 						string(models.RailCCBill): {
@@ -136,7 +136,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_eur_899",
 						},
 						string(models.RailCCBill): {
@@ -152,7 +152,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "jpy",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_jpy_1200",
 						},
 						// CCBill doesn't support JPY in this example
@@ -165,7 +165,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(8760), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_yearly_usd_7999",
 						},
 						string(models.RailCCBill): {
@@ -200,7 +200,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_monthly_usd_1999",
 						},
 						string(models.RailCCBill): {
@@ -219,7 +219,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(8760), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_yearly_usd_14999",
 						},
 						string(models.RailCCBill): {
@@ -238,7 +238,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_monthly_eur_1799",
 						},
 						string(models.RailCCBill): {
@@ -269,7 +269,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase, no recurring billing
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_usd_29999",
 						},
 						string(models.RailCCBill): {
@@ -288,7 +288,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "eur",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_eur_26999",
 						},
 						string(models.RailCCBill): {
@@ -304,7 +304,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "jpy",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_jpy_39800",
 						},
 						// CCBill doesn't support JPY in this example
@@ -331,7 +331,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_basic_monthly_usd_499",
 						},
 						// No CCBill - this price is NMI-only
@@ -451,7 +451,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_basic_1000",
 						},
 					},
@@ -479,7 +479,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_plus_2000",
 						},
 					},
@@ -508,7 +508,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
 					Rails: map[string]map[string]string{
-						string(models.RailMobius): {
+						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_ultimate_3000",
 						},
 					},
@@ -568,7 +568,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 		StartedAt:             now,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &periodEnd,
-		Rail:                  models.RailMobius,
+		Rail:                  models.RailNMI,
 		RailSubscriptionID:    "test-sub-" + uuid.New().String()[:8],
 		CreatedAt:             now,
 		UpdatedAt:             now,
@@ -613,7 +613,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 		opts.PeriodEnd = now.Add(30 * 24 * time.Hour)
 	}
 	if opts.Rail == "" {
-		opts.Rail = models.RailMobius
+		opts.Rail = models.RailNMI
 	}
 	if opts.RailSubID == "" {
 		opts.RailSubID = "test-sub-" + uuid.New().String()[:8]
@@ -670,7 +670,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
-		Rail:                 models.RailMobius,
+		Rail:                 models.RailNMI,
 		RailCustomerRef:      "vault-" + uuid.New().String()[:8],
 		RailMethodRef:        "billing-" + uuid.New().String()[:8],
 		InitialTransactionID: "txn-" + uuid.New().String()[:8],
@@ -707,7 +707,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 	tenantSubjectID := suite.ensureCustomer(ctx, opts.UserID)
 
 	if opts.Rail == "" {
-		opts.Rail = models.RailMobius
+		opts.Rail = models.RailNMI
 	}
 	if opts.VaultID == "" {
 		opts.VaultID = "vault-" + uuid.New().String()[:8]
@@ -747,7 +747,7 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 		CustomerID:     tenantSubjectID,
 		PriceID:        priceID,
 		SubscriptionID: subscriptionID,
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		TransactionID:  "txn-" + uuid.New().String()[:8],
 		Amount:         9_990_000,
 		Currency:       "usd",
@@ -780,7 +780,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 	tenantSubjectID := suite.ensureCustomer(ctx, opts.UserID)
 
 	if opts.Rail == "" {
-		opts.Rail = models.RailMobius
+		opts.Rail = models.RailNMI
 	}
 	if opts.TransactionID == "" {
 		opts.TransactionID = "txn-" + uuid.New().String()[:8]

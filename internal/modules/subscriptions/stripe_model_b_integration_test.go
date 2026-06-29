@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -209,8 +210,8 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	//    params the checkout upgrade branch passes.
 	svc := &StripeService{
 		Config: &config.Config{},
-		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: key},
+		Rails: config.ProviderAccountSet{
+			"stripe": {Rail: models.RailStripe, SecretKey: key},
 		},
 	}
 	require.NoError(t, svc.UpdateSubscriptionPrice(

@@ -84,7 +84,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		UserID:          retryUserID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Rail:            models.RailMobius,
+		Rail:            models.RailNMI,
 		RailSubID:       railSubID,
 		PeriodStart:     mockClock.Now().Add(-30 * 24 * time.Hour),
 		PeriodEnd:       mockClock.Now().Add(-time.Hour),
@@ -99,7 +99,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 			  AND sub.customer_id = $2
 			  AND sub.status = $3
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $4`,
-			string(models.RailMobius), retryCustomerID,
+			string(models.RailNMI), retryCustomerID,
 			string(models.StatusPastDue), mockClock.Now())
 	}
 	assert.Equal(t, 0, countDueRetries())
@@ -113,7 +113,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		UserID:      cancelUserID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		PeriodStart: cancelStart,
 		PeriodEnd:   cancelPeriodEnd,
 	})
@@ -192,7 +192,7 @@ func TestSubscriptionExpiryWithMockClock(t *testing.T) {
 			UserID:      userID,
 			PriceID:     priceID,
 			Status:      "active",
-			Rail:        "mobius",
+			Rail:        "nmi",
 			PeriodStart: startDate,
 			PeriodEnd:   endDate,
 		})
@@ -234,7 +234,7 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			UserID:  userID,
 			PriceID: priceID,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, sub)
@@ -263,7 +263,7 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			UserID:             userID,
 			PriceID:            priceID,
-			Rail:               models.RailMobius,
+			Rail:               models.RailNMI,
 			RailSubscriptionID: &railSubID,
 		})
 		require.NoError(t, err)

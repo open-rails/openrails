@@ -226,13 +226,16 @@ func TestWebhookHandlerRegistry(t *testing.T) {
 	reg.Register(NMIWebhookHandler{})
 	reg.Register(CCBillWebhookHandler{})
 
-	for _, proc := range []string{"stripe", "STRIPE", "ccbill", "nmi", "mobius"} {
-		if _, ok := reg.Handler(proc); !ok {
-			t.Errorf("Handler(%q) = not found, want found", proc)
+	// The registry is keyed by canonical rail; the legacy "mobius" webhook path
+	// is folded onto "nmi" at the HTTP boundary (webhookutil.CanonicalRail), so
+	// the registry only ever sees "nmi".
+	for _, rail := range []string{"stripe", "STRIPE", "ccbill", "nmi"} {
+		if _, ok := reg.Handler(rail); !ok {
+			t.Errorf("Handler(%q) = not found, want found", rail)
 		}
 	}
-	if h, ok := reg.Handler("mobius"); !ok || h.Rail() != "nmi" {
-		t.Errorf("Handler(mobius) should resolve to the nmi handler")
+	if h, ok := reg.Handler("nmi"); !ok || h.Rail() != "nmi" {
+		t.Errorf("Handler(nmi) should resolve to the nmi handler")
 	}
 	if _, ok := reg.Handler("paypal"); ok {
 		t.Errorf("Handler(paypal) = found, want not found")

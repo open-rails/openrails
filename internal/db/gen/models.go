@@ -57,54 +57,6 @@ func (ns NullOpenrailsPurchaseStatus) Value() (driver.Value, error) {
 	return string(ns.OpenrailsPurchaseStatus), nil
 }
 
-type OpenrailsRailType string
-
-const (
-	OpenrailsRailTypePaypal OpenrailsRailType = "paypal"
-	OpenrailsRailTypeSolana OpenrailsRailType = "solana"
-	OpenrailsRailTypeMobius OpenrailsRailType = "mobius"
-	OpenrailsRailTypeCcbill OpenrailsRailType = "ccbill"
-	OpenrailsRailTypeStripe OpenrailsRailType = "stripe"
-	OpenrailsRailTypeAdmin  OpenrailsRailType = "admin"
-	OpenrailsRailTypeNmi    OpenrailsRailType = "nmi"
-	OpenrailsRailTypeManual OpenrailsRailType = "manual"
-)
-
-func (e *OpenrailsRailType) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = OpenrailsRailType(s)
-	case string:
-		*e = OpenrailsRailType(s)
-	default:
-		return fmt.Errorf("unsupported scan type for OpenrailsRailType: %T", src)
-	}
-	return nil
-}
-
-type NullOpenrailsRailType struct {
-	OpenrailsRailType OpenrailsRailType
-	Valid             bool // Valid is true if OpenrailsRailType is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullOpenrailsRailType) Scan(value interface{}) error {
-	if value == nil {
-		ns.OpenrailsRailType, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.OpenrailsRailType.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullOpenrailsRailType) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.OpenrailsRailType), nil
-}
-
 type OpenrailsSubscriptionStatus string
 
 const (
@@ -621,7 +573,7 @@ type OpenrailsPayerSpendLimit struct {
 type OpenrailsPayment struct {
 	ID            uuid.UUID
 	PriceID       uuid.UUID
-	Rail          OpenrailsRailType
+	Rail          string
 	TransactionID string
 	Amount        int64
 	ListAmount    int64
@@ -809,7 +761,7 @@ type OpenrailsProviderAccount struct {
 type OpenrailsProviderIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// Provider/rail key the mutation targets (e.g. 'mobius' for an NMI-backed rail, 'stripe').
+	// Rail the mutation targets (e.g. 'nmi', 'stripe').
 	Provider string
 	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
 	IntentType     string

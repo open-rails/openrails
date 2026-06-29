@@ -350,7 +350,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		}
 	}
 
-	if !rails.IsNMIBackedRail(pm.Rail) {
+	if !rails.IsNMI(pm.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be updated")
 		return
 	}

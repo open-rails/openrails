@@ -69,7 +69,7 @@ func (e *CustomerVaultError) Error() string {
 	return fmt.Sprintf("%s (%s)", e.Message, strings.Join(extras, ", "))
 }
 
-var mobiusResponseMessages = map[int]string{
+var nmiResponseMessages = map[int]string{
 	100: "Transaction was approved.",
 	200: "Transaction was declined by rail.",
 	201: "Do not honor.",
@@ -106,7 +106,7 @@ var mobiusResponseMessages = map[int]string{
 	461: "Unsupported card type.",
 }
 
-var mobiusLocalizationIDs = map[int]string{
+var nmiLocalizationIDs = map[int]string{
 	100: "transaction_was_approved",
 	200: "transaction_was_declined_by_processor",
 	201: "do_not_honor",
@@ -143,12 +143,12 @@ var mobiusLocalizationIDs = map[int]string{
 	461: "unsupported_card_type",
 }
 
-func mobiusLocalizationID(code int) string {
-	return mobiusLocalizationIDs[code]
+func nmiLocalizationID(code int) string {
+	return nmiLocalizationIDs[code]
 }
 
-func mobiusResponseDetail(code int) string {
-	return mobiusResponseMessages[code]
+func nmiResponseDetail(code int) string {
+	return nmiResponseMessages[code]
 }
 
 func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
@@ -233,8 +233,8 @@ func newCustomerVaultError(rawResponse string, output url.Values) error {
 	return &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
-		LocalizationID: mobiusLocalizationID(responseCode),
-		Detail:         mobiusResponseDetail(responseCode),
+		LocalizationID: nmiLocalizationID(responseCode),
+		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
 	}
 }
@@ -254,8 +254,8 @@ func newAddSubscriptionError(rawResponse string, output url.Values) error {
 	return &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
-		LocalizationID: mobiusLocalizationID(responseCode),
-		Detail:         mobiusResponseDetail(responseCode),
+		LocalizationID: nmiLocalizationID(responseCode),
+		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
 	}
 }
@@ -275,8 +275,8 @@ func newSaleError(rawResponse string, output url.Values) error {
 	return &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
-		LocalizationID: mobiusLocalizationID(responseCode),
-		Detail:         mobiusResponseDetail(responseCode),
+		LocalizationID: nmiLocalizationID(responseCode),
+		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
 	}
 }

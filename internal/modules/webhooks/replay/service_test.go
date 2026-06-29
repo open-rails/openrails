@@ -38,7 +38,7 @@ func TestReplayService_LoadWebhookEvents(t *testing.T) {
 		},
 		{
 			name:        "Load all NMI events",
-			rail:        "mobius",
+			rail:        "nmi",
 			eventFilter: "all",
 			expectError: false,
 			minFiles:    1,
@@ -52,7 +52,7 @@ func TestReplayService_LoadWebhookEvents(t *testing.T) {
 		},
 		{
 			name:        "Load specific NMI event",
-			rail:        "mobius",
+			rail:        "nmi",
 			eventFilter: "recurring_subscription_add.json",
 			expectError: false,
 			minFiles:    1,
@@ -110,7 +110,7 @@ func TestReplayService_ValidateWebhookPayload(t *testing.T) {
 	assert.Empty(t, result.Error)
 
 	// Test NMI event validation
-	nmiFiles, err := rs.loadWebhookEvents("mobius", "recurring_subscription_add.json")
+	nmiFiles, err := rs.loadWebhookEvents("nmi", "recurring_subscription_add.json")
 	require.NoError(t, err)
 	require.NotEmpty(t, nmiFiles)
 
@@ -118,7 +118,7 @@ func TestReplayService_ValidateWebhookPayload(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, nmiResult.Success)
 	assert.Equal(t, "recurring_subscription_add.json", nmiResult.EventFile)
-	assert.Equal(t, "mobius", nmiResult.Rail)
+	assert.Equal(t, "nmi", nmiResult.Rail)
 	assert.NotEmpty(t, nmiResult.EventType, "NMI events should have event_type extracted")
 }
 
@@ -224,7 +224,7 @@ func TestReplayService_WebhookReplay(t *testing.T) {
 
 	nmiRequest := receivedRequests[0]
 	assert.Equal(t, "POST", nmiRequest.Method)
-	assert.Contains(t, nmiRequest.URL, "/v1/webhooks/mobius")
+	assert.Contains(t, nmiRequest.URL, "/v1/webhooks/nmi")
 	assert.Equal(t, "application/json", nmiRequest.ContentType)
 	assert.NotEmpty(t, nmiRequest.Body)
 

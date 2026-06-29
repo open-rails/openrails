@@ -32,18 +32,18 @@ const (
 	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
 	// Destination signing secret (a single endpoint may receive both).
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
-	// SecretNMIMobiusProductionKey is the legacy broad NMI security-key secret.
-	SecretNMIMobiusProductionKey = "nmi/mobius/production_key"
-	// SecretNMIMobiusTokenizationKey is the merchant's public Collect.js key.
+	// SecretNMIProductionKey is the legacy broad NMI security-key secret.
+	SecretNMIProductionKey = "nmi/mobius/production_key"
+	// SecretNMITokenizationKey is the merchant's public Collect.js key.
 	// It is client-side configuration, but it is still merchant-scoped provider
 	// configuration and belongs with the merchant's NMI account setup.
-	SecretNMIMobiusTokenizationKey = "nmi/mobius/tokenization_key"
-	// SecretNMIMobiusTokenizationURL overrides the Collect.js script URL for a
+	SecretNMITokenizationKey = "nmi/mobius/tokenization_key"
+	// SecretNMITokenizationURL overrides the Collect.js script URL for a
 	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
-	SecretNMIMobiusTokenizationURL = "nmi/mobius/tokenization_url"
-	// SecretNMIMobiusWebhookSigning is the merchant's NMI webhook signing
+	SecretNMITokenizationURL = "nmi/mobius/tokenization_url"
+	// SecretNMIWebhookSigning is the merchant's NMI webhook signing
 	// secret, used to verify inbound webhooks after merchant/provider resolution.
-	SecretNMIMobiusWebhookSigning = "nmi/mobius/webhook_signing_secret"
+	SecretNMIWebhookSigning = "nmi/mobius/webhook_signing_secret"
 	// SecretCCBillAccountConfig is the merchant's CCBill account/config payload.
 	// Store as an OpenRails-owned JSON string until the CCBill adapter grows a
 	// typed multi-field secret.
@@ -58,7 +58,7 @@ const (
 // canonical registry used by status APIs, docs, validation, and runbooks.
 type SecretDefinition struct {
 	Name              string `json:"name"`
-	Provider          string `json:"provider"`
+	Rail              string `json:"rail"`
 	Purpose           string `json:"purpose"`
 	DisplayLabel      string `json:"display_label"`
 	ManualVault       bool   `json:"manual_vault"`
@@ -68,15 +68,15 @@ type SecretDefinition struct {
 }
 
 var merchantSecretRegistry = []SecretDefinition{
-	{Name: SecretStripeSecretKey, Provider: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
-	{Name: SecretStripeWebhookSigning, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretStripeWebhookSigningThin, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretNMIMobiusTokenizationKey, Provider: "nmi", Purpose: "tokenization_key", DisplayLabel: "NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
-	{Name: SecretNMIMobiusTokenizationURL, Provider: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
-	{Name: SecretNMIMobiusWebhookSigning, Provider: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
+	{Name: SecretStripeSecretKey, Rail: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
+	{Name: SecretStripeWebhookSigning, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
+	{Name: SecretStripeWebhookSigningThin, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
+	{Name: SecretNMIProductionKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretNMITokenizationKey, Rail: "nmi", Purpose: "tokenization_key", DisplayLabel: "NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
+	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
+	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretCCBillAccountConfig, Rail: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretSolanaPrivateKey, Rail: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }
 
 // ProviderAccountSecretName returns the canonical secret-store name for a
@@ -179,12 +179,7 @@ func NormalizeProviderAccountSecretKey(providerType, key string) (string, error)
 }
 
 func normalizeProviderSecretType(providerType string) string {
-	switch strings.ToLower(strings.TrimSpace(providerType)) {
-	case "mobius":
-		return "nmi"
-	default:
-		return strings.ToLower(strings.TrimSpace(providerType))
-	}
+	return strings.ToLower(strings.TrimSpace(providerType))
 }
 
 func normalizeProviderSecretEnvironment(environment string) string {

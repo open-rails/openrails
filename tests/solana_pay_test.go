@@ -191,7 +191,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		body := map[string]any{
 			"price_id": mobiusPriceID.String(),
 			"payment": map[string]any{
-				"rail":          "mobius",
+				"rail":          "nmi",
 				"payment_token": "tok_test_123",
 				"email":         "test@example.com",
 				"first_name":    "Test",

@@ -361,12 +361,12 @@ type stripeRefundAPI interface {
 type StripeRefundHandler struct {
 	refundReservations
 	Config *config.Config
-	Rails  config.RailSet
+	Rails  config.ProviderAccountSet
 	Stripe stripeRefundAPI
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.RailSet, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.ProviderAccountSet, clock clockwork.Clock) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,

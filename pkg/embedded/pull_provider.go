@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -271,7 +272,7 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 type pullProviderRuntime struct {
 	DB             *db.DB
 	Config         *config.Config
-	Rails          config.RailSet
+	Rails          config.ProviderAccountSet
 	NMIClients     map[string]*nmi.NMIClient
 	CCBillDataLink *ccbill.DataLinkClient
 	SolanaRPC      *solanaint.RPCClient
@@ -286,7 +287,7 @@ func newPullProviderRuntime(cfg *config.Config) (*pullProviderRuntime, func(), e
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 	cleanup := func() { _ = database.Close() }
-	rails := config.RailSet{}
+	rails := config.ProviderAccountSet{}
 	nmiClients := map[string]*nmi.NMIClient{}
 	ccbillDataLink, err := pullProviderCCBillDataLink(cfg, rails)
 	if err != nil {
@@ -308,8 +309,8 @@ func newPullProviderRuntime(cfg *config.Config) (*pullProviderRuntime, func(), e
 	}, cleanup, nil
 }
 
-func pullProviderCCBillDataLink(cfg *config.Config, rails config.RailSet) (*ccbill.DataLinkClient, error) {
-	_, proc, err := rails.PrimaryRailByType(config.RailTypeCCBill)
+func pullProviderCCBillDataLink(cfg *config.Config, rails config.ProviderAccountSet) (*ccbill.DataLinkClient, error) {
+	_, proc, err := rails.PrimaryRailByType(models.RailCCBill)
 	if err != nil {
 		return nil, err
 	}
@@ -321,8 +322,8 @@ func pullProviderCCBillDataLink(cfg *config.Config, rails config.RailSet) (*ccbi
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }
 
-func pullProviderSolanaRPC(cfg *config.Config, rails config.RailSet) (*solanaint.RPCClient, error) {
-	_, proc, err := rails.PrimaryRailByType(config.RailTypeSolana)
+func pullProviderSolanaRPC(cfg *config.Config, rails config.ProviderAccountSet) (*solanaint.RPCClient, error) {
+	_, proc, err := rails.PrimaryRailByType(models.RailSolana)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +372,7 @@ func resolvePullProviderAccountTarget(ctx context.Context, rt *pullProviderRunti
 	provider := reconcile.Provider(account.ProviderType)
 	providerKey := account.ProviderType
 	if rt.Rails != nil {
-		if key, _, err := rt.Rails.PrimaryRailByType(account.ProviderType); err == nil && key != "" {
+		if key, _, err := rt.Rails.PrimaryRailByType(models.Rail(account.ProviderType)); err == nil && key != "" {
 			providerKey = key
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
@@ -62,10 +63,10 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 
 	// Add Solana configuration to the construction-time rail set.
 	if suite.Rails == nil {
-		suite.Rails = make(config.RailSet)
+		suite.Rails = make(config.ProviderAccountSet)
 	}
-	suite.Rails["solana"] = &config.RailConfig{
-		Type: config.RailTypeSolana,
+	suite.Rails["solana"] = &config.ProviderAccountConfig{
+		Rail: models.RailSolana,
 		Solana: &config.SolanaRailConfig{
 			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 			Tokens:          solanatokens.DefaultDevnetTokens(),

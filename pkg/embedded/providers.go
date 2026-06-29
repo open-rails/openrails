@@ -5,26 +5,27 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// PaymentProvider is one payment-provider credential set supplied by an
+// PaymentProvider is one provider-account credential set supplied by an
 // embedding host. Name is an optional local selector only; OpenRails durable
 // identity comes from the provider account id resolved at runtime.
 type PaymentProvider struct {
 	// Name is an optional local config selector such as "stripe_primary" or
-	// "mobius_legacy". Leave it empty when the host does not need to target the
-	// credential set by name; OpenRails will generate a process-local selector.
+	// "mobius". Leave it empty when the host does not need to target the
+	// account by name; OpenRails will generate a process-local selector.
 	Name string
-	// Config is the provider credential/config payload. Set Config.Type for
-	// non-reserved names and for generated names. Config.Routing defaults to default.
-	Config config.RailConfig
+	// Config is the provider-account credential/config payload. Set Config.Rail
+	// for non-reserved names and for generated names. Config.Routing defaults to default.
+	Config config.ProviderAccountConfig
 }
 
 // ApplyPaymentProviders converts host-supplied embedded provider credentials
-// into an in-memory RailSet. Local names are not durable identity; provider
-// account rows store the provider-returned account id.
-func ApplyPaymentProviders(providers []PaymentProvider) (config.RailSet, error) {
-	set := config.RailSet{}
+// into an in-memory ProviderAccountSet. Local names are not durable identity;
+// provider account rows store the provider-returned account id.
+func ApplyPaymentProviders(providers []PaymentProvider) (config.ProviderAccountSet, error) {
+	set := config.ProviderAccountSet{}
 	if len(providers) == 0 {
 		return set, nil
 	}
@@ -32,18 +33,15 @@ func ApplyPaymentProviders(providers []PaymentProvider) (config.RailSet, error) 
 	for _, provider := range providers {
 		proc := provider.Config
 		key := strings.ToLower(strings.TrimSpace(provider.Name))
-		providerType := strings.ToLower(strings.TrimSpace(proc.Type))
-		if key != "" && providerType == "" {
-			providerType = proc.GetEffectiveType(key)
+		rail := proc.EffectiveRail(key)
+		if rail == "" {
+			return nil, fmt.Errorf("embedded payment provider %q requires config rail", key)
 		}
-		if providerType == "" {
-			return nil, fmt.Errorf("embedded payment provider %q requires config type", key)
-		}
-		if proc.Type == "" {
-			proc.Type = providerType
+		if proc.Rail == "" {
+			proc.Rail = rail
 		}
 		if key == "" {
-			key = generatedProviderName(set, seen, providerType)
+			key = generatedProviderName(set, seen, rail)
 		}
 		if _, ok := seen[key]; ok {
 			return nil, fmt.Errorf("duplicate embedded payment provider name %q", key)
@@ -54,8 +52,8 @@ func ApplyPaymentProviders(providers []PaymentProvider) (config.RailSet, error) 
 	return set, nil
 }
 
-func generatedProviderName(existing map[string]*config.RailConfig, seen map[string]struct{}, providerType string) string {
-	base := strings.ToLower(strings.TrimSpace(providerType))
+func generatedProviderName(existing map[string]*config.ProviderAccountConfig, seen map[string]struct{}, rail models.Rail) string {
+	base := strings.ToLower(strings.TrimSpace(string(rail)))
 	if base == "" {
 		base = "provider"
 	}
@@ -74,7 +72,7 @@ func generatedProviderName(existing map[string]*config.RailConfig, seen map[stri
 	}
 }
 
-func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
+func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
 	if in == nil {
 		return nil
 	}

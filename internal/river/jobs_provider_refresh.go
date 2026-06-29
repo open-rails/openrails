@@ -48,7 +48,7 @@ type ProviderRefreshWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
 	DB                  *db.DB
 	Config              *config.Config
-	Rails               config.RailSet
+	Rails               config.ProviderAccountSet
 	Clock               clockwork.Clock
 	NMIClients          map[string]*nmi.NMIClient
 	CCBillDataLink      *ccbill.DataLinkClient

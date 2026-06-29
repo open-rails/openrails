@@ -56,7 +56,7 @@ type Subscription struct {
 	CurrentPeriodEndsAt   *time.Time         `json:"current_period_ends_at"`
 
 	// Payment rail information
-	Rail               Rail       `json:"rail"`                 // Rail: mobius, ccbill, solana
+	Rail               Rail       `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string     `json:"rail_subscription_id"` // Subscription ID from rail
 	UserEmail          *string    `json:"user_email,omitempty"`
 	PaymentMethodID    *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method

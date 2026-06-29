@@ -1562,7 +1562,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 	}
 
 	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{
-		Rail:        gen.OpenrailsRailType(rail),
+		Rail:        string(rail),
 		AmountCents: amountCents,
 		Last4:       last4,
 		FromAt:      targetTs.Add(-7 * 24 * time.Hour),

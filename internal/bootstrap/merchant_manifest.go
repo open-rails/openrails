@@ -498,7 +498,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		return fmt.Errorf("provider account %q cannot be mode=primary with environment=test outside development", providerType)
 	}
 	reconcileStripeWebhook := func() error {
-		if providerType != config.RailTypeStripe || (status != nil && *status == "disabled") {
+		if providerType != string(models.RailStripe) || (status != nil && *status == "disabled") {
 			return nil
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
@@ -634,12 +634,7 @@ func normalizeProviderEnvironment(raw string) (string, error) {
 }
 
 func normalizeManifestProviderType(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "mobius":
-		return config.RailTypeNMI
-	default:
-		return strings.ToLower(strings.TrimSpace(raw))
-	}
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 func manifestProviderAccountMode(raw string) (*string, *string, error) {
@@ -730,7 +725,7 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 		}, nil
 	}
 	switch providerType {
-	case config.RailTypeCCBill:
+	case string(models.RailCCBill):
 		// CCBill identity is derived from DECLARATIVE config (client_acc_num),
 		// not a network whoami, so it is retained (#592).
 		raw, ok, err := secrets.ResolveIfPresent("account_config")

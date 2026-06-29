@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type ManagedStripeWebhookParams struct {
 	Config              *config.Config
-	Rails               config.RailSet
+	Rails               config.ProviderAccountSet
 	SecretStore         merchants.MerchantSecretStore
 	MerchantID          merchant.ID
 	MerchantSlug        string
@@ -111,7 +112,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
 	}
 
-	rails := config.RailSet{"stripe": &config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
+	rails := config.ProviderAccountSet{"stripe": &config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
 		URL:           webhookURL,

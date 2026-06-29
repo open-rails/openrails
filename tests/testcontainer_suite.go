@@ -60,7 +60,7 @@ type TestContainerSuite struct {
 	Server     *server.Server
 	httpServer *http.Server
 	Config     *config.Config
-	Rails      config.RailSet
+	Rails      config.ProviderAccountSet
 	ServerURL  string
 
 	// Context for container operations
@@ -233,9 +233,9 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	}
 	// Payment rail credentials are construction-time merchant/provider
 	// state, not infrastructure config.yaml state.
-	suite.Rails = config.RailSet{
+	suite.Rails = config.ProviderAccountSet{
 		"ccbill": {
-			Type: config.RailTypeCCBill,
+			Rail: models.RailCCBill,
 			CCBill: &config.CCBillRailConfig{
 				ClientAccNum: "945280",
 				ClientSubAcc: "0000",
@@ -243,14 +243,14 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			},
 		},
 		"solana": {
-			Type: config.RailTypeSolana,
+			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{
 				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 				Tokens:          solanatokens.DefaultDevnetTokens(),
 			},
 		},
 		"mobius": {
-			Type: config.RailTypeNMI,
+			Rail: models.RailNMI,
 			NMI: &config.NMIRailConfig{
 				SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
 				TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
@@ -598,12 +598,14 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		return
 	}
 	clients := make(map[string]*nmi.NMIClient)
-	for name, proc := range suite.Rails.GetNMIRails() {
+	for name, proc := range suite.Rails.ByRail(models.RailNMI) {
 		settings := proc.ToNMIProviderSettings(name)
 		client, err := nmi.NewClient(name, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
 		client.ReadOnly = suite.Config.IsProviderReadOnly()
-		clients[name] = client
+		// NMIClients is keyed by rail (Option R), matching createNMIClients: a row's
+		// rail value ("nmi") resolves its client; the account name is diagnostics.
+		clients[string(models.RailNMI)] = client
 	}
 
 	rt := suite.App.Runtime

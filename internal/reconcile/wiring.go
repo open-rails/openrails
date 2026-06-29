@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -32,7 +33,7 @@ type FetcherOptions struct {
 // BuildFetchersWithOptions is the strict builder used by operator commands.
 // It respects rail role selection and returns config errors instead of
 // silently picking an arbitrary account.
-func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
+func BuildFetchersWithOptions(cfg *config.Config, rails config.ProviderAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
 	fetchers := map[Provider]RailFetcher{}
 
 	if key, c, err := selectNMIClient(rails, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
@@ -41,7 +42,7 @@ func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients 
 		fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(c), key: key}
 	}
 	if clients.CCBillDataLink != nil {
-		key, proc, err := selectRailByType(rails, config.RailTypeCCBill, opts.providerKey(ProviderCCBill))
+		key, proc, err := selectRailByType(rails, models.RailCCBill, opts.providerKey(ProviderCCBill))
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +51,7 @@ func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients 
 		}
 	}
 	{
-		key, sp, err := selectRailByType(rails, config.RailTypeStripe, opts.providerKey(ProviderStripe))
+		key, sp, err := selectRailByType(rails, models.RailStripe, opts.providerKey(ProviderStripe))
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +60,7 @@ func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients 
 		}
 	}
 	if clients.SolanaRPC != nil && d != nil {
-		key, proc, err := selectRailByType(rails, config.RailTypeSolana, opts.providerKey(ProviderSolana))
+		key, proc, err := selectRailByType(rails, models.RailSolana, opts.providerKey(ProviderSolana))
 		if err != nil {
 			return nil, err
 		}
@@ -78,21 +79,21 @@ func (o FetcherOptions) providerKey(provider Provider) string {
 	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
 }
 
-func selectRailByType(rails config.RailSet, providerType, explicitKey string) (string, *config.RailConfig, error) {
+func selectRailByType(rails config.ProviderAccountSet, rail models.Rail, explicitKey string) (string, *config.ProviderAccountConfig, error) {
 	if explicitKey != "" {
 		proc := rails.GetRail(explicitKey)
 		if proc == nil {
-			return "", nil, fmt.Errorf("rail %q is not configured", explicitKey)
+			return "", nil, fmt.Errorf("provider account %q is not configured", explicitKey)
 		}
-		if proc.GetEffectiveType(explicitKey) != providerType {
-			return "", nil, fmt.Errorf("rail %q is type %q, not %q", explicitKey, proc.GetEffectiveType(explicitKey), providerType)
+		if proc.EffectiveRail(explicitKey) != rail {
+			return "", nil, fmt.Errorf("provider account %q is on rail %q, not %q", explicitKey, proc.EffectiveRail(explicitKey), rail)
 		}
 		return explicitKey, proc, nil
 	}
-	return rails.PrimaryRailByType(providerType)
+	return rails.PrimaryRailByType(rail)
 }
 
-func selectNMIClient(rails config.RailSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
+func selectNMIClient(rails config.ProviderAccountSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
 	if explicitKey != "" {
 		c := clients[explicitKey]
 		if c == nil {
@@ -100,7 +101,7 @@ func selectNMIClient(rails config.RailSet, clients map[string]*nmi.NMIClient, ex
 		}
 		return explicitKey, c, nil
 	}
-	key, proc, err := rails.PrimaryRailByType(config.RailTypeNMI)
+	key, proc, err := rails.PrimaryRailByType(models.RailNMI)
 	if err != nil {
 		return "", nil, err
 	}
@@ -115,17 +116,14 @@ func selectNMIClient(rails config.RailSet, clients map[string]*nmi.NMIClient, ex
 	return key, c, nil
 }
 
-// pickNMIClient selects the NMI gateway client deterministically: the only
-// one when a single NMI rail is configured, else "mobius" then "nmi"
-// then the lexicographically first key.
+// pickNMIClient selects the NMI gateway client deterministically: the client
+// keyed by the NMI rail, else the lexicographically first key.
 func pickNMIClient(clients map[string]*nmi.NMIClient) (string, *nmi.NMIClient) {
 	if len(clients) == 0 {
 		return "", nil
 	}
-	for _, preferred := range []string{"mobius", "nmi"} {
-		if c, ok := clients[preferred]; ok && c != nil {
-			return preferred, c
-		}
+	if c, ok := clients[string(models.RailNMI)]; ok && c != nil {
+		return string(models.RailNMI), c
 	}
 	keys := make([]string, 0, len(clients))
 	for k := range clients {

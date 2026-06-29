@@ -19,6 +19,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	log "github.com/sirupsen/logrus"
 )
@@ -294,37 +295,31 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// RailType constants for the unified rail config
+// Provider-account routing selectors (independent of the rail/gateway).
 const (
-	RailTypeNMI    = "nmi"
-	RailTypeCCBill = "ccbill"
-	RailTypeStripe = "stripe"
-	RailTypeSolana = "solana"
-
 	RailRoutingDefault = "default"
 	RailRoutingManual  = "manual"
 	RailRoutingLegacy  = "legacy"
 )
 
-// ReservedRailNames maps rail names that imply their type.
-// These names don't require an explicit "type" field in config.
-var ReservedRailNames = map[string]string{
-	"ccbill": RailTypeCCBill,
-	"stripe": RailTypeStripe,
-	"solana": RailTypeSolana,
+// ReservedAccountRails maps a provider-account name to the rail it implies, so a
+// config entry named after a self-contained gateway need not restate its rail.
+var ReservedAccountRails = map[string]models.Rail{
+	"ccbill": models.RailCCBill,
+	"stripe": models.RailStripe,
+	"solana": models.RailSolana,
 }
 
-// RailConfig is one configured payment rail. New config should put provider
-// fields under the matching typed block (nmi/ccbill/stripe/solana); legacy flat
-// fields remain accepted and are normalized into the same runtime shape.
+// ProviderAccountConfig is one configured provider account: the rail (gateway) it
+// is on plus that rail's credentials. The map key in a ProviderAccountSet is the
+// operator-chosen account NAME (e.g. "mobius", "paykings" on rail nmi).
 //
-// Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
-// Non-reserved names (e.g., "acme") require type: nmi.
-type RailConfig struct {
-	// Type specifies the rail type: "nmi", "ccbill", "stripe", "solana".
-	// Required for non-reserved rail names; inferred for reserved names
-	// (ccbill, stripe, solana).
-	Type string `koanf:"type"`
+// For an account named after a self-contained gateway (ccbill, stripe, solana) the
+// rail is inferred from the name; other names (e.g. "mobius") must set Rail.
+type ProviderAccountConfig struct {
+	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
+	// Required unless the account name is itself a reserved gateway name.
+	Rail models.Rail `koanf:"rail"`
 	// Routing selects routing for this credential set: default | manual | legacy.
 	// Empty is default; legacy is retained for old rows/rebills/refunds and must
 	// not receive new default work.
@@ -379,28 +374,28 @@ type SolanaRailConfig struct {
 	Network string `koanf:"-"`
 }
 
-// RailSet is an in-memory set of payment-provider credential entries. It
+// ProviderAccountSet is an in-memory set of payment-provider credential entries. It
 // is not part of config.yaml/.env; private standalone installs seed provider
 // credentials through merchant bootstrap/Vault state, and embedded hosts may
 // pass a set programmatically during construction.
-type RailSet map[string]*RailConfig
+type ProviderAccountSet map[string]*ProviderAccountConfig
 
-// GetEffectiveType returns the rail type, inferring from reserved names if needed.
-func (p *RailConfig) GetEffectiveType(name string) string {
-	if p.Type != "" {
-		return strings.ToLower(p.Type)
+// EffectiveRail returns the account's rail (gateway), inferring it from a reserved
+// account name when Rail is unset.
+func (p *ProviderAccountConfig) EffectiveRail(name string) models.Rail {
+	if p.Rail != "" {
+		return models.Rail(strings.ToLower(string(p.Rail)))
 	}
-	// Check if it's a reserved name
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if impliedType, ok := ReservedRailNames[normalizedName]; ok {
-		return impliedType
+	if rail, ok := ReservedAccountRails[normalizedName]; ok {
+		return rail
 	}
 	return ""
 }
 
 // EffectiveRouting returns default when routing is omitted, preserving the
 // existing one-config-per-provider behavior.
-func (p *RailConfig) EffectiveRouting() string {
+func (p *ProviderAccountConfig) EffectiveRouting() string {
 	if p == nil {
 		return ""
 	}
@@ -410,11 +405,11 @@ func (p *RailConfig) EffectiveRouting() string {
 	return RailRoutingDefault
 }
 
-func (p *RailConfig) normalizeTypedBlock(name string) error {
+func (p *ProviderAccountConfig) normalizeTypedBlock(name string) error {
 	if p == nil {
 		return nil
 	}
-	effectiveType := p.GetEffectiveType(name)
+	effectiveType := p.EffectiveRail(name)
 	blockCount := 0
 	if p.NMI != nil {
 		blockCount++
@@ -435,19 +430,19 @@ func (p *RailConfig) normalizeTypedBlock(name string) error {
 		return fmt.Errorf("rail '%s' must set exactly one provider block matching type %q", name, effectiveType)
 	}
 	switch effectiveType {
-	case RailTypeNMI:
+	case models.RailNMI:
 		if p.NMI == nil {
 			return fmt.Errorf("rail '%s' type nmi must use nmi block", name)
 		}
-	case RailTypeCCBill:
+	case models.RailCCBill:
 		if p.CCBill == nil {
 			return fmt.Errorf("rail '%s' type ccbill must use ccbill block", name)
 		}
-	case RailTypeStripe:
+	case models.RailStripe:
 		if p.Stripe == nil {
 			return fmt.Errorf("rail '%s' type stripe must use stripe block", name)
 		}
-	case RailTypeSolana:
+	case models.RailSolana:
 		if p.Solana == nil {
 			return fmt.Errorf("rail '%s' type solana must use solana block", name)
 		}
@@ -458,28 +453,28 @@ func (p *RailConfig) normalizeTypedBlock(name string) error {
 }
 
 // IsNMI returns true if this rail config is for an NMI-backed rail.
-func (p *RailConfig) IsNMI(name string) bool {
-	return p.GetEffectiveType(name) == RailTypeNMI
+func (p *ProviderAccountConfig) IsNMI(name string) bool {
+	return p.EffectiveRail(name) == models.RailNMI
 }
 
 // IsCCBill returns true if this rail config is for CCBill.
-func (p *RailConfig) IsCCBill(name string) bool {
-	return p.GetEffectiveType(name) == RailTypeCCBill
+func (p *ProviderAccountConfig) IsCCBill(name string) bool {
+	return p.EffectiveRail(name) == models.RailCCBill
 }
 
 // IsStripe returns true if this rail config is for Stripe.
-func (p *RailConfig) IsStripe(name string) bool {
-	return p.GetEffectiveType(name) == RailTypeStripe
+func (p *ProviderAccountConfig) IsStripe(name string) bool {
+	return p.EffectiveRail(name) == models.RailStripe
 }
 
 // IsSolana returns true if this rail config is for Solana.
-func (p *RailConfig) IsSolana(name string) bool {
-	return p.GetEffectiveType(name) == RailTypeSolana
+func (p *ProviderAccountConfig) IsSolana(name string) bool {
+	return p.EffectiveRail(name) == models.RailSolana
 }
 
 // ToNMIProviderSettings converts the rail config to NMI provider settings.
 // Only valid for NMI-type rails.
-func (p *RailConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
+func (p *ProviderAccountConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
 	s := &NMIProviderSettings{Name: strings.ToLower(strings.TrimSpace(name))}
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
@@ -491,7 +486,7 @@ func (p *RailConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
 
 // ToCCBillConfig converts the rail config to CCBillConfig.
 // Only valid for CCBill-type rails.
-func (p *RailConfig) ToCCBillConfig() *CCBillConfig {
+func (p *ProviderAccountConfig) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
 	if p.CCBill != nil {
 		c.Salt = p.CCBill.Salt
@@ -823,7 +818,7 @@ func validateEncryption(cfg *EncryptionConfig) error {
 // test_mode axis. If there's a mismatch, it logs a warning and clears the key to
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
-func ValidateRailSet(cfg *Config, rails RailSet) error {
+func ValidateRailSet(cfg *Config, rails ProviderAccountSet) error {
 	if len(rails) == 0 {
 		return nil
 	}
@@ -837,12 +832,12 @@ func ValidateRailSet(cfg *Config, rails RailSet) error {
 	return validateStripeKeyForTestMode(cfg, rails)
 }
 
-func validateStripeKeyForTestMode(cfg *Config, rails RailSet) error {
+func validateStripeKeyForTestMode(cfg *Config, rails ProviderAccountSet) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
 	for name, stripeProc := range rails {
-		if stripeProc == nil || stripeProc.GetEffectiveType(name) != RailTypeStripe || stripeProc.Stripe == nil {
+		if stripeProc == nil || stripeProc.EffectiveRail(name) != models.RailStripe || stripeProc.Stripe == nil {
 			continue
 		}
 
@@ -872,8 +867,8 @@ func validateStripeKeyForTestMode(cfg *Config, rails RailSet) error {
 }
 
 // validateRails validates all rails in the new Rails map
-func validateRails(cfg *Config, rails RailSet, isDev bool) error {
-	primaryByType := map[string]string{}
+func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
+	primaryByType := map[models.Rail]string{}
 	for name, proc := range rails {
 		if proc == nil {
 			continue
@@ -887,27 +882,27 @@ func validateRails(cfg *Config, rails RailSet, isDev bool) error {
 			return fmt.Errorf("rail '%s' has unknown routing '%s'", name, proc.EffectiveRouting())
 		}
 
-		effectiveType := proc.GetEffectiveType(name)
+		effectiveType := proc.EffectiveRail(name)
 		if proc.EffectiveRouting() == RailRoutingDefault {
 			if existing := primaryByType[effectiveType]; existing != "" {
-				return fmt.Errorf("multiple default rails configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
+				return fmt.Errorf("multiple default provider accounts configured for rail %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
 			}
 			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
 		}
 		switch effectiveType {
-		case RailTypeNMI:
+		case models.RailNMI:
 			if err := validateNMIRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case RailTypeCCBill:
+		case models.RailCCBill:
 			if err := validateCCBillRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case RailTypeStripe:
+		case models.RailStripe:
 			if err := validateStripeRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case RailTypeSolana:
+		case models.RailSolana:
 			if err := validateSolanaRail(name, proc, isDev); err != nil {
 				return err
 			}
@@ -919,7 +914,7 @@ func validateRails(cfg *Config, rails RailSet, isDev bool) error {
 }
 
 // validateNMIRail validates an NMI-type rail
-func validateNMIRail(name string, proc *RailConfig, isDev bool) error {
+func validateNMIRail(name string, proc *ProviderAccountConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
@@ -940,7 +935,7 @@ func validateNMIRail(name string, proc *RailConfig, isDev bool) error {
 }
 
 // validateCCBillRail validates a CCBill-type rail
-func validateCCBillRail(name string, proc *RailConfig, isDev bool) error {
+func validateCCBillRail(name string, proc *ProviderAccountConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
@@ -967,7 +962,7 @@ func validateCCBillRail(name string, proc *RailConfig, isDev bool) error {
 }
 
 // validateStripeRail validates a Stripe-type rail
-func validateStripeRail(name string, proc *RailConfig, isDev bool) error {
+func validateStripeRail(name string, proc *ProviderAccountConfig, isDev bool) error {
 	stripe := proc.Stripe
 	if stripe == nil {
 		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
@@ -989,7 +984,7 @@ func validateStripeRail(name string, proc *RailConfig, isDev bool) error {
 // validateSolanaRail validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaRail.
-func validateSolanaRail(name string, proc *RailConfig, isDev bool) error {
+func validateSolanaRail(name string, proc *ProviderAccountConfig, isDev bool) error {
 	solana := proc.Solana
 	if solana == nil {
 		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
@@ -1004,36 +999,33 @@ func validateSolanaRail(name string, proc *RailConfig, isDev bool) error {
 	return nil
 }
 
-// GetNMIRails returns all NMI-backed rail configs.
-func (set RailSet) GetNMIRails() map[string]*RailConfig {
-	result := make(map[string]*RailConfig)
+// ByRail returns all provider accounts on the given rail, keyed by account name.
+func (set ProviderAccountSet) ByRail(rail models.Rail) map[string]*ProviderAccountConfig {
+	result := make(map[string]*ProviderAccountConfig)
 	if set == nil {
 		return result
 	}
-
 	for name, proc := range set {
-		if proc != nil && proc.IsNMI(name) {
+		if proc != nil && proc.EffectiveRail(name) == rail {
 			result[strings.ToLower(name)] = proc
 		}
 	}
-
 	return result
 }
 
-// RailKeysByType returns configured rail names for the provider type,
+// RailKeysByType returns configured account names on the given rail,
 // sorted for deterministic diagnostics and selection.
-func (set RailSet) RailKeysByType(providerType string) []string {
+func (set ProviderAccountSet) RailKeysByType(rail models.Rail) []string {
 	if set == nil {
 		return nil
 	}
-	providerType = strings.ToLower(strings.TrimSpace(providerType))
 	keys := make([]string, 0)
 	for name, proc := range set {
 		if proc == nil {
 			continue
 		}
 		key := strings.ToLower(strings.TrimSpace(name))
-		if key != "" && proc.GetEffectiveType(key) == providerType {
+		if key != "" && proc.EffectiveRail(key) == rail {
 			keys = append(keys, key)
 		}
 	}
@@ -1041,15 +1033,15 @@ func (set RailSet) RailKeysByType(providerType string) []string {
 	return keys
 }
 
-// PrimaryRailByType returns the configured default credential set for a
-// provider type. Existing configs with one entry and no routing keep working
-// because an empty routing is default. Multiple defaults are a configuration
-// error: OpenRails cannot guess where default new work should route.
-func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, error) {
-	keys := set.RailKeysByType(providerType)
+// PrimaryRailByType returns the configured default provider account for a rail.
+// A single entry with no routing keeps working because empty routing is default.
+// Multiple defaults are a configuration error: OpenRails cannot guess where
+// default new work should route.
+func (set ProviderAccountSet) PrimaryRailByType(rail models.Rail) (string, *ProviderAccountConfig, error) {
+	keys := set.RailKeysByType(rail)
 	var (
 		primaryKey string
-		primary    *RailConfig
+		primary    *ProviderAccountConfig
 	)
 	for _, key := range keys {
 		proc := set[key]
@@ -1057,7 +1049,7 @@ func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, 
 			continue
 		}
 		if primary != nil {
-			return "", nil, fmt.Errorf("multiple default rails configured for type %q: %q and %q", providerType, primaryKey, key)
+			return "", nil, fmt.Errorf("multiple default provider accounts configured for rail %q: %q and %q", rail, primaryKey, key)
 		}
 		primaryKey, primary = key, proc
 	}
@@ -1065,25 +1057,25 @@ func (set RailSet) PrimaryRailByType(providerType string) (string, *RailConfig, 
 }
 
 // GetCCBillRail returns the configured primary CCBill rail.
-func (set RailSet) GetCCBillRail() *RailConfig {
-	_, proc, _ := set.PrimaryRailByType(RailTypeCCBill)
+func (set ProviderAccountSet) GetCCBillRail() *ProviderAccountConfig {
+	_, proc, _ := set.PrimaryRailByType(models.RailCCBill)
 	return proc
 }
 
 // GetStripeRail returns the configured primary Stripe rail.
-func (set RailSet) GetStripeRail() *RailConfig {
-	_, proc, _ := set.PrimaryRailByType(RailTypeStripe)
+func (set ProviderAccountSet) GetStripeRail() *ProviderAccountConfig {
+	_, proc, _ := set.PrimaryRailByType(models.RailStripe)
 	return proc
 }
 
 // GetSolanaRail returns the configured primary Solana rail.
-func (set RailSet) GetSolanaRail() *RailConfig {
-	_, proc, _ := set.PrimaryRailByType(RailTypeSolana)
+func (set ProviderAccountSet) GetSolanaRail() *ProviderAccountConfig {
+	_, proc, _ := set.PrimaryRailByType(models.RailSolana)
 	return proc
 }
 
 // GetRail returns a rail config by name.
-func (set RailSet) GetRail(name string) *RailConfig {
+func (set ProviderAccountSet) GetRail(name string) *ProviderAccountConfig {
 	if set == nil {
 		return nil
 	}
@@ -1094,19 +1086,13 @@ func (set RailSet) GetRail(name string) *RailConfig {
 	return nil
 }
 
-// GetRailType returns the type of a rail by name.
-// Returns empty string if rail not found.
-func (set RailSet) GetRailType(name string) string {
+// RailOf returns the rail of the named provider account, or "" if not found.
+func (set ProviderAccountSet) RailOf(name string) models.Rail {
 	proc := set.GetRail(name)
 	if proc == nil {
 		return ""
 	}
-	return proc.GetEffectiveType(name)
-}
-
-// IsNMIRail returns true if the named rail is NMI-backed.
-func (set RailSet) IsNMIRail(name string) bool {
-	return set.GetRailType(name) == RailTypeNMI
+	return proc.EffectiveRail(name)
 }
 
 func (cfg *Config) normalizedProviderWriteMode() (string, error) {

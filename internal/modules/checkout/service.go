@@ -107,7 +107,7 @@ type CheckoutService struct {
 	StripeService *subscriptions.StripeService
 	clock         clockwork.Clock
 	Config        *config.Config
-	Rails         config.RailSet
+	Rails         config.ProviderAccountSet
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -142,7 +142,7 @@ func NewCheckoutService(
 	nmiClients map[string]*nmi.NMIClient,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
-	railSet config.RailSet,
+	railSet config.ProviderAccountSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
@@ -387,7 +387,7 @@ func (s *CheckoutService) processSubscription(
 	switch {
 	case rail == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
-	case rails.IsNMIBacked(rail):
+	case rails.IsNMI(models.Rail(rail)):
 		return s.processNMISubscription(ctx, req, user, price, product, coverage, rail)
 	case rail == "stripe":
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
@@ -411,7 +411,7 @@ func (s *CheckoutService) processOneTimePurchase(
 	// Route to rail-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
-	case rails.IsNMIBacked(rail):
+	case rails.IsNMI(models.Rail(rail)):
 		return s.processNMISale(ctx, req, user, price, product, coverage, rail)
 	case rail == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
@@ -1629,7 +1629,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Only NMI-backed rails support programmatic upgrades
-	if !rails.IsNMIBacked(rail) {
+	if !rails.IsNMI(models.Rail(rail)) {
 		return nil, fmt.Errorf("unsupported rail for upgrades: %s", rail)
 	}
 
@@ -2040,7 +2040,7 @@ func (s *CheckoutService) processDowngrade(
 	}
 
 	// Only NMI-backed rails support programmatic downgrades
-	if !rails.IsNMIBacked(rail) {
+	if !rails.IsNMI(models.Rail(rail)) {
 		return nil, fmt.Errorf("unsupported rail for downgrades: %s", rail)
 	}
 
@@ -2248,7 +2248,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	switch {
 	case rail == "stripe":
 		return s.processTierChangeStripe(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case rails.IsNMIBacked(rail):
+	case rails.IsNMI(models.Rail(rail)):
 		return s.processTierChangeNMI(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case rail == "ccbill":
 		return s.processTierChangeCCBill(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)

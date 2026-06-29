@@ -77,8 +77,8 @@ type priceVerifyContext struct {
 // providerAdapter is the per-provider interface dispatched by resolveProviders
 // and VerifyPriceSync. Adapters are stateless; per-call state is passed in.
 type providerAdapter interface {
-	// Name returns the canonical provider name (e.g. "stripe", "ccbill",
-	// "mobius"). Used by the dispatcher for diagnostics only — the map key in
+	// Name returns the canonical rail name (e.g. "stripe", "ccbill", "nmi").
+	// Used by the dispatcher for diagnostics only — the map key in
 	// providerAdapters is the source of truth.
 	Name() string
 
@@ -158,10 +158,10 @@ type autoCreateContext struct {
 // straightforward.
 func (s *Service) providerAdapters() map[string]providerAdapter {
 	return map[string]providerAdapter{
-		"stripe": &stripeAdapter{svc: s},
-		"ccbill": &ccbillAdapter{},
-		"mobius": &mobiusAdapter{svc: s},
-		"solana": &solanaAdapter{svc: s},
+		string(models.RailStripe): &stripeAdapter{svc: s},
+		string(models.RailCCBill): &ccbillAdapter{},
+		string(models.RailNMI):    &nmiAdapter{svc: s},
+		string(models.RailSolana): &solanaAdapter{svc: s},
 	}
 }
 

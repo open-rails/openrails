@@ -13,13 +13,13 @@ import (
 func TestDunningWorkerSkipsPastDueWithoutPeriodEndWithoutPanic(t *testing.T) {
 	worker := &DunningWorker{
 		NMIClients: map[string]*nmi.NMIClient{
-			string(models.RailMobius): {},
+			string(models.RailNMI): {},
 		},
 	}
 	sub := &models.Subscription{
 		ID:                 uuid.New(),
 		Status:             models.StatusPastDue,
-		Rail:               models.RailMobius,
+		Rail:               models.RailNMI,
 		RailSubscriptionID: "sub_missing_period",
 	}
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -153,7 +154,7 @@ func newFeatureTestSvc(t *testing.T, fake *fakeStripeFeatures) *StripeCatalogSer
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 	return &StripeCatalogService{
-		Rails:   config.RailSet{"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
+		Rails:   config.ProviderAccountSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
 		BaseURL: srv.URL,
 	}
 }

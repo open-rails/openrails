@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -223,7 +224,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	_, err = q.CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams{
 		ID:             uuid.New(),
 		PriceID:        priceID,
-		Rail:           gen.OpenrailsRailTypeCcbill,
+		Rail:           string(models.RailCCBill),
 		TransactionID:  "txn_" + subscriptionID.String(),
 		Amount:         1999,
 		ListAmount:     1999,

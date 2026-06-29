@@ -544,7 +544,8 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if e != nil {
 			return e
 		}
-		rail := string(models.RailManual)
+		// Off-rail manual invoice settlement is recorded under the manual channel.
+		rail := string(models.ChannelManual)
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:                 uuidutil.NewV7(),
 			MerchantID:         tid.UUID(),

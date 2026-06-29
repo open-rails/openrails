@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -186,7 +187,7 @@ func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...
 	rt := &app.Runtime{
 		DB:                 database,
 		Config:             cfg,
-		NMIClients:         catalogNMIClients(cfg, config.RailSet{}, catalogPushUsesProvider(manifests, "mobius")),
+		NMIClients:         catalogNMIClients(cfg, config.ProviderAccountSet{}, catalogPushUsesProvider(manifests, string(models.RailNMI))),
 		ProductService:     catalogmodule.NewProductService(database),
 		PriceService:       catalogmodule.NewPriceService(database),
 		MoneyService:       money.NewMoneyService(database),
@@ -314,12 +315,12 @@ func resolveMerchantBySlug(ctx context.Context, database *db.DB, merchantSlug st
 	return id, nil
 }
 
-func catalogNMIClients(cfg *config.Config, rails config.RailSet, enabled bool) map[string]*nmi.NMIClient {
+func catalogNMIClients(cfg *config.Config, rails config.ProviderAccountSet, enabled bool) map[string]*nmi.NMIClient {
 	clients := make(map[string]*nmi.NMIClient)
 	if cfg == nil || !enabled {
 		return clients
 	}
-	for name, procConfig := range rails.GetNMIRails() {
+	for name, procConfig := range rails.ByRail(models.RailNMI) {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" || procConfig == nil || procConfig.NMI == nil || strings.TrimSpace(procConfig.NMI.SecurityKey) == "" {
 			continue

@@ -70,7 +70,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 		attempt, err := svc.ReserveProviderAttempt(ctx, &models.Payment{
 			CustomerID:    tenantSubjectID,
 			PriceID:       priceID,
-			Rail:          models.RailMobius,
+			Rail:          models.RailNMI,
 			TransactionID: "nmi_sub_attempt:" + orderID,
 			Amount:        2300,
 			ListAmount:    2300,

@@ -10,6 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -26,7 +27,7 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 		return nil, err
 	}
 
-	provider := webhookutil.CanonicalProvider(req.Provider)
+	provider := webhookutil.CanonicalRail(req.Provider)
 
 	log.WithFields(log.Fields{
 		"provider":  provider,
@@ -34,7 +35,7 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 	}).Debug("Received webhook via Service API")
 
 	// Route based on provider
-	if rails.IsNMIBacked(provider) {
+	if rails.IsNMI(models.Rail(provider)) {
 		return s.handleNMIWebhook(ctx, provider, req)
 	}
 
@@ -52,7 +53,7 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 }
 
 func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {
-	providerKey := webhookutil.CanonicalProvider(provider)
+	providerKey := webhookutil.CanonicalRail(provider)
 
 	client, ok := s.rt.NMIClients[providerKey]
 	if !ok || client == nil {

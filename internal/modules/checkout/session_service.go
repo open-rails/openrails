@@ -103,7 +103,7 @@ type CheckoutSessionService struct {
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
 	config                   *config.Config
-	rails                    config.RailSet
+	rails                    config.ProviderAccountSet
 	clock                    clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
@@ -232,7 +232,7 @@ func NewCheckoutSessionService(
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
-	rails config.RailSet,
+	rails config.ProviderAccountSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
@@ -553,7 +553,7 @@ func (s *CheckoutSessionService) resolveMode(mode string, rail string, price *mo
 // demand billing fields its hosted-checkout path never reads.
 func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	switch {
-	case rails.IsNMIBacked(rail):
+	case rails.IsNMI(models.Rail(rail)):
 		return s.validateNMIInput(ctx, payment, user)
 	case rail == "stripe":
 		return s.validateStripeInput(payment)
@@ -630,7 +630,7 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 	switch {
 	case rail == "solana":
 		return s.initializeSolanaSession(ctx, session, payment)
-	case rails.IsNMIBacked(rail):
+	case rails.IsNMI(models.Rail(rail)):
 		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)
 	case rail == "ccbill" || rail == "stripe":
 		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)

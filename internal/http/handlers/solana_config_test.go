@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
@@ -18,9 +19,9 @@ func TestGetSolanaConfig(t *testing.T) {
 	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
 		runtime := &app.Runtime{
 			Config: &config.Config{},
-			Rails: config.RailSet{
+			Rails: config.ProviderAccountSet{
 				"solana": {
-					Type: config.RailTypeSolana,
+					Rail: models.RailSolana,
 					Solana: &config.SolanaRailConfig{
 						Network: "devnet",
 						Tokens: map[string]config.TokenConfig{
@@ -47,9 +48,9 @@ func TestGetSolanaConfig(t *testing.T) {
 
 	runtime := &app.Runtime{
 		Config: &config.Config{},
-		Rails: config.RailSet{
+		Rails: config.ProviderAccountSet{
 			"solana": {
-				Type: config.RailTypeSolana,
+				Rail: models.RailSolana,
 				Solana: &config.SolanaRailConfig{
 					Network:                         "devnet",
 					SolanaPayRecurringSubscriptions: true,

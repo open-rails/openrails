@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -65,7 +64,7 @@ type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB                 *db.DB
 	Config             *config.Config
-	Rails              config.RailSet
+	Rails              config.ProviderAccountSet
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
@@ -144,7 +143,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 	// Query all due past_due NMI-backed subscriptions
 	// Use w.now() instead of SQL NOW() to support time mocking in tests
-	nmiRails := rails.GetNMIBackedRailsList()
+	nmiRails := []string{string(models.RailNMI)}
 	dueSubscriptions, err := repo.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiRails, w.now())
 	if err != nil {
 		return fmt.Errorf("query due subscriptions: %w", err)

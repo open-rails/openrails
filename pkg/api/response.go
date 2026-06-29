@@ -116,7 +116,7 @@ type PaymentObject struct {
 	User            string              `json:"user"`                     // User ID with usr_ prefix
 	Subscription    *string             `json:"subscription,omitempty"`   // Subscription ID if linked
 	PaymentMethod   *string             `json:"payment_method,omitempty"` // Payment method ID if known
-	Rail            string              `json:"rail"`                     // mobius, ccbill, solana
+	Rail            string              `json:"rail"`                     // nmi, ccbill, solana
 	TransactionID   string              `json:"transaction_id"`           // Rail's transaction identifier
 	Refunded        bool                `json:"refunded"`                 // True if fully refunded
 	Captured        bool                `json:"captured,omitempty"`       // Always true for immediate captures
