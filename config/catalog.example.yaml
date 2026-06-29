@@ -28,7 +28,7 @@ catalogs:
               - access.basic
             prices:
               - currency: usd
-                unit_amount: 999
+                unit_amount: 9_990_000
                 interval: month
                 interval_count: 1
                 provider_links:
@@ -38,7 +38,7 @@ catalogs:
                     plan_id: local_stack_basic_monthly
 
               - currency: usd
-                unit_amount: 9990
+                unit_amount: 99_900_000
                 interval: year
                 interval_count: 1
                 providers: [stripe]
@@ -56,7 +56,7 @@ catalogs:
               - access.premium
             prices:
               - currency: usd
-                unit_amount: 1999
+                unit_amount: 19_990_000
                 interval: month
                 interval_count: 1
                 provider_links:
@@ -66,7 +66,7 @@ catalogs:
                     plan_id: local_stack_premium_monthly
 
               - currency: usd
-                unit_amount: 19990
+                unit_amount: 199_900_000
                 interval: year
                 interval_count: 1
                 providers: [stripe, solana]
@@ -91,7 +91,7 @@ catalogs:
             providers: []
             prices:
               - currency: usd
-                unit_amount: 1499
+                unit_amount: 14_990_000
                 interval: month
                 interval_count: 1
                 legacy_import: true

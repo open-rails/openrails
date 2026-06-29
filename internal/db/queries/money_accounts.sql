@@ -6,9 +6,10 @@
 -- Distinct (payer, currency) pairs to finalize invoices for (#472). The #512
 -- ledger transfers are the durable source of every payer with money activity,
 -- in every currency (the single-entry money_transactions table is gone).
-SELECT DISTINCT customer_id::uuid AS customer_id, currency
+SELECT customer_id::uuid AS customer_id, currency, MIN(created_at)::timestamptz AS period_anchor
 FROM openrails.ledger_transfers
 WHERE merchant_id = $1 AND customer_id IS NOT NULL
+GROUP BY customer_id, currency
 ORDER BY customer_id, currency;
 
 -- name: GetMoneyAccountSettings :one

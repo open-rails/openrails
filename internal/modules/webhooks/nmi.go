@@ -176,9 +176,13 @@ func explicitTransactionSubscriptionID(body *NMITransactionEventBody) string {
 	return ""
 }
 
-func nmiAmountMatchesExpected(amountCents, expectedAmountCents int64) bool {
-	if expectedAmountCents <= 0 {
+func nmiAmountMatchesExpected(amountCents, expectedAmountMicros int64) bool {
+	if expectedAmountMicros <= 0 {
 		return true
+	}
+	expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+	if err != nil {
+		return false
 	}
 	tolerance := int64(float64(expectedAmountCents) * 0.02)
 	return amountCents >= expectedAmountCents-tolerance && amountCents <= expectedAmountCents+tolerance
@@ -842,8 +846,9 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}, nil))
 	}
 
-	// Calculate amount in cents for Payment record
+	// Provider payloads are cents; payment rows are micros.
 	amountCents := parsedAmountCents
+	amountMicros := moneyutil.CentsToMicros(parsedAmountCents)
 
 	fallbackCurrency := ""
 	if subscription.Price != nil {
@@ -899,7 +904,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			RailSubscriptionID: &subscription.RailSubscriptionID,
 			UserEmail:          subscription.UserEmail,
 			TransactionID:      txnID,
-			Amount:             amountCents,
+			Amount:             amountMicros,
 			AmountProvided:     true,
 			Currency:           currencyValue,
 		})
@@ -950,7 +955,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			Rail:               models.Rail(provider),
 			RailSubscriptionID: nmiSubID,
 			TransactionID:      txnID,
-			Amount:             amountCents,
+			Amount:             amountMicros,
 			AmountProvided:     true,
 			Currency:           currencyValue,
 		}); err != nil {
@@ -1178,13 +1183,13 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			parsedAmountCents, amountErr := transactionAmountCents(body)
 			currency := transactionCurrency(body)
 
-			var amountCents int64
+			var amountMicros int64
 			if amountErr != nil {
 				if subscription.Price != nil && subscription.Price.Amount > 0 {
-					amountCents = subscription.Price.Amount
+					amountMicros = subscription.Price.Amount
 				}
 			} else {
-				amountCents = parsedAmountCents
+				amountMicros = moneyutil.CentsToMicros(parsedAmountCents)
 			}
 
 			fallbackCurrency := ""
@@ -1193,7 +1198,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			}
 			currencyValue := normalizeNMICurrencyValue(currency, fallbackCurrency)
 
-			listAmount := amountCents
+			listAmount := amountMicros
 			if subscription.Price != nil && subscription.Price.Amount > 0 {
 				listAmount = subscription.Price.Amount
 			}
@@ -1206,7 +1211,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 				SubscriptionID: &subscription.ID,
 				Rail:           models.Rail(s.Rail),
 				TransactionID:  txnID,
-				Amount:         amountCents,
+				Amount:         amountMicros,
 				ListAmount:     listAmount,
 				Currency:       currencyValue,
 				PurchasedAt:    now,
@@ -1751,7 +1756,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					if amountCents > match.AmountCents {
 						amountCents = match.AmountCents
 					}
-					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, amountCents); refundErr != nil {
+					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, moneyutil.CentsToMicros(amountCents)); refundErr != nil {
 						reconcileErrors++
 						cbMetadata["chargeback_payment_status"] = "failed"
 						cbMetadata["chargeback_payment_error"] = refundErr.Error()
@@ -2002,7 +2007,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// link the refund to the ledger entry that funded entitlement.
 	shouldTerminate := false
 	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 && originalTxnID != "" {
-		refundPercentage := (refundAmountCents * 100) / subscription.Price.Amount
+		refundPercentage := (moneyutil.CentsToMicros(refundAmountCents) * 100) / subscription.Price.Amount
 		if refundPercentage >= 80 {
 			shouldTerminate = true
 		}
@@ -2051,7 +2056,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
 				return fmt.Errorf("unable to resolve original payment %q for NMI refund transaction %q", originalTxnID, txnID)
 			} else {
-				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmountCents); refundErr != nil {
+				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, moneyutil.CentsToMicros(refundAmountCents)); refundErr != nil {
 					log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
 						"refund_transaction_id":   txnID,
 						"original_payment_id":     originalPayment.ID,

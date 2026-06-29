@@ -532,7 +532,7 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 }
 
 const listInvoiceThresholdCandidates = `-- name: ListInvoiceThresholdCandidates :many
-SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor
 FROM openrails.money_settings s
 JOIN openrails.invoice_items ii
   ON ii.merchant_id = s.merchant_id
@@ -553,23 +553,25 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
       AND i.currency = s.currency
       AND i.status IN ('open', 'past_due')
       AND i.amount_due > 0
-) >= s.credit_limit_amount
+) >= CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END
 ORDER BY period_from ASC
 `
 
 type ListInvoiceThresholdCandidatesParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
+	MerchantID   uuid.UUID
+	Cutoff       time.Time
+	MinThreshold int64
 }
 
 type ListInvoiceThresholdCandidatesRow struct {
-	CustomerID uuid.UUID
-	Currency   string
-	PeriodFrom time.Time
+	CustomerID   uuid.UUID
+	Currency     string
+	PeriodFrom   time.Time
+	PeriodAnchor time.Time
 }
 
 func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListInvoiceThresholdCandidatesParams) ([]ListInvoiceThresholdCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff)
+	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff, arg.MinThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +579,7 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 	var items []ListInvoiceThresholdCandidatesRow
 	for rows.Next() {
 		var i ListInvoiceThresholdCandidatesRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodFrom); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodFrom, &i.PeriodAnchor); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

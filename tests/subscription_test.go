@@ -66,8 +66,8 @@ func TestGetProductsEndpoint(t *testing.T) {
 		assert.NotEmpty(t, premiumProduct.Slug)
 		assert.True(t, premiumProduct.Active)
 		require.GreaterOrEqual(t, len(premiumProduct.Prices), 2, "Should have monthly and yearly USD prices")
-		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 999, "usd", "month")
-		require.NotNil(t, monthlyPrice, "Should find Premium 999 cents/month USD price")
+		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "usd", "month")
+		require.NotNil(t, monthlyPrice, "Should find Premium 9990000 micros/month USD price")
 		assert.Equal(t, "price", monthlyPrice.Object)
 	})
 
@@ -93,8 +93,8 @@ func TestGetProductsEndpoint(t *testing.T) {
 		}
 
 		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
-		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 7999, "usd", "year")
-		require.NotNil(t, yearlyPrice, "Should find Premium 7999 cents/year USD price")
+		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 79_990_000, "usd", "year")
+		require.NotNil(t, yearlyPrice, "Should find Premium 79990000 micros/year USD price")
 		assert.Equal(t, 1, yearlyPrice.Recurring.IntervalCount)
 	})
 }
@@ -178,7 +178,7 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		assert.Equal(t, string(models.StatusActive), subscriptions[0]["status"])
 		price, ok := subscriptions[0]["price"].(map[string]any)
 		require.True(t, ok, "Should include price details")
-		assert.Equal(t, float64(999), price["unit_amount"], "unit_amount should be 999 cents")
+		assert.Equal(t, float64(9_990_000), price["unit_amount"], "unit_amount should be 9990000 micros")
 		assert.NotContains(t, price, "amount", "public subscription price should not expose amount")
 	})
 
@@ -314,7 +314,7 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 		for _, p := range resp.Data {
 			paymentIDs[p["id"].(string)] = true
 			// JSON unmarshals numbers as float64, but we compare against int64 value
-			assert.Equal(t, float64(999), p["amount"], "Amount should be 999 cents")
+			assert.Equal(t, float64(9_990_000), p["amount"], "Amount should be 9990000 micros")
 			assert.Equal(t, "usd", p["currency"])
 		}
 		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")

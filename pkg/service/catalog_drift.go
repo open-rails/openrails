@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -249,8 +250,9 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 			DetectedAt:            now,
 		})
 	}
-	if local.Amount != sp.UnitAmount {
-		emit("unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(sp.UnitAmount, 10))
+	remoteUnitAmountMicros := moneyutil.CentsToMicros(sp.UnitAmount)
+	if local.Amount != remoteUnitAmountMicros {
+		emit("unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteUnitAmountMicros, 10))
 	}
 	if !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
 		emit("currency", local.Currency, sp.Currency)
@@ -268,7 +270,8 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 // nmiPlan is the parsed shape of one NMI recurring plan from the Query API
 // (recurring_plans report). NMI's plan model is flat — there is no separate
 // product object — so the drift surface is just name + amount. Amount is parsed
-// from NMI's dollar string into integer cents to match OpenRails storage.
+// from NMI's dollar string into integer cents, then converted to local micros
+// when compared to OpenRails prices.
 type nmiPlan struct {
 	PlanID      string
 	PlanName    string
@@ -369,8 +372,9 @@ func computeNMICatalogDrift(
 		if local == nil {
 			continue
 		}
-		if local.Amount != plan.AmountCents {
-			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(plan.AmountCents, 10), now))
+		remoteAmountMicros := moneyutil.CentsToMicros(plan.AmountCents)
+		if local.Amount != remoteAmountMicros {
+			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteAmountMicros, 10), now))
 		}
 	}
 

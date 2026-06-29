@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // mobiusAdapter implements providerAdapter for the Mobius (NMI-backed)
@@ -80,8 +81,8 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
 		}
 		if detail.Found {
-			if in.UnitAmount > 0 && detail.AmountCents != in.UnitAmount {
-				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d cents)", planID, detail.AmountCents, in.UnitAmount)
+			if in.UnitAmount > 0 && moneyutil.CentsToMicros(detail.AmountCents) != in.UnitAmount {
+				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d micros)", planID, detail.AmountCents, in.UnitAmount)
 			}
 			// day_frequency is only reported for day-based plans; validate it only
 			// when NMI returns one (month-based plans report 0 -> unverifiable here).
@@ -115,6 +116,10 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 	if in.UnitAmount <= 0 {
 		return fmt.Errorf("a positive unit_amount is required")
 	}
+	amountCents, err := moneyutil.MicrosToCentsExact(in.UnitAmount)
+	if err != nil {
+		return err
+	}
 	planName := ""
 	if in.Product != nil {
 		planName = strings.TrimSpace(in.Product.DisplayName)
@@ -123,7 +128,7 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 		planName = planID
 	}
 	// plan_payments=0 means bill forever; OpenRails models open-ended subscriptions.
-	return client.AddRecurringPlan(planID, planName, in.UnitAmount, *in.BillingCycleDays, 0)
+	return client.AddRecurringPlan(planID, planName, amountCents, *in.BillingCycleDays, 0)
 }
 
 // mobiusDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
@@ -211,11 +216,12 @@ func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *
 	}
 	drift := []DriftField{}
 	if local != nil {
-		if local.UnitAmount != remoteAmountCents {
+		remoteAmountMicros := moneyutil.CentsToMicros(remoteAmountCents)
+		if local.UnitAmount != remoteAmountMicros {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",
 				OpenRailsValue: strconv.FormatInt(local.UnitAmount, 10),
-				RemoteValue:    strconv.FormatInt(remoteAmountCents, 10),
+				RemoteValue:    strconv.FormatInt(remoteAmountMicros, 10),
 			})
 		}
 	}

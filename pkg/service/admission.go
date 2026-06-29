@@ -360,6 +360,9 @@ func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 // one-row configuration payload.
 type MerchantConfiguration struct {
 	Profile                            *models.MerchantProfileConfiguration
+	InvoiceCollectionThreshold         *int64
+	InvoiceMonthlyFloor                *int64
+	InvoiceBillingBoundary             string
 	DelegatedInvokerWastedSpendWindows []abuse.WastedWindow
 }
 
@@ -374,6 +377,9 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 	}
 	out := MerchantConfiguration{
 		Profile:                            &cfg.Profile,
+		InvoiceCollectionThreshold:         cfg.InvoiceCollectionThreshold,
+		InvoiceMonthlyFloor:                cfg.InvoiceMonthlyFloor,
+		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -404,6 +410,24 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	}
 	if in.Profile != nil {
 		cfg.Profile = *in.Profile
+	}
+	if in.InvoiceCollectionThreshold != nil {
+		if *in.InvoiceCollectionThreshold < 0 {
+			return fmt.Errorf("collection_threshold must be >= 0")
+		}
+		cfg.InvoiceCollectionThreshold = in.InvoiceCollectionThreshold
+	}
+	if in.InvoiceMonthlyFloor != nil {
+		if *in.InvoiceMonthlyFloor < 0 {
+			return fmt.Errorf("monthly_floor must be >= 0")
+		}
+		cfg.InvoiceMonthlyFloor = in.InvoiceMonthlyFloor
+	}
+	if in.InvoiceBillingBoundary != "" {
+		if money.NormalizeInvoiceBoundary(in.InvoiceBillingBoundary) == "" {
+			return fmt.Errorf("invalid billing_period_boundary %q", in.InvoiceBillingBoundary)
+		}
+		cfg.InvoiceBillingBoundary = in.InvoiceBillingBoundary
 	}
 	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {

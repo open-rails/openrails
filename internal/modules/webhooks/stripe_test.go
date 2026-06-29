@@ -179,7 +179,7 @@ func TestStripeInvoicePaymentPaidPreviewShape(t *testing.T) {
 }
 
 func TestValidateStripeInvoicePrice(t *testing.T) {
-	price := &models.Price{Amount: 2399, Currency: "USD"}
+	price := &models.Price{Amount: 23_990_000, Currency: "USD"}
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "usd"}, price); err != nil {
 		t.Fatalf("expected valid invoice: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestValidateStripeInvoicePrice(t *testing.T) {
 	// PRORATED amount (new_full - old_unused) that never equals the new tier's
 	// list price. They must be accepted as long as currency matches and the
 	// settled amount is positive (Stripe is the source of truth for the amount).
-	gm := &models.Price{Amount: 11900, Currency: "USD"} // Grandmaster list $119.00
+	gm := &models.Price{Amount: 119_000_000, Currency: "USD"} // Grandmaster list $119.00
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 6001, Currency: "usd", BillingReason: "subscription_update", Charge: "ch_up"}, gm); err != nil {
 		t.Fatalf("expected prorated upgrade invoice (6001 != 11900) to be accepted: %v", err)
 	}

@@ -197,7 +197,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               priceID,
 		ProductID:        productID,
-		Amount:           2399,
+		Amount:           23_990_000,
 		Currency:         "USD",
 		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingCycleDays,

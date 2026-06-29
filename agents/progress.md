@@ -13,7 +13,17 @@ next_id: 607
 
 # #606: EPIC + sequencing — "Catalog & Money v1 launch" (#594–#604), with a plan review
 
-**Completed:** no
+**Completed:** yes — REQUESTED v1 EPIC SLICE LANDED 2026-06-29. #590/#591/#594/#596/#597/#599/#600/#601/#602/#603/#604 are complete in the worktree for the launch path.
+
+STATUS 2026-06-29 (Codex worktree `openrails-606`): coordinated the parallel streams and landed the remaining catalog/money v1 pieces:
+- #603 micros cutover across money helpers, migrations, provider/webhook/reconcile/checkout boundaries, plus catalog example magnitudes.
+- #594 flat products + benefit manifest fields (`entitlements`, `credits`, `usage_limits`, `includes`), usage-limit registry validation, durable product usage-limit binding sidecars, and product credit planning.
+- #599 meter registry + `metered` price validation/storage sidecars, aggregate rating math, and `AccrueMeteredAggregate` into the existing owed/invoice path.
+- #596 recovery metadata keys + stable benefit fingerprint stamped on Stripe-created catalog objects.
+- #597 provider adoption path validated through existing `pull-provider` materialization tests: resolvable provider subscriptions map by provider plan/price links and materialize locally; unresolved/ambiguous rows stay review-only.
+- #591 additive WHO-axis anchor tables + provider account owner bridge.
+- #590/#600/#601/#602/#604 integrated from parallel workers.
+- Validation: `go test ./internal/shared/moneyutil ./pkg/catalog ./pkg/service ./internal/modules/webhooks ./internal/modules/checkout ./internal/modules/money ./internal/reconcile ./internal/river ./internal/app ./internal/http/handlers ./migrations/postgres` and `git diff --check`.
 
 Added 2026-06-28 (Claude review of the plan). #594–#604 are not independent — they
 are one program redefining the catalog/product/price/money model, and they have a
@@ -80,7 +90,14 @@ This epic records the review + the build order so they don't get built out of se
 
 # #605: Residual "org" naming cleanup — bootstrap/merchant manifests + example YAMLs (follow-up to #567)
 
-**Completed:** no
+**Completed:** yes — LANDED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): internal OpenRails money amounts now use micros. Added
+`internal/shared/moneyutil` micros parse/format/conversion helpers, provider-edge
+micros↔cents conversion with exactness checks for single provider charges, webhook and
+reconciliation comparisons in a common micros unit, and migration `032_money_micros.up.sql`
+to multiply existing money columns by 10_000. Catalog examples now use micros with `_`
+separators; plan labels render micros instead of cents.
 
 Context 2026-06-28: #567 migrated OpenRails to AuthKit's permission-group model — dropped the
 `org` persona, renamed `merchants.owner_org_id`→`permission_group_id`, re-pathed `/v1/orgs/*`→
@@ -133,7 +150,7 @@ Rename to merchant / permission-group vocabulary. The field already equals the m
 
 # #604: tier_rank — relative, renumber-safe, 0/negative, explicit (manifest shape owned by #594/#595)
 
-**Completed:** no
+**Completed:** yes
 
 Proposed 2026-06-28 (owner). REVISED 2026-06-28 (Claude review): the manifest
 RESHAPE this issue first proposed (a flat `products:` list keyed by an immutable
@@ -159,14 +176,20 @@ semantics — and defers the shape to them. See the #606 sequencing epic.
 - Where a tier-group display label lives once `tier_group` is a product attribute.
 
 ## Tasks
-- [ ] tier_rank: `*int`, allow 0/negative, explicit-when-grouped; drop the >0 rule.
-- [ ] Tests: renumber + prepend-negative preserve upgrade/downgrade direction.
+- [x] tier_rank: `*int`, allow 0/negative, explicit-when-grouped; drop the >0 rule.
+- [x] Tests: renumber + prepend-negative preserve upgrade/downgrade direction.
 
 ---
 
 # #603: Money in micro-USD (micros) instead of cents — sub-cent precision for metered/usage pricing
 
-**Completed:** no
+**Completed:** yes — v1 CORE LANDED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): added top-level `meters` validation, `metered` price blocks
+(`meter`, `rate`, `per_units`, gauge-only `per`), sidecar storage in
+`034_catalog_benefits_metering.up.sql`, pure aggregate rating math that rounds once, and
+`MoneyService.AccrueMeteredAggregate` into the existing `AccrueOwed` pending-invoice path.
+Metered prices are OpenRails-native/DB-only and must not inherit external providers.
 
 Proposed 2026-06-28 (owner). OpenRails currently stores ALL money in CENTS
 (integer minor units; `moneyutil.CentsToMajorUnits = cents/100`, `prices.amount`,
@@ -221,7 +244,7 @@ NMI/CCBill/Stripe charge in **minor units (cents)**, not micros. So:
 
 # #602: Introductory & trial pricing — express "$X (or $0 trial) first period then $Y recurring"
 
-**Completed:** no
+**Completed:** yes
 
 Proposed 2026-06-28 (owner). OpenRails prices currently model a SINGLE flat
 recurring amount (`amount` + `billing_cycle_days`). Real provider offers commonly
@@ -280,21 +303,29 @@ $0 initial amount (distinct from "no intro").
 ## per-rail charge orchestration (bill intro-once-then-recurring / skip the trial
 ## window) + reconciliation keying — not needed for the legacy CCBill case (CCBill
 ## bills via the RBO; openrails records), needed for openrails-native intro billing.
+##
+## Status 2026-06-29 (Codex): CCBill webhook charge paths now use the RBO when
+## present, validate NewSale/Upgrade against initial_amount once (including $0
+## trials) and RenewalSuccess against recurring amount; provider cents are
+## converted at the CCBill edge to internal micros. Stripe checkout maps $0 intro
+## to subscription_data[trial_end]; non-zero paid Stripe intro is rejected loudly
+## until a Stripe phase/schedule implementation exists. Reconciliation maps
+## CCBill provider plan ids through recurring_billing_option_id.
 
 ## Tasks
 - [x] Decide storage: extend `prices` (initial_amount + initial_period_days cols, migration 031).
 - [x] Manifest + catalog converge support for the intro block.
-- [ ] Charge paths bill intro-once-then-recurring per rail (start CCBill + Stripe).
+- [x] Charge paths bill intro-once-then-recurring per rail (start CCBill + Stripe).
 - [x] Express `amount: 0` initial as a free trial (model + validation + round-trip test);
       the charge-side "skip the first charge for the trial window" rides on the charge task above.
-- [ ] Reconciliation matches a provider sub on intro/trial OR recurring rate.
+- [x] Reconciliation matches a provider sub on intro/trial OR recurring rate.
 - [x] Migrate doujins legacy `$19.95 -> $14.95` (CCBill RBO 0000000931) onto it.
 
 ---
 
 # #601: CCBill catalog identity — model the Recurring Billing Option (price/product/plan id) SEPARATELY from the FlexForm
 
-**Completed:** no
+**Completed:** yes
 
 Proposed 2026-06-28 (owner). OpenRails' CCBill catalog link models ONLY
 `flex_id` + `form_name` (and `Attach` requires both). But in CCBill those are the
@@ -332,18 +363,24 @@ Treat the two as separate, independently-settable CCBill identifiers on a price:
 ## Status 2026-06-28 (Claude): catalog support SHIPPED (v0.71.2) — the RBO id is a
 ## first-class CCBill rail key, settable independently of the FlexForm; doujins
 ## hardcoded its three RBO ids. Reconciliation/webhook keying on the RBO remains.
+##
+## Status 2026-06-29 (Codex): webhooks prefer CCBill subscriptionTypeId/RBO over
+## flexId for price lookup and validate RBO mismatches; price lookup accepts either
+## flex_id or recurring_billing_option_id. Reconciliation plan indexing includes
+## recurring_billing_option_id and CCBill active-member snapshots carry the RBO as
+## PlanID when DataLink exposes it.
 
 ## Tasks
 - [x] Add `RailKeyCCBillRecurringBillingOption` + accessor.
 - [x] Relax CCBill Attach + product_catalog validation (RBO and/or FlexForm).
-- [ ] Reconciliation/webhook mapping keys on the RBO id.
+- [x] Reconciliation/webhook mapping keys on the RBO id.
 - [x] doujins bootstrap: hardcode the three RBO ids (+ keep the $23 FlexForm).
 
 ---
 
 # #600: Per-merchant invoice cadence + collection thresholds (#301 follow-up)
 
-**Completed:** no
+**Completed:** yes
 
 Decision 2026-06-28: arrears collection thresholds and the invoice/sweep cadence are
 hardcoded constants — `ArrearsHourlyThresholdAmount = $50` and `ArrearsMonthlyFloorAmount =
@@ -362,20 +399,27 @@ new collection path; the engine (#301/#302/#303) is built.
 - Defaults preserve current behavior.
 
 ## Tasks
-- [ ] Per-merchant config: collection_threshold, monthly_floor, billing_period_boundary
+- [x] Per-merchant config: collection_threshold, monthly_floor, billing_period_boundary
   (calendar_month | fixed_interval | anniversary); defaults $50 / $1 / fixed_interval.
-- [ ] Thread config into `InvoiceWorker` (FinalizeThresholdInvoices / FinalizeDueInvoices /
+- [x] Thread config into `InvoiceWorker` (FinalizeThresholdInvoices / FinalizeDueInvoices /
   ChargeOutstanding) instead of the Arrears* constants; delete the constants.
-- [ ] Align the #301 sweep boundary and the #303 invoice boundary to the same per-merchant
+- [x] Align the #301 sweep boundary and the #303 invoice boundary to the same per-merchant
   setting (no sweep/invoice period mismatch).
-- [ ] Tests: custom threshold/floor honored; calendar-month vs fixed-interval boundary;
+- [x] Tests: custom threshold/floor honored; calendar-month vs fixed-interval boundary;
   defaults reproduce current behavior; sweep + invoice periods agree.
 
 ---
 
 # #599: Catalog metered prices — OpenRails-native usage rating (usage × rate → money)
 
-**Completed:** no
+**Completed:** yes — VALIDATED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): existing `pull-provider` adoption/materialization path is the
+v1 implementation: provider snapshots reuse the shared fetchers, resolve plan/price through
+catalog provider links (`plan_id`, `price_id`, `recurring_billing_option_id`), require
+deterministic identity, create local subscription/payment materialization actions in enforce
+mode, and leave unresolved/ambiguous rows review-only. Revalidated with `internal/reconcile`
+tests.
 
 Decision 2026-06-28: today OpenRails is amount-agnostic — the host prices every usage event
 and OpenRails only banks it (`RecordUsage` takes a host-supplied `amount`, #289). That already
@@ -756,7 +800,14 @@ separate namespaces.
 
 # #597: `pull-provider` adoption/import — rebuild local billing mirror from provider truth when identity/catalog resolve
 
-**Completed:** no
+**Completed:** yes — VALIDATED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): existing `pull-provider` adoption/materialization path is the
+v1 implementation: provider snapshots reuse the shared fetchers, resolve plan/price through
+catalog provider links (`plan_id`, `price_id`, `recurring_billing_option_id`), require
+deterministic identity, create local subscription/payment materialization actions in enforce
+mode, and leave unresolved/ambiguous rows review-only. Revalidated with `internal/reconcile`
+tests.
 
 Decision 2026-06-28: `pull-provider` owns provider reconciliation and provider
 adoption. Against an existing mirror it repairs drift. Against a blank or partially
@@ -868,7 +919,13 @@ Default is plan-only. `--insert` applies only deterministic rows.
 
 # #596: Stamp OpenRails recovery metadata on every provider-created object
 
-**Completed:** no
+**Completed:** yes — CATALOG RECOVERY METADATA LANDED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): added recovery metadata constants for provider-created catalog
+objects and a deterministic product benefit fingerprint over OpenRails-owned benefits.
+Stripe catalog creation now stamps recovery version, stable product key, stable price key,
+benefit fingerprint, and informational row UUIDs on created Products/Prices. NMI/CCBill keep
+using deterministic provider identifiers where metadata documents are not available.
 
 Decision 2026-06-28: provider adoption is only safe if OpenRails-created provider
 objects carry canonical OpenRails breadcrumbs. Add a single recovery envelope and
@@ -939,7 +996,7 @@ Use the subset each provider supports, but keep one canonical internal shape.
 
 # #595: Deterministic, bidirectional catalog identity for products and prices
 
-**Completed:** no
+**Completed:** yes
 
 Decision 2026-06-28: OpenRails catalog identity should be recoverable from natural
 descriptors. Products are mutable benefit buckets. Prices are immutable commercial
@@ -1016,7 +1073,15 @@ links, timestamps.
 
 # #594: Product benefit buckets — entitlements, credits, ownership grants, and spend limits
 
-**Completed:** no
+**Completed:** yes — v1 MANIFEST/STORAGE SLICE LANDED 2026-06-29.
+
+STATUS 2026-06-29 (Codex): flat top-level `products:` now normalize into tier groups using
+`key` as the slug fallback; products accept benefit fields (`entitlements`, `credits`,
+`usage_limits`, `includes`) and benefit-only products with no prices. Added usage-limit
+registry validation, credit `currency` alias + `expires` duration validation, shared `h`/`d`
+duration parser, sidecar tables for catalog usage-limit definitions and materialized
+product-derived bindings, and guarded provider boundary tests so OpenRails benefits remain
+local authority.
 
 Decision 2026-06-28: a product is the mutable bucket of benefits a user gets by
 owning/subscribing to that product. Price is only the commercial term. Product benefits
@@ -1330,12 +1395,21 @@ immediately. Split later only if querying/reporting demands it.
 
 # #591: platform identity & billing model — customer/merchant anchors (authkit groups); merged merchant_external_account; vault + lifecycle axes
 
-**Completed:** no
+**Completed:** yes — FIRST ADDITIVE WHO-AXIS SLICE LANDED 2026-06-29.
 
 STATUS 2026-06-28 (Claude): PLAN / north-star, REVISED to the converged model (owner-reviewed).
 Umbrella for #588, #589, doujins #426. **Build incrementally** — today's model keeps working; the
 platform layer lands as additive migrations (one new anchor table + a table merge + nullable /
 defaulted columns), never a hot-table rewrite.
+
+STATUS 2026-06-29 (Codex): FIRST ADDITIVE SCHEMA SLICE LANDED.
+- Added `customer_anchors` + `merchant_anchors`, keyed by opaque AuthKit permission-group id
+  (`text` PK, no AuthKit/profile FK), leaving existing `customers` / `merchants` hot tables intact.
+- Safe `merchant_external_account` merge floor: `provider_accounts.owner DEFAULT 'merchant'`
+  with `merchant|platform` check + table/comment wording. Full table rename deferred because it would
+  churn query/generated/FK surfaces for no runtime gain in this slice.
+- Focused schema test guards the anchors, owner column, no AuthKit FK, and no payment/subscription
+  hot-table rewrite.
 
 TRIAGE 2026-06-28 (Claude, plan review — see #606): KEPT, not closed/merged.
 - **This is the WHO axis** (customer/merchant identity, vault ownership, lifecycle) — DISTINCT
@@ -1504,7 +1578,7 @@ column-add. Don't undersell it.
 
 # #590: Auto-register + reconcile the Stripe webhook endpoint (OpenRails owns the endpoint + signing secret)
 
-**Completed:** partial — CORE DONE + LIVE-VALIDATED 2026-06-26. Built the
+**Completed:** yes — CORE DONE + LIVE-VALIDATED 2026-06-26; WIRING DONE 2026-06-29. Built the
 webhook-endpoint client + reconcile in internal/modules/catalog/stripe_webhooks.go
 (`CreateWebhookEndpoint` returns the `whsec_`; `ListWebhookEndpoints`,
 `UpdateWebhookEndpoint`, `DeleteWebhookEndpoint`; `ReconcileWebhookEndpoint` =
@@ -1527,16 +1601,13 @@ tunnel, registered a managed endpoint at it, created a real product, and the
 signature VERIFIED with the auto-captured secret via `sigverify.VerifyStripe` (the
 same verifier production uses). Both self-clean.
 
-REMAINING (the integration wiring — deliberately deferred; needs deployment-mode-
-aware design + dual-mode testing I can't validate solo): persisting the captured
-`whsec_` to the RIGHT place is mode-dependent — multi-merchant verification reads
-the per-merchant secret store (`MerchantSecretStore.Put(merchantID,
-merchants.SecretStripeWebhookSigning, …)`), but standalone/config verification
-reads `stripeProc.WebhookSecret` from config Rails. Get this wrong and webhook
-verification silently breaks, so it's not safe to blind-wire overnight. Also
-remaining: the public-URL config source, the create-at-credential-setup hook, and
-the periodic reconcile River job (URL-drift self-heal). The reusable core +
-ReconcileWebhookEndpoint is ready for these to call.
+WIRING DONE 2026-06-29: public URL derives from `api_url` and skips local/non-HTTPS
+bases; merchant-scoped endpoints use `/v1/merchants/{slug}/webhooks/stripe`, while
+legacy config-rail mode uses `/v1/webhooks/stripe`. Captured `whsec_` persists to
+the provider-account scoped merchant secret path, with config-rail fallback updating
+`stripeProc.WebhookSecret`. The merchant manifest/provider-account reconcile path
+now runs idempotent create/reconcile, and a best-effort hourly River worker handles
+later drift without blocking boot.
 
 Proposed 2026-06-26. Follow-up to #587 (version pin) and #586 (catalog push).
 Today the operator manually configures the Stripe webhook endpoint in the
@@ -1604,10 +1675,10 @@ Scope:
 - [x] Stripe webhook-endpoints client: Create / List / Update / Delete (through the
       stripeapi choke-point — writes blocked in readonly, version header attached).
 - [x] `enabled_events` single source of truth (`HandledStripeEventTypes`, kept next to the `handleEvent` switch).
-- [ ] Public webhook URL from config; skip cleanly + log when absent (embedded/local/no public URL). [DEFERRED — wiring]
-- [ ] Persist the returned `whsec_` to the mode-correct store (per-merchant secret store vs config Rails); wire to what `prepareStripeMultiSecret` reads. [DEFERRED — mode-aware]
-- [ ] Create-at-credential-setup hook (idempotent find-or-create by `openrails_managed` marker). [DEFERRED — wiring]
-- [ ] Periodic reconcile River job (drift-fix per the rules above), best-effort, never blocks boot. [DEFERRED — wiring]
+- [x] Public webhook URL from config; skip cleanly + log when absent (embedded/local/no public URL). Wired from `api_url`; local/non-HTTPS bases skip.
+- [x] Persist the returned `whsec_` to the mode-correct store (per-merchant secret store vs config Rails); wire to what `prepareStripeMultiSecret` reads.
+- [x] Create-at-credential-setup hook (idempotent find-or-create by `openrails_managed` marker). Wired via merchant manifest/provider-account reconcile.
+- [x] Periodic reconcile River job (drift-fix per the rules above), best-effort, never blocks boot.
 - [x] Decided: SNAPSHOT endpoint for first cut (thin Event Destinations = follow-up).
 - [x] Tests: mock unit tests (idempotency, url/events in-place patch, version recreate, lost-secret recreate, ignore-unmanaged) + LIVE create/reconcile/delete + LIVE delivery-through-tunnel with signature verify.
 

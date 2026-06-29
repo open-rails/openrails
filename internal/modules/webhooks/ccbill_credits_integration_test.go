@@ -75,7 +75,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:               priceID,
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
-		Amount:           999,
+		Amount:           9_990_000,
 		Currency:         "usd",
 		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,

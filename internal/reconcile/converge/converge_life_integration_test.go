@@ -36,11 +36,11 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "life-prod-"+suffix, "life-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, merchantID)
+		      VALUES ($1, $2, 9990000, 'usd', 30, $3)`, priceID, productID, merchantID)
 		// A checkout session that expired an hour ago but is still 'created'.
 		exec(`INSERT INTO openrails.checkout_sessions
 		        (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id)
-		      VALUES ($1, $2, 'one_off', 'nmi', 'created', 999, 'usd', $3, $4, $5)`,
+		      VALUES ($1, $2, 'one_off', 'nmi', 'created', 9990000, 'usd', $3, $4, $5)`,
 			sessionID, priceID, time.Now().Add(-1*time.Hour), merchantID, customer)
 		return nil
 	}))

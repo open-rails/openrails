@@ -154,6 +154,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.StripeWebhookReconcileWorker{
+		DB:        r.DB,
+		Config:    r.Config,
+		Rails:     r.Rails,
+		Merchants: r.Merchants,
+	}); err != nil {
+		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
+	}
 	// Credit money-in + reconciliation workers (#239/#240/#241/#243/#508). The
 	// auto-top-up and invoice workers share the configured off-session charger;
 	// when it is nil they log-and-skip until rail wiring is attached.
@@ -452,6 +460,16 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			&river.PeriodicJobOpts{RunOnStart: false},
 		))
 	}
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.StripeWebhookReconcileArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
 
 	// Every hour: low-balance alerts (#240) + invoice collection (#241).
 	jobs = append(jobs, river.NewPeriodicJob(
@@ -467,10 +485,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			args := riverjobs.InvoiceArgs{
-				Collect:                   true,
-				CollectionThresholdAmount: riverjobs.ArrearsHourlyThresholdAmount,
-			}
+			args := riverjobs.InvoiceArgs{Collect: true}
 			opts := &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
@@ -479,16 +494,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
-	// Monthly invoice sweep (#301): collect the long tail of small owed balances
-	// (>= $1 floor) the hourly threshold trigger leaves behind. "Whichever comes
-	// first." Idempotent per invoice so it never double-charges what the hourly
-	// job already collected.
+	// Monthly invoice sweep (#301): collect the long tail above the merchant's
+	// floor that the hourly threshold trigger leaves behind.
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(30*24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			args := riverjobs.InvoiceArgs{
-				Collect:                   true,
-				CollectionThresholdAmount: riverjobs.ArrearsMonthlyFloorAmount,
+				Collect:         true,
+				UseMonthlyFloor: true,
 			}
 			opts := &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -499,9 +512,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Daily: finalize the previous calendar month's itemized invoices (#303).
-	// Idempotent per (owner, credit_type, period), so a daily run reliably
-	// finalizes the prior month shortly after rollover and no-ops thereafter.
+	// Daily: finalize the previous merchant-configured itemized invoice period
+	// (#303). Idempotent per (owner, credit_type, period).
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {

@@ -240,15 +240,17 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantI
 
 const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
 
-SELECT DISTINCT customer_id::uuid AS customer_id, currency
+SELECT customer_id::uuid AS customer_id, currency, MIN(created_at)::timestamptz AS period_anchor
 FROM openrails.ledger_transfers
 WHERE merchant_id = $1 AND customer_id IS NOT NULL
+GROUP BY customer_id, currency
 ORDER BY customer_id, currency
 `
 
 type ListMoneyAccountPairsRow struct {
-	CustomerID uuid.UUID
-	Currency   string
+	CustomerID   uuid.UUID
+	Currency     string
+	PeriodAnchor time.Time
 }
 
 // openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
@@ -266,7 +268,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 	var items []ListMoneyAccountPairsRow
 	for rows.Next() {
 		var i ListMoneyAccountPairsRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodAnchor); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

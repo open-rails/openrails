@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -810,7 +811,7 @@ func TestChargeOutstanding_WithScopedCharger_TransientErrorRetriesWithoutSettlem
 	require.Equal(t, 1, settled)
 }
 
-func TestInvoiceWorker_UsesConfiguredScopedCharger(t *testing.T) {
+func TestInvoiceWorker_UsesMerchantInvoiceThresholds(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
@@ -827,16 +828,26 @@ func TestInvoiceWorker_UsesConfiguredScopedCharger(t *testing.T) {
 	require.NoError(t, err)
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
+	collectionThreshold := int64(1_000)
+	monthlyFloor := int64(100)
+	require.NoError(t, merchantconfig.NewStore(dbi).Upsert(ctx, models.MerchantConfiguration{
+		InvoiceCollectionThreshold: &collectionThreshold,
+		InvoiceMonthlyFloor:        &monthlyFloor,
+		InvoiceBillingBoundary:     money.InvoiceBoundaryCalendarMonth,
+	}))
 
 	adapter := &fakeCollectionAdapter{}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailMobius): adapter,
 	})
 	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
-		Args: riverjobs.InvoiceArgs{
-			Collect:                   true,
-			CollectionThresholdAmount: 0,
-		},
+		Args: riverjobs.InvoiceArgs{Collect: true},
+	})
+	require.NoError(t, err)
+	require.Empty(t, adapter.charges, "custom collection threshold skips the smaller invoice")
+
+	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
+		Args: riverjobs.InvoiceArgs{Collect: true, UseMonthlyFloor: true},
 	})
 	require.NoError(t, err)
 	require.Len(t, adapter.charges, 1)

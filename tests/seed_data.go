@@ -91,7 +91,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.1: Monthly USD recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-					Amount:           999, // Amount in cents ($9.99)
+					Amount:           9_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -100,8 +100,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 						},
 						// CCBillPriceID matches flexId from testdata/webhooks/ccbill/newsalesuccess.json
 						string(models.RailCCBill): {
-							models.RailKeyCCBillFormName: CCBillTestFormName,
-							models.RailKeyCCBillFlexID:   CCBillTestFlexID,
+							models.RailKeyCCBillFormName:               CCBillTestFormName,
+							models.RailKeyCCBillFlexID:                 CCBillTestFlexID,
+							models.RailKeyCCBillRecurringBillingOption: "0000007498",
 						},
 						string(models.RailSolana): {
 							"enabled": "true",
@@ -111,7 +112,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.2: Quarterly USD recurring (discounted)
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222223"),
-					Amount:           2499, // Amount in cents ($24.99, ~17% discount)
+					Amount:           24_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(90),
 					Rails: map[string]map[string]string{
@@ -119,8 +120,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 							models.RailKeyPlanID: "plan_quarterly_usd_2499",
 						},
 						string(models.RailCCBill): {
-							models.RailKeyCCBillFormName: "FormQuarterlyUSD",
-							models.RailKeyCCBillFlexID:   "ccbill_quarterly_usd_2499",
+							models.RailKeyCCBillFormName:               "FormQuarterlyUSD",
+							models.RailKeyCCBillFlexID:                 "ccbill_quarterly_usd_2499",
+							models.RailKeyCCBillRecurringBillingOption: "0000007499",
 						},
 						string(models.RailSolana): {
 							"enabled": "true",
@@ -130,7 +132,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.3: Monthly EUR recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222224"),
-					Amount:           899, // Amount in cents (€8.99)
+					Amount:           8_990_000,
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -146,7 +148,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.4: Monthly JPY recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222225"),
-					Amount:           1200, // Amount in yen (no decimals for JPY)
+					Amount:           1_200_000_000,
 					Currency:         "jpy",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -159,7 +161,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.5: Yearly USD recurring (heavily discounted)
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222226"),
-					Amount:           7999, // Amount in cents ($79.99, ~33% discount)
+					Amount:           79_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
 					Rails: map[string]map[string]string{
@@ -194,7 +196,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.1: Monthly USD recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444444"),
-					Amount:           1999, // Amount in cents ($19.99)
+					Amount:           19_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -213,7 +215,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.2: Yearly USD recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444445"),
-					Amount:           14999, // Amount in cents ($149.99)
+					Amount:           149_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
 					Rails: map[string]map[string]string{
@@ -232,7 +234,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.3: Monthly EUR recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444446"),
-					Amount:           1799, // Amount in cents (€17.99)
+					Amount:           17_990_000,
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -263,7 +265,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.1: One-time USD purchase (no billing cycle)
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666666"),
-					Amount:           29999, // Amount in cents ($299.99)
+					Amount:           299_990_000,
 					Currency:         "usd",
 					BillingCycleDays: nil, // One-time purchase, no recurring billing
 					Rails: map[string]map[string]string{
@@ -282,7 +284,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.2: One-time EUR purchase
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666667"),
-					Amount:           26999, // Amount in cents (€269.99)
+					Amount:           269_990_000,
 					Currency:         "eur",
 					BillingCycleDays: nil, // One-time purchase
 					Rails: map[string]map[string]string{
@@ -298,7 +300,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.3: One-time JPY purchase
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666668"),
-					Amount:           39800, // Amount in yen
+					Amount:           39_800_000_000,
 					Currency:         "jpy",
 					BillingCycleDays: nil, // One-time purchase
 					Rails: map[string]map[string]string{
@@ -325,7 +327,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 4.1: Monthly USD - NMI only (no CCBill)
 					ID:               uuid.MustParse("88888888-8888-8888-8888-888888888888"),
-					Amount:           499, // Amount in cents ($4.99)
+					Amount:           4_990_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -445,7 +447,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("aaaa2222-2222-2222-2222-222222222222"),
-					Amount:           1000,
+					Amount:           10_000_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -473,7 +475,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("bbbb2222-2222-2222-2222-222222222222"),
-					Amount:           2000,
+					Amount:           20_000_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -502,7 +504,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("cccc2222-2222-2222-2222-222222222222"),
-					Amount:           3000,
+					Amount:           30_000_000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
 					Rails: map[string]map[string]string{
@@ -747,7 +749,7 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 		SubscriptionID: subscriptionID,
 		Rail:           models.RailMobius,
 		TransactionID:  "txn-" + uuid.New().String()[:8],
-		Amount:         999, // Amount in cents ($9.99)
+		Amount:         9_990_000,
 		Currency:       "usd",
 		PurchasedAt:    now,
 		CreatedAt:      now,
@@ -766,7 +768,7 @@ type PaymentOptions struct {
 	RefundedPaymentID *uuid.UUID
 	Rail              models.Rail
 	TransactionID     string
-	Amount            int64 // Amount in cents
+	Amount            int64
 	Currency          string
 	PurchasedAt       time.Time
 }
@@ -784,7 +786,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 		opts.TransactionID = "txn-" + uuid.New().String()[:8]
 	}
 	if opts.Amount == 0 {
-		opts.Amount = 999 // Default: $9.99 in cents
+		opts.Amount = 9_990_000
 	}
 	if opts.Currency == "" {
 		opts.Currency = "usd"

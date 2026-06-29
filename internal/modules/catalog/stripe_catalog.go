@@ -75,6 +75,13 @@ const (
 	// are NOT used for identity or matching.
 	StripeMetadataOpenRailsProductID = "openrails_product_id"
 	StripeMetadataOpenRailsPriceID   = "openrails_price_id"
+
+	// Recovery envelope keys (#596). Product/price keys are stable catalog
+	// identity; BenefitFingerprint snapshots the OpenRails-only benefits that
+	// providers do not own, so pull-provider can tell what local grant semantics
+	// to materialize after a DB rebuild/import.
+	StripeMetadataOpenRailsRecoveryVersion    = "openrails_recovery_version"
+	StripeMetadataOpenRailsBenefitFingerprint = "openrails_benefit_fingerprint"
 )
 
 // CreateProductParams carries the inputs for creating a Stripe Product owned by OpenRails.

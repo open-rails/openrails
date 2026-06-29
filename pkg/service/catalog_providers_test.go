@@ -147,7 +147,7 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 	priceID := uuid.New()
 	req := CreatePriceRequest{
 		ProductID:  productID,
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 		Currency:   "usd",
 		Providers:  []string{"stripe", "ccbill", "mobius"},
 		ProviderLinks: map[string]map[string]string{
@@ -179,7 +179,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	priceID := uuid.New()
 	req := CreatePriceRequest{
 		ProductID:  productID,
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 		Currency:   "usd",
 		Providers:  []string{"ccbill", "mobius"},
 		ProviderLinks: map[string]map[string]string{
@@ -210,7 +210,7 @@ func TestResolveProviders_AllPending(t *testing.T) {
 	productID := uuid.New()
 	req := CreatePriceRequest{
 		ProductID:  productID,
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 		Currency:   "usd",
 		Providers:  []string{"ccbill", "mobius"},
 	}
@@ -231,7 +231,7 @@ func TestResolveProviders_UnknownProviderDropped(t *testing.T) {
 	productID := uuid.New()
 	req := CreatePriceRequest{
 		ProductID:  productID,
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 		Currency:   "usd",
 		Providers:  []string{"paypal"}, // not in dispatch table
 	}
@@ -251,7 +251,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 	productID := uuid.New()
 	req := CreatePriceRequest{
 		ProductID:  productID,
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 		Currency:   "usd",
 		ProviderLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
@@ -277,7 +277,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	priceID := uuid.New()
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Slug: "premium"}, CreatePriceRequest{
 		Providers:  []string{"stripe", "mobius"},
-		UnitAmount: 2300,
+		UnitAmount: 23_000_000,
 		Currency:   "usd",
 	}, priceID)
 	if err != nil {
@@ -319,8 +319,8 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 
 	a := newMobiusAdapterWithServer(t, server.URL)
 	cycle := 30
-	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-2300-30"}, autoCreateContext{
-		ProductSlug: "premium", UnitAmount: 2300, Currency: "usd", BillingCycleDays: &cycle,
+	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-23000000-30"}, autoCreateContext{
+		ProductSlug: "premium", UnitAmount: 23_000_000, Currency: "usd", BillingCycleDays: &cycle,
 		RemoteWritesDisabled: true,
 	})
 	if !errors.Is(err, errRemoteWritesDisabled) {

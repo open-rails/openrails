@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -427,8 +428,9 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 		if local == nil {
 			continue
 		}
-		if local.Amount != plan.AmountCents {
-			events = append(events, nmiFieldDriftJob(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(plan.AmountCents, 10), now))
+		remoteAmountMicros := moneyutil.CentsToMicros(plan.AmountCents)
+		if local.Amount != remoteAmountMicros {
+			events = append(events, nmiFieldDriftJob(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteAmountMicros, 10), now))
 		}
 	}
 

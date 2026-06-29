@@ -551,11 +551,17 @@ type serviceMerchantConfigWindow struct {
 
 type serviceMerchantConfigurationRequest struct {
 	Profile                            *serviceMerchantProfileConfiguration `json:"profile,omitempty"`
+	InvoiceCollectionThreshold         *int64                               `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor                *int64                               `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary             string                               `json:"billing_period_boundary,omitempty"`
 	DelegatedInvokerWastedSpendWindows []serviceMerchantConfigWindow        `json:"delegated_invoker_wasted_spend_windows"`
 }
 
 type serviceMerchantSettingsRequest struct {
 	Profile                           *serviceMerchantProfileConfiguration  `json:"profile,omitempty"`
+	InvoiceCollectionThreshold        *int64                                `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor               *int64                                `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary            string                                `json:"billing_period_boundary,omitempty"`
 	TierSchedules                     []serviceMerchantTierSchedule         `json:"tier_schedules,omitempty"`
 	TierSpendLimits                   []billingservice.PayerSpendLimitInput `json:"tier_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
@@ -587,6 +593,9 @@ func ServiceGetMerchantConfiguration(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{
 		"found":                                  found,
 		"profile":                                merchantProfileResponse(cfg.Profile),
+		"collection_threshold":                   cfg.InvoiceCollectionThreshold,
+		"monthly_floor":                          cfg.InvoiceMonthlyFloor,
+		"billing_period_boundary":                cfg.InvoiceBillingBoundary,
 		"delegated_invoker_wasted_spend_windows": serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -614,6 +623,9 @@ func ServiceSetMerchantConfiguration(r *httprequest.Request) {
 	}
 	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
 		Profile:                            merchantProfileInput(req.Profile),
+		InvoiceCollectionThreshold:         req.InvoiceCollectionThreshold,
+		InvoiceMonthlyFloor:                req.InvoiceMonthlyFloor,
+		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant configuration failed")
@@ -636,6 +648,9 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 	}
 	r.SuccessJSON(serviceMerchantSettingsRequest{
 		Profile:                           merchantProfileResponsePtr(cfg.Profile),
+		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
+		InvoiceMonthlyFloor:               cfg.InvoiceMonthlyFloor,
+		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -665,6 +680,9 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	}
 	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
 		Profile:                            merchantProfileInput(req.Profile),
+		InvoiceCollectionThreshold:         req.InvoiceCollectionThreshold,
+		InvoiceMonthlyFloor:                req.InvoiceMonthlyFloor,
+		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")

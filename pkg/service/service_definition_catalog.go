@@ -419,8 +419,8 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, fmt.Errorf("product_id required")
 	}
 	req.Currency = strings.TrimSpace(req.Currency)
-	if req.UnitAmount <= 0 {
-		return nil, fmt.Errorf("unit_amount must be positive")
+	if req.UnitAmount < 0 {
+		return nil, fmt.Errorf("unit_amount must be non-negative")
 	}
 	if req.Currency == "" {
 		return nil, fmt.Errorf("currency required")

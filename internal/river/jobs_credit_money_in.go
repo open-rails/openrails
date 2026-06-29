@@ -101,24 +101,12 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 
 const KindInvoice = "openrails.invoice"
 
-// Arrears collection cadence (#241/#301). The HOURLY invoice job collects
-// balances at or above ArrearsHourlyThresholdAmount (collect big balances
-// promptly); the MONTHLY sweep collects everything at or above
-// ArrearsMonthlyFloorAmount (the $1 floor, so we don't burn rail fees on
-// dust). "Whichever comes first." Payments are idempotent per invoice, so the
-// two cadences never double-collect.
-// TODO(#301): make these configurable per-merchant; decide calendar-month vs
-// fixed-interval boundary.
-const (
-	ArrearsHourlyThresholdAmount = 50_000_000 // $50 in USD internal precision
-	ArrearsMonthlyFloorAmount    = 1_000_000  // $1 in USD internal precision
-)
-
 // InvoiceArgs lets one invoice-domain worker serve the recurring invoice
 // lifecycle without splitting each phase into a separate River worker type.
 type InvoiceArgs struct {
 	Collect                   bool  `json:"collect,omitempty"`
 	CollectionThresholdAmount int64 `json:"collection_threshold_amount,omitempty"`
+	UseMonthlyFloor           bool  `json:"use_monthly_floor,omitempty"`
 	FinalizePreviousMonth     bool  `json:"finalize_previous_month,omitempty"`
 }
 
@@ -144,8 +132,15 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 	if w.Clock != nil {
 		now = w.Clock.Now().UTC()
 	}
+	settings, err := w.Money.InvoiceSettings(ctx)
+	if err != nil {
+		return err
+	}
 
-	finalized, err := w.Money.FinalizeThresholdInvoices(ctx, now)
+	finalized, err := w.Money.FinalizeThresholdInvoices(ctx, now, money.InvoiceThresholdOptions{
+		CollectionThresholdAmount: settings.CollectionThresholdAmount,
+		BillingPeriodBoundary:     settings.BillingPeriodBoundary,
+	})
 	if err != nil {
 		return err
 	}
@@ -154,12 +149,7 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 	}
 
 	if job.Args.FinalizePreviousMonth {
-		// Finalize the PREVIOUS calendar month [firstOfPrevMonth, firstOfThisMonth).
-		// Idempotent per (payer, currency, period), so running daily is safe and
-		// guarantees the prior month is finalized shortly after rollover.
-		firstThis := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-		from := firstThis.AddDate(0, -1, 0)
-		n, err := w.Money.FinalizeDueInvoices(ctx, from, firstThis)
+		n, err := w.Money.FinalizeDueInvoicesForBoundary(ctx, settings.BillingPeriodBoundary, now)
 		if err != nil {
 			return err
 		}
@@ -177,7 +167,14 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 			logger.Debug("invoice charger not configured; skipping collection")
 			return nil
 		}
-		n, err := w.Money.ChargeOutstanding(ctx, w.Charger, job.Args.CollectionThresholdAmount)
+		threshold := settings.CollectionThresholdAmount
+		if job.Args.UseMonthlyFloor {
+			threshold = settings.MonthlyFloorAmount
+		}
+		if job.Args.CollectionThresholdAmount > 0 {
+			threshold = job.Args.CollectionThresholdAmount
+		}
+		n, err := w.Money.ChargeOutstanding(ctx, w.Charger, threshold)
 		if err != nil {
 			return err
 		}

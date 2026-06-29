@@ -80,7 +80,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND status IN ('open', 'past_due') AND amount_due > 0;
 
 -- name: ListInvoiceThresholdCandidates :many
-SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor
 FROM openrails.money_settings s
 JOIN openrails.invoice_items ii
   ON ii.merchant_id = s.merchant_id
@@ -101,7 +101,7 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
       AND i.currency = s.currency
       AND i.status IN ('open', 'past_due')
       AND i.amount_due > 0
-) >= s.credit_limit_amount
+) >= CASE WHEN sqlc.arg(min_threshold)::bigint > 0 THEN sqlc.arg(min_threshold)::bigint ELSE s.credit_limit_amount END
 ORDER BY period_from ASC;
 
 -- name: ListChargeableOpenInvoices :many

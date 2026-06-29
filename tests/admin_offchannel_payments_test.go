@@ -35,7 +35,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	body, err := json.Marshal(map[string]any{
 		"price_id":          lifetimePriceID.String(),
 		"transaction_id":    "cash-rcpt-" + uuid.NewString()[:8],
-		"amount":            int64(1500),
+		"amount":            int64(15_000_000),
 		"currency":          "usd",
 		"purchased_at":      fixedNow.Format(time.RFC3339),
 		"discount_reason":   "manual_discount",
@@ -63,8 +63,8 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	require.Equal(t, userID, p.CustomerID.String())
 	require.Equal(t, lifetimePriceID, p.PriceID)
 	require.Equal(t, models.RailManual, p.Rail)
-	require.Equal(t, int64(1500), p.Amount)
-	require.Equal(t, int64(29999), p.ListAmount) // canonical list price from seed data
+	require.Equal(t, int64(15_000_000), p.Amount)
+	require.Equal(t, int64(299_990_000), p.ListAmount) // canonical list price from seed data
 	require.Equal(t, "usd", p.Currency)
 	// Instant equality, not struct equality: the DB round-trip can hand back the
 	// same instant with a different internal time.Time representation.

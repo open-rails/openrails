@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -152,9 +153,15 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, fmt.Errorf("reserve NMI sale attempt: %w", err)
 	}
 
+	amountCents, err := moneyutil.MicrosToCentsExact(price.Amount)
+	if err != nil {
+		_ = s.PurchaseService.PaymentService.MarkFailed(ctx, attempt.ID)
+		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("NMI sale amount must be representable in whole cents: %w", err)
+	}
 	saleResp, err := client.RunSale(nmi.SaleParams{
 		CustomerVaultID:  customerVaultID,
-		Amount:           price.Amount,
+		Amount:           amountCents,
 		Currency:         price.Currency,
 		OrderDescription: fmt.Sprintf("Purchase: %s", product.DisplayName),
 		OrderID:          orderID,

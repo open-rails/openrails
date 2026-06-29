@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // stripeAdapter implements providerAdapter for the Stripe catalog provider.
@@ -86,8 +87,8 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
 	}
-	if in.UnitAmount > 0 && remote.UnitAmount != in.UnitAmount {
-		return nil, fmt.Errorf("stripe price %q unit_amount (%d) does not match catalog price (%d)", priceID, remote.UnitAmount, in.UnitAmount)
+	if in.UnitAmount > 0 && moneyutil.CentsToMicros(remote.UnitAmount) != in.UnitAmount {
+		return nil, fmt.Errorf("stripe price %q unit_amount (%d cents) does not match catalog price (%d micros)", priceID, remote.UnitAmount, in.UnitAmount)
 	}
 	if in.Currency != "" && !strings.EqualFold(strings.TrimSpace(remote.Currency), strings.TrimSpace(in.Currency)) {
 		return nil, fmt.Errorf("stripe price %q currency (%s) does not match catalog price (%s)", priceID, remote.Currency, in.Currency)
@@ -160,6 +161,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 
 	productSlug := strings.TrimSpace(in.ProductSlug)
 	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	benefitFingerprint := productBenefitFingerprint(in.Product)
 
 	// Step 1: discover an existing Stripe Product for this OpenRails product,
 	// matching on the content key (product slug) so it survives DB wipes.
@@ -187,7 +189,9 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 			Description:    desc,
 			IdempotencyKey: "openrails-product-" + productSlug,
 			Metadata: map[string]string{
-				catalog.StripeMetadataOpenRailsProductKey: productSlug,
+				catalog.StripeMetadataOpenRailsProductKey:         productSlug,
+				catalog.StripeMetadataOpenRailsRecoveryVersion:    openRailsRecoveryVersion,
+				catalog.StripeMetadataOpenRailsBenefitFingerprint: benefitFingerprint,
 				// Informational only — not used for matching.
 				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
 			},
@@ -227,16 +231,22 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		}
 	}
 	if stripePriceID == "" {
+		unitAmountCents, err := moneyutil.MicrosToCentsExact(in.UnitAmount)
+		if err != nil {
+			return nil, err
+		}
 		id, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
 			StripeProductID:  stripeProductID,
-			UnitAmount:       in.UnitAmount,
+			UnitAmount:       unitAmountCents,
 			Currency:         in.Currency,
 			BillingCycleDays: in.BillingCycleDays,
 			LookupKey:        in.LookupKey,
 			IdempotencyKey:   "openrails-price-" + priceContentKey,
 			Metadata: map[string]string{
-				catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
-				catalog.StripeMetadataOpenRailsProductKey: productSlug,
+				catalog.StripeMetadataOpenRailsPriceKey:           priceContentKey,
+				catalog.StripeMetadataOpenRailsProductKey:         productSlug,
+				catalog.StripeMetadataOpenRailsRecoveryVersion:    openRailsRecoveryVersion,
+				catalog.StripeMetadataOpenRailsBenefitFingerprint: benefitFingerprint,
 				// Informational only — not used for matching.
 				catalog.StripeMetadataOpenRailsPriceID:   in.PriceID.String(),
 				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
@@ -289,11 +299,12 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 				RemoteValue:    strconv.FormatBool(remote.Active),
 			})
 		}
-		if local.UnitAmount != remote.UnitAmount {
+		remoteUnitAmountMicros := moneyutil.CentsToMicros(remote.UnitAmount)
+		if local.UnitAmount != remoteUnitAmountMicros {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",
 				OpenRailsValue: strconv.FormatInt(local.UnitAmount, 10),
-				RemoteValue:    strconv.FormatInt(remote.UnitAmount, 10),
+				RemoteValue:    strconv.FormatInt(remoteUnitAmountMicros, 10),
 			})
 		}
 		if !strings.EqualFold(local.Currency, remote.Currency) {

@@ -602,11 +602,43 @@ func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Ti
 	return count, nil
 }
 
+func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, boundary string, now time.Time) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	pairs, err := s.db.Gen(ctx).ListMoneyAccountPairs(ctx, tid.UUID())
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, p := range pairs {
+		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
+			continue
+		}
+		from, to, err := PreviousInvoicePeriod(now, p.PeriodAnchor, boundary)
+		if err != nil {
+			return count, err
+		}
+		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
 // FinalizeThresholdInvoices finalizes open receivables for arrears customers
 // whose pending invoice items plus open invoice balances have reached their
 // configured credit line. Collection is intentionally left to ChargeOutstanding
 // so provider calls stay out of the invoice-finalization transaction.
-func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff time.Time) (int, error) {
+func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff time.Time, opts ...InvoiceThresholdOptions) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -618,9 +650,14 @@ func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff tim
 	if err != nil {
 		return 0, err
 	}
+	var opt InvoiceThresholdOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	rows, err := s.db.Gen(ctx).ListInvoiceThresholdCandidates(ctx, gen.ListInvoiceThresholdCandidatesParams{
-		MerchantID: tid.UUID(),
-		Cutoff:     cutoff,
+		MerchantID:   tid.UUID(),
+		Cutoff:       cutoff,
+		MinThreshold: opt.CollectionThresholdAmount,
 	})
 	if err != nil {
 		return 0, err
@@ -628,6 +665,13 @@ func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff tim
 	count := 0
 	for _, r := range rows {
 		from := r.PeriodFrom
+		if opt.BillingPeriodBoundary != "" {
+			start, err := CurrentInvoicePeriodStart(cutoff, r.PeriodAnchor, opt.BillingPeriodBoundary)
+			if err != nil {
+				return count, err
+			}
+			from = start
+		}
 		if !cutoff.After(from) {
 			continue
 		}
