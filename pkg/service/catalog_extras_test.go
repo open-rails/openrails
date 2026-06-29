@@ -29,15 +29,15 @@ import (
 func extrasTestSnapshot() localCatalogSnapshot {
 	productID := uuid.New()
 	priceID := uuid.New()
-	cycle := 30
-	product := &models.Product{ID: productID, Slug: "premium"}
+	cycleHours := 30 * 24
+	product := &models.Product{ID: productID, Key: "premium"}
 	price := &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Amount:             23_000_000,
-		Currency:           "usd",
-		AccessDurationDays: &cycle,
-		AutoRenew:          true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              23_000_000,
+		Currency:            "usd",
+		AccessDurationHours: &cycleHours,
+		AutoRenew:           true,
 		Rails: map[string]map[string]string{
 			"stripe": {
 				models.RailKeyStripePriceID:   "price_local",
@@ -430,13 +430,13 @@ func encodeTestPlanAccount(status uint8) []byte {
 }
 
 func TestComputeSolanaSunsetExtras(t *testing.T) {
-	cycle := 30
+	cycleHours := 30 * 24
 	productID := uuid.New()
-	product := &models.Product{ID: productID, Slug: "premium"}
+	product := &models.Product{ID: productID, Key: "premium"}
 	mkPrice := func(pda string, status models.CatalogStatus) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
-			AccessDurationDays: &cycle, AutoRenew: true, Status: status,
+			AccessDurationHours: &cycleHours, AutoRenew: true, Status: status,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": pda},
 			},
@@ -490,7 +490,7 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
 	rails := config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, SecretKey: key},
+		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 	}
 	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}
 	products, prices, err := fetchStripeCatalog(context.Background(), lister)

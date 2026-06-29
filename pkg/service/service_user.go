@@ -880,7 +880,7 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 	}
 
 	tokens := make([]SolanaToken, 0)
-	for symbol, t := range solanaProc.Tokens {
+	for symbol, t := range solanaProc.Solana.Tokens {
 		symbol = strings.ToUpper(strings.TrimSpace(symbol))
 		if symbol == "" {
 			continue
@@ -945,7 +945,7 @@ func productFromModel(p *catalog.PublicProductResponse) Product {
 	}
 	return Product{
 		ID:               api.FormatProductID(p.ID),
-		Slug:             p.Slug,
+		Key:              p.Key,
 		Name:             p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
@@ -968,7 +968,7 @@ func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
 		out[k] = CreditGrantSpec{
 			Unit:        v.Unit,
 			Amount:      v.Amount,
-			ExpiresDays: v.ExpiresDays,
+			ExpiryHours: v.ExpiryHours,
 			Cadence:     CreditGrantCadence(v.Cadence),
 		}
 	}
@@ -977,9 +977,9 @@ func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
 
 func priceFromModel(p *models.Price) Price {
 	var recurring *RecurringInfo
-	if cd := p.RecurringCycleDays(); cd != nil {
+	if ch := p.RecurringCycleHours(); ch != nil {
 		recurring = &RecurringInfo{
-			Interval: sharedformat.BillingCycleDaysToInterval(*cd),
+			Interval: sharedformat.BillingCycleHoursToInterval(*ch),
 		}
 	}
 

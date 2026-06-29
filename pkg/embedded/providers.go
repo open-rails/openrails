@@ -95,13 +95,13 @@ func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 		v := *in.Solana
 		out.Solana = &v
 	}
-	if in.AllowedCIDRs != nil {
-		out.AllowedCIDRs = append([]string(nil), in.AllowedCIDRs...)
+	if in.CCBill != nil && in.CCBill.AllowedCIDRs != nil {
+		out.CCBill.AllowedCIDRs = append([]string(nil), in.CCBill.AllowedCIDRs...)
 	}
-	if in.Tokens != nil {
-		out.Tokens = make(map[string]config.TokenConfig, len(in.Tokens))
-		for k, v := range in.Tokens {
-			out.Tokens[k] = v
+	if in.Solana != nil && in.Solana.Tokens != nil {
+		out.Solana.Tokens = make(map[string]config.TokenConfig, len(in.Solana.Tokens))
+		for k, v := range in.Solana.Tokens {
+			out.Solana.Tokens[k] = v
 		}
 	}
 	return &out

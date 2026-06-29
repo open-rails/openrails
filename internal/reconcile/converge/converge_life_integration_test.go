@@ -32,7 +32,7 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "life-prod-"+suffix, "life-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)

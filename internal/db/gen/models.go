@@ -486,6 +486,8 @@ type OpenrailsMerchant struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+	// Human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
+	DisplayName *string
 }
 
 // #591 merchant permission-group anchor. The id is the AuthKit merchant permission-group id, stored as opaque text with no FK into AuthKit.
@@ -565,7 +567,8 @@ type OpenrailsMoneySetting struct {
 	AutoTopupEnabled         bool
 	AutoTopupAmountCents     *int64
 	AutoTopupPaymentMethodID *uuid.UUID
-	DefaultCreditExpiryDays  *int32
+	// per-account default credit-grant expiry in HOURS; NULL = no default.
+	DefaultCreditExpiryHours *int32
 	HardStopOnBreach         bool
 	AlertThresholdPct        int32
 	// Current arrears owed amount in the row currency internal precision.
@@ -710,7 +713,7 @@ type OpenrailsProbeVerdict struct {
 // Product definitions that can be purchased or subscribed to
 type OpenrailsProduct struct {
 	ID               uuid.UUID
-	Slug             string
+	Key              string
 	DisplayName      string
 	Description      *string
 	EntitlementsSpec []byte
@@ -732,10 +735,11 @@ type OpenrailsProductEntitlementFeature struct {
 	MerchantID           uuid.UUID
 	ProductID            uuid.UUID
 	EntitlementFeatureID uuid.UUID
-	DurationDays         *int32
-	Metadata             []byte
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// entitlement grant window in HOURS; NULL = indefinite.
+	DurationHours *int32
+	Metadata      []byte
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // #611 catalog bundle includes: parent product grants/owns included catalog products when materialized.

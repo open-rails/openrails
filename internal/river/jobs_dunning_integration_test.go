@@ -58,7 +58,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	subID := uuid.New()
 	userID := uuid.New().String()
 
-	billingDays := 30
+	billingDays := 720
 	billingDays32 := int32(billingDays)
 
 	creditsSpecJSON, err := json.Marshal(models.CreditsSpec{
@@ -68,7 +68,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
@@ -80,27 +80,27 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	price := &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             999,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              999,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:                 priceID,
-		ProductID:          productID,
-		Amount:             999,
-		Currency:           "usd",
-		MerchantID:         dbtest.TestMerchantID.UUID(),
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays32,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              999,
+		Currency:            "usd",
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays32,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 
@@ -247,11 +247,11 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	subID := uuid.New()
 	userID := uuid.New().String()
 
-	billingDays32 := int32(30)
+	billingHours32 := int32(30 * 24)
 	description := "Test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
@@ -262,7 +262,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
-		Status: string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true,
+		Status: string(models.CatalogStatusActive), AccessDurationHours: &billingHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)

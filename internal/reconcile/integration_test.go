@@ -84,7 +84,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		// entitlements_tenant_subject_no_overlap exclusion constraint forbids
 		// overlapping windows of one entitlement for one subject.
 		entName := fmt.Sprintf("premium-%d", i)
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
@@ -354,7 +354,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		// Catalog: product with an entitlements spec + a price whose
 		// provider_links blob carries the NMI plan id.
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, rails, merchant_id)
@@ -725,7 +725,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
+		exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
 		// Two prices for the SAME product (the scheduled downgrade target), so the
 		// subscriptions_price_product_merchant composite FK is satisfied.
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,9990000,'usd',$3),($4,$2,4990000,'usd',$3)`,

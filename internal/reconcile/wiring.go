@@ -54,8 +54,8 @@ func BuildFetchersWithOptions(cfg *config.Config, rails config.RailSet, clients 
 		if err != nil {
 			return nil, err
 		}
-		if sp != nil && sp.SecretKey != "" {
-			fetchers[ProviderStripe] = keyedFetcher{RailFetcher: NewStripeFetcher(sp.SecretKey), key: key}
+		if sp != nil && sp.Stripe != nil && sp.Stripe.SecretKey != "" {
+			fetchers[ProviderStripe] = keyedFetcher{RailFetcher: NewStripeFetcher(sp.Stripe.SecretKey), key: key}
 		}
 	}
 	if clients.SolanaRPC != nil && d != nil {

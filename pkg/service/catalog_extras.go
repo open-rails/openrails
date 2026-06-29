@@ -171,7 +171,7 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 	}
 	var stripeLister stripeProductLister
 	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != "" {
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil && strings.TrimSpace(stripeProc.Stripe.SecretKey) != "" {
 			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
 		}
 	}
@@ -305,7 +305,7 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 	ix := catalog.ExtrasIndex{
 		StripeProductIDs: make(map[string]struct{}, len(snap.stripeProductIDs)),
 		StripePriceIDs:   make(map[string]struct{}, len(snap.stripePriceIDs)),
-		ProductSlugs:     make(map[string]struct{}, len(snap.productBySlug)),
+		ProductKeys:      make(map[string]struct{}, len(snap.productByKey)),
 		PriceContentKeys: make(map[string]struct{}, len(snap.priceByContentKey)),
 	}
 	for id := range snap.stripeProductIDs {
@@ -314,8 +314,8 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 	for id := range snap.stripePriceIDs {
 		ix.StripePriceIDs[id] = struct{}{}
 	}
-	for slug := range snap.productBySlug {
-		ix.ProductSlugs[slug] = struct{}{}
+	for slug := range snap.productByKey {
+		ix.ProductKeys[slug] = struct{}{}
 	}
 	for ck := range snap.priceByContentKey {
 		ix.PriceContentKeys[ck] = struct{}{}
@@ -388,7 +388,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 		}
 		if st.label == "" {
 			if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
-				st.label = openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
+				st.label = openRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 			}
 		}
 	}

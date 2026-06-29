@@ -46,7 +46,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
-		Slug:             "test_product_" + uuid.New().String(),
+		Key:              "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -57,16 +57,16 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           9_990_000,
-		Currency:         "usd",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 
@@ -192,7 +192,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
-		Slug:             "test_product_" + uuid.New().String(),
+		Key:              "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -203,16 +203,16 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           9_990_000,
-		Currency:         "usd",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

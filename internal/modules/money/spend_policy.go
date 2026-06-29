@@ -37,13 +37,13 @@ type SpendDecision struct {
 // default expiry. Used by GetAccountSettings and the enforcement path so an
 // unconfigured account "just works" (prepaid, balance-gated only).
 func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
-	days := 365
+	hours := 365 * 24
 	return &models.MoneyAccount{
-		CustomerID:              payer.UUID(),
-		BillingMode:             BillingModePrepaid,
-		HardStopOnBreach:        true,
-		AlertThresholdPct:       80,
-		DefaultCreditExpiryDays: &days,
+		CustomerID:               payer.UUID(),
+		BillingMode:              BillingModePrepaid,
+		HardStopOnBreach:         true,
+		AlertThresholdPct:        80,
+		DefaultCreditExpiryHours: &hours,
 	}
 }
 
@@ -96,7 +96,7 @@ type AccountSettingsInput struct {
 	AutoTopupEnabled         *bool
 	AutoTopupAmountCents     *int64
 	AutoTopupPaymentMethod   *uuid.UUID
-	DefaultCreditExpiryDays  *int
+	DefaultCreditExpiryHours *int
 	HardStopOnBreach         *bool
 	AlertThresholdPct        *int
 }
@@ -158,8 +158,8 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if in.AutoTopupPaymentMethod != nil {
 		cur.AutoTopupPaymentMethod = in.AutoTopupPaymentMethod
 	}
-	if in.DefaultCreditExpiryDays != nil {
-		cur.DefaultCreditExpiryDays = in.DefaultCreditExpiryDays
+	if in.DefaultCreditExpiryHours != nil {
+		cur.DefaultCreditExpiryHours = in.DefaultCreditExpiryHours
 	}
 	if in.HardStopOnBreach != nil {
 		cur.HardStopOnBreach = *in.HardStopOnBreach
@@ -182,8 +182,8 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	}
 
 	var expiry *int32
-	if cur.DefaultCreditExpiryDays != nil {
-		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryDays)
+	if cur.DefaultCreditExpiryHours != nil {
+		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryHours)
 		expiry = &v
 	}
 	alertPct, _ := safecast.Convert[int32](cur.AlertThresholdPct)
@@ -200,7 +200,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		AutoTopupEnabled:         cur.AutoTopupEnabled,
 		AutoTopupAmountCents:     cur.AutoTopupAmountCents,
 		AutoTopupPaymentMethodID: cur.AutoTopupPaymentMethod,
-		DefaultCreditExpiryDays:  expiry,
+		DefaultCreditExpiryHours: expiry,
 		HardStopOnBreach:         cur.HardStopOnBreach,
 		AlertThresholdPct:        alertPct,
 		CreatedAt:                cur.CreatedAt,

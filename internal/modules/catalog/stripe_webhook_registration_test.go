@@ -59,7 +59,7 @@ func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	rail := &config.RailConfig{Type: config.RailTypeStripe, SecretKey: "sk_test_123"}
+	rail := &config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
 	rails := config.RailSet{"stripe": rail}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
@@ -71,6 +71,6 @@ func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res.Skipped)
 	require.Equal(t, WebhookCreated, res.Result.Action)
-	require.Equal(t, "whsec_fake_0", rail.WebhookSecret)
+	require.Equal(t, "whsec_fake_0", rail.Stripe.WebhookSecret)
 	require.Equal(t, "https://billing.example.com/v1/webhooks/stripe", fake.endpoints[res.Result.EndpointID].URL)
 }

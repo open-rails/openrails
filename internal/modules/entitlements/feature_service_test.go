@@ -64,10 +64,10 @@ func TestAttachFeature_RejectsNonPositiveDuration(t *testing.T) {
 	_, err := svc.AttachFeatureToProduct(context.Background(), AttachFeatureParams{
 		ProductID:            uuid.New(),
 		EntitlementFeatureID: uuid.New(),
-		DurationDays:         &zero,
+		DurationHours:        &zero,
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "duration_days")
+	require.Contains(t, err.Error(), "duration_hours")
 }
 
 func TestGetActiveEntitlements_RequiresUserID(t *testing.T) {

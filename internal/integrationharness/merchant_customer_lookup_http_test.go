@@ -40,7 +40,7 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 
 	productID := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, slug, display_name)
+		INSERT INTO openrails.products (id, merchant_id, key, display_name)
 		VALUES ($1, $2, $3, 'Lookup Test Product')`,
 		productID, dbtest.TestMerchantID.UUID(), "lookup-product-"+productID.String())
 	require.NoError(t, err)

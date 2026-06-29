@@ -8,9 +8,9 @@ import (
 func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 	var cs CreditsSpec
 	raw := []byte(`{
-		"api_credits": {"amount": 1000, "unit": "USD", "expires_days": 30, "cadence": "once"},
-		"gpu_minutes": {"amount": 6000, "unit": "USD", "expires_days": 7, "cadence": "per_renewal"},
-		"eur_promo":   {"amount": 500, "unit": "EUR", "expiry_days": 90}
+		"api_credits": {"amount": 1000, "unit": "USD", "expiry_hours": 30, "cadence": "once"},
+		"gpu_minutes": {"amount": 6000, "unit": "USD", "expiry_hours": 7, "cadence": "per_renewal"},
+		"eur_promo":   {"amount": 500, "unit": "EUR", "expiry_hours": 90}
 	}`)
 	if err := json.Unmarshal(raw, &cs); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -24,11 +24,11 @@ func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 	if cs["gpu_minutes"].Cadence != CreditGrantCadencePerRenewal {
 		t.Fatalf("unexpected gpu_minutes cadence: %s", cs["gpu_minutes"].Cadence)
 	}
-	// new fields: unit + expiry_days parse.
+	// new fields: unit + expiry_hours parse.
 	if got := cs["eur_promo"].UnitCode(); got != "EUR" {
 		t.Fatalf("eur_promo unit = %q, want EUR", got)
 	}
-	if got := cs["eur_promo"].EffectiveExpiryDays(); got != 90 {
+	if got := cs["eur_promo"].EffectiveExpiryHours(); got != 90 {
 		t.Fatalf("eur_promo expiry = %d, want 90", got)
 	}
 	if got := cs["api_credits"].UnitCode(); got != "USD" {
@@ -44,22 +44,17 @@ func TestCreditGrantSpec_UnitAndExpiryDefaults(t *testing.T) {
 	if got := (CreditGrantSpec{Unit: "EUR"}).UnitCode(); got != "EUR" {
 		t.Fatalf("explicit unit = %q, want EUR", got)
 	}
-	// expiry: omitted => 365; explicit 0 => never (0); legacy expires_days honored.
-	if got := (CreditGrantSpec{}).EffectiveExpiryDays(); got != DefaultCreditGrantExpiryDays {
-		t.Fatalf("default expiry = %d, want %d", got, DefaultCreditGrantExpiryDays)
+	// expiry: omitted => default; explicit 0 => never.
+	if got := (CreditGrantSpec{}).EffectiveExpiryHours(); got != DefaultCreditGrantExpiryHours {
+		t.Fatalf("default expiry = %d, want %d", got, DefaultCreditGrantExpiryHours)
 	}
 	zero := 0
-	if got := (CreditGrantSpec{ExpiryDays: &zero}).EffectiveExpiryDays(); got != 0 {
+	if got := (CreditGrantSpec{ExpiryHours: &zero}).EffectiveExpiryHours(); got != 0 {
 		t.Fatalf("explicit 0 expiry = %d, want 0 (never)", got)
 	}
-	legacy := 30
-	if got := (CreditGrantSpec{ExpiresDays: &legacy}).EffectiveExpiryDays(); got != 30 {
-		t.Fatalf("legacy expires_days = %d, want 30", got)
-	}
-	// expiry_days takes precedence over legacy expires_days.
-	newer := 7
-	if got := (CreditGrantSpec{ExpiryDays: &newer, ExpiresDays: &legacy}).EffectiveExpiryDays(); got != 7 {
-		t.Fatalf("precedence expiry = %d, want 7", got)
+	explicit := 7
+	if got := (CreditGrantSpec{ExpiryHours: &explicit}).EffectiveExpiryHours(); got != 7 {
+		t.Fatalf("explicit expiry = %d, want 7", got)
 	}
 }
 

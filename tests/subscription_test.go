@@ -55,7 +55,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 		// Find Premium product and verify the monthly USD price.
 		var premiumProduct *api.ProductObject
 		for i, p := range resp.Data {
-			if p.Slug == "premium" {
+			if p.Key == "premium" {
 				premiumProduct = &resp.Data[i]
 				break
 			}
@@ -63,7 +63,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 
 		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
 		assert.Equal(t, "product", premiumProduct.Object)
-		assert.NotEmpty(t, premiumProduct.Slug)
+		assert.NotEmpty(t, premiumProduct.Key)
 		assert.True(t, premiumProduct.Active)
 		require.GreaterOrEqual(t, len(premiumProduct.Prices), 2, "Should have monthly and yearly USD prices")
 		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "usd", "30d")
@@ -86,7 +86,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 		// Find Premium product and verify yearly USD pricing.
 		var premiumProduct *api.ProductObject
 		for i, p := range resp.Data {
-			if p.Slug == "premium" {
+			if p.Key == "premium" {
 				premiumProduct = &resp.Data[i]
 				break
 			}

@@ -14,7 +14,7 @@ import (
 
 // fakeApplier is an in-memory Applier for plan/apply tests. No DB or network.
 type fakeApplier struct {
-	products map[string]*billingservice.CatalogProduct // by slug
+	products map[string]*billingservice.CatalogProduct // by key
 	prices   map[uuid.UUID][]billingservice.CatalogPrice
 
 	createdProducts  []billingservice.CreateProductRequest
@@ -36,7 +36,7 @@ func (f *fakeApplier) seedProduct(slug, tierGroup string, rank int, status model
 	tg := tierGroup
 	p := &billingservice.CatalogProduct{
 		ID:          uuid.New(),
-		Slug:        slug,
+		Key:         slug,
 		DisplayName: slug,
 		TierGroup:   &tg,
 		TierRank:    rank,
@@ -47,24 +47,24 @@ func (f *fakeApplier) seedProduct(slug, tierGroup string, rank int, status model
 }
 
 func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency string, cycleDays int, status models.CatalogStatus, providers ...string) {
-	cd := cycleDays
+	cd := cycleDays * 24 // helper takes days; the window column is hours
 	states := map[string]billingservice.ProviderState{}
 	for _, provider := range providers {
 		states[provider] = billingservice.ProviderState{Status: billingservice.ProviderStatusLinked}
 	}
 	f.prices[productID] = append(f.prices[productID], billingservice.CatalogPrice{
-		ID:                 uuid.New(),
-		ProductID:          productID,
-		Status:             status,
-		UnitAmount:         amount,
-		Currency:           currency,
-		AccessDurationDays: &cd,
-		AutoRenew:          true,
-		Providers:          states,
+		ID:                  uuid.New(),
+		ProductID:           productID,
+		Status:              status,
+		UnitAmount:          amount,
+		Currency:            currency,
+		AccessDurationHours: &cd,
+		AutoRenew:           true,
+		Providers:           states,
 	})
 }
 
-func (f *fakeApplier) GetProductBySlug(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
+func (f *fakeApplier) GetProductByKey(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
 	if p, ok := f.products[slug]; ok {
 		return p, nil
 	}
@@ -87,8 +87,8 @@ func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListPr
 
 func (f *fakeApplier) CreateProduct(_ context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error) {
 	f.createdProducts = append(f.createdProducts, req)
-	p := &billingservice.CatalogProduct{ID: uuid.New(), Slug: req.Slug, DisplayName: req.DisplayName, TierGroup: req.TierGroup, TierRank: req.TierRank, Status: req.Status}
-	f.products[req.Slug] = p
+	p := &billingservice.CatalogProduct{ID: uuid.New(), Key: req.Key, DisplayName: req.DisplayName, TierGroup: req.TierGroup, TierRank: req.TierRank, Status: req.Status}
+	f.products[req.Key] = p
 	return p, nil
 }
 
@@ -411,7 +411,7 @@ func TestPlan_RemovedProductArchived(t *testing.T) {
 	var removed []string
 	for _, g := range plan.Groups {
 		for _, rp := range g.RemovedProducts {
-			removed = append(removed, rp.Slug)
+			removed = append(removed, rp.Key)
 		}
 	}
 	if len(removed) != 1 || removed[0] != "expert" {

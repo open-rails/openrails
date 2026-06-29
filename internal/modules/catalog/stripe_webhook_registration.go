@@ -102,16 +102,16 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 
 	if secretKey == "" {
-		if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil {
-			secretKey = strings.TrimSpace(stripeProc.SecretKey)
-			haveSecret = haveSecret || strings.TrimSpace(stripeProc.WebhookSecret) != ""
+		if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
+			secretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
+			haveSecret = haveSecret || strings.TrimSpace(stripeProc.Stripe.WebhookSecret) != ""
 		}
 	}
 	if secretKey == "" {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
 	}
 
-	rails := config.RailSet{"stripe": &config.RailConfig{Type: config.RailTypeStripe, SecretKey: secretKey}}
+	rails := config.RailSet{"stripe": &config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
 		URL:           webhookURL,
@@ -132,7 +132,10 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return out, nil
 	}
 	if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil {
-		stripeProc.WebhookSecret = res.Secret
+		if stripeProc.Stripe == nil {
+			stripeProc.Stripe = &config.StripeRailConfig{}
+		}
+		stripeProc.Stripe.WebhookSecret = res.Secret
 		return out, nil
 	}
 	return ManagedStripeWebhookResult{}, fmt.Errorf("stripe webhook secret destination not configured")

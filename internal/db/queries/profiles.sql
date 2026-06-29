@@ -20,14 +20,18 @@ FROM profiles.users
 WHERE username = $1 AND deleted_at IS NULL;
 
 -- name: GetMerchantBySlug :one
-SELECT id, slug, status
+SELECT id, slug, status, display_name
 FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL;
 
 -- name: RegisterMerchant :one
 -- Register a merchant (billing bucket) from config, idempotently (#480). The
--- merchant carries ONLY billing/rail state; NO auth.
-INSERT INTO openrails.merchants (slug, status)
-VALUES ($1, 'active')
-ON CONFLICT (slug) DO UPDATE SET updated_at = now()
+-- merchant carries ONLY billing/rail state; NO auth. A re-register without a
+-- display_name keeps any existing one (COALESCE), so config that omits it never
+-- clears a name set elsewhere.
+INSERT INTO openrails.merchants (slug, status, display_name)
+VALUES ($1, 'active', sqlc.narg(display_name))
+ON CONFLICT (slug) DO UPDATE SET
+    display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
+    updated_at = now()
 RETURNING id;

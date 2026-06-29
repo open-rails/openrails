@@ -46,7 +46,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &desc,
 		CreditsSpec: creditsSpec,
@@ -59,16 +59,16 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	priceID := uuid.New()
 	cycle := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ProductID:        productID,
-		Status:           string(models.CatalogStatusActive),
-		Amount:             100,
-		Currency:           "USD",
-		AccessDurationDays: &cycle,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ProductID:           productID,
+		Status:              string(models.CatalogStatusActive),
+		Amount:              100,
+		Currency:            "USD",
+		AccessDurationHours: &cycle,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 
@@ -168,7 +168,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &desc,
 		CreditsSpec: creditsSpec,
@@ -181,16 +181,16 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	priceID := uuid.New()
 	cycle := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ProductID:        productID,
-		Status:           string(models.CatalogStatusActive),
-		Amount:             100,
-		Currency:           "USD",
-		AccessDurationDays: &cycle,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ProductID:           productID,
+		Status:              string(models.CatalogStatusActive),
+		Amount:              100,
+		Currency:            "USD",
+		AccessDurationHours: &cycle,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

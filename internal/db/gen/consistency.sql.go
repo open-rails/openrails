@@ -14,7 +14,7 @@ import (
 
 const conDuplicateChargesSamePeriod = `-- name: ConDuplicateChargesSamePeriod :many
 WITH payment_products AS (
-    SELECT purch.id, purch.customer_id, purch.amount, purch.purchased_at, price.product_id, prod.slug AS product_slug
+    SELECT purch.id, purch.customer_id, purch.amount, purch.purchased_at, price.product_id, prod.key AS product_key
     FROM openrails.payments purch
     JOIN openrails.prices price ON purch.price_id = price.id
     JOIN openrails.products prod ON price.product_id = prod.id
@@ -25,21 +25,21 @@ WITH payment_products AS (
 SELECT
     customer_id::text AS user_id,
     product_id,
-    product_slug,
+    product_key,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
     SUM(amount)::bigint AS total_amount,
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
 FROM payment_products
-GROUP BY customer_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
+GROUP BY customer_id, product_id, product_key, DATE_TRUNC('month', purchased_at)
 HAVING COUNT(*) > 1
 `
 
 type ConDuplicateChargesSamePeriodRow struct {
 	UserID      string
 	ProductID   uuid.UUID
-	ProductSlug string
+	ProductKey  string
 	Count       int32
 	PaymentIds  []uuid.UUID
 	TotalAmount int64
@@ -60,7 +60,7 @@ func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, customerID 
 		if err := rows.Scan(
 			&i.UserID,
 			&i.ProductID,
-			&i.ProductSlug,
+			&i.ProductKey,
 			&i.Count,
 			&i.PaymentIds,
 			&i.TotalAmount,

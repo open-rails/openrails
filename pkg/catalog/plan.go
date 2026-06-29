@@ -55,7 +55,7 @@ type PlanOptions struct {
 
 // GroupPlan is the diff for one tier group.
 type GroupPlan struct {
-	Slug     string        `json:"slug"`
+	Key      string        `json:"key"`
 	Products []ProductPlan `json:"products"`
 	// RemovedProducts are active OpenRails products in this tier group not
 	// declared in the manifest; they are archived (deactivated) on apply.
@@ -86,7 +86,7 @@ type PricePlan struct {
 }
 
 // Plan computes the convergence diff for a manifest against the catalog exposed
-// by applier. It performs only reads (GetProductBySlug, ListProducts,
+// by applier. It performs only reads (GetProductByKey, ListProducts,
 // ListPricesByProduct).
 func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error) {
 	return PlanWithOptions(ctx, applier, m, PlanOptions{ArchiveMissingProducts: true, ArchiveMissingPrices: true})
@@ -97,7 +97,7 @@ func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error)
 func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts PlanOptions) (*ApplyPlan, error) {
 	plan := &ApplyPlan{Manifest: m}
 	for _, group := range m.TierGroups {
-		gp := GroupPlan{Slug: group.Slug}
+		gp := GroupPlan{Key: group.Key}
 
 		declared := make(map[string]struct{}, len(group.Products))
 		for _, product := range group.Products {
@@ -114,14 +114,14 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 			// in this tier group.
 			existing, _, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{
 				ActiveOnly: true,
-				TierGroup:  group.Slug,
+				TierGroup:  group.Key,
 				Limit:      1000,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("list active products for tier group %s: %w", group.Slug, err)
+				return nil, fmt.Errorf("list active products for tier group %s: %w", group.Key, err)
 			}
 			for i := range existing {
-				if _, ok := declared[existing[i].Slug]; ok {
+				if _, ok := declared[existing[i].Key]; ok {
 					continue
 				}
 				gp.RemovedProducts = append(gp.RemovedProducts, existing[i])
@@ -136,20 +136,20 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
 	credits := creditsSpec(product.Credits)
-	tierGroup := group.Slug
+	tierGroup := group.Key
 	tierRank := product.tierRank()
 	desiredStatus := statusFromActive(product.Active)
 
 	pp := &ProductPlan{Key: product.Key}
 
-	existing, err := applier.GetProductBySlug(ctx, product.Key)
+	existing, err := applier.GetProductByKey(ctx, product.Key)
 	if err != nil || existing == nil {
 		// Not found -> create. (The facade returns an error for "not found"; we
 		// treat any lookup failure as create-intent — apply will surface a real
 		// create error if the slug actually exists.)
 		pp.Action = ProductCreate
 		pp.CreateReq = billingservice.CreateProductRequest{
-			Slug:             product.Key,
+			Key:              product.Key,
 			DisplayName:      product.DisplayName,
 			Description:      strings.TrimSpace(product.Description),
 			EntitlementsSpec: entitlements,
@@ -227,10 +227,10 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 		if !ok || ev.Unit != v.Unit || ev.Amount != v.Amount || ev.Cadence != v.Cadence {
 			return false
 		}
-		if (ev.ExpiresDays == nil) != (v.ExpiresDays == nil) {
+		if (ev.ExpiryHours == nil) != (v.ExpiryHours == nil) {
 			return false
 		}
-		if ev.ExpiresDays != nil && *ev.ExpiresDays != *v.ExpiresDays {
+		if ev.ExpiryHours != nil && *ev.ExpiryHours != *v.ExpiryHours {
 			return false
 		}
 	}
@@ -295,16 +295,16 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		// No financial match -> create.
 		createReq := billingservice.CreatePriceRequest{
 			// ProductID is filled at apply time once the product exists.
-			ProductID:          productID(existing),
-			UnitAmount:         price.UnitAmount,
-			Currency:           price.Currency,
-			AccessDurationDays: accessDurationDays,
-			AutoRenew:          price.AutoRenew,
-			TrialUnitAmount:    trialAmount,
-			TrialDurationDays:  trialDays,
-			Providers:          price.Providers,
-			ProviderLinks:      price.ProviderLinks,
-			Status:             toModelStatus(desiredStatus),
+			ProductID:           productID(existing),
+			UnitAmount:          price.UnitAmount,
+			Currency:            price.Currency,
+			AccessDurationHours: accessDurationHours,
+			AutoRenew:           price.AutoRenew,
+			TrialUnitAmount:     trialAmount,
+			TrialDurationHours:  trialHours,
+			Providers:           price.Providers,
+			ProviderLinks:       price.ProviderLinks,
+			Status:              toModelStatus(desiredStatus),
 		}
 		pp.Prices = append(pp.Prices, PricePlan{
 			Label:     label,
@@ -341,7 +341,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 // forbids two prices that differ only by provider, so a provider-set drift is a
 // mutation of the matched price, never a reason to create a second row (doing so
 // collides on the unique key).
-func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationDays, trialDays *int, trialAmount *int64, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationHours, trialHours *int, trialAmount *int64, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
 		c := &current[i]
@@ -351,12 +351,12 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurati
 		if c.UnitAmount != price.UnitAmount || !strings.EqualFold(c.Currency, price.Currency) {
 			continue
 		}
-		if !sameCycleDays(c.AccessDurationDays, accessDurationDays) || c.AutoRenew != price.AutoRenew {
+		if !sameCycleDays(c.AccessDurationHours, accessDurationHours) || c.AutoRenew != price.AutoRenew {
 			continue
 		}
 		// Trial is part of identity (NULLS NOT DISTINCT): "no trial" is a concrete
 		// value, so nil==nil but nil!=set.
-		if !samePtrInt64(c.TrialUnitAmount, trialAmount) || !samePtrInt(c.TrialDurationDays, trialDays) {
+		if !samePtrInt64(c.TrialUnitAmount, trialAmount) || !samePtrInt(c.TrialDurationHours, trialHours) {
 			continue
 		}
 		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
@@ -416,7 +416,7 @@ func creditsSpec(credits Credits) billingservice.CreditsSpec {
 		out[key] = billingservice.CreditGrantSpec{
 			Unit:        strings.TrimSpace(credit.Unit),
 			Amount:      credit.Amount,
-			ExpiresDays: credit.ExpiresDays,
+			ExpiryHours: credit.ExpiryHours,
 			Cadence:     billingservice.CreditGrantCadence(strings.TrimSpace(credit.Cadence)),
 		}
 	}
@@ -457,7 +457,7 @@ func (plan *ApplyPlan) String() string {
 	var b strings.Builder
 	for gi := range plan.Groups {
 		gp := &plan.Groups[gi]
-		fmt.Fprintf(&b, "tier_group %s\n", gp.Slug)
+		fmt.Fprintf(&b, "tier_group %s\n", gp.Key)
 		for pi := range gp.Products {
 			pp := &gp.Products[pi]
 			fmt.Fprintf(&b, "  %s product %s\n", symbol(string(pp.Action)), pp.Key)
@@ -472,7 +472,7 @@ func (plan *ApplyPlan) String() string {
 			}
 		}
 		for i := range gp.RemovedProducts {
-			fmt.Fprintf(&b, "  - product %s (archived: removed from manifest)\n", gp.RemovedProducts[i].Slug)
+			fmt.Fprintf(&b, "  - product %s (archived: removed from manifest)\n", gp.RemovedProducts[i].Key)
 		}
 	}
 	return b.String()
@@ -503,19 +503,19 @@ func symbol(action string) string {
 
 // PriceLabel derives a readable label for a price from its financial terms,
 // e.g. "starter $13.00/month". There is no price slug to lean on.
-func PriceLabel(productSlug string, price Price) string {
+func PriceLabel(productKey string, price Price) string {
 	duration := strings.TrimSpace(price.Duration)
 	if duration == "" {
 		duration = "indefinite"
 	}
 	money := formatMoney(price.UnitAmount, price.Currency)
 	if price.AutoRenew {
-		return fmt.Sprintf("%s %s/%s", productSlug, money, duration)
+		return fmt.Sprintf("%s %s/%s", productKey, money, duration)
 	}
 	if duration == "indefinite" {
-		return fmt.Sprintf("%s %s once", productSlug, money)
+		return fmt.Sprintf("%s %s once", productKey, money)
 	}
-	return fmt.Sprintf("%s %s for %s", productSlug, money, duration)
+	return fmt.Sprintf("%s %s for %s", productKey, money, duration)
 }
 
 // formatMoney renders an internal micros amount as a human currency string.

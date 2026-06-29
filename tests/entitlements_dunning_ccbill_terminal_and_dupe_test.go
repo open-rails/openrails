@@ -36,10 +36,10 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	productID := uuid.New()
 	priceID := uuid.New()
 
-	billingDays := 30
+	billingDays := 720
 	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
-		Slug:        "test_ccbill_multi_" + uuid.New().String()[:8],
+		Key:         "test_ccbill_multi_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -52,12 +52,12 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             9_990_000,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays, AutoRenew: true,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})
@@ -200,11 +200,11 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := 720
 
 	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
-		Slug:        "test_ccbill_dupe_" + uuid.New().String()[:8],
+		Key:         "test_ccbill_dupe_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -216,12 +216,12 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             9_990_000,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays, AutoRenew: true,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})

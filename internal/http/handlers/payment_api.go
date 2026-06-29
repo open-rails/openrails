@@ -17,7 +17,7 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 	return api.ProductObject{
 		ID:               api.FormatProductID(p.ID),
 		Object:           "product",
-		Slug:             p.Slug,
+		Key:              p.Key,
 		Name:             p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
@@ -42,7 +42,7 @@ func creditGrantSpecsToAPI(specs models.CreditsSpec) map[string]api.CreditGrantS
 		out[creditType] = api.CreditGrantSpecObject{
 			Unit:        spec.Unit,
 			Amount:      spec.Amount,
-			ExpiresDays: spec.ExpiresDays,
+			ExpiryHours: spec.ExpiryHours,
 			Cadence:     string(spec.Cadence),
 		}
 	}
@@ -178,8 +178,8 @@ func paymentAPIStatus(status string) string {
 
 func PriceToAPI(p *models.Price) api.PriceObject {
 	var recurring *api.RecurringInfo
-	if p.RecurringCycleDays() != nil && *p.RecurringCycleDays() > 0 {
-		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleDaysToInterval(*p.RecurringCycleDays())}
+	if ch := p.RecurringCycleHours(); ch != nil && *ch > 0 {
+		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleHoursToInterval(*ch)}
 	}
 	priceType := "one_time"
 	if recurring != nil {

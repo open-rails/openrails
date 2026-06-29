@@ -191,8 +191,8 @@ func TestPublishPlanPeriodBoundValidation(t *testing.T) {
 	}
 }
 
-// TestPublishPlanBillingCycleConsistency: when BillingCycleDays is threaded in,
-// period_hours must equal days*24.
+// TestPublishPlanBillingCycleConsistency: when BillingCycleHours is threaded in,
+// period_hours must match it.
 func TestPublishPlanBillingCycleConsistency(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	merchantPub := merchantKey.PublicKey()
@@ -200,17 +200,17 @@ func TestPublishPlanBillingCycleConsistency(t *testing.T) {
 	svc := NewPlanService(sub, "devnet")
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		PlanID:           7,
-		TokenSymbol:      "USDC",
-		AmountBaseUnits:  10_000_000,
-		PeriodHours:      720, // 30 days
-		BillingCycleDays: 31,  // disagrees: 31*24 = 744
+		PlanID:            7,
+		TokenSymbol:       "USDC",
+		AmountBaseUnits:   10_000_000,
+		PeriodHours:       720,
+		BillingCycleHours: 744,
 	})
 	if err == nil {
-		t.Fatal("mismatched period_hours vs billing_cycle_days should be rejected")
+		t.Fatal("mismatched period_hours vs billing_cycle_hours should be rejected")
 	}
-	if !strings.Contains(err.Error(), "billing_cycle_days") {
-		t.Fatalf("error should mention billing_cycle_days, got: %v", err)
+	if !strings.Contains(err.Error(), "billing_cycle_hours") {
+		t.Fatalf("error should mention billing_cycle_hours, got: %v", err)
 	}
 	if len(sub.submits) != 0 {
 		t.Fatalf("no submit on consistency failure, got %d", len(sub.submits))

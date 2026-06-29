@@ -92,7 +92,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_hours, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -118,7 +118,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.AutoTopupEnabled,
 		&i.AutoTopupAmountCents,
 		&i.AutoTopupPaymentMethodID,
-		&i.DefaultCreditExpiryDays,
+		&i.DefaultCreditExpiryHours,
 		&i.HardStopOnBreach,
 		&i.AlertThresholdPct,
 		&i.OutstandingOwedAmount,
@@ -280,7 +280,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_hours, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -306,7 +306,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.AutoTopupEnabled,
 		&i.AutoTopupAmountCents,
 		&i.AutoTopupPaymentMethodID,
-		&i.DefaultCreditExpiryDays,
+		&i.DefaultCreditExpiryHours,
 		&i.HardStopOnBreach,
 		&i.AlertThresholdPct,
 		&i.OutstandingOwedAmount,
@@ -511,7 +511,7 @@ INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
     max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount,
     low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents,
-    auto_topup_payment_method_id, default_credit_expiry_days,
+    auto_topup_payment_method_id, default_credit_expiry_hours,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $17, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
@@ -523,7 +523,7 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     auto_topup_enabled = EXCLUDED.auto_topup_enabled,
     auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents,
     auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
-    default_credit_expiry_days = EXCLUDED.default_credit_expiry_days,
+    default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
     hard_stop_on_breach = EXCLUDED.hard_stop_on_breach,
     alert_threshold_pct = EXCLUDED.alert_threshold_pct,
     updated_at = EXCLUDED.updated_at
@@ -541,7 +541,7 @@ type UpsertMoneyAccountSettingsParams struct {
 	AutoTopupEnabled         bool
 	AutoTopupAmountCents     *int64
 	AutoTopupPaymentMethodID *uuid.UUID
-	DefaultCreditExpiryDays  *int32
+	DefaultCreditExpiryHours *int32
 	HardStopOnBreach         bool
 	AlertThresholdPct        int32
 	CreatedAt                time.Time
@@ -562,7 +562,7 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 		arg.AutoTopupEnabled,
 		arg.AutoTopupAmountCents,
 		arg.AutoTopupPaymentMethodID,
-		arg.DefaultCreditExpiryDays,
+		arg.DefaultCreditExpiryHours,
 		arg.HardStopOnBreach,
 		arg.AlertThresholdPct,
 		arg.CreatedAt,

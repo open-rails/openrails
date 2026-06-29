@@ -20,7 +20,7 @@ type ProductAccessGrantResponse struct {
 	ID           string     `json:"id"`
 	CustomerID   string     `json:"customer_id"`
 	ProductID    string     `json:"product_id"`
-	ProductSlug  string     `json:"product_slug,omitempty"`
+	ProductKey   string     `json:"product_key,omitempty"`
 	ProductName  string     `json:"product_name,omitempty"`
 	SourceType   string     `json:"source_type"`
 	SourceID     string     `json:"source_id,omitempty"`
@@ -90,7 +90,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 				cache[g.ProductID] = prod
 			}
 			if prod != nil {
-				resp.ProductSlug = prod.Slug
+				resp.ProductKey = prod.Key
 				resp.ProductName = prod.DisplayName
 			}
 		}

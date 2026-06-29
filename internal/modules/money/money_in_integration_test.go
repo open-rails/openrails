@@ -192,10 +192,10 @@ func TestDeposit_NoFlag_Permanent(t *testing.T) {
 	require.Nil(t, exp, "no flag, no explicit expiry -> permanent")
 }
 
-func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
+func TestDeposit_ConfiguredExpiryHours(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
-	days := 30
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{DefaultCreditExpiryDays: &days})
+	hours := 30 * 24
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{DefaultCreditExpiryHours: &hours})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{
 		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000,
@@ -546,7 +546,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
 		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_invoice"},
+			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}
 	stripeSvc.SetBaseURLForTest(server.URL)
@@ -640,7 +640,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
 		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_invoice"},
+			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}
 	stripeSvc.SetBaseURLForTest(server.URL)

@@ -846,7 +846,7 @@ func (q *Queries) ListOwnershipGrantsWithStatus(ctx context.Context, arg ListOwn
 }
 
 const listProductUsageLimitSpecs = `-- name: ListProductUsageLimitSpecs :many
-SELECT pul.usage_limit_key, cul.measure, cul.windows, p.slug AS product_slug
+SELECT pul.usage_limit_key, cul.measure, cul.windows, p.key AS product_key
 FROM openrails.product_usage_limits pul
 JOIN openrails.catalog_usage_limits cul
   ON cul.merchant_id = pul.merchant_id AND cul.key = pul.usage_limit_key
@@ -866,7 +866,7 @@ type ListProductUsageLimitSpecsRow struct {
 	UsageLimitKey string
 	Measure       string
 	Windows       []byte
-	ProductSlug   string
+	ProductKey    string
 }
 
 func (q *Queries) ListProductUsageLimitSpecs(ctx context.Context, arg ListProductUsageLimitSpecsParams) ([]ListProductUsageLimitSpecsRow, error) {
@@ -882,7 +882,7 @@ func (q *Queries) ListProductUsageLimitSpecs(ctx context.Context, arg ListProduc
 			&i.UsageLimitKey,
 			&i.Measure,
 			&i.Windows,
-			&i.ProductSlug,
+			&i.ProductKey,
 		); err != nil {
 			return nil, err
 		}

@@ -335,8 +335,8 @@ func stripeTestModeConfig(secretKey string, testMode bool) (*Config, RailSet) {
 			TestMode:          testMode,
 		}, RailSet{
 			"stripe": {
-				Type:      string(RailTypeStripe),
-				SecretKey: secretKey,
+				Type:   string(RailTypeStripe),
+				Stripe: &StripeRailConfig{SecretKey: secretKey},
 			},
 		}
 }
@@ -351,19 +351,19 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_test_abc123", true)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "sk_test_abc123", rails["stripe"].SecretKey, "test key in test env should be kept")
+		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "test key in test env should be kept")
 	})
 
 	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Empty(t, rails["stripe"].SecretKey, "test key in live env should be disabled")
+		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "test key in live env should be disabled")
 	})
 
 	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_live_abc123", false)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "sk_live_abc123", rails["stripe"].SecretKey, "live key in live env should be kept")
+		assert.Equal(t, "sk_live_abc123", rails["stripe"].Stripe.SecretKey, "live key in live env should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
@@ -375,51 +375,51 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_test_abc123", true)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "rk_test_abc123", rails["stripe"].SecretKey, "restricted test key in test env should be kept")
+		assert.Equal(t, "rk_test_abc123", rails["stripe"].Stripe.SecretKey, "restricted test key in test env should be kept")
 	})
 
 	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Empty(t, rails["stripe"].SecretKey, "restricted test key in live env should be disabled")
+		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "restricted test key in live env should be disabled")
 	})
 
 	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_live_abc123", false)
 		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "rk_live_abc123", rails["stripe"].SecretKey, "restricted live key in live env should be kept")
+		assert.Equal(t, "rk_live_abc123", rails["stripe"].Stripe.SecretKey, "restricted live key in live env should be kept")
 	})
 
 	t.Run("validates every stripe rail", func(t *testing.T) {
 		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
 		rails := RailSet{
-			"stripe_primary": {Type: RailTypeStripe, SecretKey: "sk_live_primary"},
-			"stripe_legacy":  {Type: RailTypeStripe, Routing: RailRoutingLegacy, SecretKey: "sk_test_legacy"},
+			"stripe_primary": {Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
+			"stripe_legacy":  {Type: RailTypeStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
 		}
 		require.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		require.Equal(t, "sk_live_primary", rails["stripe_primary"].SecretKey)
-		require.Empty(t, rails["stripe_legacy"].SecretKey)
+		require.Equal(t, "sk_live_primary", rails["stripe_primary"].Stripe.SecretKey)
+		require.Empty(t, rails["stripe_legacy"].Stripe.SecretKey)
 	})
 }
 
 func TestPrimaryRailByType(t *testing.T) {
 	rails := RailSet{
-		"stripe_old": {Type: RailTypeStripe, Routing: RailRoutingLegacy, SecretKey: "sk_live_old"},
-		"stripe_new": {Type: RailTypeStripe, SecretKey: "sk_live_new"},
-		"mobius":     {Type: RailTypeNMI, SecurityKey: "sec"},
+		"stripe_old": {Type: RailTypeStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_live_old"}},
+		"stripe_new": {Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_new"}},
+		"mobius":     {Type: RailTypeNMI, NMI: &NMIRailConfig{SecurityKey: "sec"}},
 	}
 	key, proc, err := rails.PrimaryRailByType(RailTypeStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
-	require.Equal(t, "sk_live_new", proc.SecretKey)
+	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
 	require.Equal(t, proc, rails.GetStripeRail())
 
-	rails["stripe_other"] = &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_other"}
+	rails["stripe_other"] = &RailConfig{Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
 	_, _, err = rails.PrimaryRailByType(RailTypeStripe)
 	require.ErrorContains(t, err, "multiple default rails")
 	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, RailSet{
-		"stripe_a": {Type: RailTypeStripe, SecretKey: "sk_live_a"},
-		"stripe_b": {Type: RailTypeStripe, SecretKey: "sk_live_b"},
+		"stripe_a": {Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
+		"stripe_b": {Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}), "multiple default rails")
 }
 
@@ -428,12 +428,12 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.TestMode = true
 	rails := RailSet{
-		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
+		"stripe": {Type: "stripe", Stripe: &StripeRailConfig{SecretKey: "sk_live_abc123"}},
 	}
 	require.Error(t, ValidateRailSet(cfg, rails))
 
 	// test key in the test env is fine
-	rails["stripe"].SecretKey = "sk_test_abc123"
+	rails["stripe"].Stripe.SecretKey = "sk_test_abc123"
 	require.NoError(t, ValidateRailSet(cfg, rails))
 
 	// test key with live credentials expected: disabled with a warning, not fatal
@@ -442,12 +442,12 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg2.ProviderWriteMode = ProviderWriteModeLimited
 	rails2 := RailSet{
 		"stripe": {
-			Type:      "stripe",
-			SecretKey: "sk_test_abc123",
+			Type:   "stripe",
+			Stripe: &StripeRailConfig{SecretKey: "sk_test_abc123"},
 		},
 	}
 	require.NoError(t, ValidateRailSet(cfg2, rails2))
-	require.Equal(t, "", rails2["stripe"].SecretKey)
+	require.Equal(t, "", rails2["stripe"].Stripe.SecretKey)
 }
 
 func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
@@ -469,9 +469,9 @@ func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
 		},
 	}
 	require.NoError(t, ValidateRailSet(cfg, rails))
-	require.Equal(t, "sec", rails["mobius"].SecurityKey)
-	require.Equal(t, "tok", rails["mobius"].TokenizationKey)
-	require.Equal(t, "sk_live_old", rails["stripe_old"].SecretKey)
+	require.Equal(t, "sec", rails["mobius"].NMI.SecurityKey)
+	require.Equal(t, "tok", rails["mobius"].NMI.TokenizationKey)
+	require.Equal(t, "sk_live_old", rails["stripe_old"].Stripe.SecretKey)
 	require.Equal(t, RailRoutingLegacy, rails["stripe_old"].EffectiveRouting())
 }
 
@@ -505,57 +505,57 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 		{
 			name:      "stripe/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_test_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSecret: ""}},
 			wantError: false,
 		},
 		{
 			name:      "stripe/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: ""}},
 			wantError: true,
 		},
 		{
 			name:      "stripe/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeStripe, SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
 		// Solana: missing recipient_wallet
 		{
 			name:      "solana/missing recipient_wallet in dev → no error",
 			cfg:       devCfg(),
-			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: ""},
+			rail:      &RailConfig{Type: RailTypeSolana, Solana: &SolanaRailConfig{RecipientWallet: ""}},
 			wantError: false,
 		},
 		{
 			name:      "solana/missing recipient_wallet in prod → error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: ""},
+			rail:      &RailConfig{Type: RailTypeSolana, Solana: &SolanaRailConfig{RecipientWallet: ""}},
 			wantError: true,
 		},
 		{
 			name:      "solana/present recipient_wallet in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeSolana, RecipientWallet: "wallet_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeSolana, Solana: &SolanaRailConfig{RecipientWallet: "wallet_test_dummy"}},
 			wantError: false,
 		},
 		// NMI: missing webhook_secret (security_key also required outside dev)
 		{
 			name:      "nmi/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
 			wantError: false,
 		},
 		{
 			name:      "nmi/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: ""},
+			rail:      &RailConfig{Type: RailTypeNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
 			wantError: true,
 		},
 		{
 			name:      "nmi/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &RailConfig{Type: RailTypeNMI, SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"},
+			rail:      &RailConfig{Type: RailTypeNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
 	}

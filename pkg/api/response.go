@@ -8,7 +8,7 @@ import (
 type ProductObject struct {
 	ID               string                           `json:"id"`
 	Object           string                           `json:"object"` // Always "product"
-	Slug             string                           `json:"slug"`
+	Key              string                           `json:"key"`
 	Name             string                           `json:"name"`
 	Description      string                           `json:"description"`
 	EntitlementsSpec map[string]*int                  `json:"entitlements_spec,omitempty"`
@@ -27,7 +27,7 @@ type ProductObject struct {
 type CreditGrantSpecObject struct {
 	Unit        string `json:"unit,omitempty"`
 	Amount      int64  `json:"amount"`
-	ExpiresDays *int   `json:"expires_days,omitempty"`
+	ExpiryHours *int   `json:"expiry_hours,omitempty"`
 	Cadence     string `json:"cadence,omitempty"`
 }
 

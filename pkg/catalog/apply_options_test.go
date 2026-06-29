@@ -17,13 +17,13 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 	removedProductID := uuid.New()
 
 	plan := &ApplyPlan{Groups: []GroupPlan{{
-		Slug: "memberships",
+		Key: "memberships",
 		Products: []ProductPlan{
 			{
 				Key:    "new",
 				Action: ProductCreate,
 				CreateReq: billingservice.CreateProductRequest{
-					Slug:        "new",
+					Key:         "new",
 					DisplayName: "New",
 					Status:      models.CatalogStatusActive,
 				},
@@ -47,7 +47,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 				},
 			},
 		},
-		RemovedProducts: []billingservice.CatalogProduct{{ID: removedProductID, Slug: "removed"}},
+		RemovedProducts: []billingservice.CatalogProduct{{ID: removedProductID, Key: "removed"}},
 	}}}
 
 	t.Run("insert only", func(t *testing.T) {

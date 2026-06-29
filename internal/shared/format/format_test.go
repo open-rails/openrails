@@ -6,6 +6,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBillingCycleHoursToInterval(t *testing.T) {
+	tests := []struct {
+		name  string
+		hours int
+		want  string
+	}{
+		{name: "hourly", hours: 1, want: "1h"},
+		{name: "daily", hours: 24, want: "24h"},
+		{name: "monthly", hours: 30 * 24, want: "720h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, BillingCycleHoursToInterval(tt.hours))
+		})
+	}
+}
+
 func TestBillingCycleDaysToInterval(t *testing.T) {
 	tests := []struct {
 		name string

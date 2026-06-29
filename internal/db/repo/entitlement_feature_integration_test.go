@@ -52,7 +52,7 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid m
 			return err
 		}
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
+			`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, $3)`,
 			productID, tid.UUID(), slug,
 		)
 		return err
@@ -110,19 +110,19 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 	// (4) Attach the feature to product A within merchant A; then list it back.
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		rr := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx))
-		days := 30
+		hours := 30 * 24
 		require.NoError(t, rr.AttachFeatureToProduct(ctx, &models.ProductEntitlementFeature{
 			ProductID:            productA,
 			EntitlementFeatureID: featureA.ID,
-			DurationDays:         &days,
+			DurationHours:        &hours,
 		}))
 		pfs, err := rr.ListProductFeatures(ctx, productA)
 		require.NoError(t, err)
 		require.Len(t, pfs, 1)
 		require.NotNil(t, pfs[0].Feature)
 		require.Equal(t, "premium", pfs[0].Feature.LookupKey)
-		require.NotNil(t, pfs[0].DurationDays)
-		require.Equal(t, 30, *pfs[0].DurationDays)
+		require.NotNil(t, pfs[0].DurationHours)
+		require.Equal(t, 30*24, *pfs[0].DurationHours)
 		return nil
 	}))
 

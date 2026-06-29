@@ -475,10 +475,10 @@ func (s *Service) updateSessionStatus(ctx context.Context, session *models.USDCF
 
 func (s *Service) usdcMintConfig() (solanago.PublicKey, int, error) {
 	proc := s.rails.GetSolanaRail()
-	if proc == nil || proc.Tokens == nil {
+	if proc == nil || proc.Solana == nil || proc.Solana.Tokens == nil {
 		return solanago.PublicKey{}, 0, fmt.Errorf("solana_usdc_not_configured")
 	}
-	token, ok := proc.Tokens["USDC"]
+	token, ok := proc.Solana.Tokens["USDC"]
 	if !ok || strings.TrimSpace(token.Mint) == "" {
 		return solanago.PublicKey{}, 0, fmt.Errorf("solana_usdc_not_configured")
 	}

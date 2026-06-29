@@ -42,9 +42,9 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "sweep-prod-"+suffix, "sweep-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_days, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',30,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`, priceID, productID, merchantID)
 		// drift #1: a checkout session that expired but is still 'created'
 		exec(`INSERT INTO openrails.checkout_sessions (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id)
 		      VALUES ($1,$2,'one_off','nmi','created',999,'usd',$3,$4,$5)`,

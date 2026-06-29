@@ -15,12 +15,12 @@ import (
 
 func TestSolanaAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 	a := &solanaAdapter{svc: &Service{}} // no runtime -> SolanaPlanService nil
-	days := 30
+	hours := 30 * 24
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID:          uuid.New(),
-		Currency:         "USDC",
-		UnitAmount:       29_000_000,
-		BillingCycleDays: &days,
+		PriceID:             uuid.New(),
+		Currency:            "USDC",
+		UnitAmount:          29_000_000,
+		AccessDurationHours: &hours,
 	})
 	if !errors.Is(err, errPendingManualLink) {
 		t.Fatalf("unconfigured Solana AutoCreate = %v, want errPendingManualLink", err)

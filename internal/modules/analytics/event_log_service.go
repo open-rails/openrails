@@ -494,7 +494,7 @@ type SubscriptionEventData struct {
 	CancelType         string     `json:"cancel_type"`
 	PriceAmount        float64    `json:"price_amount"`
 	PriceCurrency      string     `json:"price_currency"`
-	BillingCycleDays   uint32     `json:"billing_cycle_days"`
+	BillingCycleHours  uint32     `json:"billing_cycle_hours"`
 	ProductID          *uuid.UUID `json:"product_id,omitempty"`
 	PriceID            *uuid.UUID `json:"price_id,omitempty"`
 	Rail               string     `json:"rail"`
@@ -1056,14 +1056,14 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 
 	var priceAmount float64
 	priceCurrency := ""
-	var billingDays uint32
+	var billingHours uint32
 	var productID *uuid.UUID
 	var priceID *uuid.UUID
 	if subscription.Price != nil {
 		priceAmount = float64(subscription.Price.Amount) / 100.0
 		priceCurrency = subscription.Price.Currency
-		if cycle := subscription.Price.RecurringCycleDays(); cycle != nil {
-			billingDays, _ = safecast.Convert[uint32](*cycle)
+		if cycle := subscription.Price.RecurringCycleHours(); cycle != nil {
+			billingHours, _ = safecast.Convert[uint32](*cycle)
 		}
 		productID = &subscription.Price.ProductID
 		priceID = &subscription.Price.ID
@@ -1077,7 +1077,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 		CancelType:         cancelType,
 		PriceAmount:        priceAmount,
 		PriceCurrency:      priceCurrency,
-		BillingCycleDays:   billingDays,
+		BillingCycleHours:  billingHours,
 		ProductID:          productID,
 		PriceID:            priceID,
 		Rail:               string(subscription.Rail),
@@ -1189,7 +1189,7 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
         INSERT INTO subscription_events (
             event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type,
             rail, rail_subscription_id, rail_transaction_id,
-            price_amount, price_currency, billing_cycle_days, product_id, price_id,
+            price_amount, price_currency, billing_cycle_hours, product_id, price_id,
             metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
@@ -1206,7 +1206,7 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 		nullableString2(data.RailTransactionID),
 		data.PriceAmount,
 		data.PriceCurrency,
-		data.BillingCycleDays,
+		data.BillingCycleHours,
 		nullableUUID(data.ProductID),
 		nullableUUID(data.PriceID),
 		data.Metadata,
@@ -1215,12 +1215,12 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 }
 
 func (s *EventLogService) insertSubscriptionBatch(ctx context.Context, rows []SubscriptionEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type, rail, rail_subscription_id, rail_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type, rail, rail_subscription_id, rail_transaction_id, price_amount, price_currency, billing_cycle_hours, product_id, price_id, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Rail, nullableString2(d.RailSubscriptionID), nullableString2(d.RailTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Rail, nullableString2(d.RailSubscriptionID), nullableString2(d.RailTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleHours, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}

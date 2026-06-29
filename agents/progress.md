@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 628
+next_id: 631
 
 ---
 
@@ -461,7 +461,18 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 
 # #582: rename `processor` → `rail` across notes + codebase (terminology consolidation; breaking DB + API allowed)
 
-**Completed:** no
+**Completed:** yes
+**Status:** COMPLETED — rename shipped and committed in-repo: `models.Rail`,
+`internal/modules/payments/rails`, Postgres + ClickHouse schema, JSON/env
+(`RAILS_*`), and docs (`docs/glossary-rails.md`). All tasks `[x]`; the dated
+"STATUS 2026-06-24" note below is the point-in-time record (its "uncommitted"
+line is now stale — it is committed in HEAD). Residual `processor` strings (NMI
+acquirer wire, `processor_clearing`, `processor_customer`) are intentional
+preservations. KNOWN FOLLOW-UP (separate corrective issue): the rename entrenched
+a rail/gateway/account conflation — `models.Rail` mixes gateway
+(ccbill/stripe/solana/paypal), account (mobius, an account on the NMI gateway),
+and method (admin/manual), and has no `RailNMI`. Cross-repo consumer bump may
+still be pending.
 
 Decided 2026-06-24 (Paul + Claude). On-brand consolidation: **"rail" becomes THE term for a payment channel/lane.** `processor` and `rail` are synonyms — the `models.Processor` enum values (`mobius`/`ccbill`/`stripe`/`solana`/…) literally ARE the rails. `provider` is a **different** concept (a credentialed *account on* a rail) and **stays**. Breaking changes to DB + API are authorized now (pre-production; **no migrations** — edit the schema in place and `task sqlc`). Behavior does not change; this is cosmetic/brand only.
 
@@ -1101,3 +1112,227 @@ The command surface must match AuthKit exactly:
 
 - Pair implementation with AuthKit #195 so helpers, command names, env vars, and
   report shape stay identical.
+
+---
+
+# #629: query-perf-harness-parity-real-sql-registry
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (sub-agent). Brought the openrails query-perf
+harness to parity with the upgraded authkit harness: real-SQL registry in package
+`gen`, 10 expanded perf cases sourced from the registry, non-uniform fat-customer
+seed, and one confirmed index (migration 042). Integration suite green at 100k.
+
+#628 shipped a working harness (contract tests + one perf case) but
+`internal/db/querytest/perf_test.go` HAND-COPIES the EntitlementExistsActive SQL
+(drift risk: the gate can pass while the real query changes) and gates only one
+query. Mirror the authkit upgrade: source perf SQL from the real generated
+consts, expand coverage, and read plans for missing-index findings.
+
+## Metadata
+
+- Category: test-infra
+- Status: completed
+- Passes: true (go test -tags=integration ./internal/db/querytest/... green at 100k scale)
+- Paired with AuthKit query-audit upgrade (v0.75.0)
+
+## Tasks
+
+- [ ] Add a `QueryText` registry in package `gen` (`internal/db/gen/query_text.go`)
+      mapping query name -> the generated const (consts are package-private to
+      `gen`, so the registry must live there). Values ARE the live sqlc consts, so
+      the perf gate can never drift from what the app runs.
+- [ ] Repoint `perf_test.go` (EntitlementExistsActive) at `gen.QueryText[...]`,
+      deleting the hand-copied SQL.
+- [ ] Expand perf coverage to hot openrails access patterns over growable tables:
+      entitlement lookups, admission, grants/ledger, subscription + customer +
+      payment-method lookups. Skip PK/unique point lookups. Add `ForbidSort` where
+      `ORDER BY`+`LIMIT` must be index-ordered; assert no Seq Scan + budgets.
+- [ ] Non-uniform seed where per-row fan-out matters (mirror authkit's fat-user).
+- [ ] Read EXPLAIN plans for missing-index findings. Add index migration(s)
+      (next number 040) + a gate ONLY for clear, confirmed seq-scan / sort wins on
+      hot paths; document the rest in this issue. Use temporary diagnostics to
+      confirm, then remove them.
+
+## Notes
+
+- Generated consts: `internal/db/gen/*.sql.go` (package `gen`), e.g.
+  `const entitlementExistsActive`.
+- Existing harness: `internal/db/querytest/{contracts_test.go,perf_test.go,main_test.go}`,
+  build tag `integration`; uses `dbtest.SharedPGXPool`, `dbtest.EnsureTestMerchant`,
+  `dbtest.TestMerchantID`, TRUNCATE-based seed, schema `openrails` with merchant RLS.
+- Dead-sqlc-query prune NOT needed: a scan found 0 dead of 406 queries.
+- No `task test-query-*` targets exist; run via
+  `go test -tags=integration ./internal/db/querytest/...` (dbtest provisions the DB).
+- Do NOT commit; leave changes in the working tree for Paul.
+
+## Results (2026-06-29)
+
+Added (all in the working tree, uncommitted):
+
+- `internal/db/gen/query_text.go` — `var QueryText map[string]string` in package
+  `gen` mapping query name -> the live generated const (must live in `gen`: the
+  consts are package-private). 10 growable-table hot patterns; PK/unique point
+  lookups deliberately excluded.
+- `internal/db/querytest/perf_test.go` — rewritten to mirror authkit: ONE
+  `TestQueryPerformance` that bulk-seeds (CopyFrom at scale + a fat customer / fat
+  subscription for fan-out), ANALYZEs, then EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON)es
+  each REAL const from `gen.QueryText` inside a rolled-back tx. `stripQueryHeader`
+  drops the sqlc `-- name:` header; `collectPlan` walks for Seq Scan / Sort. The
+  hand-copied EntitlementExistsActive SQL is gone. Per-case: ForbidSeqScan on the
+  big table + loose time/buffer budgets; ForbidSort where ORDER BY+LIMIT must be
+  index-ordered.
+- `migrations/postgres/042_query_perf_indexes.up.sql` — ONE confirmed index (040
+  and 041 were taken by concurrent work, so this is 042):
+  `idx_subscriptions_customer_active_created (customer_id, created_at DESC) WHERE
+  status='active'` — removes the avoidable Sort on GetActiveSubscriptionByCustomerAt
+  (was `[Limit Sort Index Scan]`, now `[Limit Index Scan]`; active-sub fan-out grows
+  with the catalog so the Sort is unbounded — clear win, planner adopts it).
+
+Perf cases (all green at 100k, no Seq Scan on the named table, budgets met):
+entitlement_exists_active, entitlement_names_active, active_subscription_by_customer
+(ForbidSort), customers_by_subject, payment_methods_by_customer, admission_capacity
+(ledger_accounts+money_settings), grants_by_customer, spendable_credit_lots,
+usage_totals, latest_charge_by_subscription.
+
+Documented-not-fixed finding: GetLatestChargeBySubscriptionID does ORDER BY
+purchased_at DESC LIMIT 1 over idx_payments_subscription_id + a top-N Sort. A
+`(subscription_id, purchased_at DESC)` index was prototyped but the planner DECLINED
+it — a subscription's charge count is bounded by its billing periods, so the cheap
+top-N Sort beats the index-ordered scan. No clear win; left unindexed on purpose
+(noted in migration 042). Two other ORDER-BY-no-LIMIT paths (grants_by_customer,
+spendable_credit_lots, payment_methods_by_customer) Sort acceptably (full result
+set, bounded per-customer) — no ForbidSort, no index.
+
+Validation: `go test -tags=integration -count=1 ./internal/db/querytest/...` PASSES
+at default 100k scale (TestQueryContractsHighValueBillingDomains + TestQueryPerformance);
+`gen` package builds + vets clean; sqlc parses migration 042 cleanly (index-only DDL,
+no codegen impact). NOTE: whole-tree `go build ./...` is currently RED due to a
+CONCURRENT billing-cycle->duration refactor by another agent (BillingCycleDays in
+internal/modules/webhooks, ExpiryHours redeclared in internal/db/models/product_catalog.go)
+— unrelated to #629 and in files this issue never touched.
+
+---
+
+# #630: model-rail-as-gateway-provider-account-as-instance
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29. Corrective follow-up to #582. #582 renamed
+`processor → rail` but entrenched a three-way conflation; this issue models the
+layers logically. Breaking DB/API allowed (pre-production), same as #582.
+
+The clean model (matches HyperSwitch connector/MCA and Spreedly gateway_type/
+gateway-instance):
+- **rail** = the gateway integration you code against (`nmi`, `stripe`, `ccbill`,
+  `solana`, `paypal`). One adapter per rail under `internal/integrations/<rail>`.
+- **provider account** = a credentialed account ON a rail (credentials + the
+  rail's native `account_id`). 1..N per rail. `mobius`/`paykings` are provider
+  accounts on rail `nmi`; a single-account rail (stripe/ccbill/solana) just names
+  its one account after the rail.
+- **payment method / channel** = the buyer's instrument (card/wallet) — and the
+  admin/manual/cash *channels* are NOT rails.
+
+## Metadata
+
+- Category: refactor
+- Status: planned
+- Passes: false
+
+## The slop this removes
+
+Today there are TWO near-duplicate enums that agree for ccbill/stripe and diverge
+exactly at the white-label case:
+- `models.Rail` (`internal/db/models/rail.go`): `mobius` (an ACCOUNT), `ccbill`,
+  `stripe`, `solana`, `paypal` (GATEWAYS), `admin`, `manual` (CHANNELS). No
+  `nmi` value — the gateway is only in a comment (`// Card payments via NMI gateway`).
+- `config.RailType` / `RailConfig.Type` (`config/config.go`): `nmi`, `ccbill`,
+  `stripe`, `solana` — the actual GATEWAY, plus `GetEffectiveType`/`GetRailType`
+  derivation glue.
+
+One `Rail` (gateway) enum + a provider-account layer collapses both. `RailType`,
+`GetEffectiveType`, `GetRailType`, and the `IsNMIBacked(name)` name-set
+(`NMIBackedRails` map) all disappear — `account.Rail == RailNMI` replaces them.
+
+## Full slop inventory (codebase sweep 2026-06-29) — scope = remove ALL of it
+
+Everything below exists ONLY because the rail-name is the account, not the
+gateway. Blast radius: ~110 `.go` files touch `models.Rail`.
+
+1. **Dual enum + derivation glue (~96 refs).** `models.Rail` (mixes
+   gateway/account/method values) vs `config.RailType` (gateway). Remove
+   `GetEffectiveType` (11), `GetRailType` (3), `RailType*` consts, `RailConfig.Type`
+   → one `Rail`.
+2. **NMI-backed name-set machinery (~65 refs)** in
+   `internal/modules/payments/rails/nmi.go`: `IsNMIBacked`, `NMIBackedRails`,
+   `InitNMIBackedRails`, `IsNMIRail`, `IsNMIBackedRail`, `GetNMIRails`,
+   `GetNMIBackedRailsList` — a runtime account-name→gateway map. All collapse to
+   `account.Rail == RailNMI`. Plus ~14 "NMI-backed rails" prose comments
+   (handlers, river jobs, intents) → "rail nmi".
+3. **Type-keyed scans over the account-keyed set:** `PrimaryRailByType`,
+   `RailKeysByType`, `GetCCBillRail`/`GetStripeRail`/`GetSolanaRail`, `GetNMIRails`
+   (config) → "the account(s) whose `Rail == X`".
+4. **`mobius` (an account) hardcoded to drive GATEWAY behavior:**
+   - `internal/merchants/secrets.go:183`, `credentials.go:72,104` (`case "mobius"`).
+   - `internal/modules/checkout/merchant_rail_secrets.go:88` + the vault twin
+     (`if provider == "mobius" { secretKey = "production_key" }`).
+   - `pkg/embedded/catalog_push.go:189` (`catalogPushUsesProvider(…, "mobius")`).
+   - `internal/db/models/product_catalog.go` (`SetNMIConfig` keys on `RailMobius`;
+     comments `Keys: "mobius"/"ccbill"/...`).
+   - **`pkg/service/catalog_provider_mobius.go`** — the catalog adapter is named
+     after the ACCOUNT (`mobiusAdapter`, `Name()=="mobius"`, registered `"mobius":`)
+     while the ccbill/solana/stripe adapters are named after the GATEWAY. Rename →
+     `catalog_provider_nmi.go` / `nmiAdapter` / `"nmi"`.
+5. **Secret names jam both layers:** `SecretNMIMobiusProductionKey` /
+   `…TokenizationKey` / `…TokenizationURL` / `…WebhookSigning`
+   (`internal/merchants/secrets.go`) = gateway+account in one identifier.
+6. **`provider` overloaded to hold a GATEWAY value** (#582 deferred this as Option
+   A; fix it here): `--provider=stripe|nmi` CLI, `admin_catalog_drift ?provider=`,
+   `webhookutil provider=="nmi"`, `secrets_status providerType=="nmi"`,
+   `secrets.go Provider:"nmi"`, `price.go provider != "nmi"`,
+   `pkg/embedded/providers.go generatedProviderName(providerType)`. Rename the
+   type-holding `provider`/`providerType` → `rail`; keep `provider_accounts` /
+   `provider_account_id` as the account concept.
+
+## Target model
+
+- `models.Rail` enum = GATEWAYS only: `RailNMI` (new), `RailStripe`, `RailCCBill`,
+  `RailSolana`, `RailPayPal`. Drop `RailMobius` (becomes a provider-account name on
+  `nmi`) and `RailAdmin`/`RailManual` (become a separate channel concept).
+- `config.RailSet` (keyed by account name, each entry `RailConfig` with `.Type`) →
+  a provider-account set keyed by account name, each carrying `Rail` (the gateway,
+  was `Type`) + credentials + `account_id`. `provider_accounts` (DB) is already
+  this layer — align it (`account.rail` column = gateway; `account_id` = native id).
+- `admin`/`manual` channels: model as a `Channel`/`Source` enum (off-rail
+  payment recording), not a rail. Decide the exact shape.
+
+## Hard parts / decisions
+
+- **`mobius` → `nmi` as the rail id** (the #582 "out of scope" item): existing
+  rows/config use rail=`mobius`. Data migration: rows with rail `mobius` get
+  rail `nmi` + provider-account `mobius`; same for any white-label account. Audit
+  all `models.Rail` string values (`"mobius"`) in DB columns, JSON, ClickHouse,
+  configs, and host apps.
+- **admin/manual**: are they a channel, a payment-method source, or kept as
+  pseudo-rails for now? Decide before touching `models.Rail`.
+- **Breaking surface**: `models.Rail` is referenced widely (post-#582 ~280 files);
+  the rail column values change for white-label rows; embedded/HTTP consumers that
+  send/read `rail: "mobius"` must adopt `rail: "nmi"` + account. Coordinate a
+  consumer bump (doujins/hentai0 use NMI/mobius).
+- Keep `provider_accounts`/`provider_account_id` naming (already correct as the
+  account layer) — this issue makes `models.Rail` agree with it.
+
+## Acceptance
+
+- One gateway `Rail` enum (no `RailType`/`GetEffectiveType`/`GetRailType`,
+  no `NMIBackedRails` name-set; grep clean).
+- `mobius`/`paykings` exist only as provider-account names on rail `nmi`; `nmi` is
+  a first-class rail value.
+- admin/manual no longer in the `Rail` enum.
+- Build + integration tests green; data migration for existing white-label rows.
+
+## References
+
+- Builds on #582 (rename done). Vocabulary researched against HyperSwitch
+  (connector + merchant connector account) and Spreedly (gateway_type +
+  gateway-instance); both use exactly this two-layer split and do not model the
+  ISO company separately (it is a label on the account).

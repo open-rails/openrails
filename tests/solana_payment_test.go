@@ -65,9 +65,11 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 		suite.Rails = make(config.RailSet)
 	}
 	suite.Rails["solana"] = &config.RailConfig{
-		Type:            config.RailTypeSolana,
-		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-		Tokens:          solanatokens.DefaultDevnetTokens(),
+		Type: config.RailTypeSolana,
+		Solana: &config.SolanaRailConfig{
+			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+			Tokens:          solanatokens.DefaultDevnetTokens(),
+		},
 		// RPCEndpoint and Network are derived from test_mode
 	}
 

@@ -20,8 +20,7 @@ func productBenefitFingerprint(product *models.Product) string {
 		Key         string `json:"key"`
 		Unit        string `json:"unit,omitempty"`
 		Amount      int64  `json:"amount"`
-		ExpiryDays  *int   `json:"expiry_days,omitempty"`
-		ExpiresDays *int   `json:"expires_days,omitempty"`
+		ExpiryHours *int   `json:"expiry_hours,omitempty"`
 		Cadence     string `json:"cadence,omitempty"`
 	}
 	payload := struct {
@@ -46,8 +45,7 @@ func productBenefitFingerprint(product *models.Product) string {
 			Key:         key,
 			Unit:        c.Unit,
 			Amount:      c.Amount,
-			ExpiryDays:  c.ExpiryDays,
-			ExpiresDays: c.ExpiresDays,
+			ExpiryHours: c.ExpiryHours,
 			Cadence:     string(c.Cadence),
 		})
 	}

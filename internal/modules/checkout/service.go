@@ -966,8 +966,8 @@ func (s *CheckoutService) grantImmediateNMISubscriptionEntitlements(ctx context.
 }
 
 func nmiSubscriptionPeriodEnd(start time.Time, price *models.Price) time.Time {
-	if cd := price.RecurringCycleDays(); cd != nil {
-		return start.Add(time.Duration(*cd) * 24 * time.Hour)
+	if ch := price.RecurringCycleHours(); ch != nil {
+		return start.Add(time.Duration(*ch) * time.Hour)
 	}
 	return start.Add(30 * 24 * time.Hour)
 }
@@ -1210,9 +1210,9 @@ func stripeCheckoutTrialEnd(price *models.Price, coverage *CoverageInfo, now tim
 		return coverage.EndDate.Unix()
 	}
 	if price != nil {
-		trialAmount, trialDays, ok := price.GetTrial()
-		if ok && trialAmount == 0 && trialDays > 0 {
-			return now.UTC().AddDate(0, 0, trialDays).Unix()
+		trialAmount, trialHours, ok := price.GetTrial()
+		if ok && trialAmount == 0 && trialHours > 0 {
+			return now.UTC().Add(time.Duration(trialHours) * time.Hour).Unix()
 		}
 	}
 	return 0
@@ -1528,7 +1528,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.Stripe.SecretKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := stripeapi.Client(s.Config, 0)
@@ -1683,15 +1683,15 @@ func (s *CheckoutService) processUpgrade(
 	// a FRESH full period, then rebill the full new price at now + cycle. The
 	// billing cycle comes from the NEW price (the period being started), with a
 	// fallback to the old price's cycle for legacy prices that omit it.
-	billingCycleDays := newPrice.RecurringCycleDays()
-	if billingCycleDays == nil || *billingCycleDays <= 0 {
-		billingCycleDays = oldPrice.RecurringCycleDays()
+	billingCycleHours := newPrice.RecurringCycleHours()
+	if billingCycleHours == nil || *billingCycleHours <= 0 {
+		billingCycleHours = oldPrice.RecurringCycleHours()
 	}
-	prorationAmount, cycleDays := CalculateModelBUpgradeCharge(
+	prorationAmount, cycleHours := CalculateModelBUpgradeCharge(
 		oldPrice.Amount,
 		newPrice.Amount,
 		existingSub.CurrentPeriodEndsAt,
-		billingCycleDays,
+		billingCycleHours,
 		now,
 	)
 
@@ -1699,7 +1699,7 @@ func (s *CheckoutService) processUpgrade(
 		"user_id":          user.ID,
 		"old_price":        oldPrice.Amount,
 		"new_price":        newPrice.Amount,
-		"cycle_days":       cycleDays,
+		"cycle_hours":      cycleHours,
 		"proration_amount": prorationAmount, // Model B first charge (new_full - old_unused)
 		"billing_model":    "B",
 	}).Info("calculating Model-B upgrade first charge")
@@ -1727,7 +1727,7 @@ func (s *CheckoutService) processUpgrade(
 	// NMI subscription's first scheduled rebill must land at the NEW period end
 	// (now + cycle), not the old period end.
 	newPeriodStart := now
-	newPeriodEnd := now.AddDate(0, 0, cycleDays)
+	newPeriodEnd := now.Add(time.Duration(cycleHours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
 
 	client, err := s.resolveNMIClient(ctx, provider)
@@ -1895,11 +1895,11 @@ func (s *CheckoutService) processUpgrade(
 
 	// Step 4: Update entitlements immediately (grant new tier entitlements)
 	if s.EntitlementService != nil && newProduct.EntitlementsSpec != nil {
-		for entitlementName, durationDays := range newProduct.EntitlementsSpec {
+		for entitlementName, durationHours := range newProduct.EntitlementsSpec {
 			notBefore := now
 			var params entitlements.PushNewEntitlementParams
-			if durationDays != nil && *durationDays > 0 {
-				d := time.Duration(*durationDays) * 24 * time.Hour
+			if durationHours != nil && *durationHours > 0 {
+				d := time.Duration(*durationHours) * time.Hour
 				params = entitlements.PushNewEntitlementParams{
 					UserID:      user.ID,
 					Entitlement: entitlementName,
@@ -2120,31 +2120,31 @@ func CalculateModelBUpgradeCharge(
 	oldFull int64,
 	newFull int64,
 	periodEndsAt *time.Time,
-	billingCycleDays *int,
+	billingCycleHours *int,
 	now time.Time,
-) (firstChargeCents int64, cycleDays int) {
-	// Default to a 30-day cycle if not specified.
-	cycleDays = 30
-	if billingCycleDays != nil && *billingCycleDays > 0 {
-		cycleDays = *billingCycleDays
+) (firstChargeCents int64, cycleHours int) {
+	// Default to a 30-day (720h) cycle if not specified.
+	cycleHours = 30 * 24
+	if billingCycleHours != nil && *billingCycleHours > 0 {
+		cycleHours = *billingCycleHours
 	}
 
-	// Whole days remaining in the current paid period.
-	daysRemaining := 0
+	// Whole hours remaining in the current paid period.
+	hoursRemaining := 0
 	if periodEndsAt != nil && periodEndsAt.After(now) {
-		daysRemaining = int(periodEndsAt.Sub(now).Hours() / 24)
-		if daysRemaining < 0 {
-			daysRemaining = 0
+		hoursRemaining = int(periodEndsAt.Sub(now).Hours())
+		if hoursRemaining < 0 {
+			hoursRemaining = 0
 		}
 	}
 	// Never credit more than a full cycle of unused time.
-	if daysRemaining > cycleDays {
-		daysRemaining = cycleDays
+	if hoursRemaining > cycleHours {
+		hoursRemaining = cycleHours
 	}
 
 	// Credit for the unused portion of the OLD plan (integer math to avoid
 	// floating-point drift on cent amounts).
-	oldUnused := (oldFull * int64(daysRemaining)) / int64(cycleDays)
+	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
 
 	firstChargeCents = newFull - oldUnused
 	if firstChargeCents < 0 {
@@ -2152,62 +2152,7 @@ func CalculateModelBUpgradeCharge(
 		// only reachable with bad inputs (e.g. a "downgrade" routed here).
 		firstChargeCents = 0
 	}
-	return firstChargeCents, cycleDays
-}
-
-// CalculateProration calculates the prorated amount for a tier change.
-//
-// NOTE (#268): Model B (reset-period) is now the UNIVERSAL policy for
-// UPGRADES — see CalculateModelBUpgradeCharge, which is what the NMI and
-// Stripe upgrade paths use to charge `newFull - oldUnused` now and reset the
-// billing period to [now, now+cycle]. This function still implements the older
-// "Model A" prorated-DIFFERENCE math and is retained for reference/compat; do
-// not use it to drive new upgrade charges. DOWNGRADES remain deferred to the
-// end of the current period (see processDowngrade / processTierChangeStripe)
-// and are unchanged.
-//
-// Returns: prorationAmount (in cents), daysRemaining, cycleDays
-func (s *CheckoutService) CalculateProration(
-	oldPriceAmount int64,
-	newPriceAmount int64,
-	periodEndsAt *time.Time,
-	billingCycleDays *int,
-	now time.Time,
-) (int64, int, int) {
-	// Default to 30-day cycle if not specified
-	cycleDays := 30
-	if billingCycleDays != nil && *billingCycleDays > 0 {
-		cycleDays = *billingCycleDays
-	}
-
-	// Calculate days remaining in current period.
-	//
-	// Rounding policy: round UP to the nearest whole day. Any partial day
-	// remaining counts as a full day of proration charge, so an upgrade with even
-	// one hour left in the period is charged for one day rather than truncating to
-	// zero. Truncation here previously allowed effectively free upgrades near the
-	// period boundary. Computed in seconds to avoid float rounding error.
-	daysRemaining := 0
-	if periodEndsAt != nil && periodEndsAt.After(now) {
-		const secondsPerDay = int64(24 * 60 * 60)
-		remainingSeconds := int64(periodEndsAt.Sub(now) / time.Second)
-		if remainingSeconds > 0 {
-			daysRemaining = int((remainingSeconds + secondsPerDay - 1) / secondsPerDay)
-		}
-	}
-
-	// Proration = (newPrice - oldPrice) * (daysRemaining / cycleDays)
-	priceDiff := newPriceAmount - oldPriceAmount
-	if priceDiff <= 0 {
-		// This is a downgrade, not an upgrade - no proration charge
-		return 0, daysRemaining, cycleDays
-	}
-
-	// Calculate prorated amount
-	// Use integer math to avoid floating point issues: (diff * daysRemaining) / cycleDays
-	prorationAmount := (priceDiff * int64(daysRemaining)) / int64(cycleDays)
-
-	return prorationAmount, daysRemaining, cycleDays
+	return firstChargeCents, cycleHours
 }
 
 // cancelNMISubscription cancels a subscription at NMI
@@ -2411,8 +2356,8 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	firstCharge, cycleDays := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleDays(), now)
-	nextDate := now.AddDate(0, 0, cycleDays)
+	firstCharge, cycleHours := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	nextDate := now.Add(time.Duration(cycleHours) * time.Hour)
 	resp.Action = "upgrade"
 	resp.AmountDueNow = firstCharge
 	resp.Effective = "now"
@@ -2573,11 +2518,11 @@ func (s *CheckoutService) processTierChangeStripe(
 	// the fresh period [now, now+cycle] locally. Stripe webhooks remain the
 	// source of truth and will reconcile the exact period boundaries.
 	stripeNow := s.now()
-	stripeCycleDays := 30
-	if cd := newPrice.RecurringCycleDays(); cd != nil {
-		stripeCycleDays = *cd
+	stripeCycleHours := 30 * 24
+	if ch := newPrice.RecurringCycleHours(); ch != nil {
+		stripeCycleHours = *ch
 	}
-	stripePeriodEnd := stripeNow.AddDate(0, 0, stripeCycleDays)
+	stripePeriodEnd := stripeNow.Add(time.Duration(stripeCycleHours) * time.Hour)
 
 	// Capture the OLD price + period BEFORE the local reset below overwrites them,
 	// so the success-toast estimate matches the preview's now-amount. Stripe
@@ -2587,7 +2532,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		oldFull = existingSub.Price.Amount
 	}
 	oldPeriodEnd := existingSub.CurrentPeriodEndsAt
-	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.RecurringCycleDays(), stripeNow)
+	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.RecurringCycleHours(), stripeNow)
 
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID

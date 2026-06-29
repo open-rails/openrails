@@ -49,17 +49,17 @@ func (s *Service) GetProduct(ctx context.Context, productID uuid.UUID) (*Catalog
 	return productToCatalogProduct(p), nil
 }
 
-// GetProductBySlug returns a product by its slug.
-func (s *Service) GetProductBySlug(ctx context.Context, slug string) (*CatalogProduct, error) {
+// GetProductByKey returns a product by its key.
+func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
 	if err != nil {
 		return nil, err
 	}
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
-		return nil, fmt.Errorf("slug required")
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, fmt.Errorf("key required")
 	}
-	p, err := products.GetBySlug(ctx, slug)
+	p, err := products.GetByKey(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +625,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 // terms are baked into its content key, so a change is a different price minted
 // upstream (create-new + archive-old), never an in-place re-mint+transfer.
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
-	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.RecurringCycleDays())
+	priceContentKey := openRailsPriceContentKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays())
 	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	unitAmountCents, err := moneyutil.MicrosToCentsExact(local.Amount)
 	if err != nil {
@@ -636,13 +636,13 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 		UnitAmount:       unitAmountCents,
 		Currency:         local.Currency,
 		BillingCycleDays: local.RecurringCycleDays(),
-		LookupKey:        internalStripeLookupKey(prod.Slug, local.Currency, local.Amount, local.RecurringCycleDays()),
+		LookupKey:        internalStripeLookupKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays()),
 		// Content key is the idempotency key: replaying recreate for the same
 		// price terms returns the same Stripe object rather than duplicating.
 		IdempotencyKey: "openrails-price-" + priceContentKey,
 		Metadata: map[string]string{
 			catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
-			catalog.StripeMetadataOpenRailsProductKey: strings.TrimSpace(prod.Slug),
+			catalog.StripeMetadataOpenRailsProductKey: strings.TrimSpace(prod.Key),
 			// Informational only — not used for matching.
 			catalog.StripeMetadataOpenRailsPriceID:   priceID.String(),
 			catalog.StripeMetadataOpenRailsProductID: prod.ID.String(),

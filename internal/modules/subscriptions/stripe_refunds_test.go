@@ -38,7 +38,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty secret key",
 			rails: config.RailSet{
-				"stripe": {Type: config.RailTypeStripe, SecretKey: ""},
+				"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: ""}},
 			},
 			params:    RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe secret key is not configured",
@@ -46,7 +46,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty charge ID",
 			rails: config.RailSet{
-				"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
+				"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 			},
 			params:    RefundParams{ChargeID: ""},
 			wantError: "charge_id or payment_intent_id is required",
@@ -84,7 +84,7 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty refund ID",
 			rails: config.RailSet{
-				"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
+				"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 			},
 			refundID:  "",
 			wantError: "refund_id is required",

@@ -275,7 +275,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeLimited}}}
 	priceID := uuid.New()
-	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Slug: "premium"}, CreatePriceRequest{
+	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
 		Providers:  []string{"stripe", "mobius"},
 		UnitAmount: 23_000_000,
 		Currency:   "usd",
@@ -320,7 +320,7 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 	a := newMobiusAdapterWithServer(t, server.URL)
 	cycle := 30
 	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-23000000-30"}, autoCreateContext{
-		ProductSlug: "premium", UnitAmount: 23_000_000, Currency: "usd", BillingCycleDays: &cycle,
+		ProductKey: "premium", UnitAmount: 23_000_000, Currency: "usd", BillingCycleDays: &cycle,
 		RemoteWritesDisabled: true,
 	})
 	if !errors.Is(err, errRemoteWritesDisabled) {

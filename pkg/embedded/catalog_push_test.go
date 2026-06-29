@@ -191,7 +191,7 @@ catalogs:
 	if targets[0].Merchant != "doujins" || targets[1].Merchant != "cozy-art" {
 		t.Fatalf("merchants = %q, %q", targets[0].Merchant, targets[1].Merchant)
 	}
-	if targets[0].Manifest.TierGroups[0].Slug != "smoke" {
-		t.Fatalf("tier group = %q, want smoke", targets[0].Manifest.TierGroups[0].Slug)
+	if targets[0].Manifest.TierGroups[0].Key != "smoke" {
+		t.Fatalf("tier group = %q, want smoke", targets[0].Manifest.TierGroups[0].Key)
 	}
 }

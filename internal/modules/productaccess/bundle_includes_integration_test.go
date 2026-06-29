@@ -52,7 +52,7 @@ func (e *bundleEnv) product(t *testing.T) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, err := e.pool.Exec(e.ctx,
-		`INSERT INTO openrails.products (id, slug, display_name, merchant_id, status)
+		`INSERT INTO openrails.products (id, key, display_name, merchant_id, status)
 		 VALUES ($1, $2, $3, $4, 'active')`,
 		id, "bundle-test-"+id.String(), "Bundle Test Product", e.merchantID)
 	require.NoError(t, err)

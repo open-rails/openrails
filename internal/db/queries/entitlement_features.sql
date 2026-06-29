@@ -39,12 +39,12 @@ WHERE ef.merchant_id = $1
 
 -- name: CreateProductEntitlementFeature :one
 INSERT INTO openrails.product_entitlement_features (
-    id, merchant_id, product_id, entitlement_feature_id, duration_days,
+    id, merchant_id, product_id, entitlement_feature_id, duration_hours,
     metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
     sqlc.arg(merchant_id)::uuid,
-    $1, $2, sqlc.narg(duration_days), sqlc.narg(metadata),
+    $1, $2, sqlc.narg(duration_hours), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )

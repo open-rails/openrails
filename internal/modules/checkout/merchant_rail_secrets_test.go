@@ -220,14 +220,16 @@ func checkoutRailConfig(testMode bool) *config.Config {
 func checkoutRailSet(mobiusKey string) config.RailSet {
 	return config.RailSet{
 		"mobius": {
-			Type:        config.RailTypeNMI,
-			SecurityKey: mobiusKey,
+			Type: config.RailTypeNMI,
+			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},
 		},
 		"ccbill": {
-			Type:         config.RailTypeCCBill,
-			ClientAccNum: "static-acc",
-			ClientSubAcc: "static-sub",
-			Salt:         "static-salt",
+			Type: config.RailTypeCCBill,
+			CCBill: &config.CCBillRailConfig{
+				ClientAccNum: "static-acc",
+				ClientSubAcc: "static-sub",
+				Salt:         "static-salt",
+			},
 		},
 	}
 }

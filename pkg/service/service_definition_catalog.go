@@ -25,7 +25,7 @@ const (
 type CreditGrantSpec struct {
 	Unit        string             `json:"unit,omitempty"`
 	Amount      int64              `json:"amount"`
-	ExpiresDays *int               `json:"expires_days,omitempty"`
+	ExpiryHours *int               `json:"expiry_hours,omitempty"`
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"`
 }
 
@@ -41,7 +41,7 @@ func toModelCreditsSpec(in CreditsSpec) models.CreditsSpec {
 		out[k] = models.CreditGrantSpec{
 			Unit:        v.Unit,
 			Amount:      v.Amount,
-			ExpiresDays: v.ExpiresDays,
+			ExpiryHours: v.ExpiryHours,
 			Cadence:     cadence,
 		}
 	}
@@ -104,7 +104,7 @@ type DriftField struct {
 // verify/reconcile, no product-level reconcile route.
 type CatalogProduct struct {
 	ID               uuid.UUID            `json:"id"`
-	Slug             string               `json:"slug"`
+	Key              string               `json:"key"`
 	DisplayName      string               `json:"display_name"`
 	Description      string               `json:"description"`
 	EntitlementsSpec map[string]*int      `json:"entitlements_spec,omitempty"`
@@ -117,7 +117,7 @@ type CatalogProduct struct {
 }
 
 type CreateProductRequest struct {
-	Slug             string          `json:"slug"`
+	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
@@ -135,11 +135,11 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if err != nil {
 		return nil, err
 	}
-	req.Slug = strings.TrimSpace(req.Slug)
+	req.Key = strings.TrimSpace(req.Key)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	req.Description = strings.TrimSpace(req.Description)
-	if req.Slug == "" {
-		return nil, fmt.Errorf("slug required")
+	if req.Key == "" {
+		return nil, fmt.Errorf("key required")
 	}
 	if req.DisplayName == "" {
 		return nil, fmt.Errorf("display_name required")
@@ -160,7 +160,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	p := &models.Product{
 		ID:               uuidutil.NewV7(),
 		MerchantID:       tid.UUID(),
-		Slug:             req.Slug,
+		Key:              req.Key,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
@@ -314,14 +314,14 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 			credits[k] = CreditGrantSpec{
 				Unit:        v.Unit,
 				Amount:      v.Amount,
-				ExpiresDays: v.ExpiresDays,
+				ExpiryHours: v.ExpiryHours,
 				Cadence:     CreditGrantCadence(v.Cadence),
 			}
 		}
 	}
 	return &CatalogProduct{
 		ID:               p.ID,
-		Slug:             p.Slug,
+		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
@@ -337,17 +337,17 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
 type CatalogPrice struct {
-	ID                uuid.UUID            `json:"id"`
-	ProductID         uuid.UUID            `json:"product_id"`
-	Status            models.CatalogStatus `json:"status"`
-	UnitAmount        int64                `json:"unit_amount"`
-	Currency          string               `json:"currency"`
-	AccessDurationHours *int               `json:"access_duration_hours,omitempty"`
-	AutoRenew          bool                `json:"auto_renew"`
-	TrialUnitAmount    *int64              `json:"trial_unit_amount,omitempty"`
-	TrialDurationHours *int                `json:"trial_duration_hours,omitempty"`
-	CreatedAt          time.Time           `json:"created_at"`
-	UpdatedAt          time.Time           `json:"updated_at"`
+	ID                  uuid.UUID            `json:"id"`
+	ProductID           uuid.UUID            `json:"product_id"`
+	Status              models.CatalogStatus `json:"status"`
+	UnitAmount          int64                `json:"unit_amount"`
+	Currency            string               `json:"currency"`
+	AccessDurationHours *int                 `json:"access_duration_hours,omitempty"`
+	AutoRenew           bool                 `json:"auto_renew"`
+	TrialUnitAmount     *int64               `json:"trial_unit_amount,omitempty"`
+	TrialDurationHours  *int                 `json:"trial_duration_hours,omitempty"`
+	CreatedAt           time.Time            `json:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at"`
 
 	// Providers carries the typed per-provider attachment state for every
 	// rail this price is linked to. Always populated when at least one
@@ -375,9 +375,9 @@ type CatalogPrice struct {
 //     what to do.
 type CreatePriceRequest struct {
 	ProductID uuid.UUID `json:"product_id"`
-	// A price's identity IS its financial substance — the product slug plus
+	// A price's identity IS its financial substance — the product key plus
 	// these immutable money terms. There is no price slug: the content-based
-	// provider keys are derived from (product_slug, currency, unit_amount,
+	// provider keys are derived from (product_key, currency, unit_amount,
 	// billing_cycle_days), so they are stable across DB rebuilds and a different
 	// amount is, by construction, a different price.
 	UnitAmount int64  `json:"unit_amount"`
@@ -509,19 +509,19 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 	now := time.Now().UTC()
 	price := &models.Price{
-		ID:                priceID,
-		MerchantID:        tid.UUID(),
-		ProductID:         req.ProductID,
-		Status:            status,
-		Amount:            req.UnitAmount,
-		Currency:          req.Currency,
+		ID:                  priceID,
+		MerchantID:          tid.UUID(),
+		ProductID:           req.ProductID,
+		Status:              status,
+		Amount:              req.UnitAmount,
+		Currency:            req.Currency,
 		AccessDurationHours: req.AccessDurationHours,
-		AutoRenew:          req.AutoRenew,
-		TrialUnitAmount:    req.TrialUnitAmount,
-		TrialDurationHours: req.TrialDurationHours,
-		Rails:              rails,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		AutoRenew:           req.AutoRenew,
+		TrialUnitAmount:     req.TrialUnitAmount,
+		TrialDurationHours:  req.TrialDurationHours,
+		Rails:               rails,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if err := prices.Create(ctx, price); err != nil {
 		return nil, err
@@ -683,17 +683,17 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 // values.
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
-		ID:                p.ID,
-		ProductID:         p.ProductID,
-		Status:            p.Status,
-		UnitAmount:        p.Amount,
-		Currency:          p.Currency,
+		ID:                  p.ID,
+		ProductID:           p.ProductID,
+		Status:              p.Status,
+		UnitAmount:          p.Amount,
+		Currency:            p.Currency,
 		AccessDurationHours: p.AccessDurationHours,
-		AutoRenew:          p.AutoRenew,
-		TrialUnitAmount:    p.TrialUnitAmount,
-		TrialDurationHours: p.TrialDurationHours,
-		CreatedAt:          p.CreatedAt,
-		UpdatedAt:          p.UpdatedAt,
+		AutoRenew:           p.AutoRenew,
+		TrialUnitAmount:     p.TrialUnitAmount,
+		TrialDurationHours:  p.TrialDurationHours,
+		CreatedAt:           p.CreatedAt,
+		UpdatedAt:           p.UpdatedAt,
 	}
 	if len(p.Rails) == 0 {
 		return cp

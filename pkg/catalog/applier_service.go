@@ -52,14 +52,14 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 		for _, product := range group.Products {
 			if len(product.UsageLimits) > 0 {
 				req.ProductLimits = append(req.ProductLimits, billingservice.CatalogProductUsageLimitsSpec{
-					ProductSlug: product.Key,
-					Keys:        append([]string(nil), product.UsageLimits...),
+					ProductKey: product.Key,
+					Keys:       append([]string(nil), product.UsageLimits...),
 				})
 			}
 			if len(product.Includes) > 0 {
 				req.ProductIncludes = append(req.ProductIncludes, billingservice.CatalogProductIncludesSpec{
-					ProductSlug:   product.Key,
-					IncludedSlugs: append([]string(nil), product.Includes...),
+					ProductKey:   product.Key,
+					IncludedKeys: append([]string(nil), product.Includes...),
 				})
 			}
 			for _, price := range product.Prices {
@@ -80,14 +80,14 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 					perSeconds = &seconds
 				}
 				req.MeteredPrices = append(req.MeteredPrices, billingservice.CatalogMeteredPriceSpec{
-					ProductSlug:      product.Key,
-					UnitAmount:       price.UnitAmount,
-					Currency:         price.Currency,
-					BillingCycleDays: cycle,
-					MeterKey:         price.Metered.Meter,
-					RateMicros:       price.Metered.Rate,
-					PerUnits:         price.Metered.PerUnits,
-					PerSeconds:       perSeconds,
+					ProductKey:          product.Key,
+					UnitAmount:          price.UnitAmount,
+					Currency:            price.Currency,
+					AccessDurationHours: cycle,
+					MeterKey:            price.Metered.Meter,
+					RateMicros:          price.Metered.Rate,
+					PerUnits:            price.Metered.PerUnits,
+					PerSeconds:          perSeconds,
 				})
 			}
 		}

@@ -57,8 +57,8 @@ func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("products cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
-func (s *ProductService) GetBySlug(ctx context.Context, slug string) (*models.Product, error) {
-	return s.repo.GetBySlug(ctx, slug)
+func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Product, error) {
+	return s.repo.GetByKey(ctx, key)
 }
 
 // Deactivate archives a product (status=archived) so it won't appear in product

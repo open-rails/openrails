@@ -23,10 +23,10 @@ type ExtrasIndex struct {
 	// StripeProductIDs / StripePriceIDs: remote ids some local price links.
 	StripeProductIDs map[string]struct{}
 	StripePriceIDs   map[string]struct{}
-	// ProductSlugs: local product content keys (= slugs).
-	ProductSlugs map[string]struct{}
+	// ProductKeys: local product content keys (= slugs).
+	ProductKeys map[string]struct{}
 	// PriceContentKeys: local price content keys
-	// ("<product_slug>.<currency>.<unit_amount>.<cycle>").
+	// ("<product_key>.<currency>.<unit_amount>.<cycle>").
 	PriceContentKeys map[string]struct{}
 }
 
@@ -35,18 +35,18 @@ func BuildExtrasIndex(products []*models.Product, prices []*models.Price) Extras
 	ix := ExtrasIndex{
 		StripeProductIDs: make(map[string]struct{}),
 		StripePriceIDs:   make(map[string]struct{}),
-		ProductSlugs:     make(map[string]struct{}, len(products)),
+		ProductKeys:      make(map[string]struct{}, len(products)),
 		PriceContentKeys: make(map[string]struct{}, len(prices)),
 	}
-	slugByProductID := make(map[string]string, len(products))
+	keyByProductID := make(map[string]string, len(products))
 	for _, p := range products {
-		if slug := strings.TrimSpace(p.Slug); slug != "" {
-			ix.ProductSlugs[slug] = struct{}{}
-			slugByProductID[p.ID.String()] = slug
+		if key := strings.TrimSpace(p.Key); key != "" {
+			ix.ProductKeys[key] = struct{}{}
+			keyByProductID[p.ID.String()] = key
 		}
 	}
 	for _, pr := range prices {
-		if slug := slugByProductID[pr.ProductID.String()]; slug != "" {
+		if slug := keyByProductID[pr.ProductID.String()]; slug != "" {
 			ix.PriceContentKeys[OpenRailsPriceContentKey(slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())] = struct{}{}
 		}
 		if stripe := pr.Rails["stripe"]; stripe != nil {
@@ -70,7 +70,7 @@ func (ix ExtrasIndex) StripeProductExtra(sp StripeProduct) (isExtra bool, produc
 		return false, productKey
 	}
 	if productKey != "" {
-		if _, ok := ix.ProductSlugs[productKey]; ok {
+		if _, ok := ix.ProductKeys[productKey]; ok {
 			return false, productKey
 		}
 	}
@@ -94,7 +94,7 @@ func (ix ExtrasIndex) StripePriceExtra(sp StripePrice) (isExtra bool, contentKey
 }
 
 // RemoteStripePriceContentKey extracts the OpenRails financial content key
-// ("<product_slug>.<currency>.<unit_amount>.<cycle>") from a Stripe Price. It
+// ("<product_key>.<currency>.<unit_amount>.<cycle>") from a Stripe Price. It
 // prefers the openrails_price_key metadata, falling back to deriving it from
 // the lookup_key ("openrails.<content_key>"). "" = no marker (a Stripe-native
 // price OpenRails doesn't own).
@@ -111,15 +111,15 @@ func RemoteStripePriceContentKey(sp StripePrice) string {
 
 // OpenRailsPriceContentKey is the content key derived from a price's financial
 // substance — product slug + immutable money terms. Format:
-// "<product_slug>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
+// "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
 // billing_cycle_days or "onetime". Canonical here; pkg/service delegates.
-func OpenRailsPriceContentKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+func OpenRailsPriceContentKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	cycle := "onetime"
 	if billingCycleDays != nil && *billingCycleDays > 0 {
 		cycle = strconv.Itoa(*billingCycleDays)
 	}
 	return strings.Join([]string{
-		strings.TrimSpace(productSlug),
+		strings.TrimSpace(productKey),
 		strings.ToLower(strings.TrimSpace(currency)),
 		strconv.FormatInt(unitAmount, 10),
 		cycle,

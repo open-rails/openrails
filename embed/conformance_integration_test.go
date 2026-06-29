@@ -176,7 +176,7 @@ type obsAccount struct {
 type obsProductAccess struct {
 	ProductMatches bool
 	CustomerIDSet  bool
-	ProductSlugSet bool
+	ProductKeySet  bool
 	SourceType     string
 	Status         string
 	HasPaymentID   bool
@@ -531,7 +531,7 @@ func observeProductAccess(grants []openrails.ProductAccessGrant, productID uuid.
 		out = append(out, obsProductAccess{
 			ProductMatches: g.ProductID == productID.String(),
 			CustomerIDSet:  g.CustomerID != "",
-			ProductSlugSet: g.ProductSlug != "",
+			ProductKeySet:  g.ProductKey != "",
 			SourceType:     g.SourceType,
 			Status:         g.Status,
 			HasPaymentID:   g.PaymentID != nil,
@@ -576,8 +576,8 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 		require.NoError(t, err)
 		productID := uuid.New()
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.products (id, merchant_id, slug, display_name)
-			VALUES ($1, $2, $3, $4)`,
+				INSERT INTO openrails.products (id, merchant_id, key, display_name)
+				VALUES ($1, $2, $3, $4)`,
 			productID, dbtest.TestMerchantID.UUID(), "conf-product-"+side+"-"+productID.String(), "Conformance Product "+side)
 		require.NoError(t, err)
 		_, _, err = productAccessSvc.GrantProductAccess(dbtest.WithTestMerchant(ctx), productaccess.GrantParams{

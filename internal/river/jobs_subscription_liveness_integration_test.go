@@ -67,10 +67,10 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 		recurringXML:   `<?xml version="1.0"?><nm_response></nm_response>`,
 	}
 
-	billingDays32 := int32(30)
+	billingHours32 := int32(30 * 24)
 	description := "Liveness test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
-		ID: f.productID, Slug: "live_product_" + uuid.New().String(), DisplayName: "Liveness Product",
+		ID: f.productID, Key: "live_product_" + uuid.New().String(), DisplayName: "Liveness Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive),
 		EntitlementsSpec: []byte(`{"premium": null}`),
@@ -80,7 +80,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: f.priceID, ProductID: f.productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Status:     string(models.CatalogStatusActive), AccessDurationHours: &billingHours32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

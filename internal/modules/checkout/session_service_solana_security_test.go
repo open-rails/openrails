@@ -307,13 +307,15 @@ func testSolanaCheckoutConfig() *config.Config {
 func testSolanaCheckoutRails() config.RailSet {
 	return config.RailSet{
 		"solana": {
-			Type:            config.RailTypeSolana,
-			Network:         "devnet",
-			RecipientWallet: testRecipientWallet,
-			Tokens: map[string]config.TokenConfig{
-				"USDC": {
-					Mint:     devnetUSDCMint,
-					Decimals: 6,
+			Type: config.RailTypeSolana,
+			Solana: &config.SolanaRailConfig{
+				Network:         "devnet",
+				RecipientWallet: testRecipientWallet,
+				Tokens: map[string]config.TokenConfig{
+					"USDC": {
+						Mint:     devnetUSDCMint,
+						Decimals: 6,
+					},
 				},
 			},
 		},

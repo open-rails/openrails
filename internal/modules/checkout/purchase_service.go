@@ -446,14 +446,14 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		if existingPayment.SubscriptionID != nil {
 			sourceID = *existingPayment.SubscriptionID
 		}
-		if err := s.grantProductEntitlements(ctx, req.UserID, entitlementsSpec, sourceID, coverage, existingPayment.SubscriptionID != nil, price.AccessDurationDays, true); err != nil {
+		if err := s.grantProductEntitlements(ctx, req.UserID, entitlementsSpec, sourceID, coverage, existingPayment.SubscriptionID != nil, price.AccessDurationHours, true); err != nil {
 			return nil, fmt.Errorf("failed to repair entitlements for existing payment: %w", err)
 		}
 
 		// Idempotently (re)record the product access grant for one-time purchases
 		// (issue #250) so a replayed webhook/poll repairs a missing grant the same
 		// way it repairs entitlements.
-		s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.AutoRenew, price.AccessDurationDays)
+		s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours)
 
 		// Re-deposit the purchase credit/currency grants (#472); idempotent per
 		// (payment, label) so re-delivery repairs without double-granting.
@@ -481,7 +481,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	}
 
 	var grantedEntitlements []string
-	if err := s.grantProductEntitlements(ctx, req.UserID, product.EntitlementsSpec, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", price.AccessDurationDays, false); err != nil {
+	if err := s.grantProductEntitlements(ctx, req.UserID, product.EntitlementsSpec, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", price.AccessDurationHours, false); err != nil {
 		log.WithError(err).WithField("payment_id", sourceID).Error("failed to grant entitlements after payment")
 		return nil, fmt.Errorf("failed to grant entitlements after payment: %w", err)
 	} else if product.EntitlementsSpec != nil {
@@ -493,7 +493,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	// Durable product ownership/access grant (issue #250) for one-time product
 	// purchases — additive to the feature entitlements granted above. Keyed on the
 	// payment id so it is idempotent; skipped for subscription purchases.
-	s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.AutoRenew, price.AccessDurationDays)
+	s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours)
 
 	// Credit/currency balance grants (#472) — the other half of "what you get"
 	// alongside entitlements. Keyed on payment id for idempotency; skipped for
@@ -519,10 +519,10 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 // feature entitlements. It is idempotent: the grant is keyed on the payment id,
 // so re-processing the same purchase is a no-op. Skipped for auto-renewing /
 // subscription purchases — those are access-by-subscription, not ownership.
-// The access window comes from the price's access_duration_days (#622): a finite
-// value sets ends_at (rental); nil = durable ownership. A nil ProductAccessService
-// makes this a no-op so existing call sites/tests are unaffected.
-func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, autoRenew bool, accessDurationDays *int) {
+// The access window comes from the price's access_duration_hours (#622): a finite
+// value sets ends_at (rental, possibly sub-day); nil = durable ownership. A nil
+// ProductAccessService makes this a no-op so existing call sites/tests are unaffected.
+func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, autoRenew bool, accessDurationHours *int) {
 	if s.ProductAccessService == nil {
 		return
 	}
@@ -530,8 +530,8 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 		return
 	}
 	var endsAt *time.Time
-	if accessDurationDays != nil && *accessDurationDays > 0 {
-		e := s.now().Add(time.Duration(*accessDurationDays) * 24 * time.Hour)
+	if accessDurationHours != nil && *accessDurationHours > 0 {
+		e := s.now().Add(time.Duration(*accessDurationHours) * time.Hour)
 		endsAt = &e
 	}
 	pid := paymentID
@@ -581,32 +581,33 @@ func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, user
 }
 
 // grantProductEntitlements grants the product's entitlements for the access
-// window the price bought (#622). The window is the price's access_duration_days
+// window the price bought (#622). The window is the price's access_duration_hours
 // (the same window that drives product_access ends_at — G3): a finite value sets
 // a finite entitlement end_at; nil = indefinite. Re-purchase stacks: a new window
 // starts at the existing coverage end.
-func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationDays *int, skipExistingSource bool) error {
+func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationHours *int, skipExistingSource bool) error {
 	if s.EntitlementService == nil || entitlementsSpec == nil {
 		return nil
 	}
 
 	now := s.now()
-	for entitlementName, entDurationDays := range entitlementsSpec {
+	for entitlementName, entDurationHours := range entitlementsSpec {
 		startAt := now
 		if coverage.HasCoverage && coverage.EndDate != nil {
 			startAt = *coverage.EndDate
 		}
 
-		// The price's access window is authoritative (#622). When the price is
-		// indefinite, a product's per-entitlement duration still scopes that
-		// entitlement to a shorter window (the existing product-duration feature).
-		windowDays := accessDurationDays
-		if windowDays == nil {
-			windowDays = entDurationDays
-		}
+		// The price's access window is authoritative (#622) and is in HOURS. When
+		// the price is indefinite, a product's per-entitlement duration (also in
+		// HOURS, a separate pre-existing feature) still scopes that entitlement to a
+		// shorter window. They are applied separately.
 		var endAt *time.Time
-		if windowDays != nil && *windowDays > 0 {
-			end := startAt.Add(time.Duration(*windowDays) * 24 * time.Hour)
+		switch {
+		case accessDurationHours != nil && *accessDurationHours > 0:
+			end := startAt.Add(time.Duration(*accessDurationHours) * time.Hour)
+			endAt = &end
+		case accessDurationHours == nil && entDurationHours != nil && *entDurationHours > 0:
+			end := startAt.Add(time.Duration(*entDurationHours) * time.Hour)
 			endAt = &end
 		}
 

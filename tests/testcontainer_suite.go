@@ -235,21 +235,27 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	// state, not infrastructure config.yaml state.
 	suite.Rails = config.RailSet{
 		"ccbill": {
-			Type:         config.RailTypeCCBill,
-			ClientAccNum: "945280",
-			ClientSubAcc: "0000",
-			Salt:         "test-salt",
+			Type: config.RailTypeCCBill,
+			CCBill: &config.CCBillRailConfig{
+				ClientAccNum: "945280",
+				ClientSubAcc: "0000",
+				Salt:         "test-salt",
+			},
 		},
 		"solana": {
-			Type:            config.RailTypeSolana,
-			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-			Tokens:          solanatokens.DefaultDevnetTokens(),
+			Type: config.RailTypeSolana,
+			Solana: &config.SolanaRailConfig{
+				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+				Tokens:          solanatokens.DefaultDevnetTokens(),
+			},
 		},
 		"mobius": {
-			Type:            config.RailTypeNMI,
-			SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
-			TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
-			WebhookSecret:   envOrDefault("RAILS_MOBIUS_WEBHOOK_SECRET", ""),
+			Type: config.RailTypeNMI,
+			NMI: &config.NMIRailConfig{
+				SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
+				TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
+				WebhookSecret:   envOrDefault("RAILS_MOBIUS_WEBHOOK_SECRET", ""),
+			},
 		},
 	}
 	if suite.port != 0 {

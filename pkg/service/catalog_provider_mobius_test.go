@@ -109,7 +109,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 
 	priceID := uuid.New()
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -143,7 +143,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -176,7 +176,7 @@ func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductKey: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("valid link should attach cleanly, got %v", err)
 	}
@@ -207,7 +207,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
-		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductKey: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("missing plan should be created, got %v", err)
 	}

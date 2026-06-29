@@ -41,7 +41,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
-		Slug:             "dedup_product_" + uuid.New().String(),
+		Key:              "dedup_product_" + uuid.New().String(),
 		DisplayName:      "Dedup Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -52,16 +52,16 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           2900,
-		Currency:         "usd",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              2900,
+		Currency:            "usd",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

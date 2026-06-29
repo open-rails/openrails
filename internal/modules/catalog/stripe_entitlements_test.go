@@ -153,7 +153,7 @@ func newFeatureTestSvc(t *testing.T, fake *fakeStripeFeatures) *StripeCatalogSer
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 	return &StripeCatalogService{
-		Rails:   config.RailSet{"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"}},
+		Rails:   config.RailSet{"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
 		BaseURL: srv.URL,
 	}
 }

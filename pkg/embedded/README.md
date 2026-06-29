@@ -25,7 +25,7 @@ func main() {
             {
                 Config: config.RailConfig{
                     Type:      config.RailTypeStripe,
-                    Role:      config.RailRolePrimary,
+                    Routing:   config.RailRoutingDefault,
                     SecretKey: hostSecrets.StripePrimaryKey,
                 },
             },
@@ -33,7 +33,7 @@ func main() {
                 Name: "stripe_legacy",
                 Config: config.RailConfig{
                     Type:      config.RailTypeStripe,
-                    Role:      config.RailRoleLegacy,
+                    Routing:   config.RailRoutingLegacy,
                     SecretKey: hostSecrets.StripeLegacyKey,
                 },
             },
@@ -89,7 +89,7 @@ openrails, err := embedded.New(embedded.Options{
         {
             Config: config.RailConfig{
                 Type:      config.RailTypeStripe,
-                Role:      config.RailRolePrimary,
+                Routing:   config.RailRoutingDefault,
                 SecretKey: stripePrimarySecret,
             },
         },
@@ -97,7 +97,7 @@ openrails, err := embedded.New(embedded.Options{
             Name: "stripe_legacy",
             Config: config.RailConfig{
                 Type:      config.RailTypeStripe,
-                Role:      config.RailRoleLegacy,
+                Routing:   config.RailRoutingLegacy,
                 SecretKey: stripeLegacySecret,
             },
         },
@@ -105,7 +105,7 @@ openrails, err := embedded.New(embedded.Options{
             Name: "mobius",
             Config: config.RailConfig{
                 Type:        config.RailTypeNMI,
-                Role:        config.RailRolePrimary,
+                Routing:     config.RailRoutingDefault,
                 SecurityKey: mobiusSecurityKey,
             },
         },

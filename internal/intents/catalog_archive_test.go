@@ -213,7 +213,7 @@ func TestStripeArchive_Verify(t *testing.T) {
 // (catalog.ExtrasIndex) — detection and the ledger cannot disagree.
 func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 	productID := uuid.New()
-	cycle := 30
+	cycle := 720
 
 	t.Run("product: content key joins", func(t *testing.T) {
 		h := newProductArchiveHandler(newFakeStripeCatalogAPI(), stubCatalog(nil, nil))
@@ -223,8 +223,8 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		if err != nil || !rel.Applicable {
 			t.Fatalf("still an extra: must be relevant, got %+v err=%v", rel, err)
 		}
-		// The slug "retired" appears locally -> the marker now content-matches.
-		h.LoadCatalog = stubCatalog([]*models.Product{{ID: productID, Slug: "retired"}}, nil)
+		// The key "retired" appears locally -> the marker now content-matches.
+		h.LoadCatalog = stubCatalog([]*models.Product{{ID: productID, Key: "retired"}}, nil)
 		rel, err = h.CheckRelevance(context.Background(), intent)
 		if err != nil || rel.Applicable {
 			t.Fatalf("object joined the catalog: must supersede, got %+v err=%v", rel, err)
@@ -241,7 +241,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		}
 		// A local price links price_x by id.
 		linked := &models.Price{
-			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationDays: &cycle, AutoRenew: true,
+			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true,
 			Rails: map[string]map[string]string{
 				"stripe": {models.RailKeyStripePriceID: "price_x"},
 			},
@@ -257,8 +257,8 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		h := newPriceArchiveHandler(newFakeStripeCatalogAPI(), stubCatalog(nil, nil))
 		intent := archiveIntent(t, TypeStripeArchivePrice, "price_x", "retired.usd.900.30")
 
-		prod := &models.Product{ID: productID, Slug: "retired"}
-		price := &models.Price{ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationDays: &cycle, AutoRenew: true}
+		prod := &models.Product{ID: productID, Key: "retired"}
+		price := &models.Price{ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true}
 		h.LoadCatalog = stubCatalog([]*models.Product{prod}, []*models.Price{price})
 		rel, err := h.CheckRelevance(context.Background(), intent)
 		if err != nil || rel.Applicable {

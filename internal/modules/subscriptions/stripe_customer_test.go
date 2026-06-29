@@ -18,7 +18,7 @@ func testStripeConfig() *config.Config {
 
 func testStripeRails() config.RailSet {
 	return config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
+		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
 

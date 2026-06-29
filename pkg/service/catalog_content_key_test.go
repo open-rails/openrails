@@ -11,16 +11,16 @@ import (
 )
 
 // TestContentKeysAreFinancialDeterministic asserts that the Stripe content keys
-// are pure functions of (product_slug, currency, unit_amount, billing_cycle)
+// are pure functions of (product_key, currency, unit_amount, billing_cycle)
 // and never incorporate a row UUID. This is the invariant that makes wipe+resync
 // re-attach to existing provider objects instead of duplicating them:
 // regenerating the OpenRails row UUIDs must not change the lookup_key or the
 // price content key.
 func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 	const (
-		productSlug = "pro"
-		currency    = "usd"
-		amount      = int64(29_000_000)
+		productKey = "pro"
+		currency   = "usd"
+		amount     = int64(29_000_000)
 	)
 	cycle := intPtr(30)
 
@@ -28,26 +28,26 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 	wantContent := "pro.usd.29000000.30"
 
 	// Exact format assertions.
-	if got := internalStripeLookupKey(productSlug, currency, amount, cycle); got != wantLookup {
+	if got := internalStripeLookupKey(productKey, currency, amount, cycle); got != wantLookup {
 		t.Fatalf("internalStripeLookupKey = %q, want %q", got, wantLookup)
 	}
-	if got := openRailsPriceContentKey(productSlug, currency, amount, cycle); got != wantContent {
+	if got := openRailsPriceContentKey(productKey, currency, amount, cycle); got != wantContent {
 		t.Fatalf("openRailsPriceContentKey = %q, want %q", got, wantContent)
 	}
 
 	// One-time price (nil cycle and 0 cycle) renders the "onetime" token.
 	wantOneTime := "openrails.pro.usd.5000000.onetime"
-	if got := internalStripeLookupKey(productSlug, currency, 5_000_000, nil); got != wantOneTime {
+	if got := internalStripeLookupKey(productKey, currency, 5_000_000, nil); got != wantOneTime {
 		t.Fatalf("one-time (nil) lookup = %q, want %q", got, wantOneTime)
 	}
-	if got := internalStripeLookupKey(productSlug, currency, 5_000_000, intPtr(0)); got != wantOneTime {
+	if got := internalStripeLookupKey(productKey, currency, 5_000_000, intPtr(0)); got != wantOneTime {
 		t.Fatalf("one-time (0) lookup = %q, want %q", got, wantOneTime)
 	}
 
 	// Determinism: same inputs always produce the same keys (no hidden UUID /
 	// time / counter input).
 	for i := 0; i < 5; i++ {
-		if got := internalStripeLookupKey(productSlug, currency, amount, cycle); got != wantLookup {
+		if got := internalStripeLookupKey(productKey, currency, amount, cycle); got != wantLookup {
 			t.Fatalf("call %d: lookup not stable: %q != %q", i, got, wantLookup)
 		}
 	}
@@ -59,14 +59,14 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 
 	// A DIFFERENT AMOUNT must yield a DIFFERENT key — this is the core of the
 	// model: a price change is a new price (new content key), never a mutation.
-	if internalStripeLookupKey(productSlug, currency, 29_000_000, cycle) == internalStripeLookupKey(productSlug, currency, 39_000_000, cycle) {
+	if internalStripeLookupKey(productKey, currency, 29_000_000, cycle) == internalStripeLookupKey(productKey, currency, 39_000_000, cycle) {
 		t.Fatal("distinct amounts must yield distinct lookup keys (a price change is a new price)")
 	}
 	// Distinct currency / cycle / product also yield distinct keys.
-	if internalStripeLookupKey(productSlug, "usd", amount, cycle) == internalStripeLookupKey(productSlug, "eur", amount, cycle) {
+	if internalStripeLookupKey(productKey, "usd", amount, cycle) == internalStripeLookupKey(productKey, "eur", amount, cycle) {
 		t.Fatal("distinct currencies must yield distinct lookup keys")
 	}
-	if internalStripeLookupKey(productSlug, currency, amount, intPtr(30)) == internalStripeLookupKey(productSlug, currency, amount, intPtr(365)) {
+	if internalStripeLookupKey(productKey, currency, amount, intPtr(30)) == internalStripeLookupKey(productKey, currency, amount, intPtr(365)) {
 		t.Fatal("distinct billing cycles must yield distinct lookup keys")
 	}
 	if internalStripeLookupKey("pro", currency, amount, cycle) == internalStripeLookupKey("basic", currency, amount, cycle) {
@@ -75,7 +75,7 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 }
 
 // TestContentKeysSurviveUUIDRegeneration is the wipe-resync invariant stated
-// directly: take two price rows that share the same (product_slug, price_slug)
+// directly: take two price rows that share the same (product_key, price_terms)
 // but have completely different row UUIDs — as would happen after a DB wipe and
 // reseed — and assert their derived content keys are byte-identical. Because
 // reconciliation reverse-matches Stripe objects to OpenRails rows by these
@@ -83,12 +83,13 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 // Stripe objects rather than producing orphan/duplicate drift.
 func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	const (
-		productSlug = "pro"
+		productKey  = "pro"
 		currency    = "usd"
 		amount      = int64(10_000_000)
 		amountCents = int64(1000)
 	)
 	cycle := intPtr(365)
+	accessHours := intPtr(365 * 24)
 
 	// "Before wipe" identifiers.
 	beforeProductID := uuid.New()
@@ -101,29 +102,29 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 		t.Fatal("precondition: regenerated UUIDs should differ")
 	}
 
-	beforeProducts := []*models.Product{{ID: beforeProductID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
+	beforeProducts := []*models.Product{{ID: beforeProductID, Key: productKey, Status: models.CatalogStatusActive}}
+	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
 
-	afterProducts := []*models.Product{{ID: afterProductID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
+	afterProducts := []*models.Product{{ID: afterProductID, Key: productKey, Status: models.CatalogStatusActive}}
+	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
 
 	beforeSnap := buildSnapshotFromRows(beforeProducts, beforePrices)
 	afterSnap := buildSnapshotFromRows(afterProducts, afterPrices)
 
 	// The snapshot indexes prices by the content key — the same key must appear
 	// in both snapshots even though every UUID changed.
-	contentKey := openRailsPriceContentKey(productSlug, currency, amount, cycle)
+	contentKey := openRailsPriceContentKey(productKey, currency, amount, cycle)
 	if _, ok := beforeSnap.priceByContentKey[contentKey]; !ok {
 		t.Fatalf("before snapshot missing content key %q", contentKey)
 	}
 	if _, ok := afterSnap.priceByContentKey[contentKey]; !ok {
 		t.Fatalf("after snapshot missing content key %q", contentKey)
 	}
-	if _, ok := beforeSnap.productBySlug[productSlug]; !ok {
-		t.Fatalf("before snapshot missing product slug %q", productSlug)
+	if _, ok := beforeSnap.productByKey[productKey]; !ok {
+		t.Fatalf("before snapshot missing product slug %q", productKey)
 	}
-	if _, ok := afterSnap.productBySlug[productSlug]; !ok {
-		t.Fatalf("after snapshot missing product slug %q", productSlug)
+	if _, ok := afterSnap.productByKey[productKey]; !ok {
+		t.Fatalf("after snapshot missing product slug %q", productKey)
 	}
 
 	// A single Stripe price with the content-derived lookup_key must match BOTH
@@ -131,7 +132,7 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	// duplicate). If the keys depended on UUIDs, the post-wipe pass would emit
 	// an orphan_in_stripe instead.
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_live", UnitAmount: amountCents, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, amount, cycle)},
+		{ID: "price_live", UnitAmount: amountCents, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productKey, currency, amount, cycle)},
 	}
 	now := time.Now().UTC()
 	if events := computeCatalogDrift(nil, stripePrices, beforeSnap, now); len(events) != 0 {
@@ -149,22 +150,23 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 // "mutate in place / transfer lookup_key" path: a price change is create-new.
 func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 	const (
-		productSlug = "pro"
-		currency    = "usd"
+		productKey = "pro"
+		currency   = "usd"
 	)
 	cycle := intPtr(30)
+	accessHours := intPtr(30 * 24)
 	productID := uuid.New()
 	priceID := uuid.New()
 
 	// Local catalog has the $29.00 price.
-	products := []*models.Product{{ID: productID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
+	products := []*models.Product{{ID: productID, Key: productKey, Status: models.CatalogStatusActive}}
+	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
 	snap := buildSnapshotFromRows(products, prices)
 
 	// Stripe has a price at a DIFFERENT amount ($39.00) under its own (different)
 	// content lookup_key. It must NOT match the $29 row — it is a separate price.
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_39", UnitAmount: 3900, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, 39_000_000, cycle)},
+		{ID: "price_39", UnitAmount: 3900, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productKey, currency, 39_000_000, cycle)},
 	}
 	now := time.Now().UTC()
 	events := computeCatalogDrift(nil, stripePrices, snap, now)

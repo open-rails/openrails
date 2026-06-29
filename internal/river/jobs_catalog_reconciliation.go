@@ -79,7 +79,7 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	scannedProducts, scannedPrices, scannedPlans := 0, 0, 0
 
 	// --- Stripe pass (skipped if unconfigured) ---
-	if stripeProc := w.Rails.GetStripeRail(); stripeProc != nil && stripeProc.SecretKey != "" {
+	if stripeProc := w.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil && stripeProc.Stripe.SecretKey != "" {
 		stripeSvc := &catalog.StripeCatalogService{Config: w.Config, Rails: w.Rails}
 		products, err := listAllStripeProducts(ctx, stripeSvc)
 		if err != nil {
@@ -183,11 +183,11 @@ func computeStripeDriftJob(
 	now time.Time,
 ) []models.CatalogDriftEvent {
 	productByID := make(map[string]*models.Product, len(productRows))
-	productBySlug := make(map[string]*models.Product, len(productRows))
+	productByKey := make(map[string]*models.Product, len(productRows))
 	for _, p := range productRows {
 		productByID[p.ID.String()] = p
-		if slug := strings.TrimSpace(p.Slug); slug != "" {
-			productBySlug[slug] = p
+		if key := strings.TrimSpace(p.Key); key != "" {
+			productByKey[key] = p
 		}
 	}
 	priceByID := make(map[string]*models.Price, len(priceRows))
@@ -196,11 +196,11 @@ func computeStripeDriftJob(
 	stripePriceIDs := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
-		// Content key = "<product_slug>.<currency>.<unit_amount>.<cycle>"; needs
+		// Content key = "<product_key>.<currency>.<unit_amount>.<cycle>"; needs
 		// the owning product for its slug.
 		if prod := productByID[pr.ProductID.String()]; prod != nil {
-			if slug := strings.TrimSpace(prod.Slug); slug != "" {
-				ck := openRailsPriceContentKeyJob(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
+			if slug := strings.TrimSpace(prod.Key); slug != "" {
+				ck := openRailsPriceContentKeyJob(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				priceByContentKey[ck] = pr
 			}
 		}
@@ -228,7 +228,7 @@ func computeStripeDriftJob(
 			events = append(events, stripeOrphan(models.CatalogDriftResourceProduct, "", sp.ID, now))
 			continue
 		}
-		local, ok := productBySlug[productKey]
+		local, ok := productByKey[productKey]
 		if !ok {
 			events = append(events, stripeOrphan(models.CatalogDriftResourceProduct, productKey, sp.ID, now))
 			continue
@@ -282,15 +282,15 @@ func computeStripeDriftJob(
 }
 
 // openRailsPriceContentKeyJob mirrors pkg/service.openRailsPriceContentKey:
-// the financial content key "<product_slug>.<currency>.<unit_amount>.<cycle>"
+// the financial content key "<product_key>.<currency>.<unit_amount>.<cycle>"
 // where <cycle> is the billing_cycle_days for a recurring price or "onetime".
-func openRailsPriceContentKeyJob(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+func openRailsPriceContentKeyJob(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	cycle := "onetime"
 	if billingCycleDays != nil && *billingCycleDays > 0 {
 		cycle = strconv.Itoa(*billingCycleDays)
 	}
 	return strings.Join([]string{
-		strings.TrimSpace(productSlug),
+		strings.TrimSpace(productKey),
 		strings.ToLower(strings.TrimSpace(currency)),
 		strconv.FormatInt(unitAmount, 10),
 		cycle,

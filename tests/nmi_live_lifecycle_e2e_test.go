@@ -181,7 +181,7 @@ func postSelfCheckout(t *testing.T, router *gin.Engine, body map[string]any) sel
 
 func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
 	t.Helper()
-	suite.Rails[nmiE2EProvider] = &config.RailConfig{Type: config.RailTypeNMI, SecurityKey: securityKey}
+	suite.Rails[nmiE2EProvider] = &config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
 	rails.InitNMIBackedRails(suite.Rails)
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{

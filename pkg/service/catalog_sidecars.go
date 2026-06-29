@@ -29,24 +29,26 @@ type CatalogMeterSpec struct {
 }
 
 type CatalogProductIncludesSpec struct {
-	ProductSlug   string   `json:"product_slug"`
-	IncludedSlugs []string `json:"included_slugs"`
+	ProductKey   string   `json:"product_key"`
+	IncludedKeys []string `json:"included_keys"`
 }
 
 type CatalogProductUsageLimitsSpec struct {
-	ProductSlug string   `json:"product_slug"`
-	Keys        []string `json:"keys"`
+	ProductKey string   `json:"product_key"`
+	Keys       []string `json:"keys"`
 }
 
 type CatalogMeteredPriceSpec struct {
-	ProductSlug      string `json:"product_slug"`
-	UnitAmount       int64  `json:"unit_amount"`
-	Currency         string `json:"currency"`
-	BillingCycleDays *int   `json:"billing_cycle_days,omitempty"`
-	MeterKey         string `json:"meter_key"`
-	RateMicros       int64  `json:"rate_micros"`
-	PerUnits         int64  `json:"per_units"`
-	PerSeconds       *int64 `json:"per_seconds,omitempty"`
+	ProductKey string `json:"product_key"`
+	UnitAmount int64  `json:"unit_amount"`
+	Currency   string `json:"currency"`
+	// AccessDurationHours is the metered price's window in hours — the lookup key
+	// that pins this meter to its price row (not a provider cadence).
+	AccessDurationHours *int   `json:"access_duration_hours,omitempty"`
+	MeterKey            string `json:"meter_key"`
+	RateMicros          int64  `json:"rate_micros"`
+	PerUnits            int64  `json:"per_units"`
+	PerSeconds          *int64 `json:"per_seconds,omitempty"`
 }
 
 type SyncCatalogSidecarsRequest struct {
@@ -145,7 +147,7 @@ SET meter_key = EXCLUDED.meter_key,
     per_seconds = EXCLUDED.per_seconds,
     updated_at = now()`,
 			priceID, merchantID, strings.TrimSpace(spec.MeterKey), spec.RateMicros, perUnits, spec.PerSeconds); err != nil {
-			return fmt.Errorf("upsert metered price %q: %w", spec.ProductSlug, err)
+			return fmt.Errorf("upsert metered price %q: %w", spec.ProductKey, err)
 		}
 	}
 	if len(desiredPriceIDs) == 0 {
@@ -169,7 +171,7 @@ func syncProductUsageLimits(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID
 		return err
 	}
 	for _, spec := range productLimits {
-		productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductSlug)
+		productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
 		if err != nil {
 			return err
 		}
@@ -182,7 +184,7 @@ func syncProductUsageLimits(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID
 	INSERT INTO openrails.product_usage_limits (merchant_id, product_id, usage_limit_key)
 	VALUES ($1, $2, $3)
 	ON CONFLICT DO NOTHING`, merchantID, productID, key); err != nil {
-				return fmt.Errorf("insert product usage_limit %q -> %q: %w", spec.ProductSlug, key, err)
+				return fmt.Errorf("insert product usage_limit %q -> %q: %w", spec.ProductKey, key, err)
 			}
 		}
 	}
@@ -194,12 +196,12 @@ func syncProductIncludes(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, i
 		return err
 	}
 	for _, spec := range includes {
-		parentID, err := resolveProductID(ctx, tx, merchantID, spec.ProductSlug)
+		parentID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
 		if err != nil {
 			return err
 		}
-		for _, childSlug := range spec.IncludedSlugs {
-			childID, err := resolveProductID(ctx, tx, merchantID, childSlug)
+		for _, childKey := range spec.IncludedKeys {
+			childID, err := resolveProductID(ctx, tx, merchantID, childKey)
 			if err != nil {
 				return err
 			}
@@ -208,7 +210,7 @@ INSERT INTO openrails.product_includes (merchant_id, product_id, included_produc
 VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING`,
 				merchantID, parentID, childID); err != nil {
-				return fmt.Errorf("insert product include %q -> %q: %w", spec.ProductSlug, childSlug, err)
+				return fmt.Errorf("insert product include %q -> %q: %w", spec.ProductKey, childKey, err)
 			}
 		}
 	}
@@ -216,14 +218,9 @@ ON CONFLICT DO NOTHING`,
 }
 
 func resolveCatalogPriceID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec CatalogMeteredPriceSpec) (uuid.UUID, error) {
-	productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductSlug)
+	productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
 	if err != nil {
 		return uuid.Nil, err
-	}
-	var accessDurationHours *int
-	if spec.BillingCycleDays != nil {
-		hours := *spec.BillingCycleDays * 24
-		accessDurationHours = &hours
 	}
 	var priceID uuid.UUID
 	if err := tx.QueryRow(ctx, `
@@ -234,16 +231,16 @@ WHERE merchant_id = $1
   AND lower(currency) = lower($4)
   AND access_duration_hours IS NOT DISTINCT FROM $5
 LIMIT 1`,
-		merchantID, productID, spec.UnitAmount, spec.Currency, accessDurationHours).Scan(&priceID); err != nil {
-		return uuid.Nil, fmt.Errorf("resolve price for product %q: %w", spec.ProductSlug, err)
+		merchantID, productID, spec.UnitAmount, spec.Currency, spec.AccessDurationHours).Scan(&priceID); err != nil {
+		return uuid.Nil, fmt.Errorf("resolve price for product %q: %w", spec.ProductKey, err)
 	}
 	return priceID, nil
 }
 
-func resolveProductID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, slug string) (uuid.UUID, error) {
+func resolveProductID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string) (uuid.UUID, error) {
 	var id uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM openrails.products WHERE merchant_id = $1 AND slug = $2`, merchantID, strings.TrimSpace(slug)).Scan(&id); err != nil {
-		return uuid.Nil, fmt.Errorf("resolve product %q: %w", slug, err)
+	if err := tx.QueryRow(ctx, `SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2`, merchantID, strings.TrimSpace(key)).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("resolve product %q: %w", key, err)
 	}
 	return id, nil
 }

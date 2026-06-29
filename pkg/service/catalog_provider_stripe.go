@@ -125,7 +125,7 @@ func (a *stripeAdapter) stripeConfigured() bool {
 		return false
 	}
 	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	return stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != ""
+	return stripeProc != nil && stripeProc.Stripe != nil && strings.TrimSpace(stripeProc.Stripe.SecretKey) != ""
 }
 
 // AutoCreate implements the find-or-create flow for Stripe. Identity is
@@ -134,14 +134,14 @@ func (a *stripeAdapter) stripeConfigured() bool {
 // discovery chain (in order):
 //
 //  1. If a Stripe Product already exists for this OpenRails product (via
-//     metadata search on the content key openrails_product_key=<product_slug>),
+//     metadata search on the content key openrails_product_key=<product_key>),
 //     reuse it.
 //  2. Otherwise create a new Stripe Product carrying openrails_product_key
 //     (+ informational openrails_product_id) and an idempotency key derived
 //     from the product slug.
 //  3. With the Product in hand, find-or-create the Stripe Price under the
 //     deterministic content lookup_key
-//     ("openrails.<product_slug>.<currency>.<unit_amount>.<cycle>"). If a price
+//     ("openrails.<product_key>.<currency>.<unit_amount>.<cycle>"). If a price
 //     with the same lookup_key already exists, attach to it. Otherwise mint a
 //     new one carrying openrails_price_key (+ informational openrails_price_id)
 //     and the lookup_key.
@@ -154,20 +154,20 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		return nil, errPendingManualLink
 	}
 	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
 		return nil, errPendingManualLink
 	}
 	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 
-	productSlug := strings.TrimSpace(in.ProductSlug)
-	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	productKey := strings.TrimSpace(in.ProductKey)
+	priceContentKey := openRailsPriceContentKey(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
 	benefitFingerprint := productBenefitFingerprint(in.Product)
 
 	// Step 1: discover an existing Stripe Product for this OpenRails product,
 	// matching on the content key (product slug) so it survives DB wipes.
 	stripeProductID := ""
-	if productSlug != "" {
-		if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductKey, productSlug); err == nil {
+	if productKey != "" {
+		if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductKey, productKey); err == nil {
 			for _, p := range existing {
 				if strings.TrimSpace(p.ID) != "" {
 					stripeProductID = p.ID
@@ -187,9 +187,9 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		id, err := stripeSvc.CreateProduct(ctx, catalog.CreateProductParams{
 			Name:           name,
 			Description:    desc,
-			IdempotencyKey: "openrails-product-" + productSlug,
+			IdempotencyKey: "openrails-product-" + productKey,
 			Metadata: map[string]string{
-				catalog.StripeMetadataOpenRailsProductKey:         productSlug,
+				catalog.StripeMetadataOpenRailsProductKey:         productKey,
 				catalog.StripeMetadataOpenRailsRecoveryVersion:    openRailsRecoveryVersion,
 				catalog.StripeMetadataOpenRailsBenefitFingerprint: benefitFingerprint,
 				// Informational only — not used for matching.
@@ -244,7 +244,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 			IdempotencyKey:   "openrails-price-" + priceContentKey,
 			Metadata: map[string]string{
 				catalog.StripeMetadataOpenRailsPriceKey:           priceContentKey,
-				catalog.StripeMetadataOpenRailsProductKey:         productSlug,
+				catalog.StripeMetadataOpenRailsProductKey:         productKey,
 				catalog.StripeMetadataOpenRailsRecoveryVersion:    openRailsRecoveryVersion,
 				catalog.StripeMetadataOpenRailsBenefitFingerprint: benefitFingerprint,
 				// Informational only — not used for matching.
@@ -275,7 +275,7 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
 	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
 	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
@@ -328,7 +328,7 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 		return nil, false, false, nil
 	}
 	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
 		return nil, false, false, nil
 	}
 	stripeProductID = strings.TrimSpace(stripeProductID)
@@ -376,7 +376,7 @@ func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutab
 		return nil
 	}
 	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
 		return nil
 	}
 	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])

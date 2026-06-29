@@ -20,12 +20,15 @@ func TestGetSolanaConfig(t *testing.T) {
 			Config: &config.Config{},
 			Rails: config.RailSet{
 				"solana": {
-					Network: "devnet",
-					Tokens: map[string]config.TokenConfig{
-						"USDC": {
-							Name:     "Dev USDC",
-							Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
-							Decimals: 6,
+					Type: config.RailTypeSolana,
+					Solana: &config.SolanaRailConfig{
+						Network: "devnet",
+						Tokens: map[string]config.TokenConfig{
+							"USDC": {
+								Name:     "Dev USDC",
+								Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+								Decimals: 6,
+							},
 						},
 					},
 				},
@@ -46,13 +49,16 @@ func TestGetSolanaConfig(t *testing.T) {
 		Config: &config.Config{},
 		Rails: config.RailSet{
 			"solana": {
-				Network:                         "devnet",
-				SolanaPayRecurringSubscriptions: true,
-				Tokens: map[string]config.TokenConfig{
-					"USDC": {
-						Name:     "Dev USDC",
-						Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
-						Decimals: 6,
+				Type: config.RailTypeSolana,
+				Solana: &config.SolanaRailConfig{
+					Network:                         "devnet",
+					SolanaPayRecurringSubscriptions: true,
+					Tokens: map[string]config.TokenConfig{
+						"USDC": {
+							Name:     "Dev USDC",
+							Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+							Decimals: 6,
+						},
 					},
 				},
 			},

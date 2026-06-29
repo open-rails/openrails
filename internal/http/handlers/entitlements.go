@@ -64,7 +64,7 @@ type adminEntitlementPath struct {
 
 type grantEntitlementRequest struct {
 	Entitlement string `json:"entitlement" binding:"required"`
-	Days        *int   `json:"days,omitempty"`
+	Hours       *int   `json:"hours,omitempty"`
 }
 
 func ServiceGetCustomerEntitlements(r *httprequest.Request) {
@@ -269,8 +269,8 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "missing admin identity")
 		return
 	}
-	if req.Days != nil && *req.Days <= 0 {
-		r.ErrorJSON(http.StatusBadRequest, "days must be > 0 (or omit for indefinite)")
+	if req.Hours != nil && *req.Hours <= 0 {
+		r.ErrorJSON(http.StatusBadRequest, "hours must be > 0 (or omit for indefinite)")
 		return
 	}
 	tenantSubjectID, err := tenantSubjectForEntitlementGrantTarget(r, path.UserID)
@@ -283,8 +283,8 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	// row. SourceID is the grant's own identity.
 	adminGrantID := uuidutil.NewV7()
 	var ent *models.Entitlement
-	if req.Days != nil {
-		d := time.Duration(*req.Days) * 24 * time.Hour
+	if req.Hours != nil {
+		d := time.Duration(*req.Hours) * time.Hour
 		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})
 	} else {
 		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})

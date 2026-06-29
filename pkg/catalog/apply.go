@@ -73,7 +73,7 @@ func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opt
 		for i := range gp.RemovedProducts {
 			rp := &gp.RemovedProducts[i]
 			if _, err := applier.DeactivateProduct(ctx, rp.ID); err != nil {
-				return res, fmt.Errorf("archive removed product %s: %w", rp.Slug, err)
+				return res, fmt.Errorf("archive removed product %s: %w", rp.Key, err)
 			}
 			res.ProductsArchived++
 		}

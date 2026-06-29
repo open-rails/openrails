@@ -42,12 +42,12 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	productID, priceID, paymentMethodID, subID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	userID := uuid.New().String()
-	billingDays := 30
+	billingDays := 720
 	billingDays32 := int32(billingDays)
 
 	description := "Materialize test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
-		ID: productID, Slug: "mat_product_" + uuid.New().String(), DisplayName: "Materialize Product",
+		ID: productID, Key: "mat_product_" + uuid.New().String(), DisplayName: "Materialize Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
 	})
@@ -55,7 +55,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Status:     string(models.CatalogStatusActive), AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 
 	description := "Window expiry test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
-		ID: productID, Slug: "wexp_product_" + uuid.New().String(), DisplayName: "Window Expiry Product",
+		ID: productID, Key: "wexp_product_" + uuid.New().String(), DisplayName: "Window Expiry Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
 	})
@@ -186,7 +186,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Status:     string(models.CatalogStatusActive), AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

@@ -52,7 +52,11 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return merchant.ID{}, err
 	}
-	id, err := gen.New(qx).RegisterMerchant(ctx, slug)
+	var displayName *string
+	if dn := strings.TrimSpace(opts.DisplayName); dn != "" {
+		displayName = &dn
+	}
+	id, err := gen.New(qx).RegisterMerchant(ctx, gen.RegisterMerchantParams{Slug: slug, DisplayName: displayName})
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
 	}
@@ -65,4 +69,7 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 // merchants.
 type RegisterMerchantOptions struct {
 	Slug string
+	// DisplayName is the human-readable merchant name (end-user display / invoices).
+	// Optional; empty leaves any existing name untouched on re-register.
+	DisplayName string
 }

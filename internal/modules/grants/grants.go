@@ -296,7 +296,7 @@ func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.Openra
 		if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
 			sourceID = parsed
 		}
-		productKey := spec.ProductSlug
+		productKey := spec.ProductKey
 		grantID := g.ID
 		if err := l.q.CreateProductUsageLimitBinding(ctx, gen.CreateProductUsageLimitBindingParams{
 			ID:            uuidutil.NewV7(),

@@ -662,7 +662,10 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		flow = "transfer_request"
 	}
 
-	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if solanaProc.Solana == nil {
+		return fmt.Errorf("%w: solana rail is not configured", ErrCheckoutSessionValidation)
+	}
+	tokenCfg, ok := solanaProc.Solana.Tokens[tokenSymbol]
 	if !ok {
 		return fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
@@ -713,7 +716,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		session.Status = models.CheckoutSessionStatusRequiresAction
 		expiresAt := s.now().Add(defaultCheckoutSessionTTL)
 		session.ExpiresAt = &expiresAt
-		recipient := strings.TrimSpace(solanaProc.RecipientWallet)
+		recipient := strings.TrimSpace(solanaProc.Solana.RecipientWallet)
 		if recipient == "" {
 			return fmt.Errorf("%w: recipient wallet not configured", ErrCheckoutSessionValidation)
 		}
@@ -1303,7 +1306,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 			oldPrice.Amount,
 			newPrice.Amount,
 			oldSub.CurrentPeriodEndsAt,
-			newPrice.RecurringCycleDays(),
+			newPrice.RecurringCycleHours(),
 			s.now(),
 		)
 		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(ctx, firstChargeCents, newTerms.mintSymbol, s.priceProvider)
@@ -1664,7 +1667,10 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, fmt.Errorf("%w: token_symbol missing", ErrCheckoutSessionValidation)
 	}
 
-	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if solanaProc.Solana == nil {
+		return nil, fmt.Errorf("%w: solana rail is not configured", ErrCheckoutSessionValidation)
+	}
+	tokenCfg, ok := solanaProc.Solana.Tokens[tokenSymbol]
 	if !ok {
 		return nil, fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}

@@ -378,21 +378,21 @@ func newNMIBillingError(errorType string, message string, context map[string]int
 func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, uint32, *uuid.UUID, *uuid.UUID) {
 	var priceAmount float64
 	priceCurrency := ""
-	var billingDays uint32
+	var billingHours uint32
 	var productID *uuid.UUID
 	var priceID *uuid.UUID
 
 	if sub != nil && sub.Price != nil {
 		priceAmount = float64(sub.Price.Amount) / 100.0
 		priceCurrency = sub.Price.Currency
-		if sub.Price.RecurringCycleDays() != nil {
-			billingDays, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleDays())
+		if sub.Price.RecurringCycleHours() != nil {
+			billingHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
 		}
 		productID = &sub.Price.ProductID
 		priceID = &sub.Price.ID
 	}
 
-	return priceAmount, priceCurrency, billingDays, productID, priceID
+	return priceAmount, priceCurrency, billingHours, productID, priceID
 }
 
 // logSubscriptionEvent emits a subscription event with full pricing/status context.
@@ -413,7 +413,7 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 		cancelType = string(*sub.CancelType)
 	}
 
-	priceAmount, priceCurrency, billingDays, productID, priceID := priceSnapshotFromSubscription(sub)
+	priceAmount, priceCurrency, billingHours, productID, priceID := priceSnapshotFromSubscription(sub)
 
 	var procSubID *string
 	if sub.RailSubscriptionID != "" {
@@ -433,7 +433,7 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 		CancelType:         cancelType,
 		PriceAmount:        priceAmount,
 		PriceCurrency:      priceCurrency,
-		BillingCycleDays:   billingDays,
+		BillingCycleHours:  billingHours,
 		ProductID:          productID,
 		PriceID:            priceID,
 		Rail:               s.Rail,

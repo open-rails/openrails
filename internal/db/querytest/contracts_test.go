@@ -57,7 +57,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,
 		MerchantID:       merchantID,
-		Slug:             "query-contract-" + productID.String(),
+		Key:              "query-contract-" + productID.String(),
 		DisplayName:      "Query Contract Premium",
 		EntitlementsSpec: []byte(`["premium"]`),
 		CreditsSpec:      []byte(`[]`),
@@ -106,7 +106,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		ProductID:            productID,
 		EntitlementFeatureID: featureID,
 		MerchantID:           merchantID,
-		DurationDays:         int32ptr(30),
+		DurationHours:        int32ptr(30 * 24),
 		Metadata:             []byte(`{}`),
 		CreatedAt:            now,
 		UpdatedAt:            now,

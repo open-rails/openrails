@@ -79,8 +79,8 @@ func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTr
 
 func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 	var expiry *int
-	if r.DefaultCreditExpiryDays != nil {
-		v := int(*r.DefaultCreditExpiryDays)
+	if r.DefaultCreditExpiryHours != nil {
+		v := int(*r.DefaultCreditExpiryHours)
 		expiry = &v
 	}
 	return &models.MoneyAccount{
@@ -96,7 +96,7 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 		AutoTopupEnabled:         r.AutoTopupEnabled,
 		AutoTopupAmountCents:     r.AutoTopupAmountCents,
 		AutoTopupPaymentMethod:   r.AutoTopupPaymentMethodID,
-		DefaultCreditExpiryDays:  expiry,
+		DefaultCreditExpiryHours: expiry,
 		HardStopOnBreach:         r.HardStopOnBreach,
 		AlertThresholdPct:        int(r.AlertThresholdPct),
 		OutstandingOwedAmount:    r.OutstandingOwedAmount,

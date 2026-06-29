@@ -249,7 +249,7 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, slug, display_name)
+		INSERT INTO openrails.products (id, merchant_id, key, display_name)
 		VALUES ($1::uuid, $2::uuid, $3, $3)
 	`, productID.String(), merchantID.String(), "prod-"+suffix)
 	require.NoError(t, err)

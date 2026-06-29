@@ -28,7 +28,7 @@ WHERE ent.source_type = 'one_off'
 -- name: ConDuplicateChargesSamePeriod :many
 -- More than one settled, non-refunded charge for the same customer/product/month.
 WITH payment_products AS (
-    SELECT purch.id, purch.customer_id, purch.amount, purch.purchased_at, price.product_id, prod.slug AS product_slug
+    SELECT purch.id, purch.customer_id, purch.amount, purch.purchased_at, price.product_id, prod.key AS product_key
     FROM openrails.payments purch
     JOIN openrails.prices price ON purch.price_id = price.id
     JOIN openrails.products prod ON price.product_id = prod.id
@@ -39,12 +39,12 @@ WITH payment_products AS (
 SELECT
     customer_id::text AS user_id,
     product_id,
-    product_slug,
+    product_key,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
     SUM(amount)::bigint AS total_amount,
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
 FROM payment_products
-GROUP BY customer_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
+GROUP BY customer_id, product_id, product_key, DATE_TRUNC('month', purchased_at)
 HAVING COUNT(*) > 1;

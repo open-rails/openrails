@@ -1551,14 +1551,14 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 
 		priceAmount := 0.0
 		priceCurrency := ""
-		billingCycleDays := uint32(0)
+		billingCycleHours := uint32(0)
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if sub.Price != nil {
 			priceAmount = float64(sub.Price.Amount) / 100.0
 			priceCurrency = sub.Price.Currency
-			if sub.Price.RecurringCycleDays() != nil {
-				billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleDays())
+			if sub.Price.RecurringCycleHours() != nil {
+				billingCycleHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
 			}
 			productID = &sub.Price.ProductID
 			priceID = &sub.Price.ID
@@ -1573,7 +1573,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 			CancelType:         "",
 			PriceAmount:        priceAmount,
 			PriceCurrency:      priceCurrency,
-			BillingCycleDays:   billingCycleDays,
+			BillingCycleHours:  billingCycleHours,
 			ProductID:          productID,
 			PriceID:            priceID,
 			Rail:               "ccbill",
@@ -2496,14 +2496,14 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		uidStr := subscription.CustomerID.String()
 		priceAmount := 0.0
 		priceCurrency := ""
-		billingCycleDays := uint32(0)
+		billingCycleHours := uint32(0)
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if subscription.Price != nil {
 			priceAmount = float64(subscription.Price.Amount) / 100.0
 			priceCurrency = subscription.Price.Currency
-			if subscription.Price.RecurringCycleDays() != nil {
-				billingCycleDays, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleDays())
+			if subscription.Price.RecurringCycleHours() != nil {
+				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
 			}
 			productID = &subscription.Price.ProductID
 			priceID = &subscription.Price.ID
@@ -2524,7 +2524,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			CancelType:         "",
 			PriceAmount:        priceAmount,
 			PriceCurrency:      priceCurrency,
-			BillingCycleDays:   billingCycleDays,
+			BillingCycleHours:  billingCycleHours,
 			ProductID:          productID,
 			PriceID:            priceID,
 			Rail:               "ccbill",
@@ -2735,14 +2735,14 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		uidStr := subscription.CustomerID.String()
 		priceAmount := 0.0
 		priceCurrency := ""
-		billingCycleDays := uint32(0)
+		billingCycleHours := uint32(0)
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if subscription.Price != nil {
 			priceAmount = float64(subscription.Price.Amount) / 100.0
 			priceCurrency = subscription.Price.Currency
-			if subscription.Price.RecurringCycleDays() != nil {
-				billingCycleDays, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleDays())
+			if subscription.Price.RecurringCycleHours() != nil {
+				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
 			}
 			productID = &subscription.Price.ProductID
 			priceID = &subscription.Price.ID
@@ -2756,7 +2756,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			CancelType:         "",
 			PriceAmount:        priceAmount,
 			PriceCurrency:      priceCurrency,
-			BillingCycleDays:   billingCycleDays,
+			BillingCycleHours:  billingCycleHours,
 			ProductID:          productID,
 			PriceID:            priceID,
 			Rail:               "ccbill",
@@ -2869,9 +2869,9 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 			CancelType:     string(cancelType),
 			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
 			PriceCurrency:  subscription.Price.Currency,
-			BillingCycleDays: func() uint32 {
-				if subscription.Price.RecurringCycleDays() != nil {
-					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleDays())
+			BillingCycleHours: func() uint32 {
+				if subscription.Price.RecurringCycleHours() != nil {
+					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
 					return v
 				}
 				return 0
@@ -2950,9 +2950,9 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			CancelType:     string(models.CancelTypeExpired),
 			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
 			PriceCurrency:  subscription.Price.Currency,
-			BillingCycleDays: func() uint32 {
-				if subscription.Price.RecurringCycleDays() != nil {
-					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleDays())
+			BillingCycleHours: func() uint32 {
+				if subscription.Price.RecurringCycleHours() != nil {
+					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
 					return v
 				}
 				return 0

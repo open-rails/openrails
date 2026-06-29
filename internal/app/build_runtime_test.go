@@ -17,10 +17,13 @@ func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	cfg.TestMode = true
 	rails := config.RailSet{
 		"ccbill": {
-			ClientAccNum:     "945280",
-			ClientSubAcc:     "0001",
-			DataLinkUsername: "datalink-user",
-			DataLinkPassword: "datalink-pass",
+			Type: config.RailTypeCCBill,
+			CCBill: &config.CCBillRailConfig{
+				ClientAccNum:     "945280",
+				ClientSubAcc:     "0001",
+				DataLinkUsername: "datalink-user",
+				DataLinkPassword: "datalink-pass",
+			},
 		},
 	}
 
@@ -68,7 +71,7 @@ func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig
 	cfg.Mode = config.ModeFull
 	cfg.TestMode = testMode
 	rails := config.RailSet{
-		"solana": {Tokens: tokens},
+		"solana": {Type: config.RailTypeSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},
 	}
 	return cfg, rails
 }
@@ -82,8 +85,8 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		})
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.Equal(t, "devnet", proc.Network)
-		require.Contains(t, proc.Tokens, "WEIRD")
+		require.Equal(t, "devnet", proc.Solana.Network)
+		require.Contains(t, proc.Solana.Tokens, "WEIRD")
 	})
 
 	t.Run("mainnet: USD-pegged stablecoin without feed degrades to parity, stays enabled", func(t *testing.T) {
@@ -93,8 +96,8 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		})
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.Equal(t, "mainnet", proc.Network)
-		require.Contains(t, proc.Tokens, "USDT")
+		require.Equal(t, "mainnet", proc.Solana.Network)
+		require.Contains(t, proc.Solana.Tokens, "USDT")
 	})
 
 	t.Run("mainnet: non-USD-pegged stablecoin without feed is disabled, boot succeeds", func(t *testing.T) {
@@ -104,8 +107,8 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		})
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.NotContains(t, proc.Tokens, "EURC", "EURC cannot default to USD parity")
-		require.Contains(t, proc.Tokens, "USDC", "other tokens keep working")
+		require.NotContains(t, proc.Solana.Tokens, "EURC", "EURC cannot default to USD parity")
+		require.Contains(t, proc.Solana.Tokens, "USDC", "other tokens keep working")
 	})
 
 	t.Run("mainnet: unknown token without feed is disabled, boot succeeds", func(t *testing.T) {
@@ -115,8 +118,8 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		})
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.NotContains(t, proc.Tokens, "NOPE")
-		require.Contains(t, proc.Tokens, "SOL")
+		require.NotContains(t, proc.Solana.Tokens, "NOPE")
+		require.Contains(t, proc.Solana.Tokens, "SOL")
 	})
 
 	t.Run("mainnet: feed-backed tokens are kept (feed pricing)", func(t *testing.T) {
@@ -126,7 +129,7 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		// Incident regression: the full mainnet default set (incl. USD1/USDG,
 		// which now have verified Pyth feeds) must boot.
 		for _, sym := range []string{"SOL", "USDC", "PYUSD", "USD1", "USDG"} {
-			require.Contains(t, proc.Tokens, sym)
+			require.Contains(t, proc.Solana.Tokens, sym)
 		}
 	})
 
@@ -134,9 +137,9 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		cfg, rails := solanaCfg(t, true, nil)
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.Equal(t, "devnet", proc.Network)
+		require.Equal(t, "devnet", proc.Solana.Network)
 		for _, sym := range []string{"SOL", "USDC", "PYUSD"} {
-			require.Contains(t, proc.Tokens, sym)
+			require.Contains(t, proc.Solana.Tokens, sym)
 		}
 	})
 
@@ -149,8 +152,8 @@ func TestConfigureSolanaRailPolicyMatrix(t *testing.T) {
 		})
 		require.NoError(t, configureSolanaRail(cfg, rails))
 		proc := rails.GetSolanaRail()
-		require.Len(t, proc.Tokens, 1)
-		require.Contains(t, proc.Tokens, "USDC")
+		require.Len(t, proc.Solana.Tokens, 1)
+		require.Contains(t, proc.Solana.Tokens, "USDC")
 	})
 }
 

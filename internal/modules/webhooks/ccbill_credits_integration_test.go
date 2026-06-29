@@ -61,7 +61,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &description,
 		CreditsSpec: creditsSpecJSON,
@@ -72,16 +72,16 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ProductID:        productID,
-		Amount:           9_990_000,
-		Currency:         "usd",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ProductID:           productID,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

@@ -30,7 +30,10 @@ func RequireStripeSecretKey(rails config.RailSet) (*config.RailConfig, string, e
 	if err != nil {
 		return nil, "", err
 	}
-	secretKey := strings.TrimSpace(proc.SecretKey)
+	if proc.Stripe == nil {
+		return nil, "", fmt.Errorf("stripe configuration is not available")
+	}
+	secretKey := strings.TrimSpace(proc.Stripe.SecretKey)
 	if secretKey == "" {
 		return nil, "", fmt.Errorf("stripe secret key is not configured")
 	}

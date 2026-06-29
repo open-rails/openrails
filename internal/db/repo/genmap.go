@@ -108,7 +108,7 @@ func productFromGen(p gen.OpenrailsProduct) (*models.Product, error) {
 	m := &models.Product{
 		ID:          p.ID,
 		MerchantID:  p.MerchantID,
-		Slug:        p.Slug,
+		Key:         p.Key,
 		DisplayName: p.DisplayName,
 		Description: derefStr(p.Description),
 		TierGroup:   p.TierGroup,

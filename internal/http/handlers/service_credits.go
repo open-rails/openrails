@@ -213,7 +213,7 @@ type serviceAccountSettingsRequest struct {
 	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
 	AutoTopupAmount          *int64  `json:"auto_topup_amount"`
 	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
-	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days"`
+	DefaultCreditExpiryHours *int    `json:"default_credit_expiry_hours"`
 	HardStopOnBreach         *bool   `json:"hard_stop_on_breach"`
 	AlertThresholdPct        *int    `json:"alert_threshold_pct"`
 }
@@ -247,7 +247,7 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 		LowBalanceThreshold:      req.LowBalanceThreshold,
 		AutoTopupEnabled:         req.AutoTopupEnabled,
 		AutoTopupAmountCents:     req.AutoTopupAmount,
-		DefaultCreditExpiryDays:  req.DefaultCreditExpiryDays,
+		DefaultCreditExpiryHours: req.DefaultCreditExpiryHours,
 		HardStopOnBreach:         req.HardStopOnBreach,
 		AlertThresholdPct:        req.AlertThresholdPct,
 	}

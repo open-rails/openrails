@@ -110,7 +110,7 @@ func (h *stripeArchiveCore) stripeConfigured() bool {
 		return h.Stripe != nil
 	}
 	proc := h.Rails.GetStripeRail()
-	return proc != nil && strings.TrimSpace(proc.SecretKey) != "" && h.Stripe != nil
+	return proc != nil && proc.Stripe != nil && strings.TrimSpace(proc.Stripe.SecretKey) != "" && h.Stripe != nil
 }
 
 // checkRelevance: the archive applies while the remote object is STILL an

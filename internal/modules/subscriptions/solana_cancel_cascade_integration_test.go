@@ -34,7 +34,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	subID := uuid.New()
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := 720
 	periodStart := now
 	paidEnd := now.Add(30 * 24 * time.Hour)
 
@@ -105,7 +105,7 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	subID := uuid.New()
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := 720
 
 	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
 
@@ -139,7 +139,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	desc := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,
-		Slug:             "test_product_" + uuid.NewString(),
+		Key:              "test_product_" + uuid.NewString(),
 		DisplayName:      "Test Product",
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Description:      &desc,
@@ -152,16 +152,16 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 
 	cycleDays := int32(billingDays)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           string(models.CatalogStatusActive),
-		Amount:           999,
-		Currency:         "usd",
-		MerchantID:         dbtest.TestMerchantID.UUID(),
-		AccessDurationDays: &cycleDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              string(models.CatalogStatusActive),
+		Amount:              999,
+		Currency:            "usd",
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		AccessDurationHours: &cycleDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

@@ -110,13 +110,16 @@ func configureSolanaRail(cfg *config.Config, rails config.RailSet) error {
 	if proc == nil {
 		return nil
 	}
-	proc.Network = effectiveSolanaNetwork(cfg)
-	if len(proc.Tokens) == 0 {
-		proc.Tokens = solanatokens.ForNetwork(proc.Network)
+	if proc.Solana == nil {
+		proc.Solana = &config.SolanaRailConfig{}
+	}
+	proc.Solana.Network = effectiveSolanaNetwork(cfg)
+	if len(proc.Solana.Tokens) == 0 {
+		proc.Solana.Tokens = solanatokens.ForNetwork(proc.Solana.Network)
 	}
 
-	normalized := make(map[string]config.TokenConfig, len(proc.Tokens))
-	for symbol, token := range proc.Tokens {
+	normalized := make(map[string]config.TokenConfig, len(proc.Solana.Tokens))
+	for symbol, token := range proc.Solana.Tokens {
 		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalizedSymbol == "" {
 			log.Warn("⚠️  solana token with empty symbol in configuration; entry dropped")
@@ -136,7 +139,7 @@ func configureSolanaRail(cfg *config.Config, rails config.RailSet) error {
 
 		// Pricing policy applies to MAINNET only: devnet money is fake, so a
 		// devnet deployment never needs price feeds (or Hermes) at all.
-		if proc.Network != "devnet" {
+		if proc.Solana.Network != "devnet" {
 			switch decision, sc := solanatokens.ClassifyPricing(normalizedSymbol, token.Mint); decision {
 			case solanatokens.TokenPricingFeed:
 				// Live Pyth pricing; for stablecoins the feed doubles as the
@@ -154,7 +157,7 @@ func configureSolanaRail(cfg *config.Config, rails config.RailSet) error {
 		}
 		normalized[normalizedSymbol] = token
 	}
-	proc.Tokens = normalized
+	proc.Solana.Tokens = normalized
 	return nil
 }
 
@@ -656,7 +659,7 @@ func createCCBillDataLinkClient(cfg *config.Config, rails config.RailSet) *ccbil
 	if ccbillProc == nil {
 		return nil
 	}
-	if ccbillProc.DataLinkUsername == "" || ccbillProc.DataLinkPassword == "" || ccbillProc.ClientAccNum == "" {
+	if ccbillProc.CCBill == nil || ccbillProc.CCBill.DataLinkUsername == "" || ccbillProc.CCBill.DataLinkPassword == "" || ccbillProc.CCBill.ClientAccNum == "" {
 		log.Info("CCBill DataLink credentials missing; DataLink worker disabled")
 		return nil
 	}
@@ -750,10 +753,10 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailSet,
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
 	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, railSet, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
 	var solanaRPC *solana.RPCClient
-	if solanaProc := railSet.GetSolanaRail(); solanaProc != nil {
+	if solanaProc := railSet.GetSolanaRail(); solanaProc != nil && solanaProc.Solana != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
-			HeliusAPIKey: solanaProc.HeliusAPIKey,
+			HeliusAPIKey: solanaProc.Solana.HeliusAPIKey,
 			Network:      solanaNetwork,
 			ReadOnly:     cfg.IsProviderReadOnly(),
 		})

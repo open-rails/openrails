@@ -40,7 +40,7 @@ type GetProductsOptions struct {
 // Product represents a billing product.
 type Product struct {
 	ID               string
-	Slug             string
+	Key              string
 	Name             string
 	Description      string
 	EntitlementsSpec map[string]*int

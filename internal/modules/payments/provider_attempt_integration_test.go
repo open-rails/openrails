@@ -36,7 +36,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Slug:        "provider_attempt_" + uuid.New().String(),
+		Key:         "provider_attempt_" + uuid.New().String(),
 		DisplayName: "Provider Attempt Test",
 		Description: &description,
 		Status:      string(models.CatalogStatusActive),
@@ -46,16 +46,16 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	require.NoError(t, err)
 	billingCycleDays := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ProductID:        productID,
-		Amount:           2300,
-		Currency:         "USD",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingCycleDays,
-		AutoRenew:          true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  priceID,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ProductID:           productID,
+		Amount:              2300,
+		Currency:            "USD",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingCycleDays,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

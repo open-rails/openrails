@@ -91,8 +91,8 @@ func NewSolanaPayPoller(
 	checkoutSessionService checkoutSessionMarker,
 ) *SolanaPayPoller {
 	var rpc *solanarpc.RPCClient
-	if solanaProc := rails.GetSolanaRail(); solanaProc != nil {
-		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Network))
+	if solanaProc := rails.GetSolanaRail(); solanaProc != nil && solanaProc.Solana != nil {
+		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Solana.Network))
 		if solanaNetwork == "" {
 			solanaNetwork = "mainnet"
 			if cfg.IsTestMode() {
@@ -100,7 +100,7 @@ func NewSolanaPayPoller(
 			}
 		}
 		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-			HeliusAPIKey: solanaProc.HeliusAPIKey,
+			HeliusAPIKey: solanaProc.Solana.HeliusAPIKey,
 			Network:      solanaNetwork,
 			ReadOnly:     cfg.IsProviderReadOnly(),
 		})

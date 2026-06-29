@@ -31,7 +31,7 @@ type graceTestFixture struct {
 	userID    string
 }
 
-func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
+func newGraceTestFixture(t *testing.T, billingHours int32) *graceTestFixture {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
@@ -45,7 +45,7 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 
 	description := "Grace test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
-		MerchantID: dbtest.TestMerchantID.UUID(), ID: productID, Slug: "grace_product_" + uuid.New().String(), DisplayName: "Grace Product",
+		MerchantID: dbtest.TestMerchantID.UUID(), ID: productID, Key: "grace_product_" + uuid.New().String(), DisplayName: "Grace Product",
 		Description: &description, Status: string(models.CatalogStatusActive),
 		EntitlementsSpec: []byte(`{"premium": null}`),
 		CreatedAt:        now, UpdatedAt: now,
@@ -53,7 +53,7 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
-		Status: string(models.CatalogStatusActive), AccessDurationDays: &billingDays, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Status: string(models.CatalogStatusActive), AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
@@ -106,7 +106,7 @@ func (f *graceTestFixture) windows(t *testing.T, subID uuid.UUID, sourceType str
 // revokes the old grace, pushes the next paid window, and pre-appends the
 // next grace — no access gap at any boundary.
 func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
-	f := newGraceTestFixture(t, 30)
+	f := newGraceTestFixture(t, 30*24)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_grace_" + uuid.New().String()
@@ -127,7 +127,7 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 	require.Len(t, grace, 1, "activation must pre-append one trailing grace window")
 	assert.True(t, grace[0].StartAt.Equal(*paid[0].EndAt), "no-gap property: grace start must equal paid end (got paid end %s, grace start %s)", paid[0].EndAt, grace[0].StartAt)
 	require.NotNil(t, grace[0].EndAt)
-	assert.Equal(t, GraceSlack(30), grace[0].EndAt.Sub(grace[0].StartAt), "monthly cycle grace is the 48h cap")
+	assert.Equal(t, GraceSlack(30*24), grace[0].EndAt.Sub(grace[0].StartAt), "monthly cycle grace is the 48h cap")
 	assert.Nil(t, grace[0].RevokedAt)
 	assert.Nil(t, grace[0].DeletedAt)
 
@@ -157,7 +157,7 @@ func TestGraceWindow_CreateAndRenew_NoGap(t *testing.T) {
 // period-end cancellation forfeits silence generosity — the scheduled grace
 // window is deleted at cancel time; paid access until period end is kept.
 func TestGraceWindow_UserCancelDeletesFutureGrace(t *testing.T) {
-	f := newGraceTestFixture(t, 30)
+	f := newGraceTestFixture(t, 30*24)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_cancel_" + uuid.New().String()
@@ -192,7 +192,7 @@ func TestGraceWindow_UserCancelDeletesFutureGrace(t *testing.T) {
 // TestGraceWindow_DailyCycleSlackCap (#368): daily cycles get half a day of
 // grace, not the 48h cap.
 func TestGraceWindow_DailyCycleSlackCap(t *testing.T) {
-	f := newGraceTestFixture(t, 1)
+	f := newGraceTestFixture(t, 24)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_daily_" + uuid.New().String()
@@ -214,7 +214,7 @@ func TestGraceWindow_DailyCycleSlackCap(t *testing.T) {
 // TestGraceWindow_IneligibleRailGetsNone (#368): CCBill keeps its own
 // retry-driven grace; activation must not pre-append a renewal grace window.
 func TestGraceWindow_IneligibleRailGetsNone(t *testing.T) {
-	f := newGraceTestFixture(t, 30)
+	f := newGraceTestFixture(t, 30*24)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_ccbill_" + uuid.New().String()
@@ -235,7 +235,7 @@ func TestGraceWindow_IneligibleRailGetsNone(t *testing.T) {
 // period end + slack is already in the past (months-stale import shapes)
 // must not mint a grace window.
 func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
-	f := newGraceTestFixture(t, 30)
+	f := newGraceTestFixture(t, 30*24)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	procSubID := "sub_stale_" + uuid.New().String()

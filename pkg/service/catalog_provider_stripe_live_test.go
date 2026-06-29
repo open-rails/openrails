@@ -34,13 +34,13 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	stripeSvc := &catalog.StripeCatalogService{
 		Config: &config.Config{Env: "dev", TestMode: true},
 		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: key},
+			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}
 	svc := &Service{rt: &app.Runtime{
 		Config: &config.Config{Env: "dev", TestMode: true},
 		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: key},
+			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}}
 	adapter := &stripeAdapter{svc: svc}
@@ -51,7 +51,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	slug := "live-stripe-catalog-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	product := &models.Product{
 		ID:          productID,
-		Slug:        slug,
+		Key:         slug,
 		DisplayName: "OpenRails live Stripe catalog " + slug,
 		Description: "OpenRails live Stripe catalog sync test",
 		EntitlementsSpec: map[string]*int{
@@ -63,7 +63,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 		PriceID:          priceID,
 		ProductID:        productID,
 		Product:          product,
-		ProductSlug:      slug,
+		ProductKey:       slug,
 		UnitAmount:       12_340_000,
 		Currency:         "usd",
 		BillingCycleDays: &cycle,
@@ -105,13 +105,13 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	oneTimePriceID := uuid.New()
 	oneTimeLookup := internalStripeLookupKey(slug, "usd", 5_670_000, nil)
 	oneTimeIn := autoCreateContext{
-		PriceID:     oneTimePriceID,
-		ProductID:   productID,
-		Product:     product,
-		ProductSlug: slug,
-		UnitAmount:  5_670_000,
-		Currency:    "usd",
-		LookupKey:   oneTimeLookup,
+		PriceID:    oneTimePriceID,
+		ProductID:  productID,
+		Product:    product,
+		ProductKey: slug,
+		UnitAmount: 5_670_000,
+		Currency:   "usd",
+		LookupKey:  oneTimeLookup,
 	}
 	oneTimeFirst, err := adapter.AutoCreate(ctx, oneTimeIn)
 	require.NoError(t, err)

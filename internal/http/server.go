@@ -207,8 +207,8 @@ func New(deps Dependencies) (*Server, error) {
 		// rotation. Idempotent; never overwrites an existing secret. No-op when
 		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
 		// global private key is set).
-		if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil {
-			if err := recurring.SeedConfiguredMerchantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.PrivateKey); err != nil {
+		if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
+			if err := recurring.SeedConfiguredMerchantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.Solana.PrivateKey); err != nil {
 				return nil, fmt.Errorf("seed configured merchant solana secret: %w", err)
 			}
 		}
@@ -232,12 +232,12 @@ func New(deps Dependencies) (*Server, error) {
 				submitter = recurring.NewSignerSubmitterFromStore(secretStore, deps.Runtime.SolanaRPC, 0)
 			}
 			network := "mainnet"
-			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Network != "" {
-				network = pc.Network
+			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {
+				network = pc.Solana.Network
 			}
 			var solanaTokens map[string]config.TokenConfig
-			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil {
-				solanaTokens = pc.Tokens
+			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
+				solanaTokens = pc.Solana.Tokens
 			}
 			cranker := recurring.NewCrankService(submitter)
 			deps.Runtime.SetSolanaCranker(cranker)

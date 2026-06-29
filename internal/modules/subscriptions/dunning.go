@@ -48,14 +48,15 @@ import (
 // cycle, 29% of a true week), monthly tier 13d (46% of the shortest 28d cycle,
 // 43% of a month).
 const (
-	// dunningMinRetryCycleDays is the shortest billing cycle that gets any
-	// retries at all; below it the first failure is terminal.
-	dunningMinRetryCycleDays = 4
-	// dunningMonthlyCycleDays is where the monthly (capped) tier starts.
-	dunningMonthlyCycleDays = 28
+	// dunningMinRetryCycleHours is the shortest billing cycle that gets any
+	// retries at all; below it the first failure is terminal. 96h (4 days).
+	dunningMinRetryCycleHours = 4 * 24
+	// dunningMonthlyCycleHours is where the monthly (capped) tier starts. 672h
+	// (28 days).
+	dunningMonthlyCycleHours = 28 * 24
 	// dunningWindowSlack is added past the last retry offset when deriving the
-	// staleness window: one day tolerates a late worker run without
-	// prematurely window-cancelling a sub that is mid-schedule.
+	// staleness window: 24h tolerates a late worker run without prematurely
+	// window-cancelling a sub that is mid-schedule.
 	dunningWindowSlack = 24 * time.Hour
 )
 
@@ -153,23 +154,23 @@ var (
 )
 
 // DunningRetryOffsets returns the hardcoded retry schedule for a billing cycle
-// expressed in days: each entry is a retry moment as an offset from the
+// expressed in HOURS: each entry is a retry moment as an offset from the
 // INITIAL failure. An empty schedule means no retries — the first failure is
 // terminal.
 //
-// billingCycleDays <= 0 means the cycle is unknown (e.g. a one-time price);
-// the monthly schedule is returned defensively and callers should log.
+// cycleHours <= 0 means the cycle is unknown (e.g. a one-time price); the
+// monthly schedule is returned defensively and callers should log.
 //
 // Callers must not mutate the returned slice.
-func DunningRetryOffsets(billingCycleDays int) []time.Duration {
+func DunningRetryOffsets(cycleHours int) []time.Duration {
 	switch {
-	case billingCycleDays <= 0:
+	case cycleHours <= 0:
 		// Unknown cycle: monthly fallback (callers log).
 		return dunningOffsetsMonthly
-	case billingCycleDays < dunningMinRetryCycleDays:
+	case cycleHours < dunningMinRetryCycleHours:
 		// Daily-ish cadence: no dunning, first failure is terminal.
 		return nil
-	case billingCycleDays < dunningMonthlyCycleDays:
+	case cycleHours < dunningMonthlyCycleHours:
 		// Weekly-ish cadence.
 		return dunningOffsetsWeekly
 	default:
@@ -182,8 +183,8 @@ func DunningRetryOffsets(billingCycleDays int) []time.Duration {
 // the initial one) a billing cycle tolerates before the subscription is
 // terminally cancelled: one per retry offset, plus the initial failure.
 // A 0-retry cycle returns 1 — the first failure is terminal.
-func DunningMaxFailures(billingCycleDays int) int {
-	return len(DunningRetryOffsets(billingCycleDays)) + 1
+func DunningMaxFailures(cycleHours int) int {
+	return len(DunningRetryOffsets(cycleHours)) + 1
 }
 
 // DunningNextRetryIn returns how long after the failures-th consecutive
@@ -194,8 +195,8 @@ func DunningMaxFailures(billingCycleDays int) int {
 // (monthly: 2d, 3d, 4d, 4d) and degrade gracefully when the worker is late —
 // the next retry is always scheduled relative to the failure that just
 // happened, never into the past.
-func DunningNextRetryIn(billingCycleDays, failures int) time.Duration {
-	offsets := DunningRetryOffsets(billingCycleDays)
+func DunningNextRetryIn(cycleHours, failures int) time.Duration {
+	offsets := DunningRetryOffsets(cycleHours)
 	if failures < 1 || failures > len(offsets) {
 		return 0
 	}
@@ -213,23 +214,23 @@ func DunningNextRetryIn(billingCycleDays, failures int) time.Duration {
 // window = last retry offset + one day of slack (14d for monthly cycles, 3d
 // for weekly). A 0-retry cycle derives a ZERO window: any missed rebill is
 // immediately terminal.
-func DunningWindow(billingCycleDays int) time.Duration {
-	offsets := DunningRetryOffsets(billingCycleDays)
+func DunningWindow(cycleHours int) time.Duration {
+	offsets := DunningRetryOffsets(cycleHours)
 	if len(offsets) == 0 {
 		return 0
 	}
 	return offsets[len(offsets)-1] + dunningWindowSlack
 }
 
-// BillingCycleDaysOf returns the price's billing cycle in days, or 0 when the
+// BillingCycleHoursOf returns the price's billing cycle in HOURS, or 0 when the
 // price or its cycle is unknown (one-time prices) — the defensive
 // monthly-fallback input to the Dunning* schedule functions.
-func BillingCycleDaysOf(price *models.Price) int {
-	cycleDays := price.RecurringCycleDays()
-	if cycleDays == nil {
+func BillingCycleHoursOf(price *models.Price) int {
+	cycleHours := price.RecurringCycleHours()
+	if cycleHours == nil {
 		return 0
 	}
-	return *cycleDays
+	return *cycleHours
 }
 
 // Renewal grace windows (#368).
@@ -258,16 +259,15 @@ const (
 )
 
 // GraceSlack returns the duration of the trailing renewal grace window for a
-// billing cycle expressed in days: half the billing cycle, capped at 48h
+// billing cycle expressed in HOURS: half the billing cycle, capped at 48h
 // (daily cycles get 12h, 3-day 36h, 4-day-and-longer incl. monthly 48h).
-// billingCycleDays <= 0
-// means the cycle is unknown (one-time price); the monthly cap is returned
-// defensively to match the Dunning* fallbacks.
-func GraceSlack(billingCycleDays int) time.Duration {
-	if billingCycleDays <= 0 {
+// cycleHours <= 0 means the cycle is unknown (one-time price); the monthly cap
+// is returned defensively to match the Dunning* fallbacks.
+func GraceSlack(cycleHours int) time.Duration {
+	if cycleHours <= 0 {
 		return graceSlackCap
 	}
-	half := time.Duration(billingCycleDays) * 12 * time.Hour
+	half := time.Duration(cycleHours) * time.Hour / 2
 	if half > graceSlackCap {
 		return graceSlackCap
 	}

@@ -18,7 +18,7 @@ import (
 func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	cycle := 30
+	cycle := 30 * 24
 
 	tests := []struct {
 		name          string
@@ -87,7 +87,7 @@ func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 // builds the unsigned [cancel + subscribe] bundle with no transfer.
 func TestSolanaDowngradeHasZeroFirstCharge(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	cycle := 30
+	cycle := 30 * 24
 
 	// A "downgrade" (newFull < oldFull) routed through the Model-B charge clamps to
 	// 0 cents, and the prepare endpoint additionally SKIPS this computation for a

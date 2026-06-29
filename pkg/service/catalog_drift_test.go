@@ -88,7 +88,7 @@ func catalogStatusFromActive(active bool) models.CatalogStatus {
 
 // helper builders
 func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
-	return &models.Product{ID: id, Slug: "prod-slug", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
+	return &models.Product{ID: id, Key: "prod-slug", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
 }
 
 func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {

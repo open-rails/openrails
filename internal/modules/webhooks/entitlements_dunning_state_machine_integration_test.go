@@ -48,7 +48,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,
 		MerchantID:       dbtest.TestMerchantID.UUID(),
-		Slug:             "test_product_" + uuid.New().String(),
+		Key:              "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -59,16 +59,16 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ProductID:        productID,
-		Amount:           9_990_000,
-		Currency:         "usd",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingDays,
-		AutoRenew:          true,
-		CreatedAt:          clock.Now().UTC(),
-		UpdatedAt:          clock.Now().UTC(),
+		ID:                  priceID,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ProductID:           productID,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingDays,
+		AutoRenew:           true,
+		CreatedAt:           clock.Now().UTC(),
+		UpdatedAt:           clock.Now().UTC(),
 	})
 	require.NoError(t, err)
 

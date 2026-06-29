@@ -188,8 +188,8 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 	}
 	secret := ""
 	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil {
-			secret = stripeProc.WebhookSecret
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
+			secret = stripeProc.Stripe.WebhookSecret
 		}
 	}
 

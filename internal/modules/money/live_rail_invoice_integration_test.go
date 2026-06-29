@@ -66,7 +66,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: true},
 		Rails: config.RailSet{
-			"stripe": {Type: config.RailTypeStripe, SecretKey: secretKey},
+			"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}},
 		},
 	}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{

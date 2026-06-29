@@ -5,7 +5,12 @@ import (
 	"strings"
 )
 
-// BillingCycleDaysToInterval formats billing cycle days as an OpenRails duration.
+// BillingCycleHoursToInterval formats billing cycle hours as an OpenRails duration.
+func BillingCycleHoursToInterval(hours int) string {
+	return strconv.Itoa(hours) + "h"
+}
+
+// BillingCycleDaysToInterval formats provider day cadences as an OpenRails duration.
 func BillingCycleDaysToInterval(days int) string {
 	return strconv.Itoa(days) + "d"
 }

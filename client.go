@@ -306,9 +306,9 @@ type AccountSettingsInput struct {
 	// AutoTopupAmountCents is the topup deposit size in currency-internal units.
 	AutoTopupAmountCents   *int64  `json:"auto_topup_amount_cents,omitempty"`
 	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id,omitempty"`
-	// DefaultCreditExpiryDays is the default lifetime in days for credit deposits that
+	// DefaultCreditExpiryHours is the default lifetime in hours for credit deposits that
 	// don't carry an explicit ExpiresAt.
-	DefaultCreditExpiryDays *int `json:"default_credit_expiry_days,omitempty"`
+	DefaultCreditExpiryHours *int `json:"default_credit_expiry_hours,omitempty"`
 	// HardStopOnBreach rejects new admissions when any spend limit is breached rather
 	// than allowing with a warning.
 	HardStopOnBreach *bool `json:"hard_stop_on_breach,omitempty"`
@@ -502,7 +502,7 @@ type ProductAccessGrant struct {
 	ID           string     `json:"id"`
 	CustomerID   string     `json:"customer_id"`
 	ProductID    string     `json:"product_id"`
-	ProductSlug  string     `json:"product_slug,omitempty"`
+	ProductKey   string     `json:"product_key,omitempty"`
 	ProductName  string     `json:"product_name,omitempty"`
 	SourceType   string     `json:"source_type"`
 	SourceID     string     `json:"source_id,omitempty"`

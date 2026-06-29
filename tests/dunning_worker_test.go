@@ -595,7 +595,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 
 	suite.InsertProduct(ctx, &models.Product{
 		ID:               productID,
-		Slug:             fmt.Sprintf("dunning-cycle-%dd-%s", cycleDays, uuid.New().String()[:8]),
+		Key:              fmt.Sprintf("dunning-cycle-%dd-%s", cycleDays, uuid.New().String()[:8]),
 		DisplayName:      fmt.Sprintf("Dunning %dd cycle", cycleDays),
 		Description:      "cadence-relative dunning fixture",
 		EntitlementsSpec: map[string]*int{"premium": nil},
@@ -605,12 +605,12 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		UpdatedAt:        now,
 	})
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             999,
-		Currency:           "usd",
-		AccessDurationDays: &cycleDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              999,
+		Currency:            "usd",
+		AccessDurationHours: &cycleDays, AutoRenew: true,
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Rails: map[string]map[string]string{
 			string(models.RailMobius): {

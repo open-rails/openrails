@@ -106,11 +106,11 @@ type PublishPlanInput struct {
 	MetadataURI     string // optional (<=128 bytes)
 	EndTs           int64  // 0 = perpetual
 
-	// BillingCycleDays, when > 0, is the source price's billing cycle. PublishPlan
-	// then enforces period_hours == BillingCycleDays*24 so the on-chain period can
+	// BillingCycleHours, when > 0, is the source price's billing cycle. PublishPlan
+	// then enforces period_hours == BillingCycleHours so the on-chain period can
 	// never silently disagree with the price the plan backs. 0 = not provided
 	// (consistency check skipped).
-	BillingCycleDays int
+	BillingCycleHours int
 }
 
 // PlanHandle is the durable record of a published plan, suitable for storing in
@@ -173,17 +173,17 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: period_hours must be in (0, %d]", maxPeriodHours)
 	}
 	// period_hours <-> billing-cycle consistency: the on-chain period is derived
-	// from a price's BillingCycleDays as days*24 (see catalog_provider_solana.go).
-	// When a caller threads that cycle through (PublishPlanInput.BillingCycleDays
-	// > 0), enforce period_hours == BillingCycleDays*24 so an admin call can't
+	// from a price's AccessDurationHours (see catalog_provider_solana.go).
+	// When a caller threads that cycle through (PublishPlanInput.BillingCycleHours
+	// > 0), enforce period_hours == BillingCycleHours so an admin call can't
 	// publish a plan whose on-chain period silently disagrees with the price.
 	// TODO(#254): the admin HTTP surface does not yet carry the price's cycle; once
-	// it does, thread BillingCycleDays from there so the check applies to every
+	// it does, thread BillingCycleHours from there so the check applies to every
 	// publish path, not only callers that already have the cycle in hand.
-	if in.BillingCycleDays > 0 {
-		want := uint64(in.BillingCycleDays) * 24
+	if in.BillingCycleHours > 0 {
+		want := uint64(in.BillingCycleHours)
 		if in.PeriodHours != want {
-			return nil, fmt.Errorf("recurring: period_hours %d disagrees with billing_cycle_days %d (expected %d = days*24)", in.PeriodHours, in.BillingCycleDays, want)
+			return nil, fmt.Errorf("recurring: period_hours %d disagrees with billing_cycle_hours %d", in.PeriodHours, in.BillingCycleHours)
 		}
 	}
 	symbol := normalizeSymbol(in.TokenSymbol)

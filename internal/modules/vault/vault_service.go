@@ -249,10 +249,13 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 		} else if value := strings.TrimSpace(sec.Value); value != "" {
 			proc := cloneRailConfig(s.railConfig(provider))
 			if proc == nil {
-				proc = &config.RailConfig{Type: config.RailTypeNMI}
+				proc = &config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{}}
 			}
 			proc.Type = config.RailTypeNMI
-			proc.SecurityKey = value
+			if proc.NMI == nil {
+				proc.NMI = &config.NMIRailConfig{}
+			}
+			proc.NMI.SecurityKey = value
 			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
 		}
 		return nil, errors.New("missing scoped merchant NMI secret for provider account")
@@ -289,10 +292,12 @@ func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
 		return nil
 	}
 	out := *in
-	if in.Tokens != nil {
-		out.Tokens = make(map[string]config.TokenConfig, len(in.Tokens))
-		for k, v := range in.Tokens {
-			out.Tokens[k] = v
+	if in.Solana != nil && in.Solana.Tokens != nil {
+		out.Solana = &config.SolanaRailConfig{}
+		*out.Solana = *in.Solana
+		out.Solana.Tokens = make(map[string]config.TokenConfig, len(in.Solana.Tokens))
+		for k, v := range in.Solana.Tokens {
+			out.Solana.Tokens[k] = v
 		}
 	}
 	return &out

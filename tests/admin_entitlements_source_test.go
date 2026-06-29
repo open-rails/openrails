@@ -31,7 +31,7 @@ func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 
 	body, err := json.Marshal(map[string]any{
 		"entitlement": "premium",
-		"days":        7,
+		"hours":       7 * 24,
 	})
 	require.NoError(t, err)
 
@@ -59,7 +59,7 @@ func TestAdminEntitlementGrant_RequiresEntitlementsWrite(t *testing.T) {
 	admin := newHostSeamAdminRouter(t, suite, "b9999999-9999-4999-8999-999999999999",
 		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
-	body, _ := json.Marshal(map[string]any{"entitlement": "premium", "days": 7})
+	body, _ := json.Marshal(map[string]any{"entitlement": "premium", "hours": 7 * 24})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+uuid.New().String()+"/entitlements", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -100,7 +100,7 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 
 	body, err := json.Marshal(map[string]any{
 		"entitlement": "premium",
-		"days":        7,
+		"hours":       7 * 24,
 	})
 	require.NoError(t, err)
 

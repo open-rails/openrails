@@ -98,7 +98,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		creditKey   = "solana-pro-usd"
 		priceMicros = int64(19_990_000)
 	)
-	productSlug := "solana-pro-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "solana-pro-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 
 	catalogToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
@@ -109,7 +109,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Key:          productSlug,
+			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
@@ -140,19 +140,19 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		entitlementsSpec, creditsSpec        []byte
 	)
 	err = h.Pool().QueryRow(ctx, `
-		SELECT slug, display_name, description, entitlements_spec, credits_spec
-		  FROM openrails.products
-		 WHERE merchant_id = $1::uuid AND slug = $2
-	`, dbtest.TestMerchantID.String(), productSlug).Scan(&dbSlug, &dbDisplayName, &dbDescription, &entitlementsSpec, &creditsSpec)
+		SELECT key, display_name, description, entitlements_spec, credits_spec
+          FROM openrails.products
+		 WHERE merchant_id = ::uuid AND key = 
+	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbSlug, &dbDisplayName, &dbDescription, &entitlementsSpec, &creditsSpec)
 	require.NoError(t, err, "product metadata must be persisted in openrails.products")
-	require.Equal(t, productSlug, dbSlug)
+	require.Equal(t, productKey, dbSlug)
 	require.Equal(t, displayName, dbDisplayName)
 	require.Equal(t, description, dbDescription)
 	require.Contains(t, string(entitlementsSpec), entitlement, "granted benefit (entitlement) stored in DB")
 	require.Contains(t, string(creditsSpec), creditKey, "granted benefit (credits) stored in DB")
 
 	// Resolve the published product + price ids (used by the DB payment row below).
-	getStatus, getBody := requestJSON(t, "GET", surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, catalogToken, nil)
+	getStatus, getBody := requestJSON(t, "GET", surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, catalogToken, nil)
 	require.Equal(t, 200, getStatus, string(getBody))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(getBody, &product))
@@ -201,14 +201,14 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 
 	// Negative (the crux of proof (a)): NONE of the catalog/product/entitlement
 	// metadata appears anywhere in the serialized on-chain transaction.
-	assertNoMetadataInTx(t, built.TransactionBase64, productSlug, displayName, description, entitlement, creditKey)
+	assertNoMetadataInTx(t, built.TransactionBase64, productKey, displayName, description, entitlement, creditKey)
 
 	// --- (b) Granted benefits + invoice/payment state live in the OpenRails DB. -
 	proveDBSourceOfTruth(t, h, surface, product.ID, priceID, reference, entitlement)
 
 	// --- Optional real on-chain leg: a funded devnet USDC transfer. -------------
 	maybeRunOnChainLeg(t, ctx, rpcClient, priv, merchantPub,
-		productSlug, displayName, description, entitlement, creditKey)
+		productKey, displayName, description, entitlement, creditKey)
 }
 
 // proveDBSourceOfTruth grants the catalog entitlement, finalizes an invoice, and

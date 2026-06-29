@@ -54,7 +54,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 		`INSERT INTO openrails.merchants (id, slug) VALUES
 		   ('` + tenantA + `','merchant-` + suffix + `-a'), ('` + tenantB + `','merchant-` + suffix + `-b')
 		 ON CONFLICT (id) DO NOTHING`,
-		`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES
+		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES
 		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
 		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,
@@ -86,7 +86,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	gotA, err := repo.GetAll(connA)
 	require.NoError(t, err)
 	require.Len(t, gotA, 1, "merchant A sees exactly its own product")
-	require.Equal(t, slugA, gotA[0].Slug)
+	require.Equal(t, slugA, gotA[0].Key)
 	releaseA()
 
 	// (3) Pinned to merchant B: sees only merchant B's product. No cross-merchant bleed.
@@ -96,7 +96,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	gotB, err := repo.GetAll(connB)
 	require.NoError(t, err)
 	require.Len(t, gotB, 1)
-	require.Equal(t, slugB, gotB[0].Slug)
+	require.Equal(t, slugB, gotB[0].Key)
 	releaseB()
 }
 

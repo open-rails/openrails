@@ -159,7 +159,7 @@ func reconcileNMIClients(cfg *config.Config, rails config.RailSet) (map[string]*
 		if providerKey == "" {
 			return nil, fmt.Errorf("nmi provider name cannot be empty")
 		}
-		if strings.TrimSpace(procConfig.SecurityKey) == "" {
+		if procConfig.NMI == nil || strings.TrimSpace(procConfig.NMI.SecurityKey) == "" {
 			return nil, fmt.Errorf("nmi provider %q security key is required for reconciliation", providerKey)
 		}
 		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestMode())
@@ -177,7 +177,7 @@ func reconcileCCBillDataLink(cfg *config.Config, rails config.RailSet) (*ccbill.
 	if err != nil {
 		return nil, err
 	}
-	if proc == nil || proc.DataLinkUsername == "" || proc.DataLinkPassword == "" || proc.ClientAccNum == "" {
+	if proc == nil || proc.CCBill == nil || proc.CCBill.DataLinkUsername == "" || proc.CCBill.DataLinkPassword == "" || proc.CCBill.ClientAccNum == "" {
 		return nil, nil
 	}
 	ccbillConfig := proc.ToCCBillConfig()
@@ -193,12 +193,16 @@ func reconcileSolanaRPC(cfg *config.Config, rails config.RailSet) (*solanaint.RP
 	if proc == nil {
 		return nil, nil
 	}
+	heliusAPIKey := ""
+	if proc.Solana != nil {
+		heliusAPIKey = proc.Solana.HeliusAPIKey
+	}
 	network := "mainnet"
 	if cfg.IsTestMode() {
 		network = "devnet"
 	}
 	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-		HeliusAPIKey: proc.HeliusAPIKey,
+		HeliusAPIKey: heliusAPIKey,
 		Network:      network,
 		ReadOnly:     true,
 	}), nil

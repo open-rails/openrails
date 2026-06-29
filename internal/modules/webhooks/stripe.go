@@ -802,8 +802,8 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				continue
 			}
 			var expiresAt *time.Time
-			if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
-				t := s.now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
+			if spec.ExpiryHours != nil && *spec.ExpiryHours > 0 {
+				t := s.now().UTC().Add(time.Duration(*spec.ExpiryHours) * 24 * time.Hour)
 				expiresAt = &t
 			}
 			paymentSourceID := result.PaymentID.String()
@@ -1218,7 +1218,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 	}
 	priceAmount := 0.0
 	priceCurrency := strings.ToLower(strings.TrimSpace(inv.Currency))
-	billingCycleDays := uint32(0)
+	billingCycleHours := uint32(0)
 	var productID *uuid.UUID
 	priceID := sub.PriceID
 	if sub.Price != nil {
@@ -1226,8 +1226,8 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 		if curr := strings.TrimSpace(sub.Price.Currency); curr != "" {
 			priceCurrency = curr
 		}
-		if sub.Price.RecurringCycleDays() != nil {
-			billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleDays())
+		if sub.Price.RecurringCycleHours() != nil {
+			billingCycleHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
 		}
 		productID = &sub.Price.ProductID
 	}
@@ -1243,7 +1243,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 		Status:             statusPastDue,
 		PriceAmount:        priceAmount,
 		PriceCurrency:      priceCurrency,
-		BillingCycleDays:   billingCycleDays,
+		BillingCycleHours:  billingCycleHours,
 		ProductID:          productID,
 		PriceID:            &priceID,
 		Rail:               string(models.RailStripe),
@@ -1548,8 +1548,8 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		if err != nil {
 			return fmt.Errorf("load stripe price for won dispute recovery: %w", err)
 		}
-		if price.RecurringCycleDays() != nil && *price.RecurringCycleDays() > 0 {
-			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.RecurringCycleDays()) * 24 * time.Hour)
+		if price.RecurringCycleHours() != nil && *price.RecurringCycleHours() > 0 {
+			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.RecurringCycleHours()) * time.Hour)
 		}
 	}
 	if !paidThrough.After(now) {

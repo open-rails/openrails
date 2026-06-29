@@ -226,11 +226,11 @@ func TestSolanaSunset_Verify(t *testing.T) {
 func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 	fx := newSunsetFixture()
 	intent := sunsetIntent(t, fx.pda)
-	cycle := 30
+	cycle := 720
 	mkPrice := func(status models.CatalogStatus) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "usd",
-			AccessDurationDays: &cycle, AutoRenew: true, Status: status,
+			AccessDurationHours: &cycle, AutoRenew: true, Status: status,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": fx.pda},
 			},

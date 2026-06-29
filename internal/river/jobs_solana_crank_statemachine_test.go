@@ -109,7 +109,7 @@ func (l *fakeLifecycle) FailMembership(_ context.Context, p *subscriptions.FailM
 	l.failures++
 	l.lastFail = p
 	// Mirror the production lifecycle: cancel once RetryAttempts reaches the cap.
-	if l.failures >= subscriptions.DunningMaxFailures(smCycleDays) {
+	if l.failures >= subscriptions.DunningMaxFailures(smCycleHours) {
 		l.cancelled = true
 	}
 	return nil
@@ -126,11 +126,11 @@ func (l *fakeLifecycle) CancelMembership(_ context.Context, p *subscriptions.Can
 
 const (
 	smPeriodHours = uint64(1)
-	// smCycleDays pins the harness to the MONTHLY dunning tier (#359) so the
+	// smCycleHours pins the harness to the MONTHLY dunning tier (#359) so the
 	// recoverable-decline path exercises the progressive 5-failure schedule
 	// (+2d/+5d/+9d/+13d); the 1h on-chain period alone would otherwise
 	// resolve to the 0-retry tier.
-	smCycleDays    = 30
+	smCycleHours   = 30 * 24
 	smAmountBase   = uint64(1_000_000) // 1 USDC (6 decimals)
 	smFiatAmount   = int64(100)        // $1.00
 	smFiatCurrency = "usd"
@@ -179,7 +179,7 @@ func newCrankHarness(t *testing.T) *crankHarness {
 				fingerprint:     smFingerprint,
 				fiatAmount:      smFiatAmount,
 				currency:        smFiatCurrency,
-				cycleDays:       smCycleDays,
+				cycleHours:      smCycleHours,
 				// mirror production resolvePlan: the failure count BEFORE this
 				// crank, as the real subscription row would carry it.
 				retryAttempts: life.failures,
@@ -240,7 +240,7 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 	// SPL token InsufficientFunds -> recoverable per the real classifier.
 	insufficient := errors.New(`Transaction failed: custom program error: 0x1 {"InstructionError":[0,{"Custom":1}]}`)
 
-	maxFailures := subscriptions.DunningMaxFailures(smCycleDays)
+	maxFailures := subscriptions.DunningMaxFailures(smCycleHours)
 	for attempt := 1; attempt <= maxFailures; attempt++ {
 		now := h.w.now()
 		h.crank.err = insufficient
@@ -252,7 +252,7 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 		// rescheduled by the schedule's gap for this failure count, not by one
 		// period. The terminal failure has no gap: the crank then advances one
 		// period so the cancelled record doesn't hot-loop.
-		gap := subscriptions.DunningNextRetryIn(smCycleDays, attempt)
+		gap := subscriptions.DunningNextRetryIn(smCycleHours, attempt)
 		if gap == 0 {
 			gap = time.Duration(smPeriodHours) * time.Hour
 		}

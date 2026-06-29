@@ -32,10 +32,10 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	// Product + price with multiple entitlements.
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := 720
 	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
-		Slug:        "test_mixed_sources_" + uuid.New().String()[:8],
+		Key:         "test_mixed_sources_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -49,12 +49,12 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             999,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              999,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays, AutoRenew: true,
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CreatedAt:  clock.Now().UTC(),
 		UpdatedAt:  clock.Now().UTC(),

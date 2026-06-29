@@ -35,11 +35,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// Seed a product with two entitlements.
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := 720
 
 	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
-		Slug:        "test_nmi_multi_" + uuid.New().String()[:8],
+		Key:         "test_nmi_multi_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -52,12 +52,12 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             999,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              999,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays, AutoRenew: true,
 		Rails: map[string]map[string]string{
 			string(models.RailMobius): {
 				models.RailKeyPlanID: "plan_test_999",

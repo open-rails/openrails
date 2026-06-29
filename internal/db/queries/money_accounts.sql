@@ -59,7 +59,7 @@ INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
     max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount,
     low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents,
-    auto_topup_payment_method_id, default_credit_expiry_days,
+    auto_topup_payment_method_id, default_credit_expiry_hours,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
@@ -71,7 +71,7 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     auto_topup_enabled = EXCLUDED.auto_topup_enabled,
     auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents,
     auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
-    default_credit_expiry_days = EXCLUDED.default_credit_expiry_days,
+    default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
     hard_stop_on_breach = EXCLUDED.hard_stop_on_breach,
     alert_threshold_pct = EXCLUDED.alert_threshold_pct,
     updated_at = EXCLUDED.updated_at;

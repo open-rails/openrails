@@ -205,7 +205,10 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	if err != nil {
 		return nil, err
 	}
-	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if solanaProc.Solana == nil {
+		return nil, fmt.Errorf("solana rail is not configured")
+	}
+	tokenCfg, ok := solanaProc.Solana.Tokens[tokenSymbol]
 	if !ok {
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
@@ -227,7 +230,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Get merchant recipient wallet
-	recipient := solanaProc.RecipientWallet
+	recipient := solanaProc.Solana.RecipientWallet
 	if recipient == "" {
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}
@@ -291,7 +294,10 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}
-	tokenCfg := solanaProc.Tokens[tokenSymbol]
+	if solanaProc.Solana == nil {
+		return baseURL
+	}
+	tokenCfg := solanaProc.Solana.Tokens[tokenSymbol]
 
 	// Format amount with proper decimals
 	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)

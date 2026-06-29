@@ -423,7 +423,7 @@ type DepositParams struct {
 	SourceID   *string // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt  *time.Time
 	// ApplyAccountExpiryDefault, when true and ExpiresAt is nil, sets the deposit's
-	// expiry to now + the payer's money_accounts.default_credit_expiry_days
+	// expiry to now + the payer's money_accounts.default_credit_expiry_hours
 	// (issue #240). Purchase/top-up paths set this so bought funds expire (default
 	// 365d); permanent grants (subscriptions, admin) leave it false. No-op when no
 	// settings default is configured.
@@ -444,8 +444,8 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	if params.ExpiresAt == nil && params.ApplyAccountExpiryDefault {
 		if payer, oerr := resolveCustomer(params.CustomerID, params.Invoker); oerr == nil {
 			if settings, serr := s.GetAccountSettings(ctx, payer, params.Currency); serr == nil &&
-				settings.DefaultCreditExpiryDays != nil && *settings.DefaultCreditExpiryDays > 0 {
-				exp := s.now().AddDate(0, 0, *settings.DefaultCreditExpiryDays)
+				settings.DefaultCreditExpiryHours != nil && *settings.DefaultCreditExpiryHours > 0 {
+				exp := s.now().Add(time.Duration(*settings.DefaultCreditExpiryHours) * time.Hour)
 				params.ExpiresAt = &exp
 			}
 		}

@@ -278,10 +278,13 @@ func testFundingConfig() *config.Config {
 func testFundingRails() config.RailSet {
 	return config.RailSet{
 		"solana": {
-			Tokens: map[string]config.TokenConfig{
-				"USDC": {
-					Mint:     "11111111111111111111111111111111",
-					Decimals: 6,
+			Type: config.RailTypeSolana,
+			Solana: &config.SolanaRailConfig{
+				Tokens: map[string]config.TokenConfig{
+					"USDC": {
+						Mint:     "11111111111111111111111111111111",
+						Decimals: 6,
+					},
 				},
 			},
 		},

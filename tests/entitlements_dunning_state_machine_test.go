@@ -40,13 +40,13 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 
-	billingDays := 30
+	billingDays := 720
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
 	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
+		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -58,12 +58,12 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                 priceID,
-		ProductID:          productID,
-		Status:             models.CatalogStatusActive,
-		Amount:             9_990_000,
-		Currency:           "usd",
-		AccessDurationDays: &billingDays, AutoRenew: true,
+		ID:                  priceID,
+		ProductID:           productID,
+		Status:              models.CatalogStatusActive,
+		Amount:              9_990_000,
+		Currency:            "usd",
+		AccessDurationHours: &billingDays, AutoRenew: true,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})

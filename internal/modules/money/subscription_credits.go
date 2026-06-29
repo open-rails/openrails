@@ -24,7 +24,7 @@ type GrantSubscriptionCreditsParams struct {
 // validateCreditGrantSpec validates one credit/currency grant spec (#472). The
 // grant key is just a label; a non-empty key scopes per-grant idempotency. Unit
 // must be a built-in currency OR an active qualified custom-credit unit (#475).
-// expiry_days==0 means never-expire (only an explicit negative is invalid).
+// expiry_hours==0 means never-expire (only an explicit negative is invalid).
 func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey string, spec models.CreditGrantSpec) error {
 	if strings.TrimSpace(grantKey) == "" {
 		return fmt.Errorf("grant key is empty")
@@ -35,11 +35,8 @@ func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey str
 	if err := s.validateUnit(ctx, spec.UnitCode()); err != nil {
 		return fmt.Errorf("invalid credits_spec: %s %w", grantKey, err)
 	}
-	if spec.ExpiryDays != nil && *spec.ExpiryDays < 0 {
-		return fmt.Errorf("invalid credits_spec: %s expiry_days must be >= 0", grantKey)
-	}
-	if spec.ExpiresDays != nil && *spec.ExpiresDays < 0 {
-		return fmt.Errorf("invalid credits_spec: %s expires_days must be >= 0", grantKey)
+	if spec.ExpiryHours != nil && *spec.ExpiryHours < 0 {
+		return fmt.Errorf("invalid credits_spec: %s expiry_hours must be >= 0", grantKey)
 	}
 	cadence := spec.Cadence
 	if cadence == "" {
@@ -51,14 +48,14 @@ func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey str
 	return nil
 }
 
-// grantExpiry resolves a grant's deposit expiry: now + EffectiveExpiryDays, or nil
+// grantExpiry resolves a grant's deposit expiry: now + EffectiveExpiryHours, or nil
 // (never) when the resolved value is 0 (#472).
 func grantExpiry(now time.Time, spec models.CreditGrantSpec) *time.Time {
-	days := spec.EffectiveExpiryDays()
-	if days <= 0 {
+	hours := spec.EffectiveExpiryHours()
+	if hours <= 0 {
 		return nil
 	}
-	t := now.Add(time.Duration(days) * 24 * time.Hour)
+	t := now.Add(time.Duration(hours) * time.Hour)
 	return &t
 }
 
@@ -148,7 +145,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 				"grant_label":     label,
 				"unit":            spec.UnitCode(),
 				"amount":          spec.Amount,
-				"expiry_days":     spec.EffectiveExpiryDays(),
+				"expiry_hours":    spec.EffectiveExpiryHours(),
 				"cadence":         cadence,
 				"grant_id":        grantID,
 			}).Info("subscription credit grant applied")
@@ -212,12 +209,12 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 				return err
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
-				"payment_id":  params.PaymentID,
-				"grant_label": label,
-				"unit":        spec.UnitCode(),
-				"amount":      spec.Amount,
-				"expiry_days": spec.EffectiveExpiryDays(),
-				"grant_id":    grantID,
+				"payment_id":   params.PaymentID,
+				"grant_label":  label,
+				"unit":         spec.UnitCode(),
+				"amount":       spec.Amount,
+				"expiry_hours": spec.EffectiveExpiryHours(),
+				"grant_id":     grantID,
 			}).Info("purchase credit grant applied")
 		}
 		return nil

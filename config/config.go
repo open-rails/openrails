@@ -321,72 +321,21 @@ var ReservedRailNames = map[string]string{
 // Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
 // Non-reserved names (e.g., "acme") require type: nmi.
 type RailConfig struct {
-	// Type specifies the rail type: "nmi", "ccbill", "stripe", "solana"
-	// Required for non-reserved rail names.
-	// For reserved names (ccbill, stripe, solana), type is inferred from the name.
+	// Type specifies the rail type: "nmi", "ccbill", "stripe", "solana".
+	// Required for non-reserved rail names; inferred for reserved names
+	// (ccbill, stripe, solana).
 	Type string `koanf:"type"`
-	// Routing selects routine routing for this configured credential set. Empty
-	// is default for existing single-provider configs. manual is available only
-	// for explicit targeting; legacy is retained for old rows/rebills/refunds and
-	// should not receive new default work.
+	// Routing selects routing for this credential set: default | manual | legacy.
+	// Empty is default; legacy is retained for old rows/rebills/refunds and must
+	// not receive new default work.
 	Routing string `koanf:"routing"`
 
+	// Exactly one provider block is set, matching Type. Credentials live ONLY in
+	// the typed block — there is no flat fallback.
 	NMI    *NMIRailConfig    `koanf:"nmi"`
 	CCBill *CCBillRailConfig `koanf:"ccbill"`
 	Stripe *StripeRailConfig `koanf:"stripe"`
 	Solana *SolanaRailConfig `koanf:"solana"`
-
-	// --- NMI fields (type: nmi) ---
-	SecurityKey     string `koanf:"security_key"`
-	TokenizationKey string `koanf:"tokenization_key"`
-	WebhookSecret   string `koanf:"webhook_secret"`
-
-	// --- CCBill fields (type: ccbill) ---
-	Salt             string `koanf:"salt"`
-	ClientSubAcc     string `koanf:"client_sub_acc"`
-	ClientAccNum     string `koanf:"client_acc_num"`
-	DataLinkUsername string `koanf:"datalink_username"`
-	DataLinkPassword string `koanf:"datalink_password"`
-	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation). When
-	// empty, the documented default ranges are used. Supplying it via config/env
-	// lets the ranges be rotated without a code deploy. Parsed at boot (fail-fast
-	// on invalid entries) — see iputil.Configure.
-	AllowedCIDRs []string `koanf:"allowed_cidrs"`
-
-	// --- Stripe fields (type: stripe) ---
-	SecretKey string `koanf:"secret_key"`
-	// WebhookSecret is shared with NMI (same field name); for Stripe it is the
-	// signing secret of the classic / "snapshot" event destination.
-	// WebhookSecretThin is the signing secret of a Stripe "thin" Event
-	// Destination pointed at the same webhook URL. When set, incoming Stripe
-	// webhooks are verified against either secret, and thin payloads are
-	// hydrated into the classic event shape before processing.
-	WebhookSecretThin string `koanf:"webhook_secret_thin"`
-
-	// --- Solana fields (type: solana) ---
-	// There is no rpc_endpoint knob (#352): with a Helius key, Helius is the
-	// primary RPC and the public endpoints are the fallback chain; without one,
-	// the public chain alone serves. One key, zero endpoint plumbing.
-	HeliusAPIKey string `koanf:"helius_api_key"`
-	// Network is DERIVED from the test_mode axis at startup (devnet under
-	// test_mode, mainnet otherwise) — it is deliberately NOT configurable
-	// (#349): test_mode already answers the question, and a second selector
-	// could only contradict it.
-	Network         string                 `koanf:"-"`
-	RecipientWallet string                 `koanf:"recipient_wallet"`
-	Tokens          map[string]TokenConfig `koanf:"tokens"`
-	// SolanaPayRecurringSubscriptions advertises recurring Solana Pay v2
-	// transaction-request support to browser clients. Keep disabled unless the
-	// deployment has validated its target wallet set with merchant co-signed txs.
-	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
-
-	// PrivateKey is the merchant/cranker Solana signing keypair (base58) for a
-	// SINGLE-TENANT install that configures Solana via global config rather than
-	// the per-merchant secret store. At boot it is seeded into the default merchant's
-	// secret store as solana/private_key (idempotently, never overwriting an
-	// existing secret) so recurring Solana can sign (issue #253). Leave empty in
-	// multi-merchant / Vault deployments, where each merchant supplies its own key.
-	PrivateKey string `koanf:"private_key"`
 }
 
 type NMIRailConfig struct {
@@ -396,26 +345,38 @@ type NMIRailConfig struct {
 }
 
 type CCBillRailConfig struct {
-	Salt             string   `koanf:"salt"`
-	ClientSubAcc     string   `koanf:"client_sub_acc"`
-	ClientAccNum     string   `koanf:"client_acc_num"`
-	DataLinkUsername string   `koanf:"datalink_username"`
-	DataLinkPassword string   `koanf:"datalink_password"`
-	AllowedCIDRs     []string `koanf:"allowed_cidrs"`
+	Salt             string `koanf:"salt"`
+	ClientSubAcc     string `koanf:"client_sub_acc"`
+	ClientAccNum     string `koanf:"client_acc_num"`
+	DataLinkUsername string `koanf:"datalink_username"`
+	DataLinkPassword string `koanf:"datalink_password"`
+	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation); empty
+	// uses the documented default ranges. Parsed at boot — see iputil.Configure.
+	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 }
 
 type StripeRailConfig struct {
-	SecretKey         string `koanf:"secret_key"`
-	WebhookSecret     string `koanf:"webhook_secret"`
+	SecretKey     string `koanf:"secret_key"`
+	WebhookSecret string `koanf:"webhook_secret"`
+	// WebhookSecretThin is the signing secret of a Stripe "thin" Event
+	// Destination; when set, webhooks verify against either secret.
 	WebhookSecretThin string `koanf:"webhook_secret_thin"`
 }
 
 type SolanaRailConfig struct {
+	// HeliusAPIKey: with a key Helius is the primary RPC + public endpoints the
+	// fallback; without one the public chain alone serves (#352).
 	HeliusAPIKey                    string                 `koanf:"helius_api_key"`
 	RecipientWallet                 string                 `koanf:"recipient_wallet"`
 	Tokens                          map[string]TokenConfig `koanf:"tokens"`
 	SolanaPayRecurringSubscriptions bool                   `koanf:"solana_pay_recurring_subscriptions"`
-	PrivateKey                      string                 `koanf:"private_key"`
+	// PrivateKey is the merchant/cranker signing keypair (base58) for a
+	// SINGLE-TENANT install; seeded into the default merchant's secret store at
+	// boot (#253). Empty in multi-merchant / Vault deployments.
+	PrivateKey string `koanf:"private_key"`
+	// Network is DERIVED from test_mode at startup (devnet under test_mode,
+	// mainnet otherwise) — not configurable (#349).
+	Network string `koanf:"-"`
 }
 
 // RailSet is an in-memory set of payment-provider credential entries. It
@@ -478,35 +439,18 @@ func (p *RailConfig) normalizeTypedBlock(name string) error {
 		if p.NMI == nil {
 			return fmt.Errorf("rail '%s' type nmi must use nmi block", name)
 		}
-		p.SecurityKey = p.NMI.SecurityKey
-		p.TokenizationKey = p.NMI.TokenizationKey
-		p.WebhookSecret = p.NMI.WebhookSecret
 	case RailTypeCCBill:
 		if p.CCBill == nil {
 			return fmt.Errorf("rail '%s' type ccbill must use ccbill block", name)
 		}
-		p.Salt = p.CCBill.Salt
-		p.ClientSubAcc = p.CCBill.ClientSubAcc
-		p.ClientAccNum = p.CCBill.ClientAccNum
-		p.DataLinkUsername = p.CCBill.DataLinkUsername
-		p.DataLinkPassword = p.CCBill.DataLinkPassword
-		p.AllowedCIDRs = p.CCBill.AllowedCIDRs
 	case RailTypeStripe:
 		if p.Stripe == nil {
 			return fmt.Errorf("rail '%s' type stripe must use stripe block", name)
 		}
-		p.SecretKey = p.Stripe.SecretKey
-		p.WebhookSecret = p.Stripe.WebhookSecret
-		p.WebhookSecretThin = p.Stripe.WebhookSecretThin
 	case RailTypeSolana:
 		if p.Solana == nil {
 			return fmt.Errorf("rail '%s' type solana must use solana block", name)
 		}
-		p.HeliusAPIKey = p.Solana.HeliusAPIKey
-		p.RecipientWallet = p.Solana.RecipientWallet
-		p.Tokens = p.Solana.Tokens
-		p.SolanaPayRecurringSubscriptions = p.Solana.SolanaPayRecurringSubscriptions
-		p.PrivateKey = p.Solana.PrivateKey
 	default:
 		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
 	}
@@ -536,27 +480,28 @@ func (p *RailConfig) IsSolana(name string) bool {
 // ToNMIProviderSettings converts the rail config to NMI provider settings.
 // Only valid for NMI-type rails.
 func (p *RailConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
-	return &NMIProviderSettings{
-		Name:            strings.ToLower(strings.TrimSpace(name)),
-		SecurityKey:     p.SecurityKey,
-		TokenizationKey: p.TokenizationKey,
-		WebhookSecret:   p.WebhookSecret,
-		TestMode:        false, // Will be set by caller based on test_mode
+	s := &NMIProviderSettings{Name: strings.ToLower(strings.TrimSpace(name))}
+	if p.NMI != nil {
+		s.SecurityKey = p.NMI.SecurityKey
+		s.TokenizationKey = p.NMI.TokenizationKey
+		s.WebhookSecret = p.NMI.WebhookSecret
 	}
+	return s // TestMode set by caller based on test_mode
 }
 
 // ToCCBillConfig converts the rail config to CCBillConfig.
 // Only valid for CCBill-type rails.
 func (p *RailConfig) ToCCBillConfig() *CCBillConfig {
-	return &CCBillConfig{
-		Salt:             p.Salt,
-		ClientSubAcc:     p.ClientSubAcc,
-		ClientAccNum:     p.ClientAccNum,
-		DataLinkUsername: p.DataLinkUsername,
-		DataLinkPassword: p.DataLinkPassword,
-		AllowedCIDRs:     p.AllowedCIDRs,
-		TestMode:         false, // Will be set by caller based on global test_mode
+	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
+	if p.CCBill != nil {
+		c.Salt = p.CCBill.Salt
+		c.ClientSubAcc = p.CCBill.ClientSubAcc
+		c.ClientAccNum = p.CCBill.ClientAccNum
+		c.DataLinkUsername = p.CCBill.DataLinkUsername
+		c.DataLinkPassword = p.CCBill.DataLinkPassword
+		c.AllowedCIDRs = p.CCBill.AllowedCIDRs
 	}
+	return c
 }
 
 type NMIProviderSettings struct {
@@ -897,11 +842,11 @@ func validateStripeKeyForTestMode(cfg *Config, rails RailSet) error {
 		cfg = &Config{}
 	}
 	for name, stripeProc := range rails {
-		if stripeProc == nil || stripeProc.GetEffectiveType(name) != RailTypeStripe {
+		if stripeProc == nil || stripeProc.GetEffectiveType(name) != RailTypeStripe || stripeProc.Stripe == nil {
 			continue
 		}
 
-		secretKey := strings.TrimSpace(stripeProc.SecretKey)
+		secretKey := strings.TrimSpace(stripeProc.Stripe.SecretKey)
 		if secretKey == "" {
 			continue
 		}
@@ -920,7 +865,7 @@ func validateStripeKeyForTestMode(cfg *Config, rails RailSet) error {
 		if !cfg.IsTestMode() && isTestKey {
 			log.Warnf("⚠️  Stripe test key provided for rail %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
 			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=true for sandbox testing")
-			stripeProc.SecretKey = ""
+			stripeProc.Stripe.SecretKey = ""
 		}
 	}
 	return nil
@@ -978,12 +923,16 @@ func validateNMIRail(name string, proc *RailConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
+	nmi := proc.NMI
+	if nmi == nil {
+		return fmt.Errorf("rail '%s' (nmi): nmi block is required", name)
+	}
 
-	if strings.TrimSpace(proc.SecurityKey) == "" {
+	if strings.TrimSpace(nmi.SecurityKey) == "" {
 		return fmt.Errorf("rail '%s' (nmi): security_key is required", name)
 	}
 
-	if strings.TrimSpace(proc.WebhookSecret) == "" {
+	if strings.TrimSpace(nmi.WebhookSecret) == "" {
 		return fmt.Errorf("rail '%s' (nmi): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
 	}
 
@@ -995,18 +944,21 @@ func validateCCBillRail(name string, proc *RailConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
+	ccbill := proc.CCBill
+	if ccbill == nil {
+		return fmt.Errorf("rail '%s' (ccbill): ccbill block is required", name)
+	}
 
-	if strings.TrimSpace(proc.ClientAccNum) == "" {
+	if strings.TrimSpace(ccbill.ClientAccNum) == "" {
 		return fmt.Errorf("rail '%s' (ccbill): client_acc_num is required", name)
 	}
 
-	if strings.TrimSpace(proc.ClientSubAcc) == "" {
+	if strings.TrimSpace(ccbill.ClientSubAcc) == "" {
 		return fmt.Errorf("rail '%s' (ccbill): client_sub_acc is required", name)
 	}
 
-	// DataLink credentials: either both or neither
-	hasUsername := strings.TrimSpace(proc.DataLinkUsername) != ""
-	hasPassword := strings.TrimSpace(proc.DataLinkPassword) != ""
+	hasUsername := strings.TrimSpace(ccbill.DataLinkUsername) != ""
+	hasPassword := strings.TrimSpace(ccbill.DataLinkPassword) != ""
 	if hasUsername != hasPassword {
 		return fmt.Errorf("rail '%s' (ccbill): both datalink_username and datalink_password must be provided when configuring DataLink", name)
 	}
@@ -1016,11 +968,15 @@ func validateCCBillRail(name string, proc *RailConfig, isDev bool) error {
 
 // validateStripeRail validates a Stripe-type rail
 func validateStripeRail(name string, proc *RailConfig, isDev bool) error {
-	if strings.TrimSpace(proc.SecretKey) == "" {
+	stripe := proc.Stripe
+	if stripe == nil {
+		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
+	}
+	if strings.TrimSpace(stripe.SecretKey) == "" {
 		log.Warnf("rail '%s' (stripe): secret_key not configured; checkout unavailable", name)
 	}
 
-	if strings.TrimSpace(proc.WebhookSecret) == "" {
+	if strings.TrimSpace(stripe.WebhookSecret) == "" {
 		if !isDev {
 			return fmt.Errorf("rail '%s' (stripe): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
 		}
@@ -1034,7 +990,11 @@ func validateStripeRail(name string, proc *RailConfig, isDev bool) error {
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaRail.
 func validateSolanaRail(name string, proc *RailConfig, isDev bool) error {
-	if strings.TrimSpace(proc.RecipientWallet) == "" {
+	solana := proc.Solana
+	if solana == nil {
+		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
+	}
+	if strings.TrimSpace(solana.RecipientWallet) == "" {
 		if !isDev {
 			return fmt.Errorf("rail '%s' (solana): recipient_wallet is required outside development (Solana payments cannot be processed without it)", name)
 		}

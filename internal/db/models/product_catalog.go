@@ -41,11 +41,11 @@ func (s CatalogStatus) Valid() bool {
 type Product struct {
 	ID          uuid.UUID `json:"id"`
 	MerchantID  uuid.UUID `json:"merchant_id"`
-	Slug        string    `json:"slug"`
+	Key         string    `json:"key"`
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
 
-	// Entitlements configuration: map entitlement name -> duration days (nil or 0 means indefinite)
+	// Entitlements configuration: map entitlement name -> duration HOURS (nil or 0 means indefinite)
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
 
 	// Credits configuration: bundled promo credits for subscriptions
@@ -88,19 +88,18 @@ const (
 	CreditGrantCadencePerRenewal CreditGrantCadence = "per_renewal"
 )
 
-// DefaultCreditGrantExpiryDays is the grant expiry when expiry_days is omitted (#472).
-const DefaultCreditGrantExpiryDays = 365
+// DefaultCreditGrantExpiryHours is the grant expiry when expiry_hours is omitted
+// (#472): 365 days expressed in hours.
+const DefaultCreditGrantExpiryHours = 365 * 24
 
 type CreditGrantSpec struct {
 	// Unit is the currency code of the granted balance (#472). Required.
 	// Unqualified = built-in currency; a future merchant/name = custom credit (#473).
 	Unit   string `json:"unit,omitempty"`
 	Amount int64  `json:"amount"`
-	// ExpiryDays: balance expires now+N days. null/omitted => 365 default; explicit
+	// ExpiryHours: balance expires now+N hours. null/omitted => default; explicit
 	// 0 => never expires (#472).
-	ExpiryDays *int `json:"expiry_days,omitempty"`
-	// ExpiresDays is the legacy field name, still parsed for backward compat.
-	ExpiresDays *int               `json:"expires_days,omitempty"`
+	ExpiryHours *int               `json:"expiry_hours,omitempty"`
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
 }
 
@@ -109,17 +108,14 @@ func (g CreditGrantSpec) UnitCode() string {
 	return g.Unit
 }
 
-// EffectiveExpiryDays resolves grant expiry in days (#472): prefers expiry_days,
-// then legacy expires_days, else the 365 default. The returned value is 0 only
-// when explicitly set to 0 — meaning NEVER expires. null/omitted yields 365.
-func (g CreditGrantSpec) EffectiveExpiryDays() int {
-	if g.ExpiryDays != nil {
-		return *g.ExpiryDays
+// EffectiveExpiryHours resolves grant expiry in hours (#472): the explicit
+// expiry_hours, else the default. The returned value is 0 only when explicitly
+// set to 0 — meaning NEVER expires. null/omitted yields the default.
+func (g CreditGrantSpec) EffectiveExpiryHours() int {
+	if g.ExpiryHours != nil {
+		return *g.ExpiryHours
 	}
-	if g.ExpiresDays != nil {
-		return *g.ExpiresDays
-	}
-	return DefaultCreditGrantExpiryDays
+	return DefaultCreditGrantExpiryHours
 }
 
 func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
@@ -145,13 +141,9 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 	out := make(CreditsSpec, len(spec))
 	for key, value := range spec {
 		cloned := value
-		if value.ExpiresDays != nil {
-			v := *value.ExpiresDays
-			cloned.ExpiresDays = &v
-		}
-		if value.ExpiryDays != nil {
-			v := *value.ExpiryDays
-			cloned.ExpiryDays = &v
+		if value.ExpiryHours != nil {
+			v := *value.ExpiryHours
+			cloned.ExpiryHours = &v
 		}
 		out[key] = cloned
 	}
@@ -215,16 +207,28 @@ func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 // the #622 replacement for the old "billing_cycle_days != nil" test.
 func (p *Price) IsRecurring() bool { return p.AutoRenew }
 
-// RecurringCycleDays returns the billing period in WHOLE DAYS for an
-// auto-renewing price, or nil for a one-off/durable price. The window is stored
-// in hours; providers (Stripe interval, NMI day-frequency, Solana period) bill
-// in days, so the cadence is hours/24. A sub-day auto_renew window floors to 0
-// days and is not pushed to a provider (provider adapters guard on > 0).
-func (p *Price) RecurringCycleDays() *int {
+// RecurringCycleHours returns the billing window in HOURS for an auto-renewing
+// price, or nil for a one-off/durable price. This is the internal canonical
+// cadence — duration is measured in hours everywhere inside OpenRails. Day-based
+// provider cadences (Stripe interval, NMI day-frequency, Solana period) are
+// derived from this (hours/24) ONLY at the provider/API boundary.
+func (p *Price) RecurringCycleHours() *int {
 	if p == nil || !p.AutoRenew || p.AccessDurationHours == nil {
 		return nil
 	}
-	days := *p.AccessDurationHours / 24
+	h := *p.AccessDurationHours
+	return &h
+}
+
+// RecurringCycleDays returns the billing period in whole days for
+// provider/API boundaries that still require day cadences. Sub-day recurring
+// windows floor to 0 days; provider adapters reject or skip those as needed.
+func (p *Price) RecurringCycleDays() *int {
+	hours := p.RecurringCycleHours()
+	if hours == nil {
+		return nil
+	}
+	days := *hours / 24
 	return &days
 }
 

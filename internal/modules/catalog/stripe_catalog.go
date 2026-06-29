@@ -32,11 +32,14 @@ func (s *StripeCatalogService) baseURL() string {
 	return "https://api.stripe.com"
 }
 
-func (s *StripeCatalogService) stripeRail() *config.RailConfig {
+func (s *StripeCatalogService) stripeRail() *config.StripeRailConfig {
 	if s == nil {
 		return nil
 	}
-	return s.Rails.GetStripeRail()
+	if rail := s.Rails.GetStripeRail(); rail != nil {
+		return rail.Stripe
+	}
+	return nil
 }
 
 // httpClient returns the choke-point Stripe client (internal/integrations/
@@ -67,7 +70,7 @@ const (
 	// find-or-create the Stripe Product, so it must be stable across DB wipes.
 	StripeMetadataOpenRailsProductKey = "openrails_product_key"
 	// StripeMetadataOpenRailsPriceKey is the content key stamped on a Stripe
-	// Price for symmetry: "<product_slug>.<price_slug>".
+	// Price for symmetry: "<product_key>.<price_terms>".
 	StripeMetadataOpenRailsPriceKey = "openrails_price_key"
 
 	// StripeMetadataOpenRailsProductID / ...PriceID carry the OpenRails row

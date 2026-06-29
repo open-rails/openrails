@@ -17,7 +17,7 @@ type ProductAccessRecord struct {
 	ID           uuid.UUID
 	CustomerID   uuid.UUID
 	ProductID    uuid.UUID
-	ProductSlug  string
+	ProductKey   string
 	ProductName  string
 	SourceType   string
 	SourceID     string
@@ -94,7 +94,7 @@ func (s *Service) productAccessRecords(ctx context.Context, grants []models.Prod
 				cache[g.ProductID] = prod
 			}
 			if prod != nil {
-				rec.ProductSlug = prod.Slug
+				rec.ProductKey = prod.Key
 				rec.ProductName = prod.DisplayName
 			}
 		}

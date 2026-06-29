@@ -148,7 +148,7 @@ func (s *SubscriptionLifecycleService) appendRenewalGraceWindows(
 	subscription *models.Subscription,
 	entNames []string,
 	periodEnd time.Time,
-	billingCycleDays int,
+	cycleHours int,
 ) {
 	if entitlementService == nil || subscription == nil || periodEnd.IsZero() || len(entNames) == 0 {
 		return
@@ -157,7 +157,7 @@ func (s *SubscriptionLifecycleService) appendRenewalGraceWindows(
 		return
 	}
 	notBefore := periodEnd.UTC()
-	graceEnd := notBefore.Add(GraceSlack(billingCycleDays))
+	graceEnd := notBefore.Add(GraceSlack(cycleHours))
 	if !graceEnd.After(s.now().UTC()) {
 		return
 	}
@@ -530,7 +530,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		// #368: pre-append the trailing renewal grace window right behind the
 		// paid window, so silence at the first renewal never gates the user.
-		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
+		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 	}
 
 	notification := &models.NotificationQueue{
@@ -762,12 +762,12 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		// Calculate new billing period. A renewing subscription's price is
-		// recurring; fall back to 30d if its cadence is somehow unset.
-		cycleDays := BillingCycleDaysOf(price)
-		if cycleDays <= 0 {
-			cycleDays = 30
+		// recurring; fall back to 30d (720h) if its cadence is somehow unset.
+		cycleHours := BillingCycleHoursOf(price)
+		if cycleHours <= 0 {
+			cycleHours = 30 * 24
 		}
-		cycleWindow := time.Duration(cycleDays) * 24 * time.Hour
+		cycleWindow := time.Duration(cycleHours) * time.Hour
 		var periodStartsAt, periodEndsAt time.Time
 		if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
 			periodStartsAt = params.CurrentPeriodStartsAt.UTC()
@@ -882,7 +882,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			for entName := range entitlementsSpec {
 				entNames = append(entNames, entName)
 			}
-			s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
+			s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 		}
 
 		// Handle entitlements for downgrade
@@ -1097,7 +1097,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 		// #368: a reactivated membership renews like any other — pre-append
 		// the trailing grace window behind the restored paid window.
-		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
+		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 
 		reactivated = subscription
 		return nil
@@ -1606,13 +1606,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// billing cycle (monthly: 5 failures total, progressive retries at
 			// +2d/+5d/+9d/+13d; weekly-ish: retries at +1d/+2d; daily-ish: the
 			// first failure is terminal). See DunningRetryOffsets.
-			cycleDays := BillingCycleDaysOf(subscription.Price)
-			if cycleDays <= 0 {
+			cycleHours := BillingCycleHoursOf(subscription.Price)
+			if cycleHours <= 0 {
 				if price, perr := priceService.GetByID(ctx, subscription.PriceID); perr == nil {
-					cycleDays = BillingCycleDaysOf(price)
+					cycleHours = BillingCycleHoursOf(price)
 				}
 			}
-			if cycleDays <= 0 {
+			if cycleHours <= 0 {
 				// A past_due subscription on a one-time price shouldn't exist;
 				// defensively dun it on the monthly schedule.
 				log.WithContext(ctx).WithFields(log.Fields{
@@ -1620,7 +1620,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					"price_id":        subscription.PriceID,
 				}).Warn("FailMembership: subscription has no billing cycle (one-time price?); using monthly dunning schedule")
 			}
-			maxFailures := DunningMaxFailures(cycleDays)
+			maxFailures := DunningMaxFailures(cycleHours)
 
 			terminal := params.Terminal
 			if !terminal {
@@ -1653,7 +1653,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.EndedAt = &now
 				subscription.ClearRetrySchedule()
 			} else {
-				nextRetry := now.Add(DunningNextRetryIn(cycleDays, *subscription.RetryAttempts))
+				nextRetry := now.Add(DunningNextRetryIn(cycleHours, *subscription.RetryAttempts))
 				subscription.NextRetryAt = &nextRetry
 			}
 		}

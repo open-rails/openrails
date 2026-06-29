@@ -254,17 +254,17 @@ func (w *DunningWorker) processSubscription(
 	// rail-side subscription is stopped via the scheduled deferred-delete
 	// mechanism so NMI quits retrying it. A sub-4-day cycle derives a ZERO
 	// window: any past_due daily sub is immediately terminal here.
-	cycleDays := subscriptions.BillingCycleDaysOf(sub.Price)
-	if cycleDays <= 0 && priceSvc != nil {
+	cycleHours := subscriptions.BillingCycleHoursOf(sub.Price)
+	if cycleHours <= 0 && priceSvc != nil {
 		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
-			cycleDays = subscriptions.BillingCycleDaysOf(p)
+			cycleHours = subscriptions.BillingCycleHoursOf(p)
 		}
 	}
-	if cycleDays <= 0 {
+	if cycleHours <= 0 {
 		logEntry.WithField("price_id", sub.PriceID).
 			Warn("Dunning: subscription has no billing cycle (one-time price?); using monthly dunning window")
 	}
-	window := subscriptions.DunningWindow(cycleDays)
+	window := subscriptions.DunningWindow(cycleHours)
 	if w.now().UTC().After(periodEnd.Add(window)) {
 		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, rail, periodEnd, window)
 	}

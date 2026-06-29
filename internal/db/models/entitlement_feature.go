@@ -30,7 +30,7 @@ type EntitlementFeature struct {
 
 // ProductEntitlementFeature attaches an EntitlementFeature to a product (Stripe's
 // product_feature) (issue #245). When the product is purchased the attached
-// feature is granted for DurationDays (nil = indefinite).
+// feature is granted for DurationHours (nil = indefinite).
 type ProductEntitlementFeature struct {
 	ID uuid.UUID `json:"id"`
 
@@ -39,9 +39,9 @@ type ProductEntitlementFeature struct {
 	ProductID            uuid.UUID `json:"product_id"`
 	EntitlementFeatureID uuid.UUID `json:"entitlement_feature_id"`
 
-	// DurationDays is the access window granted on purchase. nil = indefinite.
-	DurationDays *int           `json:"duration_days,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	// DurationHours is the access window granted on purchase, in hours. nil = indefinite.
+	DurationHours *int           `json:"duration_hours,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

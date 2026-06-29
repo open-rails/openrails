@@ -130,7 +130,7 @@ func (s *FeatureService) UpdateFeature(ctx context.Context, id uuid.UUID, p Upda
 type AttachFeatureParams struct {
 	ProductID            uuid.UUID
 	EntitlementFeatureID uuid.UUID
-	DurationDays         *int
+	DurationHours        *int
 	Metadata             map[string]any
 }
 
@@ -145,14 +145,14 @@ func (s *FeatureService) AttachFeatureToProduct(ctx context.Context, p AttachFea
 	if (p.EntitlementFeatureID == uuid.UUID{}) {
 		return nil, fmt.Errorf("entitlement_feature_id is required")
 	}
-	if p.DurationDays != nil && *p.DurationDays <= 0 {
-		return nil, fmt.Errorf("duration_days must be > 0 (or omit for indefinite)")
+	if p.DurationHours != nil && *p.DurationHours <= 0 {
+		return nil, fmt.Errorf("duration_hours must be > 0 (or omit for indefinite)")
 	}
 	now := s.now()
 	pef := &models.ProductEntitlementFeature{
 		ProductID:            p.ProductID,
 		EntitlementFeatureID: p.EntitlementFeatureID,
-		DurationDays:         p.DurationDays,
+		DurationHours:        p.DurationHours,
 		Metadata:             p.Metadata,
 		CreatedAt:            now,
 		UpdatedAt:            now,

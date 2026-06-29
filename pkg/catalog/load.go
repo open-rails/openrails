@@ -36,6 +36,13 @@ func normalizeDuration(value string) (*int, error) {
 	return &hours, nil
 }
 
+func formatDurationHours(hours int) string {
+	if hours%24 == 0 {
+		return fmt.Sprintf("%dd", hours/24)
+	}
+	return fmt.Sprintf("%dh", hours)
+}
+
 func normalizeSlug(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = invalidSlugChars.ReplaceAllString(value, "-")
@@ -106,55 +113,55 @@ func (m *Manifest) validate() error {
 		return err
 	}
 
-	groupSlugs := map[string]struct{}{}
+	groupKeys := map[string]struct{}{}
 	// Product keys are globally unique across the manifest. OpenRails still
 	// stores this value in products.slug, so the same key in two tier
 	// groups would collide on apply.
-	productSlugs := map[string]struct{}{}
+	productKeys := map[string]struct{}{}
 
 	for gi := range m.TierGroups {
 		group := &m.TierGroups[gi]
-		group.Slug = normalizeSlug(group.Slug)
-		if group.Slug == "" {
-			return errors.New("tier group slug is required")
+		group.Key = normalizeSlug(group.Key)
+		if group.Key == "" {
+			return errors.New("tier group key is required")
 		}
-		if _, ok := groupSlugs[group.Slug]; ok {
-			return fmt.Errorf("duplicate tier group slug %q", group.Slug)
+		if _, ok := groupKeys[group.Key]; ok {
+			return fmt.Errorf("duplicate tier group key %q", group.Key)
 		}
-		groupSlugs[group.Slug] = struct{}{}
+		groupKeys[group.Key] = struct{}{}
 		if len(group.Products) == 0 {
-			return fmt.Errorf("tier group %q must define products", group.Slug)
+			return fmt.Errorf("tier group %q must define products", group.Key)
 		}
 
 		requireTierRank := len(group.Products) > 1
 		for pi := range group.Products {
 			product := &group.Products[pi]
-			if err := m.validateProduct(group.Slug, product, productSlugs, requireTierRank, meterKinds); err != nil {
+			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, meterKinds); err != nil {
 				return err
 			}
 		}
 	}
-	if err := m.validateProductBenefitRefs(productSlugs, usageLimitKeys); err != nil {
+	if err := m.validateProductBenefitRefs(productKeys, usageLimitKeys); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *Manifest) validateProduct(groupSlug string, product *Product, productSlugs map[string]struct{}, requireTierRank bool, meterKinds map[string]string) error {
+func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, meterKinds map[string]string) error {
 	product.Key = normalizeSlug(product.Key)
 	if product.Key == "" {
-		return fmt.Errorf("tier group %q has a product without a key", groupSlug)
+		return fmt.Errorf("tier group %q has a product without a key", groupKey)
 	}
-	if _, ok := productSlugs[product.Key]; ok {
+	if _, ok := productKeys[product.Key]; ok {
 		return fmt.Errorf("duplicate product key %q", product.Key)
 	}
-	productSlugs[product.Key] = struct{}{}
+	productKeys[product.Key] = struct{}{}
 
 	if strings.TrimSpace(product.DisplayName) == "" {
 		return fmt.Errorf("product %q display_name is required", product.Key)
 	}
 	if requireTierRank && product.TierRank == nil {
-		return fmt.Errorf("product %q tier_rank is required when tier group %q has multiple products", product.Key, groupSlug)
+		return fmt.Errorf("product %q tier_rank is required when tier group %q has multiple products", product.Key, groupKey)
 	}
 	if err := validateCredits(product.Key, product.Credits); err != nil {
 		return err
@@ -197,37 +204,37 @@ func (m *Manifest) normalizeProducts() error {
 		if !ok {
 			idx = len(m.TierGroups)
 			groups[group] = idx
-			m.TierGroups = append(m.TierGroups, TierGroup{Slug: group, DisplayName: group})
+			m.TierGroups = append(m.TierGroups, TierGroup{Key: group, DisplayName: group})
 		}
 		m.TierGroups[idx].Products = append(m.TierGroups[idx].Products, p)
 	}
 	return nil
 }
 
-func validateCredits(productSlug string, credits Credits) error {
+func validateCredits(productKey string, credits Credits) error {
 	for key, credit := range credits {
 		if normalizeSlug(key) == "" {
-			return fmt.Errorf("product %q has credit with empty key", productSlug)
+			return fmt.Errorf("product %q has credit with empty key", productKey)
 		}
 		if strings.TrimSpace(credit.Unit) == "" && strings.TrimSpace(credit.Currency) != "" {
 			credit.Unit = credit.Currency
 			credits[key] = credit
 		}
 		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
-			return fmt.Errorf("product %q credit %q has invalid unit %q", productSlug, key, credit.Unit)
+			return fmt.Errorf("product %q credit %q has invalid unit %q", productKey, key, credit.Unit)
 		}
 		if credit.Amount <= 0 {
-			return fmt.Errorf("product %q credit %q amount must be positive", productSlug, key)
+			return fmt.Errorf("product %q credit %q amount must be positive", productKey, key)
 		}
 		if strings.TrimSpace(credit.Expires) != "" {
 			if _, err := ParseDurationSpec(credit.Expires); err != nil {
-				return fmt.Errorf("product %q credit %q expires: %w", productSlug, key, err)
+				return fmt.Errorf("product %q credit %q expires: %w", productKey, key, err)
 			}
 		}
 		switch strings.TrimSpace(credit.Cadence) {
 		case "", "once", "per_renewal":
 		default:
-			return fmt.Errorf("product %q credit %q cadence must be once or per_renewal", productSlug, key)
+			return fmt.Errorf("product %q credit %q cadence must be once or per_renewal", productKey, key)
 		}
 	}
 	return nil
@@ -250,25 +257,25 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if err := m.validateMeteredPrice(product, price, idx, meterKinds); err != nil {
 		return err
 	}
-	durDays, err := normalizeDuration(price.Duration)
+	durHours, err := normalizeDuration(price.Duration)
 	if err != nil {
 		return fmt.Errorf("product %q price #%d duration: %w", product.Key, idx+1, err)
 	}
-	if durDays == nil {
+	if durHours == nil {
 		price.Duration = "indefinite"
 	} else {
-		price.Duration = fmt.Sprintf("%dd", *durDays)
+		price.Duration = formatDurationHours(*durHours)
 	}
 	// Nothing to renew without a finite window.
-	if price.AutoRenew && durDays == nil {
+	if price.AutoRenew && durHours == nil {
 		return fmt.Errorf("product %q price #%d: auto_renew requires a finite duration (not indefinite)", product.Key, idx+1)
 	}
 	if price.Trial != nil {
-		trialDays, err := normalizeDuration(price.Trial.Duration)
+		trialHours, err := normalizeDuration(price.Trial.Duration)
 		if err != nil {
 			return fmt.Errorf("product %q price #%d trial.duration: %w", product.Key, idx+1, err)
 		}
-		if trialDays == nil {
+		if trialHours == nil {
 			return fmt.Errorf("product %q price #%d trial.duration must be a finite duration", product.Key, idx+1)
 		}
 		if !price.AutoRenew {
@@ -277,7 +284,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		if price.Trial.UnitAmount < 0 {
 			return fmt.Errorf("product %q price #%d trial.unit_amount must be >= 0 (0 = free trial)", product.Key, idx+1)
 		}
-		price.Trial.Duration = fmt.Sprintf("%dd", *trialDays)
+		price.Trial.Duration = formatDurationHours(*trialHours)
 	}
 	if price.Providers != nil {
 		price.Providers = normalizeProviders(price.Providers)
@@ -408,7 +415,7 @@ func (m *Manifest) validateUsageLimits() (map[string]struct{}, error) {
 	return out, nil
 }
 
-func (m *Manifest) validateProductBenefitRefs(productSlugs, usageLimitKeys map[string]struct{}) error {
+func (m *Manifest) validateProductBenefitRefs(productKeys, usageLimitKeys map[string]struct{}) error {
 	for gi := range m.TierGroups {
 		for pi := range m.TierGroups[gi].Products {
 			product := &m.TierGroups[gi].Products[pi]
@@ -422,7 +429,7 @@ func (m *Manifest) validateProductBenefitRefs(productSlugs, usageLimitKeys map[s
 			for i, key := range product.Includes {
 				key = normalizeSlug(key)
 				product.Includes[i] = key
-				if _, ok := productSlugs[key]; !ok {
+				if _, ok := productKeys[key]; !ok {
 					return fmt.Errorf("product %q includes unknown product %q", product.Key, key)
 				}
 				if key == product.Key {

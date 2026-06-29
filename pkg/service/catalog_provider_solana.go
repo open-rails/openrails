@@ -72,8 +72,12 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 // rebuilt catalog derives the same plan PDA, so find-or-attach re-attaches to the
 // existing on-chain plan rather than publishing a duplicate. Cosmetic edits
 // (display_name/description/providers) do not change it.
-func solanaPlanID(productSlug, currency string, unitAmount int64, billingCycleDays *int, mint string) uint64 {
-	key := openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays) + ":" + strings.TrimSpace(mint)
+func solanaPlanID(productKey, currency string, unitAmount int64, accessDurationHours *int, mint string) uint64 {
+	hourPart := "one-time"
+	if accessDurationHours != nil {
+		hourPart = "h" + strconv.Itoa(*accessDurationHours)
+	}
+	key := openRailsPriceContentKey(productKey, currency, unitAmount, nil) + "." + hourPart + ":" + strings.TrimSpace(mint)
 	sum := sha256.Sum256([]byte(key))
 	return binary.BigEndian.Uint64(sum[:8])
 }
@@ -82,7 +86,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	// A one-off Solana price (no recurring cadence, #622) needs no on-chain Plan
 	// PDA — it settles as a direct transfer validated at payment time. Mark the
 	// rail present so checkout offers Solana; publish nothing on-chain.
-	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
+	if in.AccessDurationHours == nil || *in.AccessDurationHours <= 0 {
 		return map[string]string{"provider": "solana"}, nil
 	}
 	plan, ok := a.planService()
@@ -103,8 +107,8 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if err != nil {
 		return nil, err
 	}
-	planID := solanaPlanID(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays, mint)
-	periodHours := uint64(*in.BillingCycleDays) * 24
+	planID := solanaPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.AccessDurationHours, mint)
+	periodHours := uint64(*in.AccessDurationHours)
 
 	// Idempotent find-or-attach: create_plan fails on an already-occupied PDA, so
 	// on re-apply we attach to the existing on-chain plan instead of republishing.
@@ -113,13 +117,13 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	handle, err := plan.PublishPlan(ctx, recurring.PublishPlanInput{
-		MerchantID:       tid,
-		PlanID:           planID,
-		TokenSymbol:      symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
-		AmountBaseUnits:  uint64(in.UnitAmount),
-		PeriodHours:      periodHours,
-		BillingCycleDays: *in.BillingCycleDays, // enforce period_hours == days*24
-		EndTs:            0,                    // perpetual; OpenRails models open-ended subscriptions
+		MerchantID:        tid,
+		PlanID:            planID,
+		TokenSymbol:       symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
+		AmountBaseUnits:   uint64(in.UnitAmount),
+		PeriodHours:       periodHours,
+		BillingCycleHours: *in.AccessDurationHours,
+		EndTs:             0, // perpetual; OpenRails models open-ended subscriptions
 	})
 	if err != nil {
 		return nil, fmt.Errorf("solana publish plan: %w", err)
@@ -207,8 +211,8 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	if in.UnitAmount > 0 && acct.Amount != uint64(in.UnitAmount) {
 		return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d)", pda, acct.Amount, in.UnitAmount)
 	}
-	if in.BillingCycleDays != nil && *in.BillingCycleDays > 0 {
-		wantPeriod := uint64(*in.BillingCycleDays) * 24
+	if in.AccessDurationHours != nil && *in.AccessDurationHours > 0 {
+		wantPeriod := uint64(*in.AccessDurationHours)
 		if acct.PeriodHours != wantPeriod {
 			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
 		}

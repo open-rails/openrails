@@ -59,7 +59,7 @@ type MoneyAccount struct {
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
 	AutoTopupAmountCents     *int64     `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
-	DefaultCreditExpiryDays  *int       `json:"default_credit_expiry_days,omitempty"`
+	DefaultCreditExpiryHours *int       `json:"default_credit_expiry_hours,omitempty"`
 	HardStopOnBreach         bool       `json:"hard_stop_on_breach"`
 	AlertThresholdPct        int        `json:"alert_threshold_pct"`
 

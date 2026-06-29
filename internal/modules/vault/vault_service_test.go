@@ -262,8 +262,8 @@ func vaultTestConfig(testMode bool) *config.Config {
 func vaultTestRails(mobiusKey string) config.RailSet {
 	return config.RailSet{
 		"mobius": {
-			Type:        config.RailTypeNMI,
-			SecurityKey: mobiusKey,
+			Type: config.RailTypeNMI,
+			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},
 		},
 	}
 }

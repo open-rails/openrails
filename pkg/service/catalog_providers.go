@@ -131,16 +131,18 @@ type autoCreateContext struct {
 	PriceID   uuid.UUID
 	ProductID uuid.UUID
 	Product   *models.Product
-	// ProductSlug is the product's stable identity. Together with the immutable
-	// money terms (UnitAmount / Currency / BillingCycleDays) it forms the CONTENT
-	// identity of this price, which drives the deterministic Stripe lookup_key +
-	// the metadata content keys — so find-or-create survives a DB rebuild that
+	// ProductKey is the product's stable identity. Together with the immutable
+	// money terms (UnitAmount / Currency / BillingCycleDays for day-granularity
+	// providers, AccessDurationHours for hour-granularity providers) it forms the
+	// CONTENT identity of this price, which drives deterministic provider keys
+	// and metadata content keys — so find-or-create survives a DB rebuild that
 	// regenerates row UUIDs.
-	ProductSlug      string
-	UnitAmount       int64
-	Currency         string
-	BillingCycleDays *int
-	LookupKey        string
+	ProductKey          string
+	UnitAmount          int64
+	Currency            string
+	BillingCycleDays    *int
+	AccessDurationHours *int
+	LookupKey           string
 
 	// RemoteWritesDisabled tells adapters that catalog provider WRITES are
 	// blocked by the operating mode (mode=limited/readonly, #346). Adapters
@@ -185,13 +187,13 @@ func priceCycleToken(billingCycleDays *int) string {
 // and therefore a different price — a price change is modeled as create-new +
 // archive-old, never an in-place mutation/transfer.
 //
-// Format: "<product_slug>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
+// Format: "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
 // billing_cycle_days for a recurring price or "onetime" for a one-time price.
 // Example: "pro.usd.2900.30" or "pro.usd.500.onetime".
 // Canonical implementation: catalog.OpenRailsPriceContentKey (shared with the
 // #358 archive-intent relevance checks).
-func openRailsPriceContentKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
-	return catalog.OpenRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
+func openRailsPriceContentKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
+	return catalog.OpenRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
 }
 
 // internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
@@ -200,10 +202,10 @@ func openRailsPriceContentKey(productSlug, currency string, unitAmount int64, bi
 // account. Content-addressed (see openRailsPriceContentKey), so it is stable
 // across DB rebuilds and reconstructable without the caller supplying anything.
 //
-// Format: "openrails.<product_slug>.<currency>.<unit_amount>.<cycle>".
+// Format: "openrails.<product_key>.<currency>.<unit_amount>.<cycle>".
 // Example: "openrails.pro.usd.2900.30".
-func internalStripeLookupKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
-	return "openrails." + openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
+func internalStripeLookupKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
+	return "openrails." + openRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
 }
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
@@ -257,9 +259,9 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	// Attach (link-validation) and AutoCreate (mint) paths. lookup_key + content
 	// keys are derived from the product slug + money terms, not the row UUIDs, so
 	// re-syncing after a DB wipe finds the same provider objects.
-	productSlug := ""
+	productKey := ""
 	if product != nil {
-		productSlug = strings.TrimSpace(product.Slug)
+		productKey = strings.TrimSpace(product.Key)
 	}
 	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
 	// Provider objects key on the RECURRING cadence (nil for one-off / finite
@@ -269,11 +271,12 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		PriceID:              priceID,
 		ProductID:            req.ProductID,
 		Product:              product,
-		ProductSlug:          productSlug,
+		ProductKey:           productKey,
 		UnitAmount:           req.UnitAmount,
 		Currency:             req.Currency,
 		BillingCycleDays:     reqCycle,
-		LookupKey:            internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, reqCycle),
+		AccessDurationHours:  req.AccessDurationHours,
+		LookupKey:            internalStripeLookupKey(productKey, req.Currency, req.UnitAmount, reqCycle),
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
@@ -388,10 +391,10 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 	if products, err := s.requireProductService(); err == nil {
 		if product, err := products.GetByID(ctx, price.ProductID); err == nil && product != nil {
 			pctx.Product = product
-			pctx.ProductSlug = strings.TrimSpace(product.Slug)
+			pctx.ProductKey = strings.TrimSpace(product.Key)
 		}
 	}
-	pctx.LookupKey = internalStripeLookupKey(pctx.ProductSlug, pctx.Currency, pctx.UnitAmount, pctx.BillingCycleDays)
+	pctx.LookupKey = internalStripeLookupKey(pctx.ProductKey, pctx.Currency, pctx.UnitAmount, pctx.BillingCycleDays)
 	return pctx, nil
 }
 

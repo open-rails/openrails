@@ -93,9 +93,13 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
-	tokenMap := normalizeTokenMap(solanaProc.Tokens)
+	if solanaProc.Solana == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		return
+	}
+	tokenMap := normalizeTokenMap(solanaProc.Solana.Tokens)
 	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaProc.Network))
+		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaProc.Solana.Network))
 	}
 
 	mintSet := make(map[string]struct{})
@@ -197,13 +201,13 @@ func GetSolanaConfig(r *httprequest.Request) {
 		return
 	}
 	solanaProc := r.State.Rails.GetSolanaRail()
-	if solanaProc == nil {
+	if solanaProc == nil || solanaProc.Solana == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
 
-	network := normalizeSolanaNetwork(solanaProc.Network)
-	tokenMap := normalizeTokenMap(solanaProc.Tokens)
+	network := normalizeSolanaNetwork(solanaProc.Solana.Network)
+	tokenMap := normalizeTokenMap(solanaProc.Solana.Tokens)
 	if len(tokenMap) == 0 {
 		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(network))
 	}
@@ -246,7 +250,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 	resp.Features.RecurringSubscriptions = true
 	// Some wallets reject Solana Pay transaction requests that require a merchant
 	// co-signer; require deployments to opt in after validating target wallets.
-	resp.Features.SolanaPayRecurringSubscriptions = solanaProc.SolanaPayRecurringSubscriptions
+	resp.Features.SolanaPayRecurringSubscriptions = solanaProc.Solana.SolanaPayRecurringSubscriptions
 
 	r.SuccessJSON(resp)
 }

@@ -49,7 +49,7 @@ type UsageLimitWindow struct {
 
 // TierGroup is a named grouping of products (e.g. a subscription plan family).
 type TierGroup struct {
-	Slug        string    `json:"slug" yaml:"slug"`
+	Key         string    `json:"key" yaml:"key"`
 	DisplayName string    `json:"display_name" yaml:"display_name"`
 	Products    []Product `json:"products" yaml:"products"`
 }
@@ -77,7 +77,7 @@ type CreditGrant struct {
 	Unit        string `json:"unit,omitempty" yaml:"unit,omitempty"`
 	Currency    string `json:"currency,omitempty" yaml:"currency,omitempty"`
 	Amount      int64  `json:"amount" yaml:"amount"`
-	ExpiresDays *int   `json:"expires_days,omitempty" yaml:"expires_days,omitempty"`
+	ExpiryHours *int   `json:"expiry_hours,omitempty" yaml:"expiry_hours,omitempty"`
 	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
 	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
 }

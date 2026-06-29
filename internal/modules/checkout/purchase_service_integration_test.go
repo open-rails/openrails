@@ -33,11 +33,11 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
-	durationDays := 30
+	durationDays := 720
 
 	product := &models.Product{
 		ID:          productID,
-		Slug:        "test_duplicate_purchase_" + uuid.New().String(),
+		Key:         "test_duplicate_purchase_" + uuid.New().String(),
 		DisplayName: "Duplicate Purchase Test",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -162,11 +162,11 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
-	durationDays := 30
+	durationDays := 720
 
 	product := &models.Product{
 		ID:          productID,
-		Slug:        "test_grandfather_" + uuid.New().String(),
+		Key:         "test_grandfather_" + uuid.New().String(),
 		DisplayName: "Grandfather Test",
 		Description: "Test",
 		EntitlementsSpec: map[string]*int{
@@ -262,7 +262,7 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               product.ID,
-		Slug:             product.Slug,
+		Key:              product.Key,
 		DisplayName:      product.DisplayName,
 		Description:      &product.Description,
 		EntitlementsSpec: entSpec,
@@ -273,21 +273,21 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 	require.NoError(t, err)
 
 	var accessDays *int32
-	if price.AccessDurationDays != nil {
-		d := int32(*price.AccessDurationDays)
+	if price.AccessDurationHours != nil {
+		d := int32(*price.AccessDurationHours)
 		accessDays = &d
 	}
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:         dbtest.TestMerchantID.UUID(),
-		ID:                 price.ID,
-		ProductID:          price.ProductID,
-		Amount:             price.Amount,
-		Currency:           price.Currency,
-		Status:             string(price.Status),
-		AccessDurationDays: accessDays,
-		AutoRenew:          price.AutoRenew,
-		CreatedAt:          price.CreatedAt,
-		UpdatedAt:          price.UpdatedAt,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  price.ID,
+		ProductID:           price.ProductID,
+		Amount:              price.Amount,
+		Currency:            price.Currency,
+		Status:              string(price.Status),
+		AccessDurationHours: accessDays,
+		AutoRenew:           price.AutoRenew,
+		CreatedAt:           price.CreatedAt,
+		UpdatedAt:           price.UpdatedAt,
 	})
 	require.NoError(t, err)
 }

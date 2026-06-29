@@ -154,8 +154,8 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 
 	provider = strings.ToLower(provider)
 	suite.Rails[provider] = &config.RailConfig{
-		Type:        config.RailTypeNMI,
-		SecurityKey: "test-security-key-" + provider,
+		Type: config.RailTypeNMI,
+		NMI:  &config.NMIRailConfig{SecurityKey: "test-security-key-" + provider},
 	}
 	rails.InitNMIBackedRails(suite.Rails)
 

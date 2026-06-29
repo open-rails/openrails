@@ -51,30 +51,30 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)
 
-	productSlug := "catalog-route-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "catalog-route-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	createStatus, createBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/products", catalogToken, map[string]any{
-		"slug":         productSlug,
+		"key":          productKey,
 		"display_name": "Catalog Route Product",
 		"description":  "created through the live merchant catalog route",
 	})
 	require.Equal(t, http.StatusCreated, createStatus, string(createBody))
 	var created struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID  string `json:"id"`
+		Key string `json:"key"`
 	}
 	require.NoError(t, json.Unmarshal(createBody, &created))
 	require.NotEmpty(t, created.ID)
-	require.Equal(t, productSlug, created.Slug)
+	require.Equal(t, productKey, created.Key)
 
-	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, catalogToken, nil)
+	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, catalogToken, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
 	var fetched struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID  string `json:"id"`
+		Key string `json:"key"`
 	}
 	require.NoError(t, json.Unmarshal(getBody, &fetched))
 	require.Equal(t, created.ID, fetched.ID)
-	require.Equal(t, productSlug, fetched.Slug)
+	require.Equal(t, productKey, fetched.Key)
 
 	unauthStatus, unauthBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products", "", nil)
 	require.Equal(t, http.StatusUnauthorized, unauthStatus, string(unauthBody))
@@ -95,11 +95,11 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	applier := httpCatalogApplier{t: t, baseURL: surface.BaseURL, token: token}
 
 	groupSlug := "apply-flags-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	productSlug := "plan-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "plan-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := &catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Key:         productSlug,
+			Key:         productKey,
 			DisplayName: "Plan Product",
 			Description: "inserted through HTTP-backed catalog apply",
 			TierGroup:   groupSlug,
@@ -118,7 +118,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	require.NoError(t, err)
 	_, err = catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{})
 	require.NoError(t, err)
-	_, err = applier.GetProductBySlug(ctx, productSlug)
+	_, err = applier.GetProductByKey(ctx, productKey)
 	require.Error(t, err, "bare apply options must be plan-only over HTTP")
 
 	plan, err = catalog.Plan(ctx, applier, manifest)
@@ -127,14 +127,14 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, inserted.ProductsCreated)
 	require.Equal(t, 1, inserted.PricesCreated)
-	product, err := applier.GetProductBySlug(ctx, productSlug)
+	product, err := applier.GetProductByKey(ctx, productKey)
 	require.NoError(t, err)
 	require.Equal(t, "Plan Product", product.DisplayName)
 
 	updatedManifest := *manifest
 	updatedManifest.TierGroups = nil
 	updatedManifest.Products = []catalog.Product{{
-		Key:         productSlug,
+		Key:         productKey,
 		DisplayName: "Plan Product Updated",
 		Description: "updated through HTTP-backed catalog apply",
 		TierGroup:   groupSlug,
@@ -147,14 +147,14 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	updated, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{Overwrite: true})
 	require.NoError(t, err)
 	require.Equal(t, 1, updated.ProductsUpdated)
-	product, err = applier.GetProductBySlug(ctx, productSlug)
+	product, err = applier.GetProductByKey(ctx, productKey)
 	require.NoError(t, err)
 	require.Equal(t, "Plan Product Updated", product.DisplayName)
 	require.Equal(t, 2, product.TierRank)
 
 	extraSlug := "prune-extra-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	extra, err := applier.CreateProduct(ctx, billingservice.CreateProductRequest{
-		Slug:        extraSlug,
+		Key:         extraSlug,
 		DisplayName: "Prune Extra",
 		TierGroup:   &groupSlug,
 		Status:      models.CatalogStatusActive,
@@ -190,11 +190,11 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	)
 
 	groupSlug := "publish-group-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	productSlug := "publish-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "publish-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Key:         productSlug,
+			Key:         productKey,
 			DisplayName: "Publish Product",
 			Description: "published through the live merchant catalog route",
 			TierGroup:   groupSlug,
@@ -236,7 +236,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(missingBody, &missingPage))
 	for _, item := range missingPage.Items {
-		require.NotEqual(t, productSlug, item.Slug)
+		require.NotEqual(t, productKey, item.Key)
 	}
 
 	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
@@ -254,11 +254,11 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	require.Equal(t, 1, applied.Result.ProductsCreated)
 	require.Equal(t, 1, applied.Result.PricesCreated)
 
-	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, foundStatus, string(foundBody))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(foundBody, &product))
-	require.Equal(t, productSlug, product.Slug)
+	require.Equal(t, productKey, product.Key)
 }
 
 func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
@@ -329,11 +329,11 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
 
-	productSlug := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Key:          productSlug,
+			Key:          productKey,
 			DisplayName:  "Native Lifecycle Product",
 			Description:  "published catalog anchor for native lifecycle proof",
 			Entitlements: []string{"native-lifecycle-premium"},
@@ -355,7 +355,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
@@ -379,7 +379,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 		"catalog-metered-usage-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
-	productSlug := "metered-usage-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "metered-usage-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	meterKey := "vm-seconds-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
@@ -388,7 +388,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			Kind: "counter",
 		}},
 		Products: []catalog.Product{{
-			Key:         productSlug,
+			Key:         productKey,
 			DisplayName: "Metered Usage Product",
 			Prices: []catalog.Price{{
 				UnitAmount: 0,
@@ -411,7 +411,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
@@ -443,13 +443,13 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
-	childSlug := "movie-" + suffix
-	bundleSlug := "movie-bundle-" + suffix
+	childKey := "movie-" + suffix
+	bundleKey := "movie-bundle-" + suffix
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{
 			{
-				Key:         childSlug,
+				Key:         childKey,
 				DisplayName: "Included Movie",
 				TierGroup:   "movies",
 				Prices: []catalog.Price{{
@@ -460,10 +460,10 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 				}},
 			},
 			{
-				Key:         bundleSlug,
+				Key:         bundleKey,
 				DisplayName: "Movie Bundle",
 				TierGroup:   "bundles",
-				Includes:    []string{childSlug},
+				Includes:    []string{childKey},
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,
 					Currency:   "usd",
@@ -480,11 +480,11 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+bundleSlug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+bundleKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var bundle billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &bundle))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+childSlug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+childKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var child billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &child))
@@ -523,7 +523,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
-	productSlug := "claude-plan-" + suffix
+	productKey := "claude-plan-" + suffix
 	limitKey := "claude-5x-" + suffix
 	product20Slug := "claude-plan-20x-" + suffix
 	limit20Key := "claude-20x-" + suffix
@@ -550,7 +550,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		},
 		Products: []catalog.Product{
 			{
-				Key:         productSlug,
+				Key:         productKey,
 				DisplayName: "Claude 5x Plan",
 				TierGroup:   "claude-code",
 				TierRank:    intPtr(1),
@@ -586,7 +586,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
@@ -710,12 +710,12 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	aiGroup := "ai-credits-" + suffix
 	apiGroup := "api-credits-" + suffix
 	movieGroup := "movies-" + suffix
-	premiumSlug := "premium-" + suffix
-	basicSlug := "basic-" + suffix
-	proSlug := "pro-" + suffix
+	premiumKey := "premium-" + suffix
+	basicKey := "basic-" + suffix
+	proKey := "pro-" + suffix
 	aiSlug := "ai-credits-" + suffix
 	apiSlug := "api-credits-" + suffix
-	movieSlug := "movie-" + suffix
+	movieKey := "movie-" + suffix
 	aiUnitName := "ai-image-credit-" + suffix
 	apiUnitName := "fal-api-credit-" + suffix
 	aiUnit := dbtest.TestMerchantSlug + "/" + aiUnitName
@@ -725,7 +725,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{
 			{
-				Key:          premiumSlug,
+				Key:          premiumKey,
 				DisplayName:  "Premium",
 				TierGroup:    premiumGroup,
 				Entitlements: []string{"premium"},
@@ -737,7 +737,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				}},
 			},
 			{
-				Key:         basicSlug,
+				Key:         basicKey,
 				DisplayName: "Basic",
 				TierGroup:   tierGroup,
 				TierRank:    intPtr(1),
@@ -749,7 +749,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				}},
 			},
 			{
-				Key:         proSlug,
+				Key:         proKey,
 				DisplayName: "Pro",
 				TierGroup:   tierGroup,
 				TierRank:    intPtr(2),
@@ -780,7 +780,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Duration: "indefinite"}},
 			},
 			{
-				Key:         movieSlug,
+				Key:         movieKey,
 				DisplayName: "Catalog Movie",
 				TierGroup:   movieGroup,
 				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "usd", Duration: "indefinite"}},
@@ -795,12 +795,12 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	applier := httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}
-	premium := mustCatalogProduct(t, ctx, applier, premiumSlug)
-	basic := mustCatalogProduct(t, ctx, applier, basicSlug)
-	pro := mustCatalogProduct(t, ctx, applier, proSlug)
+	premium := mustCatalogProduct(t, ctx, applier, premiumKey)
+	basic := mustCatalogProduct(t, ctx, applier, basicKey)
+	pro := mustCatalogProduct(t, ctx, applier, proKey)
 	aiProduct := mustCatalogProduct(t, ctx, applier, aiSlug)
 	apiProduct := mustCatalogProduct(t, ctx, applier, apiSlug)
-	movie := mustCatalogProduct(t, ctx, applier, movieSlug)
+	movie := mustCatalogProduct(t, ctx, applier, movieKey)
 
 	require.Contains(t, premium.EntitlementsSpec, "premium")
 	require.Equal(t, tierGroup, *basic.TierGroup)
@@ -812,17 +812,17 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, proPrices, 1)
 	require.True(t, proPrices[0].AutoRenew)
-	require.NotNil(t, proPrices[0].AccessDurationDays)
-	require.Equal(t, 30, *proPrices[0].AccessDurationDays)
+	require.NotNil(t, proPrices[0].AccessDurationHours)
+	require.Equal(t, 720, *proPrices[0].AccessDurationHours)
 	require.NotNil(t, proPrices[0].TrialUnitAmount)
 	require.Equal(t, int64(0), *proPrices[0].TrialUnitAmount)
-	require.NotNil(t, proPrices[0].TrialDurationDays)
-	require.Equal(t, 7, *proPrices[0].TrialDurationDays)
+	require.NotNil(t, proPrices[0].TrialDurationHours)
+	require.Equal(t, 168, *proPrices[0].TrialDurationHours)
 
 	moviePrices, err := applier.ListPricesByProduct(ctx, movie.ID, true)
 	require.NoError(t, err)
 	require.Len(t, moviePrices, 1)
-	require.Nil(t, moviePrices[0].AccessDurationDays)
+	require.Nil(t, moviePrices[0].AccessDurationHours)
 	require.False(t, moviePrices[0].AutoRenew)
 
 	dbi := dbtest.OpenAppDB(t, h.DSN)
@@ -983,7 +983,7 @@ func productUsageLimitBindingCount(t *testing.T, ctx context.Context, pool inter
 
 func mustCatalogProduct(t *testing.T, ctx context.Context, applier httpCatalogApplier, slug string) billingservice.CatalogProduct {
 	t.Helper()
-	product, err := applier.GetProductBySlug(ctx, slug)
+	product, err := applier.GetProductByKey(ctx, slug)
 	require.NoError(t, err)
 	return *product
 }
@@ -994,7 +994,7 @@ func serviceCreditsToModel(in billingservice.CreditsSpec) models.CreditsSpec {
 		out[key] = models.CreditGrantSpec{
 			Unit:        spec.Unit,
 			Amount:      spec.Amount,
-			ExpiresDays: spec.ExpiresDays,
+			ExpiryHours: spec.ExpiryHours,
 			Cadence:     models.CreditGrantCadence(spec.Cadence),
 		}
 	}
@@ -1121,7 +1121,7 @@ type httpCatalogApplier struct {
 	token   string
 }
 
-func (a httpCatalogApplier) GetProductBySlug(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
+func (a httpCatalogApplier) GetProductByKey(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
 	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/products/by-slug/"+url.PathEscape(slug), a.token, nil)
 	if status == http.StatusNotFound {
 		return nil, fmt.Errorf("product not found: %s", slug)
@@ -1348,7 +1348,7 @@ func exampleProductCount(t *testing.T, ctx context.Context, h *Harness, m catalo
 	t.Helper()
 	var n int
 	require.NoError(t, h.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.products WHERE merchant_id = $1 AND slug = ANY($2::text[])`,
+		`SELECT count(*) FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])`,
 		dbtest.TestMerchantID.UUID(), exampleProductKeys(m)).Scan(&n))
 	return n
 }
@@ -1363,7 +1363,7 @@ func assertExampleCatalogRows(t *testing.T, ctx context.Context, h *Harness, m c
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*) FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
 	require.Equal(t, expectedPrices, n)
 
 	require.NoError(t, pool.QueryRow(ctx,
@@ -1379,13 +1379,13 @@ WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UU
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*) FROM openrails.product_includes pi
 JOIN openrails.products p ON p.id = pi.product_id
-WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
 	require.Equal(t, exampleIncludesCount(m), n)
 
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*) FROM openrails.product_usage_limits pul
 JOIN openrails.products p ON p.id = pul.product_id
-WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
+WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
 	require.Equal(t, exampleProductUsageLimitCount(m), n)
 
 	require.NoError(t, pool.QueryRow(ctx,
@@ -1396,7 +1396,7 @@ WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[])`, dbtest.TestMerchantID.UU
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*) FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE p.merchant_id = $1 AND p.slug = ANY($2::text[]) AND pr.trial_unit_amount = 0 AND pr.trial_duration_days = 7`,
+WHERE p.merchant_id = $1 AND p.key = ANY($2::text[]) AND pr.trial_unit_amount = 0 AND pr.trial_duration_hours = 168`,
 		dbtest.TestMerchantID.UUID(), keys).Scan(&n))
 	require.Equal(t, 1, n)
 }

@@ -12,21 +12,22 @@ import (
 )
 
 const getMerchantBySlug = `-- name: GetMerchantBySlug :one
-SELECT id, slug, status
+SELECT id, slug, status, display_name
 FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL
 `
 
 type GetMerchantBySlugRow struct {
-	ID     uuid.UUID
-	Slug   string
-	Status string
+	ID          uuid.UUID
+	Slug        string
+	Status      string
+	DisplayName *string
 }
 
 func (q *Queries) GetMerchantBySlug(ctx context.Context, slug string) (GetMerchantBySlugRow, error) {
 	row := q.db.QueryRow(ctx, getMerchantBySlug, slug)
 	var i GetMerchantBySlugRow
-	err := row.Scan(&i.ID, &i.Slug, &i.Status)
+	err := row.Scan(&i.ID, &i.Slug, &i.Status, &i.DisplayName)
 	return i, err
 }
 
@@ -80,16 +81,25 @@ func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uu
 }
 
 const registerMerchant = `-- name: RegisterMerchant :one
-INSERT INTO openrails.merchants (slug, status)
-VALUES ($1, 'active')
-ON CONFLICT (slug) DO UPDATE SET updated_at = now()
+INSERT INTO openrails.merchants (slug, status, display_name)
+VALUES ($1, 'active', $2)
+ON CONFLICT (slug) DO UPDATE SET
+    display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
+    updated_at = now()
 RETURNING id
 `
 
+type RegisterMerchantParams struct {
+	Slug        string
+	DisplayName *string
+}
+
 // Register a merchant (billing bucket) from config, idempotently (#480). The
-// merchant carries ONLY billing/rail state; NO auth.
-func (q *Queries) RegisterMerchant(ctx context.Context, slug string) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, registerMerchant, slug)
+// merchant carries ONLY billing/rail state; NO auth. A re-register without a
+// display_name keeps any existing one (COALESCE), so config that omits it never
+// clears a name set elsewhere.
+func (q *Queries) RegisterMerchant(ctx context.Context, arg RegisterMerchantParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, registerMerchant, arg.Slug, arg.DisplayName)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

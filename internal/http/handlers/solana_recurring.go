@@ -567,9 +567,9 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	}
 	network := ""
 	var tokens map[string]config.TokenConfig
-	if pc := r.State.Rails.GetSolanaRail(); pc != nil {
-		network = pc.Network
-		tokens = pc.Tokens
+	if pc := r.State.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
+		network = pc.Solana.Network
+		tokens = pc.Solana.Tokens
 	}
 
 	svc := recurring.NewConfirmTierChangeService(

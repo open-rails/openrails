@@ -34,7 +34,7 @@ func testGrants(t *testing.T) (*grants.Ledger, *pgxpool.Pool, context.Context, u
 	product := uuid.New()
 	_, err := pool.Exec(ctx, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, customer, merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
 		product, "grant-test-"+short(), "Grant Test Product", merchantID)
 	require.NoError(t, err)
 
@@ -164,7 +164,7 @@ func TestGrants_OwnershipIncludes(t *testing.T) {
 	l, pool, ctx, customer, bundle, merchantID := testGrants(t)
 	childA := uuid.New()
 	childB := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
 		childA, "included-a-"+short(), "Included A", merchantID,
 		childB, "included-b-"+short(), "Included B", merchantID)
 	require.NoError(t, err)

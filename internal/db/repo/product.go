@@ -67,7 +67,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 	rows, err := r.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
 		ID:               product.ID,
 		MerchantID:       product.MerchantID,
-		Slug:             product.Slug,
+		Key:              product.Key,
 		DisplayName:      product.DisplayName,
 		Description:      desc,
 		EntitlementsSpec: entSpec,
@@ -172,7 +172,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 	}
 	rows, err := r.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
 		ID:               product.ID,
-		Slug:             product.Slug,
+		Key:              product.Key,
 		DisplayName:      product.DisplayName,
 		Description:      desc,
 		EntitlementsSpec: entSpec,
@@ -202,8 +202,8 @@ func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *ProductRepo) GetBySlug(ctx context.Context, slug string) (*models.Product, error) {
-	row, err := r.db.Gen(ctx).GetProductBySlug(ctx, slug)
+func (r *ProductRepo) GetByKey(ctx context.Context, key string) (*models.Product, error) {
+	row, err := r.db.Gen(ctx).GetProductByKey(ctx, key)
 	if err != nil {
 		return nil, err
 	}

@@ -14,7 +14,7 @@ func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
 		"monthly_eur": {
 			Unit:        "EUR",
 			Amount:      2500,
-			ExpiresDays: &expiresDays,
+			ExpiryHours: &expiresDays,
 			Cadence:     CreditGrantCadencePerRenewal,
 		},
 	}
@@ -29,7 +29,7 @@ func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
 			"monthly_eur": {
 				Unit:        "EUR",
 				Amount:      2500,
-				ExpiresDays: &expiresDays,
+				ExpiryHours: &expiresDays,
 				Cadence:     models.CreditGrantCadencePerRenewal,
 			},
 		},
@@ -40,7 +40,7 @@ func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
 		"monthly_eur": {
 			Unit:        "EUR",
 			Amount:      2500,
-			ExpiresDays: &expiresDays,
+			ExpiryHours: &expiresDays,
 			Cadence:     models.CreditGrantCadencePerRenewal,
 		},
 	})

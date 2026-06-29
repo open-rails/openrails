@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
     cancel_type LowCardinality(String) DEFAULT '',
     price_amount Decimal(12, 2) DEFAULT 0,
     price_currency LowCardinality(String),
-    billing_cycle_days UInt32 DEFAULT 0,
+    billing_cycle_hours UInt32 DEFAULT 0,
     product_id Nullable(UUID),
     price_id Nullable(UUID),
     metadata String DEFAULT '{}',
@@ -253,7 +253,7 @@ per_sub AS (
         subscription_id,
         argMax(status, timestamp) AS status,
         argMax(price_amount, timestamp) AS price_amount,
-        argMax(billing_cycle_days, timestamp) AS billing_cycle_days,
+        argMax(billing_cycle_hours, timestamp) AS billing_cycle_hours,
         argMax(rail, timestamp) AS rail
     FROM subscription_events
     GROUP BY
@@ -270,7 +270,7 @@ sub_status AS (
         countIf(status = 'active') AS active_count_end,
         countIf(status = 'past_due') AS past_due_count_end,
         countIf(status = 'pending') AS pending_count_end,
-        toInt64(sumIf(price_amount * 100 * 30 / NULLIF(billing_cycle_days, 0), status IN ('active','past_due'))) AS mrr_cents
+        toInt64(sumIf(price_amount * 100 * 720 / NULLIF(billing_cycle_hours, 0), status IN ('active','past_due'))) AS mrr_cents
     FROM per_sub
     GROUP BY snapshot_date, currency, merchant_id
 ),

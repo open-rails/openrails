@@ -391,12 +391,12 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	}
 	var secrets []string
 	stripeSecretKey := ""
-	if stripeProc := r.State.Rails.GetStripeRail(); stripeProc != nil {
-		stripeSecretKey = strings.TrimSpace(stripeProc.SecretKey)
-		if s := strings.TrimSpace(stripeProc.WebhookSecret); s != "" {
+	if stripeProc := r.State.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
+		stripeSecretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
+		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSecret); s != "" {
 			secrets = append(secrets, s)
 		}
-		if s := strings.TrimSpace(stripeProc.WebhookSecretThin); s != "" {
+		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSecretThin); s != "" {
 			secrets = append(secrets, s)
 		}
 	}

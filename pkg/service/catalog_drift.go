@@ -67,10 +67,10 @@ type localCatalogSnapshot struct {
 	productByID map[string]*models.Product
 	// priceByID maps OpenRails price UUID (string) -> price row.
 	priceByID map[string]*models.Price
-	// productBySlug maps OpenRails product slug -> product row (content key).
-	productBySlug map[string]*models.Product
+	// productByKey maps OpenRails product slug -> product row (content key).
+	productByKey map[string]*models.Product
 	// priceByContentKey maps the financial content key
-	// "<product_slug>.<currency>.<unit_amount>.<cycle>" -> price row.
+	// "<product_key>.<currency>.<unit_amount>.<cycle>" -> price row.
 	priceByContentKey map[string]*models.Price
 	// stripeProductIDs is the set of stripe product ids OpenRails believes it owns.
 	stripeProductIDs map[string]string // stripe product id -> openrails product id
@@ -116,7 +116,7 @@ func computeCatalogDrift(
 			})
 			continue
 		}
-		local, ok := snap.productBySlug[productKey]
+		local, ok := snap.productByKey[productKey]
 		if !ok {
 			// Marker points at an OpenRails product slug that doesn't exist.
 			events = append(events, models.CatalogDriftEvent{
@@ -134,8 +134,8 @@ func computeCatalogDrift(
 
 	// --- Stripe Prices: orphan + field drift ---
 	// Match on the CONTENT key: prefer the price's lookup_key
-	// ("openrails.<product_slug>.<price_slug>"), falling back to the
-	// openrails_price_key metadata ("<product_slug>.<price_slug>").
+	// ("openrails.<product_key>.<price_terms>"), falling back to the
+	// openrails_price_key metadata ("<product_key>.<price_terms>").
 	for _, sp := range stripePrices {
 		seenStripePriceIDs[sp.ID] = struct{}{}
 		priceKey := stripePriceContentKey(sp)
@@ -194,7 +194,7 @@ func computeCatalogDrift(
 }
 
 // stripePriceContentKey extracts the OpenRails financial content key
-// ("<product_slug>.<currency>.<unit_amount>.<cycle>") from a Stripe Price for
+// ("<product_key>.<currency>.<unit_amount>.<cycle>") from a Stripe Price for
 // reverse-matching. It prefers the openrails_price_key metadata, falling back to
 // deriving it from the lookup_key ("openrails.<content_key>" -> strip the
 // prefix). Returns "" when neither is present (a Stripe-native price OpenRails
@@ -504,7 +504,7 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 	snap := localCatalogSnapshot{
 		productByID:               make(map[string]*models.Product, len(productRows)),
 		priceByID:                 make(map[string]*models.Price, len(priceRows)),
-		productBySlug:             make(map[string]*models.Product, len(productRows)),
+		productByKey:              make(map[string]*models.Product, len(productRows)),
 		priceByContentKey:         make(map[string]*models.Price, len(priceRows)),
 		stripeProductIDs:          make(map[string]string),
 		stripePriceIDs:            make(map[string]string),
@@ -512,17 +512,17 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 	}
 	for _, p := range productRows {
 		snap.productByID[p.ID.String()] = p
-		if slug := strings.TrimSpace(p.Slug); slug != "" {
-			snap.productBySlug[slug] = p
+		if key := strings.TrimSpace(p.Key); key != "" {
+			snap.productByKey[key] = p
 		}
 	}
 	for _, pr := range priceRows {
 		snap.priceByID[pr.ID.String()] = pr
-		// Content key = "<product_slug>.<currency>.<unit_amount>.<cycle>"; needs
+		// Content key = "<product_key>.<currency>.<unit_amount>.<cycle>"; needs
 		// the owning product for its slug.
 		if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
-			if slug := strings.TrimSpace(prod.Slug); slug != "" {
-				ck := openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
+			if slug := strings.TrimSpace(prod.Key); slug != "" {
+				ck := openRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				snap.priceByContentKey[ck] = pr
 			}
 		}
@@ -599,7 +599,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 
 	var stripeLister stripeProductLister
 	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.SecretKey != "" {
+		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe.SecretKey != "" {
 			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
 		}
 	}

@@ -31,7 +31,7 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 
 	productID := uuid.New()
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES ($1,$2,$3,$3)`,
+		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
 		productID, merchantID, "prod-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -46,11 +46,11 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 		p := &models.Price{
 			ID: uuid.New(), MerchantID: merchantID, ProductID: productID,
 			Status: models.CatalogStatusArchived, Amount: amount, Currency: "usd",
-			AccessDurationDays: &cycle, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+			AccessDurationHours: &cycle, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		}
 		if withIntro {
 			ia, id := initialAmount, initialDays
-			p.TrialUnitAmount, p.TrialDurationDays = &ia, &id
+			p.TrialUnitAmount, p.TrialDurationHours = &ia, &id
 		}
 		require.NoError(t, r.Create(ctx, p))
 		return p
@@ -87,5 +87,5 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	require.NotNil(t, flat)
 	require.False(t, flat.HasTrial())
 	require.Nil(t, flat.TrialUnitAmount)
-	require.Nil(t, flat.TrialDurationDays)
+	require.Nil(t, flat.TrialDurationHours)
 }

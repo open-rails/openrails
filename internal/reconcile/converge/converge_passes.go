@@ -469,7 +469,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			SubjectKey: "provider_charge:" + d.UserID + ":" + d.ProductID.String() + ":" + d.FirstDate.Format("2006-01"),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": d.UserID, "product_id": d.ProductID.String(), "product_slug": d.ProductSlug,
+				"customer_id": d.UserID, "product_id": d.ProductID.String(), "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": d.TotalAmount,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 			},

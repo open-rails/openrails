@@ -44,7 +44,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		// One product+price per sub (uq_subscriptions_customer_product_lifecycle
 		// forbids multiple live subs per customer/product).
 		sub := func(id, prodID, priceID uuid.UUID, tag, psub string) {
-			exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+			exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				prodID, "prune-"+tag+"-"+suffix, "prune-tier-"+tag+"-"+suffix, merchantID)
 			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`, priceID, prodID, merchantID)
 			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, provider_account_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
@@ -162,7 +162,7 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 		}
 		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, role, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
 			paID, merchantID, "acct-pay-"+suffix)
-		exec(`INSERT INTO openrails.products (id, slug, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
 			priceID, productID, merchantID)

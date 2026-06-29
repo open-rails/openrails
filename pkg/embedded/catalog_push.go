@@ -321,7 +321,7 @@ func catalogNMIClients(cfg *config.Config, rails config.RailSet, enabled bool) m
 	}
 	for name, procConfig := range rails.GetNMIRails() {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
-		if providerKey == "" || procConfig == nil || strings.TrimSpace(procConfig.SecurityKey) == "" {
+		if providerKey == "" || procConfig == nil || procConfig.NMI == nil || strings.TrimSpace(procConfig.NMI.SecurityKey) == "" {
 			continue
 		}
 		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestMode())

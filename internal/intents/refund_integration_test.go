@@ -110,7 +110,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		require.NoError(t, err)
 	}
 	tenantID := dbtest.TestMerchantID.UUID()
-	exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
 		priceID, productID, tenantID)
@@ -406,7 +406,7 @@ func stripeIntegrationConfig(mode string) *config.Config {
 
 func stripeIntegrationRails() config.RailSet {
 	return config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, SecretKey: "sk_test_123"},
+		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
 

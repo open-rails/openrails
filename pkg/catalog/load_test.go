@@ -144,7 +144,7 @@ products:
 func TestValidateRejectsTierGroupsOnly(t *testing.T) {
 	m := &Manifest{
 		Version:    SupportedVersion,
-		TierGroups: []TierGroup{{Slug: "old", Products: []Product{{Key: "p", DisplayName: "P"}}}},
+		TierGroups: []TierGroup{{Key: "old", Products: []Product{{Key: "p", DisplayName: "P"}}}},
 	}
 	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "not tier_groups") {
 		t.Fatalf("want tier_groups-only rejection, got %v", err)
@@ -376,7 +376,7 @@ products:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(m.TierGroups) != 1 || m.TierGroups[0].Slug != "default" {
+	if len(m.TierGroups) != 1 || m.TierGroups[0].Key != "default" {
 		t.Fatalf("flat products were not normalized: %+v", m.TierGroups)
 	}
 	p := m.TierGroups[0].Products[0]
@@ -518,7 +518,7 @@ products:
 	}
 }
 
-func TestLoad_RejectsSubDayRecurringInterval(t *testing.T) {
+func TestLoad_AcceptsSubDayRecurringInterval(t *testing.T) {
 	body := `
 version: 1
 products:
@@ -529,8 +529,11 @@ products:
     prices:
       - {currency: usd, unit_amount: 1000, duration: 1h}
 `
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "must be whole days") {
-		t.Fatalf("want whole-day storage error, got %v", err)
+	m, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := m.TierGroups[0].Products[0].Prices[0].Duration; got != "1h" {
+		t.Fatalf("duration = %q, want 1h", got)
 	}
 }

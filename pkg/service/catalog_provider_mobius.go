@@ -143,8 +143,8 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 // The plan_id carries NO "openrails-"/merchant/application prefix: the content key
 // is the whole id. Operator-supplied (Attach) plan_ids are owned by the operator
 // and never renamed by OpenRails, even when this template changes.
-func mobiusDeterministicPlanID(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
-	key := openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
+func mobiusDeterministicPlanID(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
+	key := openRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
 	return strings.ReplaceAll(key, ".", "-")
 }
 
@@ -176,7 +176,7 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 		return nil, fmt.Errorf("mobius create-mode requires billing_cycle_days (NMI plans need a recurring frequency)")
 	}
 
-	planID := mobiusDeterministicPlanID(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	planID := mobiusDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
 
 	// Find-or-create: prefer an existing plan with this deterministic id.
 	found, _, _, err := client.GetRecurringPlanByID(planID)

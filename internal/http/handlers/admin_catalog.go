@@ -110,7 +110,7 @@ func AdminGetProduct(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-func AdminGetProductBySlug(r *httprequest.Request) {
+func AdminGetProductByKey(r *httprequest.Request) {
 	slug := strings.TrimSpace(r.Param("slug"))
 	if slug == "" {
 		r.ErrorJSON(http.StatusBadRequest, "slug required")
@@ -120,7 +120,7 @@ func AdminGetProductBySlug(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.GetProductBySlug(r.Request.Context(), slug)
+	out, err := svc.GetProductByKey(r.Request.Context(), slug)
 	if err != nil {
 		writeCatalogError(r, productLookupErr(err))
 		return

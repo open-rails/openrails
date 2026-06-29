@@ -186,7 +186,7 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, slug, display_name, entitlements_spec, merchant_id)
+		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, productID, "ge-prod-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
 		      VALUES ($1,$2,9990000,'usd',$3)`, priceID, productID, merchantID)
@@ -263,8 +263,8 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, slug, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prodGrant, "gm-g-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.products (id, slug, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prodEmpty, "gm-e-"+sfx, merchantID)
+		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prodGrant, "gm-g-"+sfx, merchantID)
+		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prodEmpty, "gm-e-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, priceGrant, prodGrant, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, priceEmpty, prodEmpty, merchantID)
 		ins := func(id, price uuid.UUID, txn string) {

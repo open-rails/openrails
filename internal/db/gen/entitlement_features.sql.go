@@ -54,7 +54,7 @@ func (q *Queries) CreateEntitlementFeature(ctx context.Context, arg CreateEntitl
 
 const createProductEntitlementFeature = `-- name: CreateProductEntitlementFeature :one
 INSERT INTO openrails.product_entitlement_features (
-    id, merchant_id, product_id, entitlement_feature_id, duration_days,
+    id, merchant_id, product_id, entitlement_feature_id, duration_hours,
     metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
@@ -71,7 +71,7 @@ type CreateProductEntitlementFeatureParams struct {
 	EntitlementFeatureID uuid.UUID
 	ID                   uuid.UUID
 	MerchantID           uuid.UUID
-	DurationDays         *int32
+	DurationHours        *int32
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -83,7 +83,7 @@ func (q *Queries) CreateProductEntitlementFeature(ctx context.Context, arg Creat
 		arg.EntitlementFeatureID,
 		arg.ID,
 		arg.MerchantID,
-		arg.DurationDays,
+		arg.DurationHours,
 		arg.Metadata,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -162,7 +162,7 @@ func (q *Queries) GetEntitlementFeatureByLookupKey(ctx context.Context, arg GetE
 }
 
 const getProductEntitlementFeatureByID = `-- name: GetProductEntitlementFeatureByID :one
-SELECT id, merchant_id, product_id, entitlement_feature_id, duration_days, metadata, created_at, updated_at FROM openrails.product_entitlement_features pef
+SELECT id, merchant_id, product_id, entitlement_feature_id, duration_hours, metadata, created_at, updated_at FROM openrails.product_entitlement_features pef
 WHERE pef.id = $1 AND pef.merchant_id = $2
 `
 
@@ -179,7 +179,7 @@ func (q *Queries) GetProductEntitlementFeatureByID(ctx context.Context, arg GetP
 		&i.MerchantID,
 		&i.ProductID,
 		&i.EntitlementFeatureID,
-		&i.DurationDays,
+		&i.DurationHours,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -261,7 +261,7 @@ func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg L
 }
 
 const listProductEntitlementFeatures = `-- name: ListProductEntitlementFeatures :many
-SELECT pef.id, pef.merchant_id, pef.product_id, pef.entitlement_feature_id, pef.duration_days, pef.metadata, pef.created_at, pef.updated_at, ef.id, ef.merchant_id, ef.lookup_key, ef.name, ef.metadata, ef.created_at, ef.updated_at
+SELECT pef.id, pef.merchant_id, pef.product_id, pef.entitlement_feature_id, pef.duration_hours, pef.metadata, pef.created_at, pef.updated_at, ef.id, ef.merchant_id, ef.lookup_key, ef.name, ef.metadata, ef.created_at, ef.updated_at
 FROM openrails.product_entitlement_features pef
 JOIN openrails.entitlement_features ef ON ef.id = pef.entitlement_feature_id
 WHERE pef.product_id = $1 AND pef.merchant_id = $2
@@ -292,7 +292,7 @@ func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListPr
 			&i.OpenrailsProductEntitlementFeature.MerchantID,
 			&i.OpenrailsProductEntitlementFeature.ProductID,
 			&i.OpenrailsProductEntitlementFeature.EntitlementFeatureID,
-			&i.OpenrailsProductEntitlementFeature.DurationDays,
+			&i.OpenrailsProductEntitlementFeature.DurationHours,
 			&i.OpenrailsProductEntitlementFeature.Metadata,
 			&i.OpenrailsProductEntitlementFeature.CreatedAt,
 			&i.OpenrailsProductEntitlementFeature.UpdatedAt,

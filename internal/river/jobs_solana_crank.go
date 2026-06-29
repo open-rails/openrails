@@ -71,10 +71,10 @@ type resolvedPlan struct {
 	fingerprint     int64
 	fiatAmount      int64
 	currency        string
-	// cycleDays is the price's billing cycle in days (0 = unknown) and
+	// cycleHours is the price's billing cycle in hours (0 = unknown) and
 	// retryAttempts the subscription's consecutive-failure count so far —
 	// together they feed the cadence-relative dunning schedule (#359).
-	cycleDays     int
+	cycleHours    int
 	retryAttempts int
 }
 
@@ -260,7 +260,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}
 			// plan.retryAttempts was loaded BEFORE the FailMembership above
 			// recorded this failure, so the schedule gap is looked up at +1.
-			gap := subscriptions.DunningNextRetryIn(plan.cycleDays, plan.retryAttempts+1)
+			gap := subscriptions.DunningNextRetryIn(plan.cycleHours, plan.retryAttempts+1)
 			if gap <= 0 {
 				// That failure was terminal under the schedule (FailMembership
 				// cancelled the membership); advance one period so this record
@@ -339,7 +339,7 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 		fingerprint:     fingerprint,
 		fiatAmount:      price.Amount,
 		currency:        price.Currency,
-		cycleDays:       subscriptions.BillingCycleDaysOf(price),
+		cycleHours:      subscriptions.BillingCycleHoursOf(price),
 		retryAttempts:   retryAttempts,
 	}, nil
 }

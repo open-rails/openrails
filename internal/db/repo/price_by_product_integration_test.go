@@ -29,7 +29,7 @@ func TestGetByProductID_IncludesArchived(t *testing.T) {
 
 	productID := uuid.New()
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES ($1,$2,$3,$3)`,
+		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
 		productID, merchantID, "prod-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 

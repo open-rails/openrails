@@ -163,7 +163,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	productID := uuid.New()
 	priceID := uuid.New()
 	subscriptionID := uuid.New()
-	durationDays := 30
+	durationDays := 720
 
 	entitlementsSpec := map[string]*int{
 		"premium": &durationDays,
@@ -175,7 +175,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ID:               productID,
-		Slug:             "nmi_add_subscription_" + uuid.New().String(),
+		Key:              "nmi_add_subscription_" + uuid.New().String(),
 		DisplayName:      "Premium Membership",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -194,17 +194,17 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 	billingCycleDays := int32(30)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           23_990_000,
-		Currency:         "USD",
-		Status:             string(models.CatalogStatusActive),
-		AccessDurationDays: &billingCycleDays,
-		AutoRenew:          true,
-		Rails:              railsJSON,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  priceID,
+		ProductID:           productID,
+		Amount:              23_990_000,
+		Currency:            "USD",
+		Status:              string(models.CatalogStatusActive),
+		AccessDurationHours: &billingCycleDays,
+		AutoRenew:           true,
+		Rails:               railsJSON,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 

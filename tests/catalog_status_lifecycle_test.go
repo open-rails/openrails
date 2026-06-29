@@ -25,7 +25,7 @@ func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 	require.NoError(t, err)
 
 	created, err := svc.CreateProduct(ctx, billingservice.CreateProductRequest{
-		Slug:        "status_roundtrip_" + uuid.NewString(),
+		Key:         "status_roundtrip_" + uuid.NewString(),
 		DisplayName: "Status Roundtrip",
 	})
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 	require.NoError(t, err)
 
 	product, err := svc.CreateProduct(ctx, billingservice.CreateProductRequest{
-		Slug:        "create_archived_" + uuid.NewString(),
+		Key:         "create_archived_" + uuid.NewString(),
 		DisplayName: "Legacy Product",
 		Status:      models.CatalogStatusArchived,
 	})
@@ -87,7 +87,7 @@ func TestCatalogStatus_DraftHiddenAndNotPurchasable(t *testing.T) {
 	require.NoError(t, err)
 
 	product, err := svc.CreateProduct(ctx, billingservice.CreateProductRequest{
-		Slug:        "draft_hidden_" + uuid.NewString(),
+		Key:         "draft_hidden_" + uuid.NewString(),
 		DisplayName: "Draft Product",
 		Status:      models.CatalogStatusDraft,
 	})

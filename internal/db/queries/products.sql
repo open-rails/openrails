@@ -2,7 +2,7 @@
 
 -- name: CreateProduct :execrows
 INSERT INTO openrails.products (
-    id, merchant_id, slug, display_name, description, entitlements_spec,
+    id, merchant_id, key, display_name, description, entitlements_spec,
     credits_spec, tier_group, tier_rank, status, created_at, updated_at
 ) VALUES (
     $1,
@@ -18,8 +18,8 @@ INSERT INTO openrails.products (
 -- name: GetProductByID :one
 SELECT * FROM openrails.products WHERE id = $1;
 
--- name: GetProductBySlug :one
-SELECT * FROM openrails.products WHERE slug = $1;
+-- name: GetProductByKey :one
+SELECT * FROM openrails.products WHERE key = $1;
 
 -- name: ListProductsByIDs :many
 SELECT * FROM openrails.products WHERE id = ANY(sqlc.arg(ids)::uuid[]);
@@ -49,7 +49,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: UpdateProduct :execrows
 UPDATE openrails.products SET
-    slug = $2,
+    key = $2,
     display_name = $3,
     description = sqlc.narg(description),
     entitlements_spec = sqlc.narg(entitlements_spec),

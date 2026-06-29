@@ -58,7 +58,7 @@ func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) 
 		MerchantID:           p.MerchantID,
 		ProductID:            p.ProductID,
 		EntitlementFeatureID: p.EntitlementFeatureID,
-		DurationDays:         derefIntPtr(p.DurationDays),
+		DurationHours:        derefIntPtr(p.DurationHours),
 		CreatedAt:            p.CreatedAt,
 		UpdatedAt:            p.UpdatedAt,
 	}
@@ -228,7 +228,7 @@ func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef
 		MerchantID:           pef.MerchantID,
 		ProductID:            pef.ProductID,
 		EntitlementFeatureID: pef.EntitlementFeatureID,
-		DurationDays:         intPtrTo32(pef.DurationDays),
+		DurationHours:        intPtrTo32(pef.DurationHours),
 		Metadata:             meta,
 		CreatedAt:            pef.CreatedAt,
 		UpdatedAt:            pef.UpdatedAt,
