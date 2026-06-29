@@ -12,16 +12,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
-)
-
-type CredentialMode string
-
-const (
-	CredentialModeFixed   CredentialMode = "fixed_credentials"
-	CredentialModeMutable CredentialMode = "mutable_credentials"
 )
 
 // App encapsulates the long-lived dependencies shared across transports.
@@ -30,17 +22,6 @@ type App struct {
 	Runtime     *Runtime
 	Cache       cache.Cache
 	RedisClient *redis.Client
-	// Authenticator is the framework-neutral auth boundary (gin-free). The gin
-	// Required()/Optional() middleware is reconstructed from it on the standalone
-	// HTTP path (internal/http), so this core type carries no gin dependency
-	// (#285).
-	Authenticator billingauth.Authenticator
-
-	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
-	// the browser-direct self-service and merchant surfaces (issue #339): the
-	// host verifies the incoming credential itself and supplies the explicitly
-	// mapped {merchant, subject, permissions} principal.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224),
 	// held as `any` so the embedded CORE (internal/app, pkg/embedded, embedhttp)
@@ -49,8 +30,7 @@ type App struct {
 	// path ALWAYS attaches the concrete *controlplane.ControlPlane via
 	// SetControlPlane (#469) and recovers it with a type assertion (see
 	// pkg/embedded/controlplane).
-	ControlPlane   any
-	CredentialMode CredentialMode
+	ControlPlane any
 
 	stopRedisMonitor context.CancelFunc
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
@@ -79,19 +59,11 @@ func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 type BootstrapOptions struct {
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
-	// Authenticator is the framework-neutral auth boundary (gin-free). The core
-	// no longer builds a default AuthKit verifier (#284): when nil, the app has no
-	// authenticator and auth-gated routes fail closed. Hosts opt into the AuthKit
-	// verifier via pkg/embedded/authkit.NewVerifierAuthenticator and pass it here.
-	Authenticator billingauth.Authenticator
-	// DelegatedAuthenticator is the optional host-pluggable identity seam for
-	// the delegated self-service surface (#339); see App.DelegatedAuthenticator.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	Cache                  cache.Cache
-	Clock                  clockwork.Clock
-	ConfiguredMerchant     merchant.ID
-	Rails                  config.RailSet
-	CredentialMode         CredentialMode
+	Cache   cache.Cache
+	Clock   clockwork.Clock
+
+	ConfiguredMerchant merchant.ID
+	Rails              config.RailSet
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -117,20 +89,6 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 			log.SetLevel(level)
 			log.Infof("Log level set to: %s", level)
 		}
-	}
-
-	// The embedded CORE authenticates ONLY via the host-supplied Authenticator
-	// (#284). It no longer builds an AuthKit verifier here; hosts/standalone opt in
-	// via pkg/embedded/authkit.NewVerifierAuthenticator and pass the result here.
-	var authenticator billingauth.Authenticator
-	var delegatedAuthenticator billingauth.DelegatedAuthenticator
-	if opts != nil {
-		authenticator = opts.Authenticator
-		delegatedAuthenticator = opts.DelegatedAuthenticator
-	}
-	credentialMode := CredentialModeFixed
-	if opts != nil && opts.CredentialMode != "" {
-		credentialMode = opts.CredentialMode
 	}
 
 	var dbOverride *db.DB
@@ -186,14 +144,11 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 	}
 
 	app := &App{
-		Config:                 cfg,
-		Runtime:                runtime,
-		Cache:                  appCache,
-		RedisClient:            runtime.RedisClient,
-		Authenticator:          authenticator,
-		DelegatedAuthenticator: delegatedAuthenticator,
-		CredentialMode:         credentialMode,
-		stopRedisMonitor:       stop,
+		Config:           cfg,
+		Runtime:          runtime,
+		Cache:            appCache,
+		RedisClient:      runtime.RedisClient,
+		stopRedisMonitor: stop,
 	}
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here

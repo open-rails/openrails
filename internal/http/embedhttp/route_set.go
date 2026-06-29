@@ -3,8 +3,6 @@ package embedhttp
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet string
 
-type CredentialMode string
-
 const (
 	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
 	RouteSetCheckout RouteSet = "checkout"
@@ -12,15 +10,14 @@ const (
 	RouteSetCustomer RouteSet = "customer"
 	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
 	RouteSetMerchantAdmin RouteSet = "merchant_admin"
-	// RouteSetMerchantSettings mounts provider secrets, catalog pushes, and merchant config routes.
-	RouteSetMerchantSettings RouteSet = "merchant_settings"
+	// RouteSetCatalog mounts merchant catalog routes.
+	RouteSetCatalog RouteSet = "catalog"
+	// RouteSetPaymentProviders mounts provider config and secret routes.
+	RouteSetPaymentProviders RouteSet = "payment_providers"
 	// RouteSetMerchantAPI mounts host-internal service/API-key routes.
 	RouteSetMerchantAPI RouteSet = "merchant_api"
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
 	RouteSetWebhooks RouteSet = "webhooks"
-
-	CredentialModeFixed   CredentialMode = "fixed_credentials"
-	CredentialModeMutable CredentialMode = "mutable_credentials"
 )
 
 // EmbeddedDefaultRouteSets is the default embedded HTTP surface. It excludes
@@ -30,6 +27,7 @@ var EmbeddedDefaultRouteSets = []RouteSet{
 	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
+	RouteSetCatalog,
 	RouteSetWebhooks,
 }
 
@@ -39,7 +37,8 @@ var StandaloneDefaultRouteSets = []RouteSet{
 	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
-	RouteSetMerchantSettings,
+	RouteSetCatalog,
+	RouteSetPaymentProviders,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }

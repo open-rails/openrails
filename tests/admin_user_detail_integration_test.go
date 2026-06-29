@@ -51,7 +51,7 @@ func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject str
 	e := gin.New()
 	rr := ginrouter.New(e.Group("/v1/merchant"), suite.App.Runtime)
 	httproutes.RegisterMerchantActionRoutes(rr, suite.App.Runtime, httproutes.Options{
-		DelegatedResolver: testDelegatedResolver{subject: subject, perms: perms},
+		Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedResolver: testDelegatedResolver{subject: subject, perms: perms}}),
 	})
 	return e
 }

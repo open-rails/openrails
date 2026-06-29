@@ -1,9 +1,8 @@
 // Package authkit is the OPT-IN AuthKit verifier adapter for embedded hosts
 // (#284). The embedded CORE (pkg/embedded.New -> bootstrap.NewApp ->
-// internal/app) deliberately does NOT import AuthKit: it authenticates only via
-// the host-supplied billingauth.Authenticator. Hosts (and the OpenRails
+// internal/app) deliberately does NOT import AuthKit. Hosts (and the OpenRails
 // standalone binary) that want the AuthKit JWT-verifier auth boundary opt in
-// here and pass the result as embedded.Options.Authenticator.
+// here and pass the result at HTTP mount time.
 //
 // Importing this package is what pulls github.com/open-rails/authkit onto a
 // host's dependency graph; pkg/embedded itself stays AuthKit-free.
@@ -17,7 +16,7 @@ import (
 // NewVerifierAuthenticator builds an AuthKit-backed, framework-neutral
 // billingauth.Authenticator that verifies bearer tokens against the given JWKS
 // issuers, optionally constraining the token audience. Pass the returned value
-// as embedded.Options.Authenticator.
+// as gin.MountOptions.Authenticator or a host Gate input.
 //
 // This is an explicit embedded-host bridge. Standalone OpenRails does not read
 // issuers from config; it authenticates with its own control-plane/AuthKit

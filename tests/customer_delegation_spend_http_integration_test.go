@@ -107,7 +107,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 		permissions: []string{controlplane.PermMerchantAdmissionsCreate},
 	}
 	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime,
-		httproutes.Options{ServiceCredentialResolver: resolver})
+		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
 	admitSrv := httptest.NewServer(admitRouter)
 	t.Cleanup(admitSrv.Close)
 

@@ -1,7 +1,6 @@
 package gin
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -22,9 +21,7 @@ import (
 
 // SelfHandler returns the mountable browser-direct SELF-SERVICE
 // surface for an embedded host (issues #339/#467). A host-supplied
-// billingauth.DelegatedAuthenticator wins when present. Otherwise OpenRails
-// adapts the embedded billingauth.Authenticator into a self-service principal
-// pinned to the configured embedded merchant.
+// billingauth.DelegatedAuthenticator is supplied by the host at mount time.
 //
 // Routes are served at the CANONICAL embedded paths, alongside the
 // NewHTTPHandler surface:
@@ -44,7 +41,7 @@ import (
 // self surface registration is gin (ginroutes); the core pkg/embedded handler
 // stays gin-free. Errors when the app graph is not initialized or no identity
 // source can be derived — the surface is never mounted without authentication.
-func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
+func SelfHandler(e *embedded.Embedded, authn billingauth.DelegatedAuthenticator) (http.Handler, error) {
 	if e == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
@@ -52,41 +49,14 @@ func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
+	if authn == nil {
+		return nil, fmt.Errorf("embedded billing: self surface requires MountOptions.DelegatedAuthenticator")
+	}
 	var configured merchant.ID
 	if a.Runtime != nil {
 		configured = a.Runtime.ConfiguredMerchant
 	}
-	authn := a.DelegatedAuthenticator
-	if authn == nil {
-		authn = delegatedAuthenticatorFromUserAuthenticator(a.Authenticator, configured)
-	}
-	if authn == nil {
-		return nil, fmt.Errorf("embedded billing: self surface requires Options.Authenticator plus configured merchant, or Options.DelegatedAuthenticator")
-	}
 	return newSelfHandler(a.Runtime, authn, configured), nil
-}
-
-func delegatedAuthenticatorFromUserAuthenticator(authn billingauth.Authenticator, configured merchant.ID) billingauth.DelegatedAuthenticator {
-	if authn == nil || configured.IsZero() {
-		return nil
-	}
-	return billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-		uc, err := authn.Authenticate(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		if err := uc.ValidateSubject(); err != nil {
-			return nil, err
-		}
-		return &billingauth.DelegatedPrincipal{
-			MerchantID:    configured.String(),
-			SubjectID:     uc.UserID,
-			Issuer:        "embedded",
-			Email:         uc.Email,
-			EmailVerified: uc.EmailVerified,
-			Username:      uc.Username,
-		}, nil
-	})
 }
 
 // newSelfHandler assembles the self-service gin engine and wraps it in

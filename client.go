@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -34,6 +36,14 @@ const (
 	// Wasted-spend reports use payer grace, then charge overage.
 	InvokerTypePayer = "payer"
 )
+
+// MerchantID is an OpenRails merchant identifier.
+type MerchantID = merchant.ID
+
+// WithMerchant pins merchant-scoped SDK calls to a merchant.
+func WithMerchant(ctx context.Context, id MerchantID) context.Context {
+	return merchant.WithID(ctx, id)
+}
 
 // AdmissionClient is the Tensorhub hot path: batch admission, settle, release,
 // wasted-spend reporting, and trust-tier read.

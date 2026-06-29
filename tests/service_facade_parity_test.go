@@ -138,7 +138,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermMerchantCustomerSettingsRead,
 		},
 	}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
 
 	withServiceCredential := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -182,7 +182,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	jwtGroup := jwtRouter.Group("/v1/merchant")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(ginrouter.New(jwtGroup, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: jwtResolver})
+	httproutes.RegisterServiceRoutes(ginrouter.New(jwtGroup, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: jwtResolver})})
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}

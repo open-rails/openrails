@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -91,7 +92,8 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	embeddedDefault := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{}))
 	t.Cleanup(embeddedDefault.Close)
 	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/merchant/admissions"))
-	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/catalog/products"))
+	require.NotEqual(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/catalog/products"))
+	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/payment-providers/mobius"))
 
 	embeddedMerchantAPI := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
 		RouteSets: []server.RouteSet{server.RouteSetMerchantAPI},
@@ -99,11 +101,11 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	t.Cleanup(embeddedMerchantAPI.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/merchant/admissions"))
 
-	embeddedMerchantSettings := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
-		RouteSets: []server.RouteSet{server.RouteSetMerchantSettings},
+	embeddedPaymentProviders := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
+		RouteSets: []server.RouteSet{server.RouteSetPaymentProviders},
 	}))
-	t.Cleanup(embeddedMerchantSettings.Close)
-	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantSettings.Client(), http.MethodGet, embeddedMerchantSettings.URL+"/billing/v1/merchant/catalog/products"))
+	t.Cleanup(embeddedPaymentProviders.Close)
+	require.NotEqual(t, http.StatusNotFound, status(t, embeddedPaymentProviders.Client(), http.MethodGet, embeddedPaymentProviders.URL+"/billing/v1/merchant/payment-providers/mobius"))
 
 	standalone := httptest.NewServer(srv.Handler())
 	t.Cleanup(standalone.Close)
@@ -126,11 +128,9 @@ func TestHTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions(t *test
 	for _, tc := range settingsCases {
 		t.Run(tc.name, func(t *testing.T) {
 			asm := embedhttp.FromApp(suite.App)
-			asm.DelegatedAuthenticator = testHostPrincipalAuthenticator{perms: tc.perms}
-			// Merchant settings routes require mutable-credentials mode.
+			asm.Gate = httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: testHostPrincipalAuthenticator{perms: tc.perms}})
 			h := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
-				RouteSets:      []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings},
-				CredentialMode: embedhttp.CredentialModeMutable,
+				RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetCatalog},
 			}))
 			t.Cleanup(h.Close)
 
@@ -151,7 +151,7 @@ func TestHTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			asm := embedhttp.FromApp(suite.App)
 			asm.ServiceCredentialResolver = nil
-			asm.DelegatedAuthenticator = testHostPrincipalAuthenticator{perms: tc.perms}
+			asm.Gate = httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: testHostPrincipalAuthenticator{perms: tc.perms}})
 			h := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
 				RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI},
 			}))

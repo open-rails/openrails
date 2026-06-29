@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	internalauth "github.com/open-rails/openrails/internal/auth"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -29,8 +28,13 @@ import (
 // RouteOptions configures route registration behavior.
 type RouteOptions struct {
 	// AuthProvider is required for routes that need authentication.
-	// If not provided, uses the auth provider from Embedded initialization.
 	AuthProvider ginauth.Provider
+	// Gate protects merchant route groups. When nil, a gate is built from
+	// AuthProvider plus the attached control plane when available.
+	Gate billingauth.Gate
+	// DelegatedAuthenticator protects delegated merchant/self-service requests
+	// when registering route groups directly.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 }
 
 // StandaloneHandler returns the full standalone gin HTTP surface for the embedded app:
@@ -67,9 +71,9 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 	if a == nil {
 		panic("embedded billing: not initialized")
 	}
-	authn := routeAuthenticator(e, opts)
+	authn := routeAuthenticator(opts)
 	if authn == nil {
-		panic("embedded billing: user routes require RouteOptions.AuthProvider or embedded Options.Authenticator")
+		panic("embedded billing: user routes require RouteOptions.AuthProvider")
 	}
 	httproutes.RegisterUserRoutes(ginrouter.New(group, a.Runtime), a.Runtime, httproutes.Options{
 		Authenticator: authn,
@@ -84,16 +88,24 @@ func RegisterMerchantActionRoutes(e *embedded.Embedded, group *gin.RouterGroup, 
 	if a == nil {
 		panic("embedded billing: not initialized")
 	}
-	authn := routeAuthenticator(e, opts)
-	if authn == nil {
-		panic("embedded billing: merchant action routes require RouteOptions.AuthProvider or embedded Options.Authenticator")
+	authn := routeAuthenticator(opts)
+	if authn == nil && opts.Gate == nil && opts.DelegatedAuthenticator == nil {
+		panic("embedded billing: merchant action routes require RouteOptions.AuthProvider, RouteOptions.Gate, or RouteOptions.DelegatedAuthenticator")
 	}
 	actionOpts := httproutes.Options{
-		Authenticator: authn,
+		Gate: opts.Gate,
+	}
+	if actionOpts.Gate == nil {
+		actionOpts.Gate = httproutes.NewGate(httproutes.GateOptions{Authenticator: authn})
 	}
 	if cp := embcp.Get(a); cp != nil {
-		actionOpts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(cp)
-		actionOpts.ServiceCredentialResolver = cp
+		actionOpts.Gate = httproutes.NewGate(httproutes.GateOptions{
+			Authenticator:             authn,
+			AdminPermissionChecker:    cp,
+			ServiceCredentialResolver: cp,
+			DelegatedResolver:         cp,
+			DelegatedAuthenticator:    opts.DelegatedAuthenticator,
+		})
 	}
 	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, a.Runtime), a.Runtime, actionOpts)
 }
@@ -126,16 +138,12 @@ func RegisterHostWebhookRoutes(e *embedded.Embedded, group *gin.RouterGroup) {
 }
 
 // routeAuthenticator resolves the framework-neutral Authenticator for a gin
-// route registration: the per-call RouteOptions.AuthProvider (a gin Provider)
-// wins when it exposes one, else the app's configured authenticator (#282/#285).
-func routeAuthenticator(e *embedded.Embedded, opts RouteOptions) billingauth.Authenticator {
+// route registration from the per-call RouteOptions.AuthProvider.
+func routeAuthenticator(opts RouteOptions) billingauth.Authenticator {
 	if opts.AuthProvider != nil {
 		if a, ok := ginauth.AsAuthenticator(opts.AuthProvider); ok {
 			return a
 		}
-	}
-	if a := e.App(); a != nil {
-		return a.Authenticator
 	}
 	return nil
 }
@@ -156,21 +164,23 @@ func newServer(e *embedded.Embedded) (*server.Server, error) {
 			return nil, fmt.Errorf("attach control plane: %w", err)
 		}
 	}
-	if a.Authenticator == nil {
+	authenticator := func() billingauth.Authenticator {
 		cp := embcp.Get(a)
 		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
-			return nil, fmt.Errorf("control plane verifier unavailable")
+			return nil
 		}
-		a.Authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
+		return internalauth.NewAuthenticator(cp.AuthService().Verifier())
+	}()
+	if authenticator == nil {
+		return nil, fmt.Errorf("control plane verifier unavailable")
 	}
 	return server.New(server.Dependencies{
-		Config:                 a.Config,
-		Cache:                  a.Cache,
-		Runtime:                a.Runtime,
-		Redis:                  a.RedisClient,
-		Authenticator:          a.Authenticator,
-		DelegatedAuthenticator: a.DelegatedAuthenticator,
-		ConfiguredMerchant:     a.Runtime.ConfiguredMerchant,
-		ControlPlane:           embcp.Get(a),
+		Config:             a.Config,
+		Cache:              a.Cache,
+		Runtime:            a.Runtime,
+		Redis:              a.RedisClient,
+		Authenticator:      authenticator,
+		ConfiguredMerchant: a.Runtime.ConfiguredMerchant,
+		ControlPlane:       embcp.Get(a),
 	})
 }

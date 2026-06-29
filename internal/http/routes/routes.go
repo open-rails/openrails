@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -23,33 +22,24 @@ type Options struct {
 	// neutral Required/Optional middleware for these routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
 
-	// AdminPermissionChecker is the LIVE authority for admin routes (#312/#537):
-	// admin routes require merchant-local authority evaluated live against the
-	// caller's merchant permission-group. nil for embedded hosts without a control
-	// plane, in which case admin routes fail closed.
-	AdminPermissionChecker authpolicy.AdminPermissionChecker
-
-	// ServiceCredentialResolver validates merchant-scoped programmatic
-	// credentials: generated API keys, remote-application self tokens, and service
-	// JWTs. The control plane satisfies this in standalone mode.
-	ServiceCredentialResolver ServiceCredentialResolver
-
-	// DelegatedResolver validates browser-direct delegated access tokens — a
-	// merchant's federated merchant-signed JWT for one of its admin users
-	// (#259). The control plane satisfies it in standalone mode; nil disables the
-	// delegated path on merchant routes (#555/#564). Permissions are bounded by
-	// AuthKit to the signing remote application's stored authority.
-	DelegatedResolver DelegatedResolver
-
-	// DelegatedAuthenticator is the IN-PROCESS host identity seam (#565): when
-	// OpenRails runs as a subsystem of a host application (embedded, no control
-	// plane), the host verifies its OWN credential and returns the explicitly
-	// mapped principal. In-process => the host is TRUSTED and its supplied
-	// permissions are authoritative — the same trust the gin self surface already
-	// grants via DelegatedPrincipalRequired. nil disables this path (standalone
-	// hosts use the control-plane resolvers above instead).
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	// Gate protects merchant routes. AuthKit/control-plane and embedded host auth
+	// are adapters behind this one interface.
+	Gate billingauth.Gate
 }
+
+type GateOptions struct {
+	Authenticator             billingauth.Authenticator
+	AdminPermissionChecker    authpolicy.AdminPermissionChecker
+	ServiceCredentialResolver ServiceCredentialResolver
+	DelegatedResolver         DelegatedResolver
+	DelegatedAuthenticator    billingauth.DelegatedAuthenticator
+}
+
+func NewGate(opts GateOptions) billingauth.Gate {
+	return legacyGate(opts)
+}
+
+type legacyGate GateOptions
 
 type ServiceCredentialResolver interface {
 	LooksLikeAPIKey(token string) bool
@@ -232,158 +222,155 @@ func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Option
 	registerMerchantSupportRoutes(rr, opts, dbMW...)
 }
 
-func RegisterMerchantSettingsRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	registerCatalogActionRoutes(rr.Group("/catalog"), opts, dbMW...)
-	registerPaymentProviderActionRoutes(rr.Group("/payment-providers"), opts, dbMW...)
+	registerCatalogActionRoutes(rr, opts, dbMW...)
+}
+
+func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	var dbMW []router.Middleware
+	if rt != nil && rt.DB != nil {
+		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
+	}
+	registerPaymentProviderActionRoutes(rr, opts, dbMW...)
 }
 
 func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			if resolved, handled := opts.resolveServiceCredential(r, opts.Authenticator != nil); handled {
-				if resolved == nil {
-					return
-				}
-				if !resolved.HasPermission(perm) {
-					r.AbortJSON(http.StatusForbidden, "permission_required")
-					return
-				}
-				if r.Request != nil {
-					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
-				}
-				r.Set("openrails.service_credential", resolved)
-				r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
-				next(r)
-				return
-			}
-
-			// Browser-direct delegated access token (#564): a merchant admin's
-			// remote-app-signed JWT. AuthKit has already bounded permissions to
-			// the signer's stored authority, so gate purely on the permission; the
-			// merchant is pinned from the verified token, never the URL.
-			if opts.DelegatedResolver != nil && r.Request != nil {
-				if token := bearerToken(r.Request.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
-					resolved, err := opts.DelegatedResolver.ResolveDelegated(r.Request.Context(), token, r.Request.Header.Get("Origin"))
-					if err != nil {
-						if opts.Authenticator == nil || !errors.Is(err, controlplane.ErrDelegatedInvalid) {
-							r.AbortJSON(http.StatusUnauthorized, "delegated_token_invalid")
-							return
-						}
-					} else {
-						if !resolved.HasPermission(perm) {
-							r.AbortJSON(http.StatusForbidden, "permission_required")
-							return
-						}
-						r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
-						r.Set("openrails.merchant_id", resolved.MerchantID)
-						r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
-						r.SetUserContext(billingauth.UserContext{
-							UserID:        resolved.DelegatedSubject,
-							Email:         resolved.Email,
-							EmailVerified: resolved.EmailVerified,
-							Username:      resolved.Username,
-							Merchant:      resolved.Merchant,
-						})
-						next(r)
-						return
-					}
-				}
-			}
-
-			// In-process host-delegated principal (#565): an embedded host's
-			// DelegatedAuthenticator verifies its OWN credential and returns the
-			// explicitly mapped principal. In-process => the host is trusted and its
-			// permissions are authoritative (same trust as the gin self surface's
-			// DelegatedPrincipalRequired); gate purely on permission, no control plane.
-			if opts.DelegatedAuthenticator != nil && r.Request != nil {
-				principal, err := opts.DelegatedAuthenticator.AuthenticateDelegated(r.Request.Context(), r.Request)
-				if err != nil {
-					r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
-					return
-				}
-				resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
-				if verr != nil {
-					r.AbortJSON(http.StatusUnauthorized, "delegated_principal_invalid")
-					return
-				}
-				if !resolved.HasPermission(perm) {
-					r.AbortJSON(http.StatusForbidden, "permission_required")
-					return
-				}
-				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
-				r.Set("openrails.merchant_id", resolved.MerchantID)
-				r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
-				r.SetUserContext(billingauth.UserContext{
-					UserID:        resolved.DelegatedSubject,
-					Email:         resolved.Email,
-					EmailVerified: resolved.EmailVerified,
-					Username:      resolved.Username,
-					Merchant:      resolved.Merchant,
-				})
-				next(r)
-				return
-			}
-
-			if opts.Authenticator == nil {
-				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
-				return
-			}
-			uc, ok := opts.authenticateUser(r)
-			if !ok {
-				return
-			}
-			if opts.AdminPermissionChecker == nil {
+			if opts.Gate == nil {
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
 			}
-			// #567: a user access token carries no merchant claim (uc.Merchant is empty);
-			// resolve the merchant the session is acting on from the user's
-			// merchant-group membership, then gate + pin context against THAT merchant.
-			if strings.TrimSpace(uc.Merchant) == "" {
-				resolver, ok := opts.AdminPermissionChecker.(merchantUserResolver)
-				if !ok {
-					r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
-					return
-				}
-				ref, rerr := resolver.MerchantForUser(r.Request.Context(), uc.UserID)
-				if rerr != nil || strings.TrimSpace(ref) == "" {
-					r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
-					return
-				}
-				uc.Merchant = ref
-			}
-			allowed, err := opts.AdminPermissionChecker.HasAdminPermission(r.Request.Context(), uc.Merchant, uc.UserID, perm)
+			principal, err := opts.Gate.Authorize(r.Request.Context(), r.Request, perm)
 			if err != nil {
-				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")
-				return
-			}
-			if !allowed {
-				r.AbortJSON(http.StatusForbidden, "permission_required")
-				return
-			}
-			if r.Request != nil {
-				if _, ok := merchant.FromContext(r.Request.Context()); !ok {
-					resolver, ok := opts.AdminPermissionChecker.(merchantGroupResolver)
-					if !ok {
-						r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
-						return
-					}
-					mid, _, err := resolver.ResolveMerchantForGroup(r.Request.Context(), uc.Merchant)
-					if err != nil {
-						r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
-						return
-					}
-					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), mid))
+				var ge billingauth.GateError
+				if errors.As(err, &ge) {
+					r.AbortJSON(ge.Status, ge.Message)
+				} else {
+					r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				}
+				return
+			}
+			if r.Request != nil && !principal.MerchantID.IsZero() {
+				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), principal.MerchantID))
+			}
+			if !principal.MerchantID.IsZero() {
+				r.Set("openrails.merchant_id", principal.MerchantID)
+			}
+			if principal.UserContext.UserID != "" {
+				r.SetUserContext(principal.UserContext)
 			}
 			r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
 			next(r)
 		}
 	}
+}
+
+func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
+	if resolved, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
+		if resolved == nil {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
+		}
+		if !resolved.HasPermission(perm) {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		}
+		return billingauth.Principal{MerchantID: resolved.MerchantID}, nil
+	}
+	if g.DelegatedResolver != nil && req != nil {
+		if token := bearerToken(req.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
+			resolved, err := g.DelegatedResolver.ResolveDelegated(ctx, token, req.Header.Get("Origin"))
+			if err != nil {
+				if g.Authenticator == nil || !errors.Is(err, controlplane.ErrDelegatedInvalid) {
+					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_token_invalid"}
+				}
+			} else {
+				if !resolved.HasPermission(perm) {
+					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+				}
+				return billingauth.Principal{
+					MerchantID: resolved.MerchantID,
+					UserContext: billingauth.UserContext{
+						UserID:        resolved.DelegatedSubject,
+						Email:         resolved.Email,
+						EmailVerified: resolved.EmailVerified,
+						Username:      resolved.Username,
+						Merchant:      resolved.Merchant,
+					},
+				}, nil
+			}
+		}
+	}
+	if g.DelegatedAuthenticator != nil && req != nil {
+		principal, err := g.DelegatedAuthenticator.AuthenticateDelegated(ctx, req)
+		if err != nil {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
+		}
+		resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
+		if verr != nil {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
+		}
+		if !resolved.HasPermission(perm) {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		}
+		return billingauth.Principal{
+			MerchantID: resolved.MerchantID,
+			UserContext: billingauth.UserContext{
+				UserID:        resolved.DelegatedSubject,
+				Email:         resolved.Email,
+				EmailVerified: resolved.EmailVerified,
+				Username:      resolved.Username,
+				Merchant:      resolved.Merchant,
+			},
+		}, nil
+	}
+	if g.Authenticator == nil {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "bearer principal required"}
+	}
+	uc, err := g.Authenticator.Authenticate(ctx, req)
+	if err != nil {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
+	}
+	if verr := uc.ValidateSubject(); verr != nil {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: verr.Error()}
+	}
+	if g.AdminPermissionChecker == nil {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "authorization unavailable"}
+	}
+	if strings.TrimSpace(uc.Merchant) == "" {
+		resolver, ok := g.AdminPermissionChecker.(merchantUserResolver)
+		if !ok {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+		}
+		ref, rerr := resolver.MerchantForUser(ctx, uc.UserID)
+		if rerr != nil || strings.TrimSpace(ref) == "" {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+		}
+		uc.Merchant = ref
+	}
+	allowed, err := g.AdminPermissionChecker.HasAdminPermission(ctx, uc.Merchant, uc.UserID, perm)
+	if err != nil {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
+	}
+	if !allowed {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+	}
+	mid, ok := merchant.FromContext(ctx)
+	if !ok {
+		resolver, ok := g.AdminPermissionChecker.(merchantGroupResolver)
+		if !ok {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+		}
+		var err error
+		mid, _, err = resolver.ResolveMerchantForGroup(ctx, uc.Merchant)
+		if err != nil {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+		}
+	}
+	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
 }
 
 func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserContext, bool) {
@@ -405,19 +392,18 @@ func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserCo
 	return uc, true
 }
 
-func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, bool) {
-	resolver := opts.ServiceCredentialResolver
-	if resolver == nil || r == nil || r.Request == nil {
+func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, bool) {
+	resolver := g.ServiceCredentialResolver
+	if resolver == nil || r == nil {
 		return nil, false
 	}
-	token := bearerToken(r.Request.Header.Get("Authorization"))
+	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		return nil, false
 	}
 	if resolver.LooksLikeAPIKey(token) {
-		resolved, err := resolver.ResolveAPIKey(r.Request.Context(), token)
+		resolved, err := resolver.ResolveAPIKey(ctx, token)
 		if err != nil {
-			writeServiceCredentialError(r, err)
 			return nil, true
 		}
 		return resolved, true
@@ -426,7 +412,7 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFal
 		return nil, false
 	}
 	if raResolver, ok := resolver.(remoteApplicationResolver); ok {
-		resolved, err := raResolver.ResolveRemoteApplication(r.Request.Context(), token)
+		resolved, err := raResolver.ResolveRemoteApplication(ctx, token)
 		if err == nil {
 			return resolved, true
 		}
@@ -434,12 +420,11 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFal
 			return nil, false
 		}
 		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
-			writeServiceCredentialError(r, err)
 			return nil, true
 		}
 	}
 	if jwtResolver, ok := resolver.(serviceJWTResolver); ok {
-		resolved, err := jwtResolver.ResolveServiceJWT(r.Request.Context(), token)
+		resolved, err := jwtResolver.ResolveServiceJWT(ctx, token)
 		if err == nil {
 			return resolved, true
 		}
@@ -450,7 +435,6 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request, allowJWTFal
 		// falls through so delegated/user tokens reach their own resolvers.
 		if errors.Is(err, controlplane.ErrServiceCredentialScopeDenied) ||
 			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
-			writeServiceCredentialError(r, err)
 			return nil, true
 		}
 	}
@@ -464,21 +448,6 @@ func bearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(header[len(prefix):])
-}
-
-func writeServiceCredentialError(r *httprequest.Request, err error) {
-	switch {
-	case errors.Is(err, authkit.ErrAccessTokenExpired):
-		r.AbortJSON(http.StatusUnauthorized, "service_credential_expired")
-	case errors.Is(err, authkit.ErrAccessTokenRevoked):
-		r.AbortJSON(http.StatusUnauthorized, "service_credential_revoked")
-	case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
-		r.AbortJSON(http.StatusForbidden, "service_credential_merchant_unresolved")
-	case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
-		r.AbortJSON(http.StatusForbidden, "service_credential_resource_scope_denied")
-	default:
-		r.AbortJSON(http.StatusUnauthorized, "service_credential_invalid")
-	}
 }
 
 func registerCatalogActionRoutes(catalog router.Router, opts Options, dbMW ...router.Middleware) {

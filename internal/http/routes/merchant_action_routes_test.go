@@ -40,11 +40,14 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 	mux := http.NewServeMux()
 	checker := &merchantActionChecker{}
 	opts := Options{
-		Authenticator:          merchantActionAuth{},
-		AdminPermissionChecker: checker,
+		Gate: NewGate(GateOptions{
+			Authenticator:          merchantActionAuth{},
+			AdminPermissionChecker: checker,
+		}),
 	}
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
-	RegisterMerchantSettingsRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), nil, opts)
+	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, opts)
 
 	tests := []struct {
 		name   string
@@ -172,10 +175,10 @@ func TestMerchantActionRoutesDelegatedTokenGated(t *testing.T) {
 		Permissions:      []string{controlplane.PermMerchantCustomerSettingsRead},
 	}}
 	opts := Options{
-		DelegatedResolver: del,
+		Gate: NewGate(GateOptions{DelegatedResolver: del}),
 	}
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
-	RegisterMerchantSettingsRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), nil, opts)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/catalog/publish", nil)
 	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc") // JWT-shaped delegated token
@@ -194,7 +197,7 @@ func TestMerchantActionRoutesRejectCustomerTreasuryPermission(t *testing.T) {
 		Permissions:      []string{controlplane.PermCustomerSpendDelegationsRead},
 	}}
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
-		DelegatedResolver: del,
+		Gate: NewGate(GateOptions{DelegatedResolver: del}),
 	})
 
 	rec := httptest.NewRecorder()
@@ -224,7 +227,7 @@ func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 				Permissions:      tc.perms,
 			}}
 			RegisterServiceRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
-				DelegatedResolver: del,
+				Gate: NewGate(GateOptions{DelegatedResolver: del}),
 			})
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admissions", nil)

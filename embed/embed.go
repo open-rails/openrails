@@ -15,48 +15,15 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
-	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/service"
 )
 
 // Options configures the embedded runtime. It wraps pkg/embedded.Options
-// (Config, PGXPool, Redis, Authenticator, DelegatedAuthenticator, Cache) and
-// adds lifecycle switches.
-//
-// DelegatedAuthenticator (issue #339) is the host-pluggable identity seam for
-// the browser-direct self-service surface: a host that verifies its own
-// credentials supplies a billingauth.DelegatedAuthenticator returning the
-// explicitly mapped {merchant, subject, permissions} principal, and the
-// standalone gin handler (pkg/embedded/gin.StandaloneHandler over Runtime.Embedded())
-// mounts /v1/me/* + /v1/customers/* authenticated by it — no control
-// plane required. For example:
-//
-//	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
-//		func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-//			user, err := hostAuth.Verify(r) // the host's own credential check
-//			if err != nil {
-//				return nil, billingauth.ErrUnauthenticated
-//			}
-//			return &billingauth.DelegatedPrincipal{
-//				MerchantID:  hostCfg.OpenRailsMerchantID, // explicit per-deployment merchant mapping
-//				SubjectID:   user.CanonicalID,
-//				// Permissions are optional for /v1/me/*; use customer:* only for /v1/customers/*.
-//			}, nil
-//		})
+// (Config, PGXPool, Redis, Cache) and adds lifecycle switches.
 type Options struct {
 	embedded.Options
-
-	// RunMigrations applies the OpenRails Postgres migrations (and the
-	// ClickHouse migrations when Options.Config.ClickHouse is set) before the
-	// app graph is built. It requires Options.Config.DB.URL — the migration
-	// runner opens its own connection; a host that supplies only a PGXPool must
-	// either also set DB.URL or run migrations itself (internal/migrate is what
-	// cmd/openrails's `migrate` entrypoint calls).
-	RunMigrations bool
 
 	// RunWorkers starts the River background workers on a goroutine owned by
 	// the Runtime (stopped by Close). The worker context is detached from the
@@ -64,17 +31,6 @@ type Options struct {
 	// context does not kill long-running workers; cancellation is Close's job.
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
-
-	// Merchant binds this embedded engine to a single merchant at construction:
-	// doujins/hentai0 set it to their merchant slug. It is resolved to an
-	// internal merchant id during New and stored as construction state, not
-	// loaded from config.yaml/.env. To serve another merchant, construct another
-	// engine/client.
-	Merchant string
-
-	// MerchantSettings seeds merchant-owned settings for the bound Merchant at
-	// startup, mirroring /v1/merchant/settings for embedded hosts.
-	MerchantSettings openrails.MerchantSettings
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -91,8 +47,10 @@ const (
 	RouteSetCustomer = embedded.RouteSetCustomer
 	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
 	RouteSetMerchantAdmin = embedded.RouteSetMerchantAdmin
-	// RouteSetMerchantSettings mounts provider secrets, catalog pushes, and merchant config routes.
-	RouteSetMerchantSettings = embedded.RouteSetMerchantSettings
+	// RouteSetCatalog mounts merchant catalog routes.
+	RouteSetCatalog = embedded.RouteSetCatalog
+	// RouteSetPaymentProviders mounts provider config and secret routes.
+	RouteSetPaymentProviders = embedded.RouteSetPaymentProviders
 	// RouteSetMerchantAPI mounts the host-internal service/API-key surface
 	// (/billing/v1/merchant/*). Opt in for embedded hosts that want the same
 	// service-credential surface as standalone; most embedded hosts use Client() instead.
@@ -103,11 +61,11 @@ const (
 
 var (
 	// EmbeddedDefaultRouteSets is the default embedded HTTP surface: checkout,
-	// customer, merchant_admin, and webhooks. It excludes RouteSetMerchantSettings
-	// and RouteSetMerchantAPI (both opt-in for embedded hosts).
+	// customer, merchant_admin, catalog, and webhooks. It excludes
+	// RouteSetPaymentProviders and RouteSetMerchantAPI (both opt-in for embedded hosts).
 	EmbeddedDefaultRouteSets = append([]RouteSet(nil), embedded.EmbeddedDefaultRouteSets...)
 	// StandaloneDefaultRouteSets is the full standalone HTTP surface, including
-	// merchant_settings and merchant_api in addition to EmbeddedDefaultRouteSets.
+	// payment_providers and merchant_api in addition to EmbeddedDefaultRouteSets.
 	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
 )
 
@@ -123,65 +81,19 @@ type Runtime struct {
 	emb *embedded.Embedded
 	svc *service.Service
 
-	// tenantID is the engine's construction-time bound tenant, resolved once from
-	// Options.Merchant. The unified Client adapter injects it onto each call's
-	// context so an embedded host can call the API-key-equivalent surface
-	// with a plain context. Zero when no tenant is bound.
-	tenantID merchant.ID
-
 	workersCancel context.CancelFunc
 	workersDone   chan error
 }
 
-// New builds the embedded runtime: optional migrations, then the gin-free app
-// graph (pkg/embedded.New), then the service facade the Client adapts.
+// New builds the embedded runtime: the gin-free app graph (pkg/embedded.New),
+// then the service facade the Client adapts.
 func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
-	if opts.RunMigrations {
-		if opts.Config.DB == nil || opts.Config.DB.URL == "" {
-			return nil, fmt.Errorf("openrails embed: RunMigrations requires config.DB.URL (or run migrations yourself via cmd/openrails migrate)")
-		}
-		// Embedded skips the AuthKit (`profiles`) migrations (#544): the host owns
-		// auth, so OpenRails creates only its own portable schema + River (`public`).
-		if err := migrate.RunPostgresEmbedded(ctx, opts.Config); err != nil {
-			return nil, fmt.Errorf("openrails embed: run postgres migrations: %w", err)
-		}
-		if opts.Config.ClickHouse != nil {
-			if err := migrate.RunClickHouse(ctx, opts.Config); err != nil {
-				return nil, fmt.Errorf("openrails embed: run clickhouse migrations: %w", err)
-			}
-		}
-	}
-
 	emb, err := embedded.New(opts.Options)
 	if err != nil {
 		return nil, err
-	}
-	// Idempotently provision the bound merchant (a billing bucket) from the
-	// explicit embedded construction option through the same #527 merchant
-	// provisioning boundary used by standalone manifests. Embedded OpenRails runs
-	// NO AuthKit here and creates no AuthKit objects; the merchant's permission
-	// group is the host's group of the SAME slug (#541 — merchant slug == group
-	// slug), so OpenRails neither creates nor records it (permission_group_id stays
-	// NULL in embedded, set only in standalone where OpenRails owns the group).
-	var boundMerchant merchant.ID
-	if opts.Merchant != "" {
-		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
-			tn, rerr := boot.ProvisionMerchant(ctx, boot.ProvisionMerchantRequest{
-				Config:   opts.Config,
-				Database: a.Runtime.DB,
-				Merchant: embeddedManifestMerchant(opts.Merchant, opts.MerchantSettings),
-				Options:  boot.MerchantManifestReconcileOptions{Insert: true},
-			})
-			if rerr != nil {
-				_ = emb.Close(ctx)
-				return nil, fmt.Errorf("openrails embed: %w", rerr)
-			}
-			boundMerchant = tn.ID
-			a.Runtime.ConfiguredMerchant = boundMerchant
-		}
 	}
 	svc, err := emb.Service()
 	if err != nil {
@@ -189,17 +101,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 
-	r := &Runtime{emb: emb, svc: svc, tenantID: boundMerchant}
-	if hasMerchantSettings(opts.MerchantSettings) {
-		if boundMerchant.IsZero() {
-			_ = emb.Close(ctx)
-			return nil, fmt.Errorf("openrails embed: MerchantSettings requires Merchant")
-		}
-		if err := r.Client().SetMerchantSettings(ctx, startupMerchantSettings(opts.Merchant, opts.MerchantSettings)); err != nil {
-			_ = emb.Close(ctx)
-			return nil, fmt.Errorf("openrails embed: seed merchant settings: %w", err)
-		}
-	}
+	r := &Runtime{emb: emb, svc: svc}
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel
@@ -209,51 +111,13 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	return r, nil
 }
 
-func hasMerchantSettings(in openrails.MerchantSettings) bool {
-	return in.Profile != nil ||
-		len(in.TierSchedules) > 0 ||
-		len(in.TierSpendLimits) > 0 ||
-		len(in.DelegatedInvokerWastedSpendLimits) > 0
-}
-
-func startupMerchantSettings(merchantSlug string, in openrails.MerchantSettings) openrails.MerchantSettings {
-	if in.Profile != nil && in.Profile.DisplayName == "" {
-		profile := *in.Profile
-		profile.DisplayName = merchantSlug
-		in.Profile = &profile
-	}
-	return in
-}
-
-func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantSettings) boot.ManifestMerchant {
-	displayName := merchantSlug
-	profile := boot.ManifestMerchantProfile{}
-	if cfg.Profile != nil {
-		displayName = cfg.Profile.DisplayName
-		profile = boot.ManifestMerchantProfile{
-			DisplayName: cfg.Profile.DisplayName,
-			LogoURL:     cfg.Profile.LogoURL,
-			FromEmail:   cfg.Profile.FromEmail,
-			SupportURL:  cfg.Profile.SupportURL,
-		}
-	}
-	if displayName == "" {
-		displayName = merchantSlug
-	}
-	return boot.ManifestMerchant{
-		Slug:        merchantSlug,
-		DisplayName: displayName,
-		Profile:     profile,
-	}
-}
-
 // Client returns the openrails.Client adapter over the in-process engine. Each
 // method transcribes the wire→service mapping of the corresponding standalone
 // handler (internal/http/handlers/service_*.go), including the error→status
 // mapping, so it is observably identical to NewRemote against the same engine
 // (enforced by conformance_integration_test.go).
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
-	c := &localClient{svc: r.svc, tenantID: r.tenantID}
+	c := &localClient{svc: r.svc}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
@@ -277,7 +141,6 @@ func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 // embedded host normally uses Client() instead.
 func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
 	asm := embedhttp.FromApp(r.emb.App())
-	asm.ConfiguredMerchant = r.tenantID
 	return asm.NewHTTPHandler(embedhttp.Options{
 		RouteSets: opts.RouteSets,
 	})

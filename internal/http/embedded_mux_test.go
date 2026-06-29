@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -120,16 +121,20 @@ func TestEmbeddedMuxPrivilegedRoutesRequireAuthenticatorAtConstruction(t *testin
 	}
 
 	require.PanicsWithError(t,
-		"embedded billing: user/admin route groups require Options.Authenticator",
+		"embedded billing: merchant route groups require Options.Gate",
 		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantAdmin}}) },
 	)
 	require.PanicsWithError(t,
-		"embedded billing: user/admin route groups require Options.Authenticator",
+		"embedded billing: user route groups require Options.Authenticator",
 		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetCustomer}}) },
 	)
 	require.PanicsWithError(t,
-		"embedded billing: user/admin route groups require Options.Authenticator",
-		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantSettings}}) },
+		"embedded billing: merchant route groups require Options.Gate",
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetCatalog}}) },
+	)
+	require.PanicsWithError(t,
+		"embedded billing: merchant route groups require Options.Gate",
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetPaymentProviders}}) },
 	)
 	require.NotPanics(t, func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetWebhooks}}) })
 }
@@ -148,44 +153,42 @@ func TestEmbeddedDefaultExcludesMerchantAPI(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/payment-providers/mobius", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestEmbeddedMerchantSettingsOptInMountsSettingsRoutes(t *testing.T) {
+func TestEmbeddedCatalogDefaultMountsCatalogRoutes(t *testing.T) {
 	s := &Server{
 		cfg:           &config.Config{Captcha: &config.CaptchaConfig{}},
 		runtime:       &app.Runtime{},
 		authenticator: stubAuthenticator{},
 	}
 
-	h := s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantSettings}})
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{})
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestMerchantSettingsRoutesRequireMutableCredentials(t *testing.T) {
+func TestEmbeddedPaymentProvidersOptInMountsProviderRoutes(t *testing.T) {
 	asm := &embedhttp.Assembler{
-		Cfg:            &config.Config{Captcha: &config.CaptchaConfig{}},
-		Runtime:        &app.Runtime{},
-		Authenticator:  stubAuthenticator{},
-		CredentialMode: embedhttp.CredentialModeFixed,
+		Cfg:     &config.Config{Captcha: &config.CaptchaConfig{}},
+		Runtime: &app.Runtime{},
+		Gate:    httproutes.NewGate(httproutes.GateOptions{Authenticator: stubAuthenticator{}}),
 	}
-	require.PanicsWithError(t,
-		"embedded billing: merchant settings routes require mutable_credentials",
-		func() {
-			_ = asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings}})
-		},
-	)
+	h := asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetPaymentProviders}})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/payment-providers/mobius", nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
 	asm := &embedhttp.Assembler{
-		Cfg:                       &config.Config{Captcha: &config.CaptchaConfig{}},
-		Runtime:                   &app.Runtime{},
-		ServiceCredentialResolver: stubServiceCredentialResolver{},
+		Cfg:     &config.Config{Captcha: &config.CaptchaConfig{}},
+		Runtime: &app.Runtime{},
+		Gate:    httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: stubServiceCredentialResolver{}}),
 	}
 	h := asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI}})
 
@@ -196,7 +199,8 @@ func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
 
 func TestEmbeddedRouteSetPresets(t *testing.T) {
 	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetMerchantAPI)
-	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetMerchantSettings)
+	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetPaymentProviders)
+	require.Contains(t, EmbeddedDefaultRouteSets, RouteSetCatalog)
 	require.Contains(t, StandaloneDefaultRouteSets, RouteSetMerchantAPI)
-	require.Contains(t, StandaloneDefaultRouteSets, RouteSetMerchantSettings)
+	require.Contains(t, StandaloneDefaultRouteSets, RouteSetPaymentProviders)
 }

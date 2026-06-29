@@ -281,14 +281,14 @@ var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
 import (
     "github.com/open-rails/openrails/config"
     "github.com/open-rails/openrails/pkg/embedded"
+    embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 cfg, _ := config.Load()
 openrails, err := embedded.New(embedded.Options{
-    Config:        cfg,
-    PGXPool:       myPool,  // share your pgx pool, or omit to let OpenRails connect from cfg
-    Redis:         myRedis,
-    Authenticator: myAuth,  // nil => default AuthKit-backed verifier built from cfg
+    Config:  cfg,
+    PGXPool: myPool,  // share your pgx pool, or omit to let OpenRails connect from cfg
+    Redis:   myRedis,
 })
 if err != nil {
     log.Fatal(err)
@@ -300,25 +300,33 @@ go openrails.RunWorkers(ctx)
 
 // Mount the billing surface. Routes live under /billing/v1/*.
 // Zero value uses embedded.EmbeddedDefaultRouteSets:
-// checkout, customer, merchant admin, and webhooks.
-handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
+// checkout, customer, merchant admin, catalog, and webhooks.
+handler, err := embgin.MountHandler(openrails, embgin.MountOptions{
+    MountPrefix: "/billing",
+    Authenticator: myAuth,
+    Gate: myGate,
+    DelegatedAuthenticator: myDelegatedAuth,
     RouteSets: []embedded.RouteSet{
         embedded.RouteSetCheckout,
         embedded.RouteSetCustomer,
         embedded.RouteSetMerchantAdmin,
+        embedded.RouteSetCatalog,
         embedded.RouteSetWebhooks,
     },
 })
+if err != nil {
+    log.Fatal(err)
+}
 mux := http.NewServeMux()
-mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
+mux.Handle("/billing/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
 ```
 
 The handler is framework-neutral `net/http` with zero gin on the request path. Gin hosts
 that want the combined `/me` + user/admin/webhook surface under one mount should use
 `pkg/embedded/gin` (`embgin.MountHandler(e, embgin.MountOptions{MountPrefix: "/billing"})`).
 
-Your frontend now calls these routes with its **normal session credential** — your
-`Authenticator` is the only gate. One system, one token.
+Your frontend now calls these routes with its **normal session credential**.
+`Authenticator` protects checkout/user routes; `Gate` protects merchant routes.
 
 **Rate-limiting & captcha (built in).** The embedded surface runs OpenRails' own
 per-IP/per-user rate limiting + captcha **in-process** — you do not need to front it
@@ -374,7 +382,7 @@ embedded mode too — authenticated by **your** credential, not a delegated toke
 explicitly mapped principal:
 
 ```go
-opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
+myDelegatedAuth := billingauth.DelegatedAuthenticatorFunc(
     func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
         user, err := myIdP.Verify(r.Header.Get("Authorization")) // your own session check
         if err != nil {

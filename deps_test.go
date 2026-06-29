@@ -32,6 +32,9 @@ func TestRootPackageStaysLight(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		dep := strings.TrimSpace(line)
+		if dep == "github.com/open-rails/openrails/pkg/merchant" {
+			continue
+		}
 		for _, bad := range forbidden {
 			if dep == bad || strings.HasPrefix(dep, bad+"/") {
 				t.Errorf("root openrails package links engine dependency %q — keep the root remote-only light (#338)", dep)

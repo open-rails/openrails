@@ -12,24 +12,21 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
 )
 
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet = embedhttp.RouteSet
-type CredentialMode = embedhttp.CredentialMode
 
 const (
 	RouteSetCheckout         = embedhttp.RouteSetCheckout
 	RouteSetCustomer         = embedhttp.RouteSetCustomer
 	RouteSetMerchantAdmin    = embedhttp.RouteSetMerchantAdmin
-	RouteSetMerchantSettings = embedhttp.RouteSetMerchantSettings
+	RouteSetCatalog          = embedhttp.RouteSetCatalog
+	RouteSetPaymentProviders = embedhttp.RouteSetPaymentProviders
 	RouteSetMerchantAPI      = embedhttp.RouteSetMerchantAPI
 	RouteSetWebhooks         = embedhttp.RouteSetWebhooks
-	CredentialModeFixed      = embedhttp.CredentialModeFixed
-	CredentialModeMutable    = embedhttp.CredentialModeMutable
 )
 
 var (
@@ -43,31 +40,12 @@ type Options struct {
 	// *sql.DB option was removed with the ORM (#334).
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
-	// Authenticator is the framework-neutral auth boundary (gin-free). A host
-	// brings its own auth by implementing billingauth.Authenticator. When nil, the
-	// default AuthKit-backed authenticator is built from Config. Hosts that have a
-	// gin Provider can adapt it with ginauth.AsAuthenticator (#285).
-	Authenticator billingauth.Authenticator
-	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for the
-	// browser-direct self-service and merchant surfaces (/v1/me/* +
-	// /v1/merchant/*, issue #339). A host that verifies platform credentials
-	// itself implements
-	// billingauth.DelegatedAuthenticator and returns the EXPLICITLY mapped
-	// {merchant, subject, permissions} principal; the standalone/gin handler then
-	// mounts the self surface authenticated by it, even without a control
-	// plane. When nil, the surface authenticates via the control plane's
-	// delegated-token verifier (the default). See
-	// billingauth.DelegatedAuthenticatorFunc for a closure example.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	Cache                  cache.Cache
+	Cache   cache.Cache
 	// PaymentProviders lets embedding hosts supply one or more payment-provider
 	// credential sets programmatically. Local provider names are optional
 	// selectors; durable provider-account identity is resolved from the provider
 	// itself.
 	PaymentProviders []PaymentProvider
-	// CredentialMode controls whether embedded OpenRails may expose routes that
-	// mutate provider credentials. Empty defaults to fixed credentials.
-	CredentialMode embedhttp.CredentialMode
 }
 
 type Embedded struct {
@@ -88,13 +66,10 @@ func New(opts Options) (*Embedded, error) {
 	// constructs the gin server from this App on demand (#285). Keeping the gin
 	// server out of this core type is what makes pkg/embedded gin-free.
 	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
-		PGXPool:                opts.PGXPool,
-		Redis:                  opts.Redis,
-		Authenticator:          opts.Authenticator,
-		DelegatedAuthenticator: opts.DelegatedAuthenticator,
-		Cache:                  opts.Cache,
-		Rails:                  rails,
-		CredentialMode:         app.CredentialMode(opts.CredentialMode),
+		PGXPool: opts.PGXPool,
+		Redis:   opts.Redis,
+		Cache:   opts.Cache,
+		Rails:   rails,
 	})
 	if err != nil {
 		return nil, err
@@ -119,8 +94,7 @@ func (e *Embedded) App() *app.App {
 // Note: billing health endpoints are not exposed in embedded mode.
 // If a host wants billing readiness, call IsBillingReady and include it in the host's /readyz.
 type HTTPHandlerOptions struct {
-	RouteSets      []RouteSet
-	CredentialMode embedhttp.CredentialMode
+	RouteSets []RouteSet
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
@@ -131,8 +105,7 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 		return nil
 	}
 	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
-		RouteSets:      opts.RouteSets,
-		CredentialMode: opts.CredentialMode,
+		RouteSets: opts.RouteSets,
 	})
 }
 

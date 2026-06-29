@@ -39,8 +39,7 @@ const EmbeddedV1Prefix = "/billing/v1"
 // Options controls which billing HTTP route groups are included in the returned
 // handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 type Options struct {
-	RouteSets      []RouteSet
-	CredentialMode CredentialMode
+	RouteSets []RouteSet
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -61,13 +60,13 @@ type Assembler struct {
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
 	RDB           *redis.Client
 	Authenticator billingauth.Authenticator
+	Gate          billingauth.Gate
 	// DelegatedAuthenticator is the in-process host identity seam (#565). When set
 	// (embedded hosts), the merchant routes accept the host's trusted principal and
 	// gate on its permissions — the gin-free counterpart of the self surface's
 	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	ConfiguredMerchant     merchant.ID
-	CredentialMode         CredentialMode
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -94,9 +93,12 @@ func FromApp(a *app.App) *Assembler {
 		ServiceCredentialResolver: resolver,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
-		Authenticator:             a.Authenticator,
-		DelegatedAuthenticator:    a.DelegatedAuthenticator,
-		CredentialMode:            CredentialMode(a.CredentialMode),
+	}
+	if checker != nil || resolver != nil {
+		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
+			AdminPermissionChecker:    checker,
+			ServiceCredentialResolver: resolver,
+		})
 	}
 	if a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
@@ -119,14 +121,7 @@ func FromApp(a *app.App) *Assembler {
 // standalone engine's authProvider.Optional() → RateLimit order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	routeSets := routeSetMap(opts.RouteSets)
-	credentialMode := opts.CredentialMode
-	if credentialMode == "" && s != nil {
-		credentialMode = s.CredentialMode
-	}
-	if credentialMode == "" {
-		credentialMode = CredentialModeFixed
-	}
-	if err := s.validateAuthBoundary(routeSets, credentialMode); err != nil {
+	if err := s.validateAuthBoundary(routeSets); err != nil {
 		panic(err)
 	}
 	mux := http.NewServeMux()
@@ -141,37 +136,26 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
-			Authenticator:          s.Authenticator,
-			DelegatedAuthenticator: s.DelegatedAuthenticator,
-		}
-		if s.AdminChecker != nil {
-			adminOpts.AdminPermissionChecker = s.AdminChecker
-		}
-		if s.ServiceCredentialResolver != nil {
-			adminOpts.ServiceCredentialResolver = s.ServiceCredentialResolver
+			Gate: s.Gate,
 		}
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted
 		// via embgin.SelfHandler (issuer→owner), not the base handler.
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
-	if routeSets[RouteSetMerchantSettings] {
+	if routeSets[RouteSetCatalog] {
 		adminOpts := httproutes.Options{
-			Authenticator:          s.Authenticator,
-			DelegatedAuthenticator: s.DelegatedAuthenticator,
+			Gate: s.Gate,
 		}
-		if s.AdminChecker != nil {
-			adminOpts.AdminPermissionChecker = s.AdminChecker
+		httproutes.RegisterCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalog", s.Runtime), s.Runtime, adminOpts)
+	}
+	if routeSets[RouteSetPaymentProviders] {
+		adminOpts := httproutes.Options{
+			Gate: s.Gate,
 		}
-		if s.ServiceCredentialResolver != nil {
-			adminOpts.ServiceCredentialResolver = s.ServiceCredentialResolver
-		}
-		httproutes.RegisterMerchantSettingsRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterPaymentProviderRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/payment-providers", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetMerchantAPI] {
-		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{
-			ServiceCredentialResolver: s.ServiceCredentialResolver,
-			DelegatedAuthenticator:    s.DelegatedAuthenticator,
-		})
+		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{Gate: s.Gate})
 	}
 	if routeSets[RouteSetWebhooks] {
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
@@ -199,15 +183,12 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	)
 }
 
-func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool, credentialMode CredentialMode) error {
-	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetMerchantSettings]) && (s == nil || s.Authenticator == nil) {
-		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
+func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
+	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer]) && (s == nil || s.Authenticator == nil) {
+		return fmt.Errorf("embedded billing: user route groups require Options.Authenticator")
 	}
-	if routeSets[RouteSetMerchantSettings] && credentialMode != CredentialModeMutable {
-		return fmt.Errorf("embedded billing: merchant settings routes require mutable_credentials")
-	}
-	if routeSets[RouteSetMerchantAPI] && (s == nil || (s.ServiceCredentialResolver == nil && s.DelegatedAuthenticator == nil)) {
-		return fmt.Errorf("embedded billing: merchant API route group requires Options.ServiceCredentialResolver or Options.DelegatedAuthenticator")
+	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetPaymentProviders] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
+		return fmt.Errorf("embedded billing: merchant route groups require Options.Gate")
 	}
 	return nil
 }

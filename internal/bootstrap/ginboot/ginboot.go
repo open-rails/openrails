@@ -9,13 +9,18 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	internalauth "github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/cache"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Result holds the application graph plus the gin HTTP server created by the
@@ -25,10 +30,36 @@ type Result struct {
 	Server *server.Server
 }
 
+// Options controls optional dependency overrides for the standalone gin server
+// composition root.
+type Options struct {
+	PGXPool *pgxpool.Pool
+	Redis   *redis.Client
+	Cache   cache.Cache
+	Clock   clockwork.Clock
+
+	// Authenticator protects user routes. When nil, standalone uses the attached
+	// control plane verifier.
+	Authenticator billingauth.Authenticator
+	// DelegatedAuthenticator is the optional host-pluggable identity seam for
+	// self-service routes. When nil, those routes use control-plane delegation.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+
+	ConfiguredMerchant merchant.ID
+	Rails              config.RailSet
+}
+
 // NewServer constructs the application runtime and the gin HTTP server graph
 // together. It is the gin-coupled counterpart of bootstrap.NewApp.
-func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
-	application, err := bootstrap.NewApp(cfg, opts)
+func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
+	application, err := bootstrap.NewApp(cfg, &bootstrap.Options{
+		PGXPool:            optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
+		Redis:              optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
+		Cache:              optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
+		Clock:              optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
+		ConfiguredMerchant: optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
+		Rails:              optsValue(opts, func(o *Options) config.RailSet { return o.Rails }),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -51,12 +82,13 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 	if cperr := embcp.Attach(context.Background(), application, cfg, injectedPool); cperr != nil {
 		return nil, fmt.Errorf("attach control plane: %w", cperr)
 	}
-	if application.Authenticator == nil {
+	authenticator := optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator })
+	if authenticator == nil {
 		cp := embcp.Get(application)
 		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
 			return nil, fmt.Errorf("control plane verifier unavailable")
 		}
-		application.Authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
+		authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
 	}
 
 	billingServer, err := server.New(server.Dependencies{
@@ -64,8 +96,8 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		Cache:                  application.Cache,
 		Runtime:                application.Runtime,
 		Redis:                  application.RedisClient,
-		Authenticator:          application.Authenticator,
-		DelegatedAuthenticator: application.DelegatedAuthenticator,
+		Authenticator:          authenticator,
+		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
 		ConfiguredMerchant:     application.Runtime.ConfiguredMerchant,
 		ControlPlane:           embcp.Get(application),
 	})
@@ -75,4 +107,12 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 
 	cleanupOnError = false
 	return &Result{App: application, Server: billingServer}, nil
+}
+
+func optsValue[T any](opts *Options, pick func(*Options) T) T {
+	var zero T
+	if opts == nil {
+		return zero
+	}
+	return pick(opts)
 }

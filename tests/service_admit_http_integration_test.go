@@ -55,7 +55,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate},
 	}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
 
 	post := func(path string, body any) *httptest.ResponseRecorder {
 		var rdr *bytes.Reader

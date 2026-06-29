@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -39,27 +38,6 @@ type localClient struct {
 	// requests when the request leaves it empty — the client-side counterpart of
 	// openrails.WithCurrency on the remote (#476).
 	currency string
-	// tenantID is the engine's construction-time bound tenant (#336/#478). The
-	// unified Client path has no HTTP middleware to resolve a tenant onto the
-	// context the way the standalone/gin surface does, so the adapter pins the
-	// bound tenant itself (ensureTenant) — the embedded host is the principal and
-	// is trusted for its own tenant. Zero when no tenant is bound (the call then
-	// hard-fails downstream on merchant.Require, exactly as the standalone surface
-	// would for a request with no resolved tenant).
-	tenantID merchant.ID
-}
-
-// ensureTenant pins the engine's bound tenant onto ctx when the caller has not
-// already resolved one. A non-zero tenant already on the context (e.g. a host
-// that resolved a different tenant) is left untouched.
-func (c *localClient) ensureTenant(ctx context.Context) context.Context {
-	if c == nil || c.tenantID.IsZero() {
-		return ctx
-	}
-	if _, ok := merchant.FromContext(ctx); ok {
-		return ctx
-	}
-	return merchant.WithID(ctx, c.tenantID)
 }
 
 // ClientOption configures Runtime.Client.
@@ -179,7 +157,6 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 // (service_admission.go). All verdict outcomes — allowed, abuse (429), money
 // (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
-	ctx = c.ensureTenant(ctx)
 	if req.EstimatedAmount < 0 {
 		return nil, invalidErr("estimated_amount must be >= 0")
 	}
@@ -249,7 +226,6 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 // DepositCredits transcribes handlers.ServiceDepositCredits
 // (service_credits.go).
 func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositCreditsRequest) (*openrails.CreditTransaction, error) {
-	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
 	if err != nil {
 		return nil, err
@@ -301,7 +277,6 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 // Capture transcribes handlers.ServiceCaptureHold (service_credits.go)
 // addressed by request_id, including the #311 usage-event extension.
 func (c *localClient) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *openrails.CaptureUsage) error {
-	ctx = c.ensureTenant(ctx)
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id required")
 	}
@@ -328,7 +303,6 @@ func (c *localClient) Capture(ctx context.Context, requestID string, capturedAmo
 // Release transcribes handlers.ServiceReleaseHold (service_credits.go),
 // addressed by request_id.
 func (c *localClient) Release(ctx context.Context, requestID string) error {
-	ctx = c.ensureTenant(ctx)
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id required")
 	}
@@ -341,7 +315,6 @@ func (c *localClient) Release(ctx context.Context, requestID string) error {
 // Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go)
 // using the client-level currency.
 func (c *localClient) Balance(ctx context.Context, customerID string) (*openrails.BalanceResponse, error) {
-	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(c.currency)
 	if err != nil {
 		return nil, err
@@ -366,7 +339,6 @@ func (c *localClient) Balance(ctx context.Context, customerID string) (*openrail
 
 // GetCreditAccount transcribes handlers.ServiceGetCreditsBalance.
 func (c *localClient) GetCreditAccount(ctx context.Context, customerID, currency string) (*openrails.CreditAccount, error) {
-	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
@@ -394,7 +366,6 @@ func (c *localClient) GetCreditAccount(ctx context.Context, customerID, currency
 // (service_credits.go) and then — like the remote client — re-reads the account
 // snapshot via the balance path.
 func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, currency string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(customerID, "customer_id required")
 	if err != nil {
 		return nil, err
@@ -450,7 +421,6 @@ type serviceTxn struct {
 // handlers.ServiceListCustomerCreditTransactions (service_credits.go),
 // producing the same {"transactions":[...],"total":N} JSON the wire carries.
 func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
-	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
@@ -480,7 +450,6 @@ func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, cu
 
 // UsageRollup transcribes handlers.ServiceUsageRollup (service_credits.go).
 func (c *localClient) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]openrails.UsageRollupRow, error) {
-	ctx = c.ensureTenant(ctx)
 	// gin binding: customer_id, from, to, group_by are all required.
 	switch {
 	case strings.TrimSpace(customerID) == "":
@@ -520,7 +489,6 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID, currency stri
 
 // BudgetStatus transcribes handlers.ServiceGetBudget (service_admission.go).
 func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return nil, err
@@ -541,7 +509,6 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invoker
 }
 
 func (c *localClient) setPayerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.PayerSpendLimitInput) error {
-	ctx = c.ensureTenant(ctx)
 	// An EMPTY customer_id sets the tenant-wide DEFAULT trust-tier policy (#477,
 	// the platform capacity ladder declared once); a non-empty one is a per-subject
 	// override.
@@ -578,7 +545,6 @@ func (c *localClient) setPayerSpendLimits(ctx context.Context, tenantSubjectID s
 }
 
 func (c *localClient) setTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []openrails.TierScheduleRung) error {
-	ctx = c.ensureTenant(ctx)
 	currency, err := requireCurrency(currency)
 	if err != nil {
 		return err
@@ -604,7 +570,6 @@ func (c *localClient) setTierSchedule(ctx context.Context, tenantSubjectID, curr
 
 // GetMerchantSettings transcribes handlers.ServiceGetMerchantSettings.
 func (c *localClient) GetMerchantSettings(ctx context.Context) (*openrails.MerchantSettings, error) {
-	ctx = c.ensureTenant(ctx)
 	cfg, _, err := c.svc.GetMerchantConfiguration(ctx)
 	if err != nil {
 		return nil, internalErr("get merchant settings failed")
@@ -617,7 +582,6 @@ func (c *localClient) GetMerchantSettings(ctx context.Context) (*openrails.Merch
 
 // SetMerchantSettings transcribes handlers.ServiceSetMerchantSettings.
 func (c *localClient) SetMerchantSettings(ctx context.Context, settings openrails.MerchantSettings) error {
-	ctx = c.ensureTenant(ctx)
 	ws := make([]abuse.WastedWindow, 0, len(settings.DelegatedInvokerWastedSpendLimits))
 	for _, w := range settings.DelegatedInvokerWastedSpendLimits {
 		ws = append(ws, abuse.WastedWindow{
@@ -649,7 +613,6 @@ func (c *localClient) SetMerchantSettings(ctx context.Context, settings openrail
 // SetCustomerSpendDelegations transcribes the customer treasury spend-delegations
 // replace operation for embedded hosts (#567).
 func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
 		return err
@@ -713,7 +676,6 @@ func budgetWindowInputsFromAbuse(windows []abuse.WastedWindow) []openrails.Budge
 
 // GetTier transcribes handlers.ServiceGetTier (service_admission.go, #477).
 func (c *localClient) GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return "", err
@@ -731,7 +693,6 @@ func (c *localClient) GetTier(ctx context.Context, tenantSubjectID, currency str
 
 // ReportWastedSpend transcribes handlers.ServiceReportWastedSpend (#497).
 func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.WastedSpendReport) (*openrails.WastedSpendResponse, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(report.CustomerID, "invalid customer_id")
 	if err != nil {
 		return nil, err
@@ -769,7 +730,6 @@ func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.Wa
 
 // AbuseUsage transcribes handlers.ServiceAbuseUsage (#488).
 func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*openrails.AbuseUsageResponse, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return nil, err
@@ -791,7 +751,6 @@ func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, 
 
 // SetCreditLimit transcribes handlers.ServiceSetCreditLimit (#489).
 func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return err
@@ -809,7 +768,6 @@ func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID, curre
 // GetCreditLimit transcribes handlers.ServiceGetCreditLimit (#489) — the read
 // counterpart of SetCreditLimit, reachable through openrails.Client.
 func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
-	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return 0, err
@@ -893,7 +851,6 @@ func wireProductAccessRecords(recs []billingservice.ProductAccessRecord) []openr
 // dedupe, cap, one query, an entry per requested subject. The service-credential
 // scope gate is not transcribed — embedded hosts are the principal.
 func (c *localClient) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
-	ctx = c.ensureTenant(ctx)
 	deduped := make([]string, 0, len(subjects))
 	seen := make(map[string]struct{}, len(subjects))
 	for _, s := range subjects {
@@ -964,7 +921,6 @@ func (c *localClient) HasEntitlement(ctx context.Context, subject, entitlement s
 // handlers.ServiceGetCustomersWithEntitlement (entitlements.go): trim,
 // require entitlement, default page size, and keyset pagination to completion.
 func (c *localClient) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
-	ctx = c.ensureTenant(ctx)
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return nil, invalidErr("entitlement required")
@@ -989,7 +945,6 @@ func (c *localClient) ListCustomersWithEntitlement(ctx context.Context, entitlem
 
 // ListProductAccess transcribes handlers.ServiceGetUserProductAccess.
 func (c *localClient) ListProductAccess(ctx context.Context, subject string) ([]openrails.ProductAccessGrant, error) {
-	ctx = c.ensureTenant(ctx)
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
 		return nil, invalidErr("user_id is required")
@@ -1004,7 +959,6 @@ func (c *localClient) ListProductAccess(ctx context.Context, subject string) ([]
 // HasProductAccess transcribes handlers.ServiceGetUserProductAccess with
 // ?product_id=...
 func (c *localClient) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
-	ctx = c.ensureTenant(ctx)
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
 		return false, invalidErr("user_id is required")
@@ -1023,7 +977,6 @@ func (c *localClient) HasProductAccess(ctx context.Context, subject, productID s
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue
 // (service_credits.go), including the handler-side total summation.
 func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {
-	ctx = c.ensureTenant(ctx)
 	resource = strings.TrimSpace(resource) // the remote client trims before sending
 	// gin binding: resource, from, to are all required.
 	switch {
@@ -1060,7 +1013,6 @@ const maxAdmitBatchItems = 1000
 // transcribed — in embedded mode the host IS the principal, exactly like a
 // tenant-wide token (so its `allows` is always true).
 func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitRequest) ([]openrails.AdmitBatchVerdict, error) {
-	ctx = c.ensureTenant(ctx)
 	if len(items) == 0 {
 		return nil, invalidErr("items required")
 	}

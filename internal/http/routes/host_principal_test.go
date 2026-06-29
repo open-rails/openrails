@@ -37,7 +37,7 @@ func TestMerchantActionRoutesHostPrincipalGated(t *testing.T) {
 			SubjectID:   "11111111-1111-1111-1111-111111111111",
 			Permissions: []string{"customer:spend-delegations:read"},
 		}}
-		RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{DelegatedAuthenticator: authn})
+		RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{Gate: NewGate(GateOptions{DelegatedAuthenticator: authn})})
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, customerPath, nil))
 		if rec.Code != http.StatusForbidden {
@@ -48,7 +48,7 @@ func TestMerchantActionRoutesHostPrincipalGated(t *testing.T) {
 	t.Run("auth failure is unauthorized", func(t *testing.T) {
 		mux := http.NewServeMux()
 		authn := fakeHostDelegatedAuthenticator{err: billingauth.ErrUnauthenticated}
-		RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{DelegatedAuthenticator: authn})
+		RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{Gate: NewGate(GateOptions{DelegatedAuthenticator: authn})})
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, customerPath, nil))
 		if rec.Code != http.StatusUnauthorized {

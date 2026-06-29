@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -75,9 +76,8 @@ type Server struct {
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
 
-	// configuredMerchant scopes THIS engine instance to one merchant — set by embedded
-	// hosts (embed.Options.Merchant) that run one engine per merchant. Zero in standalone,
-	// where the merchant is resolved per-credential. OpenRails is multi-merchant either way.
+	// configuredMerchant scopes legacy single-merchant installs. Zero in standalone,
+	// where the merchant is resolved per-credential.
 	configuredMerchant merchant.ID
 
 	// browserCORSOriginSource is the standalone browser CORS origin source.
@@ -392,25 +392,28 @@ func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
 // with zero gin on the request path. The gin Server holds the standalone surface
 // (newPublicEngine); embedded hosts use this gin-free handler via pkg/embedded.
 func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
-	credentialMode := opts.CredentialMode
-	if credentialMode == "" {
-		credentialMode = embedhttp.CredentialModeMutable
-	}
 	asm := &embedhttp.Assembler{
-		Cfg:            s.cfg,
-		Runtime:        s.runtime,
-		CaptchaStore:   s.captchaStore,
-		RDB:            s.rdb,
-		Authenticator:  s.embeddedAuthenticator(),
-		CredentialMode: credentialMode,
+		Cfg:           s.cfg,
+		Runtime:       s.runtime,
+		CaptchaStore:  s.captchaStore,
+		RDB:           s.rdb,
+		Authenticator: s.embeddedAuthenticator(),
 	}
 	// The control plane is always present on this surface (#469); it is the
 	// live admin-permission checker.
 	asm.AdminChecker = s.controlPlane
 	asm.ServiceCredentialResolver = s.controlPlane
+	if asm.Authenticator != nil || s.controlPlane != nil || s.delegatedAuthenticator != nil {
+		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
+			Authenticator:             asm.Authenticator,
+			AdminPermissionChecker:    s.controlPlane,
+			ServiceCredentialResolver: s.controlPlane,
+			DelegatedResolver:         s.controlPlane,
+			DelegatedAuthenticator:    s.delegatedAuthenticator,
+		})
+	}
 	return asm.NewHTTPHandler(embedhttp.Options{
-		RouteSets:      opts.RouteSets,
-		CredentialMode: credentialMode,
+		RouteSets: opts.RouteSets,
 	})
 }
 

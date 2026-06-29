@@ -6,7 +6,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/open-rails/openrails/internal/app"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -52,9 +51,6 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, m ManifestMerchant)
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: app database not initialized")
 	}
-	if err := validateCredentialMutationMode(a.CredentialMode, m); err != nil {
-		return merchant.ID{}, err
-	}
 	conf := rt.emb.Config()
 	if conf == nil || conf.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: config/db is required")
@@ -82,18 +78,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, m ManifestMerchant)
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: upsert merchant config: %w", err)
 	}
-	if rt.tenantID.IsZero() {
-		rt.tenantID = tn.ID
-		a.Runtime.ConfiguredMerchant = tn.ID
-	}
 	return tn.ID, nil
-}
-
-func validateCredentialMutationMode(mode app.CredentialMode, m ManifestMerchant) error {
-	if mode == app.CredentialModeMutable || len(m.ProviderAccounts) == 0 {
-		return nil
-	}
-	return fmt.Errorf("openrails embed: provider account credential changes require mutable_credentials")
 }
 
 // ParseMerchantConfig parses a YAML merchant document into a ManifestMerchant.

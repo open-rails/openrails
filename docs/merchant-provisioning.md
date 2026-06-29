@@ -39,10 +39,11 @@ merchants with `openrails push-merchant-config`:
 
 See `config/merchants.example.yaml` for the manifest shape.
 
-Embedded hosts (cozy-art, doujins, tensorhub) instead provision via
-`embed.Options` (one merchant per engine, secrets passed programmatically) and
-authorize the `/v1/merchant` surface with their own AuthKit/Authenticator — the
-issuer-as-owner path is the standalone mechanism.
+Embedded hosts provision billing merchants explicitly with
+`embed.Runtime.UpsertMerchantConfig` and pass auth at HTTP mount time. The engine
+is not bound to one merchant at construction; in-process SDK calls pin the
+merchant with `openrails.WithMerchant(ctx, merchantID)`. The issuer-as-owner path
+is the standalone mechanism.
 
 ## Lifecycle
 

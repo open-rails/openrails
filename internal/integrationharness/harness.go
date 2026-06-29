@@ -54,7 +54,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -181,8 +180,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: h.DSN}}
 	rt, err := embed.New(h.ctx, embed.Options{
-		Merchant: dbtest.TestMerchantSlug,
-		Options:  embedded.Options{Config: cfg, Redis: h.Redis},
+		Options: embedded.Options{Config: cfg, Redis: h.Redis},
 	})
 	require.NoError(h.t, err, "embed.New")
 	h.t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -194,10 +192,10 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 		ginrouter.New(router.Group("/v1/merchant"), runtime),
 		runtime,
 		httproutes.Options{
-			ServiceCredentialResolver: trustingResolver{
+			Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
 				merchantID:   dbtest.TestMerchantID,
 				merchantSlug: dbtest.TestMerchantSlug,
-			},
+			}}),
 		},
 	)
 	srv := httptest.NewServer(router)
@@ -251,7 +249,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := ginboot.NewServer(cfg, &bootstrap.Options{})
+	assembled, err := ginboot.NewServer(cfg, &ginboot.Options{})
 	require.NoError(h.t, err, "ginboot.NewServer (real standalone)")
 	app := assembled.App
 	h.t.Cleanup(func() { _ = app.Close(context.Background()) })

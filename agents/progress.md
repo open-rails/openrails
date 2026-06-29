@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 623
+next_id: 628
 
 ---
 
@@ -534,3 +534,487 @@ Rename **complete** across Go (`models.Rail`, `payments/rails` pkg, all idents),
 ## Notes
 - Pure rename, no behavior change — land as a reviewable rename (a Go-commit + a DB/sqlc-commit pair reads cleanest).
 - Out of scope (separate, already-flagged decisions): `mobius` as the NMI rail id (rename to `nmi`?); keeping "provider-observed truth" in the convergence taxonomy (yes, keep).
+
+# #623: authkit-style embedded route groups
+
+**Completed:** no — active refactor, not started.
+
+Make OpenRails' embedded Gin mounting look and behave like AuthKit's mount API:
+the host creates a route group, then explicitly registers only the OpenRails route
+groups it wants. Do the smallest useful version first; do not convert all routes
+to a declarative `RouteSpec` registry unless a later issue needs route
+introspection/OpenAPI/auth-table tests.
+
+## Why
+
+Embedded hosts should not get every OpenRails route just because they mounted the
+billing surface. This is the same reason AuthKit exposes separate mountable route
+groups: standalone OpenRails, Doujins, Cozy, and other hosts may want different
+surfaces.
+
+Concrete example: if provider credentials/config are fixed/read-only in the host,
+do not mount merchant-settings routes that push provider config. If the host calls
+the embedded Go service directly, do not mount host-internal merchant API routes.
+
+## Current state
+
+- `internal/http/embedhttp/route_set.go` already has the right group names:
+  `checkout`, `customer`, `merchant_admin`, `catalog`, `payment_providers`,
+  `merchant_api`, and `webhooks`.
+- `pkg/embedded/gin.MountHandler` works, but it exposes a single handler API
+  instead of the AuthKit-style `RegisterAPI(group, service, WithGroups(...))`.
+- `RouteSetCustomer` must own `/v1/me` and `/v1/customers`; selecting no customer
+  routes must not silently mount those routes.
+- Full route data tables would be useful later, but they are not required to give
+  embedders explicit route-group control now.
+
+## Target API
+
+```go
+api := router.Group("/api/openrails")
+openrailsgin.RegisterAPI(api, runtime,
+    openrailsgin.WithGroups(
+        embedded.RouteSetCheckout,
+        embedded.RouteSetCustomer,
+        embedded.RouteSetWebhooks,
+    ),
+    openrailsgin.WithGate(hostGate),
+)
+```
+
+Keep `MountHandler` as the lower-level `net/http` escape hatch for callers that
+already have one handler mount point.
+
+## Plan
+
+1. Add AuthKit-style Gin helpers in `pkg/embedded/gin`: `RegisterAPI`,
+   `WithGroups`, and `WithGate`, backed by the existing `MountHandler`.
+2. Infer the mount prefix from the Gin route group when possible so hosts do not
+   have to repeat `"/api/openrails"` in two places.
+3. Make `RouteSetCustomer` actually gate the `/v1/me` and `/v1/customers`
+   handler path.
+4. Update embedded docs/examples to prefer `RegisterAPI(group, ..., WithGroups(...))`.
+5. Update Doujins to mount OpenRails through the new API instead of mixing the
+   OpenRails catch-all directly into its own route registration.
+
+## Acceptance
+
+- A host can mount only checkout/customer/webhook routes with AuthKit-like syntax.
+- `payment_providers` routes are absent unless explicitly selected.
+- `merchant_api` routes remain absent from embedded defaults.
+- Focused tests prove route-set selection excludes customer routes when
+  `RouteSetCustomer` is omitted.
+- Doujins compiles against the new API.
+
+## Deferred
+
+- A full `RouteSpec`/`APIRoutes` registry for introspection, OpenAPI generation,
+  or table-driven auth coverage. Useful later, not needed for the route-group API.
+
+---
+
+# #624: split-merchant-settings-routeset-delete-credentialmode
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29. HARD CUT landed: `RouteSetMerchantSettings`
+and `CredentialMode` are gone; catalog and payment-provider routes are separate
+route sets.
+
+Collapse the redundant credential-mutation gating. Today exposing the
+provider-credential mutation routes requires BOTH including
+`RouteSetMerchantSettings` in `RouteSets` AND setting `CredentialMode = mutable`
+— and `embedhttp.validateAuthBoundary` PANICS if they disagree
+(`internal/http/embedhttp/embedhttp.go:206`). Two coupled knobs + a panic-on-mismatch
+for one decision. Replace with plain route-set membership.
+
+## Metadata
+
+- Category: refactor
+- Status: completed
+- Passes: true
+
+## Result
+
+- Added `RouteSetCatalog` and `RouteSetPaymentProviders`.
+- Embedded defaults now include catalog and exclude payment-provider config.
+- Standalone defaults include both catalog and payment-provider config.
+- Deleted `CredentialMode`, `CredentialModeFixed`, `CredentialModeMutable`, and
+  all `HTTPHandlerOptions.CredentialMode` plumbing.
+- Deleted the `RegisterMerchantSettingsRoutes` wrapper; callers register catalog
+  and payment providers explicitly.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+
+## Current state
+
+`RouteSetMerchantSettings` (`internal/http/embedhttp/route_set.go:16`) mounts exactly
+two subgroups via `RegisterMerchantSettingsRoutes` (`internal/http/routes/routes.go:235`):
+- `/catalog/*` — products, prices, drift, `publish` (`registerCatalogActionRoutes`,
+  routes.go:484). Gated per-route by `merchant:catalog:read/update`.
+- `/payment-providers/*` — list/get/PUT/DELETE provider config + secrets
+  (`registerPaymentProviderActionRoutes`, routes.go:512). Gated per-route by
+  `merchant:payment_providers:read/update`.
+
+(The `route_set.go:15` comment says "provider secrets, catalog pushes, and merchant
+config" — stale; there is no separate merchant-config group.)
+
+`CredentialMode` (`fixed`/`mutable`, route_set.go:6/22) is read in exactly ONE place:
+`validateAuthBoundary` requires `mutable` when `RouteSetMerchantSettings` is mounted
+(embedhttp.go:206). It is a redundant SECOND coarse gate on top of the per-route
+permission checks — its only behavior is to error when it disagrees with route-set
+membership.
+
+## Decision
+
+- **Catalog is always available.** No reason to gate catalog push behind a coarse
+  switch; the `merchant:catalog:*` permission is the real protection. ("Always on" ≠
+  unprotected — the permission gate stays.)
+- **Provider config + secrets is the only opt-in surface.** Its coarse on/off becomes
+  simply "is the route set mounted?" — one knob, the host's model.
+- **Storage backend is a SEPARATE, untouched axis.** Vault-if-`VaultConfig.Enabled`
+  else DB+envelope (`internal/secretstore`, `internal/merchantsecrets/store.go:35`) is
+  already auto-derived from config presence. Exposing the routes is independent of where
+  secrets are stored — do NOT couple them.
+
+## Plan
+
+1. Split `RouteSetMerchantSettings` into:
+   - `RouteSetCatalog` (`/catalog/*`) — add to `EmbeddedDefaultRouteSets` AND
+     `StandaloneDefaultRouteSets` (always-on).
+   - `RouteSetPaymentProviders` (`/payment-providers/*`) — opt-in; in
+     `StandaloneDefaultRouteSets`, NOT in `EmbeddedDefaultRouteSets`.
+   - Split `RegisterMerchantSettingsRoutes` into two registrars (or have the assembler
+     mount the two existing `register*ActionRoutes` under the two new sets).
+2. Delete `CredentialMode` end-to-end: the enum + consts (route_set.go), the
+   `Assembler.CredentialMode` field + `validateAuthBoundary`'s mutable check
+   (embedhttp.go), `HTTPHandlerOptions.CredentialMode` (pkg/embedded), the `embed`/`embedded`
+   re-exports, and `internal/http/server.go:395` standalone default. Keep the
+   user/admin-needs-Authenticator check in `validateAuthBoundary`.
+3. Leave `VaultConfig` / secret-store selection completely untouched.
+
+## Acceptance
+
+- Catalog routes mount with no coarse gate (permission-gated only), in both embedded and
+  standalone defaults.
+- Provider-config routes mount iff `RouteSetPaymentProviders` is selected; no
+  `CredentialMode` anywhere in the tree (grep clean).
+- No panic path for knob-mismatch (the panic is gone with the cross-check).
+- Existing HTTP integration tests green; embedded hosts that previously set
+  `mutable` + merchant-settings now just select `RouteSetPaymentProviders`.
+
+---
+
+# #625: unify-merchant-auth-into-single-host-gate
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29. Merchant-route registration now takes one public
+`billingauth.Gate`; `routes.Options` no longer exposes service/delegated/admin
+resolver fields, embedded constructor auth fields are gone, and `internal/app` /
+`internal/bootstrap` no longer store or accept authenticators. Buyer/user route
+authentication remains `billingauth.Authenticator`; that is intentionally separate
+from merchant/admin authorization.
+
+OpenRails defines ONE interface for protecting routes; the host supplies the
+implementation. "OpenRails asks the host: gate this route — it needs permission P
+on merchant M; tell me who the caller is or reject." AuthKit ships a plug-and-play
+`Gate`; any other host writes a thin shim over its own auth. Mirrors AuthKit's own
+model (one `Verifier.VerifyRequest` → one `Principal{Kind}`), which OpenRails today
+reimplements as a hand-rolled dispatch.
+
+## Metadata
+
+- Category: refactor
+- Status: completed
+- Passes: true
+
+## Landed 2026-06-29
+
+- Added public `billingauth.Gate`, `billingauth.Principal`, and
+  `billingauth.GateError`.
+- Changed merchant/admin/catalog/payment-provider/API route registration to use
+  one `Gate` instead of exposing `ServiceCredentialResolver`,
+  `DelegatedResolver`, and `AdminPermissionChecker` on `routes.Options`.
+- Kept the existing standalone/control-plane behavior behind an internal
+  `httproutes.NewGate(GateOptions{...})` adapter.
+- Moved embedded host auth out of `embedded.Options` / `embed.Options` and into
+  `embgin.MountOptions`.
+- Removed authenticator fields from `internal/app.App`, `app.BootstrapOptions`,
+  and `bootstrap.Options`; standalone HTTP auth seams now live on
+  `ginboot.Options` and are passed directly into `server.New`.
+- Direct gin route helpers no longer fall back to app-stored auth; they use
+  explicit `RouteOptions.AuthProvider`, `RouteOptions.Gate`, or
+  `RouteOptions.DelegatedAuthenticator`.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+
+## What was intentionally not deleted
+
+- `pkg/billingauth.Authenticator`, `AuthenticatorFunc`, and `Required`/`Optional`
+  still protect buyer/user routes and provide best-effort identity for rate
+  limiting. They are not the merchant/admin authorization seam.
+- `pkg/billingauth.DelegatedAuthenticator` and `DelegatedPrincipal` still protect
+  the self-service delegated browser surface.
+- A first-class external AuthKit `Gate` adapter can be added when an embedder
+  needs it; the internal standalone adapter is enough for this refactor.
+
+## Original hard-cut sketch, narrowed during implementation
+
+- `pkg/billingauth.Authenticator` + `AuthenticatorFunc` + `Required`/`Optional`.
+- `pkg/billingauth.DelegatedAuthenticator` + `DelegatedAuthenticatorFunc` +
+  `DelegatedPrincipal` (folded into the new `Principal`).
+- The credential-source ladder in `internal/http/routes/routes.go`:
+  `merchantActionPermissionMW` (routes.go:244) + `resolveServiceCredential`
+  (routes.go:408) + `authenticateUser` — the try-api-key→remote-app→service-jwt→
+  delegated→host→user dispatch.
+- The resolver interfaces on `routes.Options` + the assembler:
+  `ServiceCredentialResolver`, `DelegatedResolver`, `AdminPermissionChecker`,
+  `merchantUserResolver`, `merchantGroupResolver`, `serviceJWTResolver`,
+  `remoteApplicationResolver`. These were OpenRails wrapping the AuthKit control
+  plane behind its own abstraction; the `Gate` subsumes them.
+
+## What replaced the merchant/admin seam
+
+```go
+// OpenRails defines this; it imports NO auth library.
+type Gate interface {
+    // Verify the request's credential and check the caller holds `permission`
+    // on `merchant`. Returns the resolved caller or an error → 401 / 403.
+    Authorize(ctx context.Context, r *http.Request, permission string, merchant MerchantRef) (Principal, error)
+}
+
+type Principal struct {
+    Kind    PrincipalKind // user | api_key | remote_application | delegated | service | host_asserted
+    Subject string
+    Email, Username string
+    EmailVerified   bool
+}
+```
+
+- Routes declare the requirement, AuthKit-style:
+  `gate("merchant:subscription:cancel", ownerOf("id"))`.
+- `Gate` is the neutral seam (this dissolves the earlier "keep or drop the seam?"
+  question — the seam IS the `Gate`, AuthKit is merely one implementation).
+- AuthKit adapter: a `Gate` impl in an OPT-IN package (e.g. `pkg/embedded/authkit`),
+  backed by AuthKit's verifier + permission check, so the core still imports no
+  AuthKit. Standalone wires this adapter in place of the control-plane resolvers.
+
+## Where the Gate is supplied — the MOUNT call, NOT the constructor (decided)
+
+Auth exists only to protect the HTTP boundary. The in-process `Client()`/`service`
+path is trusted — the host already authenticated before calling in-process — so it
+needs NO Gate. (True even today: `embedded.Options.Authenticator` is read only by the
+HTTP assembler; `service.New`/`Client()` never touch it.)
+
+- DELETE `Authenticator` + `DelegatedAuthenticator` from `embedded.Options` /
+  `embed.Options`. The constructor carries no auth (feeds #626's thin constructor).
+- The `Gate` is a parameter of the mount call: `NewHTTPHandler(HTTPHandlerOptions{Gate})`
+  / `RegisterAPI(group, runtime, WithGate(...))`.
+- In-process callers pass nothing — they're trusted.
+- OPEN: rate-limiting keys best-effort by user (identify, don't reject), so the Gate
+  likely needs an Optional/identify mode alongside `Authorize` (mirrors AuthKit
+  `Required`/`Optional`). Decide: Gate exposes both, or rate-limit keys by IP only.
+
+## Stays OpenRails-side (cannot move to the host/AuthKit) — bookends the gate
+
+1. **Resource→merchant resolution** (`ownerOf("id")`): only OpenRails knows which
+   merchant owns a subscription/resource (its DB). Runs BEFORE the gate, produces
+   the `merchant MerchantRef` passed in.
+2. **RLS GUC pinning**: set AFTER `Authorize` succeeds, from the resolved merchant.
+
+## Open decision (flag, not blocker)
+
+- **Token-derived vs resource-derived merchant.** Current code pins merchant from
+  the verified token and deliberately never trusts the URL (anti-IDOR). The natural
+  `Gate` example is resource-derived (find the resource's owner, check permission on
+  it). Both are safe; pick one explicitly — it defines what `ownerOf(...)` means and
+  what `Gate` may assume.
+
+## Acceptance
+
+- Merchant/admin/catalog/payment-provider/API route registration accepts one
+  `Gate` interface; resolver/checker internals are hidden behind the internal
+  standalone adapter.
+- Embedded auth is supplied at route-mount time, not engine construction time.
+- `internal/app` and `internal/bootstrap` carry no authenticators.
+- Integration-tag package compile stays green; standalone behavior is preserved by
+  `httproutes.NewGate(GateOptions{...})`.
+
+## Related
+
+- Supersedes the earlier `DelegatedAuthenticator` rename idea.
+- Interlocks with #626 (in-process has no token, so merchant is host-supplied per
+  call — see `WithMerchant`).
+
+---
+
+# #626: embed-multi-merchant-always-and-thin-constructor
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29. HARD CUT landed: `embed.New` builds the engine
+only; merchant provisioning, migrations, settings seed, and auth are caller-owned.
+
+`embed.New` shrinks to "build the multi-merchant engine." The engine is ALWAYS
+multi-merchant; the merchant acted on is supplied per call where the operation is
+merchant-scoped. All construction side-effects (migrate, provision, seed settings)
+become explicit caller actions.
+
+## Metadata
+
+- Category: refactor
+- Status: completed
+- Passes: true
+
+## Result
+
+- Deleted `embed.Options.Merchant`, `embed.Options.MerchantSettings`, and
+  `embed.Options.RunMigrations`.
+- Deleted `Runtime.tenantID` and all hidden per-call merchant injection in the
+  embedded client.
+- Added `openrails.WithMerchant(ctx, merchantID)` for explicit merchant-scoped
+  in-process SDK calls.
+- Kept `Runtime.UpsertMerchantConfig` as the explicit provisioning path.
+- Deleted constructor-provisioning integration coverage and kept explicit
+  `UpsertMerchantConfig` coverage.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+
+## Context
+
+This does NOT reverse the org↔merchant 1:1 data model (#527). It removes only the
+construction-time BINDING shortcut. A 1:1 host stays 1:1 — it just names its merchant
+per call instead of at `embed.New`. In-process has no HTTP request/token to derive a
+merchant from, so per-call supply is the honest model anyway.
+
+## What gets deleted (hard cut)
+
+- `embed.Options.Merchant` + the bound-merchant provisioning in `embed.New`
+  (embed.go:170-185) + `Runtime.tenantID` (embed.go:130) + the per-call tenantID
+  injection in `Runtime.Client()` (embed.go:255) + `a.Runtime.ConfiguredMerchant`
+  set from the binding.
+- `embed.Options.MerchantSettings` + the startup seeding (embed.go:193-202,
+  `hasMerchantSettings`/`startupMerchantSettings`/`embeddedManifestMerchant`).
+- `embed.Options.RunMigrations` + the in-constructor `migrate.RunPostgresEmbedded`
+  call (embed.go:142-156). No production host sets it (grep); the explicit path
+  `cmd/openrails migrate` / `internal/migrate` stays.
+
+## What replaces it
+
+- **Multi-merchant always.** Export `openrails.WithMerchant(ctx, ref)` (thin wrapper
+  over the existing `merchant.WithID`/`FromContext`). Merchant-scoped `Client`
+  methods read the merchant from ctx and fail closed if absent.
+  ```go
+  client.CancelSubscription(openrails.WithMerchant(ctx, mref), subID)
+  ```
+- **Migrations**: caller runs `cmd/openrails migrate` / `internal/migrate` explicitly.
+- **Merchant provisioning**: explicit — host calls `boot.ProvisionMerchant` (already
+  exists), not the constructor.
+- **Settings seeding**: host calls `client.SetMerchantSettings(...)` after construction.
+- **`RunWorkers` STAYS**: it's a genuine Runtime lifecycle goroutine (stopped by
+  `Close`), not a one-shot construction side-effect.
+- **Auth fields ALSO leave the constructor** (owned by #625): `Authenticator` +
+  `DelegatedAuthenticator` move to the route-mount call, not `embed.New`. After
+  #624+#625+#626 the engine constructor surface is just: `Config`, `PGXPool`,
+  `Redis`, `Cache`, `PaymentProviders` (+ `RunWorkers` on `embed.Options`).
+
+## Open decision (flag, not blocker)
+
+- **Context-injected merchant (`WithMerchant`, recommended — matches the internal
+  `merchant.WithID` pattern, clean signatures) vs explicit `merchantRef` first arg
+  on every merchant-scoped method (un-missable, noisier).**
+
+## Acceptance
+
+- No `Merchant`/`MerchantSettings`/`RunMigrations` on `embed.Options`; no `tenantID`
+  binding/injection (grep clean).
+- A single engine serves multiple merchants in-process; a merchant-scoped call with
+  no merchant in context fails closed.
+- doujins/cozy-art updated to supply merchant per call + provision/migrate/seed
+  explicitly; build green.
+- HTTP path unchanged (already per-request multi-merchant).
+
+## Related
+
+- Interlocks with #625 (in-process merchant is host-supplied; no token to derive from).
+- Same theme as #624: side-effects and special-cases out of the constructor.
+
+---
+
+# #627: embed-sdk-simplification-epic
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29. #624, #625, and #626 landed. The embedded SDK
+constructor is infrastructure-only; route groups are explicit; merchant/admin
+authorization is a mount-time `Gate`; in-process merchant scope is explicit.
+
+One theme, captured as one epic over the member issues: **`embed.New` shrinks to
+"build the engine"; everything else becomes an explicit caller action; auth becomes
+one host-plugged interface supplied at route-mount time.** This supersedes the
+earlier `DelegatedAuthenticator`-rename and "fix CredentialMode naming" sketches.
+
+## Metadata
+
+- Category: refactor
+- Status: completed
+- Passes: true
+
+## Landed 2026-06-29
+
+- `embed.New` / `embedded.New` constructor surface is now infrastructure-only:
+  `Config`, `PGXPool`, `Redis`, `Cache`, `PaymentProviders`, plus `RunWorkers` on
+  `embed.Options`.
+- Auth for embedded HTTP is supplied at mount time through
+  `embgin.MountOptions{Authenticator, Gate, DelegatedAuthenticator}`.
+- Standalone HTTP auth overrides are supplied through `ginboot.Options`; the core
+  app/bootstrap graph no longer carries authenticators.
+- Merchant-scoped in-process calls use `openrails.WithMerchant`.
+- Catalog routes and payment-provider config routes are separate route sets.
+- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
+
+## Member issues
+
+- **#624** — split `RouteSetMerchantSettings` → `RouteSetCatalog` (always-on) +
+  `RouteSetPaymentProviders` (opt-in); delete `CredentialMode`.
+- **#625** — replace exposed merchant/admin resolver/checker plumbing with ONE
+  host-supplied `Gate`, supplied at the mount call; keep buyer/user
+  `Authenticator` and self-service `DelegatedAuthenticator` as separate route
+  auth seams.
+- **#626** — multi-merchant always: delete the `Merchant` binding + `tenantID`
+  injection (per-call `WithMerchant`); delete constructor side-effects
+  `RunMigrations` + `MerchantSettings` (migrate/provision/seed become explicit).
+
+## Cross-cutting decisions (RESOLVED)
+
+- **Auth lives at the route-mount call, not the constructor.** In-process `Client()`
+  is trusted (host authenticated upstream) and takes no Gate. `embedded.Options`/
+  `embed.Options` lose `Authenticator` + `DelegatedAuthenticator`.
+- **The `Gate` IS the neutral seam.** The earlier "keep or drop the neutral auth
+  seam?" question dissolves — AuthKit is just one `Gate` implementation; a host on
+  another auth library writes its own. Core imports no auth library.
+- **Removing the merchant binding does NOT reverse org↔merchant 1:1 (#527).** Only
+  the construction-time shortcut goes; a 1:1 host names its merchant per call.
+
+## Deferred calls
+
+- **#625** token-derived vs resource-derived merchant for future resource-owner
+  gates. Current code preserves token-derived/control-plane merchant pinning and
+  does not trust URL merchant ids.
+- **#625** optional identity mode for rate-limit keying. Current code keeps the
+  existing `billingauth.Optional` buyer-auth path.
+- **#626** context-injected merchant (`WithMerchant`, recommended) vs explicit
+  `merchantRef` first arg on every merchant-scoped method.
+
+## End-state constructor surface (after all three land)
+
+- `embedded.Options`: `Config`, `PGXPool`, `Redis`, `Cache`, `PaymentProviders`.
+- `embed.Options`: the above + `RunWorkers`.
+- Auth (`Gate`) + route-set selection: supplied at the mount call.
+- Migrate / provision merchant / seed settings: explicit caller actions.
+
+## Suggested order
+
+#624 (smallest, self-contained) → #625 (Gate; biggest auth surface) → #626
+(constructor + multi-merchant; depends on #625 having pulled auth out of the
+constructor). Each lands as its own breaking PR; hosts bumped per PR.
+
+## Note
+
+#623 (your AuthKit-style route-group mounting) is adjacent but separate; it still
+references `CredentialModeMutable`, which #624 deletes — reconcile #623 when #624
+lands.

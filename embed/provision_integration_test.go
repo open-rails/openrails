@@ -30,10 +30,7 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	slug := fmt.Sprintf("embed-provision-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		// Seeding provider accounts is a credential mutation, so the embedded
-		// engine must run in mutable-credentials mode (default is fixed).
-		Options:  embedded.Options{Config: cfg, Authenticator: testEmbedAuthenticator{}, CredentialMode: embedded.CredentialModeMutable},
-		Merchant: slug,
+		Options: embedded.Options{Config: cfg},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

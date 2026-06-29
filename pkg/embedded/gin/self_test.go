@@ -30,15 +30,6 @@ func (s stubSelfAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 	return s.principal, s.err
 }
 
-type stubUserAuthenticator struct {
-	user billingauth.UserContext
-	err  error
-}
-
-func (s stubUserAuthenticator) Authenticate(context.Context, *http.Request) (billingauth.UserContext, error) {
-	return s.user, s.err
-}
-
 func selfPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
 		MerchantID:   dbtest.TestMerchantID.String(),
@@ -111,32 +102,10 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
-func TestSelfHandler_DefaultUserAuthenticatorGetsSelfSurface(t *testing.T) {
-	authn := delegatedAuthenticatorFromUserAuthenticator(stubUserAuthenticator{
-		user: billingauth.UserContext{
-			UserID:        "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
-			Email:         "user@example.com",
-			EmailVerified: true,
-			Username:      "user",
-		},
-	}, dbtest.TestMerchantID)
-	require.NotNil(t, authn)
-
-	h := newSelfHandler(nil, authn, dbtest.TestMerchantID)
-
-	// Default embedded auth produces a permissionless self principal. With
-	// rt==nil, reaching the handler produces a 500 through gin Recovery, which
-	// proves auth admitted the request.
-	w := doSelf(h, http.MethodPut, "/billing/v1/me/settings")
-	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
-	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
-	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
-}
-
 // SelfHandler (the exported constructor) fails loud without an initialized app
 // graph — the identity-gated surface is never silently mounted.
 func TestSelfHandler_RequiresInitializedApp(t *testing.T) {
-	h, err := SelfHandler(nil)
+	h, err := SelfHandler(nil, nil)
 	require.Error(t, err)
 	require.Nil(t, h)
 }

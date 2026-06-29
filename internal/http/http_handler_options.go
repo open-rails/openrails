@@ -8,7 +8,8 @@ const (
 	RouteSetCheckout         = embedhttp.RouteSetCheckout
 	RouteSetCustomer         = embedhttp.RouteSetCustomer
 	RouteSetMerchantAdmin    = embedhttp.RouteSetMerchantAdmin
-	RouteSetMerchantSettings = embedhttp.RouteSetMerchantSettings
+	RouteSetCatalog          = embedhttp.RouteSetCatalog
+	RouteSetPaymentProviders = embedhttp.RouteSetPaymentProviders
 	RouteSetMerchantAPI      = embedhttp.RouteSetMerchantAPI
 	RouteSetWebhooks         = embedhttp.RouteSetWebhooks
 )
@@ -25,6 +26,5 @@ var (
 // Note: health/debug endpoints are intentionally not part of embedded handler options.
 // Standalone mode owns service-level health routes.
 type HTTPHandlerOptions struct {
-	RouteSets      []RouteSet
-	CredentialMode embedhttp.CredentialMode
+	RouteSets []RouteSet
 }

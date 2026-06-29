@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -43,14 +44,12 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	})
 
 	rt, err := embed.New(ctx, embed.Options{
-		Merchant: dbtest.TestMerchantSlug,
 		Options: embedded.Options{
 			Config: &config.Config{
 				Env: "dev",
 				DB:  &config.DBConfig{URL: h.DSN},
 			},
-			Redis:                  h.Redis,
-			DelegatedAuthenticator: authn,
+			Redis: h.Redis,
 		},
 	})
 	require.NoError(t, err)
@@ -59,6 +58,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	handler, err := embgin.MountHandler(rt.Embedded(), embgin.MountOptions{
 		MountPrefix: "/api/openrails",
 		RouteSets:   []embedded.RouteSet{embedded.RouteSetMerchantAPI},
+		Gate:        httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
 	})
 	require.NoError(t, err)
 

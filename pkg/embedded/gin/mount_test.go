@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func TestCombinedMountRoutesAndRewrites(t *testing.T) {
@@ -36,5 +38,37 @@ func TestCombinedMountRoutesAndRewrites(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: dispatched %q, want %q", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestRouteSetSelectedCustomer(t *testing.T) {
+	if !routeSetSelected(nil, embedded.RouteSetCustomer) {
+		t.Fatal("default embedded route sets should include customer routes")
+	}
+	if routeSetSelected([]embedded.RouteSet{embedded.RouteSetCheckout}, embedded.RouteSetCustomer) {
+		t.Fatal("explicit route sets without customer should not include customer routes")
+	}
+}
+
+func TestCombinedMountSkipsCustomerHandlerWhenNotSelected(t *testing.T) {
+	self := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("self handler should not run when customer routes are omitted")
+	})
+	user := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	handler := combinedMount("/api/openrails", "/billing", nil, user)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/openrails/v1/me/balance", nil))
+	if rec.Code != http.StatusTeapot {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTeapot)
+	}
+
+	handler = combinedMount("/api/openrails", "/billing", self, user)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/openrails/v1/merchant/catalog/products", nil))
+	if rec.Code != http.StatusTeapot {
+		t.Fatalf("merchant status = %d, want %d", rec.Code, http.StatusTeapot)
 	}
 }
