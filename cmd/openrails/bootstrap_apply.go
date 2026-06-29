@@ -54,7 +54,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 	opts := pushMerchantConfigOptions{file: bootstrap.DefaultMerchantConfigManifestPath}
 	cmd := &cobra.Command{
 		Use:   "push-merchant-config",
-		Short: "Push OpenRails merchant configuration (org + issuer-as-owner + secrets + profile) from YAML",
+		Short: "Push OpenRails merchant configuration (merchant group + issuer-as-owner + secrets + profile) from YAML",
 		Args:  validatePushMerchantConfigArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushMerchantConfig(cmd, opts)
@@ -254,7 +254,7 @@ func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *boots
 		return nil
 	}
 	if dryRun || !reconcileOpts.HasMutations() {
-		fmt.Fprintf(out, "bootstrap authority: org %q declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", manifest.BootstrapOptions().BootstrapOrgSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
+		fmt.Fprintf(out, "bootstrap authority: merchant %q declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", manifest.BootstrapOptions().BootstrapMerchantSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
 		return nil
 	}
 	cp := embcp.Get(a)
@@ -265,7 +265,7 @@ func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *boots
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
-	fmt.Fprintf(out, "bootstrap authority: org %q reconciled (insert=%t overwrite=%t prune=%t api_key_minted=%t)\n", res.BootstrapOrgSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune, res.APIKeyMinted)
+	fmt.Fprintf(out, "bootstrap authority: merchant %q reconciled (insert=%t overwrite=%t prune=%t api_key_minted=%t)\n", res.BootstrapMerchantSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune, res.APIKeyMinted)
 	if res.APIKeyMinted && res.APIKeySecret != "" {
 		fmt.Fprintf(out, "bootstrap admin API key: %s\n", res.APIKeySecret)
 	}
@@ -273,7 +273,7 @@ func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *boots
 }
 
 // applyPushMerchantConfigManifest provisions OpenRails merchants declared by the
-// merchant config manifest: backing org + optional host-app issuer-as-owner,
+// merchant config manifest: permission-group + optional host-app issuer-as-owner,
 // merchant row, provider secrets, and profile (#527). It intentionally does not
 // touch catalog/provider state.
 func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.MerchantManifest, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {

@@ -366,7 +366,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
 	// pinned to an explicit merchant slug (no default merchant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:  dbtest.TestMerchantSlug,
+		BootstrapMerchantSlug:  dbtest.TestMerchantSlug,
 		MintInitialAPIKey: false,
 	})
 	require.NoError(suite.t, err, "control plane bootstrap")

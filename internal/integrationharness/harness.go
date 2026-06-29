@@ -262,7 +262,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	// run-server does the same at boot). MintInitialAPIKey returns the
 	// one-time secret we hand to the client.
 	res, err := embcp.RunBootstrap(h.ctx, app, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:  dbtest.TestMerchantSlug,
+		BootstrapMerchantSlug:  dbtest.TestMerchantSlug,
 		MintInitialAPIKey: true,
 	})
 	require.NoError(h.t, err, "control plane bootstrap")

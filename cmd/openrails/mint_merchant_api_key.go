@@ -41,7 +41,7 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, application, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:  authorityOrgSlug,
+		BootstrapMerchantSlug:  authorityOrgSlug,
 		MintInitialAPIKey: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
