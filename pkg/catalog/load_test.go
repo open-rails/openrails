@@ -179,7 +179,10 @@ products:
 	}
 }
 
-func TestLoad_AllowsSameTermsWithDifferentProviders(t *testing.T) {
+// Two prices that differ only by provider share one unique_prices_product_amount_window
+// key, so the DB can hold at most one. The loader must reject the manifest up
+// front rather than let it collide on the unique key at apply time.
+func TestLoad_RejectsSameTermsWithDifferentProviders(t *testing.T) {
 	body := `
 version: 1
 products:
@@ -189,8 +192,27 @@ products:
       - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [mobius, ccbill, solana]}
       - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [solana], active: false}
 `
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
+		t.Fatalf("want duplicate price terms error, got %v", err)
+	}
+}
+
+// Trial is part of price identity: two prices with the same recurring substance
+// but different first phases (one with a trial, one without) are distinct rows
+// under the unique key, so the loader must accept both.
+func TestLoad_AcceptsSameTermsWithDifferentTrials(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius], trial: {unit_amount: 100, duration: 7d}}
+`
 	if _, err := Load(writeManifest(t, body)); err != nil {
-		t.Fatalf("same terms with different providers should be accepted: %v", err)
+		t.Fatalf("same terms with different trials must be accepted: %v", err)
 	}
 }
 

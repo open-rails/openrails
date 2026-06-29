@@ -219,7 +219,7 @@ FROM openrails.solana_subscriptions;
 -- jsonb carries that id under the provider's key. Draft prices are excluded
 -- (not billable); archived prices stay (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_days, auto_renew, status, rails
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, status, rails
 FROM openrails.prices
 WHERE rails IS NOT NULL
   AND status <> 'draft';
@@ -394,11 +394,6 @@ ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
     updated_at = now()
 RETURNING *;
-
--- name: ListReconciliationState :many
-SELECT * FROM openrails.reconciliation_state
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-ORDER BY source_domain;
 
 -- name: IsSourceDomainReconciled :one
 -- The confirmed-absence gate (§3.2): is this source domain proven fully

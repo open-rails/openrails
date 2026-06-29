@@ -440,46 +440,6 @@ func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (Openrail
 	return i, err
 }
 
-const getProviderIntentByIdempotencyKey = `-- name: GetProviderIntentByIdempotencyKey :one
-SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, provider_account_id FROM openrails.provider_intents
-WHERE merchant_id = $1 AND idempotency_key = $2
-`
-
-type GetProviderIntentByIdempotencyKeyParams struct {
-	MerchantID     uuid.UUID
-	IdempotencyKey string
-}
-
-func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg GetProviderIntentByIdempotencyKeyParams) (OpenrailsProviderIntent, error) {
-	row := q.db.QueryRow(ctx, getProviderIntentByIdempotencyKey, arg.MerchantID, arg.IdempotencyKey)
-	var i OpenrailsProviderIntent
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Provider,
-		&i.IntentType,
-		&i.SubscriptionID,
-		&i.PaymentID,
-		&i.PriceID,
-		&i.Payload,
-		&i.IdempotencyKey,
-		&i.Status,
-		&i.Attempts,
-		&i.NextAttemptAt,
-		&i.ClaimedUntil,
-		&i.Origin,
-		&i.OriginReason,
-		&i.LastFailureReason,
-		&i.ExpiresAt,
-		&i.ResultEvidence,
-		&i.CreatedAt,
-		&i.ExecutedAt,
-		&i.UpdatedAt,
-		&i.ProviderAccountID,
-	)
-	return i, err
-}
-
 const listProviderIntents = `-- name: ListProviderIntents :many
 SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, provider_account_id FROM openrails.provider_intents
 WHERE ($1::text IS NULL OR status = $1::text)
@@ -762,33 +722,6 @@ type ParkProviderIntentParams struct {
 // must not escalate backoff.
 func (q *Queries) ParkProviderIntent(ctx context.Context, arg ParkProviderIntentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkProviderIntent, arg.NextAttemptAt, arg.Reason, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const rebindProviderIntentsToAccount = `-- name: RebindProviderIntentsToAccount :execrows
-UPDATE openrails.provider_intents
-SET provider_account_id = $1,
-    updated_at = now()
-WHERE provider = $2
-  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
-  AND provider_account_id IS DISTINCT FROM $1
-`
-
-type RebindProviderIntentsToAccountParams struct {
-	ProviderAccountID *uuid.UUID
-	Provider          string
-}
-
-// #518 escape hatch: after the operator confirms a credential change points at
-// the SAME (or intentionally-adopted) provider account, rebind the LIVE
-// intents to the current provider account so the account guard stops parking them.
-// Only live statuses — succeeded/terminal/superseded/expired rows keep the
-// provider account they executed (or died) under as evidence.
-func (q *Queries) RebindProviderIntentsToAccount(ctx context.Context, arg RebindProviderIntentsToAccountParams) (int64, error) {
-	result, err := q.db.Exec(ctx, rebindProviderIntentsToAccount, arg.ProviderAccountID, arg.Provider)
 	if err != nil {
 		return 0, err
 	}

@@ -50,15 +50,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
--- name: GetEnabledPrimaryProviderAccount :one
-SELECT * FROM openrails.provider_accounts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND provider_type = lower(sqlc.arg(provider_type)::text)
-  AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
-  AND role = 'primary'
-  AND status = 'enabled'
-LIMIT 1;
-
 -- name: DemoteOtherPrimaryProviderAccounts :exec
 UPDATE openrails.provider_accounts
 SET role = 'legacy',

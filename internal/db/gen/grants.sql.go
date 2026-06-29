@@ -258,30 +258,6 @@ func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepos
 	return deposited, err
 }
 
-const grantHasLiveEntitlement = `-- name: GrantHasLiveEntitlement :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements
-    WHERE merchant_id = $1::uuid
-      AND grant_id = $2::uuid
-      AND revoked_at IS NULL AND deleted_at IS NULL
-) AS exists
-`
-
-type GrantHasLiveEntitlementParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
-}
-
-// GrantHasLiveEntitlement: does this grant still have a non-revoked entitlement
-// window? Used by the Convergence Engine to detect `derive.grant_effect.excess`
-// (a terminated grant whose entitlement effect was never retracted).
-func (q *Queries) GrantHasLiveEntitlement(ctx context.Context, arg GrantHasLiveEntitlementParams) (bool, error) {
-	row := q.db.QueryRow(ctx, grantHasLiveEntitlement, arg.MerchantID, arg.GrantID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const insertGrant = `-- name: InsertGrant :one
 
 INSERT INTO openrails.grants (
@@ -378,34 +354,6 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 	var terminated bool
 	err := row.Scan(&terminated)
 	return terminated, err
-}
-
-const listCustomerIDsWithGrants = `-- name: ListCustomerIDsWithGrants :many
-SELECT DISTINCT customer_id FROM openrails.grants
-WHERE merchant_id = $1::uuid
-ORDER BY customer_id
-`
-
-// #511 DERIVE merchant-wide fan-out: customers in a merchant that hold any grant,
-// so Converge(merchant) can run the per-customer DERIVE checks across all of them.
-func (q *Queries) ListCustomerIDsWithGrants(ctx context.Context, merchantID uuid.UUID) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listCustomerIDsWithGrants, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
-			return nil, err
-		}
-		items = append(items, customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many

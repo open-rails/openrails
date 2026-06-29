@@ -225,24 +225,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND grant_id = sqlc.arg(grant_id)::uuid
   AND revoked_at IS NULL AND deleted_at IS NULL;
 
--- GrantHasLiveEntitlement: does this grant still have a non-revoked entitlement
--- window? Used by the Convergence Engine to detect `derive.grant_effect.excess`
--- (a terminated grant whose entitlement effect was never retracted).
--- name: GrantHasLiveEntitlement :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND grant_id = sqlc.arg(grant_id)::uuid
-      AND revoked_at IS NULL AND deleted_at IS NULL
-) AS exists;
-
--- #511 DERIVE merchant-wide fan-out: customers in a merchant that hold any grant,
--- so Converge(merchant) can run the per-customer DERIVE checks across all of them.
--- name: ListCustomerIDsWithGrants :many
-SELECT DISTINCT customer_id FROM openrails.grants
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-ORDER BY customer_id;
-
 -- #511 DERIVE `derive.grant.missing` (grant tier): a customer's completed,
 -- positive, one-off (non-subscription) payments for a product that PROMISES
 -- grants — a non-empty `entitlements_spec` or `credits_spec` — yet produced NO

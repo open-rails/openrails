@@ -9,6 +9,197 @@
 
 ---
 
+# #623: authkit-style embedded route groups
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Claude). HARD CUT landed (uncommitted): the
+AuthKit-style `RegisterAPI` front door + the hand-written capability-discovery
+system (`GET /v1/capabilities` + `ActiveRouteSets()`, ranged-map, NOT OpenAPI).
+The epic #624–627 had already landed the hard parts (route-set split, the `Gate`,
+mount-time auth, customer-route gating). Doujins migration to `RegisterAPI` remains
+a cross-repo follow-up (it still uses `MountHandler`, which is unchanged).
+
+## Landed 2026-06-29
+
+- `pkg/embedded/gin/api.go` (NEW): `RegisterAPI(group, e, ...Option)` +
+  `WithGroups`/`WithGate`/`WithAuthenticator`/`WithDelegatedAuthenticator`. Prefix
+  inferred from `group.BasePath()`; mounts `group.Any("/*openrails", gin.WrapH(h))`
+  over the existing `MountHandler`.
+- Capability discovery (hand-written, ranged-map, mirrors AuthKit `capabilities.go`):
+  - `internal/http/embedhttp/route_set.go`: `AllRouteSets` (the universe) +
+    `ResolveRouteSets` (nil→defaults, dedup).
+  - `internal/http/embedhttp/capabilities.go` (NEW): `Capabilities`,
+    `buildCapabilities` (ranges `AllRouteSets` → `map[RouteSet]bool`),
+    `CapabilitiesHandler` (public, ETag + `Cache-Control: public, max-age=300`,
+    If-None-Match→304).
+  - `embedhttp.Options.AdvertiseRouteSets`: full set for `/capabilities` (the
+    combined mount strips `customer` from the user handler but still advertises it).
+  - Always-on `GET /billing/v1/capabilities` in `embedhttp.NewHTTPHandler`;
+    standalone gin serves `GET /v1/capabilities` via `registerStandaloneMetaRoutes`.
+- `ActiveRouteSets()` Go accessor on `embedded.Embedded` + `embed.Runtime`, fed by
+  `Embedded.MountRouteSets` (records the resolved set at mount). Same source as the
+  HTTP endpoint, so no drift.
+- HARD CUT: deleted the dead granular gin helpers `RegisterUserRoutes`,
+  `RegisterMerchantActionRoutes`, `RegisterWebhookRoutes`,
+  `RegisterHostWebhookRoutes`, plus `RouteOptions`/`routeAuthenticator`
+  (`pkg/embedded/gin/gin.go`) — zero callers in openrails or doujins; `RegisterAPI`
+  + `MountHandler` are the only mount paths. `StandaloneHandler`/`Handler` kept.
+
+## Validation (all green)
+
+- `go build ./...`, `go vet` (touched pkgs), `gofmt -l` clean.
+- Unit: `go test ./internal/http/embedhttp/... ./pkg/embedded/... ./embed/...`
+  (incl. new `capabilities_test.go`: handler shape/ETag/304, `ResolveRouteSets`).
+- Integration: `go test -tags=integration ./internal/integrationharness -run
+  'TestRegisterAPIEndToEnd|TestEmbeddedMountHandlerEndToEnd'` — both PASS (new test
+  proves selection, prefix inference, customer 404-when-omitted, capabilities
+  reflects selection incl. `customer` true when selected, `ActiveRouteSets`).
+
+## Cross-repo follow-up
+
+- Doujins: migrate `buildMount`'s `MountHandler` call to `RegisterAPI`
+  (`WithGroups`/`WithAuthenticator`/`WithDelegatedAuthenticator`/`WithGate`).
+  Optional — `MountHandler` is unchanged, so doujins still compiles as-is.
+
+Make OpenRails' embedded Gin mounting look like AuthKit's mount API: the host
+creates a route group and selects only the OpenRails route groups it wants.
+
+## Why
+
+Embedded hosts should not get every OpenRails route just because they mounted the
+billing surface — same reason AuthKit exposes separate mountable groups. If
+provider config is fixed/read-only in the host, don't mount the payment-provider
+routes; if the host calls the in-process service directly, don't mount the
+host-internal merchant API routes.
+
+## Already done by epic #624–627 (verified in code 2026-06-29)
+
+- Route groups exist and are independently selectable: `checkout`, `customer`,
+  `merchant_admin`, `catalog`, `payment_providers`, `merchant_api`, `webhooks`
+  (`internal/http/embedhttp/route_set.go`). `payment_providers`/`merchant_api` are
+  already excluded from `EmbeddedDefaultRouteSets`.
+- `RouteSetCustomer` ALREADY gates `/v1/me` + `/v1/customers`: `MountHandler`
+  builds the self-handler only when customer is selected and `combinedMount` 404s
+  the customer subtree otherwise (`pkg/embedded/gin/mount.go`). Covered by
+  `TestCombinedMountSkipsCustomerHandlerWhenNotSelected` +
+  `TestRouteSetSelectedCustomer`.
+- Mount-time auth is already the seam (#625):
+  `MountOptions{Authenticator, Gate, DelegatedAuthenticator}`. The `Gate` exists.
+
+So the original plan item "make `RouteSetCustomer` gate the self path" and most of
+the acceptance criteria are already satisfied. Only the ergonomic wrapper is left.
+
+## Target API
+
+```go
+api := router.Group("/api/openrails")
+openrailsgin.RegisterAPI(api, rt.Embedded(),
+    openrailsgin.WithGroups(
+        embedded.RouteSetCheckout,
+        embedded.RouteSetCustomer,
+        embedded.RouteSetWebhooks,
+    ),
+    openrailsgin.WithAuthenticator(hostAuthn),          // checkout/customer
+    openrailsgin.WithDelegatedAuthenticator(hostDeleg), // /v1/me + /v1/customers
+    openrailsgin.WithGate(hostGate),                    // merchant groups
+)
+```
+
+`MountHandler` stays as the lower-level `net/http` escape hatch.
+
+## Decisions
+
+- **Receiver is `*embedded.Embedded`** (consistent with `MountHandler`/
+  `SelfHandler`; the low-level gin package must not import the high-level `embed`
+  package). The host passes `rt.Embedded()` — not the `runtime` of the old sketch.
+- **`Option` mutates `MountOptions` directly** — no parallel options struct.
+  `MountPrefix` is always overwritten from `group.BasePath()`, so there is NO
+  `WithMountPrefix` (YAGNI).
+- **The example needs all three auth options** for those route sets: checkout
+  needs `WithAuthenticator`, customer also needs `WithDelegatedAuthenticator`,
+  merchant groups need `WithGate`. The original sketch (only `WithGate`) would
+  fail at mount.
+- **Auth-misconfig stays boot-time fail-fast.** `RegisterAPI` returns
+  `MountHandler`'s error (missing `DelegatedAuthenticator`); the missing
+  `Authenticator`/`Gate` case still panics inside `NewHTTPHandler`
+  (`embedhttp.go` `validateAuthBoundary`). NOT converting that panic to an error:
+  `NewHTTPHandler` returns `http.Handler` (no error) and is called from several
+  places (standalone `server.go` too), so a signature change would ripple well
+  beyond this issue for no runtime benefit — both fire only on bad boot config.
+
+## Capability discovery (mirrors AuthKit `capabilities.go` — hand-written, NOT OpenAPI)
+
+AuthKit answers "what's available here?" with a HAND-WRITTEN capability document
+(root `capabilities.go` struct + `Service.capabilities()` constructor in
+`http/providers_get.go`, reading config), served at `GET /auth/capabilities` with
+an ETag + `Cache-Control: public, max-age=300`. It auto-generates NOTHING — AuthKit
+has zero OpenAPI/swagger (verified by grep). Its `RouteSpec` registry is for
+*mounting*, not discovery. So capability discovery and the registry we cut are
+INDEPENDENT: OpenRails gets discovery WITHOUT the registry/OpenAPI.
+
+OpenRails route-group availability is a mount choice (`WithGroups(...)`),
+config-dependent per deployment — exactly the discovery case. Two surfaces over ONE
+source of truth (the resolved selected set):
+
+- **HTTP (external + remote SDK):** always-on `GET {prefix}/v1/capabilities`:
+  ```json
+  { "route_groups": { "checkout": true, "customer": true, "merchant_admin": true,
+    "catalog": true, "payment_providers": false, "merchant_api": false, "webhooks": true } }
+  ```
+  Typed struct, explicit bool per group (like AuthKit's bool-per-capability — NOT a
+  loose map), public, with AuthKit's `ETag` + `Cache-Control: public, max-age=300`.
+- **Go (in-process):** `rt.ActiveRouteSets() []RouteSet` (+ lower
+  `embedded.Embedded.ActiveRouteSets()`), the primitive the HTTP handler serializes.
+
+Gotcha that fixes where it's wired: the embedded combined mount STRIPS `customer`
+from the net/http user handler (it is served by the separate `SelfHandler`,
+`pkg/embedded/gin/mount.go`), so the capabilities response must be built from the
+FULL resolved set, computed at the mount layer (`MountHandler` / standalone
+`server`) — NOT from the user handler's stripped subset, or `customer` always reads
+false. Plan: store the full resolved set on `*embedded.Embedded` at mount; both
+`ActiveRouteSets()` and the `/v1/capabilities` handler read it.
+
+## Plan
+
+1. Add `pkg/embedded/gin/api.go`: `RegisterAPI(group, e, ...Option)` plus
+   `WithGroups` / `WithGate` / `WithAuthenticator` / `WithDelegatedAuthenticator`,
+   backed by `MountHandler`. Infer the prefix from `group.BasePath()`; mount with
+   `group.Any("/*openrails", gin.WrapH(h))`.
+2. Add the capability surface: a hand-written `Capabilities` /
+   `RouteGroupCapabilities` struct (mirrors AuthKit `capabilities.go`); store the
+   full resolved `[]RouteSet` on `*embedded.Embedded` at mount; expose
+   `ActiveRouteSets()` (Go) + always-on `GET {prefix}/v1/capabilities` (HTTP, ETag +
+   cache headers like AuthKit). Wire it in `MountHandler` and standalone `server` so
+   the FULL set (incl. `customer`) is reported.
+3. Tests: `api_test.go` (checkout 200s, `/v1/me` 404s when `RouteSetCustomer`
+   omitted) + a capabilities test (response reflects selected groups; `customer`
+   true when selected even though the user handler strips it).
+4. Update the `pkg/embedded` README example to prefer `RegisterAPI(...)` and show
+   `GET /v1/capabilities`.
+5. (cross-repo) Update Doujins to mount OpenRails via `RegisterAPI` instead of
+   wiring the catch-all directly. Separate PR + version bump, like the epic's
+   per-host bumps.
+
+## Acceptance
+
+- A host mounts only checkout/customer/webhook routes with AuthKit-like syntax via
+  `RegisterAPI` + `WithGroups`.
+- The dedicated gin group's `BasePath()` is the mount prefix — host doesn't repeat it.
+- `GET /v1/capabilities` returns the active route groups (incl. `customer` when
+  selected); `rt.ActiveRouteSets()` returns the same set; one source, no drift.
+- Tests prove customer routes are excluded when `RouteSetCustomer` is omitted, and
+  that capabilities reflects selection.
+- Doujins compiles against the new API (separate repo).
+
+## Not doing (rejected, not deferred)
+
+- No `RouteSpec`/`APIRoutes` route registry, no OpenAPI/swagger generation, no
+  table-driven auth coverage. Explicitly rejected (Paul, 2026-06-29). NOTE: this is
+  SEPARATE from capability discovery above — AuthKit proves you get hand-written
+  discovery with ZERO OpenAPI. The registry stays cut.
+
+---
+
 # #621: catalog prices own providers explicitly
 
 **Completed:** yes

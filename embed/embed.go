@@ -15,7 +15,6 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -136,14 +135,22 @@ func (r *Runtime) Service() *service.Service { return r.svc }
 func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
-// passthrough to pkg/embedded.NewHTTPHandler. The service-credential-authenticated
+// passthrough to pkg/embedded.NewHTTPHandler (which records the active route sets
+// for ActiveRouteSets / capability discovery). The service-credential-authenticated
 // /billing/v1/merchant/* surface is opt-in via embedded.RouteSetMerchantAPI; an
 // embedded host normally uses Client() instead.
 func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
-	asm := embedhttp.FromApp(r.emb.App())
-	return asm.NewHTTPHandler(embedhttp.Options{
-		RouteSets: opts.RouteSets,
-	})
+	return r.emb.NewHTTPHandler(opts)
+}
+
+// ActiveRouteSets returns the route groups of the most recently mounted HTTP
+// surface (Handler, or pkg/embedded/gin MountHandler / RegisterAPI); nil before
+// any mount. It is the in-process twin of GET /v1/capabilities — same source.
+func (r *Runtime) ActiveRouteSets() []RouteSet {
+	if r == nil {
+		return nil
+	}
+	return r.emb.ActiveRouteSets()
 }
 
 // RunWorkers runs the River workers, blocking until ctx is done — a thin

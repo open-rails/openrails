@@ -168,24 +168,24 @@ type Price struct {
 	Amount     int64         `json:"amount"`
 	Currency   string        `json:"currency"`
 
-	// AccessDurationDays is the access window (#622) a purchase of this price
-	// grants, in days. nil = indefinite/durable (perpetual ownership); a positive
-	// value = a finite window (rental, one-off, or the billing period when
-	// AutoRenew). Drives BOTH product_access_grants.ends_at and the derived
-	// entitlement end_at.
-	AccessDurationDays *int `json:"access_duration_days"`
+	// AccessDurationHours is the access window (#622) a purchase of this price
+	// grants, in HOURS (supports sub-day windows, e.g. a 12h rental). nil =
+	// indefinite/durable (perpetual ownership); a positive value = a finite window
+	// (rental, one-off, or the billing period when AutoRenew). Drives BOTH
+	// product_access_grants.ends_at and the derived entitlement end_at.
+	AccessDurationHours *int `json:"access_duration_hours"`
 
 	// AutoRenew (#622) reports whether the price charges again and extends the
-	// window at the end of AccessDurationDays. A recurring subscription is
-	// AutoRenew=true with a finite AccessDurationDays (the billing period).
+	// window at the end of AccessDurationHours. A recurring subscription is
+	// AutoRenew=true with a finite AccessDurationHours (the billing period).
 	AutoRenew bool `json:"auto_renew"`
 
 	// Trial pricing (#622): an optional FIRST phase that differs from the recurring
 	// terms above. TrialUnitAmount = first-phase price (0 = free trial),
-	// TrialDurationDays = first-phase length. Both nil = a flat price. Only valid
-	// when AutoRenew.
-	TrialUnitAmount   *int64 `json:"trial_unit_amount,omitempty"`
-	TrialDurationDays *int   `json:"trial_duration_days,omitempty"`
+	// TrialDurationHours = first-phase length in hours. Both nil = a flat price.
+	// Only valid when AutoRenew.
+	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
+	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
 	// Rails is a JSONB map of rail name -> rail-specific configuration
 	// Keys: "mobius", "ccbill", "solana", etc.
@@ -215,14 +215,17 @@ func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 // the #622 replacement for the old "billing_cycle_days != nil" test.
 func (p *Price) IsRecurring() bool { return p.AutoRenew }
 
-// RecurringCycleDays returns the billing period in days for an auto-renewing
-// price, or nil for a one-off/durable price. It is the #622 replacement for the
-// old BillingCycleDays field where callers meant "the recurring cadence".
+// RecurringCycleDays returns the billing period in WHOLE DAYS for an
+// auto-renewing price, or nil for a one-off/durable price. The window is stored
+// in hours; providers (Stripe interval, NMI day-frequency, Solana period) bill
+// in days, so the cadence is hours/24. A sub-day auto_renew window floors to 0
+// days and is not pushed to a provider (provider adapters guard on > 0).
 func (p *Price) RecurringCycleDays() *int {
-	if p == nil || !p.AutoRenew {
+	if p == nil || !p.AutoRenew || p.AccessDurationHours == nil {
 		return nil
 	}
-	return p.AccessDurationDays
+	days := *p.AccessDurationHours / 24
+	return &days
 }
 
 // Rail config key constants (used in the Rails JSONB map)
@@ -298,15 +301,15 @@ func (p *Price) GetSolanaConfig() (ok bool) {
 }
 
 // HasTrial reports whether this price has a trial first phase (#622).
-func (p *Price) HasTrial() bool { return p.TrialUnitAmount != nil && p.TrialDurationDays != nil }
+func (p *Price) HasTrial() bool { return p.TrialUnitAmount != nil && p.TrialDurationHours != nil }
 
-// GetTrial returns the trial first phase (unit amount + length in days) and
+// GetTrial returns the trial first phase (unit amount + length in HOURS) and
 // whether one is set. A unit amount of 0 is a free trial.
-func (p *Price) GetTrial() (trialUnitAmount int64, trialDurationDays int, ok bool) {
+func (p *Price) GetTrial() (trialUnitAmount int64, trialDurationHours int, ok bool) {
 	if !p.HasTrial() {
 		return 0, 0, false
 	}
-	return *p.TrialUnitAmount, *p.TrialDurationDays, true
+	return *p.TrialUnitAmount, *p.TrialDurationHours, true
 }
 
 // GetStripeConfig returns Stripe price ID

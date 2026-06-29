@@ -28,19 +28,19 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
-		ID:                price.ID,
-		MerchantID:        price.MerchantID,
-		ProductID:         price.ProductID,
-		Status:            string(price.Status),
-		Amount:            price.Amount,
-		Currency:          price.Currency,
-		AccessDurationDays: intPtrTo32(price.AccessDurationDays),
-		AutoRenew:          price.AutoRenew,
-		TrialUnitAmount:    price.TrialUnitAmount,
-		TrialDurationDays:  intPtrTo32(price.TrialDurationDays),
-		Rails:              rails,
-		CreatedAt:          price.CreatedAt,
-		UpdatedAt:          price.UpdatedAt,
+		ID:                  price.ID,
+		MerchantID:          price.MerchantID,
+		ProductID:           price.ProductID,
+		Status:              string(price.Status),
+		Amount:              price.Amount,
+		Currency:            price.Currency,
+		AccessDurationHours: intPtrTo32(price.AccessDurationHours),
+		AutoRenew:           price.AutoRenew,
+		TrialUnitAmount:     price.TrialUnitAmount,
+		TrialDurationHours:  intPtrTo32(price.TrialDurationHours),
+		Rails:               rails,
+		CreatedAt:           price.CreatedAt,
+		UpdatedAt:           price.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -236,17 +236,17 @@ func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).UpdatePrice(ctx, gen.UpdatePriceParams{
-		ID:               price.ID,
-		ProductID:        price.ProductID,
-		Status:           string(price.Status),
-		Amount:           price.Amount,
-		Currency:         price.Currency,
-		AccessDurationDays: intPtrTo32(price.AccessDurationDays),
-		AutoRenew:          price.AutoRenew,
-		TrialUnitAmount:    price.TrialUnitAmount,
-		TrialDurationDays:  intPtrTo32(price.TrialDurationDays),
-		Rails:              rails,
-		UpdatedAt:          updateTimestamp(price.UpdatedAt),
+		ID:                  price.ID,
+		ProductID:           price.ProductID,
+		Status:              string(price.Status),
+		Amount:              price.Amount,
+		Currency:            price.Currency,
+		AccessDurationHours: intPtrTo32(price.AccessDurationHours),
+		AutoRenew:           price.AutoRenew,
+		TrialUnitAmount:     price.TrialUnitAmount,
+		TrialDurationHours:  intPtrTo32(price.TrialDurationHours),
+		Rails:               rails,
+		UpdatedAt:           updateTimestamp(price.UpdatedAt),
 	})
 	if err != nil {
 		return err

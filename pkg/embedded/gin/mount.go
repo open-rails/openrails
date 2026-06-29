@@ -29,8 +29,11 @@ type MountOptions struct {
 // MountHandler returns the selected embedded billing surfaces as ONE handler.
 // The host mounts this once and rewrites nothing.
 func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error) {
+	// Resolve + record the full selection (incl. customer); the combined mount
+	// serves customer via the self handler, so it is part of the advertised set.
+	active := e.MountRouteSets(opts.RouteSets)
 	var self http.Handler
-	if routeSetSelected(opts.RouteSets, embedded.RouteSetCustomer) {
+	if routeSetSelected(active, embedded.RouteSetCustomer) {
 		var err error
 		self, err = SelfHandler(e, opts.DelegatedAuthenticator)
 		if err != nil {
@@ -43,10 +46,13 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	if a := e.App(); a != nil && a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
 	}
-	userRouteSets := routeSetsWithoutCustomer(opts.RouteSets)
+	userRouteSets := routeSetsWithoutCustomer(active)
 	user := http.NotFoundHandler()
 	if len(userRouteSets) > 0 {
-		user = asm.NewHTTPHandler(embedhttp.Options{RouteSets: userRouteSets})
+		user = asm.NewHTTPHandler(embedhttp.Options{
+			RouteSets:          userRouteSets,
+			AdvertiseRouteSets: active,
+		})
 	}
 
 	// base is the canonical embedded mount ("/billing"); both handlers serve at

@@ -148,9 +148,11 @@ func TestConvergenceState_ConfirmedAbsenceGate(t *testing.T) {
 		require.False(t, st2.FullyReconciled)
 		require.NotNil(t, st2.LastFullPullAt, "watermark preserved across upsert")
 
-		list, err := q.ListReconciliationState(ctx, merchantID)
-		require.NoError(t, err)
-		require.Len(t, list, 1)
+		var stateCount int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.reconciliation_state WHERE merchant_id=$1`, merchantID,
+		).Scan(&stateCount))
+		require.Equal(t, 1, stateCount)
 		return nil
 	}))
 }

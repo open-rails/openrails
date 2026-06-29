@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -19,8 +18,8 @@ var invalidSlugChars = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 // normalizeDuration parses a #622 access-window duration. An empty value or
 // "indefinite" returns nil (durable/perpetual). A finite value must be a whole
-// number of days (the storage unit). Returns the window length in days, or nil
-// for indefinite.
+// number of hours, minimum 1h (the storage unit), so windows can be sub-day
+// (e.g. 12h). Returns the window length in HOURS, or nil for indefinite.
 func normalizeDuration(value string) (*int, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" || value == "indefinite" {
@@ -30,11 +29,11 @@ func normalizeDuration(value string) (*int, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d < 24*time.Hour || d%(24*time.Hour) != 0 {
-		return nil, fmt.Errorf("duration %q must be whole days (e.g. 30d) or 'indefinite'", value)
+	if d < time.Hour || d%time.Hour != 0 {
+		return nil, fmt.Errorf("duration %q must be whole hours (e.g. 12h, 30d) or 'indefinite'", value)
 	}
-	days := int(d / (24 * time.Hour))
-	return &days, nil
+	hours := int(d / time.Hour)
+	return &hours, nil
 }
 
 func normalizeSlug(value string) string {
@@ -161,8 +160,10 @@ func (m *Manifest) validateProduct(groupSlug string, product *Product, productSl
 		return err
 	}
 
-	// A price's identity is its financial substance plus explicit provider set.
-	// There is no price slug to dedup on.
+	// A price's identity is its financial substance — exactly the DB's
+	// unique_prices_product_amount_window key. There is no price slug to dedup
+	// on, and providers are NOT part of identity (the constraint forbids two
+	// prices that differ only by provider).
 	priceTerms := map[string]struct{}{}
 	for pri := range product.Prices {
 		price := &product.Prices[pri]
@@ -465,22 +466,21 @@ func validPriceCurrency(value string) bool {
 	return value != "custom" && validLedgerCurrency(value)
 }
 
-// priceTermsKey is the manifest identity key for a declared price.
+// priceTermsKey is the manifest identity key for a declared price — the same
+// financial substance the DB's unique_prices_product_amount_window key enforces.
+// Providers are excluded so two declarations that differ only by provider are
+// rejected here with a clear message instead of colliding on the unique key at
+// apply time.
 func priceTermsKey(p Price) string {
 	metered := ""
 	if p.Metered != nil {
 		metered = fmt.Sprintf("|metered:%s:%d:%d:%s", p.Metered.Meter, p.Metered.Rate, p.Metered.PerUnits, p.Metered.Per)
 	}
-	return fmt.Sprintf("%s|%d|%s|renew:%t|providers:%s%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, providerSetKey(p.Providers), metered)
-}
-
-func providerSetKey(providers []string) string {
-	if len(providers) == 0 {
-		return ""
+	trial := ""
+	if p.Trial != nil {
+		trial = fmt.Sprintf("|trial:%d:%s", p.Trial.UnitAmount, p.Trial.Duration)
 	}
-	out := append([]string(nil), providers...)
-	sort.Strings(out)
-	return strings.Join(out, ",")
+	return fmt.Sprintf("%s|%d|%s|renew:%t%s%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, trial, metered)
 }
 
 func normalizeProviders(in []string) []string {

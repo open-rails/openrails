@@ -688,14 +688,14 @@ type OpenrailsPrice struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-	// #622 access window in days a purchase grants; NULL = indefinite/durable.
-	AccessDurationDays *int32
-	// #622 whether the price recharges and extends the window after access_duration_days (recurring).
+	// access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.
+	AccessDurationHours *int32
+	// #622 whether the price recharges and extends the window after access_duration_hours (recurring).
 	AutoRenew bool
 	// #622 optional first-phase price (micros); 0 = free trial; NULL = no trial.
 	TrialUnitAmount *int64
-	// #622 optional first-phase length in days; NULL = no trial.
-	TrialDurationDays *int32
+	// optional trial first-phase length in HOURS; NULL = no trial.
+	TrialDurationHours *int32
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.

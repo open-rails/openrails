@@ -52,7 +52,7 @@ const createPrice = `-- name: CreatePrice :execrows
 
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, status, amount, currency,
-    access_duration_days, auto_renew, trial_unit_amount, trial_duration_days, rails, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, created_at, updated_at
 ) VALUES (
     $1,
     $5::uuid,
@@ -66,19 +66,19 @@ INSERT INTO openrails.prices (
 `
 
 type CreatePriceParams struct {
-	ID                 uuid.UUID
-	ProductID          uuid.UUID
-	Amount             int64
-	Currency           string
-	MerchantID         uuid.UUID
-	Status             string
-	AccessDurationDays *int32
-	AutoRenew          bool
-	TrialUnitAmount    *int64
-	TrialDurationDays  *int32
-	Rails              []byte
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  uuid.UUID
+	ProductID           uuid.UUID
+	Amount              int64
+	Currency            string
+	MerchantID          uuid.UUID
+	Status              string
+	AccessDurationHours *int32
+	AutoRenew           bool
+	TrialUnitAmount     *int64
+	TrialDurationHours  *int32
+	Rails               []byte
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // openrails.prices.
@@ -90,10 +90,10 @@ func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64
 		arg.Currency,
 		arg.MerchantID,
 		arg.Status,
-		arg.AccessDurationDays,
+		arg.AccessDurationHours,
 		arg.AutoRenew,
 		arg.TrialUnitAmount,
-		arg.TrialDurationDays,
+		arg.TrialDurationHours,
 		arg.Rails,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -117,7 +117,7 @@ func (q *Queries) DeletePrice(ctx context.Context, id uuid.UUID) (int64, error) 
 }
 
 const getPriceByID = `-- name: GetPriceByID :one
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices WHERE id = $1
+SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours FROM openrails.prices WHERE id = $1
 `
 
 func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (OpenrailsPrice, error) {
@@ -133,16 +133,16 @@ func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (OpenrailsPric
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
-		&i.AccessDurationDays,
+		&i.AccessDurationHours,
 		&i.AutoRenew,
 		&i.TrialUnitAmount,
-		&i.TrialDurationDays,
+		&i.TrialDurationHours,
 	)
 	return i, err
 }
 
 const getPriceByNMIPlan = `-- name: GetPriceByNMIPlan :one
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices price
+SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours FROM openrails.prices price
 WHERE price.status <> 'draft'
   AND (price.rails -> $1::text ->> 'plan_id' = $2::text
        OR ($3::boolean
@@ -171,16 +171,16 @@ func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
-		&i.AccessDurationDays,
+		&i.AccessDurationHours,
 		&i.AutoRenew,
 		&i.TrialUnitAmount,
-		&i.TrialDurationDays,
+		&i.TrialDurationHours,
 	)
 	return i, err
 }
 
 const getPriceWithProductByCCBillPriceID = `-- name: GetPriceWithProductByCCBillPriceID :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE (price.rails -> 'ccbill' ->> 'flex_id' = $1::text
@@ -207,10 +207,10 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, ccbill
 		&i.OpenrailsPrice.CreatedAt,
 		&i.OpenrailsPrice.UpdatedAt,
 		&i.OpenrailsPrice.MerchantID,
-		&i.OpenrailsPrice.AccessDurationDays,
+		&i.OpenrailsPrice.AccessDurationHours,
 		&i.OpenrailsPrice.AutoRenew,
 		&i.OpenrailsPrice.TrialUnitAmount,
-		&i.OpenrailsPrice.TrialDurationDays,
+		&i.OpenrailsPrice.TrialDurationHours,
 		&i.OpenrailsProduct.ID,
 		&i.OpenrailsProduct.Slug,
 		&i.OpenrailsProduct.DisplayName,
@@ -228,7 +228,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, ccbill
 }
 
 const getPriceWithProductByStripePriceID = `-- name: GetPriceWithProductByStripePriceID :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.rails -> 'stripe' ->> 'price_id' = $1::text
@@ -254,10 +254,10 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, stripe
 		&i.OpenrailsPrice.CreatedAt,
 		&i.OpenrailsPrice.UpdatedAt,
 		&i.OpenrailsPrice.MerchantID,
-		&i.OpenrailsPrice.AccessDurationDays,
+		&i.OpenrailsPrice.AccessDurationHours,
 		&i.OpenrailsPrice.AutoRenew,
 		&i.OpenrailsPrice.TrialUnitAmount,
-		&i.OpenrailsPrice.TrialDurationDays,
+		&i.OpenrailsPrice.TrialDurationHours,
 		&i.OpenrailsProduct.ID,
 		&i.OpenrailsProduct.Slug,
 		&i.OpenrailsProduct.DisplayName,
@@ -274,47 +274,8 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, stripe
 	return i, err
 }
 
-const listActivePricesByProduct = `-- name: ListActivePricesByProduct :many
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices price
-WHERE price.product_id = $1 AND price.status = 'active'
-`
-
-func (q *Queries) ListActivePricesByProduct(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
-	rows, err := q.db.Query(ctx, listActivePricesByProduct, productID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPrice
-	for rows.Next() {
-		var i OpenrailsPrice
-		if err := rows.Scan(
-			&i.ID,
-			&i.ProductID,
-			&i.Amount,
-			&i.Currency,
-			&i.Rails,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.MerchantID,
-			&i.AccessDurationDays,
-			&i.AutoRenew,
-			&i.TrialUnitAmount,
-			&i.TrialDurationDays,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActivePricesByProductOrdered = `-- name: ListActivePricesByProductOrdered :many
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices price
+SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'
 ORDER BY price.amount ASC
 `
@@ -338,10 +299,10 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productI
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.AccessDurationDays,
+			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.TrialUnitAmount,
-			&i.TrialDurationDays,
+			&i.TrialDurationHours,
 		); err != nil {
 			return nil, err
 		}
@@ -354,7 +315,7 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productI
 }
 
 const listAllActivePricesWithProduct = `-- name: ListAllActivePricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.status = 'active'
@@ -385,10 +346,10 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAll
 			&i.OpenrailsPrice.CreatedAt,
 			&i.OpenrailsPrice.UpdatedAt,
 			&i.OpenrailsPrice.MerchantID,
-			&i.OpenrailsPrice.AccessDurationDays,
+			&i.OpenrailsPrice.AccessDurationHours,
 			&i.OpenrailsPrice.AutoRenew,
 			&i.OpenrailsPrice.TrialUnitAmount,
-			&i.OpenrailsPrice.TrialDurationDays,
+			&i.OpenrailsPrice.TrialDurationHours,
 			&i.OpenrailsProduct.ID,
 			&i.OpenrailsProduct.Slug,
 			&i.OpenrailsProduct.DisplayName,
@@ -413,7 +374,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAll
 }
 
 const listAllPricesWithProduct = `-- name: ListAllPricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 ORDER BY price.amount ASC
@@ -443,10 +404,10 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPrices
 			&i.OpenrailsPrice.CreatedAt,
 			&i.OpenrailsPrice.UpdatedAt,
 			&i.OpenrailsPrice.MerchantID,
-			&i.OpenrailsPrice.AccessDurationDays,
+			&i.OpenrailsPrice.AccessDurationHours,
 			&i.OpenrailsPrice.AutoRenew,
 			&i.OpenrailsPrice.TrialUnitAmount,
-			&i.OpenrailsPrice.TrialDurationDays,
+			&i.OpenrailsPrice.TrialDurationHours,
 			&i.OpenrailsProduct.ID,
 			&i.OpenrailsProduct.Slug,
 			&i.OpenrailsProduct.DisplayName,
@@ -471,7 +432,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPrices
 }
 
 const listPricesByIDs = `-- name: ListPricesByIDs :many
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices WHERE id = ANY($1::uuid[])
+SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours FROM openrails.prices WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPrice, error) {
@@ -493,10 +454,10 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]Openr
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.AccessDurationDays,
+			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.TrialUnitAmount,
-			&i.TrialDurationDays,
+			&i.TrialDurationHours,
 		); err != nil {
 			return nil, err
 		}
@@ -509,7 +470,7 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]Openr
 }
 
 const listPricesByProduct = `-- name: ListPricesByProduct :many
-SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_days, auto_renew, trial_unit_amount, trial_duration_days FROM openrails.prices price
+SELECT id, product_id, amount, currency, rails, status, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours FROM openrails.prices price
 WHERE price.product_id = $1
 `
 
@@ -535,10 +496,10 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, productID uuid.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.AccessDurationDays,
+			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.TrialUnitAmount,
-			&i.TrialDurationDays,
+			&i.TrialDurationHours,
 		); err != nil {
 			return nil, err
 		}
@@ -551,7 +512,7 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, productID uuid.UUID) 
 }
 
 const listPricesFiltered = `-- name: ListPricesFiltered :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE (NOT $1::boolean OR price.status = 'active')
@@ -611,10 +572,10 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 			&i.OpenrailsPrice.CreatedAt,
 			&i.OpenrailsPrice.UpdatedAt,
 			&i.OpenrailsPrice.MerchantID,
-			&i.OpenrailsPrice.AccessDurationDays,
+			&i.OpenrailsPrice.AccessDurationHours,
 			&i.OpenrailsPrice.AutoRenew,
 			&i.OpenrailsPrice.TrialUnitAmount,
-			&i.OpenrailsPrice.TrialDurationDays,
+			&i.OpenrailsPrice.TrialDurationHours,
 			&i.OpenrailsProduct.ID,
 			&i.OpenrailsProduct.Slug,
 			&i.OpenrailsProduct.DisplayName,
@@ -639,7 +600,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 }
 
 const listPricesWithProductByIDs = `-- name: ListPricesWithProductByIDs :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_days, price.auto_renew, price.trial_unit_amount, price.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.id = ANY($1::uuid[])
@@ -669,10 +630,10 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUI
 			&i.OpenrailsPrice.CreatedAt,
 			&i.OpenrailsPrice.UpdatedAt,
 			&i.OpenrailsPrice.MerchantID,
-			&i.OpenrailsPrice.AccessDurationDays,
+			&i.OpenrailsPrice.AccessDurationHours,
 			&i.OpenrailsPrice.AutoRenew,
 			&i.OpenrailsPrice.TrialUnitAmount,
-			&i.OpenrailsPrice.TrialDurationDays,
+			&i.OpenrailsPrice.TrialDurationHours,
 			&i.OpenrailsProduct.ID,
 			&i.OpenrailsProduct.Slug,
 			&i.OpenrailsProduct.DisplayName,
@@ -702,27 +663,27 @@ UPDATE openrails.prices SET
     status = $3,
     amount = $4,
     currency = $5,
-    access_duration_days = $6,
+    access_duration_hours = $6,
     auto_renew = $7::boolean,
     trial_unit_amount = $8,
-    trial_duration_days = $9,
+    trial_duration_hours = $9,
     rails = $10,
     updated_at = $11
 WHERE id = $1
 `
 
 type UpdatePriceParams struct {
-	ID                 uuid.UUID
-	ProductID          uuid.UUID
-	Status             string
-	Amount             int64
-	Currency           string
-	AccessDurationDays *int32
-	AutoRenew          bool
-	TrialUnitAmount    *int64
-	TrialDurationDays  *int32
-	Rails              []byte
-	UpdatedAt          time.Time
+	ID                  uuid.UUID
+	ProductID           uuid.UUID
+	Status              string
+	Amount              int64
+	Currency            string
+	AccessDurationHours *int32
+	AutoRenew           bool
+	TrialUnitAmount     *int64
+	TrialDurationHours  *int32
+	Rails               []byte
+	UpdatedAt           time.Time
 }
 
 func (q *Queries) UpdatePrice(ctx context.Context, arg UpdatePriceParams) (int64, error) {
@@ -732,10 +693,10 @@ func (q *Queries) UpdatePrice(ctx context.Context, arg UpdatePriceParams) (int64
 		arg.Status,
 		arg.Amount,
 		arg.Currency,
-		arg.AccessDurationDays,
+		arg.AccessDurationHours,
 		arg.AutoRenew,
 		arg.TrialUnitAmount,
-		arg.TrialDurationDays,
+		arg.TrialDurationHours,
 		arg.Rails,
 		arg.UpdatedAt,
 	)

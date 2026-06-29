@@ -112,8 +112,14 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 		_, err = gl.Revoke(ctx, g.ID, "admin removed (retraction not yet run)")
 		require.NoError(t, err)
 		grantID = g.ID
-		live, err := appDB.Gen(ctx).GrantHasLiveEntitlement(ctx, gen.GrantHasLiveEntitlementParams{MerchantID: merchantID, GrantID: g.ID})
-		require.NoError(t, err)
+		var live bool
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM openrails.entitlements
+				WHERE merchant_id=$1 AND grant_id=$2
+				  AND revoked_at IS NULL AND deleted_at IS NULL
+			)
+		`, merchantID, g.ID).Scan(&live))
 		require.True(t, live, "precondition: entitlement still live despite the revoke")
 		return nil
 	}))
@@ -135,8 +141,14 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 		require.Equal(t, 1, res.Findings)
 		require.Equal(t, 1, res.AutoFixed, "terminated grant retraction is AUTO (recorded revoke, not absence)")
 
-		live, err := appDB.Gen(ctx).GrantHasLiveEntitlement(ctx, gen.GrantHasLiveEntitlementParams{MerchantID: merchantID, GrantID: grantID})
-		require.NoError(t, err)
+		var live bool
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM openrails.entitlements
+				WHERE merchant_id=$1 AND grant_id=$2
+				  AND revoked_at IS NULL AND deleted_at IS NULL
+			)
+		`, merchantID, grantID).Scan(&live))
 		require.False(t, live, "entitlement window retracted by the repair")
 
 		var status string

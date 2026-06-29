@@ -413,7 +413,8 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 		})
 	}
 	return asm.NewHTTPHandler(embedhttp.Options{
-		RouteSets: opts.RouteSets,
+		RouteSets:          opts.RouteSets,
+		AdvertiseRouteSets: opts.RouteSets,
 	})
 }
 

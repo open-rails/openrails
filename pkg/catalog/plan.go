@@ -256,13 +256,27 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 
 	for _, price := range product.Prices {
 		desiredStatus := statusFromActive(price.Active)
-		accessDurationDays, err := normalizeDuration(price.Duration)
+		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
 			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
 		}
 		label := PriceLabel(product.Key, price)
 
-		match := matchPrice(current, price, accessDurationDays, claimed)
+		// #622 trial first phase (a different first-phase price/length) is part
+		// of price identity, so normalize it up front and match on it too.
+		var trialAmount *int64
+		var trialHours *int
+		if price.Trial != nil {
+			amt := price.Trial.UnitAmount
+			hours, err := normalizeDuration(price.Trial.Duration)
+			if err != nil {
+				return fmt.Errorf("price %s trial.duration: %w", label, err)
+			}
+			trialAmount = &amt
+			trialHours = hours
+		}
+
+		match := matchPrice(current, price, accessDurationHours, trialHours, trialAmount, claimed)
 		if match != nil {
 			claimed[match.ID] = struct{}{}
 			plp := PricePlan{Label: label, ExistingID: match.ID}
@@ -286,19 +300,11 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			Currency:           price.Currency,
 			AccessDurationDays: accessDurationDays,
 			AutoRenew:          price.AutoRenew,
+			TrialUnitAmount:    trialAmount,
+			TrialDurationDays:  trialDays,
 			Providers:          price.Providers,
 			ProviderLinks:      price.ProviderLinks,
 			Status:             toModelStatus(desiredStatus),
-		}
-		// #622 trial first phase (a different first-phase price/length).
-		if price.Trial != nil {
-			amt := price.Trial.UnitAmount
-			days, err := normalizeDuration(price.Trial.Duration)
-			if err != nil {
-				return fmt.Errorf("price %s trial.duration: %w", label, err)
-			}
-			createReq.TrialUnitAmount = &amt
-			createReq.TrialDurationDays = days
 		}
 		pp.Prices = append(pp.Prices, PricePlan{
 			Label:     label,
@@ -329,8 +335,13 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 
 // matchPrice finds an existing OpenRails price with the same financial identity
 // as the declared price, preferring an unclaimed active match over an archived
-// one. Identity is (currency, unit_amount, access_duration_days, auto_renew, providers).
-func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationDays *int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+// one. Identity is exactly the unique_prices_product_amount_window key:
+// (currency, unit_amount, access_duration_hours, auto_renew, trial_unit_amount,
+// trial_duration_hours). Providers are NOT part of identity — the DB constraint
+// forbids two prices that differ only by provider, so a provider-set drift is a
+// mutation of the matched price, never a reason to create a second row (doing so
+// collides on the unique key).
+func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationDays, trialDays *int, trialAmount *int64, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
 		c := &current[i]
@@ -343,7 +354,9 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurati
 		if !sameCycleDays(c.AccessDurationDays, accessDurationDays) || c.AutoRenew != price.AutoRenew {
 			continue
 		}
-		if providerSetKey(price.Providers) != catalogPriceProviderSetKey(c.Providers) {
+		// Trial is part of identity (NULLS NOT DISTINCT): "no trial" is a concrete
+		// value, so nil==nil but nil!=set.
+		if !samePtrInt64(c.TrialUnitAmount, trialAmount) || !samePtrInt(c.TrialDurationDays, trialDays) {
 			continue
 		}
 		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
@@ -353,22 +366,27 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurati
 	return best
 }
 
-func catalogPriceProviderSetKey(providers map[string]billingservice.ProviderState) string {
-	if len(providers) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(providers))
-	for name := range providers {
-		names = append(names, strings.ToLower(strings.TrimSpace(name)))
-	}
-	return providerSetKey(names)
-}
-
 func sameCycleDays(a, b *int) bool {
 	if a == nil || *a <= 0 {
 		return b == nil || *b <= 0
 	}
 	return b != nil && *a == *b
+}
+
+// samePtrInt / samePtrInt64 mirror the DB's NULLS NOT DISTINCT comparison: two
+// NULLs are equal, a NULL and a value are not.
+func samePtrInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func samePtrInt64(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func productID(p *billingservice.CatalogProduct) uuid.UUID {

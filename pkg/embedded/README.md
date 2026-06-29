@@ -44,15 +44,38 @@ func main() {
     }
     defer openrails.Close(context.Background())
 
-    // Mount OpenRails routes on your router.
+    // Mount OpenRails on a dedicated gin group, AuthKit-style. The mount prefix is
+    // inferred from the group — you don't repeat "/api/openrails". Select only the
+    // route groups this host needs.
     router := gin.Default()
-    billing, err := embgin.MountHandler(openrails, embgin.MountOptions{MountPrefix: "/billing"})
-    if err != nil {
+    api := router.Group("/api/openrails")
+    if err := embgin.RegisterAPI(api, openrails,
+        embgin.WithGroups(
+            embedded.RouteSetCheckout,
+            embedded.RouteSetCustomer,
+            embedded.RouteSetWebhooks,
+        ),
+        embgin.WithAuthenticator(hostAuthn),          // checkout + customer routes
+        embgin.WithDelegatedAuthenticator(hostDeleg), // /v1/me + /v1/customers
+        embgin.WithGate(hostGate),                    // merchant groups (catalog/providers/admin)
+    ); err != nil {
         log.Fatal(err)
     }
-    router.Any("/billing/*path", gin.WrapH(billing))
 }
 ```
+
+`MountHandler` remains the lower-level `net/http` escape hatch for hosts that
+already have a single mount point.
+
+### Route-group discovery
+
+Which groups a deployment serves is config-dependent, so OpenRails advertises it
+two ways over one source of truth:
+
+- **HTTP** (browsers, the remote SDK, other services): `GET /api/openrails/v1/capabilities`
+  returns `{"route_groups": {"checkout": true, "customer": true, "payment_providers": false, ...}}`
+  — public, cached, hand-written (not OpenAPI; nothing is generated).
+- **Go** (in-process host code): `rt.ActiveRouteSets()` returns the same selection.
 
 ## Payment Providers
 

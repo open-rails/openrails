@@ -587,7 +587,7 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.provider_account_id, p.id, p.product_id, p.amount, p.currency, p.rails, p.status, p.created_at, p.updated_at, p.merchant_id, p.access_duration_days, p.auto_renew, p.trial_unit_amount, p.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.provider_account_id, p.id, p.product_id, p.amount, p.currency, p.rails, p.status, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -636,10 +636,10 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPrice.CreatedAt,
 		&i.OpenrailsPrice.UpdatedAt,
 		&i.OpenrailsPrice.MerchantID,
-		&i.OpenrailsPrice.AccessDurationDays,
+		&i.OpenrailsPrice.AccessDurationHours,
 		&i.OpenrailsPrice.AutoRenew,
 		&i.OpenrailsPrice.TrialUnitAmount,
-		&i.OpenrailsPrice.TrialDurationDays,
+		&i.OpenrailsPrice.TrialDurationHours,
 		&i.OpenrailsProduct.ID,
 		&i.OpenrailsProduct.Slug,
 		&i.OpenrailsProduct.DisplayName,
@@ -805,54 +805,6 @@ type ListPaymentsByCustomerPagedParams struct {
 
 func (q *Queries) ListPaymentsByCustomerPaged(ctx context.Context, arg ListPaymentsByCustomerPagedParams) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByCustomerPaged, arg.CustomerID, arg.PageOffset, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPayment
-	for rows.Next() {
-		var i OpenrailsPayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.Rail,
-			&i.TransactionID,
-			&i.Amount,
-			&i.ListAmount,
-			&i.Currency,
-			&i.Status,
-			&i.SubscriptionID,
-			&i.RefundedPaymentID,
-			&i.DiscountCode,
-			&i.DiscountReason,
-			&i.DiscountMetadata,
-			&i.EntitlementsSpecSnapshot,
-			&i.CreditsSpecSnapshot,
-			&i.Metadata,
-			&i.PurchasedAt,
-			&i.CreatedAt,
-			&i.CardBrand,
-			&i.CardLast4,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.ProviderAccountID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentsByIDs = `-- name: ListPaymentsByIDs :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, provider_account_id FROM openrails.payments WHERE id = ANY($1::uuid[])
-`
-
-func (q *Queries) ListPaymentsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPayment, error) {
-	rows, err := q.db.Query(ctx, listPaymentsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}

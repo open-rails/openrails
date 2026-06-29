@@ -535,82 +535,6 @@ Rename **complete** across Go (`models.Rail`, `payments/rails` pkg, all idents),
 - Pure rename, no behavior change — land as a reviewable rename (a Go-commit + a DB/sqlc-commit pair reads cleanest).
 - Out of scope (separate, already-flagged decisions): `mobius` as the NMI rail id (rename to `nmi`?); keeping "provider-observed truth" in the convergence taxonomy (yes, keep).
 
-# #623: authkit-style embedded route groups
-
-**Completed:** no — active refactor, not started.
-
-Make OpenRails' embedded Gin mounting look and behave like AuthKit's mount API:
-the host creates a route group, then explicitly registers only the OpenRails route
-groups it wants. Do the smallest useful version first; do not convert all routes
-to a declarative `RouteSpec` registry unless a later issue needs route
-introspection/OpenAPI/auth-table tests.
-
-## Why
-
-Embedded hosts should not get every OpenRails route just because they mounted the
-billing surface. This is the same reason AuthKit exposes separate mountable route
-groups: standalone OpenRails, Doujins, Cozy, and other hosts may want different
-surfaces.
-
-Concrete example: if provider credentials/config are fixed/read-only in the host,
-do not mount merchant-settings routes that push provider config. If the host calls
-the embedded Go service directly, do not mount host-internal merchant API routes.
-
-## Current state
-
-- `internal/http/embedhttp/route_set.go` already has the right group names:
-  `checkout`, `customer`, `merchant_admin`, `catalog`, `payment_providers`,
-  `merchant_api`, and `webhooks`.
-- `pkg/embedded/gin.MountHandler` works, but it exposes a single handler API
-  instead of the AuthKit-style `RegisterAPI(group, service, WithGroups(...))`.
-- `RouteSetCustomer` must own `/v1/me` and `/v1/customers`; selecting no customer
-  routes must not silently mount those routes.
-- Full route data tables would be useful later, but they are not required to give
-  embedders explicit route-group control now.
-
-## Target API
-
-```go
-api := router.Group("/api/openrails")
-openrailsgin.RegisterAPI(api, runtime,
-    openrailsgin.WithGroups(
-        embedded.RouteSetCheckout,
-        embedded.RouteSetCustomer,
-        embedded.RouteSetWebhooks,
-    ),
-    openrailsgin.WithGate(hostGate),
-)
-```
-
-Keep `MountHandler` as the lower-level `net/http` escape hatch for callers that
-already have one handler mount point.
-
-## Plan
-
-1. Add AuthKit-style Gin helpers in `pkg/embedded/gin`: `RegisterAPI`,
-   `WithGroups`, and `WithGate`, backed by the existing `MountHandler`.
-2. Infer the mount prefix from the Gin route group when possible so hosts do not
-   have to repeat `"/api/openrails"` in two places.
-3. Make `RouteSetCustomer` actually gate the `/v1/me` and `/v1/customers`
-   handler path.
-4. Update embedded docs/examples to prefer `RegisterAPI(group, ..., WithGroups(...))`.
-5. Update Doujins to mount OpenRails through the new API instead of mixing the
-   OpenRails catch-all directly into its own route registration.
-
-## Acceptance
-
-- A host can mount only checkout/customer/webhook routes with AuthKit-like syntax.
-- `payment_providers` routes are absent unless explicitly selected.
-- `merchant_api` routes remain absent from embedded defaults.
-- Focused tests prove route-set selection excludes customer routes when
-  `RouteSetCustomer` is omitted.
-- Doujins compiles against the new API.
-
-## Deferred
-
-- A full `RouteSpec`/`APIRoutes` registry for introspection, OpenAPI generation,
-  or table-driven auth coverage. Useful later, not needed for the route-group API.
-
 ---
 
 # #624: split-merchant-settings-routeset-delete-credentialmode
@@ -1018,3 +942,162 @@ constructor). Each lands as its own breaking PR; hosts bumped per PR.
 #623 (your AuthKit-style route-group mounting) is adjacent but separate; it still
 references `CredentialModeMutable`, which #624 deletes — reconcile #623 when #624
 lands.
+
+---
+
+# #628: query-contract-and-performance-harness
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29. Added the shared OpenRails query-test command
+surface, migrated-Postgres sqlc query-contract coverage across the first
+high-value billing domains, a 100k-row entitlement lookup plan/perf check, JSON
+report output, and a raw-SQL inventory/pruning classification.
+
+## Goal
+
+`task sqlc-check` already proves sqlc queries PREPARE against the migrated schema.
+This issue adds the next layer: execute important queries against real seeded data,
+assert the results/mutations, and run heavyweight plan/performance tests against
+large tables so missing indexes and bad query shapes are caught before production.
+
+The command surface must match AuthKit exactly:
+
+- `task test-query-contracts`
+- `task test-query-perf`
+
+## Metadata
+
+- Category: test-infra
+- Status: completed
+- Passes: true
+- Paired AuthKit issue: AuthKit #195
+
+## Progress 2026-06-29
+
+- Added `task test-query-contracts`, matching AuthKit's command name/env
+  contract and reusing the existing `dbtest.SharedPostgresDSN` migrated scratch
+  Postgres harness.
+- Added `task test-query-perf`, with `QUERY_TEST_DATABASE_URL`,
+  `QUERY_TEST_KEEP_DB`, `QUERY_PERF_SCALE`, and optional `QUERY_PERF_REPORT`
+  support.
+- Added `internal/db/querytest` integration tests covering the first
+  high-value sqlc domains: provider accounts, catalog products/prices/features,
+  customers/rail customers/payment methods, subscriptions, payments,
+  entitlements, money account capacity, invoices, usage events, provider intents,
+  and reconciliation support queries.
+- Added a 100k-row default perf seed using `CopyFrom`, `ANALYZE`, and
+  `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for
+  `EntitlementExistsActive`; it fails if the hot lookup falls back to a
+  sequential scan.
+- Added `internal/db/querytest/raw_sql_inventory.md`; no obvious duplicated
+  static raw query was safe to delete in this pass. Surviving raw SQL is
+  classified as DDL/session/lock/test harness, dynamic analytics/policy,
+  ClickHouse, control-plane global SQL, or package-local persistence.
+- Validation passed: `task test-query-contracts`, `task test-query-perf`,
+  `QUERY_PERF_REPORT=/tmp/openrails-query-perf-report.json task test-query-perf`,
+  `task sqlc-check`, `go test -tags=integration -count=1 ./internal/crypto ./internal/db ./internal/modules/money ./pkg/service`,
+  `task test-integration-all`, and `git diff --check`. The 100k-row perf report
+  for `EntitlementExistsActive` used `Index Scan` and completed in 3.646 ms in
+  this run.
+
+## Design
+
+### A. Shared command contract
+
+- Add `task test-query-contracts`: starts/uses a real Postgres, runs migrations,
+  seeds small deterministic fixtures, and runs query-contract Go tests.
+- Add `task test-query-perf`: starts/uses a real Postgres, runs migrations, bulk
+  seeds large deterministic fixtures, runs `ANALYZE`, then executes hot queries
+  through `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` with explicit budgets.
+- Use identical env names in both repos:
+  - `QUERY_TEST_DATABASE_URL` — optional existing DB override.
+  - `QUERY_TEST_KEEP_DB` — keep the scratch DB for debugging.
+  - `QUERY_PERF_SCALE` — default row scale for perf seeds.
+  - `QUERY_PERF_REPORT` — optional JSON report path.
+- Keep `task sqlc-check` as the cheap universal schema/query drift gate; do not
+  fold perf tests into it.
+
+### B. Query-contract tests
+
+- Add a small harness under `internal/db/querytest` (or nearest existing test
+  helper package) for:
+  - scratch DB creation
+  - migration application
+  - deterministic fixture helpers
+  - merchant/RLS context pinning
+  - sqlc query wrapper access
+- Add contract tests by query domain, not one giant generated-method runner.
+- Cover the important sqlc groups first:
+  - merchants/provider_accounts
+  - catalog products/prices/entitlement features
+  - customers/rail_customers/payment_methods
+  - entitlements/product access/grants
+  - money_accounts/ledger/invoices/usage_events
+  - subscriptions/payments/provider intents/reconciliation
+- Each contract test should prove:
+  - query executes
+  - returned rows match seeded data
+  - mutations change only intended rows
+  - missing-row / duplicate / constraint edge cases return the expected behavior
+
+### C. Query-performance tests
+
+- Seed large datasets with `pgx.CopyFrom` / `COPY`, never row-by-row loops.
+- Start with representative scales, then allow override:
+  - default `QUERY_PERF_SCALE=100000`
+  - manual/nightly target `QUERY_PERF_SCALE=1000000`
+- Build reusable `Explain` helpers that parse JSON plans and fail on:
+  - sequential scan over large tenant/merchant-owned tables unless allowlisted
+  - unexpected sort/hash spill or temp blocks
+  - excessive shared read blocks
+  - bad row-estimate skew for hot queries
+  - execution time over query-specific budget
+- Store query budgets in a small checked-in manifest, e.g.
+  `internal/db/querytest/perf_budgets.yaml`.
+- Keep wall-clock thresholds loose; prefer plan shape and buffer budgets because CI
+  machines vary.
+
+### D. Raw SQL inventory and pruning
+
+- Add an inventory step for handwritten SQL outside `internal/db/queries`.
+- Classify each raw query:
+  - convert to sqlc
+  - keep raw because it is dynamic SQL / DDL / advisory lock / session setup
+  - delete because unused or duplicated
+- Require every kept raw SQL path to have either:
+  - a query-contract test, or
+  - an explicit allowlist reason in the inventory.
+- Prefer moving static raw queries into sqlc as domains are covered.
+
+### E. CI policy
+
+- PR/default CI:
+  - `task sqlc-check`
+  - `task test-query-contracts`
+- Nightly/manual CI:
+  - `task test-query-perf`
+- Add docs explaining that `PREPARE` validates schema compatibility, while
+  query-contract/perf tests validate behavior and scaling.
+
+## Acceptance
+
+- `task test-query-contracts` exists and runs against a migrated scratch Postgres.
+- `task test-query-perf` exists with the same name/env contract as AuthKit.
+- At least the first high-value OpenRails query domains have semantic contract
+  coverage: merchant/provider config, catalog, entitlements, money, subscriptions.
+- Perf harness can seed at least 100k rows and emit JSON plan/budget reports.
+- Raw SQL inventory exists; obvious duplicated/static raw queries are converted or
+  deleted.
+- `task sqlc-check`, `task test-query-contracts`, and focused normal Go tests pass.
+
+## Non-goals
+
+- Do not blindly auto-execute every generated sqlc method with fake arguments.
+  Query args and seed state must be meaningful.
+- Do not make million-row perf tests part of every local `task test` run.
+- Do not add an ORM or a new query abstraction.
+
+## Notes
+
+- Pair implementation with AuthKit #195 so helpers, command names, env vars, and
+  report shape stay identical.

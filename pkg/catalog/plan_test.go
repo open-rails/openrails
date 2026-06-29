@@ -287,7 +287,12 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	}
 }
 
-func TestPlan_SameTermsDifferentProvidersCreateSeparatePrice(t *testing.T) {
+// A declared price matches an existing one on financial substance alone; a
+// provider-set drift must NOT spawn a second row — the
+// unique_prices_product_amount_window key (no provider column) would reject it,
+// crashing the converge. The declared price below differs from the stored one
+// only by provider set, so it must match (here: archive, since active:false).
+func TestPlan_SameTermsDifferentProvidersMatchExistingPrice(t *testing.T) {
 	m := loadFrom(t, `
 version: 1
 products:
@@ -306,6 +311,36 @@ products:
 		t.Fatalf("Plan: %v", err)
 	}
 	pp := findProduct(plan, "premium")
+	for _, pr := range pp.Prices {
+		if pr.Action == PriceCreate {
+			t.Fatalf("provider drift must not create a second price: %+v", pp.Prices)
+		}
+	}
+}
+
+// Trial is part of identity: a declared price that adds a trial first phase must
+// NOT match an otherwise-identical existing price with no trial — they are
+// distinct rows under the unique key, so the trial variant is a create.
+func TestPlan_TrialMakesPriceDistinctFromNonTrial(t *testing.T) {
+	m := loadFrom(t, `
+version: 1
+products:
+  - key: premium
+    display_name: Premium
+    prices:
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius], trial: {unit_amount: 100, duration: 7d}}
+`)
+	f := newFakeApplier()
+	premium := f.seedProduct("premium", "default", 0, models.CatalogStatusActive)
+	premium.DisplayName = "Premium"
+	// Existing price has the same recurring substance but NO trial.
+	f.seedPrice(premium.ID, 23_000_000, "usd", 30, models.CatalogStatusActive, "mobius")
+
+	plan, err := Plan(context.Background(), f, m)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	pp := findProduct(plan, "premium")
 	var creates int
 	for _, pr := range pp.Prices {
 		if pr.Action == PriceCreate {
@@ -313,7 +348,7 @@ products:
 		}
 	}
 	if creates != 1 {
-		t.Fatalf("want separate solana-only price create, got %+v", pp.Prices)
+		t.Fatalf("trial variant must be a distinct create, got %+v", pp.Prices)
 	}
 }
 

@@ -129,6 +129,24 @@ tasks:
     cmds:
       - bash scripts/test_integration.sh ./...
 
+  test-query-contracts:
+    desc: Run sqlc query-contract tests against a migrated Postgres
+    cmds:
+      - |
+        if [ -n "${QUERY_TEST_DATABASE_URL:-}" ]; then
+          export OPENRAILS_TEST_DB_URL="$QUERY_TEST_DATABASE_URL"
+        fi
+        go test -tags=integration -count=1 ./internal/db/querytest -run 'TestQueryContracts'
+
+  test-query-perf:
+    desc: Run large-seed query plan/perf checks against a migrated Postgres
+    cmds:
+      - |
+        if [ -n "${QUERY_TEST_DATABASE_URL:-}" ]; then
+          export OPENRAILS_TEST_DB_URL="$QUERY_TEST_DATABASE_URL"
+        fi
+        go test -tags=integration -count=1 ./internal/db/querytest -run 'TestQueryPerf'
+
   fmt:
     desc: Format code
     cmds:

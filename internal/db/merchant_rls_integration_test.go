@@ -5,7 +5,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,38 +31,6 @@ import (
 func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Context) {
 	t.Helper()
 	ctx = context.Background()
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
-	if dsn == "" {
-		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL"))
-	}
-	if dsn != "" {
-		superDSN = dsn
-		sqlDB, err := sql.Open("pgx", superDSN)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = sqlDB.Close() })
-		require.NoError(t, sqlDB.PingContext(ctx))
-
-		_, err = sqlDB.ExecContext(ctx, `
-			CREATE SCHEMA IF NOT EXISTS openrails;
-			CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
-			CREATE EXTENSION IF NOT EXISTS btree_gist;
-		`)
-		require.NoError(t, err)
-
-		authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
-		require.NoError(t, err)
-		require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").ApplyMigrations(ctx, authMigrations))
-		migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
-		require.NoError(t, err)
-		m := migratekit.NewPostgres(sqlDB, config.MigratekitApp)
-		require.NoError(t, m.ApplyMigrations(ctx, migrations))
-
-		_, err = sqlDB.ExecContext(ctx, `ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
-		require.NoError(t, err)
-
-		appDSN = "postgres://openrails_app:app_pw@" + dsnHostPart(t, superDSN)
-		return superDSN, appDSN, ctx
-	}
 
 	container, err := postgres.Run(ctx,
 		"postgres:18-alpine",

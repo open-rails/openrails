@@ -257,10 +257,6 @@ ORDER BY created_at, id;
 -- name: GetProviderIntent :one
 SELECT * FROM openrails.provider_intents WHERE id = $1;
 
--- name: GetProviderIntentByIdempotencyKey :one
-SELECT * FROM openrails.provider_intents
-WHERE merchant_id = sqlc.arg(merchant_id) AND idempotency_key = sqlc.arg(idempotency_key);
-
 -- name: CountProviderIntents :one
 SELECT count(*) FROM openrails.provider_intents
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
@@ -276,16 +272,3 @@ WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
-
--- #518 escape hatch: after the operator confirms a credential change points at
--- the SAME (or intentionally-adopted) provider account, rebind the LIVE
--- intents to the current provider account so the account guard stops parking them.
--- Only live statuses — succeeded/terminal/superseded/expired rows keep the
--- provider account they executed (or died) under as evidence.
--- name: RebindProviderIntentsToAccount :execrows
-UPDATE openrails.provider_intents
-SET provider_account_id = sqlc.arg(provider_account_id),
-    updated_at = now()
-WHERE provider = sqlc.arg(provider)
-  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
-  AND provider_account_id IS DISTINCT FROM sqlc.arg(provider_account_id);

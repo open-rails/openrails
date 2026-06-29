@@ -11,34 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countExternalProviderMutationLogs = `-- name: CountExternalProviderMutationLogs :one
-SELECT count(*)
-FROM openrails.external_provider_mutation_logs
-WHERE ($1::text IS NULL OR provider = $1::text)
-  AND ($2::uuid IS NULL OR provider_intent_id = $2::uuid)
-  AND ($3::uuid IS NULL OR provider_account_id = $3::uuid)
-  AND ($4::text IS NULL OR phase = $4::text)
-`
-
-type CountExternalProviderMutationLogsParams struct {
-	Provider          *string
-	ProviderIntentID  *uuid.UUID
-	ProviderAccountID *uuid.UUID
-	Phase             *string
-}
-
-func (q *Queries) CountExternalProviderMutationLogs(ctx context.Context, arg CountExternalProviderMutationLogsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countExternalProviderMutationLogs,
-		arg.Provider,
-		arg.ProviderIntentID,
-		arg.ProviderAccountID,
-		arg.Phase,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const insertExternalProviderMutationLog = `-- name: InsertExternalProviderMutationLog :exec
 INSERT INTO openrails.external_provider_mutation_logs (
     merchant_id,
@@ -83,64 +55,4 @@ func (q *Queries) InsertExternalProviderMutationLog(ctx context.Context, arg Ins
 		arg.Evidence,
 	)
 	return err
-}
-
-const listExternalProviderMutationLogs = `-- name: ListExternalProviderMutationLogs :many
-SELECT id, merchant_id, provider, provider_account_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at
-FROM openrails.external_provider_mutation_logs
-WHERE ($1::text IS NULL OR provider = $1::text)
-  AND ($2::uuid IS NULL OR provider_intent_id = $2::uuid)
-  AND ($3::uuid IS NULL OR provider_account_id = $3::uuid)
-  AND ($4::text IS NULL OR phase = $4::text)
-ORDER BY created_at DESC, id DESC
-LIMIT $6 OFFSET $5
-`
-
-type ListExternalProviderMutationLogsParams struct {
-	Provider          *string
-	ProviderIntentID  *uuid.UUID
-	ProviderAccountID *uuid.UUID
-	Phase             *string
-	PageOffset        int64
-	PageLimit         int64
-}
-
-func (q *Queries) ListExternalProviderMutationLogs(ctx context.Context, arg ListExternalProviderMutationLogsParams) ([]OpenrailsExternalProviderMutationLog, error) {
-	rows, err := q.db.Query(ctx, listExternalProviderMutationLogs,
-		arg.Provider,
-		arg.ProviderIntentID,
-		arg.ProviderAccountID,
-		arg.Phase,
-		arg.PageOffset,
-		arg.PageLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsExternalProviderMutationLog
-	for rows.Next() {
-		var i OpenrailsExternalProviderMutationLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Provider,
-			&i.ProviderAccountID,
-			&i.ProviderIntentID,
-			&i.IntentType,
-			&i.IdempotencyKey,
-			&i.Attempt,
-			&i.Phase,
-			&i.Reason,
-			&i.Evidence,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

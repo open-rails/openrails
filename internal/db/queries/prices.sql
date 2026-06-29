@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, status, amount, currency,
-    access_duration_days, auto_renew, trial_unit_amount, trial_duration_days, rails, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,
-    sqlc.narg(access_duration_days), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_days), sqlc.narg(rails),
+    sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(rails),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -26,10 +26,6 @@ SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.id = ANY(sqlc.arg(ids)::uuid[]);
-
--- name: ListActivePricesByProduct :many
-SELECT * FROM openrails.prices price
-WHERE price.product_id = $1 AND price.status = 'active';
 
 -- All prices for a product regardless of status (active + archived/draft) — the
 -- catalog converge needs archived rows to reconcile legacy_import prices instead
@@ -113,10 +109,10 @@ UPDATE openrails.prices SET
     status = $3,
     amount = $4,
     currency = $5,
-    access_duration_days = sqlc.narg(access_duration_days),
+    access_duration_hours = sqlc.narg(access_duration_hours),
     auto_renew = sqlc.arg(auto_renew)::boolean,
     trial_unit_amount = sqlc.narg(trial_unit_amount),
-    trial_duration_days = sqlc.narg(trial_duration_days),
+    trial_duration_hours = sqlc.narg(trial_duration_hours),
     rails = sqlc.narg(rails),
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1;

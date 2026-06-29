@@ -4,9 +4,6 @@ package service_test
 
 import (
 	"context"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -16,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -31,12 +28,8 @@ import (
 // GetDB().BeginTx that did not set app.merchant_id, so under openrails_app they
 // were fail-closed (no rows). This test would fail-closed without the fix.
 func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
-	superDSN := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
-	if superDSN == "" {
-		t.Skip("set OPENRAILS_TEST_DB_DSN to a super/admin Postgres DSN")
-	}
 	ctx := context.Background()
-	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: superDSN}}))
+	superDSN, appRoleDSN := dbtest.SharedRLSPostgres(t)
 
 	tenantID := uuid.NewString()
 	payer := identity.CustomerIDFromString(uuid.NewString())
@@ -49,14 +42,9 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 		`INSERT INTO openrails.merchants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
 		tenantID, "merchant-cf-"+tenantID[:8])
 	require.NoError(t, err)
-	_, err = super.Pool().Exec(ctx,
-		`ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
-	require.NoError(t, err)
 
 	// Facade connected as the unprivileged openrails_app role (RLS ENFORCES).
-	u, _ := url.Parse(superDSN)
-	u.User = url.UserPassword("openrails_app", "app_pw")
-	appDB, err := db.NewDB(&config.DBConfig{URL: u.String()})
+	appDB, err := db.NewDB(&config.DBConfig{URL: appRoleDSN})
 	require.NoError(t, err)
 	defer appDB.Close()
 	posture, err := appDB.CheckRLSPosture(ctx)

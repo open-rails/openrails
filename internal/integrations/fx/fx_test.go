@@ -2,9 +2,27 @@ package fx
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+// A canceled context must surface as context.Canceled all the way up through the
+// %w wrapping, because RedisCachedProvider.Start relies on
+// errors.Is(err, context.Canceled) to suppress shutdown noise. If any link in
+// the chain ever switches %w -> %v this fails, catching the regression before it
+// logs "fx: refresh failed" on every clean shutdown again.
+func TestExchangeAPIProvider_CanceledContextIsDetectable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewExchangeAPIProvider().Quote(ctx, "eur", "usd")
+	if err == nil {
+		t.Fatal("want error from canceled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(err, context.Canceled) must be true (the shutdown-noise guard depends on it); got %v", err)
+	}
+}
 
 func TestConvertAmount_RoundsUpAcrossCurrencyScales(t *testing.T) {
 	p := NewMockProvider(map[string]float64{"eur": 1.25, "jpy": 0.01})

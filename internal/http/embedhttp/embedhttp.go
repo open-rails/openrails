@@ -40,6 +40,12 @@ const EmbeddedV1Prefix = "/billing/v1"
 // handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 type Options struct {
 	RouteSets []RouteSet
+	// AdvertiseRouteSets is the full selection reported by GET /v1/capabilities,
+	// independent of which subset THIS handler actually mounts. The embedded
+	// combined mount strips `customer` from RouteSets (it is served by the
+	// separate self handler) but still advertises it here so discovery is honest.
+	// Empty → falls back to RouteSets.
+	AdvertiseRouteSets []RouteSet
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -125,6 +131,15 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		panic(err)
 	}
 	mux := http.NewServeMux()
+
+	// Capability discovery (#623): always-on, public, independent of selection so
+	// even a minimal deployment is discoverable. Reports the full advertised set
+	// (incl. `customer`, which the combined mount serves via the self handler).
+	advertise := opts.AdvertiseRouteSets
+	if len(advertise) == 0 {
+		advertise = ResolveRouteSets(opts.RouteSets)
+	}
+	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", CapabilitiesHandler(advertise))
 
 	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.

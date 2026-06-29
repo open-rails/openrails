@@ -50,6 +50,10 @@ type Options struct {
 
 type Embedded struct {
 	app *app.App
+	// activeRouteSets records the resolved route groups of the most recently
+	// mounted HTTP surface (#623), for ActiveRouteSets() and capability
+	// discovery. Written at mount time (boot), read while serving.
+	activeRouteSets []RouteSet
 }
 
 func New(opts Options) (*Embedded, error) {
@@ -104,9 +108,34 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	if e == nil || e.app == nil {
 		return nil
 	}
+	active := e.MountRouteSets(opts.RouteSets)
 	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
-		RouteSets: opts.RouteSets,
+		RouteSets:          active,
+		AdvertiseRouteSets: active,
 	})
+}
+
+// ActiveRouteSets returns the route groups of the most recently mounted HTTP
+// surface (NewHTTPHandler / pkg/embedded/gin MountHandler / RegisterAPI),
+// recorded at mount time; nil before any mount. Returns a copy. The typical host
+// mounts once, so this reflects its live surface.
+func (e *Embedded) ActiveRouteSets() []RouteSet {
+	if e == nil {
+		return nil
+	}
+	return append([]RouteSet(nil), e.activeRouteSets...)
+}
+
+// MountRouteSets resolves a selection (nil → EmbeddedDefaultRouteSets, empties
+// dropped, deduped) and records it as the active HTTP surface for
+// ActiveRouteSets() and capability discovery. The mount paths call it; hosts
+// normally don't. Returns the resolved set.
+func (e *Embedded) MountRouteSets(sets []RouteSet) []RouteSet {
+	resolved := embedhttp.ResolveRouteSets(sets)
+	if e != nil {
+		e.activeRouteSets = resolved
+	}
+	return resolved
 }
 
 // Service returns the in-process billing API for embedded hosts.

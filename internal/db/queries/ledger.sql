@@ -37,10 +37,6 @@ RETURNING *;
 SELECT * FROM openrails.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
--- name: GetLedgerTransfer :one
-SELECT * FROM openrails.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
-
 -- LedgerAccountBalance: net credit (credits - debits) from maintained account
 -- counters. This is the Phase H O(1) replacement for summing ledger_transfers.
 -- name: LedgerAccountBalance :one
@@ -124,33 +120,3 @@ SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint AS net
 FROM openrails.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND currency = sqlc.arg(currency)::text;
-
--- LedgerAccountCounterDrift: hard-gate invariant for the maintained account
--- counters. Any row returned means ledger_accounts drifted from the immutable
--- transfer log.
--- name: LedgerAccountCounterDrift :many
-WITH actual AS (
-    SELECT
-        a.id,
-        COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credits_posted,
-        COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debits_posted
-    FROM openrails.ledger_accounts a
-    LEFT JOIN openrails.ledger_transfers t
-      ON t.merchant_id = a.merchant_id
-     AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
-    WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND a.currency = sqlc.arg(currency)::text
-    GROUP BY a.id
-)
-SELECT
-    a.id,
-    (a.credits_posted - actual.credits_posted)::bigint AS credits_posted_delta,
-    (a.debits_posted - actual.debits_posted)::bigint AS debits_posted_delta
-FROM openrails.ledger_accounts a
-JOIN actual ON actual.id = a.id
-WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND a.currency = sqlc.arg(currency)::text
-  AND (
-      a.credits_posted <> actual.credits_posted
-      OR a.debits_posted <> actual.debits_posted
-  );

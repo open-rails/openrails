@@ -136,7 +136,7 @@ func (p *RedisCachedProvider) Start(ctx context.Context, currencies []string, in
 	p.mu.Unlock()
 
 	go func() {
-		if err := p.Refresh(ctx, currencies); err != nil {
+		if err := p.Refresh(ctx, currencies); err != nil && !errors.Is(err, context.Canceled) {
 			log.WithError(err).Warn("fx: refresh failed")
 		}
 		ticker := time.NewTicker(interval + jitter(interval/20))
@@ -146,7 +146,7 @@ func (p *RedisCachedProvider) Start(ctx context.Context, currencies []string, in
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := p.Refresh(ctx, currencies); err != nil {
+				if err := p.Refresh(ctx, currencies); err != nil && !errors.Is(err, context.Canceled) {
 					log.WithError(err).Warn("fx: refresh failed")
 				}
 			}

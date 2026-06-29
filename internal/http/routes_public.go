@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -148,6 +149,11 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 	})
 
 	e.GET("/health/ready", s.readyHandler)
+
+	// Capability discovery (#623): which route groups this deployment serves.
+	// Standalone mounts the full surface, so it advertises StandaloneDefaultRouteSets.
+	// Same hand-written handler the embedded surface serves at /billing/v1/capabilities.
+	e.GET(StandaloneV1Prefix+"/capabilities", gin.WrapH(embedhttp.CapabilitiesHandler(embedhttp.StandaloneDefaultRouteSets)))
 
 	// Kubernetes-style health check endpoints (aliases)
 	e.GET("/healthz", func(c *gin.Context) {

@@ -186,40 +186,6 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 	return i, err
 }
 
-const getLedgerTransfer = `-- name: GetLedgerTransfer :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-`
-
-type GetLedgerTransferParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) GetLedgerTransfer(ctx context.Context, arg GetLedgerTransferParams) (OpenrailsLedgerTransfer, error) {
-	row := q.db.QueryRow(ctx, getLedgerTransfer, arg.MerchantID, arg.ID)
-	var i OpenrailsLedgerTransfer
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.DebitAccountID,
-		&i.CreditAccountID,
-		&i.Amount,
-		&i.Currency,
-		&i.TransferType,
-		&i.AllowDebitNegativeUpTo,
-		&i.Source,
-		&i.SourceID,
-		&i.GrantID,
-		&i.CustomerID,
-		&i.InvokerID,
-		&i.Resource,
-		&i.InvoiceID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
@@ -411,68 +377,6 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 	var balance int64
 	err := row.Scan(&balance)
 	return balance, err
-}
-
-const ledgerAccountCounterDrift = `-- name: LedgerAccountCounterDrift :many
-WITH actual AS (
-    SELECT
-        a.id,
-        COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credits_posted,
-        COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debits_posted
-    FROM openrails.ledger_accounts a
-    LEFT JOIN openrails.ledger_transfers t
-      ON t.merchant_id = a.merchant_id
-     AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
-    WHERE a.merchant_id = $1::uuid
-      AND a.currency = $2::text
-    GROUP BY a.id
-)
-SELECT
-    a.id,
-    (a.credits_posted - actual.credits_posted)::bigint AS credits_posted_delta,
-    (a.debits_posted - actual.debits_posted)::bigint AS debits_posted_delta
-FROM openrails.ledger_accounts a
-JOIN actual ON actual.id = a.id
-WHERE a.merchant_id = $1::uuid
-  AND a.currency = $2::text
-  AND (
-      a.credits_posted <> actual.credits_posted
-      OR a.debits_posted <> actual.debits_posted
-  )
-`
-
-type LedgerAccountCounterDriftParams struct {
-	MerchantID uuid.UUID
-	Currency   string
-}
-
-type LedgerAccountCounterDriftRow struct {
-	ID                 uuid.UUID
-	CreditsPostedDelta int64
-	DebitsPostedDelta  int64
-}
-
-// LedgerAccountCounterDrift: hard-gate invariant for the maintained account
-// counters. Any row returned means ledger_accounts drifted from the immutable
-// transfer log.
-func (q *Queries) LedgerAccountCounterDrift(ctx context.Context, arg LedgerAccountCounterDriftParams) ([]LedgerAccountCounterDriftRow, error) {
-	rows, err := q.db.Query(ctx, ledgerAccountCounterDrift, arg.MerchantID, arg.Currency)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LedgerAccountCounterDriftRow
-	for rows.Next() {
-		var i LedgerAccountCounterDriftRow
-		if err := rows.Scan(&i.ID, &i.CreditsPostedDelta, &i.DebitsPostedDelta); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const ledgerLedgerNet = `-- name: LedgerLedgerNet :one

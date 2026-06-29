@@ -219,9 +219,6 @@ ORDER BY
     CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND sqlc.arg(sort_desc)::boolean     THEN purch.created_at END DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
--- name: ListPaymentsByIDs :many
-SELECT * FROM openrails.payments WHERE id = ANY(sqlc.arg(ids)::uuid[]);
-
 -- name: MatchChargebackPayments :many
 -- NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
 -- payments matched by amount + card last4 within ±7d of the chargeback date,

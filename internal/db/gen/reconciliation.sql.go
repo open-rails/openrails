@@ -656,39 +656,6 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 	return items, nil
 }
 
-const listReconciliationState = `-- name: ListReconciliationState :many
-SELECT id, merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at FROM openrails.reconciliation_state
-WHERE merchant_id = $1::uuid
-ORDER BY source_domain
-`
-
-func (q *Queries) ListReconciliationState(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsReconciliationState, error) {
-	rows, err := q.db.Query(ctx, listReconciliationState, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsReconciliationState
-	for rows.Next() {
-		var i OpenrailsReconciliationState
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.SourceDomain,
-			&i.FullyReconciled,
-			&i.LastFullPullAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :many
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
@@ -1081,21 +1048,21 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithRails = `-- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_days, auto_renew, status, rails
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, status, rails
 FROM openrails.prices
 WHERE rails IS NOT NULL
   AND status <> 'draft'
 `
 
 type ReconcileListPricesWithRailsRow struct {
-	ID                 uuid.UUID
-	ProductID          uuid.UUID
-	Amount             int64
-	Currency           string
-	AccessDurationDays *int32
-	AutoRenew          bool
-	Status             string
-	Rails              []byte
+	ID                  uuid.UUID
+	ProductID           uuid.UUID
+	Amount              int64
+	Currency            string
+	AccessDurationHours *int32
+	AutoRenew           bool
+	Status              string
+	Rails               []byte
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
@@ -1116,7 +1083,7 @@ func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]Reconcile
 			&i.ProductID,
 			&i.Amount,
 			&i.Currency,
-			&i.AccessDurationDays,
+			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.Status,
 			&i.Rails,

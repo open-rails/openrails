@@ -43,6 +43,37 @@ var StandaloneDefaultRouteSets = []RouteSet{
 	RouteSetWebhooks,
 }
 
+// AllRouteSets is the canonical universe of mountable route groups, in stable
+// order. Adding a new RouteSet means appending it here once: capability
+// discovery ranges over this list, so nothing else needs editing.
+var AllRouteSets = []RouteSet{
+	RouteSetCheckout,
+	RouteSetCustomer,
+	RouteSetMerchantAdmin,
+	RouteSetCatalog,
+	RouteSetPaymentProviders,
+	RouteSetMerchantAPI,
+	RouteSetWebhooks,
+}
+
+// ResolveRouteSets normalizes a selection: nil/empty → EmbeddedDefaultRouteSets,
+// empty strings dropped, original order preserved, deduped.
+func ResolveRouteSets(sets []RouteSet) []RouteSet {
+	if len(sets) == 0 {
+		sets = EmbeddedDefaultRouteSets
+	}
+	seen := make(map[RouteSet]bool, len(sets))
+	out := make([]RouteSet, 0, len(sets))
+	for _, rs := range sets {
+		if rs == "" || seen[rs] {
+			continue
+		}
+		seen[rs] = true
+		out = append(out, rs)
+	}
+	return out
+}
+
 func defaultRouteSets() []RouteSet {
 	return append([]RouteSet(nil), EmbeddedDefaultRouteSets...)
 }

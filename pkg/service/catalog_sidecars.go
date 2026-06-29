@@ -220,6 +220,11 @@ func resolveCatalogPriceID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID,
 	if err != nil {
 		return uuid.Nil, err
 	}
+	var accessDurationHours *int
+	if spec.BillingCycleDays != nil {
+		hours := *spec.BillingCycleDays * 24
+		accessDurationHours = &hours
+	}
 	var priceID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 SELECT id FROM openrails.prices
@@ -227,9 +232,9 @@ WHERE merchant_id = $1
   AND product_id = $2
   AND amount = $3
   AND lower(currency) = lower($4)
-  AND access_duration_days IS NOT DISTINCT FROM $5
+  AND access_duration_hours IS NOT DISTINCT FROM $5
 LIMIT 1`,
-		merchantID, productID, spec.UnitAmount, spec.Currency, spec.BillingCycleDays).Scan(&priceID); err != nil {
+		merchantID, productID, spec.UnitAmount, spec.Currency, accessDurationHours).Scan(&priceID); err != nil {
 		return uuid.Nil, fmt.Errorf("resolve price for product %q: %w", spec.ProductSlug, err)
 	}
 	return priceID, nil

@@ -60,8 +60,8 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			productID, "provider-account-scope-"+suffix, "provider-account-scope-"+suffix, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_days, auto_renew, merchant_id)
-			 VALUES ($1, $2, 999, 'usd', 30, true, $3)`,
+			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+			 VALUES ($1, $2, 999, 'usd', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
