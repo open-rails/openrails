@@ -11,7 +11,7 @@ next_id: 607
 
 ---
 
-# #606: EPIC + sequencing — "Catalog & Money v2" (#594–#604), with a plan review
+# #606: EPIC + sequencing — "Catalog & Money v1 launch" (#594–#604), with a plan review
 
 **Completed:** no
 
@@ -49,11 +49,30 @@ This epic records the review + the build order so they don't get built out of se
    and #596 (recovery metadata — needs product_key/price_key + benefit_fingerprint).
 4. **Adoption + ops:** #597 (pull-provider adoption — needs #595 identity + #596 envelope +
    #594 benefits to derive grants) and #600 (invoice cadence — mostly independent config).
-5. **Triage:** #591 (reconcile vs #592/#594/#595 before any build).
+5. **#591 (platform identity — the WHO axis):** complementary to #594/#595 (the WHAT /
+   catalog axis), NOT duplicative — corrected after re-reading it. North-star umbrella;
+   shipped slices (#588/#589/#426 + #592 group-id keying) are done; next concrete slice =
+   the customer/merchant anchor tables. Sequence independently of the catalog cluster.
+
+## Assignment (parallel streams) — #606 itself is NOT assigned; it just drives this
+- **Stream A — #603 (micros).** One owner, starts NOW, fully PARALLEL: the money UNIT
+  (amounts + provider-edge rounding), independent of catalog structure.
+- **Stream B — catalog-model rewrite: #595 + #594 + #604 as ONE workstream, one owner.**
+  Do NOT split across people — they rewrite the SAME manifest parser + converge + identity,
+  so splitting = constant merge conflicts. Inside B: #595 keys → #594 benefit model +
+  manifest shape (tier_rank from #604 rides along).
+- **Stream C — #591 (platform WHO axis), independent owner when prioritized:** the
+  customer/merchant anchor tables. Doesn't block A/B (different axis).
+- **After A + B: #596 + #599 in parallel** (recovery metadata; metered — need micros + keys).
+- **After those: #597 + #600 in parallel** (adoption; invoice cadence).
+- **More hands inside #594** (314 lines): once the #595/#594 manifest shape is pinned, split
+  #594 into children — entitlements-materialize / credits / usage_limits / product-ownership.
+  Don't split before the shape is fixed.
 
 ## Tasks
 - [ ] Owner: confirm the build order + the micros/keys foundation-first sequencing.
-- [ ] Owner: triage #591 against #592 (shipped) + #594/#595 — close/split/rescope.
+- [x] Triage #591 (Claude): KEPT as the platform "who"-axis north-star; shipped slices marked;
+      it is complementary to #594/#595 (who vs what), not superseded. Next slice = anchor tables.
 - [ ] As each issue starts, pin its manifest/identity assumptions to #594/#595/#603 (one
       source of truth for the shape + the money unit + the keys).
 
@@ -1317,6 +1336,17 @@ STATUS 2026-06-28 (Claude): PLAN / north-star, REVISED to the converged model (o
 Umbrella for #588, #589, doujins #426. **Build incrementally** — today's model keeps working; the
 platform layer lands as additive migrations (one new anchor table + a table merge + nullable /
 defaulted columns), never a hot-table rewrite.
+
+TRIAGE 2026-06-28 (Claude, plan review — see #606): KEPT, not closed/merged.
+- **This is the WHO axis** (customer/merchant identity, vault ownership, lifecycle) — DISTINCT
+  from and COMPLEMENTARY to the catalog cluster #594/#595 (the WHAT axis: product/price keys).
+  They share authkit groups as the identity root but don't overlap; build them on separate streams.
+- **Already SHIPPED slices of this umbrella:** #588 (two-slot instrument), #589 (payment-methods
+  health), doujins #426 (provider-account binding), and #592 (provider-account de-conflation +
+  the bill-by-group-id / invoker-opaque / no-FK keying patterns this issue mandates).
+- **Next concrete buildable slice:** the thin `customer` + `merchant` ANCHOR tables (PK =
+  permission-group-id) + the `merchant_external_account` merge — additive, independent of #594/#595.
+- Own-vault (HyperSwitch) + per-customer/per-merchant lifecycle axes are the later platform slices.
 
 ## Vision
 OpenRails becomes a platform (Stripe Link / Shop Pay): a customer registers on OpenRails, saves a
