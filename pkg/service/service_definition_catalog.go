@@ -378,8 +378,8 @@ type CreatePriceRequest struct {
 	// A price's identity IS its financial substance — the product key plus
 	// these immutable money terms. There is no price slug: the content-based
 	// provider keys are derived from (product_key, currency, unit_amount,
-	// billing_cycle_days), so they are stable across DB rebuilds and a different
-	// amount is, by construction, a different price.
+	// access duration, renewal flag, and trial terms), so they are stable across
+	// DB rebuilds and a different amount is, by construction, a different price.
 	UnitAmount int64  `json:"unit_amount"`
 	Currency   string `json:"currency"`
 

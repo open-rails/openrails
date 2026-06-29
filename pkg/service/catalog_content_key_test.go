@@ -70,7 +70,7 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 		t.Fatal("distinct billing cycles must yield distinct lookup keys")
 	}
 	if internalStripeLookupKey("pro", currency, amount, cycle) == internalStripeLookupKey("basic", currency, amount, cycle) {
-		t.Fatal("distinct product slugs must yield distinct lookup keys")
+		t.Fatal("distinct product keys must yield distinct lookup keys")
 	}
 }
 
@@ -94,7 +94,7 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	// "Before wipe" identifiers.
 	beforeProductID := uuid.New()
 	beforePriceID := uuid.New()
-	// "After wipe" identifiers — fresh UUIDs, same product slug + money terms.
+	// "After wipe" identifiers — fresh UUIDs, same product key + money terms.
 	afterProductID := uuid.New()
 	afterPriceID := uuid.New()
 
@@ -121,10 +121,10 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 		t.Fatalf("after snapshot missing content key %q", contentKey)
 	}
 	if _, ok := beforeSnap.productByKey[productKey]; !ok {
-		t.Fatalf("before snapshot missing product slug %q", productKey)
+		t.Fatalf("before snapshot missing product key %q", productKey)
 	}
 	if _, ok := afterSnap.productByKey[productKey]; !ok {
-		t.Fatalf("after snapshot missing product slug %q", productKey)
+		t.Fatalf("after snapshot missing product key %q", productKey)
 	}
 
 	// A single Stripe price with the content-derived lookup_key must match BOTH

@@ -24,25 +24,6 @@ func TestBillingCycleHoursToInterval(t *testing.T) {
 	}
 }
 
-func TestBillingCycleDaysToInterval(t *testing.T) {
-	tests := []struct {
-		name string
-		days int
-		want string
-	}{
-		{name: "daily", days: 1, want: "1d"},
-		{name: "weekly", days: 7, want: "7d"},
-		{name: "monthly", days: 30, want: "30d"},
-		{name: "yearly", days: 365, want: "365d"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, BillingCycleDaysToInterval(tt.days))
-		})
-	}
-}
-
 func TestBillingCycleDaysToStripeRecurring(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -470,7 +470,7 @@ func registerCatalogActionRoutes(catalog router.Router, opts Options, dbMW ...ro
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)
 	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts), readMW...)
 	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct), readMW...)
-	products.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductByKey), readMW...)
+	products.Handle(http.MethodGet, "/by-key/:key", h(httphandlers.AdminGetProductByKey), readMW...)
 	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct), writeMW...)

@@ -203,15 +203,14 @@ func (p *Price) IsPurchasable() bool { return p.Status == CatalogStatusActive }
 // charging them indefinitely — anything that is not a draft remains billable.
 func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
-// IsRecurring reports whether the price auto-renews (a subscription). This is
-// the #622 replacement for the old "billing_cycle_days != nil" test.
+// IsRecurring reports whether the price auto-renews (a subscription).
 func (p *Price) IsRecurring() bool { return p.AutoRenew }
 
 // RecurringCycleHours returns the billing window in HOURS for an auto-renewing
 // price, or nil for a one-off/durable price. This is the internal canonical
 // cadence — duration is measured in hours everywhere inside OpenRails. Day-based
 // provider cadences (Stripe interval, NMI day-frequency, Solana period) are
-// derived from this (hours/24) ONLY at the provider/API boundary.
+// derived from this (hours/24) ONLY at the provider boundary.
 func (p *Price) RecurringCycleHours() *int {
 	if p == nil || !p.AutoRenew || p.AccessDurationHours == nil {
 		return nil
@@ -221,7 +220,7 @@ func (p *Price) RecurringCycleHours() *int {
 }
 
 // RecurringCycleDays returns the billing period in whole days for
-// provider/API boundaries that still require day cadences. Sub-day recurring
+// provider boundaries that still require day cadences. Sub-day recurring
 // windows floor to 0 days; provider adapters reject or skip those as needed.
 func (p *Price) RecurringCycleDays() *int {
 	hours := p.RecurringCycleHours()

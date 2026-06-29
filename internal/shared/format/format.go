@@ -10,11 +10,6 @@ func BillingCycleHoursToInterval(hours int) string {
 	return strconv.Itoa(hours) + "h"
 }
 
-// BillingCycleDaysToInterval formats provider day cadences as an OpenRails duration.
-func BillingCycleDaysToInterval(days int) string {
-	return strconv.Itoa(days) + "d"
-}
-
 // BillingCycleDaysToStripeRecurring converts billing cycle days to Stripe's
 // recurring interval shape.
 func BillingCycleDaysToStripeRecurring(days int) (string, int) {

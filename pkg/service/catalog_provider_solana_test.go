@@ -79,7 +79,7 @@ func TestSolanaPlanID_Deterministic(t *testing.T) {
 		t.Error("a different cycle must yield a different plan id")
 	}
 	if base == solanaPlanID("basic", "usd", 2300, intPtr(30), "mint-a") {
-		t.Error("a different product slug must yield a different plan id")
+		t.Error("a different product key must yield a different plan id")
 	}
 	if base == solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-b") {
 		t.Error("a different mint must yield a different plan id")

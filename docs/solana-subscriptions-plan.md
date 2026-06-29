@@ -177,11 +177,11 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 
 ## 6. Data model changes
 
-- **`Price.Rails["solana"]`** gains keys: `plan_pda`, `plan_id`, `mint`, `mint_symbol` (`USDC`|`PYUSD`), `amount_base_units`, `period_hours`, `created_at`. Created when an admin "publishes" a recurring Solana price (calls `create_plan` on-chain). Recurring Solana prices must have `BillingCycleDays` consistent with on-chain `period_hours`.
+- **`Price.Rails["solana"]`** gains keys: `plan_pda`, `plan_id`, `mint`, `mint_symbol` (`USDC`|`PYUSD`), `amount_base_units`, `period_hours`, `created_at`. Created when an admin "publishes" a recurring Solana price (calls `create_plan` on-chain). Recurring Solana prices must have `BillingCycleHours` consistent with on-chain `period_hours`.
 - **Recurring stablecoin allowlist** — a small constant set, **`{USDC}` at launch**, with `PYUSD` gated behind devnet verification (see §2 warning; its mint extensions likely disqualify it). Resolved to mainnet/devnet mints via `config.TokensForNetwork`. `create_plan` / publish-recurring-price **rejects any mint not in this set** (notably USDT and SOL). One-off purchase paths keep using the full `DefaultSupportedTokens()` set and are unaffected.
 - **`subscriptions` table:** reuse `Rail=solana`, `RailSubscriptionID` = the **Subscription PDA** address (natural unique key for `GetByRailSubscriptionID`, which lifecycle renewal already keys on). No new columns on this table.
 - **New table `billing.solana_subscriptions`** (decided — a dedicated table, **not** subscription metadata; on-chain state is load-bearing and the due-worker queries it, so it must be first-class and indexable). Merchant-scoped (`merchant_id`), with FK to `subscriptions.id`. Columns: `subscriber_wallet`, `authority_pda`, `subscription_pda` (unique), `plan_pda`, `mint`, `last_pulled_period_start`, `last_signature`, `plan_created_at_fingerprint` (detects ghost-plan recreation), `next_pull_at`, timestamps. Indexes on `(merchant_id, next_pull_at)` for the due-query and `subscription_pda` for idempotent upserts.
-- **Merchant credentials reuse the EXISTING `MerchantSecretStore`** (`internal/tenancy/secrets.go`, issues #225/#227) — **do NOT build a bespoke `merchant_solana_credentials` table.** That abstraction already provides `(merchant_id, name)`-addressed, per-merchant-isolated, envelope-encrypted secrets with a DB backend (self-hosted) and a Vault backend (managed) behind one interface. Add canonical Solana secret names alongside the existing `stripe/*` ones:
+- **Merchant credentials reuse the EXISTING `MerchantSecretStore`** (`internal/merchants`, issues #225/#227) — **do NOT build a bespoke Solana credential table.** That abstraction already provides `(merchant_id, name)`-addressed, per-merchant-isolated, envelope-encrypted secrets with a DB backend (self-hosted) and a Vault backend (managed) behind one interface. Add canonical Solana secret names alongside the existing `stripe/*` ones:
   - `solana/private_key` — the merchant's signing keypair (the sensitive bit; ideally never extracted — see §8 Transit).
   - `solana/merchant_address`, `solana/fee_wallet_address` — non-secret but stored together for cohesion (or keep addresses in a small non-secret merchant-config row; they're public on-chain).
   - `solana/rpc_endpoint`, `solana/helius_api_key` — per-merchant RPC config.
@@ -288,7 +288,7 @@ plugs into the same pipe; we do not invent a parallel one.**
 ## 11. Open questions
 
 **Resolved**
-- ✅ **Multi-merchant signing** — **per-merchant** keypair + on-chain merchant address, loaded from a new `billing.merchant_solana_credentials` store (the global config seeds the `default` merchant). Generalizes the Stripe "per-merchant API key + account" model. *(§5, §6, §8)*
+- ✅ **Multi-merchant signing** — **per-merchant** keypair + on-chain merchant address, loaded through the existing `MerchantSecretStore`; no bespoke Solana credential table. Generalizes the Stripe "per-merchant API key + account" model. *(§5, §6, §8)*
 - ✅ **On-chain subscription state** — **dedicated table** `billing.solana_subscriptions`, not subscription metadata. *(§6)*
 
 **Still open**

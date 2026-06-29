@@ -11,9 +11,9 @@ caused an action when that differs from the payable subject.
 |---|---|---|
 | Payable identity | `tenant_subject_id uuid not null` | FK/logical reference to `billing.tenant_subjects.id`. |
 | External principal | `issuer`, `subject` | Stored once in `billing.tenant_subjects` and touched idempotently. |
-| Action attribution | `invoker_id text` | For API keys, current internal attribution still uses the compatibility prefix `serviceToken:<key_id>`; for delegated users use `<issuer>:<subject>` or the resolved delegated subject when the route contract requires it. |
+| Action attribution | `invoker_id text` | For API keys, use `apiKey:<key_id>`; for delegated users use `<issuer>:<subject>` or the resolved delegated subject when the route contract requires it. |
 | Tenant boundary | `tenant_id uuid not null` | RLS and directory boundary; do not infer it from a caller-provided subject string. |
-| Service-token scope | `openrails.merchant`, `openrails.customer` | AuthKit resource scopes are opaque there and interpreted only by OpenRails. |
+| Credential resource scope | `openrails.merchant`, `openrails.customer` | AuthKit resource scopes are opaque there and interpreted only by OpenRails. |
 
 ## Rename / Model Map
 

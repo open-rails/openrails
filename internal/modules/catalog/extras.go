@@ -11,7 +11,7 @@ import (
 //
 // A remote Stripe object is an EXTRA when the local catalog neither links it by
 // id (a price row stores its stripe id) nor matches it by content key (the
-// OpenRails ownership marker resolves to a local product slug / price content
+// OpenRails ownership marker resolves to a local product key / price content
 // key). This single definition is shared by the pkg/service extras report
 // (DetectCatalogExtras) and the intent ledger's archive relevance checks
 // (stripe_archive_product / stripe_archive_price): an archive intent stays
@@ -46,8 +46,8 @@ func BuildExtrasIndex(products []*models.Product, prices []*models.Price) Extras
 		}
 	}
 	for _, pr := range prices {
-		if slug := keyByProductID[pr.ProductID.String()]; slug != "" {
-			ix.PriceContentKeys[OpenRailsPriceContentKey(slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())] = struct{}{}
+		if key := keyByProductID[pr.ProductID.String()]; key != "" {
+			ix.PriceContentKeys[OpenRailsPriceContentKey(key, pr.Currency, pr.Amount, pr.RecurringCycleDays())] = struct{}{}
 		}
 		if stripe := pr.Rails["stripe"]; stripe != nil {
 			if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
@@ -110,9 +110,9 @@ func RemoteStripePriceContentKey(sp StripePrice) string {
 }
 
 // OpenRailsPriceContentKey is the content key derived from a price's financial
-// substance — product slug + immutable money terms. Format:
+// substance — product key + immutable money terms. Format:
 // "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
-// billing_cycle_days or "onetime". Canonical here; pkg/service delegates.
+// provider day cadence or "onetime". Canonical here; pkg/service delegates.
 func OpenRailsPriceContentKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	cycle := "onetime"
 	if billingCycleDays != nil && *billingCycleDays > 0 {

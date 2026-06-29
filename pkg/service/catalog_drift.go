@@ -58,8 +58,8 @@ type nmiPlanLister interface {
 // Built from the products + prices tables.
 //
 // Stripe matching is CONTENT-keyed: Stripe objects are reverse-matched to
-// OpenRails rows by the product slug (from metadata openrails_product_key) and
-// the price's financial content key — product slug + immutable money terms
+// OpenRails rows by the product key (from metadata openrails_product_key) and
+// the price's financial content key — product key + immutable money terms
 // (from the Stripe price lookup_key / metadata openrails_price_key), NOT by the
 // row UUIDs. This makes drift matching survive a DB rebuild that regenerates UUIDs.
 type localCatalogSnapshot struct {
@@ -67,7 +67,7 @@ type localCatalogSnapshot struct {
 	productByID map[string]*models.Product
 	// priceByID maps OpenRails price UUID (string) -> price row.
 	priceByID map[string]*models.Price
-	// productByKey maps OpenRails product slug -> product row (content key).
+	// productByKey maps OpenRails product key -> product row (content key).
 	productByKey map[string]*models.Product
 	// priceByContentKey maps the financial content key
 	// "<product_key>.<currency>.<unit_amount>.<cycle>" -> price row.
@@ -100,7 +100,7 @@ func computeCatalogDrift(
 	seenStripePriceIDs := make(map[string]struct{}, len(stripePrices))
 
 	// --- Stripe Products: orphan + field drift ---
-	// Match on the CONTENT key (product slug from openrails_product_key) so the
+	// Match on the CONTENT key (product key from openrails_product_key) so the
 	// match survives a DB rebuild that regenerates row UUIDs.
 	for _, sp := range stripeProducts {
 		seenStripeProductIDs[sp.ID] = struct{}{}
@@ -118,7 +118,7 @@ func computeCatalogDrift(
 		}
 		local, ok := snap.productByKey[productKey]
 		if !ok {
-			// Marker points at an OpenRails product slug that doesn't exist.
+			// Marker points at an OpenRails product key that doesn't exist.
 			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
@@ -519,9 +519,9 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 	for _, pr := range priceRows {
 		snap.priceByID[pr.ID.String()] = pr
 		// Content key = "<product_key>.<currency>.<unit_amount>.<cycle>"; needs
-		// the owning product for its slug.
+		// the owning product for its key.
 		if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
-			if slug := strings.TrimSpace(prod.Key); slug != "" {
+			if key := strings.TrimSpace(prod.Key); key != "" {
 				ck := openRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				snap.priceByContentKey[ck] = pr
 			}

@@ -42,7 +42,7 @@ func StripeArchiveIdempotencyKey(intentType, externalID string) string {
 
 // StripeArchivePayload is the stored payload for both Stripe archive types.
 // MarkerKey is the OpenRails ownership marker captured at detection time (a
-// product slug for products, a price content key for prices); relevance
+// product key for products, a price content key for prices); relevance
 // re-checks it against the live local catalog.
 type StripeArchivePayload struct {
 	ObjectID  string `json:"object_id"`

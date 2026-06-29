@@ -24,9 +24,9 @@ import (
 //     operator-chosen AND client-creatable, so a link to a plan that exists is
 //     verified (amount + frequency must match the price) while a link to one that
 //     does not yet exist is CREATED from the price's terms (+ optional provider override).
-//   - AutoCreate: content-addressed plan_id `<slug>-<cur>-<amt>-<cycle>`; find-or-attach
+//   - AutoCreate: content-addressed plan_id `<key>-<cur>-<amt>-<cycle>`; find-or-attach
 //     against NMI, falling back to creating the plan. Requires
-//     billing_cycle_days (NMI requires a frequency). When no NMI rail is
+//     a recurring provider day cadence (NMI requires a frequency). When no NMI rail is
 //     configured, falls back to errPendingManualLink so the operator can link
 //     a control-center plan manually.
 //   - Update: propagates display_name via EditRecurringPlan; rejects financial
@@ -111,7 +111,7 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 // positive amount are required.
 func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCreateContext) error {
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
-		return fmt.Errorf("billing_cycle_days is required (NMI plans need a recurring frequency)")
+		return fmt.Errorf("recurring day cadence is required (NMI plans need a recurring frequency)")
 	}
 	if in.UnitAmount <= 0 {
 		return fmt.Errorf("a positive unit_amount is required")
@@ -132,7 +132,7 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 }
 
 // mobiusDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
-// It is CONTENT-addressed — derived from the price content key (product slug +
+// It is CONTENT-addressed — derived from the price content key (product key +
 // immutable money terms), NOT the per-DB price UUID — so it is stable across a
 // FRESH OpenRails DB: a rebuilt catalog re-derives the same plan_id and
 // find-or-attach reattaches to the existing NMI Recurring Plan instead of
@@ -173,7 +173,7 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 	}
 	// NMI recurring plans require a fixed billing frequency.
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
-		return nil, fmt.Errorf("mobius create-mode requires billing_cycle_days (NMI plans need a recurring frequency)")
+		return nil, fmt.Errorf("mobius create-mode requires recurring day cadence (NMI plans need a recurring frequency)")
 	}
 
 	planID := mobiusDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)

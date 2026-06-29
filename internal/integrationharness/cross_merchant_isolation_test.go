@@ -166,13 +166,13 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	serviceToken := surface.MintAPIKey(
+	apiKey := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"admit-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
 	)
 	payer := uuid.NewString()
-	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
+	depositCredits(t, surface.BaseURL, apiKey, payer, 1000)
 
 	denied := surface.RegisterDelegatedCaller(
 		"admit-denied-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
@@ -244,13 +244,13 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	serviceToken := surface.MintAPIKey(
+	apiKey := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"admit-user-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
 	)
 	payer := uuid.NewString()
-	depositCredits(t, surface.BaseURL, serviceToken, payer, 1000)
+	depositCredits(t, surface.BaseURL, apiKey, payer, 1000)
 
 	cp := embcp.Get(surface.app)
 	require.NotNil(t, cp, "control plane attached")
@@ -348,15 +348,15 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	serviceToken := surface.MintAPIKey(
+	apiKey := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-self-service-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 	)
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()
-	depositCredits(t, surface.BaseURL, serviceToken, subjectA, 1000)
-	depositCredits(t, surface.BaseURL, serviceToken, subjectB, 5000)
+	depositCredits(t, surface.BaseURL, apiKey, subjectA, 1000)
+	depositCredits(t, surface.BaseURL, apiKey, subjectB, 5000)
 
 	selfA := surface.RegisterDelegatedCaller(
 		"iso-self-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),

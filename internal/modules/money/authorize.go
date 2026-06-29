@@ -17,7 +17,7 @@ import (
 // hold.
 type AuthorizeHoldInput struct {
 	Payer           identity.CustomerID
-	Invoker         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	Invoker         string // canonical: 'apiKey:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency        string
 	EstimatedAmount int64
 	// Source + SourceID are the durable provenance/idempotency coordinates used

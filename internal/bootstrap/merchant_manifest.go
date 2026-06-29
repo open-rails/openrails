@@ -258,6 +258,15 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
+	// Keep an existing merchant's display name in sync with the manifest (the
+	// create path already set it via RegisterMerchant). Idempotent upsert; an
+	// empty manifest display name leaves the stored one untouched (COALESCE).
+	if found && strings.TrimSpace(mt.DisplayName) != "" {
+		if _, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug, DisplayName: mt.DisplayName}); err != nil {
+			return nil, fmt.Errorf("merchant bootstrap: sync display name for %q: %w", mt.Slug, err)
+		}
+	}
+
 	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, mt, req.SecretStore, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", mt.Slug, err)
 	}
@@ -270,7 +279,7 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
 		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
 		// is set only in standalone, where OpenRails owns the group.
-		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug})
+		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug, DisplayName: mt.DisplayName})
 		if err != nil {
 			return nil, err
 		}

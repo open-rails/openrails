@@ -48,22 +48,22 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	cycle := 30
-	slug := "live-stripe-catalog-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	productKey := "live-stripe-catalog-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	product := &models.Product{
 		ID:          productID,
-		Key:         slug,
-		DisplayName: "OpenRails live Stripe catalog " + slug,
+		Key:         key,
+		DisplayName: "OpenRails live Stripe catalog " + productKey,
 		Description: "OpenRails live Stripe catalog sync test",
 		EntitlementsSpec: map[string]*int{
 			"premium": nil,
 		},
 	}
-	lookup := internalStripeLookupKey(slug, "usd", 12_340_000, &cycle)
+	lookup := internalStripeLookupKey(productKey, "usd", 12_340_000, &cycle)
 	in := autoCreateContext{
 		PriceID:          priceID,
 		ProductID:        productID,
 		Product:          product,
-		ProductKey:       slug,
+		ProductKey:       productKey,
 		UnitAmount:       12_340_000,
 		Currency:         "usd",
 		BillingCycleDays: &cycle,
@@ -103,12 +103,12 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	require.Equal(t, first[models.RailKeyStripeProductID], remotePrice.Product)
 
 	oneTimePriceID := uuid.New()
-	oneTimeLookup := internalStripeLookupKey(slug, "usd", 5_670_000, nil)
+	oneTimeLookup := internalStripeLookupKey(productKey, "usd", 5_670_000, nil)
 	oneTimeIn := autoCreateContext{
 		PriceID:    oneTimePriceID,
 		ProductID:  productID,
 		Product:    product,
-		ProductKey: slug,
+		ProductKey: productKey,
 		UnitAmount: 5_670_000,
 		Currency:   "usd",
 		LookupKey:  oneTimeLookup,
@@ -136,7 +136,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 
 	remoteProduct, err := stripeSvc.RetrieveProduct(ctx, first[models.RailKeyStripeProductID])
 	require.NoError(t, err)
-	require.Equal(t, slug, remoteProduct.Metadata[catalog.StripeMetadataOpenRailsProductKey])
+	require.Equal(t, productKey, remoteProduct.Metadata[catalog.StripeMetadataOpenRailsProductKey])
 	require.Equal(t, productBenefitFingerprint(product), remoteProduct.Metadata[catalog.StripeMetadataOpenRailsBenefitFingerprint])
 }
 

@@ -26,7 +26,7 @@ func statusFromActive(active *bool) string {
 // fake in tests, by an in-process *service.Service adapter, or by a remote HTTP
 // client — all decoupled from *service.Service.
 type Applier interface {
-	GetProductByKey(ctx context.Context, slug string) (*billingservice.CatalogProduct, error)
+	GetProductByKey(ctx context.Context, key string) (*billingservice.CatalogProduct, error)
 	ListProducts(ctx context.Context, opts billingservice.ListProductsOptions) ([]billingservice.CatalogProduct, int64, error)
 	CreateProduct(ctx context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error)
 	UpdateProduct(ctx context.Context, id uuid.UUID, req billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error)

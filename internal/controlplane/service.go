@@ -200,9 +200,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
-	// `openrails` audience. Customer self-service tokens may be permissionless;
-	// any supplied permissions are bounded by the signing remote application's
-	// stored authority in AuthKit.
+	// `openrails` audience. Customer delegated self-service JWTs may be
+	// permissionless; any supplied permissions are bounded by the signing remote
+	// application's stored authority in AuthKit.
 	delegatedVerifier, err := newDelegatedVerifier(authClient, APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)

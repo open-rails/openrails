@@ -619,7 +619,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 // its content lookup_key and repoints the local rails map at the new id.
 // This is the missing→recreate path: the stored Stripe price 404'd, so we
 // re-mint one carrying the SAME content lookup_key + metadata (derived from the
-// product slug + the price's immutable money terms) and point the row at it.
+// product key + the price's immutable money terms) and point the row at it.
 //
 // There is no amount-drift / transfer_lookup_key path: a price's financial
 // terms are baked into its content key, so a change is a different price minted

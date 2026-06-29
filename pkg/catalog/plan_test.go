@@ -32,17 +32,17 @@ func newFakeApplier() *fakeApplier {
 	}
 }
 
-func (f *fakeApplier) seedProduct(slug, tierGroup string, rank int, status models.CatalogStatus) *billingservice.CatalogProduct {
+func (f *fakeApplier) seedProduct(key, tierGroup string, rank int, status models.CatalogStatus) *billingservice.CatalogProduct {
 	tg := tierGroup
 	p := &billingservice.CatalogProduct{
 		ID:          uuid.New(),
-		Key:         slug,
-		DisplayName: slug,
+		Key:         key,
+		DisplayName: key,
 		TierGroup:   &tg,
 		TierRank:    rank,
 		Status:      status,
 	}
-	f.products[slug] = p
+	f.products[key] = p
 	return p
 }
 
@@ -64,11 +64,11 @@ func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency stri
 	})
 }
 
-func (f *fakeApplier) GetProductByKey(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
-	if p, ok := f.products[slug]; ok {
+func (f *fakeApplier) GetProductByKey(_ context.Context, key string) (*billingservice.CatalogProduct, error) {
+	if p, ok := f.products[key]; ok {
 		return p, nil
 	}
-	return nil, fmt.Errorf("product not found: %s", slug)
+	return nil, fmt.Errorf("product not found: %s", key)
 }
 
 func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) ([]billingservice.CatalogProduct, int64, error) {
@@ -141,10 +141,10 @@ func loadFrom(t *testing.T, body string) *Manifest {
 	return m
 }
 
-func findProduct(plan *ApplyPlan, slug string) *ProductPlan {
+func findProduct(plan *ApplyPlan, key string) *ProductPlan {
 	for gi := range plan.Groups {
 		for pi := range plan.Groups[gi].Products {
-			if plan.Groups[gi].Products[pi].Key == slug {
+			if plan.Groups[gi].Products[pi].Key == key {
 				return &plan.Groups[gi].Products[pi]
 			}
 		}
@@ -177,17 +177,17 @@ func TestPlan_CreateWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	for _, slug := range []string{"initiate", "craftsman"} {
-		pp := findProduct(plan, slug)
+	for _, key := range []string{"initiate", "craftsman"} {
+		pp := findProduct(plan, key)
 		if pp == nil || pp.Action != ProductCreate {
-			t.Fatalf("%s: want create, got %+v", slug, pp)
+			t.Fatalf("%s: want create, got %+v", key, pp)
 		}
 		if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceCreate {
-			t.Fatalf("%s: want 1 price create, got %+v", slug, pp.Prices)
+			t.Fatalf("%s: want 1 price create, got %+v", key, pp.Prices)
 		}
 		// providers are carried explicitly from the price onto the create request.
 		if got := pp.Prices[0].CreateReq.Providers; len(got) != 1 || got[0] != "stripe" {
-			t.Fatalf("%s: providers not set on create req: %v", slug, got)
+			t.Fatalf("%s: providers not set on create req: %v", key, got)
 		}
 	}
 	if !plan.HasChanges() {

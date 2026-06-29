@@ -152,7 +152,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	require.Contains(t, string(creditsSpec), creditKey, "granted benefit (credits) stored in DB")
 
 	// Resolve the published product + price ids (used by the DB payment row below).
-	getStatus, getBody := requestJSON(t, "GET", surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, catalogToken, nil)
+	getStatus, getBody := requestJSON(t, "GET", surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)
 	require.Equal(t, 200, getStatus, string(getBody))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(getBody, &product))

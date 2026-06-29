@@ -388,7 +388,7 @@ OpenRails does not seed products/prices/credit types in production. For checkout
 - Any credit types referenced by `products.credits_spec` must exist in `billing.credit_types`.
 
 ### POST /v1/merchant/catalog/products
-Create a product. Body includes at least `{ slug, display_name }`, and may include `entitlements_spec` and `credits_spec`.
+Create a product. Body includes at least `{ key, display_name }`, and may include `entitlements_spec` and `credits_spec`.
 
 #### `credits_spec` v2
 
@@ -396,13 +396,13 @@ Create a product. Body includes at least `{ slug, display_name }`, and may inclu
 
 ```json
 {
-  "api_credits": { "amount": 100000, "expires_days": 30, "cadence": "per_renewal" },
-  "signup_bonus": { "amount": 5000, "expires_days": 90, "cadence": "once" }
+  "api_credits": { "amount": 100000, "expiry_hours": 720, "cadence": "per_renewal" },
+  "signup_bonus": { "amount": 5000, "expiry_hours": 2160, "cadence": "once" }
 }
 ```
 
 - `amount` is in the credit type's base integer units (not USD cents).
-- `expires_days` is optional; when present, each grant expires after N days.
+- `expiry_hours` is optional; when present, each grant expires after N hours.
 - `cadence` is `once` (default) or `per_renewal`.
 
 Renewal semantics:
@@ -449,7 +449,7 @@ objects. Matching is **content-addressed** — it keys off the catalog product k
 the OpenRails row UUIDs — so re-syncing or wiping the DB and re-syncing always
 re-attaches to the existing provider objects rather than duplicating them.
 
-- **Price identity** is `(product_key, currency, unit_amount, interval)`.
+- **Price identity** is `(product_key, currency, unit_amount, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours)`.
 - **Stripe content keys** are derived from the product key and price terms.
 - These keys do not depend on row UUIDs, so a DB-wipe-and-resync that regenerates
   UUIDs reattaches to the same Stripe objects. Re-sync is idempotent: re-attach,

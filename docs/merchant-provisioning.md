@@ -160,7 +160,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 23_000_000
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             providers: [mobius]
 ```
 

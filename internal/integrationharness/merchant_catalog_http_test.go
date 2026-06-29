@@ -66,7 +66,7 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	require.NotEmpty(t, created.ID)
 	require.Equal(t, productKey, created.Key)
 
-	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, catalogToken, nil)
+	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
 	var fetched struct {
 		ID  string `json:"id"`
@@ -254,7 +254,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	require.Equal(t, 1, applied.Result.ProductsCreated)
 	require.Equal(t, 1, applied.Result.PricesCreated)
 
-	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
+	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, foundStatus, string(foundBody))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(foundBody, &product))
@@ -355,7 +355,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
@@ -411,7 +411,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
@@ -480,11 +480,11 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+bundleKey, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+bundleKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var bundle billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &bundle))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+childKey, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+childKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var child billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &child))
@@ -525,7 +525,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	productKey := "claude-plan-" + suffix
 	limitKey := "claude-5x-" + suffix
-	product20Slug := "claude-plan-20x-" + suffix
+	product20Key := "claude-plan-20x-" + suffix
 	limit20Key := "claude-20x-" + suffix
 	measure := "claude-code"
 	manifest := catalog.Manifest{
@@ -564,7 +564,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 				}},
 			},
 			{
-				Key:         product20Slug,
+				Key:         product20Key,
 				DisplayName: "Claude 20x Plan",
 				TierGroup:   "claude-code",
 				TierRank:    intPtr(2),
@@ -586,11 +586,11 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productKey, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+product20Slug, token, nil)
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+product20Key, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product20 billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product20))
@@ -981,9 +981,9 @@ func productUsageLimitBindingCount(t *testing.T, ctx context.Context, pool inter
 	return n
 }
 
-func mustCatalogProduct(t *testing.T, ctx context.Context, applier httpCatalogApplier, slug string) billingservice.CatalogProduct {
+func mustCatalogProduct(t *testing.T, ctx context.Context, applier httpCatalogApplier, key string) billingservice.CatalogProduct {
 	t.Helper()
-	product, err := applier.GetProductByKey(ctx, slug)
+	product, err := applier.GetProductByKey(ctx, key)
 	require.NoError(t, err)
 	return *product
 }
@@ -1121,13 +1121,13 @@ type httpCatalogApplier struct {
 	token   string
 }
 
-func (a httpCatalogApplier) GetProductByKey(_ context.Context, slug string) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/products/by-slug/"+url.PathEscape(slug), a.token, nil)
+func (a httpCatalogApplier) GetProductByKey(_ context.Context, key string) (*billingservice.CatalogProduct, error) {
+	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/products/by-key/"+url.PathEscape(key), a.token, nil)
 	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("product not found: %s", slug)
+		return nil, fmt.Errorf("product not found: %s", key)
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("get product by slug: status %d: %s", status, string(body))
+		return nil, fmt.Errorf("get product by key: status %d: %s", status, string(body))
 	}
 	var out billingservice.CatalogProduct
 	require.NoError(a.t, json.Unmarshal(body, &out))

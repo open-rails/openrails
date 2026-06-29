@@ -66,7 +66,7 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 }
 
 // solanaPlanID derives the deterministic on-chain plan id from the price CONTENT
-// key (product slug + immutable money terms) plus the token mint, hashed to a
+// key (product key + immutable money terms) plus the token mint, hashed to a
 // uint64 (first 8 bytes, big-endian). Content-addressing — NOT the per-DB price
 // UUID — makes re-apply idempotent AND stable across a FRESH OpenRails DB: a
 // rebuilt catalog derives the same plan PDA, so find-or-attach re-attaches to the

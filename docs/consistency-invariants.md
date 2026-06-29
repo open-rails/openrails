@@ -266,7 +266,7 @@ repair task, not as a durable finding taxonomy.
 |---|---|
 | Merchant isolation on merchant-owned tables | RLS requires rows to live inside the current `app.merchant_id` scope. Same-merchant composite FKs should be preferred whenever a child references another merchant-owned row. Current hardened example: `subscriptions(price_id, product_id, merchant_id)` -> `prices(id, product_id, merchant_id)`. |
 | Identity maps: `customers`, `rail_customers`, `payment_methods`, `payment_blocklist` | Natural-key duplicates are blocked inside a merchant: one customer per issuer/subject, one rail customer per customer/provider and provider customer id, one vault token per customer/provider, and one blocklist entry per `(kind,value)`. |
-| Local catalog: `products`, `prices`, `entitlement_features`, `product_entitlement_features` | Product slugs are unique per merchant; price financial substance is unique per product; entitlement lookup keys are unique per merchant; product/feature joins are unique; local status/value enums are checked. |
+| Local catalog: `products`, `prices`, `entitlement_features`, `product_entitlement_features` | Product keys are unique per merchant; price financial substance is unique per product; entitlement lookup keys are unique per merchant; product/feature joins are unique; local status/value enums are checked. |
 | Subscriptions | Local product/price coherence is blocked by `subscriptions_price_product_merchant_fkey`; local provider subscription ids are unique; active/pending/past-due duplicates are blocked per `(merchant, customer, product)` and local active/pending tier group; cancelled/past-due/period fields obey CHECK constraints. |
 | Payments and checkout sessions | Duplicate local provider transactions are blocked by `(merchant, rail, transaction_id)`; payments cannot be materially future-dated; checkout rail references/transactions are unique when present; payment/customer/subscription/price references are FK-backed. |
 | Grant ledger: `grants` | Grant rows are append-only through role privileges; event/kind/source type are checked; credit grants carry positive amount+currency; windows are valid; FKs link customer/product/payment/supersedes; a root grant has at most one terminal event. |
@@ -379,7 +379,7 @@ and should be handled conservatively.
 > clawback (`derive.grant_effect.excess`, credits) retracts the **unspent** remainder only via a reversing
 > transfer to `revoked_credits` (reversible; money frozen, not refunded — refund is a
 > separate OPERATOR step, optionally bundled into `RevokeGrant(grant,{refund})`; §11 (decision 4));
-> spent credits are left as-is. An expired admin grant (`created_at + duration_days`)
+> spent credits are left as-is. An expired admin grant (`created_at + duration_hours`)
 > is a `derive.grant.excess` grant whose source no longer justifies it -> its grant effects become `derive.grant_effect.excess`.
 
 > **Implementation status (2026-06-18).** `derive.grant_effect.missing` and
@@ -571,7 +571,7 @@ Excluded to avoid redundancy — the schema makes these impossible:
   positive amount+currency, grant windows are valid, and each grant has at most
   one terminal event;
 - natural-key duplicates for customers, rail customers, payment methods,
-  linked wallets, blocklist entries, catalog product slugs, price financial
+  linked wallets, blocklist entries, catalog product keys, price financial
   substance, invoice periods, invoice item sources, usage-event idempotency, and
   open reconciliation/catalog-drift finding identities.
 

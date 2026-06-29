@@ -55,7 +55,7 @@ func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
 		t.Error("a different cycle must yield a different plan_id")
 	}
 	if mobiusDeterministicPlanID("basic", "usd", 23_000_000, intPtr(30)) == want {
-		t.Error("a different product slug must yield a different plan_id")
+		t.Error("a different product key must yield a different plan_id")
 	}
 }
 
@@ -81,7 +81,7 @@ func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 		PriceID: uuid.New(), UnitAmount: 9_990_000, BillingCycleDays: nil,
 	})
 	if err == nil {
-		t.Fatal("expected error when billing_cycle_days is nil")
+		t.Fatal("expected error when recurring day cadence is nil")
 	}
 }
 
@@ -238,8 +238,8 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
 		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: nil})
-	if err == nil || !strings.Contains(err.Error(), "billing_cycle_days") {
-		t.Fatalf("expected a loud billing_cycle_days error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "recurring day cadence") {
+		t.Fatalf("expected a loud recurring day cadence error, got %v", err)
 	}
 }
 

@@ -165,9 +165,10 @@ type GrantPurchaseCreditsParams struct {
 	Source    string // deposit source label (e.g., "purchase")
 }
 
-// GrantPurchaseCredits deposits each credits_spec entry of a completed one-off
-// purchase as an expiring balance. Idempotent per (payment, grant label) via a
-// deterministic deposit SourceID, so webhook/poll re-delivery never double-grants.
+// GrantPurchaseCredits deposits each once-cadence credits_spec entry of a
+// completed one-off purchase as an expiring balance. Idempotent per
+// (payment, grant label) via a deterministic deposit SourceID, so webhook/poll
+// re-delivery never double-grants.
 func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPurchaseCreditsParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -193,6 +194,13 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			label = strings.TrimSpace(label)
 			if err := s.validateCreditGrantSpec(ctx, label, spec); err != nil {
 				return err
+			}
+			cadence := spec.Cadence
+			if cadence == "" {
+				cadence = models.CreditGrantCadenceOnce
+			}
+			if cadence != models.CreditGrantCadenceOnce {
+				continue
 			}
 			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)
 			// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.

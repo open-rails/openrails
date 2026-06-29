@@ -77,7 +77,7 @@ import (
 // reports whether it bears an OpenRails ownership marker (the archive guard);
 // Active is the provider-side active flag (NMI plans have no such flag and
 // always report true). MarkerKey is the Stripe ownership marker value (a
-// product slug / price content key) — the archive intents' relevance re-checks
+// product key / price content key) — the archive intents' relevance re-checks
 // it against the live local catalog.
 type CatalogExtra struct {
 	Provider   string `json:"provider"`    // "stripe" | "mobius" | "solana"

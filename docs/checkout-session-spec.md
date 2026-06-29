@@ -134,8 +134,8 @@ All endpoints require authentication.
 4) System verifies amount, recipient, token mint, and reference before finalizing.
 5) On success: create `payment` record and grant entitlements.
 
-Solana ignores subscription semantics. If the price has `billing_cycle_days`,
-that duration defines the entitlement window for the one-off purchase.
+For Solana one-off purchases, the price's `access_duration_hours` defines the
+entitlement window.
 
 ### NMI-backed Card Payments
 1) Create session with `payment_method_id` or `payment_token`.

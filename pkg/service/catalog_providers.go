@@ -58,7 +58,7 @@ var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (
 const remoteWritesDisabledMessage = "provider writes disabled (mode=limited/readonly): remote object creation deferred; re-apply once writes are allowed"
 
 // mutableUpdate carries the post-create mutable fields that Update propagates
-// to attached providers (active flag). Currency / amount / billing cycle are
+// to attached providers (active flag). Currency, amount, and provider cadence are
 // immutable in OpenRails so they're not represented here.
 type mutableUpdate struct {
 	IsActive *bool
@@ -132,7 +132,7 @@ type autoCreateContext struct {
 	ProductID uuid.UUID
 	Product   *models.Product
 	// ProductKey is the product's stable identity. Together with the immutable
-	// money terms (UnitAmount / Currency / BillingCycleDays for day-granularity
+	// money terms (UnitAmount / Currency / provider-day cadence for day-granularity
 	// providers, AccessDurationHours for hour-granularity providers) it forms the
 	// CONTENT identity of this price, which drives deterministic provider keys
 	// and metadata content keys — so find-or-create survives a DB rebuild that
@@ -165,8 +165,9 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 	}
 }
 
-// priceCycleToken renders the billing cycle component of a price content key.
-// A recurring price (cycle > 0) renders the day count; a one-time price (nil or
+// priceCycleToken renders the provider-cadence component of a price content key.
+// A recurring price (cycle > 0) renders the day count for day-granularity
+// providers; a one-time price (nil or
 // 0 cycle) renders the literal "onetime". This keeps the key unambiguous and
 // human-readable while still distinguishing one_time from recurring.
 func priceCycleToken(billingCycleDays *int) string {
@@ -177,8 +178,8 @@ func priceCycleToken(billingCycleDays *int) string {
 }
 
 // openRailsPriceContentKey is the content key derived from a price's FINANCIAL
-// SUBSTANCE — the product's stable slug plus the immutable money terms
-// (currency, unit amount, billing cycle). It is NOT derived from any row UUID,
+// SUBSTANCE — the product's stable key plus the immutable money terms
+// (currency, unit amount, provider cadence). It is NOT derived from any row UUID,
 // so it survives a DB wipe + resync: re-seeding the same product+price terms
 // reproduces byte-identical keys and re-attaches to the existing provider
 // objects rather than duplicating them.
@@ -188,7 +189,7 @@ func priceCycleToken(billingCycleDays *int) string {
 // archive-old, never an in-place mutation/transfer.
 //
 // Format: "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
-// billing_cycle_days for a recurring price or "onetime" for a one-time price.
+// provider day cadence for a recurring price or "onetime" for a one-time price.
 // Example: "pro.usd.2900.30" or "pro.usd.500.onetime".
 // Canonical implementation: catalog.OpenRailsPriceContentKey (shared with the
 // #358 archive-intent relevance checks).
@@ -255,9 +256,9 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	}
 	sort.Strings(names)
 
-	// The price substance (slug + immutable money terms) is the same for the
+	// The price substance (product key + immutable money terms) is the same for the
 	// Attach (link-validation) and AutoCreate (mint) paths. lookup_key + content
-	// keys are derived from the product slug + money terms, not the row UUIDs, so
+	// keys are derived from the product key + money terms, not the row UUIDs, so
 	// re-syncing after a DB wipe finds the same provider objects.
 	productKey := ""
 	if product != nil {
@@ -372,11 +373,11 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	return rails, states, pending, nil
 }
 
-// priceLinkContext builds the substance context (slug + immutable money terms)
+// priceLinkContext builds the substance context (product key + immutable money terms)
 // used by adapter.Attach to validate an operator-supplied provider link against
 // an EXISTING price (the admin PATCH / link-rotation path). It resolves the
-// product slug via the product service; an unresolved product yields an empty
-// slug (validators tolerate a blank slug — they still check amount/cycle/mint).
+// product key via the product service; an unresolved product yields an empty key
+// (validators tolerate a blank key — they still check amount/cycle/mint).
 func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (autoCreateContext, error) {
 	if price == nil {
 		return autoCreateContext{}, fmt.Errorf("price required")

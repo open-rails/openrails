@@ -220,7 +220,7 @@ func computeStripeDriftJob(
 	seenProducts := make(map[string]struct{}, len(stripeProducts))
 	seenPrices := make(map[string]struct{}, len(stripePrices))
 
-	// Match on the CONTENT key (product slug) so it survives DB rebuilds.
+	// Match on the CONTENT key (product key) so it survives DB rebuilds.
 	for _, sp := range stripeProducts {
 		seenProducts[sp.ID] = struct{}{}
 		productKey := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsProductKey])
@@ -283,7 +283,7 @@ func computeStripeDriftJob(
 
 // openRailsPriceContentKeyJob mirrors pkg/service.openRailsPriceContentKey:
 // the financial content key "<product_key>.<currency>.<unit_amount>.<cycle>"
-// where <cycle> is the billing_cycle_days for a recurring price or "onetime".
+// where <cycle> is the provider day cadence for a recurring price or "onetime".
 func openRailsPriceContentKeyJob(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	cycle := "onetime"
 	if billingCycleDays != nil && *billingCycleDays > 0 {

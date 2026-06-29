@@ -138,7 +138,7 @@ func (a *stripeAdapter) stripeConfigured() bool {
 //     reuse it.
 //  2. Otherwise create a new Stripe Product carrying openrails_product_key
 //     (+ informational openrails_product_id) and an idempotency key derived
-//     from the product slug.
+//     from the product key.
 //  3. With the Product in hand, find-or-create the Stripe Price under the
 //     deterministic content lookup_key
 //     ("openrails.<product_key>.<currency>.<unit_amount>.<cycle>"). If a price
@@ -164,7 +164,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	benefitFingerprint := productBenefitFingerprint(in.Product)
 
 	// Step 1: discover an existing Stripe Product for this OpenRails product,
-	// matching on the content key (product slug) so it survives DB wipes.
+	// matching on the content key (product key) so it survives DB wipes.
 	stripeProductID := ""
 	if productKey != "" {
 		if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductKey, productKey); err == nil {

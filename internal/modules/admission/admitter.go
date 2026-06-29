@@ -69,7 +69,7 @@ func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, invokerWindows
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
 	CustomerID  identity.CustomerID // the merchant subject
-	Invoker     string              // canonical invoker: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
+	Invoker     string              // canonical invoker: user:<id> / apiKey:<key_id> / <issuer>:<sub>
 	InvokerType string              // "payer" for direct payer credential; empty/other = delegated
 	Tier        string              // optional payer trust tier; empty resolves from OpenRails money state
 	Resource    string              // caller-supplied resource string for host-side attribution only

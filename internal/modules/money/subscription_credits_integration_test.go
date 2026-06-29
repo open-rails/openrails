@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -249,4 +250,43 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(110), bal.Balance)
+}
+
+func TestGrantPurchaseCredits_OnlyOnceCadence(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	ctx := context.Background()
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
+
+	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	payer := identity.CustomerID(tenantSubjectID)
+
+	moneySvc := money.NewMoneyService(dbi)
+	paymentID := uuid.New()
+	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
+		Payer:     payer,
+		PaymentID: paymentID,
+		Source:    "purchase",
+		Spec: models.CreditsSpec{
+			"once":  {Unit: "USD", Amount: 10, Cadence: models.CreditGrantCadenceOnce},
+			"renew": {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		},
+	}))
+	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
+		Payer:     payer,
+		PaymentID: paymentID,
+		Source:    "purchase",
+		Spec: models.CreditsSpec{
+			"once":  {Unit: "USD", Amount: 10, Cadence: models.CreditGrantCadenceOnce},
+			"renew": {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		},
+	}))
+
+	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
+	require.NoError(t, err)
+	require.Equal(t, int64(10), bal.Balance)
 }

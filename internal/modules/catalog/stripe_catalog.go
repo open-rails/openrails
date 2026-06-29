@@ -66,7 +66,7 @@ type stripeObject struct {
 // retained as informational breadcrumbs only — never used for matching.
 const (
 	// StripeMetadataOpenRailsProductKey is the content key stamped on a Stripe
-	// Product: the OpenRails product slug. This is the field SEARCHED on to
+	// Product: the OpenRails product key. This is the field SEARCHED on to
 	// find-or-create the Stripe Product, so it must be stable across DB wipes.
 	StripeMetadataOpenRailsProductKey = "openrails_product_key"
 	// StripeMetadataOpenRailsPriceKey is the content key stamped on a Stripe

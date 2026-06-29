@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -789,34 +790,17 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 	}
 	if len(creditsSpec) > 0 && s.MoneyService != nil {
-		// #472: the spec key is just a grant label now (money has no credit_type).
-		for grantKey, spec := range creditsSpec {
-			cadence := spec.Cadence
-			if cadence == "" {
-				cadence = models.CreditGrantCadenceOnce
-			}
-			if cadence != models.CreditGrantCadenceOnce {
-				continue
-			}
-			if strings.TrimSpace(grantKey) == "" || spec.Amount <= 0 {
-				continue
-			}
-			var expiresAt *time.Time
-			if spec.ExpiryHours != nil && *spec.ExpiryHours > 0 {
-				t := s.now().UTC().Add(time.Duration(*spec.ExpiryHours) * 24 * time.Hour)
-				expiresAt = &t
-			}
-			paymentSourceID := result.PaymentID.String()
-			_, err = s.MoneyService.Deposit(ctx, money.DepositParams{
-				Invoker:   userID,
-				Amount:    spec.Amount,
-				Source:    "purchase",
-				SourceID:  &paymentSourceID,
-				ExpiresAt: expiresAt,
-			})
-			if err != nil {
-				return fmt.Errorf("grant purchased credits (%s): %w", grantKey, err)
-			}
+		payer := identity.CustomerIDFromString(userID)
+		if payer.IsZero() {
+			return fmt.Errorf("grant purchased credits: invalid user_id %q", userID)
+		}
+		if err := s.MoneyService.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
+			Payer:     payer,
+			PaymentID: result.PaymentID,
+			Spec:      creditsSpec,
+			Source:    "purchase",
+		}); err != nil {
+			return fmt.Errorf("grant purchased credits: %w", err)
 		}
 	}
 	return nil

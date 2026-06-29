@@ -111,16 +111,16 @@ func AdminGetProduct(r *httprequest.Request) {
 }
 
 func AdminGetProductByKey(r *httprequest.Request) {
-	slug := strings.TrimSpace(r.Param("slug"))
-	if slug == "" {
-		r.ErrorJSON(http.StatusBadRequest, "slug required")
+	key := strings.TrimSpace(r.Param("key"))
+	if key == "" {
+		r.ErrorJSON(http.StatusBadRequest, "key required")
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.GetProductByKey(r.Request.Context(), slug)
+	out, err := svc.GetProductByKey(r.Request.Context(), key)
 	if err != nil {
 		writeCatalogError(r, productLookupErr(err))
 		return
