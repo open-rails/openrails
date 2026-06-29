@@ -7,7 +7,59 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 604
+next_id: 605
+
+---
+
+# #604: Catalog manifest restructure — merchants→products (tier_group as an attribute) + flexible tier_rank
+
+**Completed:** no
+
+Proposed 2026-06-28 (owner). The catalog manifest nesting feels wrong:
+`catalogs → name(=merchant slug) → tier_groups → products → prices`. The
+`tier_groups` level only earns its keep when a group holds MORE THAN ONE
+mutually-exclusive product (it usually holds one), and keying the top list by
+`name` (which must equal a merchant slug) is implicit. Flatten + clarify.
+
+## Proposed shape (confirm before building)
+```yaml
+merchants:
+  - slug: doujins
+    products:
+      - slug: premium
+        display_name: Premium
+        tier_group: premium      # just an attribute (string label), not a nesting level
+        tier_rank: 0             # relative key; 0 and negatives allowed
+        entitlements: [premium]
+        prices: [...]
+```
+- `catalogs` (keyed by `name`) → `merchants` (keyed by `slug`) — explicit.
+- Drop the `tier_groups` nesting; `tier_group` becomes a product attribute. Products
+  sharing a `tier_group` are the mutually-exclusive upgrade/downgrade set.
+
+## tier_rank: relative, renumber-safe, 0/negative allowed
+- `tier_rank` lives ONLY on `products` (NOT denormalized onto subscriptions/payments,
+  confirmed), and every runtime use is a RELATIVE `<`/`>`/`>=` (upgrade = higher,
+  downgrade = lower). So renumbering is safe with zero data migration — e.g. insert a
+  lower tier by bumping the others up, OR prepend a NEGATIVE rank without touching them.
+- Make `tier_rank` an EXPLICIT manifest field (`*int`, so "omitted" ≠ "0"; the DB
+  default is 0) and require it when a `tier_group` has >1 product, so two products
+  don't silently collide at the default 0.
+- Drop the loader's `tier_rank > 0` rule (pkg/catalog/load.go:136) — allow 0/negative.
+
+## Open design decisions
+- Where the tier-group display label lives now (it was `tier_groups[].display_name`):
+  derive from the lead product, an optional `tier_groups:` metadata map, or drop it.
+- Back-compat: HARD CUT (new format only) + rewrite the doujins/cozy configs, vs a
+  transitional dual-parse. Lean hard-cut (matches #588 style).
+
+## Tasks
+- [ ] Pin the final manifest shape (this issue's sketch) with the owner.
+- [ ] New parser in pkg/catalog (manifest.go/load.go): merchants→products, tier_group attr.
+- [ ] tier_rank: `*int`, allow 0/negative, explicit-when-grouped; drop the >0 rule.
+- [ ] Converge maps the flattened shape onto products/prices unchanged downstream.
+- [ ] Rewrite doujins config/openrails-bootstrap.yaml + any cozy-art catalog onto it.
+- [ ] Tests: parse, tier_group grouping, renumber/insert-negative upgrade-direction.
 
 ---
 
