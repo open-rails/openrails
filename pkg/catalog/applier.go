@@ -2,34 +2,23 @@ package catalog
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// Status values mirror the OpenRails CatalogStatus enum (issue #210). We keep
-// them as plain strings inside the catalog package so it is decoupled from the
-// internal models package; the in-process adapter casts to models.CatalogStatus
-// at the boundary.
+// Status values mirror the OpenRails CatalogStatus enum at the service boundary.
 const (
-	StatusDraft    = "draft"
 	StatusActive   = "active"
 	StatusArchived = "archived"
 )
 
-func normalizeStatus(s string) (string, error) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	switch s {
-	case "":
-		return "", nil // caller-defined default (active for products/prices)
-	case StatusDraft, StatusActive, StatusArchived:
-		return s, nil
-	default:
-		return "", fmt.Errorf("invalid status %q (want draft|active|archived)", s)
+func statusFromActive(active *bool) string {
+	if active != nil && !*active {
+		return StatusArchived
 	}
+	return StatusActive
 }
 
 // Applier is the narrow facade surface the plan/apply pipeline drives. It

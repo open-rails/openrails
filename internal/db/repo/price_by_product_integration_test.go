@@ -14,7 +14,7 @@ import (
 )
 
 // GetByProductID must return ALL prices (active + archived/draft). The catalog
-// converge relies on it to reconcile an already-archived legacy_import price
+// converge relies on it to reconcile an already-archived historical price
 // instead of re-creating it — a prior bug wired GetByProductID to the
 // active-only query, so re-applying a manifest with archived legacy tiers blew
 // up on unique_prices_product_amount_cycle. GetActiveByProductID stays
@@ -42,7 +42,7 @@ func TestGetByProductID_IncludesArchived(t *testing.T) {
 		require.NoError(t, e)
 	}
 	insertPrice(activeID, 2300, "active")
-	insertPrice(archivedID, 1900, "archived") // the legacy_import tier
+	insertPrice(archivedID, 1900, "archived") // historical tier
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE product_id = $1`, productID)

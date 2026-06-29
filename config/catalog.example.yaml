@@ -8,27 +8,20 @@ version: 1
 
 catalogs:
   - merchant: local-stack
-    name: local-stack-default
-
-    # Provider labels here are catalog-provider adapters. Use "mobius" for the
-    # NMI catalog adapter, even though merchant provider_accounts use
-    # provider_type: nmi.
-    default_providers: [stripe, mobius]
 
     products:
-      - slug: basic
+      - key: basic
         display_name: Basic
         description: Basic recurring membership.
         tier_group: memberships
         tier_rank: 1
-        status: active
         entitlements:
           - access.basic
         prices:
           - currency: usd
             unit_amount: 9_990_000
-            interval: month
-            interval_count: 1
+            interval: 30d
+            providers: [stripe, mobius]
             provider_links:
               stripe:
                 lookup_key: local-stack-basic-monthly
@@ -37,27 +30,25 @@ catalogs:
 
           - currency: usd
             unit_amount: 99_900_000
-            interval: year
-            interval_count: 1
+            interval: 365d
             providers: [stripe]
             provider_links:
               stripe:
                 lookup_key: local-stack-basic-yearly
 
-      - slug: premium
+      - key: premium
         display_name: Premium
         description: Premium recurring membership.
         tier_group: memberships
         tier_rank: 2
-        status: active
         entitlements:
           - access.basic
           - access.premium
         prices:
           - currency: usd
             unit_amount: 19_990_000
-            interval: month
-            interval_count: 1
+            interval: 30d
+            providers: [stripe, mobius]
             provider_links:
               stripe:
                 lookup_key: local-stack-premium-monthly
@@ -66,8 +57,7 @@ catalogs:
 
           - currency: usd
             unit_amount: 199_900_000
-            interval: year
-            interval_count: 1
+            interval: 365d
             providers: [stripe, solana]
             provider_links:
               stripe:
@@ -77,19 +67,16 @@ catalogs:
               # solana:
               #   plan_pda: 7XyExistingPlanAccount...
 
-      - slug: legacy-vip
+      - key: legacy-vip
         display_name: Legacy VIP
         description: Historical plan kept for migrated subscriptions.
         tier_group: legacy
         tier_rank: 99
-        status: archived
+        active: false
         entitlements:
           - access.premium
-        providers: []
         prices:
           - currency: usd
             unit_amount: 14_990_000
-            interval: month
-            interval_count: 1
-            legacy_import: true
-            providers: []
+            interval: 30d
+            active: false

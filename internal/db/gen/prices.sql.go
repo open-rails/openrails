@@ -503,7 +503,7 @@ WHERE price.product_id = $1
 `
 
 // All prices for a product regardless of status (active + archived/draft) — the
-// catalog converge needs archived rows to reconcile legacy_import prices instead
+// catalog converge needs archived rows to reconcile historical prices instead
 // of re-creating them (would violate unique_prices_product_amount_cycle).
 func (q *Queries) ListPricesByProduct(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
 	rows, err := q.db.Query(ctx, listPricesByProduct, productID)

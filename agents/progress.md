@@ -7,7 +7,42 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 621
+next_id: 622
+
+---
+
+# #621: catalog prices own providers explicitly
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29 (Codex). Remove `default_providers` and product-level `providers` from catalog manifests. Provider sync/routing must be declared only on the price itself.
+
+## Reason
+
+`default_providers` and product `providers` are only YAML inheritance:
+
+`price.providers -> product.providers -> catalog.default_providers`
+
+That saves a few repeated strings but hides the important decision: which external rails this exact price should sync/link/create against. It is especially confusing for mixed catalogs where the current price, historical prices, native/metered prices, Solana prices, and CCBill-only legacy prices all differ.
+
+Follow the Stripe-simple model: a price carries the provider-specific publication/linking intent. The product and catalog do not.
+
+## Scope
+
+- Delete `Manifest.DefaultProviders`.
+- Delete `Product.Providers`.
+- Keep `Price.Providers` as the only provider list.
+- Change provider resolution to read `price.providers` only.
+- Decide and document the nil/empty meaning for `Price.Providers`; preferred: omitted or `[]` means OpenRails-native/no external provider sync.
+- Update `config/catalog.example.yaml`, embedded catalog push tests, and Doujins bootstrap manifests to put `providers` directly on each externally synced price.
+- Remove docs/comments that describe provider inheritance.
+
+## Acceptance
+
+- Catalog parser rejects `default_providers` and product-level `providers` as unknown fields.
+- Every external-provider price in examples/tests declares `providers` on that price.
+- Native/metered/internal-only prices omit `providers` or set `providers: []` consistently.
+- Focused tests pass: `go test ./pkg/catalog ./pkg/embedded ./cmd/openrails`.
+- Doujins embedded bootstrap tests pass after updating its manifest shape.
 
 ---
 
@@ -78,7 +113,7 @@ Prove the full lifecycle for the complex catalog use cases:
 - [ ] Stripe test mode: catalog product/price sync, recurring price, intro/free-trial price where Stripe supports it, one-time product price, invoice-item collection for metered invoice totals.
 - [ ] NMI sandbox: recurring plan sync where supported, one-time/charge behavior where supported, invoice collection through NMI vault/charge path.
 - [ ] Solana/devnet or local validator: prove OpenRails catalog metadata remains internal and Solana is only used for payment/recurring transfer identifiers; do not pretend Solana stores rich billing metadata.
-- [ ] DB-only/OpenRails-native prices: usage-limited and metered products that intentionally do not sync to external providers.
+- [x] DB-only/OpenRails-native prices: usage-limited and metered products that intentionally do not sync to external providers.
 
 ## Runtime Use Cases To Prove
 
@@ -87,18 +122,18 @@ Prove the full lifecycle for the complex catalog use cases:
 - [ ] AI credits: purchase/subscription grants custom `ai-image-credit` balances and they can be spent through existing credit paths.
 - [ ] API prepay: purchase grants custom `api-credit` balances for fal.ai-style API spend.
 - [ ] Content marketplace: one-off movie/video purchase creates durable ownership/product-access records.
-- [ ] Bundle product: buying a bundle grants or materializes access for its included products, not only the parent product.
-- [ ] Claude Code-style rate limits: 5x and 20x plans materialize usage-limit policy windows for the customer and admission checks enforce the correct window.
-- [ ] DigitalOcean/Runpod-style metered billing: app reports VM runtime and storage usage; OpenRails rates usage from catalog meter sidecars; end-of-period invoice has correct line items and total.
+- [x] Bundle product: buying a bundle grants or materializes access for its included products, not only the parent product.
+- [x] Claude Code-style rate limits: 5x and 20x plans materialize usage-limit policy windows for the customer and admission checks enforce the correct window.
+- [x] DigitalOcean/Runpod-style metered billing: app reports VM runtime and storage usage; OpenRails rates usage from catalog meter sidecars; end-of-period invoice has correct line items and total.
 
 ## Integration Test Plan
 
-- [ ] EXTEND the existing `internal/integrationharness` (already boots standalone + embedded over shared Postgres + Redis) with the lifecycle assertions below — do not stand up a new harness.
-- [ ] Start from an already-published catalog (reuse #611's publish path + fixture, unique slugs per run); this issue consumes the catalog, it does NOT re-prove publish.
-- [ ] Drive remote host usage reporting through the public/merchant HTTP surface that a separate app would call.
-- [ ] Drive embedded usage reporting through the embedded service/HTTP surface where host-owned auth is bypassed but OpenRails engine, DB, Redis, and services are real.
-- [ ] Query the real DB only for assertions that are not exposed through HTTP yet: meter sidecars, invoice item source rows, product include rows, usage-limit bindings.
-- [ ] Assert month-end invoice finalization from reported VM/storage usage: usage rows covered exactly once, invoice item totals match rated usage, invoice totals/payment state are correct.
+- [x] EXTEND the existing `internal/integrationharness` (already boots standalone + embedded over shared Postgres + Redis) with the lifecycle assertions below — do not stand up a new harness.
+- [x] Start from an already-published catalog (reuse #611's publish path + fixture, unique slugs per run); this issue consumes the catalog, it does NOT re-prove publish.
+- [x] Drive remote host usage reporting through the public/merchant HTTP surface that a separate app would call.
+- [x] Drive embedded usage reporting through the embedded service/HTTP surface where host-owned auth is bypassed but OpenRails engine, DB, Redis, and services are real.
+- [x] Query the real DB only for assertions that are not exposed through HTTP yet: meter sidecars, invoice item source rows, product include rows, usage-limit bindings.
+- [x] Assert month-end invoice finalization from reported VM/storage usage: usage rows covered exactly once, invoice item totals match rated usage, invoice totals/payment state are correct.
 - [ ] Assert collection paths:
       Stripe/NMI sandbox tests are opt-in via credentials and fail loudly when enabled;
       default CI still runs the real OpenRails HTTP/DB/Redis lifecycle without live provider secrets.
@@ -107,10 +142,10 @@ Prove the full lifecycle for the complex catalog use cases:
 
 ## Implementation Tasks
 
-- [ ] Inventory the current usage-reporting HTTP/embedded surfaces and decide the canonical app-reporting API for metered catalog usage.
-- [ ] Wire catalog meter sidecars into the usage rating path so `catalog_price_metered` drives invoice item amounts.
-- [ ] Wire product `includes` into ownership/materialization so bundle purchases grant included products.
-- [ ] Wire product usage-limit specs into customer-scoped usage bindings at grant/subscription/purchase time.
+- [x] Inventory the current usage-reporting HTTP/embedded surfaces and decide the canonical app-reporting API for metered catalog usage.
+- [x] Wire catalog meter sidecars into the usage rating path so `catalog_price_metered` drives invoice item amounts.
+- [x] Wire product `includes` into ownership/materialization so bundle purchases grant included products.
+- [x] Wire product usage-limit specs into customer-scoped usage bindings at grant/subscription/purchase time.
 - [ ] Add or fix provider sync gaps for Stripe/NMI discovered by the provider matrix tests; keep provider-specific limitations explicit in docs and assertions.
 - [ ] Add docs that explain OpenRails owns rich catalog/billing metadata; providers are payment/sync adapters with smaller metadata surfaces.
 
@@ -138,13 +173,14 @@ Prove the full lifecycle for the complex catalog use cases:
 # #620: Solana catalog money-movement proof
 
 **Completed:** no
-**Status:** PLANNED 2026-06-29: prove Solana stays a payment rail while OpenRails keeps catalog, product, entitlement, usage, and invoice metadata internally.
+**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove Solana stays a payment rail while OpenRails keeps catalog, product, entitlement, usage, and invoice metadata internally. Local env check found no Solana/devnet credentials, so this cannot be marked complete from this worktree without a configured provider run.
 
 Parent: #612.
 Depends on: #614.
 
 ## Tasks
 
+- [x] Check local environment for Solana/devnet credentials before attempting provider proof; none were configured on 2026-06-29.
 - [ ] Add an opt-in integration proof for Solana/devnet or local validator using a published catalog product.
 - [ ] Assert Solana inputs/outputs carry only payment/plan identifiers needed for money movement.
 - [ ] Assert OpenRails DB remains the source of truth for product metadata, granted benefits, and invoice/payment state.
@@ -160,13 +196,14 @@ Depends on: #614.
 # #619: NMI sandbox catalog sync and collection proof
 
 **Completed:** no
-**Status:** PLANNED 2026-06-29: prove the NMI sandbox path can collect OpenRails-owned catalog charges without pretending NMI supports richer catalog semantics than it does.
+**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove the NMI sandbox path can collect OpenRails-owned catalog charges without pretending NMI supports richer catalog semantics than it does. Local env check found no NMI sandbox credentials, so this cannot be marked complete from this worktree without a configured provider run.
 
 Parent: #612.
 Depends on: #614.
 
 ## Tasks
 
+- [x] Check local environment for NMI sandbox credentials before attempting provider proof; none were configured on 2026-06-29.
 - [ ] Add opt-in NMI sandbox integration coverage starting from an already-published catalog.
 - [ ] Exercise the supported recurring/one-time charge path against real OpenRails invoice/payment state.
 - [ ] Document or assert provider limitations instead of adding compatibility shims.
@@ -182,13 +219,14 @@ Depends on: #614.
 # #618: Stripe test-mode catalog sync and collection proof
 
 **Completed:** no
-**Status:** PLANNED 2026-06-29: prove Stripe test-mode sync/collection over the existing provider machinery, with OpenRails still owning catalog semantics.
+**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove Stripe test-mode sync/collection over the existing provider machinery, with OpenRails still owning catalog semantics. Local env check found no Stripe test credentials, so this cannot be marked complete from this worktree without a configured provider run.
 
 Parent: #612.
 Depends on: #614.
 
 ## Tasks
 
+- [x] Check local environment for Stripe test credentials before attempting provider proof; none were configured on 2026-06-29.
 - [ ] Add opt-in Stripe test-mode integration coverage starting from an already-published catalog.
 - [ ] Exercise recurring price, one-time price, free-trial/intro behavior where Stripe supports it, and invoice-item collection for metered totals.
 - [ ] Assert provider ids are stored and reused idempotently.
@@ -198,74 +236,6 @@ Depends on: #614.
 
 - Configured Stripe tests sync/collect through real Stripe test mode and fail on broken credentials or behavior.
 - Default CI still runs without Stripe secrets.
-
----
-
-# #617: catalog usage-limit specs create customer bindings
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29: wire catalog-declared usage-limit specs into customer-scoped admission bindings when a qualifying product is granted.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [ ] Trace the grant/subscription/purchase path that already materializes entitlements and credits.
-- [ ] Reuse the existing spendgate policy/binding model; do not create a parallel limiter.
-- [ ] Create customer bindings from catalog usage-limit specs at grant time.
-- [ ] Add integration coverage for Claude Code-style 5x and 20x plans through real admission checks.
-
-## Acceptance
-
-- Buying/granting the 5x plan creates the expected customer windows and admission enforces them.
-- Buying/granting the 20x plan creates stronger windows without stale 5x bindings shadowing it.
-
----
-
-# #616: catalog bundle includes materialize on grant
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29: buying or granting a bundle product must materialize access to its included products.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [ ] Trace `grants.go` and the existing ownership/access materialization path.
-- [ ] Reuse the persisted `product_includes` data from #611.
-- [ ] Grant included product access when the parent bundle is granted.
-- [ ] Make the operation idempotent.
-
-## Acceptance
-
-- A real integration test buys/grants a bundle and proves included products are accessible.
-- Replaying the grant does not duplicate ownership/access rows.
-
----
-
-# #615: catalog meter sidecars drive rating
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29: wire `catalog_price_metered` sidecars into metered rating so catalog-declared VM/storage prices produce invoiceable totals.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [ ] Find the canonical usage-reporting path and keep it as the single app-facing API.
-- [ ] Load the matching catalog metered price sidecar before calling `AccrueMeteredAggregate`.
-- [ ] Rate VM runtime and storage usage using the catalog rate, unit, and interval.
-- [ ] Add idempotency coverage so usage is rated once per billing period/source.
-
-## Acceptance
-
-- A real integration test reports VM/storage usage, rates it from catalog sidecars, finalizes an invoice, and verifies exact line totals.
-- Re-running rating/finalization does not duplicate owed or invoice item rows.
-
----
 
 # #611: exhaustive v1 catalog bootstrap examples and real HTTP coverage
 

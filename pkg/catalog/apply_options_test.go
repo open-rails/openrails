@@ -20,7 +20,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 		Slug: "memberships",
 		Products: []ProductPlan{
 			{
-				Slug:   "new",
+				Key:    "new",
 				Action: ProductCreate,
 				CreateReq: billingservice.CreateProductRequest{
 					Slug:        "new",
@@ -38,7 +38,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 				}},
 			},
 			{
-				Slug:     "existing",
+				Key:      "existing",
 				Action:   ProductUpdate,
 				UpdateID: existingProductID,
 				Prices: []PricePlan{

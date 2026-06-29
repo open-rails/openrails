@@ -64,7 +64,7 @@ type GroupPlan struct {
 
 // ProductPlan is the diff for one product plus its price set.
 type ProductPlan struct {
-	Slug   string        `json:"slug"`
+	Key    string        `json:"key"`
 	Action ProductAction `json:"action"`
 
 	// CreateReq / UpdateReq / UpdateID are prepared for apply.
@@ -101,7 +101,7 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 
 		declared := make(map[string]struct{}, len(group.Products))
 		for _, product := range group.Products {
-			declared[product.Slug] = struct{}{}
+			declared[product.Key] = struct{}{}
 			pp, err := planProduct(ctx, applier, m, group, product, opts)
 			if err != nil {
 				return nil, err
@@ -138,21 +138,18 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	credits := creditsSpec(product.Credits)
 	tierGroup := group.Slug
 	tierRank := product.tierRank()
-	desiredStatus := product.Status
-	if desiredStatus == "" {
-		desiredStatus = StatusActive
-	}
+	desiredStatus := statusFromActive(product.Active)
 
-	pp := &ProductPlan{Slug: product.Slug}
+	pp := &ProductPlan{Key: product.Key}
 
-	existing, err := applier.GetProductBySlug(ctx, product.Slug)
+	existing, err := applier.GetProductBySlug(ctx, product.Key)
 	if err != nil || existing == nil {
 		// Not found -> create. (The facade returns an error for "not found"; we
 		// treat any lookup failure as create-intent — apply will surface a real
 		// create error if the slug actually exists.)
 		pp.Action = ProductCreate
 		pp.CreateReq = billingservice.CreateProductRequest{
-			Slug:             product.Slug,
+			Slug:             product.Key,
 			DisplayName:      product.DisplayName,
 			Description:      strings.TrimSpace(product.Description),
 			EntitlementsSpec: entitlements,
@@ -251,21 +248,25 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		var err error
 		current, err = applier.ListPricesByProduct(ctx, existing.ID, false)
 		if err != nil {
-			return fmt.Errorf("list prices for product %s: %w", product.Slug, err)
+			return fmt.Errorf("list prices for product %s: %w", product.Key, err)
 		}
 	}
 
 	claimed := map[uuid.UUID]struct{}{}
 
 	for _, price := range product.Prices {
-		desiredStatus := price.Status
-		if desiredStatus == "" {
-			desiredStatus = StatusActive
+		desiredStatus := statusFromActive(price.Active)
+		_, cycleDays, err := normalizeInterval(price.Interval)
+		if err != nil {
+			return fmt.Errorf("price %s interval: %w", PriceLabel(product.Key, price), err)
 		}
-		cycleDays := intervalDays(price.Interval, price.IntervalCount)
-		label := PriceLabel(product.Slug, price)
+		var billingCycleDays *int
+		if cycleDays > 0 {
+			billingCycleDays = &cycleDays
+		}
+		label := PriceLabel(product.Key, price)
 
-		match := matchPrice(current, price, cycleDays, claimed)
+		match := matchPrice(current, price, billingCycleDays, claimed)
 		if match != nil {
 			claimed[match.ID] = struct{}{}
 			plp := PricePlan{Label: label, ExistingID: match.ID}
@@ -274,7 +275,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 				plp.Action = PriceUnchanged
 			case desiredStatus == StatusActive:
 				plp.Action = PriceActivate
-			default: // archived/draft desired but currently different
+			default: // inactive desired but currently active
 				plp.Action = PriceArchive
 			}
 			pp.Prices = append(pp.Prices, plp)
@@ -282,21 +283,23 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		}
 
 		// No financial match -> create.
-		providers := m.providersFor(product, price)
 		createReq := billingservice.CreatePriceRequest{
 			// ProductID is filled at apply time once the product exists.
 			ProductID:        productID(existing),
 			UnitAmount:       price.UnitAmount,
 			Currency:         price.Currency,
-			BillingCycleDays: &cycleDays,
-			Providers:        providers,
+			BillingCycleDays: billingCycleDays,
+			Providers:        price.Providers,
 			ProviderLinks:    price.ProviderLinks,
 			Status:           toModelStatus(desiredStatus),
 		}
 		// #602 introductory/trial first period (a different first-period price/length).
 		if price.Intro != nil {
 			amt := price.Intro.Amount
-			days := price.Intro.PeriodDays
+			_, days, err := normalizeInterval(price.Intro.Interval)
+			if err != nil {
+				return fmt.Errorf("price %s intro.interval: %w", label, err)
+			}
 			createReq.InitialAmount = &amt
 			createReq.InitialPeriodDays = &days
 		}
@@ -318,7 +321,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 				continue
 			}
 			pp.Prices = append(pp.Prices, PricePlan{
-				Label:      PriceLabel(product.Slug, Price{Currency: c.Currency, UnitAmount: c.UnitAmount}),
+				Label:      PriceLabel(product.Key, Price{Currency: c.Currency, UnitAmount: c.UnitAmount}),
 				Action:     PriceArchive,
 				ExistingID: c.ID,
 			})
@@ -330,7 +333,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 // matchPrice finds an existing OpenRails price with the same financial substance
 // as the declared price, preferring an unclaimed active match over an archived
 // one. Identity is (currency, unit_amount, billing_cycle_days).
-func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays *int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
 		c := &current[i]
@@ -340,7 +343,7 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays in
 		if c.UnitAmount != price.UnitAmount || !strings.EqualFold(c.Currency, price.Currency) {
 			continue
 		}
-		if c.BillingCycleDays == nil || *c.BillingCycleDays != cycleDays {
+		if !sameCycleDays(c.BillingCycleDays, cycleDays) {
 			continue
 		}
 		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
@@ -348,6 +351,13 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays in
 		}
 	}
 	return best
+}
+
+func sameCycleDays(a, b *int) bool {
+	if a == nil || *a <= 0 {
+		return b == nil || *b <= 0
+	}
+	return b != nil && *a == *b
 }
 
 func productID(p *billingservice.CatalogProduct) uuid.UUID {
@@ -421,7 +431,7 @@ func (plan *ApplyPlan) String() string {
 		fmt.Fprintf(&b, "tier_group %s\n", gp.Slug)
 		for pi := range gp.Products {
 			pp := &gp.Products[pi]
-			fmt.Fprintf(&b, "  %s product %s\n", symbol(string(pp.Action)), pp.Slug)
+			fmt.Fprintf(&b, "  %s product %s\n", symbol(string(pp.Action)), pp.Key)
 			var changes []string
 			for i := range pp.Prices {
 				plp := &pp.Prices[i]
@@ -467,13 +477,10 @@ func symbol(action string) string {
 func PriceLabel(productSlug string, price Price) string {
 	interval := price.Interval
 	if interval == "" {
-		interval = "month"
+		interval = "30d"
 	}
 	if interval == "once" {
 		return fmt.Sprintf("%s %s once", productSlug, formatMoney(price.UnitAmount, price.Currency))
-	}
-	if price.IntervalCount > 1 {
-		interval = fmt.Sprintf("%d %ss", price.IntervalCount, interval)
 	}
 	return fmt.Sprintf("%s %s/%s", productSlug, formatMoney(price.UnitAmount, price.Currency), interval)
 }

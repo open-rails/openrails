@@ -19,10 +19,9 @@ func writeManifest(t *testing.T, body string) string {
 
 const goodManifest = `
 version: 1
-default_providers: [stripe]
 
 products:
-  - slug: initiate
+  - key: initiate
     display_name: Novice
     tier_group: cozy
     tier_rank: 1
@@ -30,8 +29,9 @@ products:
     prices:
       - currency: usd
         unit_amount: 1200
-        interval: month
-  - slug: craftsman
+        interval: 30d
+        providers: [stripe]
+  - key: craftsman
     display_name: Craftsman
     tier_group: cozy
     tier_rank: 2
@@ -39,14 +39,16 @@ products:
     prices:
       - currency: usd
         unit_amount: 2900
-        interval: month
+        interval: 30d
+        providers: [stripe]
       - currency: usd
         unit_amount: 1500
-        interval: month
+        interval: 30d
+        active: false
+        providers: [stripe]
         provider_links:
           stripe:
             price_id: price_legacy123
-        legacy_import: true
 `
 
 func TestLoad_Good(t *testing.T) {
@@ -65,20 +67,19 @@ func TestLoad_Good(t *testing.T) {
 		t.Fatalf("want 2 prices, got %d", len(craftsman.Prices))
 	}
 	// Interval defaults and normalization.
-	if craftsman.Prices[0].Interval != "month" || craftsman.Prices[0].IntervalCount != 1 {
+	if craftsman.Prices[0].Interval != "30d" {
 		t.Fatalf("interval not normalized: %+v", craftsman.Prices[0])
 	}
-	// legacy_import folds to archived status.
+	// Historical prices are declared directly as archived.
 	legacy := craftsman.Prices[1]
-	if legacy.Status != StatusArchived {
-		t.Fatalf("legacy import should be archived, got %q", legacy.Status)
+	if legacy.Active == nil || *legacy.Active {
+		t.Fatalf("historical price should be inactive, got %v", legacy.Active)
 	}
 	if got := legacy.ProviderLinks["stripe"]["price_id"]; got != "price_legacy123" {
 		t.Fatalf("provider_links.stripe.price_id not preserved: %q", got)
 	}
-	// default_providers inherited.
-	if got := m.providersFor(craftsman, craftsman.Prices[0]); len(got) != 1 || got[0] != "stripe" {
-		t.Fatalf("providers not inherited: %v", got)
+	if got := craftsman.Prices[0].Providers; len(got) != 1 || got[0] != "stripe" {
+		t.Fatalf("providers not normalized: %v", got)
 	}
 }
 
@@ -96,10 +97,31 @@ func TestLoad_RejectsTierGroups(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsStatus(t *testing.T) {
+	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    status: archived\n"))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want status unknown-field error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsDefaultProviders(t *testing.T) {
+	_, err := Load(writeManifest(t, "version: 1\ndefault_providers: [stripe]\nproducts: []\n"))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want default_providers unknown-field error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsProductProviders(t *testing.T) {
+	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    providers: [stripe]\n"))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want product providers unknown-field error, got %v", err)
+	}
+}
+
 func TestValidateRejectsTierGroupsOnly(t *testing.T) {
 	m := &Manifest{
 		Version:    SupportedVersion,
-		TierGroups: []TierGroup{{Slug: "old", Products: []Product{{Slug: "p", DisplayName: "P"}}}},
+		TierGroups: []TierGroup{{Slug: "old", Products: []Product{{Key: "p", DisplayName: "P"}}}},
 	}
 	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "not tier_groups") {
 		t.Fatalf("want tier_groups-only rejection, got %v", err)
@@ -120,13 +142,13 @@ func TestLoad_DuplicatePriceByTerms(t *testing.T) {
 	body := `
 version: 1
 products:
-  - slug: p
+  - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: month}
-      - {currency: usd, unit_amount: 1000, interval: month}
+      - {currency: usd, unit_amount: 1000, interval: 30d}
+      - {currency: usd, unit_amount: 1000, interval: 30d}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -134,16 +156,16 @@ products:
 	}
 }
 
-func TestLoad_DuplicateProductSlug(t *testing.T) {
+func TestLoad_DuplicateProductKey(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {slug: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "duplicate product slug") {
-		t.Fatalf("want duplicate product slug error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "duplicate product key") {
+		t.Fatalf("want duplicate product key error, got %v", err)
 	}
 }
 
@@ -151,8 +173,8 @@ func TestLoad_MissingTierRank(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {slug: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "tier_rank is required") {
@@ -164,7 +186,7 @@ func TestLoad_TierRankOptionalForSingleProduct(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {slug: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -179,15 +201,15 @@ func TestLoad_TierRankAllowsZeroAndNegative(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {slug: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	ranks := ranksBySlug(m)
+	ranks := ranksByKey(m)
 	if ranks["free"] != -1 || ranks["starter"] != 0 || ranks["pro"] != 1 {
 		t.Fatalf("unexpected ranks: %v", ranks)
 	}
@@ -203,8 +225,8 @@ func TestLoad_TierRankDirectionSurvivesRenumberAndNegativePrepend(t *testing.T) 
 			body: `
 version: 1
 products:
-  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `,
 		},
 		{
@@ -212,9 +234,9 @@ products:
 			body: `
 version: 1
 products:
-  - {slug: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-  - {slug: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
 `,
 		},
 	}
@@ -224,7 +246,7 @@ products:
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
-			ranks := ranksBySlug(m)
+			ranks := ranksByKey(m)
 			if !(ranks["starter"] < ranks["pro"]) {
 				t.Fatalf("starter should downgrade from pro and pro should upgrade from starter: %v", ranks)
 			}
@@ -232,11 +254,11 @@ products:
 	}
 }
 
-func ranksBySlug(m *Manifest) map[string]int {
+func ranksByKey(m *Manifest) map[string]int {
 	ranks := map[string]int{}
 	for _, group := range m.TierGroups {
 		for _, product := range group.Products {
-			ranks[product.Slug] = product.tierRank()
+			ranks[product.Key] = product.tierRank()
 		}
 	}
 	return ranks
@@ -246,13 +268,12 @@ func TestLoad_SolanaNonStablecoinRejected(t *testing.T) {
 	body := `
 version: 1
 products:
-  - slug: p
+  - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
-    providers: [solana]
     prices:
-      - {currency: eur, unit_amount: 1000, interval: month}
+      - {currency: eur, unit_amount: 1000, interval: 30d, providers: [solana]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
@@ -296,7 +317,7 @@ products:
 		t.Fatalf("flat products were not normalized: %+v", m.TierGroups)
 	}
 	p := m.TierGroups[0].Products[0]
-	if p.Slug != "premium" || p.UsageLimits[0] != "starter-spend" {
+	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
 	if got := p.Credits["monthly-usd"].Unit; got != "usd" {
@@ -327,10 +348,9 @@ products:
 	}
 }
 
-func TestLoad_MeteredRejectsInheritedProviders(t *testing.T) {
+func TestLoad_MeteredRejectsProviders(t *testing.T) {
 	body := `
 version: 1
-default_providers: [stripe]
 meters:
   - {key: api-calls, kind: counter}
 products:
@@ -339,6 +359,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
+        providers: [stripe]
         metered: {meter: api-calls, rate: 2_000}
 `
 	_, err := Load(writeManifest(t, body))
@@ -365,13 +386,12 @@ func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
 products:
-  - slug: p
+  - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
-    providers: [solana]
     prices:
-      - {currency: usdc, unit_amount: 1000, interval: month}
+      - {currency: usdc, unit_amount: 1000, interval: 30d, providers: [solana]}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("usdc + solana should be accepted, got %v", err)
@@ -382,15 +402,52 @@ func TestLoad_BadInterval(t *testing.T) {
 	body := `
 version: 1
 products:
-  - slug: p
+  - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: week}
+      - {currency: usd, unit_amount: 1000, interval: 1w}
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "interval must be once, month, or year") {
+	if err == nil || !strings.Contains(err.Error(), "must use h or d") {
 		t.Fatalf("want interval error, got %v", err)
+	}
+}
+
+func TestLoad_NormalizesWholeDayHourInterval(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, interval: 24h}
+`
+	m, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := m.TierGroups[0].Products[0].Prices[0].Interval; got != "1d" {
+		t.Fatalf("interval = %q, want 1d", got)
+	}
+}
+
+func TestLoad_RejectsSubDayRecurringInterval(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, interval: 1h}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "whole-day duration") {
+		t.Fatalf("want whole-day storage error, got %v", err)
 	}
 }

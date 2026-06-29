@@ -33,6 +33,11 @@ type CatalogProductIncludesSpec struct {
 	IncludedSlugs []string `json:"included_slugs"`
 }
 
+type CatalogProductUsageLimitsSpec struct {
+	ProductSlug string   `json:"product_slug"`
+	Keys        []string `json:"keys"`
+}
+
 type CatalogMeteredPriceSpec struct {
 	ProductSlug      string `json:"product_slug"`
 	UnitAmount       int64  `json:"unit_amount"`
@@ -45,10 +50,11 @@ type CatalogMeteredPriceSpec struct {
 }
 
 type SyncCatalogSidecarsRequest struct {
-	UsageLimits     []CatalogUsageLimitSpec      `json:"usage_limits,omitempty"`
-	Meters          []CatalogMeterSpec           `json:"meters,omitempty"`
-	ProductIncludes []CatalogProductIncludesSpec `json:"product_includes,omitempty"`
-	MeteredPrices   []CatalogMeteredPriceSpec    `json:"metered_prices,omitempty"`
+	UsageLimits     []CatalogUsageLimitSpec         `json:"usage_limits,omitempty"`
+	Meters          []CatalogMeterSpec              `json:"meters,omitempty"`
+	ProductIncludes []CatalogProductIncludesSpec    `json:"product_includes,omitempty"`
+	ProductLimits   []CatalogProductUsageLimitsSpec `json:"product_limits,omitempty"`
+	MeteredPrices   []CatalogMeteredPriceSpec       `json:"metered_prices,omitempty"`
 }
 
 func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSidecarsRequest) error {
@@ -65,6 +71,9 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSideca
 			return err
 		}
 		if err := syncMeters(ctx, tx, tid.UUID(), req.Meters, req.MeteredPrices); err != nil {
+			return err
+		}
+		if err := syncProductUsageLimits(ctx, tx, tid.UUID(), req.ProductLimits); err != nil {
 			return err
 		}
 		if err := syncProductIncludes(ctx, tx, tid.UUID(), req.ProductIncludes); err != nil {
@@ -153,6 +162,31 @@ SET meter_key = EXCLUDED.meter_key,
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND NOT (key = ANY($2::text[]))`, merchantID, meterKeys)
 	return err
+}
+
+func syncProductUsageLimits(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, productLimits []CatalogProductUsageLimitsSpec) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.product_usage_limits WHERE merchant_id = $1`, merchantID); err != nil {
+		return err
+	}
+	for _, spec := range productLimits {
+		productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductSlug)
+		if err != nil {
+			return err
+		}
+		for _, rawKey := range spec.Keys {
+			key := strings.TrimSpace(rawKey)
+			if key == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `
+	INSERT INTO openrails.product_usage_limits (merchant_id, product_id, usage_limit_key)
+	VALUES ($1, $2, $3)
+	ON CONFLICT DO NOTHING`, merchantID, productID, key); err != nil {
+				return fmt.Errorf("insert product usage_limit %q -> %q: %w", spec.ProductSlug, key, err)
+			}
+		}
+	}
+	return nil
 }
 
 func syncProductIncludes(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, includes []CatalogProductIncludesSpec) error {

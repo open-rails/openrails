@@ -39,7 +39,7 @@ func newPushCatalogCmd() *cobra.Command {
 			"computes a terraform-style plan per merchant, and prints it. A bare command is plan-only. " +
 			"Mutation classes are explicit and compose: --insert creates missing products/prices/provider objects; " +
 			"--overwrite updates existing OpenRails-owned catalog rows; --prune archives OpenRails-owned extras. " +
-			"Products are identified by slug within their merchant; prices by financial substance (currency, amount, interval).",
+			"Products are identified by key within their merchant; prices by financial substance (currency, amount, interval).",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushCatalog(cmd, opts)

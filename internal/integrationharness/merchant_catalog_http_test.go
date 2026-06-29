@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	openrails "github.com/open-rails/openrails"
@@ -95,16 +96,15 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	manifest := &catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Slug:        productSlug,
+			Key:         productSlug,
 			DisplayName: "Plan Product",
 			Description: "inserted through HTTP-backed catalog apply",
 			TierGroup:   groupSlug,
 			TierRank:    intPtr(1),
 			Prices: []catalog.Price{{
-				UnitAmount:    1299,
-				Currency:      "usd",
-				Interval:      "month",
-				IntervalCount: 1,
+				UnitAmount: 1299,
+				Currency:   "usd",
+				Interval:   "month",
 			}},
 		}},
 	}
@@ -130,7 +130,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	updatedManifest := *manifest
 	updatedManifest.TierGroups = nil
 	updatedManifest.Products = []catalog.Product{{
-		Slug:        productSlug,
+		Key:         productSlug,
 		DisplayName: "Plan Product Updated",
 		Description: "updated through HTTP-backed catalog apply",
 		TierGroup:   groupSlug,
@@ -190,16 +190,15 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Slug:        productSlug,
+			Key:         productSlug,
 			DisplayName: "Publish Product",
 			Description: "published through the live merchant catalog route",
 			TierGroup:   groupSlug,
 			TierRank:    intPtr(1),
 			Prices: []catalog.Price{{
-				UnitAmount:    1499,
-				Currency:      "usd",
-				Interval:      "month",
-				IntervalCount: 1,
+				UnitAmount: 1499,
+				Currency:   "usd",
+				Interval:   "month",
 			}},
 		}},
 	}
@@ -273,7 +272,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Slug:         productSlug,
+			Key:          productSlug,
 			DisplayName:  "Native Lifecycle Product",
 			Description:  "published catalog anchor for native lifecycle proof",
 			Entitlements: []string{"native-lifecycle-premium"},
@@ -281,11 +280,10 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 				"native-lifecycle-usd": {Currency: "usd", Amount: 10_000},
 			},
 			Prices: []catalog.Price{{
-				UnitAmount:    10_000,
-				Currency:      "usd",
-				Interval:      "once",
-				IntervalCount: 1,
-				Providers:     []string{},
+				UnitAmount: 10_000,
+				Currency:   "usd",
+				Interval:   "once",
+				Providers:  []string{},
 			}},
 		}},
 	}
@@ -329,14 +327,13 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			Kind: "counter",
 		}},
 		Products: []catalog.Product{{
-			Slug:        productSlug,
+			Key:         productSlug,
 			DisplayName: "Metered Usage Product",
 			Prices: []catalog.Price{{
-				UnitAmount:    0,
-				Currency:      "usd",
-				Interval:      "month",
-				IntervalCount: 1,
-				Providers:     []string{},
+				UnitAmount: 0,
+				Currency:   "usd",
+				Interval:   "month",
+				Providers:  []string{},
 				Metered: &catalog.MeteredPrice{
 					Meter:    meterKey,
 					Rate:     250_000,
@@ -359,12 +356,278 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	prices, err := (httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}).ListPricesByProduct(ctx, product.ID, true)
 	require.NoError(t, err)
 	require.Len(t, prices, 1)
+	var meterCount int
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2`, dbtest.TestMerchantID.UUID(), meterKey).Scan(&meterCount))
+	require.Equal(t, 1, meterCount)
+	var sidecarCount int
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_price_metered WHERE merchant_id = $1 AND price_id = $2`, dbtest.TestMerchantID.UUID(), prices[0].ID).Scan(&sidecarCount))
+	require.Equal(t, 1, sidecarCount)
 
 	for _, surface := range []*Surface{standalone, embedded} {
 		t.Run(surface.Name, func(t *testing.T) {
 			proveCatalogMeteredUsage(t, h, surface, prices[0].ID)
 		})
 	}
+}
+
+func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	standalone := h.StartStandalone("usd")
+
+	token := standalone.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-bundle-includes-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	childSlug := "movie-" + suffix
+	bundleSlug := "movie-bundle-" + suffix
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Products: []catalog.Product{
+			{
+				Key:         childSlug,
+				DisplayName: "Included Movie",
+				TierGroup:   "movies",
+				Prices: []catalog.Price{{
+					UnitAmount: 4_990_000,
+					Currency:   "usd",
+					Interval:   "once",
+					Providers:  []string{},
+				}},
+			},
+			{
+				Key:         bundleSlug,
+				DisplayName: "Movie Bundle",
+				TierGroup:   "bundles",
+				Includes:    []string{childSlug},
+				Prices: []catalog.Price{{
+					UnitAmount: 9_990_000,
+					Currency:   "usd",
+					Interval:   "once",
+					Providers:  []string{},
+				}},
+			},
+		},
+	}
+	require.NoError(t, manifest.Validate())
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+bundleSlug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var bundle billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &bundle))
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+childSlug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var child billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &child))
+
+	dbi := dbtest.OpenAppDB(t, h.DSN)
+	pool := dbi.Pool()
+	customer := uuid.New()
+	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customer)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customer)
+	})
+	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	g, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customer,
+		Product:  &bundle.ID,
+		Kind:     grants.Ownership,
+		Source:   grants.Purchase,
+		SourceID: "pay_" + suffix,
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customer, child.ID))
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customer, child.ID))
+}
+
+func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	standalone := h.StartStandalone("usd")
+
+	token := standalone.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-usage-limit-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	productSlug := "claude-plan-" + suffix
+	limitKey := "claude-5x-" + suffix
+	product20Slug := "claude-plan-20x-" + suffix
+	limit20Key := "claude-20x-" + suffix
+	measure := "claude-code"
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		UsageLimits: []catalog.UsageLimit{
+			{
+				Key:     limitKey,
+				Measure: measure,
+				Windows: []catalog.UsageLimitWindow{{
+					Window: "1h",
+					Amount: 100,
+				}},
+			},
+			{
+				Key:     limit20Key,
+				Measure: measure,
+				Windows: []catalog.UsageLimitWindow{{
+					Window: "1h",
+					Amount: 400,
+				}},
+			},
+		},
+		Products: []catalog.Product{
+			{
+				Key:         productSlug,
+				DisplayName: "Claude 5x Plan",
+				TierGroup:   "claude-code",
+				TierRank:    intPtr(1),
+				UsageLimits: []string{limitKey},
+				Prices: []catalog.Price{{
+					UnitAmount: 20_000_000,
+					Currency:   "usd",
+					Interval:   "month",
+					Providers:  []string{},
+				}},
+			},
+			{
+				Key:         product20Slug,
+				DisplayName: "Claude 20x Plan",
+				TierGroup:   "claude-code",
+				TierRank:    intPtr(2),
+				UsageLimits: []string{limit20Key},
+				Prices: []catalog.Price{{
+					UnitAmount: 80_000_000,
+					Currency:   "usd",
+					Interval:   "month",
+					Providers:  []string{},
+				}},
+			},
+		},
+	}
+	require.NoError(t, manifest.Validate())
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+productSlug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var product billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &product))
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-slug/"+product20Slug, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var product20 billingservice.CatalogProduct
+	require.NoError(t, json.Unmarshal(body, &product20))
+
+	dbi := dbtest.OpenAppDB(t, h.DSN)
+	pool := dbi.Pool()
+	customer := openrails.CustomerID(uuid.New())
+	customerID := customer.UUID()
+	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customerID.String())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.product_usage_limit_bindings WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
+	})
+	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	g, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customerID,
+		Product:  &product.ID,
+		Kind:     grants.Entitlement,
+		Source:   grants.Purchase,
+		SourceID: uuid.NewString(),
+		Spec:     &grants.Spec{Entitlements: []string{"claude-code"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, false))
+
+	client := standalone.Client()
+	depositSourceID := uuid.New()
+	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
+		CustomerID: &customer,
+		Invoker:    customerID.String(),
+		Currency:   "usd",
+		Amount:     1_000,
+		Source:     "catalog-usage-limit",
+		SourceID:   &depositSourceID,
+	})
+	require.NoError(t, err)
+
+	firstID := "usage-limit-first-" + uuid.NewString()
+	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
+		CustomerID:      customerID.String(),
+		Invoker:         customerID.String(),
+		InvokerType:     string(identity.InvokerTypePayer),
+		Resource:        measure,
+		Currency:        "usd",
+		EstimatedAmount: 60,
+		RequestID:       firstID,
+		Source:          "catalog-usage-limit",
+	}})
+	require.NoError(t, err)
+	require.Len(t, verdicts, 1)
+	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
+
+	secondID := "usage-limit-second-" + uuid.NewString()
+	verdicts, err = client.AdmitBatch(ctx, []openrails.AdmitRequest{{
+		CustomerID:      customerID.String(),
+		Invoker:         customerID.String(),
+		InvokerType:     string(identity.InvokerTypePayer),
+		Resource:        measure,
+		Currency:        "usd",
+		EstimatedAmount: 50,
+		RequestID:       secondID,
+		Source:          "catalog-usage-limit",
+	}})
+	require.NoError(t, err)
+	require.Len(t, verdicts, 1)
+	require.False(t, verdicts[0].Allowed(), "%+v", verdicts[0])
+
+	_, err = grantLedger.Revoke(ctx, g.ID, "refund")
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, true))
+	require.Equal(t, 0, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, false))
+
+	g20, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customerID,
+		Product:  &product20.ID,
+		Kind:     grants.Entitlement,
+		Source:   grants.Purchase,
+		SourceID: uuid.NewString(),
+		Spec:     &grants.Spec{Entitlements: []string{"claude-code-20x"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, g20))
+	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limit20Key, false))
+
+	upgradeID := "usage-limit-20x-" + uuid.NewString()
+	verdicts, err = client.AdmitBatch(ctx, []openrails.AdmitRequest{{
+		CustomerID:      customerID.String(),
+		Invoker:         customerID.String(),
+		InvokerType:     string(identity.InvokerTypePayer),
+		Resource:        measure,
+		Currency:        "usd",
+		EstimatedAmount: 150,
+		RequestID:       upgradeID,
+		Source:          "catalog-usage-limit",
+	}})
+	require.NoError(t, err)
+	require.Len(t, verdicts, 1)
+	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
 }
 
 func proveCatalogMeteredUsage(t *testing.T, h *Harness, surface *Surface, priceID uuid.UUID) {
@@ -396,6 +659,42 @@ func proveCatalogMeteredUsage(t *testing.T, h *Harness, surface *Surface, priceI
 	require.NoError(t, err)
 	require.Equal(t, "open", inv.Status)
 	require.Equal(t, int64(1_050_000), inv.AmountDue)
+}
+
+func liveOwnershipGrantCount(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, customer, product uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.grants g
+WHERE g.merchant_id = $1
+  AND g.customer_id = $2
+  AND g.product_id = $3
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.merchant_id = g.merchant_id
+        AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede')
+  )`, dbtest.TestMerchantID.UUID(), customer, product).Scan(&n))
+	return n
+}
+
+func productUsageLimitBindingCount(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, customer uuid.UUID, key string, revoked bool) int {
+	t.Helper()
+	cond := "revoked_at IS NULL"
+	if revoked {
+		cond = "revoked_at IS NOT NULL"
+	}
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.product_usage_limit_bindings WHERE merchant_id = $1 AND customer_id = $2 AND usage_limit_key = $3 AND `+cond,
+		dbtest.TestMerchantID.UUID(), customer, key).Scan(&n))
+	return n
 }
 
 func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, productID uuid.UUID) {

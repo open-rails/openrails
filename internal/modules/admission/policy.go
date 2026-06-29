@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,6 +39,11 @@ type PayerSpendLimits struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows for this tier; direct-payer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
+}
+
+type catalogUsageLimitWindow struct {
+	Window string `json:"window"`
+	Amount int64  `json:"amount"`
 }
 
 // UpsertPayerSpendLimitsFull sets the full trust-tier money policy.
@@ -129,6 +136,81 @@ func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer id
 		PolicyCurrency:  row.Policy.PolicyCurrency,
 		BadSpendWindows: row.Policy.BadSpendWindows,
 	}, nil
+}
+
+func (s *PayerSpendLimitStore) GetProductUsageLimitWindows(ctx context.Context, payer identity.CustomerID, measure string) ([]budgets.BudgetWindow, error) {
+	measure = strings.TrimSpace(measure)
+	if measure == "" {
+		return nil, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
+	var out []budgets.BudgetWindow
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		rows, err := s.db.Qx(ctx).Query(ctx, `
+SELECT usage_limit_key, windows
+FROM openrails.product_usage_limit_bindings
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND measure = $3
+  AND revoked_at IS NULL
+  AND starts_at <= now()
+  AND (ends_at IS NULL OR ends_at > now())
+ORDER BY usage_limit_key`, tenantID, payer.UUID(), measure)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			var raw []byte
+			if err := rows.Scan(&key, &raw); err != nil {
+				return err
+			}
+			var windows []catalogUsageLimitWindow
+			if err := json.Unmarshal(raw, &windows); err != nil {
+				return fmt.Errorf("admission: decode product usage-limit windows %q: %w", key, err)
+			}
+			for _, window := range windows {
+				seconds, err := usageLimitWindowSeconds(window.Window)
+				if err != nil {
+					return fmt.Errorf("admission: product usage-limit %q: %w", key, err)
+				}
+				if window.Amount < 0 {
+					continue
+				}
+				out = append(out, budgets.BudgetWindow{
+					Key:           key + ":" + strings.TrimSpace(window.Window),
+					WindowSeconds: seconds,
+					Limit:         window.Amount,
+				})
+			}
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func usageLimitWindowSeconds(value string) (int64, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return 0, fmt.Errorf("window is required")
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(value[:len(value)-1]), 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("window %q must be a positive whole h or d value", value)
+	}
+	switch value[len(value)-1] {
+	case 'h':
+		return int64((time.Duration(n) * time.Hour) / time.Second), nil
+	case 'd':
+		return int64((time.Duration(n) * 24 * time.Hour) / time.Second), nil
+	default:
+		return 0, fmt.Errorf("window %q must use h or d", value)
+	}
 }
 
 // InvokerSpendLimitStore reads/writes per-invoker spend limits (#473/#517) —

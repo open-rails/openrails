@@ -136,7 +136,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
-	sgReq := spendgate.Request{Invoker: req.Invoker, Tier: tier, Roles: roleStrings(req.Roles)}
+	sgReq := spendgate.Request{Invoker: req.Invoker, Tier: tier, Roles: roleStrings(req.Roles), Measure: req.Resource}
 
 	// Cached cap windows (FX-normalized to the request currency).
 	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, tier, req.Currency, sgReq)

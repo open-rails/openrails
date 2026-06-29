@@ -11,6 +11,8 @@ func TestCatalogBenefitsMeteringMigration(t *testing.T) {
 		t.Fatalf("read 034_catalog_benefits_metering.up.sql: %v", err)
 	}
 	sql := string(b)
+	productIncludesSQL := readMigration(t, "035_catalog_product_includes.up.sql")
+	productUsageLimitsSQL := readMigration(t, "036_catalog_product_usage_limits.up.sql")
 
 	for _, want := range []string{
 		"CREATE TABLE openrails.catalog_usage_limits",
@@ -18,14 +20,16 @@ func TestCatalogBenefitsMeteringMigration(t *testing.T) {
 		"CREATE TABLE openrails.catalog_meters",
 		"CREATE TABLE openrails.catalog_price_metered",
 		"CREATE TABLE openrails.product_includes",
+		"CREATE TABLE openrails.product_usage_limits",
 		"catalog_meters_kind_check CHECK",
 		"catalog_price_metered_rate_positive CHECK",
 		"COMMENT ON TABLE openrails.catalog_meters IS '#599 billing meter registry",
 		"COMMENT ON TABLE openrails.product_usage_limit_bindings IS '#594 materialized product-derived usage-limit bindings",
 		"COMMENT ON TABLE openrails.product_includes IS '#611 catalog bundle includes",
+		"COMMENT ON TABLE openrails.product_usage_limits IS '#617 catalog product usage-limit memberships",
 		"ENABLE ROW LEVEL SECURITY",
 	} {
-		if !strings.Contains(sql, want) && !strings.Contains(readMigration(t, "035_catalog_product_includes.up.sql"), want) {
+		if !strings.Contains(sql, want) && !strings.Contains(productIncludesSQL, want) && !strings.Contains(productUsageLimitsSQL, want) {
 			t.Errorf("catalog benefit/metering migration missing %q", want)
 		}
 	}

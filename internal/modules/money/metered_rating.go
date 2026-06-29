@@ -91,10 +91,10 @@ func (s *MoneyService) AccrueCatalogMeteredAggregate(ctx context.Context, payer 
 	var perUnits int64
 	var perSeconds *int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return s.db.Pool().QueryRow(ctx, `
-SELECT cpm.meter_key, cm.kind, cpm.rate_micros, cpm.per_units, cpm.per_seconds
-FROM openrails.catalog_price_metered cpm
-JOIN openrails.catalog_meters cm
+		return s.db.Qx(ctx).QueryRow(ctx, `
+	SELECT cpm.meter_key, cm.kind, cpm.rate_micros, cpm.per_units, cpm.per_seconds
+	FROM openrails.catalog_price_metered cpm
+	JOIN openrails.catalog_meters cm
   ON cm.merchant_id = cpm.merchant_id AND cm.key = cpm.meter_key
 WHERE cpm.merchant_id = $1 AND cpm.price_id = $2`,
 			tid.UUID(), priceID).Scan(&meter, &kind, &rateMicros, &perUnits, &perSeconds)

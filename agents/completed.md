@@ -18261,3 +18261,83 @@ OpenRails standalone bootstrap should use AuthKit's intended root-of-trust path:
 - [x] Audit `ControlPlane.Bootstrap`; keep it only for merchant-local permission-group/API-key bootstrap used by embedded tests, harnesses, and `mint-merchant-api-key`.
 - [x] Update standalone startup bootstrap, docs, and examples so first identity/bootstrap instructions point at AuthKit authority YAML first, then OpenRails merchant config/catalog.
 - [x] Add focused tests proving the command uses AuthKit bootstrap parsing and rejects old OpenRails/merchant manifest shapes.
+
+---
+
+# #617: catalog usage-limit specs create customer bindings
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): catalog product usage-limit memberships now materialize customer bindings at grant time and feed the existing spendgate admission policy.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Trace the grant/subscription/purchase path that already materializes entitlements and credits.
+- [x] Reuse the existing spendgate policy/binding model; do not create a parallel limiter.
+- [x] Create customer bindings from catalog usage-limit specs at grant time.
+- [x] Add integration coverage for Claude Code-style admission through real admission checks.
+
+## Acceptance
+
+- Buying/granting the 5x plan creates the expected customer windows and admission enforces them.
+- Buying/granting the 20x plan creates stronger windows without stale 5x bindings shadowing it.
+
+## Verification
+
+- `go test -tags=integration ./internal/integrationharness -run TestNativeCatalogUsageLimitBindingHTTP -count=1`
+
+---
+
+# #616: catalog bundle includes materialize on grant
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): ownership grants for catalog bundle products now materialize included-product ownership grants idempotently, and revoke them when the parent grant is revoked.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Trace `grants.go` and the existing ownership/access materialization path.
+- [x] Reuse the persisted `product_includes` data from #611.
+- [x] Grant included product access when the parent bundle is granted.
+- [x] Make the operation idempotent.
+
+## Acceptance
+
+- A real integration test buys/grants a bundle and proves included products are accessible.
+- Replaying the grant does not duplicate ownership/access rows.
+
+## Verification
+
+- `go test -tags=integration ./internal/modules/grants -run 'TestGrants_Ownership(Includes)?$' -count=1`
+- `go test -tags=integration ./internal/integrationharness -run TestNativeCatalogBundleIncludesHTTP -count=1`
+
+---
+
+# #615: catalog meter sidecars drive rating
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): `catalog_price_metered` sidecars now drive metered rating through the merchant-scoped HTTP usage path, with real standalone + embedded integration coverage.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Find the canonical usage-reporting path and keep it as the single app-facing API (`POST /v1/merchant/usage/metered`).
+- [x] Load the matching catalog metered price sidecar before calling `AccrueMeteredAggregate`.
+- [x] Rate VM runtime and storage usage using the catalog rate, unit, and interval.
+- [x] Add idempotency coverage so usage is rated once per billing period/source.
+
+## Acceptance
+
+- A real integration test reports VM/storage usage, rates it from catalog sidecars, finalizes an invoice, and verifies exact line totals.
+- Re-running rating/finalization does not duplicate owed or invoice item rows.
+
+## Verification
+
+- `go test -tags=integration ./internal/modules/money -run 'TestAccrue(MeteredAggregate|CatalogMeteredAggregate)' -count=1`
+- `go test -tags=integration ./internal/integrationharness -run 'TestNativeCatalog(MeteredUsage|Lifecycle)HTTP' -count=1`

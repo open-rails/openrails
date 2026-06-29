@@ -19,9 +19,8 @@ func writeCatalogPushManifest(t *testing.T, body string) string {
 func TestLoadCatalogPushTargetsRequiresMerchantPerCatalog(t *testing.T) {
 	path := writeCatalogPushManifest(t, `version: 1
 catalogs:
-  - name: missing-merchant
-    products:
-      - slug: smoke-basic
+  - products:
+      - key: smoke-basic
         display_name: Smoke Basic
         tier_group: smoke
         tier_rank: 1
@@ -59,9 +58,8 @@ func TestLoadCatalogPushTargetsParsesMultiMerchantCatalogs(t *testing.T) {
 	raw := []byte(`version: 1
 catalogs:
   - merchant: doujins
-    name: doujins-default
     products:
-      - slug: smoke-basic
+      - key: smoke-basic
         display_name: Smoke Basic
         tier_group: smoke
         tier_rank: 1
@@ -70,7 +68,7 @@ catalogs:
             unit_amount: 100
   - merchant: cozy-art
     products:
-      - slug: premium-basic
+      - key: premium-basic
         display_name: Premium Basic
         tier_group: premium
         tier_rank: 1

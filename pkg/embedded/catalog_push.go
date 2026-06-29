@@ -39,7 +39,6 @@ type CatalogPushOptions struct {
 
 type catalogPushTarget struct {
 	Merchant string
-	Name     string
 	Manifest *catalog.Manifest
 }
 
@@ -50,8 +49,6 @@ type catalogPushFile struct {
 
 type catalogPushFileEntry struct {
 	Merchant         string               `yaml:"merchant"`
-	Name             string               `yaml:"name,omitempty"`
-	DefaultProviders []string             `yaml:"default_providers,omitempty"`
 	TierGroups       []catalog.TierGroup  `yaml:"tier_groups,omitempty"`
 	Products         []catalog.Product    `yaml:"products,omitempty"`
 	Meters           []catalog.Meter      `yaml:"meters,omitempty"`
@@ -85,10 +82,6 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	applier := catalog.NewServiceApplier(svc)
 
 	for _, target := range targets {
-		label := strings.TrimSpace(target.Name)
-		if label == "" {
-			label = target.Merchant
-		}
 		catalogCtx, err := contextForCatalogPushTarget(ctx, rt.DB, target.Merchant)
 		if err != nil {
 			return err
@@ -96,10 +89,10 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 		if err := rt.DB.RunInMerchantConn(catalogCtx, func(ctx context.Context) error {
 			plan, err := catalog.Plan(ctx, applier, target.Manifest)
 			if err != nil {
-				return fmt.Errorf("plan %s: %w", label, err)
+				return fmt.Errorf("plan %s: %w", target.Merchant, err)
 			}
 			if len(targets) > 1 {
-				fmt.Fprintf(out, "\n%s plan:\n", label)
+				fmt.Fprintf(out, "\n%s plan:\n", target.Merchant)
 			}
 			planOnly := opts.planOnly()
 			plan.Print(out, planOnly)
@@ -121,7 +114,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 				Prune:     opts.Prune,
 			})
 			if err != nil {
-				return fmt.Errorf("apply %s: %w", label, err)
+				return fmt.Errorf("apply %s: %w", target.Merchant, err)
 			}
 			fmt.Fprintln(out)
 			result.Print(out)
@@ -168,23 +161,17 @@ func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error
 			return nil, fmt.Errorf("catalog #%d merchant is required", i+1)
 		}
 		manifest := &catalog.Manifest{
-			Version:          catalog.SupportedVersion,
-			DefaultProviders: append([]string(nil), entry.DefaultProviders...),
-			TierGroups:       append([]catalog.TierGroup(nil), entry.TierGroups...),
-			Products:         append([]catalog.Product(nil), entry.Products...),
-			Meters:           append([]catalog.Meter(nil), entry.Meters...),
-			UsageLimits:      append([]catalog.UsageLimit(nil), entry.UsageLimits...),
+			Version:     catalog.SupportedVersion,
+			TierGroups:  append([]catalog.TierGroup(nil), entry.TierGroups...),
+			Products:    append([]catalog.Product(nil), entry.Products...),
+			Meters:      append([]catalog.Meter(nil), entry.Meters...),
+			UsageLimits: append([]catalog.UsageLimit(nil), entry.UsageLimits...),
 		}
 		if err := manifest.Validate(); err != nil {
-			label := strings.TrimSpace(entry.Name)
-			if label == "" {
-				label = merchantSlug
-			}
-			return nil, fmt.Errorf("catalog %s: %w", label, err)
+			return nil, fmt.Errorf("catalog %s: %w", merchantSlug, err)
 		}
 		targets = append(targets, catalogPushTarget{
 			Merchant: merchantSlug,
-			Name:     strings.TrimSpace(entry.Name),
 			Manifest: manifest,
 		})
 	}
@@ -373,24 +360,10 @@ func catalogManifestUsesProvider(manifest *catalog.Manifest, provider string) bo
 		}
 		return false
 	}
-	hasLink := func(links map[string]map[string]string) bool {
-		for p := range links {
-			if strings.EqualFold(strings.TrimSpace(p), provider) {
-				return true
-			}
-		}
-		return false
-	}
-	if hasProvider(manifest.DefaultProviders) {
-		return true
-	}
 	for _, group := range manifest.TierGroups {
 		for _, product := range group.Products {
-			if hasProvider(product.Providers) {
-				return true
-			}
 			for _, price := range product.Prices {
-				if hasProvider(price.Providers) || hasLink(price.ProviderLinks) {
+				if hasProvider(price.Providers) {
 					return true
 				}
 			}

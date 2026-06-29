@@ -138,7 +138,7 @@ func loadFrom(t *testing.T, body string) *Manifest {
 func findProduct(plan *ApplyPlan, slug string) *ProductPlan {
 	for gi := range plan.Groups {
 		for pi := range plan.Groups[gi].Products {
-			if plan.Groups[gi].Products[pi].Slug == slug {
+			if plan.Groups[gi].Products[pi].Key == slug {
 				return &plan.Groups[gi].Products[pi]
 			}
 		}
@@ -148,20 +148,19 @@ func findProduct(plan *ApplyPlan, slug string) *ProductPlan {
 
 const planManifest = `
 version: 1
-default_providers: [stripe]
 products:
-  - slug: initiate
+  - key: initiate
     display_name: Novice
     tier_group: cozy
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1200, interval: month}
-  - slug: craftsman
+      - {currency: usd, unit_amount: 1200, interval: 30d, providers: [stripe]}
+  - key: craftsman
     display_name: Craftsman
     tier_group: cozy
     tier_rank: 2
     prices:
-      - {currency: usd, unit_amount: 1300, interval: month}
+      - {currency: usd, unit_amount: 1300, interval: 30d, providers: [stripe]}
 `
 
 func TestPlan_CreateWhenEmpty(t *testing.T) {
@@ -180,13 +179,40 @@ func TestPlan_CreateWhenEmpty(t *testing.T) {
 		if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceCreate {
 			t.Fatalf("%s: want 1 price create, got %+v", slug, pp.Prices)
 		}
-		// providers default inherited onto the create request.
+		// providers are carried explicitly from the price onto the create request.
 		if got := pp.Prices[0].CreateReq.Providers; len(got) != 1 || got[0] != "stripe" {
 			t.Fatalf("%s: providers not set on create req: %v", slug, got)
 		}
 	}
 	if !plan.HasChanges() {
 		t.Fatal("expected changes")
+	}
+}
+
+func TestPlan_InactiveManifestObjectsCreateArchived(t *testing.T) {
+	m := loadFrom(t, `
+version: 1
+products:
+  - key: legacy
+    display_name: Legacy
+    active: false
+    prices:
+      - currency: usd
+        unit_amount: 1200
+        active: false
+`)
+	f := newFakeApplier()
+
+	plan, err := Plan(context.Background(), f, m)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	pp := findProduct(plan, "legacy")
+	if got := pp.CreateReq.Status; got != models.CatalogStatusArchived {
+		t.Fatalf("product status = %q, want archived", got)
+	}
+	if got := pp.Prices[0].CreateReq.Status; got != models.CatalogStatusArchived {
+		t.Fatalf("price status = %q, want archived", got)
 	}
 }
 

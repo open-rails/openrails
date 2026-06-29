@@ -438,16 +438,13 @@ Update price display name, rails mapping, or active status.
 ### Provider registration & content-addressed dedup
 
 When the catalog is synced, OpenRails find-or-creates the matching provider
-objects. Matching is **content-addressed** — it keys off the catalog slugs, not
+objects. Matching is **content-addressed** — it keys off the catalog product key and price terms, not
 the OpenRails row UUIDs — so re-syncing or wiping the DB and re-syncing always
 re-attaches to the existing provider objects rather than duplicating them.
 
-- **Price identity** is `(product_slug, price_slug)`.
-- **Stripe content keys** derived from those slugs:
-  - Price `lookup_key` = `openrails.<product_slug>.<price_slug>`.
-  - Price metadata `openrails_price_key` = `<product_slug>.<price_slug>`.
-  - Product metadata `openrails_product_key` = `<product_slug>`.
-- These keys depend only on the slugs, so a DB-wipe-and-resync that regenerates
+- **Price identity** is `(product_key, currency, unit_amount, interval, interval_count)`.
+- **Stripe content keys** are derived from the product key and price terms.
+- These keys do not depend on row UUIDs, so a DB-wipe-and-resync that regenerates
   UUIDs reattaches to the same Stripe objects. Re-sync is idempotent: re-attach,
   never duplicate. Reconciliation reverse-matches Stripe objects to OpenRails
   rows the same way (by content key, falling back from `openrails_price_key`
@@ -468,7 +465,7 @@ PATCH in.
 
 **Amount / billing-cycle changes (re-mint):** Stripe and NMI prices are
 immutable on financial terms — `unit_amount`, `currency`, and the billing cycle
-cannot be edited in place. When such a field changes on a slug-stable price,
+cannot be edited in place. When such a field changes on a key-stable price,
 reconcile **re-mints**: it creates a new Stripe price (which sets
 `transfer_lookup_key`, atomically moving the content `lookup_key` off the old
 price onto the new one) and archives the old price. Mutable-only drift (active

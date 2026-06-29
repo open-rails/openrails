@@ -160,6 +160,37 @@ func TestGrants_Ownership(t *testing.T) {
 	require.False(t, containsGrant(live, g.ID), "not owned after revoke")
 }
 
+func TestGrants_OwnershipIncludes(t *testing.T) {
+	l, pool, ctx, customer, bundle, merchantID := testGrants(t)
+	childA := uuid.New()
+	childB := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+		childA, "included-a-"+short(), "Included A", merchantID,
+		childB, "included-b-"+short(), "Included B", merchantID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.product_includes (merchant_id, product_id, included_product_id) VALUES ($1, $2, $3), ($1, $2, $4)`,
+		merchantID, bundle, childA, childB)
+	require.NoError(t, err)
+
+	g, err := l.Grant(ctx, grants.GrantInput{
+		Customer: customer, Product: &bundle, Kind: grants.Ownership, Source: grants.Purchase, SourceID: "pay_" + short(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA))
+	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB))
+
+	require.NoError(t, l.MaterializeGrant(ctx, g))
+	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA), "replay must not duplicate included ownership")
+	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB), "replay must not duplicate included ownership")
+
+	_, err = l.Revoke(ctx, g.ID, "refund")
+	require.NoError(t, err)
+	require.NoError(t, l.MaterializeGrant(ctx, g))
+	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA))
+	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB))
+}
+
 // The grant ledger is append-only at the role level (SELECT,INSERT only).
 func TestGrants_AppendOnly(t *testing.T) {
 	l, _, ctx, customer, product, merchantID := testGrants(t)
@@ -205,6 +236,25 @@ func containsGrant(gs []gen.OpenrailsGrant, id uuid.UUID) bool {
 		}
 	}
 	return false
+}
+
+func liveOwnershipCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchant, customer, product uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM openrails.grants g
+WHERE g.merchant_id = $1
+  AND g.customer_id = $2
+  AND g.product_id = $3
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.merchant_id = g.merchant_id
+        AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede')
+  )`, merchant, customer, product).Scan(&n))
+	return n
 }
 
 // TestGrants_RevokeBySource proves the #511 write-path unification: revoking an

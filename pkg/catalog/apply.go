@@ -36,9 +36,9 @@ type ApplyOptions struct {
 // belongs to, so the apply output can tell the operator which price needs a
 // manual link.
 type PendingActionFor struct {
-	ProductSlug string                       `json:"product_slug"`
-	PriceLabel  string                       `json:"price_label"`
-	Action      billingservice.PendingAction `json:"action"`
+	ProductKey string                       `json:"product_key"`
+	PriceLabel string                       `json:"price_label"`
+	Action     billingservice.PendingAction `json:"action"`
 }
 
 // Apply converges OpenRails onto the plan, driving the Applier. It is
@@ -98,7 +98,7 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 		}
 		created, err := applier.CreateProduct(ctx, pp.CreateReq)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("create product %s: %w", pp.Slug, err)
+			return uuid.Nil, fmt.Errorf("create product %s: %w", pp.Key, err)
 		}
 		res.ProductsCreated++
 		return created.ID, nil
@@ -108,7 +108,7 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 		}
 		updated, err := applier.UpdateProduct(ctx, pp.UpdateID, pp.UpdateReq)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("update product %s: %w", pp.Slug, err)
+			return uuid.Nil, fmt.Errorf("update product %s: %w", pp.Key, err)
 		}
 		res.ProductsUpdated++
 		return updated.ID, nil
@@ -134,9 +134,9 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 			res.PricesCreated++
 			for _, pa := range out.PendingManualActions {
 				res.PendingActions = append(res.PendingActions, PendingActionFor{
-					ProductSlug: pp.Slug,
-					PriceLabel:  plp.Label,
-					Action:      pa,
+					ProductKey: pp.Key,
+					PriceLabel: plp.Label,
+					Action:     pa,
 				})
 			}
 		case PriceActivate:

@@ -153,7 +153,14 @@ provider fan-out, and provider links.
 version: 1
 catalogs:
   - merchant: doujins
-    default_providers: [mobius]
+    products:
+      - key: premium
+        display_name: Premium
+        prices:
+          - currency: usd
+            unit_amount: 23_000_000
+            interval: 30d
+            providers: [mobius]
 ```
 
 Issuer/JWKS registration belongs in AuthKit remote applications under the

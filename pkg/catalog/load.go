@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 )
@@ -13,25 +14,32 @@ import (
 // SupportedVersion is the only manifest schema version this tool accepts.
 const SupportedVersion = 1
 
-// intervalDays converts a recurring interval + count into billing-cycle days,
-// matching cozy-art's mapping (month=30, year=365). OpenRails prices store a
-// BillingCycleDays integer rather than an interval enum.
-func intervalDays(interval string, count int) int {
-	if normalizeSlug(interval) == "once" {
-		return 0
-	}
-	if count <= 0 {
-		count = 1
-	}
-	switch interval {
-	case "year":
-		return 365 * count
-	default:
-		return 30 * count
-	}
-}
-
 var invalidSlugChars = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+func normalizeInterval(value string) (string, int, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		value = "30d"
+	}
+	switch value {
+	case "month":
+		value = "30d"
+	case "year":
+		value = "365d"
+	}
+	if value == "once" {
+		return "once", 0, nil
+	}
+	d, err := ParseDurationSpec(value)
+	if err != nil {
+		return "", 0, err
+	}
+	if d < 24*time.Hour || d%(24*time.Hour) != 0 {
+		return "", 0, fmt.Errorf("interval %q must be a whole-day duration until billing_cycle_days storage is replaced", value)
+	}
+	days := int(d / (24 * time.Hour))
+	return fmt.Sprintf("%dd", days), days, nil
+}
 
 func normalizeSlug(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
@@ -88,7 +96,6 @@ func (m *Manifest) validate() error {
 	if m.Version != SupportedVersion {
 		return fmt.Errorf("unsupported catalog manifest version %d (want %d)", m.Version, SupportedVersion)
 	}
-	m.DefaultProviders = normalizeProviders(m.DefaultProviders)
 	if err := m.normalizeProducts(); err != nil {
 		return err
 	}
@@ -105,8 +112,8 @@ func (m *Manifest) validate() error {
 	}
 
 	groupSlugs := map[string]struct{}{}
-	// Product slugs are globally unique across the manifest: slug is the product's
-	// identity in OpenRails (GetProductBySlug), so the same slug in two tier
+	// Product keys are globally unique across the manifest. OpenRails still
+	// stores this value in products.slug, so the same key in two tier
 	// groups would collide on apply.
 	productSlugs := map[string]struct{}{}
 
@@ -139,35 +146,27 @@ func (m *Manifest) validate() error {
 }
 
 func (m *Manifest) validateProduct(groupSlug string, product *Product, productSlugs map[string]struct{}, requireTierRank bool, meterKinds map[string]string) error {
-	if strings.TrimSpace(product.Slug) == "" {
-		product.Slug = product.Key
+	product.Key = normalizeSlug(product.Key)
+	if product.Key == "" {
+		return fmt.Errorf("tier group %q has a product without a key", groupSlug)
 	}
-	product.Slug = normalizeSlug(product.Slug)
-	if product.Slug == "" {
-		return fmt.Errorf("tier group %q has a product without a slug", groupSlug)
+	if _, ok := productSlugs[product.Key]; ok {
+		return fmt.Errorf("duplicate product key %q", product.Key)
 	}
-	if _, ok := productSlugs[product.Slug]; ok {
-		return fmt.Errorf("duplicate product slug %q", product.Slug)
-	}
-	productSlugs[product.Slug] = struct{}{}
+	productSlugs[product.Key] = struct{}{}
 
 	if strings.TrimSpace(product.DisplayName) == "" {
-		return fmt.Errorf("product %q display_name is required", product.Slug)
+		return fmt.Errorf("product %q display_name is required", product.Key)
 	}
 	if requireTierRank && product.TierRank == nil {
-		return fmt.Errorf("product %q tier_rank is required when tier group %q has multiple products", product.Slug, groupSlug)
+		return fmt.Errorf("product %q tier_rank is required when tier group %q has multiple products", product.Key, groupSlug)
 	}
-	var err error
-	if product.Status, err = normalizeStatus(product.Status); err != nil {
-		return fmt.Errorf("product %q: %w", product.Slug, err)
-	}
-	product.Providers = normalizeProviders(product.Providers)
-	if err := validateCredits(product.Slug, product.Credits); err != nil {
+	if err := validateCredits(product.Key, product.Credits); err != nil {
 		return err
 	}
 
 	// A price's identity is its financial substance. Dedup declared prices
-	// within a product by (currency, unit_amount, interval, interval_count) —
+	// within a product by (currency, unit_amount, interval) —
 	// there is no slug to dedup on.
 	priceTerms := map[string]struct{}{}
 	for pri := range product.Prices {
@@ -177,7 +176,7 @@ func (m *Manifest) validateProduct(groupSlug string, product *Product, productSl
 		}
 		key := priceTermsKey(*price)
 		if _, ok := priceTerms[key]; ok {
-			return fmt.Errorf("product %q declares duplicate price terms %s", product.Slug, PriceLabel(product.Slug, *price))
+			return fmt.Errorf("product %q declares duplicate price terms %s", product.Key, PriceLabel(product.Key, *price))
 		}
 		priceTerms[key] = struct{}{}
 	}
@@ -218,9 +217,9 @@ func validateCredits(productSlug string, credits Credits) error {
 			credit.Unit = credit.Currency
 			credits[key] = credit
 		}
-			if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
-				return fmt.Errorf("product %q credit %q has invalid unit %q", productSlug, key, credit.Unit)
-			}
+		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
+			return fmt.Errorf("product %q credit %q has invalid unit %q", productSlug, key, credit.Unit)
+		}
 		if credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productSlug, key)
 		}
@@ -241,56 +240,66 @@ func validateCredits(productSlug string, credits Credits) error {
 func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKinds map[string]string) error {
 	price.Currency = normalizeCurrency(price.Currency)
 	if price.Currency == "" {
-		return fmt.Errorf("product %q price #%d currency is required", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d currency is required", product.Key, idx+1)
 	}
 	if !validPriceCurrency(price.Currency) {
-		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
 	}
 	if price.UnitAmount < 0 {
-		return fmt.Errorf("product %q price #%d unit_amount must be non-negative", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d unit_amount must be non-negative", product.Key, idx+1)
 	}
 	if price.UnitAmount == 0 && price.Metered == nil {
-		return fmt.Errorf("product %q price #%d unit_amount must be positive", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d unit_amount must be positive", product.Key, idx+1)
 	}
 	if err := m.validateMeteredPrice(product, price, idx, meterKinds); err != nil {
 		return err
 	}
-	price.Interval = normalizeSlug(price.Interval)
-	if price.Interval == "" {
-		price.Interval = "month"
+	interval, _, err := normalizeInterval(price.Interval)
+	if err != nil {
+		return fmt.Errorf("product %q price #%d interval: %w", product.Key, idx+1, err)
 	}
-	if price.Interval != "once" && price.Interval != "month" && price.Interval != "year" {
-		return fmt.Errorf("product %q price #%d interval must be once, month, or year", product.Slug, idx+1)
+	price.Interval = interval
+	if price.Intro != nil {
+		introInterval, days, err := normalizeInterval(price.Intro.Interval)
+		if err != nil {
+			return fmt.Errorf("product %q price #%d intro.interval: %w", product.Key, idx+1, err)
+		}
+		if days <= 0 {
+			return fmt.Errorf("product %q price #%d intro.interval must be recurring", product.Key, idx+1)
+		}
+		if price.Interval == "once" {
+			return fmt.Errorf("product %q price #%d intro requires a recurring interval", product.Key, idx+1)
+		}
+		price.Intro.Interval = introInterval
 	}
-	if price.IntervalCount <= 0 {
-		price.IntervalCount = 1
-	}
-	var err error
-	if price.Status, err = normalizeStatus(price.Status); err != nil {
-		return fmt.Errorf("product %q price %s: %w", product.Slug, PriceLabel(product.Slug, *price), err)
-	}
-	// Legacy imports are archived by definition; reconcile the shorthand.
-	if price.LegacyImport && price.Status == "" {
-		price.Status = StatusArchived
-	}
-
 	if price.Providers != nil {
 		price.Providers = normalizeProviders(price.Providers)
+	}
+	if len(price.ProviderLinks) > 0 {
+		declared := map[string]struct{}{}
+		for _, provider := range price.Providers {
+			declared[provider] = struct{}{}
+		}
+		for provider := range price.ProviderLinks {
+			key := strings.ToLower(strings.TrimSpace(provider))
+			if _, ok := declared[key]; !ok {
+				return fmt.Errorf("product %q price %s: provider_links.%s requires providers to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
+			}
+		}
 	}
 
 	// Per-provider eligibility (shape-only; no chain calls). Solana settles
 	// on-chain in $1-pegged stablecoins on a recurring schedule, so a Solana
 	// price must be recurring (an interval is always present here) AND priced in
 	// a stablecoin currency.
-	providers := m.providersFor(product, *price)
-	if price.Metered != nil && len(providers) > 0 {
-		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Slug, PriceLabel(product.Slug, *price))
+	if price.Metered != nil && len(price.Providers) > 0 {
+		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
-	for _, provider := range providers {
+	for _, provider := range price.Providers {
 		if provider == "solana" {
 			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
 				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (usd/usdc/usdg), got %q",
-					product.Slug, PriceLabel(product.Slug, *price), price.Currency)
+					product.Key, PriceLabel(product.Key, *price), price.Currency)
 			}
 		}
 	}
@@ -327,29 +336,29 @@ func (m *Manifest) validateMeteredPrice(product Product, price *Price, idx int, 
 	mp.Meter = normalizeSlug(mp.Meter)
 	kind, ok := meterKinds[mp.Meter]
 	if !ok {
-		return fmt.Errorf("product %q price #%d references unknown meter %q", product.Slug, idx+1, mp.Meter)
+		return fmt.Errorf("product %q price #%d references unknown meter %q", product.Key, idx+1, mp.Meter)
 	}
 	if mp.Rate <= 0 {
-		return fmt.Errorf("product %q price #%d metered rate must be positive", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d metered rate must be positive", product.Key, idx+1)
 	}
 	if mp.PerUnits == 0 {
 		mp.PerUnits = 1
 	}
 	if mp.PerUnits < 1 {
-		return fmt.Errorf("product %q price #%d metered per_units must be >= 1", product.Slug, idx+1)
+		return fmt.Errorf("product %q price #%d metered per_units must be >= 1", product.Key, idx+1)
 	}
 	mp.Per = strings.ToLower(strings.TrimSpace(mp.Per))
 	switch kind {
 	case "gauge":
 		if mp.Per == "" {
-			return fmt.Errorf("product %q price #%d gauge meter %q requires per", product.Slug, idx+1, mp.Meter)
+			return fmt.Errorf("product %q price #%d gauge meter %q requires per", product.Key, idx+1, mp.Meter)
 		}
 		if _, err := ParseDurationSpec(mp.Per); err != nil {
-			return fmt.Errorf("product %q price #%d metered per: %w", product.Slug, idx+1, err)
+			return fmt.Errorf("product %q price #%d metered per: %w", product.Key, idx+1, err)
 		}
 	case "counter":
 		if mp.Per != "" {
-			return fmt.Errorf("product %q price #%d counter meter %q must not set per", product.Slug, idx+1, mp.Meter)
+			return fmt.Errorf("product %q price #%d counter meter %q must not set per", product.Key, idx+1, mp.Meter)
 		}
 	}
 	return nil
@@ -401,17 +410,17 @@ func (m *Manifest) validateProductBenefitRefs(productSlugs, usageLimitKeys map[s
 				key = normalizeSlug(key)
 				product.UsageLimits[i] = key
 				if _, ok := usageLimitKeys[key]; !ok {
-					return fmt.Errorf("product %q references unknown usage_limit %q", product.Slug, key)
+					return fmt.Errorf("product %q references unknown usage_limit %q", product.Key, key)
 				}
 			}
 			for i, key := range product.Includes {
 				key = normalizeSlug(key)
 				product.Includes[i] = key
 				if _, ok := productSlugs[key]; !ok {
-					return fmt.Errorf("product %q includes unknown product %q", product.Slug, key)
+					return fmt.Errorf("product %q includes unknown product %q", product.Key, key)
 				}
-				if key == product.Slug {
-					return fmt.Errorf("product %q cannot include itself", product.Slug)
+				if key == product.Key {
+					return fmt.Errorf("product %q cannot include itself", product.Key)
 				}
 			}
 		}
@@ -454,7 +463,7 @@ func priceTermsKey(p Price) string {
 	if p.Metered != nil {
 		metered = fmt.Sprintf("|metered:%s:%d:%d:%s", p.Metered.Meter, p.Metered.Rate, p.Metered.PerUnits, p.Metered.Per)
 	}
-	return fmt.Sprintf("%s|%d|%s|%d%s", p.Currency, p.UnitAmount, p.Interval, p.IntervalCount, metered)
+	return fmt.Sprintf("%s|%d|%s%s", p.Currency, p.UnitAmount, p.Interval, metered)
 }
 
 func normalizeProviders(in []string) []string {

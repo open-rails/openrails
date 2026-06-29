@@ -48,41 +48,52 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 	for _, meter := range m.Meters {
 		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{Key: meter.Key, Kind: meter.Kind})
 	}
-	for _, product := range m.Products {
-		if len(product.Includes) > 0 {
-			req.ProductIncludes = append(req.ProductIncludes, billingservice.CatalogProductIncludesSpec{
-				ProductSlug:   product.Slug,
-				IncludedSlugs: append([]string(nil), product.Includes...),
-			})
-		}
-		for _, price := range product.Prices {
-			if price.Metered == nil {
-				continue
+	for _, group := range m.TierGroups {
+		for _, product := range group.Products {
+			if len(product.UsageLimits) > 0 {
+				req.ProductLimits = append(req.ProductLimits, billingservice.CatalogProductUsageLimitsSpec{
+					ProductSlug: product.Key,
+					Keys:        append([]string(nil), product.UsageLimits...),
+				})
 			}
-			cycleDays := intervalDays(price.Interval, price.IntervalCount)
-			var cycle *int
-			if cycleDays > 0 {
-				cycle = &cycleDays
+			if len(product.Includes) > 0 {
+				req.ProductIncludes = append(req.ProductIncludes, billingservice.CatalogProductIncludesSpec{
+					ProductSlug:   product.Key,
+					IncludedSlugs: append([]string(nil), product.Includes...),
+				})
 			}
-			var perSeconds *int64
-			if price.Metered.Per != "" {
-				d, err := ParseDurationSpec(price.Metered.Per)
-				if err != nil {
-					return fmt.Errorf("product %q price %s metered per: %w", product.Slug, PriceLabel(product.Slug, price), err)
+			for _, price := range product.Prices {
+				if price.Metered == nil {
+					continue
 				}
-				seconds := int64(d.Seconds())
-				perSeconds = &seconds
+				_, cycleDays, err := normalizeInterval(price.Interval)
+				if err != nil {
+					return fmt.Errorf("product %q price %s interval: %w", product.Key, PriceLabel(product.Key, price), err)
+				}
+				var cycle *int
+				if cycleDays > 0 {
+					cycle = &cycleDays
+				}
+				var perSeconds *int64
+				if price.Metered.Per != "" {
+					d, err := ParseDurationSpec(price.Metered.Per)
+					if err != nil {
+						return fmt.Errorf("product %q price %s metered per: %w", product.Key, PriceLabel(product.Key, price), err)
+					}
+					seconds := int64(d.Seconds())
+					perSeconds = &seconds
+				}
+				req.MeteredPrices = append(req.MeteredPrices, billingservice.CatalogMeteredPriceSpec{
+					ProductSlug:      product.Key,
+					UnitAmount:       price.UnitAmount,
+					Currency:         price.Currency,
+					BillingCycleDays: cycle,
+					MeterKey:         price.Metered.Meter,
+					RateMicros:       price.Metered.Rate,
+					PerUnits:         price.Metered.PerUnits,
+					PerSeconds:       perSeconds,
+				})
 			}
-			req.MeteredPrices = append(req.MeteredPrices, billingservice.CatalogMeteredPriceSpec{
-				ProductSlug:      product.Slug,
-				UnitAmount:       price.UnitAmount,
-				Currency:         price.Currency,
-				BillingCycleDays: cycle,
-				MeterKey:         price.Metered.Meter,
-				RateMicros:       price.Metered.Rate,
-				PerUnits:         price.Metered.PerUnits,
-				PerSeconds:       perSeconds,
-			})
 		}
 	}
 	return a.Service.SyncCatalogSidecars(ctx, req)

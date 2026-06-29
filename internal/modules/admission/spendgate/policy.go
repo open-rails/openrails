@@ -75,6 +75,7 @@ type Request struct {
 	Invoker string
 	Roles   []string
 	Tier    string
+	Measure string
 }
 
 // resolvedWindow binds a Window to the concrete scope identity it was configured

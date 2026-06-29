@@ -30,6 +30,62 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: GetOwnershipGrantBySourceID :one
+SELECT * FROM openrails.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id = sqlc.arg(customer_id)::uuid
+  AND product_id = sqlc.arg(product_id)::uuid
+  AND kind = 'ownership' AND event = 'grant'
+  AND source_id = sqlc.arg(source_id)::text
+ORDER BY created_at ASC
+LIMIT 1;
+
+-- name: ListIncludedProductIDs :many
+SELECT included_product_id FROM openrails.product_includes
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND product_id = sqlc.arg(product_id)::uuid
+ORDER BY included_product_id;
+
+-- name: ListProductUsageLimitSpecs :many
+SELECT pul.usage_limit_key, cul.measure, cul.windows, p.slug AS product_slug
+FROM openrails.product_usage_limits pul
+JOIN openrails.catalog_usage_limits cul
+  ON cul.merchant_id = pul.merchant_id AND cul.key = pul.usage_limit_key
+JOIN openrails.products p
+  ON p.merchant_id = pul.merchant_id AND p.id = pul.product_id
+WHERE pul.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pul.product_id = sqlc.arg(product_id)::uuid
+ORDER BY pul.usage_limit_key;
+
+-- name: ProductUsageLimitBindingExistsForGrant :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.product_usage_limit_bindings
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND grant_id = sqlc.arg(grant_id)::uuid
+      AND usage_limit_key = sqlc.arg(usage_limit_key)::text
+) AS exists;
+
+-- name: CreateProductUsageLimitBinding :exec
+INSERT INTO openrails.product_usage_limit_bindings (
+    id, merchant_id, customer_id, usage_limit_key, measure, windows,
+    source_type, source_id, product_key, grant_id, starts_at, ends_at, policy_version
+) VALUES (
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid,
+    sqlc.arg(usage_limit_key)::text, sqlc.arg(measure)::text, sqlc.arg(windows)::jsonb,
+    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(product_key)::text,
+    sqlc.narg(grant_id)::uuid, sqlc.arg(starts_at)::timestamptz,
+    sqlc.narg(ends_at)::timestamptz, sqlc.arg(policy_version)::bigint
+);
+
+-- name: RevokeProductUsageLimitBindingsByGrant :exec
+UPDATE openrails.product_usage_limit_bindings
+SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
+    updated_at = now(),
+    policy_version = policy_version + 1
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND grant_id = sqlc.arg(grant_id)::uuid
+  AND revoked_at IS NULL;
+
 -- ListLiveGrantsByCustomer: grant-events not terminated by a later revoke/expire/
 -- supersede event. The fold's input.
 -- name: ListLiveGrantsByCustomer :many
