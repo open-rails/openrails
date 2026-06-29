@@ -569,7 +569,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		if err != nil {
 			return fmt.Errorf("upsert provider account %s:%s: %w", providerType, accountID, err)
 		}
-		if role != nil && *role == config.RailRolePrimary && (status == nil || *status == "enabled") {
+		if role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
 			if err := database.Gen(ctx).DemoteOtherPrimaryProviderAccounts(ctx, gen.DemoteOtherPrimaryProviderAccountsParams{
 				MerchantID:   merchantID.UUID(),
 				ProviderType: providerType,

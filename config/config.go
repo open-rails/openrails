@@ -304,11 +304,6 @@ const (
 	RailRoutingDefault = "default"
 	RailRoutingManual  = "manual"
 	RailRoutingLegacy  = "legacy"
-
-	// Deprecated: use RailRoutingDefault/Manual/Legacy for config routing.
-	RailRolePrimary   = "primary"
-	RailRoleSecondary = "secondary"
-	RailRoleLegacy    = "legacy"
 )
 
 // ReservedRailNames maps rail names that imply their type.
@@ -335,8 +330,6 @@ type RailConfig struct {
 	// for explicit targeting; legacy is retained for old rows/rebills/refunds and
 	// should not receive new default work.
 	Routing string `koanf:"routing"`
-	// Role is a deprecated compatibility alias for routing.
-	Role string `koanf:"role"`
 
 	NMI    *NMIRailConfig    `koanf:"nmi"`
 	CCBill *CCBillRailConfig `koanf:"ccbill"`
@@ -450,27 +443,10 @@ func (p *RailConfig) EffectiveRouting() string {
 	if p == nil {
 		return ""
 	}
-	routing := strings.ToLower(strings.TrimSpace(p.Routing))
-	role := strings.ToLower(strings.TrimSpace(p.Role))
-	if routing == "" {
-		switch role {
-		case "", RailRolePrimary:
-			return RailRoutingDefault
-		case RailRoleSecondary:
-			return RailRoutingManual
-		case RailRoleLegacy:
-			return RailRoutingLegacy
-		default:
-			return role
-		}
+	if routing := strings.ToLower(strings.TrimSpace(p.Routing)); routing != "" {
+		return routing
 	}
-	return routing
-}
-
-// EffectiveRole is a deprecated compatibility wrapper for callers that have not
-// been renamed yet.
-func (p *RailConfig) EffectiveRole() string {
-	return p.EffectiveRouting()
+	return RailRoutingDefault
 }
 
 func (p *RailConfig) normalizeTypedBlock(name string) error {
@@ -956,15 +932,6 @@ func validateRails(cfg *Config, rails RailSet, isDev bool) error {
 	for name, proc := range rails {
 		if proc == nil {
 			continue
-		}
-		if strings.TrimSpace(proc.Routing) != "" && strings.TrimSpace(proc.Role) != "" {
-			routingOnly := *proc
-			routingOnly.Role = ""
-			roleOnly := *proc
-			roleOnly.Routing = ""
-			if routingOnly.EffectiveRouting() != roleOnly.EffectiveRouting() {
-				return fmt.Errorf("rail '%s' sets conflicting routing %q and legacy role %q", name, proc.Routing, proc.Role)
-			}
 		}
 		if err := proc.normalizeTypedBlock(name); err != nil {
 			return err

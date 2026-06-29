@@ -475,22 +475,6 @@ func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
 	require.Equal(t, RailRoutingLegacy, rails["stripe_old"].EffectiveRouting())
 }
 
-func TestRailConfigRejectsConflictingRoutingAndRole(t *testing.T) {
-	err := ValidateRailSet(&Config{}, RailSet{
-		"stripe": {Type: RailTypeStripe, Routing: RailRoutingDefault, Role: RailRoleLegacy},
-	})
-	require.ErrorContains(t, err, "conflicting routing")
-}
-
-func TestRailConfigAcceptsLegacyRoleAlias(t *testing.T) {
-	rails := RailSet{
-		"stripe_manual": {Type: RailTypeStripe, Role: RailRoleSecondary, SecretKey: "sk_live_manual"},
-		"stripe":        {Type: RailTypeStripe, SecretKey: "sk_live_default"},
-	}
-	require.NoError(t, ValidateRailSet(&Config{}, rails))
-	require.Equal(t, RailRoutingManual, rails["stripe_manual"].EffectiveRouting())
-}
-
 func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
 	err := ValidateRailSet(&Config{}, RailSet{
 		"stripe": {Type: RailTypeStripe, NMI: &NMIRailConfig{SecurityKey: "sec"}},
