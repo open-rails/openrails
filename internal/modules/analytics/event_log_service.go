@@ -229,6 +229,8 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 	var acusFiles []fileRec
 	var chgs []ChargebackEventData
 	var chgsFiles []fileRec
+	var providerMutations []ProviderMutationEventData
+	var providerMutationFiles []fileRec
 	var transAsPayments []PaymentEventData
 	var transFiles []fileRec
 
@@ -385,6 +387,26 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			}
 			chgs = append(chgs, d)
 			chgsFiles = append(chgsFiles, fileRec{p})
+		case "provider_mutation":
+			var d ProviderMutationEventData
+			if err := json.Unmarshal(rec.Data, &d); err != nil {
+				log.WithError(err).Warn("decode provider mutation")
+				dead(p)
+				continue
+			}
+			if d.EventID == uuid.Nil {
+				d.EventID = uuidutil.NewV7()
+			}
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
+				log.WithError(err).Warn("resolve merchant for provider mutation")
+				dead(p)
+				continue
+			}
+			if d.Timestamp.IsZero() {
+				d.Timestamp = s.now().UTC()
+			}
+			providerMutations = append(providerMutations, d)
+			providerMutationFiles = append(providerMutationFiles, fileRec{p})
 		default:
 			log.Warnf("Unknown spool kind: %s; moving to dead-letter", rec.Kind)
 			dead(p)
@@ -425,6 +447,12 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			return err
 		}
 		removeAll(chgsFiles)
+	}
+	if len(providerMutations) > 0 {
+		if err := s.insertProviderMutationBatch(ctx, providerMutations); err != nil {
+			return err
+		}
+		removeAll(providerMutationFiles)
 	}
 	return nil
 }
@@ -585,6 +613,21 @@ type ChargebackEventData struct {
 	Reason            string     `json:"reason"`
 	Status            string     `json:"status"`
 	Metadata          string     `json:"metadata"`
+	Timestamp         time.Time  `json:"timestamp"`
+}
+
+type ProviderMutationEventData struct {
+	EventID           uuid.UUID  `json:"event_id"`
+	MerchantID        string     `json:"merchant_id"`
+	Provider          string     `json:"provider"`
+	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
+	ProviderIntentID  *uuid.UUID `json:"provider_intent_id,omitempty"`
+	IntentType        string     `json:"intent_type"`
+	IdempotencyKey    string     `json:"idempotency_key"`
+	Attempt           int32      `json:"attempt"`
+	Phase             string     `json:"phase"`
+	Reason            string     `json:"reason"`
+	Evidence          string     `json:"evidence"`
 	Timestamp         time.Time  `json:"timestamp"`
 }
 
@@ -935,6 +978,44 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	return nil
 }
 
+func (s *EventLogService) LogProviderMutationEvent(ctx context.Context, data ProviderMutationEventData) error {
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
+		return nil
+	}
+	if strings.TrimSpace(data.Provider) == "" || strings.TrimSpace(data.Phase) == "" {
+		return fmt.Errorf("provider and phase are required")
+	}
+	if data.EventID == uuid.Nil {
+		data.EventID = uuidutil.NewV7()
+	}
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
+		return err
+	} else {
+		data.MerchantID = resolved
+	}
+	if data.Timestamp.IsZero() {
+		data.Timestamp = s.now().UTC()
+	}
+
+	s.mu.Lock()
+	err := s.ensureConnLocked(ctx)
+	if err == nil {
+		err = s.insertProviderMutation(ctx, data)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		if err := s.enqueue("provider_mutation", data); err != nil {
+			return fmt.Errorf("failed to log provider mutation event and enqueue spool record: %w", err)
+		}
+		log.WithError(err).WithFields(log.Fields{
+			"event_id": data.EventID,
+			"provider": data.Provider,
+			"phase":    data.Phase,
+		}).Warn("Failed to log provider mutation event to ClickHouse; spooled")
+	}
+	return nil
+}
+
 // Helper method to create metadata JSON
 func CreateMetadataJSON(data map[string]interface{}) string {
 	if data == nil {
@@ -1218,6 +1299,40 @@ func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []Char
 	}
 	for _, d := range rows {
 		if err := batch.Append(d.EventID, d.MerchantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Rail, nullableString2(d.RailTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
+			return err
+		}
+	}
+	return batch.Send()
+}
+
+func (s *EventLogService) insertProviderMutation(ctx context.Context, data ProviderMutationEventData) error {
+	return s.clickhouseConn.Exec(ctx, `
+		INSERT INTO provider_mutation_events (
+			event_id, merchant_id, provider, provider_account_id, provider_intent_id,
+			intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		data.EventID,
+		data.MerchantID,
+		data.Provider,
+		nullableUUID(data.ProviderAccountID),
+		nullableUUID(data.ProviderIntentID),
+		data.IntentType,
+		data.IdempotencyKey,
+		data.Attempt,
+		data.Phase,
+		data.Reason,
+		data.Evidence,
+		data.Timestamp,
+	)
+}
+
+func (s *EventLogService) insertProviderMutationBatch(ctx context.Context, rows []ProviderMutationEventData) error {
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO provider_mutation_events (event_id, merchant_id, provider, provider_account_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp) VALUES`)
+	if err != nil {
+		return err
+	}
+	for _, d := range rows {
+		if err := batch.Append(d.EventID, d.MerchantID, d.Provider, nullableUUID(d.ProviderAccountID), nullableUUID(d.ProviderIntentID), d.IntentType, d.IdempotencyKey, d.Attempt, d.Phase, d.Reason, d.Evidence, d.Timestamp); err != nil {
 			return err
 		}
 	}

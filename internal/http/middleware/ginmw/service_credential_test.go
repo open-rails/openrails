@@ -45,7 +45,7 @@ func newServiceCredentialTestRouter(resolver ServiceCredentialResolver, perm str
 	r.GET("/svc", ServiceCredentialRequired(resolver), RequirePermission(perm), func(c *gin.Context) {
 		resolved, _ := ServiceCredentialFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
-		c.JSON(http.StatusOK, gin.H{"authkit_org": resolved.OwnerGroupRef, "merchant": tid.String()})
+		c.JSON(http.StatusOK, gin.H{"owner_group": resolved.OwnerGroupRef, "merchant": tid.String()})
 	})
 	return r
 }
@@ -200,7 +200,7 @@ func TestServiceCredentialRequired_DeniesUnknownAPIKey(t *testing.T) {
 }
 
 func TestServiceCredentialRequired_DeniesCrossMerchantAPIKey(t *testing.T) {
-	// Owning AuthKit org maps to no active OpenRails merchant for this deployment.
+	// Owning permission-group maps to no active OpenRails merchant for this deployment.
 	resolver := fakeServiceCredentialResolver{looksLikeAPIKey: true, err: controlplane.ErrServiceCredentialMerchantUnresolved}
 	r := newServiceCredentialTestRouter(resolver, controlplane.PermMerchantCustomerSettingsUpdate)
 	w := doServiceCredentialRequest(r, true)

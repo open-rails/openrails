@@ -5,13 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 )
 
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
 	// host-app issuer (registered as owner of its permission-group), provider
-	// accounts + secrets, and profile. No auth/users/orgs section.
+	// accounts + secrets, and profile. No auth/users/groups section.
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
@@ -64,70 +65,9 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Len(t, manifest.Merchants[0].ProviderAccounts, 4)
 }
 
-func TestParseBootstrapManifest(t *testing.T) {
-	raw := []byte(`
-version: 1
-authority:
-  bootstrap_merchant_slug: local-stack
-  initial_admin_user_id: usr_admin
-  mint_initial_api_key: false
-`)
-	manifest, err := ParseBootstrapManifest(raw)
+func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {
+	_, err := akembedded.LoadBootstrapManifestFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
-
-	opts := manifest.BootstrapOptions()
-	require.Equal(t, "local-stack", opts.BootstrapMerchantSlug)
-	require.Equal(t, "usr_admin", opts.InitialAdminUserID)
-	require.False(t, opts.MintInitialAPIKey)
-}
-
-func TestExampleBootstrapManifestParses(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
-	require.NoError(t, err)
-
-	manifest, err := ParseBootstrapManifest(raw)
-	require.NoError(t, err)
-	require.Equal(t, "local-stack", manifest.BootstrapOptions().BootstrapMerchantSlug)
-}
-
-func TestParseBootstrapManifestValidationErrors(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "unknown top-level key",
-			body: "version: 1\ntenantz: []\n",
-			want: "tenantz",
-		},
-		{
-			name: "merchant config belongs elsewhere",
-			body: "version: 1\nmerchants: []\n",
-			want: "merchants",
-		},
-		{
-			name: "catalog belongs elsewhere",
-			body: "version: 1\ncatalogs: []\n",
-			want: "catalogs",
-		},
-		{
-			name: "missing authority",
-			body: "version: 1\n",
-			want: "authority.bootstrap_merchant_slug",
-		},
-		{
-			name: "missing bootstrap merchant slug",
-			body: "version: 1\nauthority: {}\n",
-			want: "authority.bootstrap_merchant_slug",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseBootstrapManifest([]byte(tc.body))
-			require.Error(t, err)
-			require.Contains(t, err.Error(), tc.want)
-		})
-	}
 }
 
 func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
@@ -155,9 +95,9 @@ merchants:
 			want: "auth",
 		},
 		{
-			name: "bootstrap authority belongs to push-bootstrap",
-			body: "version: 1\nauthority:\n  bootstrap_merchant_slug: local-stack\n",
-			want: "authority",
+			name: "authkit authority belongs elsewhere",
+			body: "users:\n  - username: operator\n",
+			want: "users",
 		},
 		{
 			name: "no merchants",

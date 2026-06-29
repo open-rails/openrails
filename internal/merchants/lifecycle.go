@@ -25,16 +25,16 @@ type Merchant struct {
 	ID                merchant.ID
 	Slug              string
 	Status            MerchantStatus
-	PermissionGroupID string // The merchant's own authkit permission-group id (#567; was owner_org_id, the #500 org link).
+	PermissionGroupID string // The merchant's own AuthKit permission-group id (#567).
 }
 
 // ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
 	// Slug is the stable merchant slug (used in routes and merchant resolution).
 	Slug string `json:"slug"`
-	// PermissionGroupID is the merchant's own authkit permission-group id (#567;
-	// was the #500 owner-org link). Required for control-plane provisioning;
-	// embedded/no-AuthKit registration uses internal/db.RegisterMerchant.
+	// PermissionGroupID is the merchant's own AuthKit permission-group id (#567).
+	// Required for control-plane provisioning; embedded/no-AuthKit registration
+	// uses internal/db.RegisterMerchant.
 	PermissionGroupID string `json:"permission_group_id"`
 }
 
@@ -51,9 +51,8 @@ var ErrExportRequired = errors.New("merchants: export required before delete")
 
 // Service is the merchant provisioning + lifecycle service (issue #225). It owns
 // the openrails.merchants directory rows (billing buckets) and per-merchant
-// secrets. #481: it no longer auto-mints an AuthKit org per merchant — owner-org
-// ownership is set explicitly (the explicit register -> create-org ->
-// create-remote_application -> create-merchant flow), never auto-minted here.
+// secrets. Control-plane callers create/resolve the AuthKit permission-group and
+// pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
 	pool    *db.Pool
 	secrets MerchantSecretStore
@@ -84,7 +83,7 @@ func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 // Provision idempotently provisions a merchant:
 //
 //  1. create/ensure the openrails.merchants namespace row (resolve by slug),
-//  2. record the owning AuthKit org id supplied by the caller.
+//  2. record the merchant permission-group id supplied by the caller.
 //
 // Re-running with the same slug returns the existing merchant (no duplicate row),
 // so provisioning is safe to retry. Default-merchant seeding of catalog/credit
@@ -95,8 +94,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	if slug == "" {
 		return nil, errors.New("merchants: provision requires a slug")
 	}
-	// #548: the merchant slug must be a legal AuthKit org slug (it owns a same-slug
-	// backing org).
+	// #567: the merchant slug must be a legal AuthKit permission-group instance slug.
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -122,8 +120,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 		return nil, err
 	}
 
-	// 2. Record the merchant's own permission-group id (#567; was the #500
-	//    owner-org link). Idempotent.
+	// 2. Record the merchant's own permission-group id (#567). Idempotent.
 	if _, uerr := s.pool.Exec(ctx, `
 			UPDATE openrails.merchants
 			   SET permission_group_id = $2, updated_at = current_timestamp

@@ -177,12 +177,12 @@ func TestProvision_Idempotent(t *testing.T) {
 	svc := newSvc(t)
 
 	// #500: provisioning a merchant namespace requires the caller to provide the
-	// durable AuthKit owner org id. The lifecycle service does not mint it.
-	req := ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"}
+	// durable AuthKit permission group id. The lifecycle service does not mint it.
+	req := ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"}
 	first, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "acme", first.Slug)
-	require.Equal(t, "org-acme", first.PermissionGroupID, "explicit owner-org link recorded (never auto-minted)")
+	require.Equal(t, "group-acme", first.PermissionGroupID, "explicit permission-group link recorded (never auto-minted)")
 
 	// Re-provision: same merchant id, no duplicate row (idempotent).
 	second, err := svc.Provision(ctx, req)
@@ -200,7 +200,7 @@ func TestProvision_Idempotent(t *testing.T) {
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	// Seed a merchant-owned row + a secret so the purge has something to remove.
@@ -244,7 +244,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
@@ -268,7 +268,7 @@ func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	// Resolve by slug.

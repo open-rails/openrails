@@ -24,7 +24,7 @@ func (f fakeMerchantDelegatedResolver) ResolveDelegated(_ context.Context, _, _ 
 type merchantActionAuth struct{}
 
 func (merchantActionAuth) Authenticate(_ context.Context, _ *http.Request) (billingauth.UserContext, error) {
-	return billingauth.UserContext{UserID: "11111111-1111-1111-1111-111111111111", Org: "merchant_1"}, nil
+	return billingauth.UserContext{UserID: "11111111-1111-1111-1111-111111111111", Merchant: "merchant_1"}, nil
 }
 
 type merchantActionChecker struct {

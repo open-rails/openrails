@@ -383,7 +383,7 @@ func TestUnifiedBilling_Idempotency_HoldReplay(t *testing.T) {
 }
 
 // TestUnifiedBilling_OwnerScoping: owner A's admit/capture never touches owner B.
-// Owners here are the deterministic personal orgs of two distinct user ids,
+// Owners here are deterministic customer subjects for two distinct user ids,
 // which is exactly how the service routes scope (resolveOwner(nil, userID)).
 func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)

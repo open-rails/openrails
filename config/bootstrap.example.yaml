@@ -1,9 +1,13 @@
-# Control-plane bootstrap only: no merchants, provider secrets, or catalog here.
-# Run after push-merchant-config has created the merchant referenced below.
-version: 1
+users:
+  - email: operator@example.com
+    username: operator
+    email_verified: true
+    password:
+      plaintext: "change-me"
+    root_role: owner
 
-authority:
-  bootstrap_merchant_slug: local-stack
-  # Optional existing AuthKit user id to grant the merchant-local operator role in this merchant group.
-  # initial_admin_user_id: usr_admin
-  mint_initial_api_key: true
+remote_applications:
+  - slug: openrails-runtime
+    issuer: https://openrails.example
+    jwks_uri: https://openrails.example/.well-known/jwks.json
+    enabled: true

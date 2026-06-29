@@ -96,7 +96,7 @@ func TestCoinbaseSessionCreationGeneratesCDPJWT(t *testing.T) {
 	seed := []byte("0123456789abcdef0123456789abcdef")
 	privateKey := ed25519.NewKeyFromSeed(seed)
 	publicKey := privateKey.Public().(ed25519.PublicKey)
-	keyID := "organizations/org/apiKeys/key"
+	keyID := "merchant/apiKeys/key"
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")

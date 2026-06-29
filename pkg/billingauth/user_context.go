@@ -53,13 +53,13 @@ type UserContext struct {
 	// before token expiry can opt into EntitlementFreshnessResolver at the gate.
 	Entitlements []string
 
-	// Org is the slug of the user's active AuthKit org context (optional).
-	// Empty when the host has no org model or no org is active.
-	Org string
+	// Merchant is the slug of the merchant context the user is acting in
+	// (optional). Empty when no merchant context is active.
+	Merchant string
 
-	// OrgRoles is the list of roles the user holds within Org. Only meaningful
-	// when Org is non-empty.
-	OrgRoles []string
+	// MerchantRoles is the list of roles the user holds within Merchant. Only
+	// meaningful when Merchant is non-empty.
+	MerchantRoles []string
 }
 
 // ValidateSubject enforces the UUID-only payable-identity contract (#364) at
@@ -122,13 +122,14 @@ func (uc UserContext) HasEntitlementFresh(ctx context.Context, resolver Entitlem
 	return uc.HasEntitlement(entitlement), nil
 }
 
-// HasAnyOrgRole returns true if the user holds any of the listed roles within
-// Org (case-insensitive). Always returns false when Org is empty or want is empty.
-func (uc UserContext) HasAnyOrgRole(want ...string) bool {
-	if uc.Org == "" || len(want) == 0 {
+// HasAnyMerchantRole returns true if the user holds any of the listed roles
+// within Merchant (case-insensitive). Always returns false when Merchant is empty
+// or want is empty.
+func (uc UserContext) HasAnyMerchantRole(want ...string) bool {
+	if uc.Merchant == "" || len(want) == 0 {
 		return false
 	}
-	for _, r := range uc.OrgRoles {
+	for _, r := range uc.MerchantRoles {
 		for _, w := range want {
 			if strings.EqualFold(r, w) {
 				return true

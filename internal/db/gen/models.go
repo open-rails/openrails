@@ -221,8 +221,6 @@ type OpenrailsCustomCreditType struct {
 type OpenrailsCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// Deprecated customer identity metadata. Merchant ownership is represented by merchant_id; org/issuer do not key customers.
-	OrgID *string
 	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
 	Issuer *string
 	// Host/AuthKit stable UUID subject. Natural key is (merchant_id, subject); issuer does not participate.
@@ -441,7 +439,7 @@ type OpenrailsMerchant struct {
 	// Stable merchant slug used in merchant-scoped routes and resolution.
 	Slug   string
 	Status string
-	// The merchant's OWN authkit permission-group id (#567 — a merchant is a top-level `merchant` group, child of `root`, with no parent org; supersedes #527's owner_org_id 1:1 coupling). Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.
+	// The merchant's own AuthKit permission-group id (#567): a merchant is a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.
 	PermissionGroupID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time

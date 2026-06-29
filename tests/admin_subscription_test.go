@@ -21,7 +21,7 @@ import (
 
 // #528 hard cut: the admin surface is the delegated /v1/merchant model — a host-app
 // issuer registered as the merchant's `owner` mints delegated tokens carrying
-// browser-safe org permissions. The retired per-user admin-JWT model
+// browser-safe merchant permissions. The retired per-user admin-JWT model
 // is gone, so these tests authenticate
 // as a delegated merchant principal via newHostSeamAdminRouter.
 

@@ -7,7 +7,88 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 607
+next_id: 609
+
+---
+
+# #608: authkit-owned-standalone-authority-bootstrap
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29: AuthKit `v0.74.0` was tagged/pushed and OpenRails now depends on it. The old `push-bootstrap` first-authority path has been replaced with `push-auth-bootstrap`, which loads AuthKit bootstrap YAML and calls `ApplyBootstrapManifest`; startup bootstrap uses AuthKit's once-only marker. OpenRails no longer parses its own first-authority manifest shape. Validation: `go test -p 1 ./...` passed.
+
+OpenRails standalone bootstrap should use AuthKit's intended root-of-trust path: declare/import the initial operator user, seed root `owner` through AuthKit's bootstrap semantics, and register trusted remote applications. OpenRails should keep merchant/provider/catalog bootstrap separate.
+
+## Metadata
+
+- Category: cleanup
+- Status: completed
+- Passes: true
+
+## Desired model
+
+- Delete the current `push-bootstrap` implementation that parses `authority.bootstrap_merchant_slug` and calls `ControlPlane.Bootstrap` as the first-authority path.
+- Add a boring standalone command, `push-auth-bootstrap`, that reads an AuthKit bootstrap YAML file and calls `ApplyBootstrapManifest`.
+- Use AuthKit's manifest structs, validation, idempotency, seed-if-absent root owner behavior, and result counters instead of duplicating authority rules in OpenRails.
+- Keep the command explicitly standalone-only: it requires OpenRails' embedded AuthKit/control-plane wiring and is not part of embedded host app runtime surfaces.
+- Keep OpenRails merchant config, provider secrets, catalog, and merchant-local API-key provisioning in the existing merchant/bootstrap commands.
+
+## Non-goals
+
+- Do not keep compatibility for the old `config/bootstrap.example.yaml` authority shape.
+- Do not make OpenRails create/import users outside AuthKit's bootstrap path.
+- Do not merge merchant/provider/catalog bootstrap into AuthKit authority bootstrap.
+- Do not make this command useful for embedded host apps.
+
+**Tasks:**
+- [x] Replace `config/bootstrap.example.yaml` with an AuthKit-shaped authority example or rename it so the standalone authority file is clearly AuthKit-owned.
+- [x] Remove the OpenRails `BootstrapManifest` / `BootstrapAuthorityManifest` path if it has no remaining caller after the command swap.
+- [x] Replace `push-bootstrap` wiring with the new AuthKit authority command, or hard-cut the command name if the old name would keep the wrong mental model.
+- [x] Wire the command to load AuthKit bootstrap YAML and call the embedded AuthKit client's `ApplyBootstrapManifest` with explicit operator flags (`--file`, dry-run/apply semantics, startup-only/name if still useful).
+- [x] Audit `ControlPlane.Bootstrap`; keep it only for merchant-local permission-group/API-key bootstrap used by embedded tests, harnesses, and `mint-merchant-api-key`.
+- [x] Update standalone startup bootstrap, docs, and examples so first identity/bootstrap instructions point at AuthKit authority YAML first, then OpenRails merchant config/catalog.
+- [x] Add focused tests proving the command uses AuthKit bootstrap parsing and rejects old OpenRails/merchant manifest shapes.
+
+---
+
+# #607: provider-intents-as-boring-outbound-queue
+
+**Completed:** no
+**Status:** NOT_STARTED 2026-06-29: simplify the provider-intent system so `openrails.provider_intents` is a normal outbound message queue/current-work table, while provider mutation history lives in ClickHouse events. This issue intentionally cuts the "ledger/tombstone forever" model back to boring queue semantics.
+
+Make provider intents easier to reason about: pending/retryable/in-flight/dead work belongs in Postgres; historical attempts/results belong in ClickHouse; successful work should leave the queue.
+
+## Metadata
+
+- Category: cleanup
+- Status: not_started
+- Passes: false
+
+## Desired model
+
+- `provider_intents` is the durable outbound queue, not an audit ledger.
+- Live queue states are the only normal residents: `pending`, `in_flight`, `failed_retryable`, `unknown_needs_verify`.
+- Operator-attention states may remain temporarily: `failed_terminal` as dead-letter, maybe parked/retryable states while blocked.
+- Successful, superseded, and expired work is logged to ClickHouse and removed from the queue once the transition is committed.
+- `openrails intents` answers "what work exists now?"
+- `openrails intents-log` answers "what happened historically?"
+- ClickHouse remains optional/degraded analytics/audit storage; provider execution must not depend on ClickHouse being reachable.
+
+## Non-goals
+
+- Do not add a second tombstone/dedupe table unless a real replay bug proves it is needed.
+- Do not make ClickHouse a source of truth for billing/provider decisions.
+- Do not preserve compatibility for the old "provider_intents as forever ledger" mental model.
+
+**Tasks:**
+- [ ] Rename comments/docs/help text that call `provider_intents` a ledger where that implies permanent history; use queue/outbox/dead-letter wording.
+- [ ] Delete successful provider-intent rows after the success transition, with provider mutation events already written to ClickHouse.
+- [ ] Delete or prune `superseded` and `expired` provider-intent rows after logging the terminal event; keep only if a caller still needs them for immediate response shape.
+- [ ] Treat `failed_terminal` as the dead-letter state: keep it visible in `openrails intents`, then add an explicit operator action or bounded prune path later if needed.
+- [ ] Update `EnqueueAndExecute` so synchronous callers get a useful result even when success deletes the queue row.
+- [ ] Update CLI output/tests so `openrails intents --status=succeeded` is no longer expected to show historical successes; use `openrails intents-log --phase=succeeded`.
+- [ ] Remove remaining writes/reads of the Postgres `external_provider_mutation_logs` path once ClickHouse provider mutation events cover the CLI/history use case.
+- [ ] Remove the Postgres `external_provider_mutation_logs` table from the greenfield schema and merchant-delete/export bookkeeping after the app no longer uses it.
+- [ ] Keep focused tests proving: success deletes queue row, retryable/dead rows stay, logs are emitted/spooled, and duplicate enqueue behavior is acceptable without permanent success tombstones.
 
 ---
 

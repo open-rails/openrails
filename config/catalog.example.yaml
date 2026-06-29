@@ -4,7 +4,7 @@ version: 1
 #   openrails push-merchant-catalog --config config.yaml --file config/catalog.example.yaml
 #
 # This file contains desired catalog state only. It does not contain merchant
-# profile data, provider credentials, users, orgs, or API keys.
+# profile data, provider credentials, users, permission groups, or API keys.
 
 catalogs:
   - merchant: local-stack

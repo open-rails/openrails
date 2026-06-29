@@ -129,11 +129,6 @@ tasks:
     cmds:
       - bash scripts/test_integration.sh ./...
 
-  test-authkit-rbac-live:
-    desc: Run live Docker Compose HTTP E2E for AuthKit delegated RBAC/customer identity
-    cmds:
-      - bash scripts/authkit_rbac_live_e2e.sh
-
   fmt:
     desc: Format code
     cmds:

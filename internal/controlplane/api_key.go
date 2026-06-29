@@ -50,7 +50,7 @@ type ResolvedServiceCredential struct {
 // `merchant:catalog:update`; an exact grant still matches exactly).
 func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 	for _, grant := range r.Permissions {
-		if authkit.PermissionTokenCovers(grant, perm) {
+		if authkit.PermMatches(grant, perm) {
 			return true
 		}
 	}
@@ -175,7 +175,7 @@ var ErrServiceCredentialScopeDenied = errors.New("controlplane: API key resource
 // merchantForGroupID resolves the OpenRails merchant a caller administers from
 // its authenticated authkit permission-group id: the merchant whose
 // permission_group_id equals it (#567 — a merchant IS its own group; was the
-// #527 owner_org 1:1 lookup). With merchant.slug == group slug (#548), the group
+// the old owner-link lookup). With merchant.slug == group slug (#548), the group
 // is effectively the merchant's authkit identity. Suspended/deleted merchants
 // are rejected.
 func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (merchant.ID, string, error) {
@@ -195,7 +195,7 @@ func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (
 
 // AuthorizeMerchant checks that the caller's permission group backs the named
 // merchant: the merchant's permission_group_id must equal the caller's group id,
-// and the merchant must be active (#567; was the #527 owner_org check).
+// and the merchant must be active (#567).
 // merchantForGroupID resolves the group's merchant; AuthorizeMerchant is the
 // explicit fail-closed gate for any path that NAMES a merchant id directly.
 func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mid merchant.ID) error {

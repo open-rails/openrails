@@ -26,11 +26,10 @@ func userContext(r *request.Request) (billingauth.UserContext, bool) {
 }
 
 // AdminPermissionRequiredMW is the framework-neutral analogue of
-// AdminPermissionRequired (#282/#312/#537). HARDCUT: admin authority is live
-// merchant-local `org:` permission state in the CALLER'S OWN org. There is no
-// claim-based operator-org gate. A nil checker is a config error and fails
-// closed with 500: a deployment that mounts admin routes must wire the live
-// permission checker (the control plane).
+// AdminPermissionRequired (#282/#312/#537). Admin authority is live
+// merchant-local permission-group state. A nil checker is a config error and
+// fails closed with 500: a deployment that mounts admin routes must wire the
+// live permission checker (the control plane).
 func AdminPermissionRequiredMW(checker AdminPermissionChecker, perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
@@ -44,7 +43,7 @@ func AdminPermissionRequiredMW(checker AdminPermissionChecker, perm string) rout
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
 			}
-			allowed, err := checker.HasAdminPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
+			allowed, err := checker.HasAdminPermission(r.Request.Context(), uc.Merchant, uc.UserID, perm)
 			if err != nil {
 				log.WithError(err).Error("failed to evaluate admin permission")
 				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")

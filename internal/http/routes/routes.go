@@ -24,10 +24,9 @@ type Options struct {
 	Authenticator billingauth.Authenticator
 
 	// AdminPermissionChecker is the LIVE authority for admin routes (#312/#537):
-	// admin routes require merchant-local `org:` authority evaluated live against
-	// the CALLER'S OWN org. nil for embedded hosts without a control plane, in
-	// which case admin routes fail closed (there is no operator-org or
-	// role-claim fallback).
+	// admin routes require merchant-local authority evaluated live against the
+	// caller's merchant permission-group. nil for embedded hosts without a control
+	// plane, in which case admin routes fail closed.
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
 
 	// ServiceCredentialResolver validates merchant-scoped programmatic
@@ -71,8 +70,8 @@ type remoteApplicationResolver interface {
 	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
-type merchantOrgResolver interface {
-	ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error)
+type merchantGroupResolver interface {
+	ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error)
 }
 
 // merchantUserResolver resolves the merchant a user session is acting on from
@@ -286,7 +285,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 							Email:         resolved.Email,
 							EmailVerified: resolved.EmailVerified,
 							Username:      resolved.Username,
-							Org:           resolved.Merchant,
+							Merchant:      resolved.Merchant,
 						})
 						next(r)
 						return
@@ -322,7 +321,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 					Email:         resolved.Email,
 					EmailVerified: resolved.EmailVerified,
 					Username:      resolved.Username,
-					Org:           resolved.Merchant,
+					Merchant:      resolved.Merchant,
 				})
 				next(r)
 				return
@@ -340,10 +339,10 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
 			}
-			// #567: a user access token carries no merchant claim (uc.Org is empty);
+			// #567: a user access token carries no merchant claim (uc.Merchant is empty);
 			// resolve the merchant the session is acting on from the user's
 			// merchant-group membership, then gate + pin context against THAT merchant.
-			if strings.TrimSpace(uc.Org) == "" {
+			if strings.TrimSpace(uc.Merchant) == "" {
 				resolver, ok := opts.AdminPermissionChecker.(merchantUserResolver)
 				if !ok {
 					r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
@@ -354,9 +353,9 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 					r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
 					return
 				}
-				uc.Org = ref
+				uc.Merchant = ref
 			}
-			allowed, err := opts.AdminPermissionChecker.HasAdminPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
+			allowed, err := opts.AdminPermissionChecker.HasAdminPermission(r.Request.Context(), uc.Merchant, uc.UserID, perm)
 			if err != nil {
 				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")
 				return
@@ -367,12 +366,12 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			}
 			if r.Request != nil {
 				if _, ok := merchant.FromContext(r.Request.Context()); !ok {
-					resolver, ok := opts.AdminPermissionChecker.(merchantOrgResolver)
+					resolver, ok := opts.AdminPermissionChecker.(merchantGroupResolver)
 					if !ok {
 						r.AbortJSON(http.StatusInternalServerError, "merchant resolver unavailable")
 						return
 					}
-					mid, _, err := resolver.ResolveMerchantForOrg(r.Request.Context(), uc.Org)
+					mid, _, err := resolver.ResolveMerchantForGroup(r.Request.Context(), uc.Merchant)
 					if err != nil {
 						r.AbortJSON(http.StatusForbidden, "merchant_unresolved")
 						return

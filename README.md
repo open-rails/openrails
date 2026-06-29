@@ -267,8 +267,8 @@ var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
             UserID:       claims.Subject,      // required: the payer/principal (opaque to OpenRails)
             Email:        claims.Email,        // optional
             Username:     claims.Username,     // optional
-            Org:          claims.Org,          // optional: AuthKit org context
-            OrgRoles:     claims.OrgRoles,     // optional: roles within Org
+            Merchant:      claims.Merchant,      // optional merchant context
+            MerchantRoles: claims.MerchantRoles, // optional roles within Merchant
             Roles:        claims.Roles,        // optional host-level roles
             Entitlements: claims.Entitlements, // optional
         }, nil
@@ -598,7 +598,7 @@ See [docs/operations.md](docs/operations.md) for the finding taxonomy and the
 confirmed-absence gate (destructive repairs are held until the source domain is
 fully reconciled). `pull-provider` records local mirror plans/changes only; remote
 provider writes executed later through provider intents are recorded separately in
-`openrails intents log`.
+`openrails intents-log`.
 
 **`intents`** — read-only view of the provider intent ledger (#358): every queued
 outbound provider mutation. Under `MODE=limited`/`readonly` this is the dry-run
@@ -610,8 +610,8 @@ intents execute under `limited`, system-origin only under `full`, nothing under
 openrails intents --merchant=<slug>                         # pending intents + drain forecast by mode
 openrails intents --merchant=<slug> --status=all            # full ledger history
 openrails intents --merchant=<slug> --type=nmi_delete_subscription --format=json
-openrails intents log --merchant=<slug> --provider=stripe   # remote provider mutation attempts/results
-openrails intents log --merchant=<slug> --intent=<uuid> --format=json
+openrails intents-log --merchant=<slug> --provider=stripe   # remote provider mutation attempts/results
+openrails intents-log --merchant=<slug> --intent=<uuid> --format=json
 
 # No public HTTP route is exposed for this ledger in core OpenRails.
 ```

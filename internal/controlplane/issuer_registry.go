@@ -11,7 +11,7 @@ import (
 )
 
 // ErrDelegatedIssuerUnknown indicates a presented token's validated `iss` is not
-// a registered AuthKit remote_application mapped (via org ownership) to an
+// a registered AuthKit remote_application mapped via permission-group ownership to an
 // active merchant. Fail closed: the token is rejected even if well-formed.
 var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer maps to no active merchant")
 
@@ -53,11 +53,11 @@ func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error)
 // AuthKit remote_application -> its controlling permission-group id (the merchant
 // group) -> the merchant directory row whose recorded controlling group id
 // matches (`merchants.permission_group_id`, repurposed under #567 to hold the merchant
-// permission-group's internal id, NOT an org uuid).
+// permission-group's internal id).
 //
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, is attached
 // to no group, or that group is no active merchant (fail closed). The returned
-// groupID/groupRef pair replaces the old (ownerOrgID, ownerOrgSlug).
+// groupID/groupRef identify the merchant permission-group.
 func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, groupID, groupRef, remoteApplicationID string, err error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {

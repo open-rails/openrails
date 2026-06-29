@@ -3,7 +3,7 @@ package controlplane
 import (
 	"testing"
 
-	authhttp "github.com/open-rails/authkit/http"
+	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +13,7 @@ import (
 
 func TestDelegatedVerify_AcceptsMerchantAdminClaim(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
+	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
 		Permissions: []string{PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate},
 	})
 	_, dp, err := v.VerifyDelegatedAccess(tok)
@@ -23,7 +23,7 @@ func TestDelegatedVerify_AcceptsMerchantAdminClaim(t *testing.T) {
 
 func TestDelegatedVerify_AcceptsNoPermissions(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
+	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
 	_, dp, err := v.VerifyDelegatedAccess(tok)
 	require.NoError(t, err)
 	require.Empty(t, dp.Permissions)

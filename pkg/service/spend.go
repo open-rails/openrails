@@ -301,7 +301,7 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 
 // GetCreditAccountSettings returns a payer's stored account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
-// org billing-account admin surface (issue #242). RLS-scoped.
+// customer billing-account admin surface (issue #242). RLS-scoped.
 func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")

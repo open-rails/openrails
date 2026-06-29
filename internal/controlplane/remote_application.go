@@ -35,8 +35,8 @@ func LooksLikeJWT(token string) bool {
 // authz runs unchanged.
 //
 // AuthKit's verifier resolves the principal's STORED authority from the VALIDATED
-// `iss` (its registered remote_application -> assigned org roles + direct
-// permissions); the token's own self-claimed permissions/roles are IGNORED. The
+// `iss` (its registered remote_application -> assigned group roles); the token's
+// own self-claimed permissions/roles are IGNORED. The
 // merchant the caller administers is resolved by ROLE on the merchant's
 // permission_group_id (#481/#567), never by an identity-equation.
 //
@@ -44,8 +44,8 @@ func LooksLikeJWT(token string) bool {
 //   - ErrNotRemoteApplicationToken when the token verifies but is not a
 //     remote application access token (caller falls through / rejects),
 //   - ErrDelegatedInvalid for any verification failure (sanitized),
-//   - ErrServiceCredentialMerchantUnresolved when the principal's org owns no
-//     active merchant (fail closed).
+//   - ErrServiceCredentialMerchantUnresolved when the principal's permission
+//     group maps to no active merchant (fail closed).
 func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrRemoteApplicationNotConfigured

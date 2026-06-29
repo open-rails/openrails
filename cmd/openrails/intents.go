@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -38,6 +39,7 @@ func newIntentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "intents",
 		Short: "List the provider intent ledger (#358): queued outbound provider mutations and which mode executes them (read-only)",
+		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runIntentsList(c, status, provider, intentType, format, merchantSlug, limit)
 		},
@@ -49,31 +51,34 @@ func newIntentsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (default: the default merchant)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
+	return cmd
+}
+
+func newIntentsLogCmd() *cobra.Command {
 	var (
-		logProvider        string
-		logIntent          string
-		logProviderAccount string
-		logPhase           string
-		logFormat          string
-		logMerchant        string
-		logLimit           int
+		provider        string
+		intent          string
+		providerAccount string
+		phase           string
+		format          string
+		merchant        string
+		limit           int
 	)
-	logCmd := &cobra.Command{
-		Use:   "log",
-		Short: "List append-only external provider mutation attempts/results (#533)",
+	cmd := &cobra.Command{
+		Use:   "intents-log",
+		Short: "List provider mutation attempts/results (#533)",
+		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsMutationLog(c, logProvider, logIntent, logProviderAccount, logPhase, logFormat, logMerchant, logLimit)
+			return runIntentsMutationLog(c, provider, intent, providerAccount, phase, format, merchant, limit)
 		},
 	}
-	logCmd.Flags().StringVar(&logProvider, "provider", "", "Provider filter (e.g. mobius, stripe)")
-	logCmd.Flags().StringVar(&logIntent, "intent", "", "Provider intent id filter")
-	logCmd.Flags().StringVar(&logProviderAccount, "provider-account", "", "Provider account id filter")
-	logCmd.Flags().StringVar(&logPhase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
-	logCmd.Flags().StringVar(&logFormat, "format", "table", "Output format: table, json")
-	logCmd.Flags().StringVar(&logMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
-	logCmd.Flags().IntVar(&logLimit, "limit", 500, "Maximum rows to list")
-	cmd.AddCommand(logCmd)
-
+	cmd.Flags().StringVar(&provider, "provider", "", "Provider filter (e.g. mobius, stripe)")
+	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
+	cmd.Flags().StringVar(&providerAccount, "provider-account", "", "Provider account id filter")
+	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
+	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
+	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 	return cmd
 }
 
@@ -249,28 +254,40 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		limit = 500
 	}
 
-	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
-		q := database.Gen(ctx)
-		countArgs := gen.CountExternalProviderMutationLogsParams{
-			Provider: providerFilter, ProviderIntentID: intentFilter, ProviderAccountID: accountFilter, Phase: phaseFilter,
-		}
-		total, err := q.CountExternalProviderMutationLogs(ctx, countArgs)
+	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, _ *db.DB) error {
+		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+		svc, err := analytics.NewEventLogService(cfg.ClickHouse)
 		if err != nil {
-			return fmt.Errorf("count external provider mutation logs: %w", err)
+			return fmt.Errorf("open clickhouse event log: %w", err)
 		}
-		rows, err := q.ListExternalProviderMutationLogs(ctx, gen.ListExternalProviderMutationLogsParams{
-			Provider: providerFilter, ProviderIntentID: intentFilter, ProviderAccountID: accountFilter, Phase: phaseFilter,
-			PageLimit: int64(limit), PageOffset: 0,
-		})
+		defer func() { _ = svc.Close() }()
+
+		merchantID, err := merchant.Require(ctx)
 		if err != nil {
-			return fmt.Errorf("list external provider mutation logs: %w", err)
+			return err
+		}
+		filter := analytics.ProviderMutationEventFilter{
+			MerchantID:        merchantID.String(),
+			Provider:          providerFilter,
+			ProviderIntentID:  intentFilter,
+			ProviderAccountID: accountFilter,
+			Phase:             phaseFilter,
+			Limit:             limit,
+		}
+		total, err := svc.CountProviderMutationEvents(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("count provider mutation events: %w", err)
+		}
+		rows, err := svc.ListProviderMutationEvents(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("list provider mutation events: %w", err)
 		}
 
 		if format == "json" {
 			items := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
 				item := map[string]any{
-					"id":                  row.ID,
+					"id":                  row.EventID,
 					"merchant_id":         row.MerchantID,
 					"provider":            row.Provider,
 					"provider_account_id": row.ProviderAccountID,
@@ -280,19 +297,19 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 					"attempt":             row.Attempt,
 					"phase":               row.Phase,
 					"reason":              row.Reason,
-					"created_at":          row.CreatedAt,
+					"created_at":          row.Timestamp,
 				}
-				if len(row.Evidence) > 0 {
+				if row.Evidence != "" {
 					item["evidence"] = json.RawMessage(row.Evidence)
 				}
 				items = append(items, item)
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			return enc.Encode(map[string]any{"total": total, "external_provider_mutation_logs": items})
+			return enc.Encode(map[string]any{"total": total, "provider_mutation_events": items})
 		}
 
-		fmt.Printf("External provider mutation log: %d total, showing %d\n\n", total, len(rows))
+		fmt.Printf("Provider mutation events: %d total, showing %d\n\n", total, len(rows))
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
 		for _, row := range rows {
@@ -304,17 +321,9 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 			if row.ProviderIntentID != nil {
 				intent = row.ProviderIntentID.String()
 			}
-			intentType := ""
-			if row.IntentType != nil {
-				intentType = *row.IntentType
-			}
-			reason := ""
-			if row.Reason != nil {
-				reason = *row.Reason
-			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-				row.CreatedAt.Format("2006-01-02 15:04"),
-				row.Provider, account, intent, intentType, row.Attempt, row.Phase, reason)
+				row.Timestamp.Format("2006-01-02 15:04"),
+				row.Provider, account, intent, row.IntentType, row.Attempt, row.Phase, row.Reason)
 		}
 		return w.Flush()
 	})

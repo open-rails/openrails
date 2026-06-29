@@ -67,11 +67,11 @@ func PrincipalFromGin(c *gin.Context) (*Principal, bool) {
 	return p, ok && p != nil
 }
 
-// AdminPermissionChecker evaluates live user-session authority in the caller's
-// own org. It matches the control plane without coupling this middleware to the
-// policy package.
+// AdminPermissionChecker evaluates live user-session authority in a merchant
+// permission-group. It matches the control plane without coupling this middleware
+// to the policy package.
 type AdminPermissionChecker interface {
-	HasAdminPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error)
+	HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error)
 }
 
 // UserSessionAdminPrincipalRequired turns the authenticated AuthKit user session
@@ -90,28 +90,26 @@ func UserSessionAdminPrincipalRequired(checker AdminPermissionChecker) gin.Handl
 			c.Abort()
 			return
 		}
-		c.Set(PrincipalContextKey, userSessionPrincipal(uc.UserID, uc.Org, checker))
+		c.Set(PrincipalContextKey, userSessionPrincipal(uc.UserID, uc.Merchant, checker))
 		c.Next()
 	}
 }
 
-// userSessionPrincipal builds the Principal for a live AuthKit user session acting
-// in its OWN org. Its permission evaluator stays a live AuthKit check and admits
-// only org-plane namespaces — AuthKit org-management (`org:`) and OpenRails
-// app-defined merchant resources (`merchant:`, #554). The separate `platform:`
-// layer is never reachable from an org session.
-func userSessionPrincipal(userID, orgSlug string, checker AdminPermissionChecker) *Principal {
+// userSessionPrincipal builds the Principal for a live AuthKit user session
+// acting in a merchant permission-group. Its permission evaluator stays a live
+// AuthKit check and admits OpenRails app-defined merchant resources only.
+func userSessionPrincipal(userID, merchantRef string, checker AdminPermissionChecker) *Principal {
 	userID = strings.TrimSpace(userID)
 	return &Principal{
-		MerchantSource: "user_session_org",
+		MerchantSource: "user_session_merchant",
 		CredentialType: CredentialUserSession,
 		Subject:        userID,
 		can: func(ctx context.Context, perm string) bool {
 			perm = strings.TrimSpace(perm)
-			if !strings.HasPrefix(perm, "org:") && !strings.HasPrefix(perm, "merchant:") {
+			if !strings.HasPrefix(perm, "merchant:") {
 				return false
 			}
-			allowed, err := checker.HasAdminPermission(ctx, orgSlug, userID, perm)
+			allowed, err := checker.HasAdminPermission(ctx, merchantRef, userID, perm)
 			return err == nil && allowed
 		},
 	}

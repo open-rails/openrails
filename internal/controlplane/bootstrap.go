@@ -57,7 +57,7 @@ type BootstrapOptions struct {
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
 // bootstrap merchant (#567): the merchant permission-group exists (a top-level
-// child of `root`, NO parent org, NO owner_org coupling), the initial admin is
+// child of `root`), the initial admin is
 // its `owner` (auto-holds `merchant:*`), the merchant directory row records the
 // merchant group's internal id, and an initial deployment admin API key is
 // optionally minted under the merchant group when none exists.
@@ -95,8 +95,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	// 1. Ensure the merchant permission-group exists (idempotent: resolve, else
 	//    create). The merchant IS the group — `type=merchant`, `resourceRef=slug`,
-	//    parent=root. No parent org. The initial admin (if any) is seeded as owner
-	//    at creation.
+	//    parent=root. The initial admin (if any) is seeded as owner at creation.
 	groupID, err := core.ResolveGroupIDForSlug(ctx, MerchantType, slug)
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
@@ -193,6 +192,23 @@ func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, 
 		return "", fmt.Errorf("controlplane: create bootstrap api-key actor: %w", err)
 	}
 	return u.ID, nil
+}
+
+// EnsureMerchantAPIKeyActor returns the genesis actor used for operator CLI
+// API-key mints and ensures it is allowed to mint the requested merchant role.
+func (c *ControlPlane) EnsureMerchantAPIKeyActor(ctx context.Context, merchantSlug string) (string, error) {
+	merchantSlug = strings.ToLower(strings.TrimSpace(merchantSlug))
+	if merchantSlug == "" {
+		return "", errors.New("controlplane: merchant slug is required")
+	}
+	createdBy, err := c.ensureBootstrapAPIKeyActor(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := c.Core().AssignGroupRole(ctx, MerchantType, merchantSlug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); err != nil {
+		return "", fmt.Errorf("controlplane: assign api-key actor merchant owner: %w", err)
+	}
+	return createdBy, nil
 }
 
 // anyLiveAPIKey reports whether the merchant group already has at least one

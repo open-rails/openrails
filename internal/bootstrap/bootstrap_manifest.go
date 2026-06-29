@@ -3,90 +3,18 @@ package bootstrap
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
 const (
-	// DefaultBootstrapManifestPath is the conventional mounted bootstrap
-	// provisioning file location for containers and Linux deployments.
+	// DefaultBootstrapManifestPath is the conventional mounted AuthKit authority
+	// bootstrap file location for standalone containers and Linux deployments.
 	DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
 	BootstrapManifestVersion     = 1
 )
-
-// BootstrapManifest is the OpenRails control-plane authority document (#531).
-// It is intentionally not a merchant config or catalog document: merchants,
-// provider credentials, and products/prices live in their own files.
-type BootstrapManifest struct {
-	Version   int                        `yaml:"version"`
-	Authority BootstrapAuthorityManifest `yaml:"authority"`
-}
-
-type BootstrapAuthorityManifest struct {
-	// BootstrapMerchantSlug names the merchant/permission-group whose OpenRails admin role
-	// should be seeded. OpenRails does not have a global admin org in this repo;
-	// admin authority is merchant-scoped, so the merchant must already exist.
-	BootstrapMerchantSlug   string `yaml:"bootstrap_merchant_slug"`
-	InitialAdminUserID string `yaml:"initial_admin_user_id,omitempty"`
-	// MintInitialAPIKey defaults true when omitted. Set false when the
-	// deploy will create admin access through another AuthKit path.
-	MintInitialAPIKey *bool `yaml:"mint_initial_api_key,omitempty"`
-}
-
-// LoadBootstrapManifest reads and validates a bootstrap manifest.
-func LoadBootstrapManifest(path string) (*BootstrapManifest, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read bootstrap manifest %s: %w", path, err)
-	}
-	return ParseBootstrapManifest(raw)
-}
-
-// ParseBootstrapManifest parses and validates a bootstrap manifest.
-func ParseBootstrapManifest(raw []byte) (*BootstrapManifest, error) {
-	var manifest BootstrapManifest
-	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
-		return nil, fmt.Errorf("parse bootstrap manifest: %w", err)
-	}
-	if err := manifest.Validate(); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
-}
-
-// Validate normalizes and validates the manifest in place.
-func (m *BootstrapManifest) Validate() error {
-	if m == nil {
-		return fmt.Errorf("bootstrap manifest is required")
-	}
-	if m.Version != BootstrapManifestVersion {
-		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
-	}
-	if strings.TrimSpace(m.Authority.BootstrapMerchantSlug) == "" {
-		return fmt.Errorf("bootstrap manifest authority.bootstrap_merchant_slug is required")
-	}
-	return nil
-}
-
-func (m *BootstrapManifest) BootstrapOptions() controlplane.BootstrapOptions {
-	if m == nil {
-		return controlplane.BootstrapOptions{}
-	}
-	mintInitialAPIKey := true
-	if m.Authority.MintInitialAPIKey != nil {
-		mintInitialAPIKey = *m.Authority.MintInitialAPIKey
-	}
-	return controlplane.BootstrapOptions{
-		BootstrapMerchantSlug:   strings.ToLower(strings.TrimSpace(m.Authority.BootstrapMerchantSlug)),
-		InitialAdminUserID: strings.TrimSpace(m.Authority.InitialAdminUserID),
-		MintInitialAPIKey:  mintInitialAPIKey,
-	}
-}
 
 func validateMerchantManifestShape(m *MerchantManifest) error {
 	if m == nil {

@@ -2,7 +2,7 @@ package controlplane
 
 // BND-C1 regression: service-JWT permissions must be intersected against
 // stored authority; a token cannot self-assert permissions that were never
-// granted (e.g. org:*).
+// granted (e.g. root:*).
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 
 func TestIntersectPermissions_EmptyStoredDeniesAll(t *testing.T) {
 	// Stored authority is empty → no permissions survive, regardless of what
-	// the token claims (including org:*).
+	// the token claims.
 	claimed := []string{"root:*", PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate}
 	got := intersectPermissions(claimed, nil)
 	if len(got) != 0 {
@@ -36,7 +36,7 @@ func TestIntersectPermissions_OnlyGrantedPermissionsSurvive(t *testing.T) {
 }
 
 func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
-	// The critical BND-C1 case: a token self-asserts org:* but the
+	// The critical BND-C1 case: a token self-asserts root:* but the
 	// remote application's stored authority only grants merchant customer reads.
 	// The owner-grant claim must be stripped.
 	stored := []string{PermMerchantCustomerSettingsRead}
@@ -48,7 +48,7 @@ func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
 }
 
 func TestIntersectPermissions_AdminGrantedWhenStored(t *testing.T) {
-	// If an operator EXPLICITLY grants org:* to a remote_application
+	// If an operator EXPLICITLY grants root:* to a remote_application
 	// (unusual but valid), the token may claim it and it should pass through.
 	stored := []string{"root:*", PermMerchantCustomerSettingsRead}
 	claimed := []string{"root:*"}

@@ -285,8 +285,8 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 		return tn, nil
 	}
 
-	// #567: the merchant IS a top-level permission-group (child of root, no parent
-	// org). When the merchant declares an issuer, AuthKit registers it as a
+	// #567: the merchant IS a top-level permission-group (child of root). When
+	// the merchant declares an issuer, AuthKit registers it as a
 	// remote_application nested under the merchant group with the `owner` role so
 	// host-app delegated tokens administer this merchant only.
 	groupID, err := provisionMerchantGroup(ctx, cp, mt)
@@ -818,7 +818,7 @@ func stringPtrIfNotEmpty(v string) *string {
 }
 
 // provisionMerchantGroup ensures the merchant's top-level permission-group exists
-// (`type=merchant`, `resourceRef=slug`, child of `root`; NO parent org — #567) and,
+// (`type=merchant`, `resourceRef=slug`, child of `root` — #567) and,
 // when the merchant declares an issuer, registers that issuer as a
 // remote_application nested under the merchant group and grants it the merchant
 // `owner` role (full `merchant:*` authority, scoped to this merchant alone since
@@ -878,8 +878,7 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 }
 
 // manifestIssuerToRemoteApplication maps a merchant's manifest issuer onto an
-// AuthKit remote_application registration nested under the merchant group
-// (groupID carried in the OrgID field, retained authbase name — #567).
+// AuthKit remote_application registration nested under the merchant group.
 func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *ManifestIssuer) authkit.RemoteApplication {
 	appSlug := strings.TrimSpace(iss.Slug)
 	if appSlug == "" {

@@ -50,6 +50,7 @@ func TestClickHouseSchemaConsolidationInvariants(t *testing.T) {
 		"webhook_events",
 		"acu_events",
 		"chargeback_events",
+		"provider_mutation_events",
 		"premium_status_daily",
 		"daily_metrics",
 	} {
@@ -69,6 +70,7 @@ func TestClickHouseSchemaConsolidationInvariants(t *testing.T) {
 		"index idx_webhook_events_merchant (merchant_id) type set(0) granularity 1",
 		"index idx_acu_events_merchant (merchant_id) type set(0) granularity 1",
 		"index idx_chargeback_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_provider_mutation_events_merchant (merchant_id) type set(0) granularity 1",
 		"index idx_premium_status_daily_merchant (merchant_id) type set(0) granularity 1",
 		"alter table subscription_events rename column if exists tenant_id to merchant_id",
 		"drop table if exists mv_daily_metrics",

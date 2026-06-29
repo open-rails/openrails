@@ -224,7 +224,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		},
 		Auth: &config.AuthConfig{
 			// HARDCUT (#312/#537): admin authority is LIVE merchant-local AuthKit
-			// org permission state (control-plane evaluated), or a
+			// merchant permission-group state (control-plane evaluated), or a
 			// deployment-minted admin API key - NOT a claim-based operator
 			// merchant. Admin-route integration tests therefore require the embedded
 			// control plane wired with the test admin granted the operator role, so
@@ -360,14 +360,14 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.seedProviderAccountFixtures()
 
 	// Bootstrap the control plane exactly like the standalone serve path (#312):
-	// ensure the test merchant's AuthKit org exists with the operator role holding
-	// the concrete merchant-local org catalog, so admin identities created by the
-	// test helpers carry LIVE merchant-local org authority. Idempotent; runs after
+	// ensure the test merchant's merchant permission-group exists with the operator role holding
+	// the concrete merchant-local permission catalog, so admin identities created by the
+	// test helpers carry LIVE merchant-local permission-group authority. Idempotent; runs after
 	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
 	// pinned to an explicit merchant slug (no default merchant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
-		BootstrapMerchantSlug:  dbtest.TestMerchantSlug,
-		MintInitialAPIKey: false,
+		BootstrapMerchantSlug: dbtest.TestMerchantSlug,
+		MintInitialAPIKey:     false,
 	})
 	require.NoError(suite.t, err, "control plane bootstrap")
 

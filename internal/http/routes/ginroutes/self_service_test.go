@@ -45,9 +45,9 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string)
 		merchantID = dbtest.TestMerchantID
 	}
 	return &controlplane.ResolvedDelegated{
-		Merchant:         "acme-org",
+		Merchant:         "acme-merchant",
 		MerchantID:       merchantID,
-		MerchantSlug:     "acme-org",
+		MerchantSlug:     "acme-merchant",
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,
 	}, nil
@@ -149,23 +149,23 @@ func TestSelfService_RejectsServiceCredential(t *testing.T) {
 
 func TestCustomerTreasurySpendDelegationsMountedAndGated(t *testing.T) {
 	e := newCustomerTreasuryRouter(t, nil)
-	w := doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", false)
+	w := doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 
 	e = newCustomerTreasuryRouter(t, []string{controlplane.PermMerchantCustomerSettingsRead})
-	w = doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", true)
+	w = doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "merchant:* must not satisfy customer treasury")
 
 	e = newCustomerTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsRead})
 	w = doSelf(e, http.MethodGet, "/v1/customers/other-customer/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "caller must be scoped to the customer in the path")
 
-	w = doSelf(e, http.MethodGet, "/v1/customers/acme-org/spend-delegations", true)
+	w = doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", true)
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	w = doSelf(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", true)
+	w = doSelf(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy update")
 }
 
@@ -179,7 +179,7 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
 		}]
 	}`
-	w := doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", "delegated.jwt.token", body)
+	w := doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", "delegated.jwt.token", body)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "customer_id")
 
@@ -191,7 +191,7 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
 		}]
 	}`
-	w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-org/spend-delegations", "delegated.jwt.token", body)
+	w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", "delegated.jwt.token", body)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "customer_id")
 }

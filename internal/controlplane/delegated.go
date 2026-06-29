@@ -77,7 +77,7 @@ type ResolvedDelegated struct {
 // expose more than strictly necessary — the minter's call, not a gate rule).
 func (r *ResolvedDelegated) HasPermission(perm string) bool {
 	for _, grant := range r.Permissions {
-		if authkit.PermissionTokenCovers(grant, perm) {
+		if authkit.PermMatches(grant, perm) {
 			return true
 		}
 	}

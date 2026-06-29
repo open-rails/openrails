@@ -15,26 +15,26 @@ import (
 )
 
 type fakeAdminPrincipalChecker struct {
-	allowedOrg  string
-	allowedUser string
-	allowedPerm string
+	allowedMerchant string
+	allowedUser     string
+	allowedPerm     string
 }
 
-func (f fakeAdminPrincipalChecker) HasAdminPermission(_ context.Context, orgSlug, userID, perm string) (bool, error) {
-	return orgSlug == f.allowedOrg && userID == f.allowedUser && perm == f.allowedPerm, nil
+func (f fakeAdminPrincipalChecker) HasAdminPermission(_ context.Context, merchantRef, userID, perm string) (bool, error) {
+	return merchantRef == f.allowedMerchant && userID == f.allowedUser && perm == f.allowedPerm, nil
 }
 
 func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
-		c.Set("openrails.user_context", ginauth.UserContext{UserID: "admin-1", Org: "merchant-org"})
+		c.Set("openrails.user_context", ginauth.UserContext{UserID: "admin-1", Merchant: "merchant-a"})
 		c.Next()
 	})
 	r.GET("/admin", UserSessionAdminPrincipalRequired(fakeAdminPrincipalChecker{
-		allowedOrg:  "merchant-org",
-		allowedUser: "admin-1",
-		allowedPerm: controlplane.PermMerchantCustomerSettingsRead,
+		allowedMerchant: "merchant-a",
+		allowedUser:     "admin-1",
+		allowedPerm:     controlplane.PermMerchantCustomerSettingsRead,
 	}), RequirePermission(controlplane.PermMerchantCustomerSettingsRead), func(c *gin.Context) {
 		p, ok := PrincipalFromGin(c)
 		require.True(t, ok)
@@ -47,19 +47,19 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
-func TestUserSessionAdminPrincipalDeniesNonOrgPermissions(t *testing.T) {
-	for _, perm := range []string{"platform:orgs:update"} {
+func TestUserSessionAdminPrincipalDeniesNonMerchantPermissions(t *testing.T) {
+	for _, perm := range []string{"platform:merchants:update"} {
 		t.Run(perm, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
-				c.Set("openrails.user_context", ginauth.UserContext{UserID: "admin-1", Org: "merchant-org"})
+				c.Set("openrails.user_context", ginauth.UserContext{UserID: "admin-1", Merchant: "merchant-a"})
 				c.Next()
 			})
 			r.GET("/admin", UserSessionAdminPrincipalRequired(fakeAdminPrincipalChecker{
-				allowedOrg:  "merchant-org",
-				allowedUser: "admin-1",
-				allowedPerm: perm,
+				allowedMerchant: "merchant-a",
+				allowedUser:     "admin-1",
+				allowedPerm:     perm,
 			}), RequirePermission(perm), func(c *gin.Context) {
 				c.Status(http.StatusOK)
 			})
@@ -75,7 +75,7 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 	ctx := context.Background()
 
 	servicePrincipal := principalFromServiceCredential(&controlplane.ResolvedServiceCredential{
-		OwnerGroupRef: "merchant-org",
+		OwnerGroupRef: "merchant-a",
 		MerchantID:    dbtest.TestMerchantID,
 		Permissions: []string{
 			controlplane.PermMerchantCustomerSettingsRead,
@@ -94,5 +94,5 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 	require.Equal(t, "user-1", delegatedPrincipal.Subject)
 	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantCustomerSettingsRead))
 	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantAdmissionsCreate))
-	require.False(t, delegatedPrincipal.Can(ctx, "platform:orgs:update"))
+	require.False(t, delegatedPrincipal.Can(ctx, "platform:merchants:update"))
 }

@@ -43,9 +43,9 @@ var allCustomerTreasuryPerms = []string{
 	controlplane.PermCustomerSpendDelegationsUpdate,
 }
 
-// newCustomerTreasuryServer mounts the org-treasury surface behind a host-seam
-// principal carrying perms. The principal's MerchantID is always the test org;
-// subject is irrelevant on this surface (the payer is rebound to the org), so a
+// newCustomerTreasuryServer mounts the customer-treasury surface behind a host-seam
+// principal carrying perms. The principal's MerchantID is always the test customer;
+// subject is irrelevant on this surface (the payer is rebound to the customer), so a
 // random subject proves the rebind is what scopes the balance.
 func newCustomerTreasuryServer(t *testing.T, suite *TestContainerSuite, perms []string) *httptest.Server {
 	t.Helper()
@@ -69,34 +69,34 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// EUR keeps this test's org account independent of the USD draw-down E2E; the
+	// EUR keeps this test's customer account independent of the USD draw-down E2E; the
 	// before/after delta assertions tolerate any balance carried in from fixtures.
 	const currency = "EUR"
-	orgPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
+	customerPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
 
 	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 
-	// Baseline balance for the org payer in this currency, read over HTTP.
+	// Baseline balance for the customer payer in this currency, read over HTTP.
 	before := getCustomerBalance(t, srv, currency)
 
-	// Org loads credits (the post-confirmation effect of a checkout pre-pay).
+	// Customer loads credits (the post-confirmation effect of a checkout pre-pay).
 	depositID := uuid.New()
 	const deposit = 4_200_000
 	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
-		CustomerID: &orgPayer,
-		Invoker:    orgPayer.UUID().String(),
+		CustomerID: &customerPayer,
+		Invoker:    customerPayer.UUID().String(),
 		Currency:   currency,
 		Amount:     deposit,
-		Source:     "test_org_prepay",
+		Source:     "test_customer_prepay",
 		SourceID:   &depositID,
 	})
 	require.NoError(t, err)
 
-	// --- GET balance: reflects the org payer's loaded credits, NOT an individual. ---
+	// --- GET balance: reflects the customer payer's loaded credits, NOT an individual. ---
 	require.EqualValues(t, before+deposit, getCustomerBalance(t, srv, currency),
-		"org balance must reflect credits loaded onto the org payable subject")
+		"customer balance must reflect credits loaded onto the customer payable subject")
 
-	// --- GET transactions: the newest entry is this org deposit, keyed to the org. ---
+	// --- GET transactions: the newest entry is this customer deposit, keyed to the customer. ---
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/transactions?currency="+currency+"&limit=5"), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	txns := decodeJSONObject(t, resp.body)
@@ -105,10 +105,10 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	require.NotEmpty(t, list, resp.body)
 	newest, ok := list[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, orgPayer.UUID().String(), newest["customer_id"], "transaction is scoped to the org payable subject")
+	require.Equal(t, customerPayer.UUID().String(), newest["customer_id"], "transaction is scoped to the customer payable subject")
 	require.EqualValues(t, deposit, newest["amount"])
 
-	// --- PUT settings: the org sets self-imposed caps (billing mode stays
+	// --- PUT settings: the customer sets self-imposed caps (billing mode stays
 	// merchant-granted — the shared handler refuses platform policy fields). ---
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/settings"), map[string]any{
 		"currency":            currency,
@@ -122,7 +122,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	require.NotContains(t, stored, "billing_mode", "billing mode is merchant-granted, not customer self-service")
 
 	// --- GET usage / payments / invoices / payment-methods: all reachable and
-	// scoped, returning the org's (empty) payer state. ---
+	// scoped, returning the customer's (empty) payer state. ---
 	for _, p := range []string{
 		"/usage?currency=" + currency,
 		"/payments",
@@ -133,7 +133,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.status, "GET %s: %s", p, resp.body)
 	}
 
-	// --- PUT + GET spend-delegations: the org's balance-sharing policy. ---
+	// --- PUT + GET spend-delegations: the customer's balance-sharing policy. ---
 	invoker := uuid.NewString()
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
 		"delegations": []map[string]any{{
@@ -207,46 +207,46 @@ func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 		"/notifications",
 	} {
 		resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath(p), nil)
-		require.Equal(t, http.StatusNotFound, resp.status, "consumer route %s must not exist on the org surface: %s", p, resp.body)
+		require.Equal(t, http.StatusNotFound, resp.status, "consumer route %s must not exist on the customer surface: %s", p, resp.body)
 	}
 }
 
-// TestCustomerTreasuryPayer_DelegatedDrawDownE2E is the Tensorhub use-case: the org
+// TestCustomerTreasuryPayer_DelegatedDrawDownE2E is the Tensorhub use-case: the customer
 // loads credits, sets a per-invoker spend-delegation window over HTTP, and a
-// delegated invoker draws the ORG balance down THROUGH that window while a
+// delegated invoker draws the customer balance down THROUGH that window while a
 // second invoker is independently metered (per-invoker, not pooled — #563).
 func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
-	orgPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
+	customerPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// Org loads a large prepaid balance (the post-checkout effect) so the balance
+	// Customer loads a large prepaid balance (the post-checkout effect) so the balance
 	// never gates — the spend-delegation WINDOW is what must bind.
 	depositID := uuid.New()
 	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
-		CustomerID: &orgPayer,
-		Invoker:    orgPayer.UUID().String(),
+		CustomerID: &customerPayer,
+		Invoker:    customerPayer.UUID().String(),
 		Currency:   money.DefaultCurrency,
 		Amount:     1_000_000_000,
-		Source:     "test_org_prepay",
+		Source:     "test_customer_prepay",
 		SourceID:   &depositID,
 	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		_, _ = suite.Pool.Exec(context.Background(),
-			"DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", orgPayer.UUID())
+			"DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", customerPayer.UUID())
 	})
 
 	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 
-	// The org confirms its loaded balance over HTTP.
+	// The customer confirms its loaded balance over HTTP.
 	require.GreaterOrEqual(t, getCustomerBalance(t, srv, money.DefaultCurrency), int64(1_000_000_000))
 
-	// The org grants alice a $1000-per-day window — over HTTP, the real surface.
+	// The customer grants alice a $1000-per-day window — over HTTP, the real surface.
 	alice := "user:alice"
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
 		"delegations": []map[string]any{{
@@ -257,7 +257,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
-	// Wire the spendgate-backed admitter over the SAME Postgres + Redis the org
+	// Wire the spendgate-backed admitter over the SAME Postgres + Redis the customer
 	// just wrote its policy to (the production admission path, #513).
 	adm := admission.NewAdmitter(
 		money.NewMoneyService(suite.App.Runtime.DB),
@@ -271,7 +271,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 
 	drawDown := func(invoker string, amount int64) admission.AdmitDecision {
 		d, derr := adm.Admit(ctx, admission.AdmitRequest{
-			CustomerID:      orgPayer,
+			CustomerID:      customerPayer,
 			Invoker:         invoker,
 			InvokerType:     string(identity.InvokerTypeDelegated),
 			Currency:        money.DefaultCurrency,
@@ -284,14 +284,14 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 		return d
 	}
 
-	// alice draws the org balance down within her window.
+	// alice draws the customer balance down within her window.
 	require.True(t, drawDown(alice, 600).Allowed, "first 600 fits alice's 1000 window")
 	require.False(t, drawDown(alice, 600).Allowed, "600+600 breaches alice's 1000 window")
 
 	// bob has no grant of his own; alice's window never widened his access
 	// (per-invoker isolation, not a pooled role counter).
 	bob := drawDown("user:bob", 100)
-	require.False(t, bob.Allowed, "an ungranted invoker cannot spend the org balance")
+	require.False(t, bob.Allowed, "an ungranted invoker cannot spend the customer balance")
 	require.Equal(t, admission.DenyDelegatedSpendNotAllowed, bob.DenyCode)
 }
 

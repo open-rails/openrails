@@ -69,10 +69,10 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		SessionID:       cl.SessionID,
 		Roles:           cl.Roles,
 		Entitlements:    cl.Entitlements,
-		// #567: the permission-group model has NO `org` persona, so a user access
-		// token carries no org slug/org-roles. Merchant-admin authority is a role
-		// on the merchant permission-group, evaluated live by HasAdminPermission
-		// against the merchant the route resolves — not read from the token. Org is
+		// #567: the permission-group model has no legacy tenant persona, so a user
+		// access token carries no group slug/group roles. Merchant-admin authority
+		// is a role on the merchant permission-group, evaluated live by
+		// HasAdminPermission against the merchant the route resolves — not read from the token. Merchant is
 		// left empty here; it is populated only on the in-process/delegated paths
 		// that bind an explicit merchant (see routes/ginmw).
 	}

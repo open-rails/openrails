@@ -180,6 +180,57 @@ func TestLogSubscriptionEventStampsMerchant(t *testing.T) {
 	}
 }
 
+func TestLogProviderMutationEventSpoolsWhenClickHouseDown(t *testing.T) {
+	sp, err := spool.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create spool: %v", err)
+	}
+	now := time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)
+	svc := &EventLogService{
+		config: &config.ClickHouseConfig{HTTPAddr: "127.0.0.1:1", ClientAddr: "127.0.0.1:1", Database: "analytics"},
+		spool:  sp,
+		clock:  clockwork.NewFakeClockAt(now),
+	}
+
+	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
+	defer cancel()
+	if err := svc.LogProviderMutationEvent(ctx, ProviderMutationEventData{
+		Provider:       "mobius",
+		IntentType:     "manual_rebill",
+		IdempotencyKey: "manual_rebill:test",
+		Attempt:        1,
+		Phase:          "attempting",
+		Evidence:       "{}",
+	}); err != nil {
+		t.Fatalf("log provider mutation event: %v", err)
+	}
+
+	paths, err := sp.List(10)
+	if err != nil {
+		t.Fatalf("list spool: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("spool files = %d, want 1", len(paths))
+	}
+	rec, _, err := sp.Read(paths[0])
+	if err != nil {
+		t.Fatalf("read spool: %v", err)
+	}
+	if rec.Kind != "provider_mutation" {
+		t.Fatalf("kind = %q, want provider_mutation", rec.Kind)
+	}
+	var event ProviderMutationEventData
+	if err := json.Unmarshal(rec.Data, &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.MerchantID != dbtest.TestMerchantID.String() {
+		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, dbtest.TestMerchantID.String())
+	}
+	if !event.Timestamp.Equal(now) {
+		t.Fatalf("timestamp = %s, want %s", event.Timestamp, now)
+	}
+}
+
 func readOnlySpooledPayment(t *testing.T, sp *spool.Spool) PaymentEventData {
 	t.Helper()
 	paths, err := sp.List(10)
@@ -261,5 +312,8 @@ func assertSinkNoOp(t *testing.T, ctx context.Context, svc *EventLogService) {
 	}
 	if err := svc.LogChargebackEvent(ctx, ChargebackEventData{ChargebackID: "c", EventType: "chargeback", Rail: "p"}); err != nil {
 		t.Fatalf("LogChargebackEvent errored on unconfigured sink: %v", err)
+	}
+	if err := svc.LogProviderMutationEvent(ctx, ProviderMutationEventData{Provider: "p", Phase: "attempting"}); err != nil {
+		t.Fatalf("LogProviderMutationEvent errored on unconfigured sink: %v", err)
 	}
 }

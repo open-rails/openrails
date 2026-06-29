@@ -61,7 +61,7 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	)
 	b := surface.ProvisionOwnedMerchant("iso-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
-		b.OrgSlug,
+		b.MerchantSlug,
 		"iso-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 	)
@@ -125,7 +125,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	)
 	b := surface.ProvisionOwnedMerchant("iso-ra-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
-		b.OrgSlug,
+		b.MerchantSlug,
 		"iso-ra-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 	)
@@ -314,7 +314,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 
 	b := surface.ProvisionOwnedMerchant("iso-admin-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
-		b.OrgSlug,
+		b.MerchantSlug,
 		"iso-admin-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
 	)
@@ -329,7 +329,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 	)
 	adminB := surface.RegisterDelegatedCaller(
 		"iso-admin-b-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
-		b.OrgSlug,
+		b.MerchantSlug,
 		uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)
@@ -397,7 +397,7 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	user, err := core.CreateUser(ctx, email, username)
 	require.NoError(t, err, "create merchant admin user")
 	// #567: assign the merchant `owner` role directly in the merchant group (no
-	// separate org membership step).
+	// separate group membership step).
 	require.NoError(t, core.AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner), "assign merchant admin role")
 	token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
 	require.NoError(t, err, "issue merchant admin user access token")

@@ -71,7 +71,7 @@ type Server struct {
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
-	// control-plane DB) and operator-org provisioner, and is always built
+	// control-plane DB) and permission-group provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
 
@@ -172,7 +172,7 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
-	// control-plane DB) and operator-org provisioner. The DB-backed secret
+	// control-plane DB) and permission-group provisioner. The DB-backed secret
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.
 	{

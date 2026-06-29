@@ -36,10 +36,11 @@ func (ProviderIntentVerifyArgs) Kind() string { return KindProviderIntentVerify 
 // ProviderIntentExecuteWorker drains the executable intents.
 type ProviderIntentExecuteWorker struct {
 	river.WorkerDefaults[ProviderIntentExecuteArgs]
-	DB       *db.DB
-	Config   *config.Config
-	Clock    clockwork.Clock
-	Registry *intents.Registry
+	DB             *db.DB
+	Config         *config.Config
+	Clock          clockwork.Clock
+	Registry       *intents.Registry
+	MutationLogger intents.MutationLogger
 }
 
 func (ProviderIntentExecuteWorker) Kind() string { return KindProviderIntentExecute }
@@ -50,6 +51,7 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(w.DB),
+		Logger:   w.MutationLogger,
 		Registry: w.Registry,
 		Config:   w.Config,
 		Clock:    w.Clock,
@@ -76,10 +78,11 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 // ProviderIntentVerifyWorker resolves ambiguous outcomes via provider reads.
 type ProviderIntentVerifyWorker struct {
 	river.WorkerDefaults[ProviderIntentVerifyArgs]
-	DB       *db.DB
-	Config   *config.Config
-	Clock    clockwork.Clock
-	Registry *intents.Registry
+	DB             *db.DB
+	Config         *config.Config
+	Clock          clockwork.Clock
+	Registry       *intents.Registry
+	MutationLogger intents.MutationLogger
 }
 
 func (ProviderIntentVerifyWorker) Kind() string { return KindProviderIntentVerify }
@@ -90,6 +93,7 @@ func (w ProviderIntentVerifyWorker) Work(ctx context.Context, _ *river.Job[Provi
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(w.DB),
+		Logger:   w.MutationLogger,
 		Registry: w.Registry,
 		Config:   w.Config,
 		Clock:    w.Clock,

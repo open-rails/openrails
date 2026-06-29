@@ -133,17 +133,17 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	cp := newMerchantManifestControlPlane(t, pool)
 	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
-	var tenantID, ownerOrgID string
+	var tenantID, permissionGroupID string
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT id::text, permission_group_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
-	`).Scan(&tenantID, &ownerOrgID))
+	`).Scan(&tenantID, &permissionGroupID))
 
 	// #567: permission_group_id now holds the merchant permission-group's internal id.
 	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, controlplane.MerchantType, "cozy-art")
 	require.NoError(t, err)
-	require.Equal(t, groupID, ownerOrgID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
+	require.Equal(t, groupID, permissionGroupID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
@@ -151,8 +151,8 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 			SELECT permission_group_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
-	`).Scan(&ownerOrgID))
-	require.Equal(t, groupID, ownerOrgID)
+	`).Scan(&permissionGroupID))
+	require.Equal(t, groupID, permissionGroupID)
 }
 
 func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {

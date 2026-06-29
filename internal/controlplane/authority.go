@@ -46,7 +46,7 @@ var ErrMerchantAmbiguous = errors.New("controlplane: user belongs to multiple me
 
 // MerchantForUser resolves the merchant a user session is acting on from the
 // user's LIVE merchant-group membership (#567: a user access token carries no
-// org/merchant claim, so /v1/merchant routes resolve the merchant from the
+// merchant claim, so /v1/merchant routes resolve the merchant from the
 // permission-group the user belongs to). Returns the merchant slug (the group's
 // resource ref) when the user is a member of exactly one merchant group, "" when
 // the user belongs to none, or ErrMerchantAmbiguous when more than one.
@@ -75,18 +75,15 @@ func (c *ControlPlane) MerchantForUser(ctx context.Context, userID string) (stri
 	return ref, nil
 }
 
-// ResolveMerchantForOrg resolves a merchant by its reference (the merchant slug,
+// ResolveMerchantForGroup resolves a merchant by its reference (the merchant slug,
 // the merchant group's resource ref). Route auth uses it after a live merchant
 // permission check so user-session merchant routes pin the same merchant context
 // as API-key and delegated JWT principals.
-//
-// The parameter is named orgSlug for source compatibility with the route seam,
-// but under #567 it is the merchant slug — there is no org persona.
-func (c *ControlPlane) ResolveMerchantForOrg(ctx context.Context, orgSlug string) (merchant.ID, string, error) {
+func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
 		return merchant.ID{}, "", ErrNoControlPlane
 	}
-	ref := strings.ToLower(strings.TrimSpace(orgSlug))
+	ref := strings.ToLower(strings.TrimSpace(merchantRef))
 	if ref == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}

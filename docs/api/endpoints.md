@@ -298,15 +298,9 @@ Authorization: Bearer <delegated-jwt-or-user-access-token>
 ```
 
 Generated API keys are resolved through the OpenRails-owned AuthKit control
-plane: their owning permission group maps to an OpenRails merchant, AuthKit
-resource scopes constrain where they may act, and granted permissions gate what
-they may do.
-Every generated API key must carry
-`resources: [{kind:"openrails.merchant", id:"<merchant_uuid>"}]`.
-Subject-scoped tokens additionally carry
-`{kind:"openrails.customer", id:"<customer_uuid>"}` and may only act
-for that exact `customer_id`; merchant-wide tokens omit the customer
-resource.
+plane: their owning permission group maps to an OpenRails merchant, and granted
+`merchant:*` permissions gate what they may do. API-key resource scopes are gone;
+a merchant key acts within the merchant group it was minted under.
 
 First-party service JWTs are signed by a registered issuer and must carry
 standard JWT/OIDC claims plus `token_use=service`, `jti`, a maximum 15-minute

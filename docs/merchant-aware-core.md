@@ -8,10 +8,10 @@ analytics, and webhook credential lookup.
 ## Vocabulary
 
 - **Merchant**: OpenRails billing/isolation namespace.
-- **Org**: AuthKit ownership and control authority.
+- **Merchant permission-group**: AuthKit control authority for one merchant.
 - **Customer**: OpenRails payable subject under a merchant.
 - **Remote application**: AuthKit registered issuer/JWKS credential that may be
-  granted authority through org roles and permissions.
+  granted authority through merchant permission-group roles.
 
 ## Schema Shape
 
@@ -61,10 +61,10 @@ GUC reset on connection release, and transaction scoping.
 Merchant control is not direct user ownership. The chain is:
 
 ```text
-AuthKit credential -> AuthKit org permission -> OpenRails merchant owner_org_id
+AuthKit credential -> merchant permission-group role -> OpenRails merchant permission_group_id
 ```
 
-API keys and remote applications are credentials controlled by the org.
+API keys and remote applications are credentials nested under permission groups.
 They are not merchant owners.
 
 ## Migration Note

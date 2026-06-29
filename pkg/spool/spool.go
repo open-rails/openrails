@@ -13,7 +13,7 @@ import (
 
 // Record is the envelope stored on disk for a deferred ClickHouse write.
 type Record struct {
-	Kind string          `json:"kind"` // subscription|payment|transaction|acu|chargeback
+	Kind string          `json:"kind"` // subscription|payment|transaction|acu|chargeback|provider_mutation
 	Data json.RawMessage `json:"data"`
 }
 

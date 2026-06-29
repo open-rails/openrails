@@ -26,12 +26,12 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	customerA := uuid.New()
 	customerB := uuid.New()
 
-	// Baseline: the default bootstrapped org controls only the default merchant.
+	// Baseline: the default bootstrapped merchant group controls only the default merchant.
 	status, body := postDepositCredits(t, standalone.BaseURL, standalone.Token, customerA, 1_000)
 	require.Equal(t, http.StatusOK, status, body)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	// A different org's API key is valid, but it is pinned to that org's
+	// A different merchant group's API key is valid, but it is pinned to that group's
 	// own merchant.
 	merchantBClient := standalone.Client(openrails.WithTokenProvider(func(context.Context) (string, error) {
 		return merchantB.APIKey, nil
@@ -48,10 +48,10 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	// mechanism that no longer exists; cross-merchant isolation is now proven by the
 	// group-based cases above and below (B's key never reaches merchant A).
 
-	// An AuthKit org with no active OpenRails merchant owns no merchant surface.
-	orphanOrg := standalone.CreateAuthKitOrg("or502-orphan")
+	// A merchant group with no active OpenRails merchant owns no merchant surface.
+	orphanGroup := standalone.CreateMerchantGroup("or502-orphan")
 	orphanToken := standalone.MintAPIKey(
-		orphanOrg,
+		orphanGroup,
 		"or502-orphan-API-key",
 		nil, // #567: MintAPIKey now mints the merchant owner role (full merchant:*)
 	)
@@ -59,32 +59,32 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, body)
 
 	// #564 (no source discrimination): a user access token IS accepted on the
-	// merchant surface — authority is the user's live org-role perms, not the
+	// merchant surface — authority is the user's live merchant-group role, not the
 	// credential type. A user with no merchant grant is denied by PERMISSION (403),
 	// never rejected by credential source (was 401).
 	userToken := standalone.MintUserAccessToken("or502-user")
 	status, body = postDepositCredits(t, standalone.BaseURL, userToken, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
 
-	// JWKS remote_application self-tokens use stored AuthKit org authority. A
-	// principal with the org owner role mutates only its org's merchant; one
+	// JWKS remote_application self-tokens use stored AuthKit group authority. A
+	// principal with the merchant owner role mutates only its merchant; one
 	// without a role is denied.
-	remoteAppB := standalone.RegisterRemoteApplication("or502-ra-b", merchantB.OrgSlug, controlplane.OwnerRole)
+	remoteAppB := standalone.RegisterRemoteApplication("or502-ra-b", merchantB.MerchantSlug, controlplane.OwnerRole)
 	status, body = postDepositCredits(t, standalone.BaseURL, remoteAppB.Token, customerB, 3_000)
 	require.Equal(t, http.StatusOK, status, body)
 	assertBalance(t, ctx, merchantBClient, customerB, 5_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	remoteAppWithoutRole := standalone.RegisterRemoteApplication("or502-ra-denied", merchantB.OrgSlug, "")
+	remoteAppWithoutRole := standalone.RegisterRemoteApplication("or502-ra-denied", merchantB.MerchantSlug, "")
 	status, body = postDepositCredits(t, standalone.BaseURL, remoteAppWithoutRole.Token, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
 
-	// First-party service JWTs resolve by registered issuer -> AuthKit org ->
-	// owned merchant. They can act on their own merchant and cannot claim a
+	// First-party service JWTs resolve by registered issuer -> merchant group ->
+	// merchant. They can act on their own merchant and cannot claim a
 	// resource from another merchant.
 	serviceJWTB := standalone.RegisterServiceJWTIssuer(
 		"or502-jwt-b",
-		merchantB.OrgSlug,
+		merchantB.MerchantSlug,
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, serviceJWTB.Token, customerB, 4_000)

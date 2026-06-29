@@ -3,8 +3,8 @@
 | Term | Meaning |
 |---|---|
 | OpenRails merchant | Billing/isolation namespace. It scopes subscriptions, payments, credits, usage, credentials, webhooks, and analytics. |
-| AuthKit org | Ownership and control authority. Users, API keys, and remote applications receive permissions through org roles. |
-| Remote application | AuthKit registered issuer/JWKS principal that can sign delegated access tokens, service JWTs, and remote application access tokens. It is a credential controlled by an org, not an OpenRails owner. |
+| Merchant permission-group | Ownership and control authority for one OpenRails merchant. Users, API keys, and remote applications receive permissions through group roles. |
+| Remote application | AuthKit registered issuer/JWKS principal that can sign delegated access tokens, service JWTs, and remote application access tokens. It is a credential nested under a permission-group, not an OpenRails owner. |
 | Delegated user | External OIDC subject from a registered issuer, carried as AuthKit `delegated_sub`. |
 | Customer | OpenRails payable subject under a merchant. |
 | Invoker | Principal that caused usage when it differs from the payable customer. |
@@ -12,12 +12,12 @@
 ## Standalone Chain
 
 ```text
-JWT or API key -> AuthKit org -> OpenRails merchant
+JWT or API key -> merchant permission-group -> OpenRails merchant
 ```
 
-The OpenRails merchant stores `owner_org_id`. AuthKit decides which users,
-API keys, and remote applications can act for that org. OpenRails then
-checks whether the request is scoped to a merchant owned by that org.
+The OpenRails merchant stores `permission_group_id`. AuthKit decides which users,
+API keys, and remote applications can act for that permission-group. OpenRails
+then checks whether the request maps to the merchant linked to that group.
 
 ## Delegated Browser Flow
 

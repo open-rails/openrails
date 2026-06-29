@@ -13,11 +13,11 @@ import (
 // effective OpenRails service principal.
 //
 // Authorization model: the token's cryptographic signature proves issuer identity;
-// the issuer's STORED authority (direct permission grants + org-role expansion in
+// the issuer's STORED authority (merchant permission-group role grants in
 // AuthKit) is the source of truth for what that issuer MAY do. The token's
 // self-asserted `permissions` claim is treated as a REQUESTED SUBSET — it is
 // intersected against stored authority so a compromised or malicious issuer
-// cannot escalate by self-claiming permissions (including `org:*`) that
+// cannot escalate by self-claiming permissions (for example `root:*`) that
 // were never explicitly granted.
 func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.delegatedVerifier == nil {

@@ -20,7 +20,6 @@ type ledger interface {
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
-	LogExternalMutation(ctx context.Context, p MutationLogParams) error
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
@@ -49,6 +48,7 @@ const (
 // River periodic jobs' concern.
 type Runner struct {
 	Store    ledger
+	Logger   MutationLogger
 	Registry *Registry
 	// Config gates execution by origin x operating mode. nil (tests) = full.
 	Config ModeView
@@ -315,7 +315,16 @@ func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id
 
 func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
 	intentID := intent.ID
-	return r.Store.LogExternalMutation(ctx, MutationLogParams{
+	logger := r.Logger
+	if logger == nil {
+		if fallback, ok := r.Store.(MutationLogger); ok {
+			logger = fallback
+		}
+	}
+	if logger == nil {
+		return nil
+	}
+	return logger.LogExternalMutation(ctx, MutationLogParams{
 		MerchantID:        intent.MerchantID,
 		Provider:          intent.Provider,
 		ProviderAccountID: intent.ProviderAccountID,

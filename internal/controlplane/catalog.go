@@ -6,17 +6,16 @@
 //
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
-//   - runs with public user registration and public org management disabled,
-//   - bootstraps the default merchant's own AuthKit org, the OpenRails permission
-//     catalog (`merchant:*` / `customer:*`), and an initial deployment admin API
-//     key through in-process AuthKit CORE calls (CreateOrg / AssignRole / MintAPIKey)
-//     — never raw SQL or a private HTTP route. OpenRails defines NO org role of its
-//     own (#543): the admin is made the org `owner`; the API key is permission-scoped.
+//   - runs with public user registration disabled,
+//   - bootstraps the merchant permission-group, the OpenRails permission catalog
+//     (`merchant:*` / `customer:*`), and an initial deployment admin API key
+//     through in-process AuthKit CORE calls (CreatePermissionGroup /
+//     AssignGroupRole / MintAPIKey) — never raw SQL or a private HTTP route.
 //
-// HARDCUT (#537): merchant-local authority is evaluated in the caller's merchant
-// AuthKit org using OpenRails' app permissions (`merchant:*` seller, `customer:*`
-// buyer/treasury); `org:`/`platform:` stay AuthKit-native. Cross-merchant directory
-// authority is AuthKit platform RBAC (`platform:`).
+// HARDCUT (#567): merchant-local authority is evaluated in the caller's merchant
+// permission-group using OpenRails' app permissions (`merchant:*` seller,
+// `customer:*` buyer/treasury). Cross-merchant directory authority belongs to
+// root/platform control, not merchant groups.
 package controlplane
 
 import (
@@ -36,14 +35,14 @@ type Permission struct {
 // Permission-group personas (#567). OpenRails declares exactly TWO flat
 // top-level group types under the intrinsic `root` type:
 //
-//   - MerchantType — a merchant IS a top-level permission-group (child of root,
-//     no parent org). Staff roles owner/support/viewer; holds `merchant:*`.
+//   - MerchantType — a merchant IS a top-level permission-group (child of root).
+//     Staff roles owner/support/viewer; holds `merchant:*`.
 //   - CustomerType — every payer is a `customer` group (child of root). Roles
-//     owner/member; holds `customer:*`. Universal — there is NO org-vs-individual
-//     split; every customer can delegate the spending of its balance.
+//     owner/member; holds `customer:*`. Universal: every customer can delegate
+//     the spending of its balance.
 //
 // Both are addressed by (type, resourceRef): the merchant slug for MerchantType,
-// the customer uuid string for CustomerType. There is NO `org` persona.
+// the customer uuid string for CustomerType.
 const (
 	MerchantType = "merchant"
 	CustomerType = "customer"
@@ -124,7 +123,7 @@ func Groups() []authcore.PersonaDef {
 // OpenRails permissions (#554). `merchant:*` is the seller hat (top-level
 // `merchant` permission-group), `customer:*` the buyer hat (top-level `customer`
 // permission-group sharing its OWN balance); the two are DISJOINT top-level
-// personas (#567 — no org↔merchant coupling), each owner auto-holds its own
+// personas (#567), each owner auto-holds its own
 // `<persona>:*`. `/v1/me/*` self-service needs no grant. Coarse: one permission
 // per role boundary, not per route.
 const (

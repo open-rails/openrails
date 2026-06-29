@@ -10,5 +10,5 @@ const PermMerchantCatalogUpdate = "merchant:catalog:update"
 // AdminPermissionChecker is the live AuthKit effective-permission check the
 // control plane provides for merchant-local `merchant:` permissions.
 type AdminPermissionChecker interface {
-	HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
+	HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error)
 }

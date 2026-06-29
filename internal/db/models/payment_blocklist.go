@@ -11,7 +11,7 @@ import (
 // (kind, value) matches an entry.
 //
 // An entry is either merchant-wide (CustomerID nil/zero) — applying to every payer
-// org in the merchant — or scoped to a single merchant subject (CustomerID set, issue #221).
+// customer group in the merchant — or scoped to a single merchant subject (CustomerID set, issue #221).
 // Uniqueness is (merchant_id, kind, value); that index is also the IsBlocked lookup.
 type PaymentBlocklistEntry struct {
 	ID uuid.UUID `json:"id"`

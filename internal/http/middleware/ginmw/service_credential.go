@@ -19,9 +19,9 @@ import (
 const (
 	// ServiceCredentialContextKey holds the *controlplane.ResolvedServiceCredential for the request.
 	ServiceCredentialContextKey = "openrails.service_credential"
-	// ServiceCredentialOwnerOrgSlugContextKey holds the merchant permission-group's
+	// ServiceCredentialOwnerGroupRefContextKey holds the merchant permission-group's
 	// resource ref (the merchant slug) the credential is nested under (#567).
-	ServiceCredentialOwnerOrgSlugContextKey = "openrails.service_credential_authkit_org_slug"
+	ServiceCredentialOwnerGroupRefContextKey = "openrails.service_credential_owner_group_ref"
 )
 
 // ServiceCredentialResolver validates a presented OpenRails-issued API key against live AuthKit +
@@ -88,7 +88,7 @@ func ServiceCredentialRequired(resolver ServiceCredentialResolver) gin.HandlerFu
 			case errors.Is(err, authkit.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "service_credential_revoked")
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
-				// Owning AuthKit org maps to no active OpenRails merchant.
+				// Owning permission-group maps to no active OpenRails merchant.
 				response.ForbiddenWithMessage(c, "service_credential_merchant_unresolved")
 			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
 				response.ForbiddenWithMessage(c, "service_credential_resource_scope_denied")
@@ -110,7 +110,7 @@ func ServiceCredentialRequired(resolver ServiceCredentialResolver) gin.HandlerFu
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("openrails.merchant_id", resolved.MerchantID)
 		c.Set(ServiceCredentialContextKey, resolved)
-		c.Set(ServiceCredentialOwnerOrgSlugContextKey, resolved.OwnerGroupRef)
+		c.Set(ServiceCredentialOwnerGroupRefContextKey, resolved.OwnerGroupRef)
 		c.Set(PrincipalContextKey, principalFromServiceCredential(resolved, credentialType))
 
 		c.Next()

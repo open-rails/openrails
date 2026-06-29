@@ -105,7 +105,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 			Email:         resolved.Email,
 			EmailVerified: resolved.EmailVerified,
 			Username:      resolved.Username,
-			Org:           resolved.Merchant,
+			Merchant:      resolved.Merchant,
 		}
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)
@@ -165,7 +165,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 			Email:         resolved.Email,
 			EmailVerified: resolved.EmailVerified,
 			Username:      resolved.Username,
-			Org:           resolved.Merchant,
+			Merchant:      resolved.Merchant,
 		}
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)

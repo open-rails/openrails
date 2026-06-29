@@ -17,14 +17,13 @@ import (
 )
 
 func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
-	authorityOrgSlug, err := cmd.Flags().GetString("org")
+	merchantRef, err := cmd.Flags().GetString("merchant")
 	if err != nil {
-		return fmt.Errorf("read org flag: %w", err)
+		return fmt.Errorf("read merchant flag: %w", err)
 	}
-	authorityOrgSlug = strings.ToLower(strings.TrimSpace(authorityOrgSlug))
-	if authorityOrgSlug == "" {
-		// No default merchant (#336): the authority org must be named explicitly.
-		return fmt.Errorf("--org is required (the AuthKit org slug hosting the admin authority)")
+	merchantRef = strings.TrimSpace(merchantRef)
+	if merchantRef == "" {
+		return fmt.Errorf("--merchant is required")
 	}
 
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
@@ -40,13 +39,6 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane unavailable (set auth.issuer)")
 	}
 
-	if _, berr := embcp.RunBootstrap(ctx, application, controlplane.BootstrapOptions{
-		BootstrapMerchantSlug:  authorityOrgSlug,
-		MintInitialAPIKey: false,
-	}); berr != nil {
-		return fmt.Errorf("bootstrap authority/role: %w", berr)
-	}
-
 	name, err := cmd.Flags().GetString("name")
 	if err != nil {
 		return fmt.Errorf("read name flag: %w", err)
@@ -56,47 +48,43 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		name = "openrails-merchant-api-key"
 	}
 
-	// #567: the merchant IS a permission-group with a FIXED role catalog
-	// (owner/support/viewer; AllowCustomRoles=false). A key is minted under the
-	// merchant group against one of those catalog roles; its effective permissions
-	// are resolved from the role at verify time. --permission no longer applies
-	// (no custom roles); --role selects a catalog role, defaulting to `owner`.
 	roleFlag, err := cmd.Flags().GetString("role")
 	if err != nil {
 		return fmt.Errorf("read role flag: %w", err)
 	}
 	roleFlag = strings.TrimSpace(roleFlag)
 
-	if perms, perr := cmd.Flags().GetStringSlice("permission"); perr == nil && len(perms) > 0 {
-		return fmt.Errorf("--permission is no longer supported (#567: merchant groups have fixed catalog roles); use --role owner|support|viewer")
-	}
-
-	merchantRef, err := cmd.Flags().GetString("merchant")
-	if err != nil {
-		return fmt.Errorf("read merchant flag: %w", err)
-	}
 	merchantID, merchantSlug, err := cp.MerchantScope(ctx, merchantRef)
 	if err != nil {
 		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
+	}
+
+	if _, err := cp.Bootstrap(ctx, controlplane.BootstrapOptions{
+		BootstrapMerchantSlug: merchantSlug,
+		MintInitialAPIKey:     false,
+	}); err != nil {
+		return fmt.Errorf("ensure merchant permission-group: %w", err)
 	}
 
 	role := roleFlag
 	if role == "" {
 		role = controlplane.MerchantRoleOwner
 	}
+	createdBy, err := cp.EnsureMerchantAPIKeyActor(ctx, merchantSlug)
+	if err != nil {
+		return fmt.Errorf("ensure API-key actor: %w", err)
+	}
 
-	// Mint under the merchant permission-group (type=merchant, ref=merchant slug).
-	// #569 (hard cut): identity is the group; no resource scope.
 	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, controlplane.MerchantType, merchantSlug, authkit.APIKeyMintOptions{
-		Name: name,
-		Role: role,
+		Name:      name,
+		Role:      role,
+		CreatedBy: createdBy,
 	})
 	if err != nil {
 		return fmt.Errorf("mint merchant API key: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":         authorityOrgSlug,
 		"name":        name,
 		"merchant":    merchantSlug,
 		"merchant_id": merchantID.String(),

@@ -40,17 +40,17 @@ The flags compose. Full reconciliation to the source of truth is
 The primary commands are:
 
 ```bash
+openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
-openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
 openrails pull-provider --config /etc/openrails/config.yaml --merchant doujins --provider stripe
 ```
 
-The three `push-*` commands push declared file state into OpenRails-owned
-state, AuthKit/control-plane state, the merchant secret backend, or provider
-catalog surfaces. `pull-provider` moves the opposite direction: provider
-observed state into OpenRails' local mirror, then local convergence. It never
-mutates external payment rails.
+The `push-*` commands push declared file state into AuthKit root authority,
+OpenRails-owned merchant state, the merchant secret backend, or provider catalog
+surfaces. `pull-provider` moves the opposite direction: provider observed state
+into OpenRails' local mirror, then local convergence. It never mutates external
+payment rails.
 
 Merchant provider secrets in `push-merchant-config` are seed material, not the
 runtime source of truth. The command resolves each declared provider account
@@ -72,16 +72,16 @@ On an empty private standalone install, run the file-backed push commands as an
 init job or manual operation:
 
 ```bash
+openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml --insert
 openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
 ```
 
-`push-merchant-config` runs first because the control-plane bootstrap seeds
-admin authority against a merchant/backing org; this source-available repo does
-not create a separate global admin org. Normal server restarts never reconcile
-merchant config or catalog files. If `/etc/openrails/bootstrap.yaml` is mounted,
-startup bootstrap is first-run only and limited to control-plane authority.
+`push-auth-bootstrap` runs first because it creates the initial AuthKit root
+operator. Merchant config then creates OpenRails merchant groups and secrets.
+Normal server restarts never reconcile merchant config or catalog files. If
+`/etc/openrails/bootstrap.yaml` is mounted, startup bootstrap is first-run only
+and limited to AuthKit authority.
 
 ## Durability model
 
@@ -220,7 +220,7 @@ Manual-only — **never scheduled**. It never writes to a provider:
 - `openrails pull-provider --prune`: delete eligible local subscriptions or
   payments attributed to the pulled provider account that are absent from the
   provider source.
-- `openrails intents log`: render append-only external provider mutation
+- `openrails intents-log`: render append-only external provider mutation
   attempts/results created by the provider-intent executor. This is the
   opposite direction from `pull-provider`: it records remote provider writes,
   not local mirror corrections.

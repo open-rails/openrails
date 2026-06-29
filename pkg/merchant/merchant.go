@@ -20,41 +20,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// slugRe is the legal merchant-slug pattern. It is IDENTICAL to AuthKit's
-// org-slug rule (authkit/core validateOrgSlug: `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`
-// — lowercase alnum + hyphens, no leading/trailing hyphen, ≤63 chars) so that a
-// merchant slug is ALWAYS a legal backing-org slug. The merchant.slug ==
-// backing-org.slug invariant (#548) requires this: a merchant must be able to
-// own a same-slug AuthKit org in standalone mode.
-//
-// #548 is a PROVISION-TIME invariant, not a maintained one. AuthKit allows an
-// org to be re-slugged (core.RenameOrgSlug / RenameOrgSlugForce, v0.43.0) and
-// merchant.slug is immutable here (there is no UPDATE-slug path), so after an
-// org rename merchant.slug and backing-org.slug diverge. That is SAFE: the
-// durable merchant link is merchants.permission_group_id (#567; the stable
-// authkit group id), and merchant-scoped secret/Vault paths key on the
-// OpenRails-owned merchant.slug — neither depends on the two slugs still
-// matching. Do NOT resolve a merchant's group by slug==merchant.slug as if
-// authoritative; always use permission_group_id. (A renamed-away slug can later be reclaimed by a
-// DIFFERENT org once AuthKit's reuse-hold lapses, so slug-equality must never be
-// trusted for authorization.)
+// slugRe is the legal merchant-slug pattern: lowercase alnum + hyphens, no
+// leading/trailing hyphen, <=63 chars. The same slug is also the AuthKit
+// merchant permission-group instance slug in standalone.
 var slugRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // NormalizeSlug returns the canonical form of a merchant slug (trimmed,
-// lowercased). The canonical form is what is stored and what must match the
-// backing org's slug.
+// lowercased). The canonical form is what is stored.
 func NormalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // ValidateSlug reports whether the NORMALIZED form of s is a legal merchant slug
-// — equivalently, a legal AuthKit org slug (#548). Callers should normalize
-// (NormalizeSlug) and store/use that form so merchant.slug == backing-org.slug
-// holds by construction.
+// and permission-group instance slug.
 func ValidateSlug(s string) error {
 	n := NormalizeSlug(s)
 	if !slugRe.MatchString(n) {
-		return fmt.Errorf("invalid merchant slug %q: must be a legal AuthKit org slug (lowercase a-z0-9 and hyphens, no leading/trailing hyphen, ≤63 chars)", s)
+		return fmt.Errorf("invalid merchant slug %q: must use lowercase a-z0-9 and hyphens, no leading/trailing hyphen, <=63 chars", s)
 	}
 	return nil
 }

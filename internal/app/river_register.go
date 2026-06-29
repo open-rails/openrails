@@ -126,18 +126,20 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Registry:       intentRegistry,
+		MutationLogger: intents.NewAnalyticsMutationLogger(r.EventLogService),
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Registry:       intentRegistry,
+		MutationLogger: intents.NewAnalyticsMutationLogger(r.EventLogService),
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
@@ -249,6 +251,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(r.DB),
+		Logger:   intents.NewAnalyticsMutationLogger(r.EventLogService),
 		Registry: registry,
 		Clock:    clock,
 	}

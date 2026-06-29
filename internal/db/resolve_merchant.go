@@ -47,10 +47,8 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 	if slug == "" {
 		return merchant.ID{}, nil
 	}
-	// #548: a merchant slug MUST be a legal AuthKit org slug, so the merchant can
-	// own a same-slug backing org in standalone. Embedded never creates the org,
-	// so validate here too — otherwise an embedded-only slug could break a later
-	// embedded→standalone move.
+	// #567: a merchant slug must be a legal AuthKit permission-group instance
+	// slug. Embedded never creates the group, so validate here too.
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return merchant.ID{}, err
 	}

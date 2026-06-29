@@ -100,11 +100,11 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 		}, http.StatusUnauthorized},
 		{"unknown grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-			Permissions: []string{"org:not_in_browser_catalog:read"},
+			Permissions: []string{"merchant:not_in_browser_catalog:read"},
 		}, http.StatusUnauthorized},
 		{"platform grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-			Permissions: []string{"platform:orgs:update"},
+			Permissions: []string{"platform:merchants:update"},
 		}, http.StatusUnauthorized},
 	}
 	for _, tc := range cases {

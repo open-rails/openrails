@@ -33,7 +33,7 @@ func CustomerIDMatchesDelegated(customerID string, resolved *controlplane.Resolv
 }
 
 // CustomerScopeRequired gates the customer-as-payer treasury surface
-// (/v1/customers/:customer_id/*, #567 — collapses the old org-treasury #566
+// (/v1/customers/:customer_id/*, #567
 // surface into the universal customer persona). It runs AFTER the delegated
 // authentication middleware and BEFORE the per-route permission gates and
 // handlers, and:
@@ -73,7 +73,7 @@ func CustomerScopeRequired() gin.HandlerFunc {
 		uc := authprovider.UserContext{
 			UserID:   resolved.MerchantID.UUID().String(),
 			Username: resolved.Merchant,
-			Org:      resolved.Merchant,
+			Merchant: resolved.Merchant,
 		}
 		c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
 		c.Set("openrails.user_context", uc)

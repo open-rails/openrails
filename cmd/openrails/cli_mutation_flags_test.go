@@ -18,16 +18,16 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		want string
 	}{
 		{
-			name: "bootstrap rejects merchants",
-			cmd:  newPushBootstrapCmd(),
-			body: "version: 1\nmerchants: []\n",
+			name: "authkit authority rejects merchants",
+			cmd:  newPushAuthBootstrapCmd(),
+			body: "merchants: []\n",
 			want: "merchants",
 		},
 		{
-			name: "merchant config rejects bootstrap authority",
+			name: "merchant config rejects authkit authority",
 			cmd:  newPushMerchantConfigCmd(),
-			body: "version: 1\nauthority:\n  bootstrap_merchant_slug: local-stack\n",
-			want: "authority",
+			body: "users:\n  - username: operator\n",
+			want: "users",
 		},
 		{
 			name: "catalog rejects merchants",

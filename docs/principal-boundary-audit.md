@@ -9,7 +9,8 @@ not a compatibility surface.
 Every `/v1/merchant/*` request is authorized by the same route gate:
 
 1. Validate the presented credential.
-2. Resolve the OpenRails merchant owned by the credential's AuthKit org.
+2. Resolve the OpenRails merchant mapped to the credential's merchant
+   permission-group.
 3. Resolve the credential's live or stored permission set.
 4. Compare that set to the route's required `merchant:*` permission.
 5. Pin the merchant context before merchant-owned DB access.
@@ -26,8 +27,8 @@ Supported credential classes:
   the signing remote application's stored authority. Over-claims reject the token
   (`permission_not_granted`); OpenRails does not apply a browser-safe allowlist.
 - Logged-in user access tokens authenticate through the configured Authenticator.
-  OpenRails checks the user's live permission in the active AuthKit org and then
-  resolves that org's owned merchant for DB scoping.
+  OpenRails checks the user's live permission in the merchant permission-group
+  and then resolves that merchant for DB scoping.
 
 ## Handler Boundary
 
@@ -45,9 +46,10 @@ service-credential resource checks.
 
 Core does not expose platform/cross-merchant admin routes. Future platform
 operator surfaces belong to OpenRails SaaS and must use `platform:*` authority.
-Merchant routes use OpenRails-defined `merchant:*` permissions in the owning
-AuthKit org. A merchant role/token cannot grant `platform:*`, and a platform role
-cannot satisfy a merchant route without explicit org-scoped merchant authority.
+Merchant routes use OpenRails-defined `merchant:*` permissions in the merchant
+permission-group. A merchant role/token cannot grant `platform:*`, and a
+platform role cannot satisfy a merchant route without explicit merchant-group
+authority.
 
 ## Validation
 

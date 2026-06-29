@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/analytics"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type MutationLogPhase string
@@ -32,6 +34,54 @@ type MutationLogParams struct {
 	Phase             MutationLogPhase
 	Reason            string
 	Evidence          map[string]any
+}
+
+type MutationLogger interface {
+	LogExternalMutation(ctx context.Context, p MutationLogParams) error
+}
+
+type AnalyticsMutationLogger struct {
+	Events *analytics.EventLogService
+}
+
+func NewAnalyticsMutationLogger(events *analytics.EventLogService) *AnalyticsMutationLogger {
+	return &AnalyticsMutationLogger{Events: events}
+}
+
+func (l *AnalyticsMutationLogger) LogExternalMutation(ctx context.Context, p MutationLogParams) error {
+	if l == nil || l.Events == nil {
+		return nil
+	}
+	if p.MerchantID == uuid.Nil || p.Provider == "" || p.Phase == "" {
+		return fmt.Errorf("intents: mutation log requires merchant_id, provider, and phase")
+	}
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = merchant.WithID(ctx, merchant.ID(p.MerchantID))
+	}
+	reason := ""
+	if p.Reason != "" {
+		reason = scrubMutationString(p.Reason)
+	}
+	evidence := "{}"
+	if len(p.Evidence) > 0 {
+		b, err := json.Marshal(scrubMutationEvidence(p.Evidence))
+		if err != nil {
+			return fmt.Errorf("intents: marshal mutation log evidence: %w", err)
+		}
+		evidence = string(b)
+	}
+	return l.Events.LogProviderMutationEvent(ctx, analytics.ProviderMutationEventData{
+		MerchantID:        p.MerchantID.String(),
+		Provider:          p.Provider,
+		ProviderAccountID: p.ProviderAccountID,
+		ProviderIntentID:  p.ProviderIntentID,
+		IntentType:        p.IntentType,
+		IdempotencyKey:    p.IdempotencyKey,
+		Attempt:           p.Attempt,
+		Phase:             string(p.Phase),
+		Reason:            reason,
+		Evidence:          evidence,
+	})
 }
 
 var (

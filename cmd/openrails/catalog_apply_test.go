@@ -41,7 +41,7 @@ catalogs:
 func TestLoadCatalogTargetsRejectsAuthAndMerchants(t *testing.T) {
 	path := writeCatalogManifest(t, `version: 1
 auth:
-  orgs:
+  permission_groups:
     - slug: doujins
 merchants:
   - slug: doujins

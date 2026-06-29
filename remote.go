@@ -338,7 +338,7 @@ func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 }
 
 // SetCustomerSpendDelegations implements PolicySyncClient over the customer
-// treasury surface (#567 — re-pathed off /v1/orgs onto /v1/customers).
+// treasury surface (#567 — mounted on /v1/customers).
 func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")

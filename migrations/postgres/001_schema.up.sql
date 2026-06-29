@@ -281,7 +281,6 @@ COMMENT ON COLUMN openrails.custom_credit_types.decimals IS 'Minor-unit scale fo
 CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    org_id text,
     issuer text,
     subject text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -296,13 +295,6 @@ ALTER TABLE ONLY openrails.customers FORCE ROW LEVEL SECURITY;
 --
 
 COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.';
-
-
---
--- Name: COLUMN customers.org_id; Type: COMMENT; Schema: openrails; Owner: -
---
-
-COMMENT ON COLUMN openrails.customers.org_id IS 'Deprecated customer identity metadata. Merchant ownership is represented by merchant_id; org/issuer do not key customers.';
 
 
 --
@@ -920,7 +912,7 @@ COMMENT ON COLUMN openrails.merchants.slug IS 'Stable merchant slug used in merc
 -- Name: COLUMN merchants.permission_group_id; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.merchants.permission_group_id IS 'The merchant''s OWN authkit permission-group id (#567 — a merchant is a top-level `merchant` group, child of `root`, with no parent org; supersedes #527''s owner_org_id 1:1 coupling). Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.';
+COMMENT ON COLUMN openrails.merchants.permission_group_id IS 'The merchant''s own AuthKit permission-group id (#567): a merchant is a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id.';
 
 
 --

@@ -15,7 +15,7 @@ import (
 //     A cross-schema FK would break a standalone→embedded move (where `profiles`
 //     is absent) and couple portable billing data to auth state. The merchant's
 //     permission-group link is `merchants.permission_group_id` (#567; was
-//     owner_org_id), deliberately a bare `text` column with NO FK (#544/#541) —
+//     permission_group_id), deliberately a bare `text` column with NO FK (#544/#541) —
 //     that is the ONLY permitted cross-mode reference.
 //
 //  2. River job-queue tables (`river_*`) must never be created by these

@@ -124,6 +124,28 @@ CREATE TABLE IF NOT EXISTS chargeback_events {{ON_CLUSTER}} (
 ORDER BY (event_id)
 SETTINGS index_granularity = 8192;
 
+CREATE TABLE IF NOT EXISTS provider_mutation_events {{ON_CLUSTER}} (
+    event_id UUID,
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    provider LowCardinality(String),
+    provider_account_id Nullable(UUID),
+    provider_intent_id Nullable(UUID),
+    intent_type LowCardinality(String),
+    idempotency_key String,
+    attempt Int32,
+    phase LowCardinality(String),
+    reason String DEFAULT '',
+    evidence String DEFAULT '{}',
+    timestamp DateTime('UTC'),
+    created_at DateTime('UTC') DEFAULT now(),
+    INDEX idx_provider_mutation_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1,
+    INDEX idx_provider_mutation_events_provider_phase (provider, phase) TYPE set(100) GRANULARITY 1,
+    INDEX idx_provider_mutation_events_intent (provider_intent_id) TYPE minmax GRANULARITY 1,
+    INDEX idx_provider_mutation_events_account (provider_account_id) TYPE minmax GRANULARITY 1
+) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
+ORDER BY (merchant_id, provider, timestamp, event_id)
+SETTINGS index_granularity = 8192;
+
 CREATE TABLE IF NOT EXISTS premium_status_daily {{ON_CLUSTER}} (
     day Date,
     user_id String,

@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	authkit "github.com/open-rails/authkit"
+	akembedded "github.com/open-rails/authkit/embedded"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -16,12 +19,11 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-type pushBootstrapOptions struct {
-	file      string
-	dryRun    bool
-	insert    bool
-	overwrite bool
-	prune     bool
+type pushAuthBootstrapOptions struct {
+	file        string
+	dryRun      bool
+	startupOnly bool
+	name        string
 }
 
 type pushMerchantConfigOptions struct {
@@ -32,21 +34,20 @@ type pushMerchantConfigOptions struct {
 	prune     bool
 }
 
-func newPushBootstrapCmd() *cobra.Command {
-	opts := pushBootstrapOptions{file: bootstrap.DefaultBootstrapManifestPath}
+func newPushAuthBootstrapCmd() *cobra.Command {
+	opts := pushAuthBootstrapOptions{file: bootstrap.DefaultBootstrapManifestPath}
 	cmd := &cobra.Command{
-		Use:   "push-bootstrap",
-		Short: "Push OpenRails control-plane bootstrap authority from YAML",
-		Args:  validatePushBootstrapArgs,
+		Use:   "push-auth-bootstrap",
+		Short: "Push standalone AuthKit authority from AuthKit bootstrap YAML",
+		Args:  validatePushAuthBootstrapArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPushBootstrap(cmd, opts)
+			return runPushAuthBootstrap(cmd, opts)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultBootstrapManifestPath, "bootstrap manifest YAML file")
-	addPushMutationFlags(cmd, &opts.dryRun, &opts.insert, &opts.overwrite, &opts.prune,
-		"create missing control-plane bootstrap authority",
-		"re-assert control-plane bootstrap authority",
-		"delete bootstrap-owned extras absent from the manifest (currently no destructive scope)")
+	cmd.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultBootstrapManifestPath, "AuthKit bootstrap manifest YAML file")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "plan AuthKit authority bootstrap without mutating state")
+	cmd.Flags().BoolVar(&opts.startupOnly, "startup-only", false, "apply at most once using AuthKit's bootstrap marker")
+	cmd.Flags().StringVar(&opts.name, "name", "openrails", "AuthKit startup marker name when --startup-only is set")
 	return cmd
 }
 
@@ -94,15 +95,15 @@ func validateManifestFileArgs(cmd *cobra.Command, args []string, defaultPath, la
 	return nil
 }
 
-func validatePushBootstrapArgs(cmd *cobra.Command, args []string) error {
-	return validateManifestFileArgs(cmd, args, bootstrap.DefaultBootstrapManifestPath, "bootstrap")
+func validatePushAuthBootstrapArgs(cmd *cobra.Command, args []string) error {
+	return validateManifestFileArgs(cmd, args, bootstrap.DefaultBootstrapManifestPath, "AuthKit authority")
 }
 
 func validatePushMerchantConfigArgs(cmd *cobra.Command, args []string) error {
 	return validateManifestFileArgs(cmd, args, bootstrap.DefaultMerchantConfigManifestPath, "merchant config")
 }
 
-func runPushBootstrap(cmd *cobra.Command, opts pushBootstrapOptions) error {
+func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 	path := strings.TrimSpace(opts.file)
@@ -110,20 +111,20 @@ func runPushBootstrap(cmd *cobra.Command, opts pushBootstrapOptions) error {
 		path = bootstrap.DefaultBootstrapManifestPath
 	}
 
-	manifest, err := bootstrap.LoadBootstrapManifest(path)
+	manifest, err := akembedded.LoadBootstrapManifestFile(path)
 	if err != nil {
 		return err
 	}
 
 	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
 	if cfg == nil {
-		return fmt.Errorf("config not loaded; push-bootstrap requires --config")
+		return fmt.Errorf("config not loaded; push-auth-bootstrap requires --config")
 	}
 
 	application := &app.App{Config: cfg}
 	defer func() {
 		if closeErr := application.Close(context.Background()); closeErr != nil {
-			log.WithError(closeErr).Error("push-bootstrap cleanup failed")
+			log.WithError(closeErr).Error("push-auth-bootstrap cleanup failed")
 		}
 	}()
 
@@ -131,10 +132,10 @@ func runPushBootstrap(cmd *cobra.Command, opts pushBootstrapOptions) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyPushBootstrapManifest(ctx, application, manifest, out, opts.dryRun, bootstrap.MerchantManifestReconcileOptions{
-		Insert:    opts.insert,
-		Overwrite: opts.overwrite,
-		Prune:     opts.prune,
+	return applyAuthKitAuthorityManifest(ctx, application, manifest, out, authkit.BootstrapReconcileOptions{
+		DryRun:      opts.dryRun,
+		StartupOnly: opts.startupOnly,
+		Name:        opts.name,
 	})
 }
 
@@ -174,18 +175,10 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	})
 }
 
-// startupBootstrapLockKey is the pg_advisory_lock key serializing concurrent
-// startup control-plane bootstraps (#342). The apply is plan-then-execute with
-// no internal transaction, so simultaneous replica cold starts against an empty
-// control plane would each plan the same creates and race the inserts. Holding
-// this lock across plan+apply makes the second replica plan against the
-// converged state instead.
-const startupBootstrapLockKey = int64(0x6f72_626f_6f74) // "orboot"
-
-// applyStartupBootstrap applies the bootstrap authority manifest on the FIRST
-// server start only (#527/#531). Merchant config and catalog files are never
-// reconciled from normal server startup; operators run those explicit CLI
-// commands as init jobs or manual operations.
+// applyStartupBootstrap applies the AuthKit authority manifest on the FIRST
+// server start only. Merchant config and catalog files are never reconciled from
+// normal server startup; operators run those explicit CLI commands as init jobs
+// or manual operations.
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {
@@ -196,43 +189,13 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 		return fmt.Errorf("startup bootstrap: control plane not attached (#469: it is mandatory in standalone mode)")
 	}
 
-	conn, err := cp.Pool().Raw().Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire bootstrap lock connection: %w", err)
-	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, startupBootstrapLockKey); err != nil {
-		return fmt.Errorf("acquire bootstrap advisory lock: %w", err)
-	}
-	defer func() {
-		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, startupBootstrapLockKey); err != nil {
-			log.WithError(err).Warn("release bootstrap advisory lock")
-		}
-	}()
-
-	// First-run gate (#527): the schema-qualified marker is a safe identifier
-	// (config.validateSchema), so direct interpolation is injection-free.
-	schema := cp.Pool().Schema()
-	var applied bool
-	if err := conn.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s.bootstrap_state WHERE singleton)`, schema)).Scan(&applied); err != nil {
-		return fmt.Errorf("startup bootstrap: check first-run marker: %w", err)
-	}
-	if applied {
-		log.Info("startup bootstrap: already applied (first-run marker present); skipping")
-		return nil
-	}
-
-	manifest, err := bootstrap.LoadBootstrapManifest(path)
+	manifest, err := akembedded.LoadBootstrapManifestFile(path)
 	if err != nil {
 		return err
 	}
-	log.WithField("file", path).Info("startup bootstrap: first run — applying bootstrap manifest")
-	// Startup is always insert-only + seed-once: never overwrite or prune on boot.
-	if err := applyPushBootstrapManifest(ctx, a, manifest, log.StandardLogger().Out, false, bootstrap.MerchantManifestReconcileOptions{Insert: true}); err != nil {
+	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
+	if err := applyAuthKitAuthorityManifest(ctx, a, manifest, log.StandardLogger().Out, authkit.BootstrapReconcileOptions{StartupOnly: true, Name: "openrails"}); err != nil {
 		return err
-	}
-	if _, err := conn.Exec(ctx, fmt.Sprintf(`INSERT INTO %s.bootstrap_state (singleton) VALUES (true) ON CONFLICT (singleton) DO NOTHING`, schema)); err != nil {
-		return fmt.Errorf("startup bootstrap: record first-run marker: %w", err)
 	}
 	return nil
 }
@@ -246,30 +209,22 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 	return ""
 }
 
-// applyPushBootstrapManifest reconciles OpenRails/AuthKit control-plane
-// authority. It intentionally does not touch merchant config, merchant secrets,
-// catalog/provider state, or remote rails.
-func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
-	if manifest == nil {
-		return nil
-	}
-	if dryRun || !reconcileOpts.HasMutations() {
-		fmt.Fprintf(out, "bootstrap authority: merchant %q declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", manifest.BootstrapOptions().BootstrapMerchantSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
-		return nil
-	}
+// applyAuthKitAuthorityManifest reconciles AuthKit-owned standalone authority.
+// It intentionally does not touch OpenRails merchant config, secrets, catalog,
+// provider state, or remote rails.
+func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest authkit.BootstrapManifest, out io.Writer, opts authkit.BootstrapReconcileOptions) error {
 	cp := embcp.Get(a)
 	if cp == nil {
-		return fmt.Errorf("bootstrap: control plane not attached")
+		return fmt.Errorf("AuthKit authority bootstrap: control plane not attached")
 	}
-	res, err := cp.Bootstrap(ctx, manifest.BootstrapOptions())
+	if cp.Core() == nil {
+		return fmt.Errorf("AuthKit authority bootstrap: core service unavailable")
+	}
+	res, err := cp.Core().ApplyBootstrapManifest(ctx, manifest, opts)
 	if err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		return fmt.Errorf("apply AuthKit authority bootstrap: %w", err)
 	}
-	fmt.Fprintf(out, "bootstrap authority: merchant %q reconciled (insert=%t overwrite=%t prune=%t api_key_minted=%t)\n", res.BootstrapMerchantSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune, res.APIKeyMinted)
-	if res.APIKeyMinted && res.APIKeySecret != "" {
-		fmt.Fprintf(out, "bootstrap admin API key: %s\n", res.APIKeySecret)
-	}
-	return nil
+	return json.NewEncoder(out).Encode(res)
 }
 
 // applyPushMerchantConfigManifest provisions OpenRails merchants declared by the

@@ -140,8 +140,8 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 }
 
 // GetBalanceForCustomer reads a balance scoped explicitly by merchant subject (issue
-// #221), for callers that own balances at a team org rather than a personal
-// org. The invoker string is not required for an payer-scoped read.
+// #221), for callers that own balances at a team customer rather than a personal
+// customer group. The invoker string is not required for a payer-scoped read.
 func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -298,7 +298,7 @@ func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency 
 // GetTransactionsByCustomer lists money transactions for an EXPLICIT merchant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
 // the payer from a invoker id — it filters customer_id directly, which is what the
-// org-level billing-account usage view (issue #242) needs. RLS-scoped to the
+// customer-level billing-account usage view (issue #242) needs. RLS-scoped to the
 // request merchant via Qx(ctx).
 func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {

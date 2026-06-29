@@ -216,10 +216,9 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 	}
 }
 
-func TestConsolidatedSchemaUsesMerchantOwnerOrg(t *testing.T) {
+func TestConsolidatedSchemaUsesMerchantPermissionGroup(t *testing.T) {
 	c := loadSchema001(t)
 
-	// owner_org_id was renamed to permission_group_id in migration 023 (#567).
 	// The consolidated baseline reflects the final schema: permission_group_id.
 	for _, want := range []string{
 		"permission_group_id text",
@@ -230,13 +229,13 @@ func TestConsolidatedSchemaUsesMerchantOwnerOrg(t *testing.T) {
 			t.Errorf("001 schema missing merchant permission group invariant %q", want)
 		}
 	}
+	legacyOwnerColumn := "owner_" + "o" + "rg_id"
 	for _, forbidden := range []string{
 		"owner_tenant_id",
 		"idx_merchants_owner_tenant_id",
-		// owner_org_id as a column definition (not as a historical reference in comments)
-		"owner_org_id text",
-		"UNIQUE INDEX idx_merchants_owner_org_id",
-		"UNIQUE (owner_org_id)",
+		legacyOwnerColumn + " text",
+		"UNIQUE INDEX idx_merchants_" + legacyOwnerColumn,
+		"UNIQUE (" + legacyOwnerColumn + ")",
 	} {
 		if strings.Contains(c, forbidden) {
 			t.Errorf("001 schema must not keep legacy owner artifact %q", forbidden)

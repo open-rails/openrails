@@ -20,7 +20,7 @@ import (
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
 // wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process org/role/API-key bootstrap calls).
+// underlying core.Service (used for in-process group/role/API-key bootstrap calls).
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
@@ -116,7 +116,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		return nil, errors.New("controlplane: auth.issuer is required")
 	}
 
-	// (authkit issue 60) Orgs are always a supported primitive — no org-mode
+	// (authkit issue 60) Group routes are always a supported primitive — no group-mode
 	// config or core flag.
 
 	// Build the signing KeySource ONCE and inject it into the core config, so the
@@ -159,16 +159,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		Environment: strings.TrimSpace(cfg.Env),
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
 		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
-		// and `customer` (owner/member, `customer:*`). There is NO `org` persona,
-		// and no org⇄merchant coupling. Each type's `owner` role is auto-seeded
+		// and `customer` (owner/member, `customer:*`). There is no merchant coupling
+		// outside permission groups. Each type's `owner` role is auto-seeded
 		// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
 		// its own namespace directly; the flat case needs no cross-namespace grant).
 		RBAC: Groups(),
 		// Private standalone posture: no public user self-registration. Embedded
 		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
-		// config/env knob opens this in standalone. (#567: there is no `org`
-		// persona, so there is no org-registration mode.)
+		// config/env knob opens this in standalone.
 		Registration: authcore.RegistrationConfig{
 			NativeUserMode: registrationMode(lockedRegistration),
 		},
@@ -242,7 +241,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 }
 
 // Core returns the underlying AuthKit core service used for in-process
-// org/role/API key operations.
+// group/role/API key operations.
 func (c *ControlPlane) Core() authkit.Client {
 	if c == nil {
 		return nil

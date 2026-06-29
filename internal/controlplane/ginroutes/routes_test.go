@@ -4,12 +4,12 @@ import "testing"
 
 func TestToGinPath(t *testing.T) {
 	cases := map[string]string{
-		"/token":                        "/token",
-		"/owners/{slug}":                "/owners/:slug",
-		"/user/sessions/{id}":           "/user/sessions/:id",
-		"/orgs/{org}/members/{user_id}": "/orgs/:org/members/:user_id",
-		"/user/providers/{provider}":    "/user/providers/:provider",
-		"":                              "",
+		"/token":                                 "/token",
+		"/owners/{slug}":                         "/owners/:slug",
+		"/user/sessions/{id}":                    "/user/sessions/:id",
+		"/merchant/{merchant}/members/{user_id}": "/merchant/:merchant/members/:user_id",
+		"/user/providers/{provider}":             "/user/providers/:provider",
+		"":                                       "",
 	}
 	for in, want := range cases {
 		if got := toGinPath(in); got != want {

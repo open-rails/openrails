@@ -492,15 +492,15 @@ type RedisConfig struct {
 
 // AuthConfig holds OpenRails' AuthKit control-plane configuration. Standalone
 // OpenRails authenticates users/admins through this control plane; remote
-// applications, JWKS/public keys, API keys, users, orgs, roles, and
+// applications, JWKS/public keys, API keys, users, permission groups, roles, and
 // permissions are seeded as AuthKit state rather than trusted from runtime
 // config.yaml/.env issuer allow-lists.
 type AuthConfig struct {
 	// HARDCUT (#312/#537): there is no `auth.operator_tenant_slug` /
 	// `auth.operator_tenant_admin_roles`. Admin authority is live merchant-local
-	// AuthKit org permission state (or a deployment-minted admin API key) -
-	// deployment authority, not
-	// membership in a separate "operator" AuthKit org. Load rejects the
+	// AuthKit merchant permission-group state (or a deployment-minted admin API
+	// key) - deployment authority, not membership in a separate operator group.
+	// Load rejects the
 	// deprecated keys.
 
 	// Issuer is the AuthKit token issuer OpenRails signs as
@@ -1355,7 +1355,6 @@ func Load(configPath string) (*Config, error) {
 		k.Exists("auth.control_plane.public_tenant_registration") ||
 		k.Exists("auth.control_plane.public_hosted") ||
 		k.Exists("auth.control_plane.token_prefix") ||
-		k.Exists("auth.control_plane.platform_org_slug") ||
 		k.Exists("auth.control_plane.platform_admin_user_id") ||
 		os.Getenv("AUTH_CONTROL_PLANE_ISSUER") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_ISSUED_AUDIENCES") != "" ||
@@ -1365,7 +1364,6 @@ func Load(configPath string) (*Config, error) {
 		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_HOSTED") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ORG_SLUG") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
 	if ignoredStoreConfig {
 		log.Warn("ignoring retired store config (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile")
@@ -1380,7 +1378,7 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")
 	}
 	if ignoredAuthIssuers {
-		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app issuer inline under merchants[].issuer in the bootstrap manifest (registered as the merchant org owner)")
+		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app issuer inline under merchants[].issuer in the merchant config manifest")
 	}
 	if ignoredRails {
 		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")

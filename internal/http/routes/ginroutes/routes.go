@@ -21,7 +21,7 @@ const SelfRoutePrefix = "/me"
 // are for a customer (any payer) acting over its OWN co-managed/shared balance,
 // addressed by the customer's id — not for merchant/seller administration. The
 // caller's own balance lives on the /me surface; this surface is the universal
-// customer persona (#567, supersedes the old /orgs #566 surface).
+// customer persona (#567).
 const CustomerRoutePrefix = "/customers"
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
@@ -125,7 +125,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 }
 
 // RegisterCustomerTreasuryRoutes mounts the customer-as-PAYER treasury surface
-// (#567, supersedes the org-treasury #566 surface). It is deliberately separate
+// (#567). It is deliberately separate
 // from `/me` (the caller's OWN self-service balance) and `/merchant`
 // (merchant/seller operations): a customer is a distinct top-level persona with
 // its own `customer:*` namespace. The customer surface is addressed by the
@@ -144,7 +144,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 // separation, not handler duplication. Every route is gated by a `customer:*`
 // permission because the customer balance may be a SHARED resource (unlike
 // `/v1/me`, which is authenticated-self and needs no grant). Every customer can
-// delegate spend of its balance — there is no org-vs-individual distinction.
+// delegate spend of its balance.
 func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, writeMW ...gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)

@@ -1,36 +1,36 @@
 # Merchant Provisioning, Credentials, and Webhook Routing
 
-OpenRails calls the billing/isolation namespace a **merchant**. AuthKit calls the
-authority that controls it an **org**. Each merchant has its own dedicated
-backing org (1:1); the merchant row carries `owner_org_id` pointing at it
-(`UNIQUE` on non-null, nullable for embedded-without-AuthKit).
+OpenRails calls the billing/isolation namespace a **merchant**. AuthKit authority
+for that merchant is a top-level **merchant permission-group**. The merchant row
+carries `permission_group_id` pointing at that group (nullable for
+embedded-without-AuthKit).
 
 ## Provisioning model (#527/#531)
 
 OpenRails splits provisioning into three file-backed surfaces:
 
+- `push-auth-bootstrap` applies AuthKit's standalone authority bootstrap
+  manifest: initial users, trusted remote applications, and root roles.
 - `push-merchant-config` declares merchants, profile/config, provider accounts,
   provider secrets, and optional host-app issuer ownership.
-- `push-bootstrap` seeds OpenRails/AuthKit control-plane authority for an
-  already-created merchant org.
 - `push-merchant-catalog` declares products, prices, tier groups, and provider
   catalog links.
 
 The merchant config manifest carries an inline `issuer` (the host application's
-JWKS or static public-key trust), which OpenRails registers as the **owner** of
-the merchant's backing org. The host app's delegated tokens then fully
+JWKS or static public-key trust), which OpenRails registers under the merchant's
+permission-group. The host app's delegated tokens then fully
 administer that one merchant — and no other — because federated authority claims
 are stripped on verify and authority is the stored owner role:
 
 ```text
-host-app issuer (JWKS) -> owner of the merchant's org -> OpenRails merchant
+host-app issuer (JWKS) -> merchant permission-group role -> OpenRails merchant
 ```
 
-OpenRails owns authority; the host app owns identity. Startup bootstrap, if
-`/etc/openrails/bootstrap.yaml` exists, is **first-run only** and limited to
-control-plane authority (gated by the `openrails.bootstrap_state` marker). A
-normal server restart never reapplies merchant config or catalog state. Change
-merchants afterward with `openrails push-merchant-config`:
+OpenRails owns merchant authority; AuthKit owns root identity authority. Startup
+bootstrap, if `/etc/openrails/bootstrap.yaml` exists, is **first-run only** and
+limited to AuthKit authority (gated by AuthKit's bootstrap marker). A normal
+server restart never reapplies merchant config or catalog state. Change
+merchants with `openrails push-merchant-config`:
 
 - no mutation flags: plan-only;
 - `--insert`: create missing merchant/config/secret state;
@@ -50,7 +50,7 @@ The lifecycle service is `internal/merchants.Service`.
 
 | Operation | Behaviour |
 |---|---|
-| `Provision` | Creates or updates `openrails.merchants` and links `owner_org_id` when an AuthKit org owns the merchant. |
+| `Provision` | Creates or updates `openrails.merchants` and records `permission_group_id` for control-plane merchants. |
 | `Suspend` / `Resume` | Flips `status` and `suspended_at`. Suspended merchants deny writes while reads and rail webhook reconciliation can still proceed. |
 | `Export` | Writes a completed `merchant_exports` row with row counts and secret names, never secret values. |
 | `Delete` | Requires confirmation and a completed export, purges merchant-owned rows and secrets, then tombstones the merchant directory row. |
@@ -105,7 +105,7 @@ with the resolved merchant's secret is.
 ## Admin Surface
 
 OpenRails core no longer exposes cross-merchant lifecycle or credential routes.
-Merchant-owned admin APIs are scoped to the authenticated merchant/org; any
+Merchant-owned admin APIs are scoped to the authenticated merchant; any
 future platform operator surface belongs in OpenRails SaaS.
 
 ## Merchant Config Manifest
@@ -156,7 +156,7 @@ catalogs:
     default_providers: [mobius]
 ```
 
-Issuer/JWKS registration belongs in AuthKit remote applications through the
-`auth.orgs[].issuers` bootstrap section. OpenRails stores only the merchant
-ownership link, merchant profile/configuration, provider-account bindings, and
-merchant secret values/references.
+Issuer/JWKS registration belongs in AuthKit remote applications under the
+merchant permission-group. OpenRails stores only the merchant permission-group
+link, merchant profile/configuration, provider-account bindings, and merchant
+secret values/references.

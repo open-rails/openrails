@@ -25,15 +25,14 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // minimalMerchantsDDL creates just the openrails.merchants directory table the
 // control plane updates (#480/#481). OpenRails 001_schema.up.sql owns the full
 // table in production; the control-plane bootstrap only needs the table (plus a
 // row, seeded via dbtest.EnsureTestMerchant) to exist. slug is UNIQUE to match
-// EnsureTestMerchant's ON CONFLICT (slug). permission_group_id is the #481 ownership
-// link (the AuthKit org that administers the merchant), NOT an identity-equation.
+// EnsureTestMerchant's ON CONFLICT (slug). permission_group_id is the AuthKit
+// merchant permission-group id that administers the merchant.
 const minimalMerchantsDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
@@ -118,8 +117,8 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	// First run: creates the operator org, seeds role/perms, mints an API key,
-	// and records the merchant owner.
+	// First run: creates the merchant permission-group, seeds role/perms, mints
+	// an API key, and records the merchant group id.
 	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
@@ -129,8 +128,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.NotEmpty(t, res1.BootstrapMerchantGroupID)
 
 	// #567: the merchant permission-group's internal id is recorded on the
-	// merchant directory row via the permission_group_id column (repurposed to hold the
-	// group id, no longer an org uuid).
+	// merchant directory row via the permission_group_id column.
 	var groupID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT permission_group_id FROM openrails.merchants WHERE id = $1::uuid`,
@@ -278,9 +276,9 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	merchantOwner, err := cp.Core().CreateUser(ctx, "merchant-owner@example.test", "merchantowner")
 	require.NoError(t, err)
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{
-		BootstrapMerchantSlug:   dbtest.TestMerchantSlug,
-		InitialAdminUserID: merchantOwner.ID,
-		MintInitialAPIKey:  false,
+		BootstrapMerchantSlug: dbtest.TestMerchantSlug,
+		InitialAdminUserID:    merchantOwner.ID,
+		MintInitialAPIKey:     false,
 	})
 	require.NoError(t, err)
 
@@ -301,76 +299,4 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	merchantCanModerateRoot, err := cp.Core().Can(ctx, merchantOwner.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
 	require.NoError(t, err)
 	require.False(t, merchantCanModerateRoot, "merchant owner must not hold root moderation perms")
-}
-
-// TestMerchantForOwnerOrg exercised the #481/#500 org→merchant ownership link
-// (merchantForGroupID / AuthorizeMerchant). Under #567 a merchant IS its own
-// permission-group and the org↔merchant coupling is gone — API keys resolve their
-// merchant from the permission group the key was minted under (#569 removed the
-// resource-scope mechanism entirely), not from an owning org. The legacy helpers
-// remain for source-compat but their org-identity premise is obsolete, so this
-// test is retired.
-func TestMerchantForOwnerOrg(t *testing.T) {
-	t.Skip("org→merchant ownership link removed under #567; merchant is resolved from the permission group the API key was minted under")
-	ctx := context.Background()
-	pool := newBootstrapTestPool(t)
-	cp := newTestControlPlane(t, pool)
-
-	// The default test merchant is owned by AuthKit org "ak-default-id".
-	_, err := pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET permission_group_id = 'ak-default-id', status = 'active'
-		 WHERE id = $1::uuid`, dbtest.TestMerchantID.String())
-	require.NoError(t, err)
-	// A SECOND merchant owned by the SAME org (#481: one org -> many merchants).
-	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
-		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'active', 'ak-default-id')
-		ON CONFLICT (id) DO NOTHING`)
-	require.NoError(t, err)
-	// A deleted merchant owned by a distinct org.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id, deleted_at)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'deleted', 'ak-acme-id', current_timestamp)
-		ON CONFLICT (id) DO NOTHING`)
-	require.NoError(t, err)
-	// A single-merchant owner still supports the inferred common path.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
-		VALUES ('00000000-0000-0000-0000-000000000003', 'solo', 'active', 'ak-solo-id')
-		ON CONFLICT (id) DO NOTHING`)
-	require.NoError(t, err)
-
-	// Single owning org -> its merchant namespace (role-based ownership; not identity).
-	mid, _, err := cp.merchantForGroupID(ctx, "ak-solo-id")
-	require.NoError(t, err)
-	require.False(t, mid.IsZero(), "single owning org resolves to its merchant")
-
-	// An org that owns multiple merchants must name one explicitly.
-	_, _, err = cp.merchantForGroupID(ctx, "ak-default-id")
-	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
-
-	// A credential with no owning org is rejected.
-	_, _, err = cp.merchantForGroupID(ctx, "")
-	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
-
-	// An owner that owns no merchant is rejected.
-	_, _, err = cp.merchantForGroupID(ctx, "ak-nobody-id")
-	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
-
-	// A deleted merchant's owner resolves to no merchant.
-	_, _, err = cp.merchantForGroupID(ctx, "ak-acme-id")
-	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
-
-	// #481 role-based AuthorizeMerchant: the owning org may act on EITHER of its
-	// merchants when the request NAMES one (an org owning many merchants).
-	require.NoError(t, cp.AuthorizeMerchant(ctx, "ak-default-id", dbtest.TestMerchantID))
-	second, perr := merchant.ParseID("00000000-0000-0000-0000-000000000004")
-	require.NoError(t, perr)
-	require.NoError(t, cp.AuthorizeMerchant(ctx, "ak-default-id", second))
-	// A different org may NOT act on a merchant it does not own.
-	require.ErrorIs(t, cp.AuthorizeMerchant(ctx, "ak-acme-id", dbtest.TestMerchantID), ErrServiceCredentialScopeDenied)
-
-	// The control plane built a delegated verifier (browser-tier prerequisite).
-	require.NotNil(t, cp.DelegatedVerifier())
 }

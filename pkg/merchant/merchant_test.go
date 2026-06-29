@@ -63,11 +63,10 @@ func TestParseID(t *testing.T) {
 }
 
 func TestValidateSlug(t *testing.T) {
-	// Must mirror AuthKit's org-slug rule (#548): lowercase a-z0-9 + hyphens,
-	// no leading/trailing hyphen, <=63 chars; normalized (trim+lowercase) first.
-	// Valid INCLUDING inputs that only become valid after normalize (trim+lower) —
-	// "UPPER"->"upper", "  Tensorhub  "->"tensorhub" — exactly the canonical
-	// lowercase form AuthKit org slugs require, so the invariant still holds.
+	// Must mirror AuthKit permission-group instance slugs: lowercase a-z0-9 +
+	// hyphens, no leading/trailing hyphen, <=63 chars; normalized
+	// (trim+lowercase) first. Valid INCLUDING inputs that only become valid after
+	// normalize (trim+lower).
 	valid := []string{"tensorhub", "doujins", "monkey", "a", "ab", "a-b-c", "x1-2y", "  Tensorhub  ", "UPPER"}
 	for _, s := range valid {
 		if err := ValidateSlug(s); err != nil {

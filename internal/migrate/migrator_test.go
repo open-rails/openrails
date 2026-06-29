@@ -29,32 +29,3 @@ CREATE TABLE three ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{da
 		}
 	}
 }
-
-func TestPatchAuthKitAPIKeyRoleMigrationBackfillsLegacyRows(t *testing.T) {
-	migrations := []migratekit.Migration{{
-		Name: "007_api_key_role.up.sql",
-		Content: `ALTER TABLE profiles.service_tokens
-  ADD COLUMN role text NOT NULL;
-
-ALTER TABLE profiles.service_tokens
-  ADD CONSTRAINT service_tokens_role_format_chk CHECK (char_length(role) BETWEEN 1 AND 64);`,
-	}}
-
-	got := patchAuthKitAPIKeyRoleMigration(migrations)
-	content := got[0].Content
-
-	if strings.Contains(content, "ADD COLUMN role text NOT NULL") {
-		t.Fatalf("unsafe role column DDL survived:\n%s", content)
-	}
-	for _, want := range []string{
-		"ADD COLUMN IF NOT EXISTS role text",
-		"INSERT INTO profiles.org_roles (org_id, role)",
-		"UPDATE profiles.service_tokens",
-		"ALTER COLUMN role SET NOT NULL",
-		"service_tokens_role_format_chk",
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("missing %q in patched migration:\n%s", want, content)
-		}
-	}
-}

@@ -114,7 +114,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.Equal(t, int64(600), final.BalanceAmount, "1000 - 400 withdrawn = 600")
 
 	// #242 billing-account admin surface under openrails_app: configure arrears
-	// mode + an outstanding cap, read it back, and list the org's usage.
+	// mode + an outstanding cap, read it back, and list the customer's usage.
 	arrears := "arrears"
 	var cap int64 = 5000
 	require.NoError(t, svc.SetCreditAccountSettings(tctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
@@ -127,7 +127,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	txns, total, err := svc.GetCustomerCreditTransactions(tctx, payer, money.DefaultCurrency, 50, 0)
 	require.NoError(t, err)
-	require.Greater(t, total, 0, "org has credit transactions (deposit/withdraw)")
+	require.Greater(t, total, 0, "customer has credit transactions (deposit/withdraw)")
 	require.NotEmpty(t, txns)
 }
 

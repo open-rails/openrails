@@ -54,25 +54,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 	}
 }
 
-func TestCatalog_HardCutsOldOrgMerchantPermissions(t *testing.T) {
+func TestCatalog_HardCutsOldMerchantPermissions(t *testing.T) {
 	old := []string{
-		"org:credits:read",
-		"org:credits:update",
-		"org:credits:spend",
-		"org:billing:read",
-		"org:billing:update",
-		"org:checkout:create",
-		"org:subscriptions:read",
-		"org:subscriptions:update",
-		"org:payment-methods:read",
-		"org:payment-methods:update",
-		"org:entitlements:read",
-		"org:entitlements:update",
-		"org:product_access:update",
-		"org:catalog:update",
-		"org:secrets:read",
-		"org:configuration:read",
-		"org:metrics:read",
 		"merchant:customers:read",
 		"merchant:customers:update",
 	}
@@ -82,7 +65,7 @@ func TestCatalog_HardCutsOldOrgMerchantPermissions(t *testing.T) {
 	}
 	for _, name := range old {
 		if names[name] {
-			t.Fatalf("old OpenRails org permission %q must not be in the #554 catalog", name)
+			t.Fatalf("old OpenRails permission %q must not be in the #554 catalog", name)
 		}
 	}
 }
@@ -216,8 +199,8 @@ func TestCatalogPermissionsCoveredByOwnerGrant(t *testing.T) {
 			t.Fatalf("catalog permission %q has no namespace; owner-grant coverage is namespace-anchored (#554/#100)", name)
 		}
 		if ns == platformNS {
-			t.Fatalf("catalog permission %q is in the %q: layer, which no org owner can ever hold; "+
-				"OpenRails org-scoped perms must be app namespaces like merchant: or customer: (#554/#100)", name, platformNS)
+			t.Fatalf("catalog permission %q is in the %q: layer, which no merchant/customer owner can ever hold; "+
+				"OpenRails app perms must be namespaces like merchant: or customer: (#554/#100)", name, platformNS)
 		}
 	}
 }
