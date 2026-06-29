@@ -7,78 +7,447 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 599
+next_id: 603
 
 ---
 
-# #598: Speculative — eliminate catalog-derived entitlement rows and derive access from product ownership
+# #602: Introductory pricing — express "$X first period then $Y recurring" for a recurring price
 
 **Completed:** no
 
-Decision 2026-06-28: this is a speculative simplification candidate, not an approved
-hard cut yet. The current `openrails.entitlements` table may be duplicate state for
-catalog-derived access if product ownership windows plus current product definitions can
-answer the same reads. Evaluate replacing catalog-derived entitlement rows with derived
-reads, while preserving manual/non-catalog grants and audit history.
+Proposed 2026-06-28 (owner). OpenRails prices currently model a SINGLE flat
+recurring amount (`amount` + `billing_cycle_days`). Real provider offers commonly
+have a DIFFERENT first/initial period price than the recurring price — e.g. the
+doujins legacy CCBill plan `0000000931`: **$19.95 for the first 30 days, then
+$14.95 every 30 days thereafter**. Today we can only approximate it as a flat
+$14.95 (or $15.00), losing the intro-period semantics; migrated subscribers and
+new checkouts can't faithfully express or reconcile it.
 
-## Hypothesis
-Catalog-derived entitlements do not need their own source-of-truth rows.
+## Goal
+Model a recurring price whose FIRST billing period differs from subsequent ones:
+- initial amount + initial period length
+- recurring amount + recurring cycle
+- so a charge path bills the intro amount once, then the recurring amount on each
+  rebill, and reconciliation can match a provider subscription on either rate.
 
-Source-of-truth facts should be:
-- entitlement feature registry: durable feature keys like Stripe `Feature.lookup_key`
-  (`premium`, `premium-plus`) plus optional display metadata.
-- product catalog: `product_slug -> entitlement feature keys/spend limits/linked products`.
-- product ownership windows: `customer owns product_slug from starts_at to ends_at`,
-  including grace windows.
-- `grants`: append-only audit log for "customer got ownership/credit/manual entitlement
-  because of payment/import/admin action."
-
-Effective entitlements can then be derived at read time:
-
-```text
-active product ownership windows
-+ current product definitions and entitlement feature keys
-+ manual/non-catalog entitlement grants
-= active entitlements
+## Shape (sketch, not final)
+Extend the price with an optional intro/trial block:
 ```
+amount: 1495            # recurring (the steady-state rate)
+billing_cycle_days: 30
+intro:
+  amount: 1995          # first-period price
+  period_days: 30       # first-period length (CCBill "initial period")
+  periods: 1            # how many initial periods at the intro rate (usually 1)
+```
+A flat price omits `intro` (today's behavior unchanged).
 
-## Stripe-like feature registry, not Stripe-like active rows
-Adopt the useful Stripe shape: durable entitlement feature definitions with stable keys.
-Do not adopt catalog-derived active entitlement rows as source of truth.
+## Provider mapping
+- **CCBill**: native — a Recurring Billing Option has distinct initial price/period
+  vs recurring price/period (see #601). Map intro -> initial, recurring -> recurring.
+- **NMI/mobius**: flat-only in practice (doujins NMI plans `premium`/`premium_new`
+  are flat $19/$23); express intro via an add-on/one-time first charge or leave
+  unsupported per rail.
+- **Stripe/Solana**: evaluate (Stripe supports trial/one-time-then-recurring).
 
-Catalog shape can stay lazy:
+## Tasks
+- [ ] Decide storage: extend `prices` (intro_* columns) vs a child period table.
+- [ ] Manifest + catalog converge support for the intro block.
+- [ ] Charge paths bill intro-once-then-recurring per rail (start CCBill).
+- [ ] Reconciliation matches a provider sub on intro OR recurring rate.
+- [ ] Migrate doujins legacy `$19.95 -> $14.95` (CCBill RBO 0000000931) onto it.
+
+---
+
+# #601: CCBill catalog identity — model the Recurring Billing Option (price/product/plan id) SEPARATELY from the FlexForm
+
+**Completed:** no
+
+Proposed 2026-06-28 (owner). OpenRails' CCBill catalog link models ONLY
+`flex_id` + `form_name` (and `Attach` requires both). But in CCBill those are the
+**FlexForm** — the hosted purchase-flow page the buyer is sent to — which is
+DISTINCT from the **price/product/plan identifier**. CCBill officially calls the
+latter a **"Recurring Billing Option"** (RBO): a zero-padded numeric id (e.g.
+`#0000042836`) that defines the actual pricing (initial price/period + recurring
+price/period). One FlexForm can present a given RBO; legacy subscribers carry an
+RBO with NO FlexForm at all.
+
+Consequence today: doujins cannot record its CCBill pricing ids in the catalog —
+`$23`=`0000007498`, legacy `$19`=`0000001412`, legacy `$19.95->$14.95`=
+`0000000931` — because the only CCBill keys are FlexForm fields. The migrated
+billing rows have no catalog-level CCBill price identity to reconcile against.
+
+## Goal
+Treat the two as separate, independently-settable CCBill identifiers on a price:
+- **Recurring Billing Option id** (the price/product/plan identity) — the canonical
+  CCBill price key; required for reconciliation/recovery (#595/#596) and for
+  legacy/archived tiers that have no FlexForm.
+- **FlexForm** (`flex_id` + `form_name`) — the purchase-flow page; needed only for
+  NEW self-service checkout, optional otherwise.
+
+## Plan
+- Add a `recurring_billing_option_id` (CCBill RBO) rail key alongside the existing
+  `flex_id`/`form_name`.
+- Relax `Attach` (pkg/service/catalog_provider_ccbill.go) + the price-model CCBill
+  validation (internal/db/models/product_catalog.go): a CCBill link is valid with
+  an RBO id alone, a FlexForm alone, or both; a FlexForm still requires BOTH
+  flex_id+form_name together.
+- Surface RBO in GetCCBill* accessors; webhooks/reconciliation key on the RBO id.
+- doujins: hardcode `recurring_billing_option_id` 0000007498/0000001412/0000000931
+  on the $23/$19/$15 prices (currently blocked on this).
+
+## Tasks
+- [ ] Add `RailKeyCCBillRecurringBillingOption` + accessor.
+- [ ] Relax CCBill Attach + product_catalog validation (RBO and/or FlexForm).
+- [ ] Reconciliation/webhook mapping keys on the RBO id.
+- [ ] doujins bootstrap: hardcode the three RBO ids (+ keep the $23 FlexForm).
+
+---
+
+# #600: Per-merchant invoice cadence + collection thresholds (#301 follow-up)
+
+**Completed:** no
+
+Decision 2026-06-28: arrears collection thresholds and the invoice/sweep cadence are
+hardcoded constants — `ArrearsHourlyThresholdAmount = $50` and `ArrearsMonthlyFloorAmount =
+$1` in `internal/river/jobs_credit_money_in.go`, with a fixed ~30d arrears sweep interval
+and a calendar-month invoice boundary. #301 closed noting "calendar arrears = future
+refinement" and the code carries `TODO(#301): make these configurable per-merchant; decide
+calendar-month vs fixed-interval boundary.` This issue does that. Config + plumbing only — no
+new collection path; the engine (#301/#302/#303) is built.
+
+## What
+- Move the collection threshold (charge when owed ≥ X mid-cycle) and the monthly floor (skip
+  dust < Y at period close) into per-merchant config, defaulting to today's $50 / $1.
+- Make the billing-period boundary per-merchant: calendar-month-UTC vs fixed-interval vs
+  signup anniversary. Today the #301 sweep uses fixed-30d and the #303 invoice uses
+  calendar-month; unify both under one per-merchant setting so they always agree.
+- Defaults preserve current behavior.
+
+## Tasks
+- [ ] Per-merchant config: collection_threshold, monthly_floor, billing_period_boundary
+  (calendar_month | fixed_interval | anniversary); defaults $50 / $1 / fixed_interval.
+- [ ] Thread config into `InvoiceWorker` (FinalizeThresholdInvoices / FinalizeDueInvoices /
+  ChargeOutstanding) instead of the Arrears* constants; delete the constants.
+- [ ] Align the #301 sweep boundary and the #303 invoice boundary to the same per-merchant
+  setting (no sweep/invoice period mismatch).
+- [ ] Tests: custom threshold/floor honored; calendar-month vs fixed-interval boundary;
+  defaults reproduce current behavior; sweep + invoice periods agree.
+
+---
+
+# #599: Catalog metered prices — OpenRails-native usage rating (usage × rate → money)
+
+**Completed:** no
+
+Decision 2026-06-28: today OpenRails is amount-agnostic — the host prices every usage event
+and OpenRails only banks it (`RecordUsage` takes a host-supplied `amount`, #289). That already
+supports cloud-style billing IF the app does the rating. This issue adds an OPTIONAL,
+catalog-defined rate so OpenRails itself turns metered usage into money — the "$0.10/GB·month",
+"$X/sec" cloud model — reusing the built accrual/invoice/charge engine (#301/#302/#303). Rating
+is opt-in per price; host-priced events (#289) keep working unchanged.
+
+## What a metered price is
+Two pieces, mirroring OpenMeter (Meter) / Lago (billable metric): a first-class **meter** and a
+**price** that references it. A `meter` is a top-level registry entry — like #594's `usage_limits`
+— naming a usage stream + its `kind` (gauge|counter). A metered `price` references a `meter` and
+adds the `rate` (+ `per`). The SAME meter is referenced by both metered prices (to charge) and
+usage_limits (to cap), so a stream's identity + kind are defined ONCE.
 
 ```yaml
-entitlements:
-  - key: premium
-    display_name: Premium
-    description: Premium site access
+# top-level meter registry (like `usage_limits`) — names the stream + its kind, ONCE
+meters:
+  - key: vcpu          # gauge: a level HELD over time → time-integrated
+    kind: gauge
+  - key: storage_mb    # gauge: MB stored (1 GB = 1_000)
+    kind: gauge
+  - key: api_calls     # counter: discrete events → summed
+    kind: counter
 
 products:
-  - slug: premium-monthly
+  - key: compute-vm
+    prices:
+      - currency: usd
+        metered: { meter: vcpu, rate: 50_000, per: 1h }           # $0.05/vCPU-hour
+  - key: object-storage
+    prices:
+      - currency: usd
+        metered: { meter: storage_mb, rate: 0_000_100, per: 30d }  # $0.10/GB-month
+  - key: api
+    prices:
+      - currency: usd
+        metered: { meter: api_calls, rate: 2_000 }                 # $0.002/call (counter, no per)
+```
+
+- `meter` (top-level registry, like `usage_limits`) = a named usage stream the host reports
+  against (the #289 usage_event `event_type`) + its `kind`. Defined ONCE and referenced by many:
+  metered prices (to charge) and usage_limits (to cap). The running tally is per
+  `(customer, meter)` (or `(customer, meter, resource)` when instance-tagged — see Host hooks).
+- `kind` (on the METER, not the price — it's intrinsic to the stream) = `gauge` (a level HELD
+  over time — VMs, storage; time-integrated, persists across periods) or `counter` (discrete
+  EVENTS — API calls, egress; summed, resets each period). Prometheus's gauge-vs-counter; replaces
+  aggregation+recurring. Rare peak/value-at-close (`max`/`latest`) deferred.
+- `rate` (on the price) = micros per meter-unit per `per`; ISO money currency ONLY (custom
+  counters can't be arrears — #474), consistent with the ledger model (#594).
+- `per` (on the price) = the rate's TIME denominator for gauge meters — "$rate per unit per
+  `per`" (VM `1h`, storage `30d`); reuses the #594 duration grammar. Omitted for counter meters
+  (priced per event, not per time). It is the only time field on a price: when the invoice CLOSES
+  is the customer billing cycle (#600), and how often OpenRails accrues is arbitrary/internal (the
+  integral can be evaluated at any instant) — neither belongs on the price.
+
+## How it bills
+A rating job (River) runs periodically — the frequency is INTERNAL and arbitrary, because the
+integral can be evaluated at any instant ("owed so far" = integral up to now). Each run computes
+the meter's aggregate since the last accrual (by the meter's `kind`): for a `counter`, the summed events; for a `gauge`,
+the time-integral of the level (unit·seconds). It multiplies by `rate` ONCE (rounding once —
+NEVER per event; sub-unit per-event rounding drifts), normalizing a gauge by `per`
+(cost = integral_unit_seconds × rate ÷ `per`_seconds), and `AccrueOwed` (#302) the result. The
+existing `InvoiceWorker` (#303) closes the invoice on the customer's billing cycle (#600) and
+`ChargeOutstanding` (#301) collects. Metered prices are pure rating on top of the built engine —
+no new ledger, no new collection path.
+
+Granularity: OpenRails has no time unit — it's the app's emit cadence. Rate per-second or
+aggregate a session; never write a ledger row per microsecond. Gauges ($/GB·month): the app
+emits an ABSOLUTE sample (current GB + timestamp) whenever the level CHANGES — not deltas, not
+per-tick polling; the rating job TIME-INTEGRATES the level over the period (`weighted_sum`) to a
+time-weighted quantity, then × rate. `recurring` carries the last level into the next period so
+untouched storage keeps billing. This is the Lago weighted_sum model; CloudKitty computes the
+same integral by polling the gauge each collect-period and summing — push vs poll, same math.
+
+## Gauge contract (push-on-change — OpenRails never polls)
+Any resource HELD OVER TIME is a gauge — a STEP FUNCTION that changes only at discrete moments
+and is constant between them: storage GB, running VMs / vCPUs, reserved IPs, provisioned seats.
+A VM is the canonical case — emit `running=1` at start and `running=0` at stop, and OpenRails
+bills everything in between by integrating the level over the elapsed time: TWO events, not one
+per second. Per-second (or finer) granularity falls out of the breakpoint TIMESTAMPS, not the
+event frequency. So OpenRails does NOT sample/poll a gauge — the host pushes an ABSOLUTE level
+sample ONLY WHEN the level changes: `RecordUsage(measure, value=<current level>, amount=0)` — a
+metered-only event (#289 already supports `amount=0` = recorded, not debited; the level rides a
+`Dimensions` entry, so NO new ingestion primitive). The rating job reconstructs "usage at any
+time" by treating the level as piecewise-constant between samples and time-integrating
+(`weighted_sum`). Consequences:
+- IDLE = ZERO traffic. A customer who stores 30GB and never touches it emits ONE event ever; the
+  level simply persists (a gauge holds until the next change event) so it keeps billing every
+  period. No 10-minute polling, no callback OpenRails invokes, no background samples with zero
+  value. Cost is proportional to CHURN, not to time.
+- OpenRails NEVER measures or pulls — it has no access to merchant data; the app always pushes.
+  (CloudKitty polls only because Ceilometer is a generic telemetry collector; a purpose-built
+  system uses push-on-change, like Lago weighted_sum.)
+- Mid-life changes are just MORE breakpoints: a VM resize (2→4 vCPU) or storage growth emits a
+  new level at that instant and each segment integrates at its own level. A resource still held
+  at a period boundary just carries forward (a gauge holds until changed) — bill [start,
+  period_end) now, continue next period until the stop/delete arrives.
+- OPTIONAL drift backstop: one low-frequency reconciliation sample (e.g. a daily "current truth"
+  emit) self-corrects a missed delete/stop — a crashed VM whose stop event never fired would
+  otherwise bill forever. A daily "list what's currently held" emit doubles as stop-detection.
+  ~1 event/day/customer is negligible and is the ONLY periodic emit; skip it if change events
+  are reliable.
+
+This is the unifying cloud model: ALL resource provisioning is a gauge — compute, storage, IPs,
+seats, provisioned throughput — billed by emitting a level on each state change (start / resize /
+stop) and integrating between. So the entire host contract is: (1) declare the `metered` price
+ONCE; (2) emit the new level on change. OpenRails does integrate → rate → accrue → invoice →
+charge.
+
+## Host hooks (client surface)
+Two methods cover everything; both are thin wrappers over #289 usage events.
+- `ReportLevel(customer, meter, level)` — GAUGE meters (held resources). Sets the current ABSOLUTE
+  integer level; call ONLY when it changes. OpenRails timestamps it and time-integrates between
+  reports. VM lifecycle = `ReportLevel(cust, "vcpu", 4)` at boot, `ReportLevel(cust, "vcpu", 0)`
+  at stop; storage = `ReportLevel(cust, "storage_mb", 1100)` whenever bytes change. (Optional
+  `ChangeID` for idempotency, `OccurredAt` to override now.)
+- `RecordUsage(customer, meter, quantity, sourceID)` — COUNTER meters (discrete events). Adds a
+  count — one call per occurrence or a batched quantity; `sourceID` for idempotency. (This is
+  today's #289 RecordUsage; the gauge form is the SAME event with `amount=0` + the level in a
+  dimension.)
+- Both take an optional `resource` (instance) label — the existing #289 usage_event `Resource`
+  column. Tag every report for VM-1 with `resource="vm-1"` and #303 groups the invoice PER
+  INSTANCE (VM-1 → its RAM/disk/bandwidth lines; VM-2 → its own). Untagged = one aggregate line
+  per meter. Rate/group per `(customer, meter, resource)` when tagged (#311 ServiceUsageRollup
+  already groups by resource).
+
+Units: pick the FINEST integer unit you bill (MB for storage, vCPU for compute, 0/1 for a whole
+VM); declare it as a `meter` and set the price `rate` in micros per that unit per `per`.
+$0.10/GB·month → meter `storage_mb` (kind gauge, 1 GB = 1_000) + price rate 100 micros, `per: 30d`.
+No fractional units — choose a fine enough integer one.
+
+## Scope
+- v1 meter `kind`: `counter` (summed events — the PRIMARY case: API calls, bandwidth/egress,
+  images; what OpenMeter/Lago center on) AND `gauge` (time-integrated level — storage, RAM,
+  running VMs; Lago's weighted_sum, which OpenMeter lacks). BOTH core. Peak/value-at-close
+  (`max`/`latest`) deferred.
+- Opt-in: a price with no `metered` block stays host-priced (#289); both coexist.
+- One `meter`, two uses: the SAME meter is referenced by a usage_limit (cap, admission #298) AND
+  a metered price (charge) — independent bindings over one stream defined once.
+
+## Non-goals (v1)
+- Tiered / graduated / volume pricing ("first 100GB free, next 1TB at $X"). Big feature; defer
+  to its own issue. v1 = one flat rate per measure.
+- Per-event rating on the admission hot path — rating runs in the cadence job off the request
+  path (admission stays the Redis headroom op, #298).
+- Provider-hosted metered invoicing (Stripe Billing Meter) — that's the separate optional #134.
+
+## Prior art (researched 2026-06-28)
+Every open-source cloud-billing stack converges on the SAME four stages: meter → aggregate →
+rate → invoice/collect.
+- OpenStack (the AWS-like IaaS reference): Ceilometer/Gnocchi (meter + time-series store) →
+  CloudKitty (rate: `hashmap` flat/rate mappings or `pyscripts`, run every `collect_period`,
+  default hourly) → downstream billing. CloudKitty is PURELY the rater.
+- Lago: usage events → billable metric (7 aggregations incl. `weighted_sum` + the `recurring`
+  flag) → charge model (standard/graduated/volume/package) → invoice. Best modern reference;
+  `weighted_sum` IS the storage answer (absolute samples, time-integrated).
+- OpenMeter: high-volume meter (Kafka/ClickHouse, CloudEvents idempotency; sum/count/avg/
+  min/max/latest) feeding Stripe/Lago — a meter, not a biller.
+
+Ingestion design (both, researched 2026-06-28): the host fires DUMB events — payload +
+idempotency key + customer + a meter/metric CODE + timestamp — and a SEPARATELY-DEFINED named
+meter decides which value field to read and how to aggregate. Lago event {transaction_id,
+external_subscription_id, code, timestamp, properties} + billable metric {code, aggregation,
+field_name, recurring}; OpenMeter CloudEvent + Meter {slug, eventType, valueProperty JSONPath,
+aggregation, groupBy}. Lessons: (1) the meter is FIRST-CLASS and reused — define `kind`/aggregation
+ONCE and reference from many prices AND caps (→ promote OpenRails `measure` to a top-level meter
+like `usage_limits`, `kind` on the meter not the price; ADOPTED 2026-06-28). (2)
+events bucket into periods by TIMESTAMP not arrival (#289 `OccurredAt` already does this). (3)
+prefer ONE event per occurrence over a pre-summed count (preserves granularity for later pricing).
+(4) flow metering (SUM/COUNT) is the PRIMARY case in both → `counter` stays core; OpenMeter has NO
+time-weighted gauge, so OpenRails' gauge follows Lago's `weighted_sum`.
+
+Broader OSS survey (researched 2026-06-28) — more production systems doing exactly this:
+- Apache CloudStack Usage Server (OSS IaaS, AWS-like): reads the event log → summary usage records.
+  HELD resources (running VM, allocated VM, IP, volume, LB, VPN) are billed in HOURS (a gauge
+  integrated over time); network bytes sent/received are ACCUMULATED bytes (a counter). Real-world
+  confirmation of the gauge(hours)/counter(bytes) split and of per-hour rating ("VM-hours",
+  "GB-hours"). Runs ≥1×/day.
+- Kill Bill (mature OSS billing): two usage types — CONSUMABLE (sum of units = our `counter`) and
+  CAPACITY (billed on the MAX / high-water-mark over the period). CAPACITY = peak pricing = our
+  deferred `max`, and is LESS precise than time-weighted; Lago/CloudStack/OpenRails bill the
+  time-integral, not the peak. Tiers: ALL_TIER (graduated) vs TOP_TIER (volume) — confirms tiered
+  pricing is a separate, ubiquitous charge-model layer → our v1 non-goal.
+- CGRateS (Go, telecom real-time charging, 50k+ req/s): rating engine + account balances +
+  session/event charging WITH RESERVATION — the same shape as our admission holds (#298) + ledger.
+  A production Go reference that rating-engine + reservation + balances is the right decomposition.
+- Cyclops (OSS cloud RCB, ICCLab): microservice pipeline UDR (meter, pulls from OpenStack/
+  CloudStack) → CDR (rate) → Billing (invoice) — the meter→rate→invoice pipeline again.
+- Meteroid (Rust OSS): real-time usage without pre-aggregation; versioned plans + grandfathering
+  (we get this via materialize-at-grant, #594/#598).
+Takeaway: the gauge(time-integrated, billed in resource-hours)/counter(summed) split is UNIVERSAL;
+time-weighted (Lago/CloudStack/OpenRails) is the precise model while max/high-water-mark (Kill Bill
+CAPACITY, OpenMeter MAX) is the deferred peak-pricing variant; tiers are everywhere a separate
+charge-model layer (deferred); a Go rating-engine + reservation + ledger (CGRateS) is proven.
+OpenRails already has meter (#289 usage_events) + aggregate (rollups) + invoice/collect
+(#301/#302/#303). #599 is exactly the missing RATING module — the CloudKitty/Lago piece. The
+tiered/graduated/volume "charge model" is a distinct concern in all of them → v1 non-goal.
+
+## Tasks
+- [ ] Add a top-level `meters` registry (key + `kind` gauge|counter) — like `usage_limits`;
+  validate URL-safe unique keys. Point both #594 `usage_limits` and metered prices at it (one
+  meter, referenced as cap and/or charge); `kind` lives on the meter, not the price.
+- [ ] Extend the #594 price model with an optional `metered` block referencing a `meter` + `rate`
+  (micros/unit) + `per` (gauge only). Validate ISO money currency only, positive rate, `per`
+  required for gauge meter / absent for counter meter, parseable `per`.
+- [ ] Rating job (internal cadence, arbitrary), by the meter's `kind`: `counter` → sum events;
+  `gauge` → time-integral of the level (unit·seconds); multiply by rate ONCE, gauges normalized by
+  `per` (integral × rate ÷ `per`_seconds); `AccrueOwed`; idempotent per (customer, meter, accrual).
+- [ ] Gauge = a level per `(customer, meter[, resource])` that persists until the next change event
+  (no per-period reset, no `recurring` flag); time-integrate the piecewise-constant level. Document:
+  app emits absolute gauge samples on change, not deltas.
+- [ ] Gauge ingestion = push-on-change (NO OpenRails polling/callback): reuse #289 `RecordUsage`
+  with `amount=0` + the level in a `Dimensions` entry; the rating job time-integrates the
+  piecewise-constant level. Idle accounts emit nothing. Document the OPTIONAL daily
+  reconciliation-sample backstop for missed-delete drift.
+- [ ] Coexist with host-priced #289: no `metered` block → unchanged; with one → OpenRails
+  computes the amount.
+- [ ] Surface rated amounts on #303 invoices as metered line items (meter, qty, rate, amount).
+- [ ] Group invoice line items per `resource`/instance (existing usage_event `Resource` column +
+  #311 rollup-by-resource): tagged usage bills as "VM-1 → RAM/disk/bandwidth" sub-groups; untagged
+  aggregates per meter. Rate per (customer, meter, resource) when tagged.
+- [ ] Tests: counter (sum) accrues; storage gauge (weighted_sum time-integral, persists across
+  periods); rate-the-aggregate rounds once (no per-event drift); custom-currency rate rejected;
+  one meter referenced by both a usage_limit (cap) and a metered price (charge) are independent.
+
+---
+
+# #598: DECIDED — keep `openrails.entitlements` as the flat access ledger; materialize product benefits at grant time (rejected: derive-from-ownership)
+
+**Completed:** yes — DECISION 2026-06-28 (owner-reviewed). Do NOT eliminate the
+entitlements table and do NOT switch to read-time derivation from product ownership.
+Keep `entitlements` as the source-of-truth flat access ledger; products MATERIALIZE
+their benefits into it (and the credit/admission ledgers) at grant time (#594). No
+schema change is required by this issue. The implementation work — materializing a
+product's benefits on purchase — lives in #594.
+
+## Why keep it (rejecting the rewrite)
+The current `openrails.entitlements` table is already a windowed, source-tracked,
+revocable, audit-linked access ledger: `entitlement` key + `start_at`/`end_at`/`period`
+(a generated `tstzrange`) + `source_type` (subscription|one_off|admin|grace|grant) +
+`grant_id` + `revoked_at`. It is NOT duplicate state today (there is no
+`product_ownership` table to duplicate); it *is* the access state. Its two decisive
+advantages — both flowing from being a flat, denormalized, point-in-time ledger:
+
+- **Manual grants are trivial.** A comp/support/legacy entitlement is one INSERT
+  (`source_type='admin'|'grant'`), needing no product or catalog mapping. Entitlements
+  that map to no product *must* live in a flat table like this anyway.
+- **Reads are trivial and fast.** "What does this customer have now?" is one indexed
+  query (`WHERE merchant_id+customer_id AND period @> now() AND revoked_at IS NULL`),
+  no joins, no derivation. Reverse lookup ("who has entitlement X?") is just as cheap.
+  It also unifies catalog-derived AND manual access behind one read surface.
+
+A pure derive-from-ownership model trades these away: reads become ownership→product-spec
+→feature-key joins, reverse lookup scans all ownership × product specs, and you end up
+re-introducing a projection cache — which *is* this table. Its one real weakness is the
+catalog-churn case (changing a product's entitlement set needs a backfill of active
+rows), and at current scale that is rare (doujins: one product, one entitlement, for
+years). YAGNI; the flat ledger wins.
+
+## Model: materialize at grant time (NOT derive at read time)
+- No top-level entitlement registry in the catalog. Product entitlement grants are direct
+  URL-safe keys.
+- On a successful purchase/subscription/renewal/admin grant, write the product's CURRENT
+  benefits into the existing ledgers: one `entitlements` row per granted entitlement
+  (windowed, with `source_type` + `grant_id`); credits into the money/credit ledger;
+  usage limits as admission-policy bindings (#594). Included products recurse.
+- The entitlement rows ARE the snapshot of what was granted, so grandfathering is
+  automatic and free: a later catalog change does not touch existing windows. Catalog
+  changes apply to FUTURE grants by default; an explicit backfill action can push
+  *additive* changes onto active windows.
+- `grants` remains the audit log of why each materialization happened.
+
+The only future trigger to revisit product-level ownership is #594 reaching genuinely
+rich products (credits + included products + usage limits) PLUS real catalog churn —
+not entitlements alone.
+
+Catalog shape stays lazy:
+
+```yaml
+usage_limits:
+  - key: starter-spend
+    measure: billable_spend
+    windows:
+      - window: 5h
+        amount: 10_000_000
+
+products:
+  - key: premium-monthly
     display_name: Premium Monthly
     entitlements:
       - premium
+    usage_limits:
+      - starter-spend
 ```
 
-Product-level `entitlements: ["premium"]` may auto-create missing feature definitions
-with `key = "premium"` if no display metadata is needed. Top-level definitions exist
-to catch typos, carry UI/admin labels, and mirror provider feature registries where useful.
-Entitlement feature keys are URL-safe lookup keys in the entitlement namespace. They may
-share the same literal value as product slugs because product and entitlement identity
-are separate namespaces.
+Product-level `entitlements: ["premium"]` means "materialize an entitlement row whose
+key is `premium`." There is no separate feature definition to create or validate against.
+Entitlement keys are URL-safe lookup keys in the entitlement namespace. They may share
+the same literal value as product keys because product and entitlement identity are
+separate namespaces.
 
-## Why consider this
-- Catalog changes become instant by construction: changing `premium -> pro` changes
-  effective reads for active owners without rewriting per-customer entitlement rows.
-- Durable feature keys make entitlement names a merchant contract, not throwaway strings,
-  and let validation catch misspellings before catalog apply.
-- Grace/dunning becomes an ownership-window concern instead of special entitlement
-  timeline mutation.
-- Less duplicated state: no separate catalog-derived entitlement lifecycle to keep in
-  sync with subscriptions, product ownership, catalog mutation, provider pull, and grace.
-- Auditing remains in `grants`: the audit event is "user got product ownership", not
-  "user got whatever entitlements the product happened to grant that day."
+## What the rewrite would have bought (and why it isn't worth it now)
+- Instant catalog changes for active owners with no backfill — the one real win, but
+  rare at current scale; an explicit additive-backfill action covers it when needed.
+- Durable feature-key metadata/validation — rejected for v1; direct keys are enough until
+  OpenRails itself needs entitlement labels/descriptions.
+- Grace as an ownership-window concern — the flat ledger already models grace as a
+  `source_type='grace'` window, so no rewrite is needed for it.
 
 ## What must remain supported
 - Manual comp/support entitlements that are not represented by product ownership.
@@ -87,21 +456,17 @@ are separate namespaces.
 - Batch active entitlement lookup for AuthKit/token enrichment.
 - Historical audit: answer what caused access and when ownership/grace started/ended.
 - Performance for hot reads without making every request scan huge ownership/catalog sets.
-- Durable entitlement feature CRUD/metadata for UI and API consumers that need labels or
-  descriptions, while keeping product references as stable keys.
+- Direct entitlement keys in product manifests and ledger rows; no separate feature CRUD
+  unless OpenRails later needs labels/descriptions.
 
-## Possible end state
-Prefer the smallest end state that holds:
-
-1. `product_ownership` is source of truth for product access windows.
-2. `entitlement_features` is the durable registry of valid feature keys and metadata.
-3. Manual/non-catalog entitlements live in a small manual grant table or in `grants`
-   with enough typed fields to query them.
-4. Catalog-derived entitlements are computed from ownership + current product spec.
-5. If performance requires materialization, keep `effective_entitlements` as a
-   rebuildable projection/cache, not a source-of-truth table.
-6. Delete or stop writing `openrails.entitlements` only after every read/write path has
-   moved to source-of-truth ownership/manual grants or the projection boundary.
+## End state (decided)
+1. `openrails.entitlements` STAYS the source-of-truth flat access ledger — catalog-derived
+   and manual rows unified behind one read surface. No `product_ownership` source-of-truth table.
+2. No top-level catalog `entitlements` registry and no required entitlement metadata
+   layer; products carry direct entitlement keys.
+3. Products materialize their benefits into `entitlements` (+ the credit/admission ledgers)
+   at grant time (#594); `grants` records why each materialization happened.
+4. No table is deleted, and none is demoted to a projection/cache.
 
 ## Risks / reasons to reject
 - Reverse entitlement lookup may need an indexed projection.
@@ -111,25 +476,14 @@ Prefer the smallest end state that holds:
   enforced elsewhere.
 - Historical "what entitlement did this user have on date X?" may require catalog
   version history, not just current product definitions.
-- Auto-creating feature keys from product references may hide typos unless catalog apply
-  has a strict mode or warnings.
+- Direct entitlement keys can hide typos; accept this for v1 unless merchants need strict
+  validation.
 - Migration may be too risky if the current entitlement table is already serving as a
   useful compatibility projection.
 
 ## Tasks
-- [ ] Inventory every writer to `openrails.entitlements` and classify it as catalog-derived, manual/imported, or projection maintenance.
-- [ ] Inventory every reader of active entitlement names/records and classify whether it can derive from ownership + catalog or needs an indexed projection.
-- [ ] Inventory current `entitlement_features` usage and decide whether it already satisfies the durable feature registry role.
-- [ ] Define catalog shape for optional top-level entitlement feature definitions; allow product references by key.
-- [ ] Validate product entitlement keys against the durable registry, with a deliberate decision on auto-create vs strict mode.
-- [ ] Define product ownership window schema keyed by merchant + customer + product slug, including subscription, one-time, admin, import, grace, revoke, refund, and provider-pull sources.
-- [ ] Define manual/non-catalog entitlement storage; do not mix these with catalog-derived entitlements.
-- [ ] Prototype derived active entitlement query for one customer and batch customers.
-- [ ] Prototype reverse lookup `entitlement -> customers`, using either derived joins or a rebuildable projection.
-- [ ] Decide whether `openrails.entitlements` can be deleted or should be renamed/reframed as `effective_entitlements` projection.
-- [ ] Add migration/backfill plan from current subscription/product_access/entitlement rows into product ownership windows plus manual grants.
-- [ ] Add tests for catalog mutation changing effective entitlements immediately, grace preserving ownership-derived access, grace expiry removing derived access, manual grants coexisting with catalog-derived access, and reverse lookup.
-- [ ] Only after tests/proof: delete or stop source-of-truth writes to `openrails.entitlements`.
+- None. This is a decision record: keep the flat access ledger and skip the feature
+  registry. The materialize-at-grant implementation lives in #594.
 
 ---
 
@@ -161,7 +515,7 @@ semantics unless metadata or a manifest maps them.
 1. Provider metadata recovery envelope:
    - merchant slug/id
    - OpenRails subject
-   - product slug
+   - product key
    - price key/id
    - checkout/subscription/payment/payment-method ids when available
 2. Adoption manifest:
@@ -185,8 +539,10 @@ Default is plan-only. `--insert` applies only deterministic rows.
 - payment-method/vault references tied to provider account + customer.
 - subscriptions tied to resolved customer + price.
 - payments tied to resolved customer/subscription/price.
-- grants/entitlements/credits/product ownership/spend limits derived from the local
-  product benefit bucket, not from provider catalog guesses.
+- entitlements/credits/usage-limit bindings MATERIALIZED into the existing ledgers
+  (entitlements table, credit/money ledger, admission) from the LOCAL catalog
+  product/benefit definitions — never from provider catalog guesses — with `grants`
+  recording each event (#594/#598).
 - provider-account bindings on adopted rows.
 
 ## Tasks
@@ -218,7 +574,7 @@ openrails_version
 merchant_slug
 merchant_id
 subject
-product_slug
+product_key
 price_key
 price_id
 checkout_session_id
@@ -231,7 +587,8 @@ provider_account_id
 Use the subset each provider supports, but keep one canonical internal shape.
 
 ## Provider behavior
-- Stripe: product metadata and price `lookup_key`; keep `prod_...` / `price_...` as links.
+- Stripe: deterministic product `id` when safe for the connected account, product metadata
+  as backup, and deterministic price `lookup_key`; keep `prod_...` / `price_...` as links.
 - NMI: product `product_sku`, product `product_description`, recurring `plan_id`, `plan_name`,
   and order/customer/vault metadata fields that survive query/report reads.
 - CCBill: form/flex/custom fields that survive DataLink exports; numeric admin price ids are
@@ -241,6 +598,12 @@ Use the subset each provider supports, but keep one canonical internal shape.
 ## Tasks
 - [ ] Add canonical `RecoveryMetadata` type + serializer/parser.
 - [ ] Stamp metadata during catalog/provider price creation.
+- [ ] During provider catalog push, derive deterministic remote identifiers from local keys:
+  Stripe product id from namespaced product key, Stripe price `lookup_key` from price key,
+  NMI `product_sku` from product key, and NMI `plan_id` from price key.
+- [ ] Find existing provider catalog objects by deterministic identifiers before creating;
+  after creation, persist provider-generated links (`prod_...`, `price_...`, CCBill ids)
+  alongside the deterministic key mapping.
 - [ ] Stamp metadata during checkout/session creation.
 - [ ] Stamp metadata during subscription creation/update.
 - [ ] Stamp metadata during payment-method vault creation.
@@ -259,16 +622,15 @@ descriptors. Products are mutable benefit buckets. Prices are immutable commerci
 terms pointing at a product.
 
 ## Product identity and label
-Product slug is the canonical immutable identifier used in APIs, manifests, provider
-metadata, and DB relationships. Scope it by merchant. A separate product UUID or stored
-product key is duplicate state if slug is immutable; use `(merchant_id, slug)` as the
-DB key. The product's benefits/settings are mutable; ownership of the product remains
-stable.
+Product `key` is the canonical immutable identifier used in APIs, manifests, provider
+metadata, and DB relationships. Scope it by merchant. A separate product UUID or
+opaque derived product key is duplicate state if the user-chosen key is immutable; use
+`(merchant_id, key)` as the DB key. The product's benefits/settings are mutable;
+ownership of the product remains stable.
 
-Use `slug` for products because products are API/URL-facing resources. Use `key` for
-entitlement features because they are abstract feature flags/lookup keys. Both must be
-URL-safe strings, but they live in separate namespaces: product `premium` and
-entitlement key `premium` may both exist and do not collide.
+Use `key` for all user-chosen catalog identifiers. Keys must be URL-safe, lowercase,
+and stable. Product keys and entitlement keys live in separate namespaces: product
+`premium` and entitlement key `premium` may both exist and do not collide.
 
 `display_name` is the mutable user-facing label. Provider mapping should follow the
 same split where possible: NMI uses a unique product SKU for identity and product
@@ -278,46 +640,53 @@ description for the user-facing name.
 Price natural key:
 
 ```text
-price:<merchant_slug>:<product_slug>:<currency>:<unit_amount>:<billing_period>
+price:<merchant_slug>:<product_key>:<currency>:<unit_amount>:<billing_period>
 ```
 
 Examples:
 
 ```text
-price:doujins:premium:usd:25000000:30d
-price:doujins:api-credits-100:usd:100000000:once
+price:doujins:premium:usd:25_000_000:30d
+price:doujins:api-credits-100:usd:100_000_000:once
 ```
 
-Price key should be deterministic from that natural key. Unit amount/currency/billing
-period/product-link changes create a new price. Mutable price fields should be
-operational only: status/archive, provider links, timestamps.
+Price key should be deterministic from that natural key. Price `currency` is required;
+do not default it to USD. Unit amount/currency/billing period/product-link changes create
+a new price. Mutable price fields should be operational only: status/archive, provider
+links, timestamps.
 
 ## Bidirectional mapping
-- local merchant + product slug -> provider product via provider links.
+- local merchant + product key -> provider product via provider links.
 - local price key -> provider price/plan via provider links.
-- provider product/price -> local product slug and price key via stamped metadata.
-- legacy provider product/price -> local product slug and price key via adoption manifest.
+- provider product/price -> local product key and price key via stamped metadata.
+- legacy provider product/price -> local product key and price key via adoption manifest.
 
 ## Provider identifier mapping
-- Stripe product: prefer caller-owned product `id` derived from product slug when allowed;
-  otherwise store `product_slug` in metadata and keep Stripe's `prod_...` id as a provider link.
-- Stripe price: provider `price_...` is an opaque link; use deterministic `lookup_key` for
-  the OpenRails price key and stamp metadata as backup.
-- NMI product: map `product_sku = product slug`; map `product_description = display_name`.
-- NMI recurring plan: map `plan_id = price key`; map `plan_name = display_name`.
-- CCBill: no OpenRails-owned product slug object. Store `form_name`, `flex_id`, and any
+- Stripe product: prefer caller-owned product `id` derived from the namespaced product key
+  when safe for the connected account; otherwise store `product_key` in metadata and keep
+  Stripe's `prod_...` id as a provider link.
+- Stripe price: provider `price_...` is an opaque link; use deterministic `lookup_key`
+  derived from the OpenRails price key and stamp metadata as backup.
+- NMI product: map `product_sku = product key`; map `product_description = display_name`.
+- NMI recurring plan: map `plan_id = deterministic price key`; map `plan_name = display_name`.
+  Do not use product key as the canonical plan id except as a compatibility alias for
+  single-price legacy products; a plan is price/period terms, not the mutable product bucket.
+- CCBill: no OpenRails-owned product key object. Store `form_name`, `flex_id`, and any
   numeric Pricing Admin price/subscription ids as provider links; resolve legacy rows via
   adoption manifest.
 
 ## Tasks
-- [ ] Add canonical URL-safe product slug / entitlement key validation and price-key builder.
-- [ ] Make products use immutable natural identity (`merchant_id + slug`) instead of a separate product UUID/key.
-- [ ] Store mutable product `display_name` separately from immutable product `slug`.
+- [ ] Add canonical URL-safe product key / entitlement key validation and price-key builder.
+- [ ] Make products use immutable natural identity (`merchant_id + key`) instead of a separate product UUID/derived key.
+- [ ] Store mutable product `display_name` separately from immutable product `key`.
 - [ ] Store price natural keys or make them derivable from existing columns.
-- [ ] Enforce price uniqueness by merchant + product + currency + unit amount + billing period.
-- [ ] Keep product slug mutable fields separate from identity fields.
-- [ ] Update provider link logic with Stripe/NMI direct identifiers and CCBill link-only identifiers.
-- [ ] Add tests for stable product slug, changed product benefits preserving ownership, changed price terms creating a new price key.
+- [ ] Enforce price uniqueness by merchant + product key + currency + unit amount + billing period.
+- [ ] Keep product identity fields separate from mutable product fields.
+- [ ] Update provider link logic with Stripe/NMI deterministic identifiers and CCBill link-only identifiers.
+- [ ] Add provider lookup tests: Stripe product by deterministic id, Stripe price by
+  `lookup_key`, NMI product by `product_sku`, and NMI recurring plan by deterministic
+  `plan_id`.
+- [ ] Add tests for stable product key, changed product benefits preserving ownership, changed price terms creating a new price key.
 
 ---
 
@@ -332,97 +701,257 @@ must model all OpenRails-owned access and billing effects directly.
 ## Target manifest shape
 
 ```yaml
+usage_limits:
+  - key: starter-spend
+    measure: billable_spend
+    windows:
+      - window: 5h
+        amount: 10_000_000
+      - window: 7d
+        amount: 70_000_000
+
 products:
-  - slug: premium
+  - key: premium
     display_name: Premium
     description: Optional text
     entitlements:
       - premium
+    usage_limits:
+      - starter-spend
     credits:
-      - currency: usd
-        amount: 25000000
-        expires_after_days: null
-    product_ownership:
+      - ledger: credits          # named ledger; real currency → money
+        currency: usd
+        amount: 25_000_000
+      - ledger: ai-image-credits  # currency omitted → custom integer counter
+        amount: 200
+    includes:
       - product-b
       - product-c
-    spend_limits:
-      - window: 5h
-        amount: 10000000
-        currency: usd
-      - window: 7d
-        amount: 70000000
-        currency: usd
     prices:
       - currency: usd
-        unit_amount: 25000000
+        unit_amount: 25_000_000
         billing_period: 30d
+        providers:
+          - stripe
+          - nmi
+
+  - key: claude-api-credits-50
+    display_name: $55 Claude API credits
+    description: Pay $50, receive $55 in Claude API credits
+    credits:
+      - ledger: claude-api-credits
+        currency: usd
+        amount: 55_000_000
+    prices:
+      - currency: usd
+        unit_amount: 50_000_000
+        providers:
+          - stripe
+          - nmi
+
+  - key: claude-api-credits-100
+    display_name: $120 Claude API credits
+    description: Pay $100, receive $120 in Claude API credits
+    credits:
+      - ledger: claude-api-credits
+        currency: usd
+        amount: 120_000_000
+    prices:
+      - currency: usd
+        unit_amount: 100_000_000
         providers:
           - stripe
           - nmi
 ```
 
-Prices are nested under products. A price's identity includes the product slug plus
+Prices are nested under products. A price's identity includes the product key plus
 commercial terms, so a top-level `prices:` section would duplicate the product link
 and invite drift. Products may have zero prices when they are benefit-only buckets
 granted by another product; sellable products declare one or more nested prices.
 
 Durations use one explicit OpenRails catalog grammar anywhere the manifest expresses
-a time length: price `billing_period`, spend-limit `window`, and future duration
-fields. Use Go-style strings with one OpenRails extension: `h` and `d`. Examples:
-`24h`, `30d`, `365d`. Missing price `billing_period` means one-time; `once` is
-accepted as an explicit spelling. Canonicalize equivalent durations before storing
-or building keys, so `24h` and `1d` resolve to the same period. Go's standard
-`time.ParseDuration` handles `h` but not `d`, so this needs a tiny catalog parser
-for `h` and `d`; do not add a dependency.
+a time length: price `billing_period`, usage-limit `window`, credit `expires`, and
+future duration fields. Use Go-style strings with one OpenRails extension: `h` and
+`d`. Examples: `24h`, `30d`, `365d`. Missing price `billing_period` means one-time;
+`once` is accepted as an explicit spelling there. Missing credit `expires` means the
+default `365d`. Canonicalize equivalent durations before storing or building keys, so
+`24h` and `1d` resolve to the same period. Go's standard `time.ParseDuration` handles
+`h` but not `d`, so this needs a tiny catalog parser for `h` and `d`; do not add a
+dependency.
 
 Provider adapters translate the canonical duration into each provider's native shape.
 Stripe recurring prices use `interval` (`day`, `week`, `month`, `year`) plus
 `interval_count`; for OpenRails `30d`, prefer Stripe `interval=day` and
 `interval_count=30` rather than calendar `month`. Price billing periods must be
-`once` or whole-day durations; sub-day durations like `5h` are valid for spend-limit
+`once` or whole-day durations; sub-day durations like `5h` are valid for usage-limit
 windows, not provider recurring prices.
 
-Amounts are currency-native integer units. For USD, use micro-dollars: $25.00 is
-`25000000`, $10.00 is `10000000`, and $70.00 is `70000000`.
-Prices use Stripe's `unit_amount` field name. Credits and spend limits use `amount`
-because they are OpenRails ledger/budget amounts, not provider price objects.
+Money amounts are currency-native integer units. For USD, use micro-dollars: $25.00
+is `25_000_000`, $10.00 is `10_000_000`, and $70.00 is `70_000_000`. Prices use Stripe's
+`unit_amount` field name because they describe the unit price a provider charges.
+Credit grants and usage limits use `amount` because they describe ledger deposits or
+budget counters, not provider price objects. Credit grants target a
+named ledger: `(merchant, customer, ledger)` identifies it, and the ledger's `currency`
+determines what the integer `amount` means — a real ISO currency (`usd`, `yen`) is money
+in micro-units, while `custom` (the default when `currency` is omitted) is an app-defined
+integer counter. So `280_000_000` is $280.00 in a `usd` ledger and 280,000,000 units in a
+`custom` ledger; the ledger, not the bare number, carries the meaning.
 
 Examples this must cover:
 - `premium`, `premium-plus` entitlement grants.
-- API-credit packs: pay $25 for $25 credits, or $100 for $110 credits.
-- Product ownership chaining: buy product-A, also own product-B and product-C.
-- Spend/rate limits: product-A grants 5h/$10 + 7d/$70; product-B grants 2x that.
+- Money credit packs: pay $25 for $25 prepaid USD credits, $50 for $55 Claude API credits,
+  or $100 for $120 Claude API credits.
+- Credit packs: pay $10 for 100 `ai_image_credit` units.
+- Separate ledgers: a `usd` `balance-owed` ledger (driven negative by arrears) and a
+  separate `usd` `credits` ledger, held by the same customer without auto-netting.
+- Included products: buy product-A, also own product-B and product-C.
+- Usage/rate limits: product-A grants usage limit `starter-spend`, which caps
+  `billable_spend` at 5h/$10 + 7d/$70, represented as integer measure units. Products
+  can grant entitlements, usage limits, credits, and included products independently.
 
 ## Semantics
-- Product identity is stable; benefits are mutable.
-- Durable product ownership windows are the source of truth for access. Subscriptions,
-  one-time purchases, imports, and admin grants create/extend/revoke ownership windows
-  for product slugs.
-- Effective entitlements are derived from active product ownership plus a benefit
-  snapshot for the current paid/grace window, with additive catalog changes applied
-  immediately. If a user bought product-A while it granted entitlement-A, and the
-  catalog changes product-A to grant entitlement-B, the user keeps entitlement-A until
-  the current ownership window ends and also receives entitlement-B for the remainder
-  of that window. New windows/purchases use the new product definition.
-- Grace is an ownership-window state/extension, not an entitlement special case. A
-  subscription in grace still owns the product until `grace_ends_at`; when grace ends,
-  product ownership ends and derived benefits disappear.
-- Credit grants are payment ledger entries, not continuously recomputed access state.
+- Product key is stable; benefits are mutable.
+- The `entitlements` ledger is the source of truth for access (see #598). A purchase,
+  subscription, renewal, import, or admin grant MATERIALIZES the product's CURRENT
+  benefits at grant time: one windowed `entitlements` row per granted entitlement
+  (carrying `source_type` + `grant_id`), credits into the credit/money ledger, and usage
+  limits as admission-policy bindings. Reads use the existing flat ledger directly — no
+  read-time derivation from ownership, and no `product_ownership` source-of-truth table.
+- The materialized rows ARE the snapshot of what was granted, so grandfathering is
+  automatic: a later catalog change does not touch existing windows. Catalog changes
+  apply to FUTURE grants by default; an explicit additive-backfill action can push newly
+  added benefits onto active windows when a merchant wants the change to be retroactive.
+- Grace is just another materialized window, not a special case: a subscription in grace
+  holds `source_type='grace'` entitlement rows whose `end_at` is `grace_ends_at`; when
+  grace ends those rows simply expire (no special-case derivation to unwind).
+- Credit grants are payment/ledger entries, not continuously recomputed access state.
   Each successful one-time purchase grants the product's configured credits once. Each
   successful recurring payment grants them once for that billing period. Editing catalog
   credit grants changes future payment grants; existing granted/spent credits remain
   auditable unless an explicit credit migration action is run.
+- Balances live in named ledgers keyed `(merchant, customer, ledger)`, where `ledger` is an
+  arbitrary merchant-chosen URL-safe key. A customer×merchant may hold AS MANY ledgers as the
+  merchant wants, including more than one in the same currency — e.g. a `balance-owed` ledger
+  and a separate `credits` ledger, both `usd`. Each ledger carries a `currency`:
+  - a real ISO currency (`usd`, `yen`, …) → MONEY: micro-unit scale, may go negative (arrears,
+    capped by the configured outstanding-owed limit), recorded via double-entry (money's
+    source of truth).
+  - `custom` (the default when `currency` is omitted) → an app-defined integer counter
+    (`ai_image_credit`, game gold): floors at 0, recorded as credit lots, is not money, and
+    never offsets owed money.
+  A ledger's currency is fixed on first use; a later grant referencing the same ledger with a
+  different currency is a validation error.
+- Currency vocabulary: built-ins are the ISO 4217 codes, compiled in (NOT a merchant-managed
+  table) — every ISO currency is money, stored in micros uniformly; the ISO minor-unit exponent
+  (USD→2, JPY→0) is used ONLY for display and provider conversion (e.g. Stripe cents). `custom`
+  is a single sentinel for a non-money integer counter; the LEDGER NAME (`ai-image-credits` vs
+  `gold`) is what distinguishes counters, so merchants do NOT define custom currencies — that is
+  the unit registry rejected in #598 (a label is the app's job; a fractional `scale` is a YAGNI
+  per-ledger add only if some merchant ever truly needs sub-unit amounts).
+- Currency validation: `currency` ∈ {any ISO 4217 code} ∪ {`custom`}; omitted → `custom`; any
+  other value (e.g. `usdd`) is a validation error. A price/payment may only target an ISO (money)
+  ledger — charging into a `custom` ledger is an error, which also catches a forgotten
+  `currency: usd`.
+- ISO money ledgers are signed balances: positive means prepaid/credit, negative means owed
+  arrears, bounded by the configured outstanding-owed limit. `custom` ledgers are not signed
+  debt ledgers; they floor at zero.
+- Cross-ledger application is allowed only for the same merchant, same customer, and same ISO
+  currency. It is explicit or configured, not surprise global netting: e.g. customer owes $10
+  on ledger-A and has $20 on ledger-B, so apply $10 from B to A, leaving A=$0 and B=$10.
+  Otherwise ledgers stay isolated. No cross-currency, no custom-counter application, no FX.
+- Money credit grant materialization deposits into the named ISO-currency ledger; within that
+  ledger the signed balance absorbs any negative (owed) balance before going positive (prepaid).
+  Custom grants deposit into the named `custom` ledger as integer units, spendable by the
+  merchant's own usage logic but never offsetting owed money.
+- Usage limits are a separate admission/rate-limit policy category. They are not
+  entitlements and not credits. A product can grant usage limit keys alongside
+  entitlement keys and credit grants. `measure` is a direct URL-safe event-stream key
+  whose values are summed as integers for admission control; `billable_spend` does not
+  touch the money ledger. Future measures can be arbitrary integer counters, but their
+  admission/capture semantics live in the merchant application, not a catalog registry.
 - Grants are the audit log: "this user got ownership/credit/manual entitlement because
   of this payment/import/admin action." Source product/subscription/payment is preserved.
-- The existing entitlement read surface should be backed by read-time derivation or a
-  rebuildable projection. Keep entitlement rows only for manual/non-catalog grants or
-  as a compatibility cache, not as the source of truth for catalog-derived benefits.
+- The existing entitlement read surface stays backed by the `entitlements` ledger itself:
+  catalog-derived and manual rows live in the same table and are read uniformly. It is the
+  source of truth, not a projection or compatibility cache (#598).
 - Provider catalog never owns these semantics; providers only receive sellable products/prices.
 
+## Usage limit system
+- Specified in catalog as top-level `usage_limits` definitions referenced by product keys.
+  A definition has `key`, direct `measure`, and one or more windows (`window`, `amount`).
+  `measure` is just the URL-safe event-stream key the merchant app reports against.
+- Validate catalog usage limits on apply: URL-safe `key` and `measure`, unique limit keys,
+  positive window durations, positive integer amounts, and no duplicate window key/duration
+  within one limit. Do not add a measure registry or unit system.
+- Store catalog definitions lazily in the product/catalog JSON first. Split tables only when
+  querying/reporting needs it.
+- At grant time, materialize product-granted usage limits into a durable binding row, not
+  a hot-path counter row. Shape: merchant, customer, usage_limit_key, measure, windows
+  JSON, product_key/source_type/grant_id, starts_at, ends_at, revoked_at, policy_version.
+  This row is the recoverable "customer is entitled to this limit" fact and is written
+  only on purchase/renewal/admin grant/backfill/revoke.
+- Delegated application traffic is a separate usage-policy source, not product ownership.
+  A platform application such as Cozy Art registered under Tensorhub can define delegated
+  tiers/profiles that point at usage-limit keys or inline windows. A delegated user is an
+  opaque invoker key namespaced by application, e.g.
+  `app:<application_id>:sub:<stable_host_subject>`, so native Tensorhub users, Cozy Art
+  users, and another tenant's users cannot collide.
+- For delegated users, avoid per-user OpenRails rows unless Tensorhub deliberately wants
+  server-side assignment. The remote app JWT should identify the application, delegated
+  subject, and tier/profile key; Tensorhub/OpenRails resolves that tier/profile against
+  platform-owned application config. Membership changes take effect on next token issuance
+  or server-side profile update, bounded by token TTL.
+- If Tensorhub needs an application-wide aggregate cap, model the application as the payer
+  customer and apply payer-scope windows. If it needs per-delegated-user caps, apply
+  invoker-scope windows keyed by the namespaced delegated user. Both compose in the same
+  admission policy and both use Redis counters.
+- Customer ledger delegation is a third layer: a customer permission group may authorize
+  other principals to spend a specific `(merchant, customer, ledger)` balance on its behalf,
+  including stored-balance spend or arrears spend. This chooses the payer/ledger authority;
+  it does not by itself define the usage limit. After authorization resolves the payer
+  ledger, usage-limit policy still composes from product-derived customer limits,
+  delegated-application limits, and customer-owned invoker/role caps.
+- Keep the axes separate:
+  native Tensorhub user purchase -> customer/product bindings;
+  Cozy Art delegated user -> application tier/profile + invoker-scoped counters;
+  customer "let these users spend my balance" -> permission-group ledger delegation plus
+  optional payer-owned invoker/role caps.
+- Do not cram product-derived usage limits into existing `payer_spend_limits` or
+  `invoker_spend_limits`; those are trust-tier/delegated-invoker admin policies. The
+  admission loader should compose product-derived bindings with those existing policies.
+- Enforcement uses Redis/Garnet fixed-window counters, reusing the current spendgate/ratelimit
+  primitives. Request-time counter state lives only in Redis; Postgres is never updated
+  per API request.
+- Admission input must name `measure`, integer `amount`, customer, request id, and optional
+  invoker/roles. The loader selects active bindings for that customer+measure. The gate
+  atomically denies if any applicable window would exceed its amount; on allow it reserves
+  the estimate in every applicable window.
+- For delegated application admission, the input also carries application id, delegated
+  subject/invoker, and tier/profile key. The host may report the invoker key directly only
+  after Tensorhub has validated the remote application JWT and normalized it under the
+  application namespace.
+- For customer-authorized ledger spend, admission first resolves the customer permission
+  group and ledger the invoker is allowed to spend from, then runs the same Redis gate with
+  that customer/ledger as payer authority and the acting principal as invoker.
+- Capture keeps the reserved estimate in the windows and releases only the in-flight hold.
+  Release subtracts the estimate from the windows. This matches the current estimate-based
+  spendgate model and avoids true-up complexity. If exact usage is required, the caller should
+  admit with the exact amount.
+- Refresh is implicit: Redis keys expire at the fixed-window boundary plus slack. No cron job
+  resets counters. If Redis is flushed, counters restart at zero but durable bindings reload
+  from Postgres. Bindings refresh only when a new grant/renewal materializes a new window.
+- Catalog edits affect future grants by default. Additive backfill inserts new active
+  usage-limit binding rows for existing windows; removals do not delete existing bindings
+  unless an explicit revoke/migration action does it.
+- Introspection reads active bindings plus Redis window status and returns, per customer and
+  optional measure/invoker: usage_limit_key, measure, window, limit, used, remaining,
+  reset_at, and source product/grant. This is dashboard/reporting state, not source of truth.
+
 ## Provider boundary
-- OpenRails owns entitlements, credits, linked product ownership, and spend limits.
-- Stripe can mirror product display/description and some entitlement-like metadata/features,
-  but it does not own OpenRails product ownership, credits, or spend limits.
+- OpenRails owns entitlements, usage limits, money credits, non-money credit balances, and
+  included product ownership.
+- Stripe can mirror product display/description, but it does not own OpenRails
+  entitlements, included products, credits, or usage limits.
 - NMI and CCBill own sellable/payment-side objects only; they do not own OpenRails benefits.
 - Provider sync is best-effort for provider-visible fields. Benefit changes must not depend
   on provider mutation succeeding.
@@ -432,27 +961,46 @@ Lazy path first: extend the current product JSON specs rather than splitting tab
 immediately. Split later only if querying/reporting demands it.
 
 ## Tasks
-- [ ] Extend catalog manifest with flattened product benefit fields.
+- [ ] Extend catalog manifest with flattened product benefit fields plus a separate `usage_limits` registry.
 - [ ] Keep prices nested under products; allow benefit-only products with no direct prices.
-- [ ] Normalize price `unit_amount` and benefit `amount` values as currency-native integer units; USD examples use micro-dollars.
+- [ ] Normalize price `unit_amount` and money-credit/usage-limit `amount` values as integer units; USD examples use micro-dollars with YAML underscore grouping.
+- [ ] Require price `currency`; do not default sellable prices to USD. Credit grants may omit `currency`, which defaults to `custom`.
 - [ ] Replace catalog `interval`/`interval_count` with optional `billing_period` strings (`24h`, `30d`, `365d`; missing means one-time; `once` allowed) and canonicalize equivalent periods.
-- [ ] Use the same duration parser/canonical form for spend-limit `window` values.
+- [ ] Use the same duration parser/canonical form for usage-limit `window` and credit `expires` values.
+- [ ] Replace credit `expires_after_days` with optional `expires`; omitted means default `365d`.
 - [ ] Translate canonical billing periods into provider-native recurrence fields; Stripe gets `interval` + `interval_count`.
-- [ ] Reject sub-day `billing_period` values for provider-backed prices while still allowing sub-day spend-limit windows.
-- [ ] Map existing `entitlements` and `credits` into the new benefit model.
+- [ ] Reject sub-day `billing_period` values for provider-backed prices while still allowing sub-day usage-limit windows.
+- [ ] Map existing `entitlements` and money credits into the new benefit model.
 - [ ] Apply credit grants from successful payments/renewals, not from continuous ownership recomputation.
-- [ ] Make product ownership windows the source of truth for subscription, one-time purchase, import, grace, and admin access.
-- [ ] Store or derive current-window benefit snapshots so removals do not revoke current paid/grace access.
-- [ ] Apply additive catalog changes to active windows immediately; apply removals on next ownership window/payment unless an explicit revoke/migration action is run.
-- [ ] Derive effective entitlements from active ownership windows, current-window benefit snapshots, additive catalog changes, and manual grants.
-- [ ] Treat `grants` as the audit ledger for ownership/credit/manual-entitlement events.
-- [ ] Demote current entitlement rows to manual grants and/or rebuildable compatibility projection.
-- [ ] Add product ownership grants to the product benefit application path.
-- [ ] Add spend-limit/rate-limit grants to the product benefit application path.
+- [ ] Model balances as named ledgers `(merchant, customer, ledger)` with a per-ledger `currency`; allow as many ledgers per customer as the merchant wants, including multiple of the same currency. Fix a ledger's currency on first use; reject later references that change it.
+- [ ] Route by currency: real ISO currency → double-entry money posting (micro-units, may go negative up to the outstanding-owed limit); `custom` (default) → integer credit-lot posting (floors at 0).
+- [ ] Currency vocabulary + validation: compiled-in ISO 4217 table (code → display exponent) as the built-in money currencies; single `custom` sentinel for integer counters (no merchant-defined currencies). Validate `currency` ∈ {ISO} ∪ {`custom`}, omitted → `custom`, else error; reject prices/payments targeting a `custom` ledger.
+- [ ] Allow ISO money ledgers to carry signed balances: positive prepaid/credit, negative owed arrears bounded by the outstanding-owed limit; keep `custom` ledgers non-negative.
+- [ ] Provide explicit/configured same-currency ledger application/transfer for merchants who want prepaid on one ledger to pay down owed balance on another ledger; no cross-currency/custom-counter netting.
+- [ ] Tests: ISO ledger can go negative within owed limit; custom ledger cannot go below zero; same-currency ledger application moves value between two ledgers for the same merchant/customer; cross-currency and custom-counter application are rejected.
+- [ ] Materialize a product's current benefits into the existing ledgers at grant time (subscription, one-time purchase, renewal, import, grace, admin): windowed `entitlements` rows + credit deposits + admission-policy bindings.
+- [ ] Default catalog changes to apply on the NEXT grant/renewal only; existing windows keep their materialized rows. Provide an explicit additive-backfill action for retroactive adds.
+- [ ] Keep reads on the flat `entitlements` ledger (catalog-derived + manual unified); NO read-time derivation and NO `product_ownership` source-of-truth table (#598).
+- [ ] Treat `grants` as the audit ledger for the materialization events (entitlement/credit/manual).
+- [ ] Add `includes` product ownership grants to the product benefit application path.
+- [ ] Apply product-granted usage limit keys separately from entitlements and credits.
+- [ ] Treat `usage_limits[].measure` as a direct URL-safe event-stream key; windows only carry `window` + integer `amount`.
+- [ ] Add durable product-derived usage-limit binding storage with source/grant/window metadata; do not reuse tier/delegated admin policy tables as the source of truth.
+- [ ] Keep usage-limit request counters exclusively in Redis/Garnet; no Postgres write on admit/capture/release.
+- [ ] Compose active product-derived usage-limit bindings into the existing Redis admission gate policy.
+- [ ] Add usage-limit admission input fields for direct `measure` + integer `amount`; keep money affordability separate from non-money usage counters.
+- [ ] Add delegated application usage policy support: application config maps tier/profile keys to usage-limit keys/windows.
+- [ ] Normalize delegated invoker identity as application-namespaced opaque keys; reject un-namespaced delegated subjects.
+- [ ] Compose delegated application policies with product-derived bindings and existing admin/delegated policies in the Redis admission gate.
+- [ ] Add cross-tenant/app isolation tests: same host subject under two applications gets distinct counters; native user ids do not collide with delegated ids.
+- [ ] Add customer permission-group ledger spend delegation support: resolve which principals may spend each `(merchant, customer, ledger)` balance, including stored-balance and arrears spend.
+- [ ] Compose customer-owned ledger delegation with usage-limit admission: authorization selects payer/ledger; Redis policy enforces payer/invoker windows.
+- [ ] Add delegation tests: authorized principal can spend the delegated ledger, unauthorized principal cannot, and two ledgers owned by the same customer do not share spend authority unless explicitly granted.
+- [ ] Add usage-limit introspection: active bindings plus Redis used/remaining/reset state.
 - [ ] Add explicit credit expiry support in product credit grants.
-- [ ] Update catalog apply/upsert so product benefit changes are visible to active holders immediately through derived reads or projection refresh.
+- [ ] Catalog apply/upsert updates the product definition for FUTURE grants; it does NOT rewrite active holders' materialized rows unless the explicit additive-backfill action is run.
 - [ ] Keep provider sync limited to provider-visible product/price fields; OpenRails benefit changes stay local and authoritative.
-- [ ] Tests: purchase applies all benefit kinds; product mutation updates active holders; provider adoption derives grants from benefits; provider sync failure does not block local benefit convergence.
+- [ ] Tests: purchase materializes all benefit kinds; a catalog change applies to the next grant (not active windows) by default; additive-backfill pushes an added benefit onto active windows; provider adoption materializes benefits from the local catalog; provider sync failure does not block local benefit convergence.
 
 ---
 
