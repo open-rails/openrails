@@ -16,6 +16,110 @@ func writeCatalogPushManifest(t *testing.T, body string) string {
 	return path
 }
 
+// TestExampleCatalogManifestParses loads the canonical config/catalog.example.yaml
+// through the real publish path (loadCatalogPushTargets, which runs
+// catalog.Manifest.Validate per merchant) and asserts the full v1 product
+// surface is present and valid. Mirrors TestExampleMerchantConfigManifestParses.
+// This keeps the example from rotting: if a manifest-schema change breaks the
+// example, this test fails.
+func TestExampleCatalogManifestParses(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+
+	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: raw})
+	if err != nil {
+		t.Fatalf("loadCatalogPushTargets (example failed to parse/validate): %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	target := targets[0]
+	if target.Merchant != "local-stack" {
+		t.Fatalf("merchant = %q, want local-stack", target.Merchant)
+	}
+	m := target.Manifest
+
+	// manifest.Validate already ran inside loadCatalogPushTargets; assert it is
+	// idempotently happy on the normalized manifest too.
+	if err := m.Validate(); err != nil {
+		t.Fatalf("manifest.Validate: %v", err)
+	}
+
+	// Flatten products across tier groups (Validate buckets them by tier_group).
+	products := map[string]bool{}
+	var (
+		sawMeteredPrice bool
+		sawIntro        bool
+		sawCredits      bool
+		sawUsageLimit   bool
+		sawIncludes     bool
+	)
+	for _, g := range m.TierGroups {
+		for _, p := range g.Products {
+			products[p.Key] = true
+			if len(p.UsageLimits) > 0 {
+				sawUsageLimit = true
+			}
+			if len(p.Includes) > 0 {
+				sawIncludes = true
+			}
+			if len(p.Credits) > 0 {
+				sawCredits = true
+			}
+			for _, pr := range p.Prices {
+				if pr.Metered != nil {
+					sawMeteredPrice = true
+				}
+				if pr.Intro != nil {
+					sawIntro = true
+				}
+			}
+		}
+	}
+
+	// Every documented use case is represented by at least one product key.
+	for _, key := range []string{
+		"basic", "premium", // subscription tiers
+		"creator-pro",                     // free-trial / intro pricing
+		"ai-image-credits", "api-credits", // custom credit grants
+		"movie-classic", "movie-premiere", // content marketplace (ownership)
+		"movie-bundle",            // bundle via includes
+		"claude-5x", "claude-20x", // usage-limit plan variants
+		"compute-metered", "storage-metered", // metered billing
+	} {
+		if !products[key] {
+			t.Errorf("example missing expected product key %q", key)
+		}
+	}
+
+	// Advanced-feature surfaces are all exercised.
+	if !sawIntro {
+		t.Error("example has no price with intro/free-trial pricing")
+	}
+	if !sawCredits {
+		t.Error("example has no product granting custom credits")
+	}
+	if !sawUsageLimit {
+		t.Error("example has no product bound to a usage_limit")
+	}
+	if !sawIncludes {
+		t.Error("example has no bundle product using includes")
+	}
+	if !sawMeteredPrice {
+		t.Error("example has no metered price")
+	}
+
+	// Top-level meters and usage_limits are declared.
+	if len(m.Meters) < 2 {
+		t.Errorf("example declares %d meters, want >= 2 (counter + gauge)", len(m.Meters))
+	}
+	if len(m.UsageLimits) < 2 {
+		t.Errorf("example declares %d usage_limits, want >= 2 (5x + 20x)", len(m.UsageLimits))
+	}
+}
+
 func TestLoadCatalogPushTargetsRequiresMerchantPerCatalog(t *testing.T) {
 	path := writeCatalogPushManifest(t, `version: 1
 catalogs:

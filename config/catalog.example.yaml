@@ -1,15 +1,64 @@
 version: 1
 
+# Canonical, exhaustive OpenRails catalog-as-code example.
+#
 # Apply with:
 #   openrails push-merchant-catalog --config config.yaml --file config/catalog.example.yaml
 #
-# This file contains desired catalog state only. It does not contain merchant
-# profile data, provider credentials, users, permission groups, or API keys.
+# This file is desired catalog state ONLY. It does not contain merchant profile
+# data, provider credentials, users, permission groups, or API keys (those live
+# in config/merchants.example.yaml).
+#
+# Money is in MICRO-USD: 1_000_000 micro-USD = $1.00. So 9_990_000 = $9.99.
+# Price intervals are whole-day/whole-hour duration strings: "30d" (monthly),
+# "365d" (yearly), or "once" (a single non-recurring charge). A price's identity
+# is its financial substance (currency + unit_amount + interval + providers);
+# prices have no slug. A product's identity is its `key`.
 
 catalogs:
   - merchant: local-stack
 
+    # -----------------------------------------------------------------------
+    # METERS (#603): named usage signals that metered prices bill against.
+    #   kind: counter -> accumulating events (e.g. VM-hours consumed).
+    #   kind: gauge   -> a level sampled over time (e.g. GB stored), so its
+    #                    metered price must declare a `per` time denominator.
+    # Meters are merchant-scoped and referenced by `prices[].metered.meter`.
+    # -----------------------------------------------------------------------
+    meters:
+      - key: vm-hours
+        kind: counter
+      - key: cloud-storage
+        kind: gauge
+
+    # -----------------------------------------------------------------------
+    # USAGE LIMITS: Claude-Code-style request-count windows. A limit is a named
+    # measure with one or more rolling windows ({window, amount}); products bind
+    # to it via `usage_limits: [<key>]`. Windows use the h/d duration grammar.
+    # The 5x and 20x plans below share the same measure but scale the amounts.
+    # -----------------------------------------------------------------------
+    usage_limits:
+      - key: claude-5x
+        measure: claude-code           # the metered action being capped
+        windows:
+          - window: 5h                 # ~225 requests per rolling 5 hours
+            amount: 225
+          - window: 7d                 # ~1500 requests per rolling week
+            amount: 1500
+      - key: claude-20x
+        measure: claude-code           # same measure, 4x the headroom
+        windows:
+          - window: 5h
+            amount: 900
+          - window: 7d
+            amount: 6000
+
     products:
+      # =====================================================================
+      # 1. SUBSCRIPTION TIERS — recurring memberships with monthly (30d) and
+      #    yearly (365d) prices and entitlement grants. Multiple products in
+      #    one tier_group require an ordering tier_rank.
+      # =====================================================================
       - key: basic
         display_name: Basic
         description: Basic recurring membership.
@@ -19,7 +68,7 @@ catalogs:
           - access.basic
         prices:
           - currency: usd
-            unit_amount: 9_990_000
+            unit_amount: 9_990_000     # $9.99 / month
             interval: 30d
             providers: [stripe, mobius]
             provider_links:
@@ -27,9 +76,8 @@ catalogs:
                 lookup_key: local-stack-basic-monthly
               mobius:
                 plan_id: local_stack_basic_monthly
-
           - currency: usd
-            unit_amount: 99_900_000
+            unit_amount: 99_900_000    # $99.90 / year
             interval: 365d
             providers: [stripe]
             provider_links:
@@ -46,7 +94,7 @@ catalogs:
           - access.premium
         prices:
           - currency: usd
-            unit_amount: 19_990_000
+            unit_amount: 19_990_000    # $19.99 / month
             interval: 30d
             providers: [stripe, mobius]
             provider_links:
@@ -54,19 +102,22 @@ catalogs:
                 lookup_key: local-stack-premium-monthly
               mobius:
                 plan_id: local_stack_premium_monthly
-
           - currency: usd
-            unit_amount: 199_900_000
+            unit_amount: 199_900_000   # $199.90 / year
             interval: 365d
+            # Solana settles on-chain in a $1-pegged stablecoin on a recurring
+            # schedule, so a Solana price must be recurring AND priced in usd/usdc/usdg.
             providers: [stripe, solana]
             provider_links:
               stripe:
                 lookup_key: local-stack-premium-yearly
-              # Solana plan accounts are provider-generated. Include
-              # plan_pda only when linking an existing on-chain plan.
+              # Solana plan accounts are provider-generated. Supply plan_pda only
+              # when linking an EXISTING on-chain plan:
               # solana:
               #   plan_pda: 7XyExistingPlanAccount...
 
+      # A retired plan kept active:false so migrated subscriptions still resolve
+      # while the price is archived from new checkout. Demonstrates archival.
       - key: legacy-vip
         display_name: Legacy VIP
         description: Historical plan kept for migrated subscriptions.
@@ -80,3 +131,195 @@ catalogs:
             unit_amount: 14_990_000
             interval: 30d
             active: false
+
+      # =====================================================================
+      # 2. FREE-TRIAL / INTRO PRICING (#602) — a first period priced/length
+      #    differently from the recurring terms. amount: 0 is a free trial.
+      #    `intro.interval` must be recurring; the price interval must not be
+      #    "once". After the intro period it renews at unit_amount.
+      # =====================================================================
+      - key: creator-pro
+        display_name: Creator Pro
+        description: Pro plan with a free 7-day trial, then monthly billing.
+        tier_group: creator
+        entitlements:
+          - access.creator
+        prices:
+          - currency: usd
+            unit_amount: 29_990_000    # $29.99 / month after the trial
+            interval: 30d
+            intro:
+              amount: 0                # free
+              interval: 7d             # for the first 7 days
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-creator-pro-monthly
+
+      # =====================================================================
+      # 3. AI IMAGE CREDITS — a one-time purchase that grants a custom credit
+      #    unit. `credits` is a map of grant-name -> {unit, amount, ...}; the
+      #    custom unit is minted in the merchant's credit ledger. interval:
+      #    once means a single charge (not a subscription).
+      # =====================================================================
+      - key: ai-image-credits
+        display_name: AI Image Credits
+        description: One-time pack granting 500 AI image-generation credits.
+        tier_group: ai-credits
+        credits:
+          ai-image-gen:
+            unit: ai-image-credit      # custom ledger unit
+            amount: 500                # credits granted per purchase
+            cadence: once              # granted once at purchase (not per renewal)
+        prices:
+          - currency: usd
+            unit_amount: 5_000_000     # $5.00 one-time
+            interval: once
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-ai-image-credits
+
+      # =====================================================================
+      # 4. PREPAID API CREDITS — same credit mechanism, a different custom unit
+      #    with an expiry. `expires` uses the h/d duration grammar.
+      # =====================================================================
+      - key: api-credits
+        display_name: Prepaid API Credits
+        description: One-time pack of 10,000 API credits, expiring after a year.
+        tier_group: api-credits
+        credits:
+          api-calls:
+            unit: api-credit
+            amount: 10_000
+            cadence: once
+            expires: 365d              # credits lapse 365 days after grant
+        prices:
+          - currency: usd
+            unit_amount: 20_000_000    # $20.00 one-time
+            interval: once
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-api-credits
+
+      # =====================================================================
+      # 5. CONTENT MARKETPLACE — one-time ownership purchases (e.g. buying a
+      #    movie). interval: once with no entitlements/credits => an owned item.
+      #    Two titles in one group need tier_rank for ordering.
+      # =====================================================================
+      - key: movie-classic
+        display_name: "Movie: The Classic"
+        description: One-time purchase granting permanent ownership of a film.
+        tier_group: movies
+        tier_rank: 1
+        prices:
+          - currency: usd
+            unit_amount: 4_990_000     # $4.99 to own
+            interval: once
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-movie-classic
+      - key: movie-premiere
+        display_name: "Movie: The Premiere"
+        description: One-time purchase of a newer, premium-priced film.
+        tier_group: movies
+        tier_rank: 2
+        prices:
+          - currency: usd
+            unit_amount: 14_990_000    # $14.99 to own
+            interval: once
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-movie-premiere
+
+      # =====================================================================
+      # 6. BUNDLE — a product that grants several INCLUDED products. Purchasing
+      #    the bundle materializes ownership of every product in `includes`
+      #    (each must be a key declared elsewhere in this manifest).
+      # =====================================================================
+      - key: movie-bundle
+        display_name: "Movie Bundle: Classic + Premiere"
+        description: One-time bundle granting ownership of both films at a discount.
+        tier_group: bundles
+        includes:
+          - movie-classic
+          - movie-premiere
+        prices:
+          - currency: usd
+            unit_amount: 17_990_000    # $17.99 (vs $19.98 bought separately)
+            interval: once
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-movie-bundle
+
+      # =====================================================================
+      # 7. CLAUDE-CODE-STYLE USAGE LIMITS — recurring plans that bind to the
+      #    request-count usage_limits declared at the top of this catalog.
+      #    The 5x and 20x variants are ranked tiers of the same family.
+      # =====================================================================
+      - key: claude-5x
+        display_name: Claude Code 5x
+        description: Monthly plan with 5x request-window limits.
+        tier_group: claude-code
+        tier_rank: 1
+        usage_limits:
+          - claude-5x
+        prices:
+          - currency: usd
+            unit_amount: 20_000_000    # $20.00 / month
+            interval: 30d
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-claude-5x
+      - key: claude-20x
+        display_name: Claude Code 20x
+        description: Monthly plan with 20x request-window limits.
+        tier_group: claude-code
+        tier_rank: 2
+        usage_limits:
+          - claude-20x
+        prices:
+          - currency: usd
+            unit_amount: 80_000_000    # $80.00 / month
+            interval: 30d
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-claude-20x
+
+      # =====================================================================
+      # 8. INFRA METERED BILLING — pay-as-you-go prices that bill against the
+      #    meters above. A metered price is OpenRails-native (no external
+      #    `providers`) and may set unit_amount: 0 (all charge comes from usage).
+      #    `metered.rate` is micro-USD per `per_units` of metered quantity.
+      # =====================================================================
+      - key: compute-metered
+        display_name: Compute (VM-hours, metered)
+        description: Usage-based compute billed per VM-hour consumed.
+        tier_group: compute
+        prices:
+          - currency: usd
+            unit_amount: 0             # no flat fee; usage-only
+            interval: 30d              # metered usage is tallied per 30-day cycle
+            metered:
+              meter: vm-hours          # references the counter meter above
+              rate: 50_000             # $0.05 ...
+              per_units: 1             # ... per 1 VM-hour
+      - key: storage-metered
+        display_name: Object Storage (metered)
+        description: Usage-based storage billed per GB held over the period.
+        tier_group: storage
+        prices:
+          - currency: usd
+            unit_amount: 0
+            interval: 30d
+            metered:
+              meter: cloud-storage     # references the gauge meter above
+              rate: 20_000             # $0.02 ...
+              per_units: 1             # ... per 1 GB ...
+              per: 30d                 # ... held for 30 days (gauge needs `per`)
