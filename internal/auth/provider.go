@@ -13,9 +13,8 @@ import (
 
 // Authenticator is the gin-free auth boundary backed by an AuthKit JWT verifier.
 // It implements billingauth.Authenticator. The gin Required()/Optional()
-// middleware that wraps it lives in internal/auth/ginauth so that this gin-free
-// core (and its transitive importers, ultimately pkg/embedded) does not pull in
-// github.com/gin-gonic/gin (#285).
+// Gin middleware wraps it from pkg/authprovider/ginauth so this gin-free core
+// and its transitive importers do not pull in github.com/gin-gonic/gin (#285).
 type Authenticator struct {
 	verifier Verifier
 }

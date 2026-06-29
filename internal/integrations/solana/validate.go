@@ -33,13 +33,3 @@ func ValidateSignature(signature string) error {
 	}
 	return nil
 }
-
-// IsValidAddress returns true if the address format is valid
-func IsValidAddress(address string) bool {
-	return ValidateAddress(address) == nil
-}
-
-// IsValidSignature returns true if the signature format is valid
-func IsValidSignature(signature string) bool {
-	return ValidateSignature(signature) == nil
-}

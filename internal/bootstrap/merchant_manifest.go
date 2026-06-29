@@ -912,27 +912,3 @@ func unlockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Contr
 		log.WithError(err).Warn("merchant bootstrap: release advisory lock failed")
 	}
 }
-
-// AnyMerchantProvisioned reports whether any of the given merchant slugs is already
-// provisioned in the control plane. The server uses this for first-run
-// detection: it auto-applies the bootstrap manifest only when NONE of the
-// manifest's merchants exist yet (#327). Checking the manifest's own slugs — not a
-// blanket merchant count — is required because the control plane's own bootstrap
-// always creates a "default" merchant, so the table is never empty.
-func AnyMerchantProvisioned(ctx context.Context, cp *controlplane.ControlPlane, slugs []string) (bool, error) {
-	if cp == nil || cp.Pool() == nil {
-		return false, nil
-	}
-	norm := make([]string, 0, len(slugs))
-	for _, s := range slugs {
-		if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
-			norm = append(norm, s)
-		}
-	}
-	if len(norm) == 0 {
-		return false, nil
-	}
-	var exists bool
-	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.merchants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
-	return exists, err
-}

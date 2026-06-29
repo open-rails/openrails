@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -366,8 +365,4 @@ func (s *IdempotencyService) setMemoryWithTTL(key string, record *IdempotencyRec
 
 func (s *IdempotencyService) buildKey(operation, key string) string {
 	return idempotencyKeyPrefix + operation + ":" + key
-}
-
-func GenerateKeyForRebill(subscriptionID uuid.UUID, periodEndISO string) string {
-	return fmt.Sprintf("%s:%s", subscriptionID.String(), periodEndISO)
 }

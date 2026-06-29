@@ -29,14 +29,6 @@ type FetcherOptions struct {
 	ProviderKeys map[Provider]string
 }
 
-// BuildFetchers wires a RailFetcher for every provider the runtime has
-// clients/credentials for. Reads only; providers without configuration are
-// simply absent from the map.
-func BuildFetchers(cfg *config.Config, rails config.RailSet, clients FetcherClients, d *db.DB) map[Provider]RailFetcher {
-	fetchers, _ := BuildFetchersWithOptions(cfg, rails, clients, d, FetcherOptions{})
-	return fetchers
-}
-
 // BuildFetchersWithOptions is the strict builder used by operator commands.
 // It respects rail role selection and returns config errors instead of
 // silently picking an arbitrary account.

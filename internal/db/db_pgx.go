@@ -145,17 +145,6 @@ func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx
 	return tx.Commit(ctx)
 }
 
-// SetMerchantGUCPgx pins the RLS merchant GUC (from the context) onto an
-// already-open pgx transaction — for callbacks that already received a
-// pgx.Tx.
-func SetMerchantGUCPgx(ctx context.Context, tx pgx.Tx) error {
-	id, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return setMerchantLocalGUCPgx(ctx, tx, id)
-}
-
 // setMerchantLocalGUCPgx sets the merchant GUC transaction-locally
 // (set_config is_local=true) so it reverts when the tx ends and can never
 // leak onto a pooled connection.

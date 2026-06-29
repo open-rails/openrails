@@ -47,23 +47,3 @@ func NewIssuerVerifier(issuers []string, expectedAudience string) (Verifier, err
 
 	return v, nil
 }
-
-// FormatVerifierError normalises verifier error messages for HTTP responses.
-func FormatVerifierError(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "missing_token"):
-		return "missing_token"
-	case strings.Contains(msg, "bad_issuer"):
-		return "invalid_issuer"
-	case strings.Contains(msg, "bad_audience"):
-		return "invalid_audience"
-	case strings.Contains(msg, "invalid_token"):
-		return "invalid_or_expired_token"
-	default:
-		return msg
-	}
-}

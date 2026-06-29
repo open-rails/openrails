@@ -216,16 +216,6 @@ type keyedFetcher struct {
 
 func (f keyedFetcher) ProviderKey() string { return f.key }
 
-// ProviderKeyFor returns the configured provider key behind a fetcher.
-func ProviderKeyFor(provider Provider, fetcher RailFetcher) string {
-	if k, ok := fetcher.(ProviderKeyer); ok {
-		if key := strings.ToLower(strings.TrimSpace(k.ProviderKey())); key != "" {
-			return key
-		}
-	}
-	return string(provider)
-}
-
 // rawJSON marshals v into a json.RawMessage for the Raw forensics fields,
 // falling back to a JSON-encoded error note rather than failing the fetch.
 func rawJSON(v any) json.RawMessage {

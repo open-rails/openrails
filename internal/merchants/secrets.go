@@ -198,13 +198,6 @@ func normalizeProviderSecretEnvironment(environment string) string {
 	}
 }
 
-// MerchantSecretRegistry returns the canonical OpenRails merchant-secret registry.
-func MerchantSecretRegistry() []SecretDefinition {
-	out := make([]SecretDefinition, len(merchantSecretRegistry))
-	copy(out, merchantSecretRegistry)
-	return out
-}
-
 // SecretDefinitionFor returns a registry entry by stable secret name.
 func SecretDefinitionFor(name string) (SecretDefinition, bool) {
 	name = cleanSecretName(name)
