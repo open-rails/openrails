@@ -259,7 +259,11 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 	got := fx.intentByID(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	assert.Contains(t, string(got.ResultEvidence), `"verified_existing": true`)
+	// #607: the tombstone is slimmed to the dunning pointer keys — the
+	// transaction_id the repair path reads survives; the verified_existing
+	// forensic marker is dropped (retained in the mutation log).
+	assert.Contains(t, string(got.ResultEvidence), fake.txnID, "transaction_id pointer retained for the dunning repair path")
+	assert.NotContains(t, string(got.ResultEvidence), "verified_existing", "forensic evidence pruned")
 	assert.EqualValues(t, 1, fake.saleCalls.Load(), "exactly one charge attempt ever reached the gateway")
 
 	sub := fx.subscription(t)

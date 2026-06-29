@@ -25,6 +25,7 @@ type fakeLedger struct {
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
 	evidence   map[uuid.UUID]map[string]any
+	pruned     []uuid.UUID // ids the Runner pruned post-success (#607)
 	logs       []MutationLogParams
 	logErr     error
 
@@ -101,6 +102,10 @@ func (f *fakeLedger) LogExternalMutation(_ context.Context, p MutationLogParams)
 func (f *fakeLedger) MarkSucceeded(_ context.Context, id uuid.UUID, _ time.Time, ev map[string]any) error {
 	f.transition[id] = StatusSucceeded
 	f.evidence[id] = ev
+	return nil
+}
+func (f *fakeLedger) PruneSucceeded(_ context.Context, id uuid.UUID, _ map[string]any, _, _ bool) error {
+	f.pruned = append(f.pruned, id)
 	return nil
 }
 func (f *fakeLedger) MarkFailedRetryable(_ context.Context, id uuid.UUID, next time.Time, reason string) error {

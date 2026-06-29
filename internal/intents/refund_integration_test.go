@@ -189,7 +189,12 @@ func TestNMIRefundSynchronousSuccess(t *testing.T) {
 	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
-	assert.Contains(t, string(row.ResultEvidence), "txn_refund_1")
+	// #607: the refund tombstone retains its PAYLOAD (the admin producer reads
+	// reservation_id off it for double-refund conflict detection); the forensic
+	// evidence is slimmed. The completed reservation (below) is the source of
+	// truth for the provider refund id.
+	assert.NotEmpty(t, row.Payload, "refund payload retained on the succeeded tombstone")
+	assert.NotContains(t, string(row.ResultEvidence), "txn_refund_1", "forensic evidence slimmed off the tombstone")
 	assert.EqualValues(t, 1, fake.refundCalls.Load())
 
 	status, txn, metadata := fx.reservation(t)
@@ -256,7 +261,7 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 
 		got := fx.intentByID(t, row.ID)
 		assert.Equal(t, StatusSucceeded, got.Status)
-		assert.Contains(t, string(got.ResultEvidence), `"verified_existing": true`)
+		assert.NotEmpty(t, got.Payload, "#607: refund payload retained on the succeeded tombstone")
 		status, txn, _ := fx.reservation(t)
 		assert.Equal(t, "completed", status)
 		assert.Equal(t, "txn_refund_1", txn)

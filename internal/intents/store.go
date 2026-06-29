@@ -150,6 +150,90 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 	}))
 }
 
+// pruneEvidenceKeys are the result-pointer keys a slim succeeded tombstone
+// retains by default — the dunning repair path reads them back off
+// result_evidence (internal/river/jobs_dunning.go: transaction_id for the
+// lifecycle repair, response_code for hard/soft decline classification; the
+// admin operations view also surfaces transaction_id). Everything else is
+// forensic and was already durably logged to ClickHouse before the success
+// transition, so it is safe to drop from Postgres — UNLESS the handler asks to
+// keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
+// because pkg/service/catalog_extras.go renders their verification booleans.
+var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
+
+// PruneSucceeded slims a just-succeeded intent down to a dedupe tombstone:
+// the heavy payload is dropped and result_evidence is reduced to the pointer
+// keys downstream readers still need. The ROW ITSELF IS RETAINED — it is the
+// effectively-once tombstone (UNIQUE on merchant_id+idempotency_key); deleting
+// it would let a re-enqueue re-run the provider mutation (a double charge).
+//
+// keepPayload/keepEvidence are the handler's PrunePolicy: a handler whose
+// payload is read AFTER success (the refund producer's conflict detection reads
+// reservation_id off the durable succeeded row — admin_payments.go) sets
+// keepPayload; a handler whose result_evidence is read after success (catalog
+// archive/sunset detail — catalog_extras.go) sets keepEvidence.
+//
+// The WHERE status='succeeded' guard makes this a no-op on anything not (still)
+// succeeded. Best-effort by design: a prune failure leaves the full row in
+// place, which is correct — just larger — and never weakens the dedupe.
+//
+// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
+// apply exactly as they do for the generated queries.
+func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error {
+	if keepPayload && keepEvidence {
+		return nil // nothing to slim
+	}
+	qx := s.db.Qx(ctx)
+	if keepEvidence {
+		// Drop the payload only; leave result_evidence intact for the handler's
+		// post-success readers.
+		_, err := qx.Exec(ctx,
+			`UPDATE openrails.provider_intents
+			    SET payload = NULL, updated_at = now()
+			  WHERE id = $1 AND status = 'succeeded'`, id)
+		return err
+	}
+	var ev []byte
+	if slim := slimEvidence(evidence); len(slim) > 0 {
+		b, err := json.Marshal(slim)
+		if err != nil {
+			return fmt.Errorf("intents: marshal slim evidence: %w", err)
+		}
+		ev = b
+	}
+	if keepPayload {
+		_, err := qx.Exec(ctx,
+			`UPDATE openrails.provider_intents
+			    SET result_evidence = $2, updated_at = now()
+			  WHERE id = $1 AND status = 'succeeded'`, id, ev)
+		return err
+	}
+	_, err := qx.Exec(ctx,
+		`UPDATE openrails.provider_intents
+		    SET payload = NULL, result_evidence = $2, updated_at = now()
+		  WHERE id = $1 AND status = 'succeeded'`, id, ev)
+	return err
+}
+
+// slimEvidence keeps only pruneEvidenceKeys (when present) off a succeeded
+// intent's evidence; returns nil when none are present so the column is set
+// NULL rather than to an empty object.
+func slimEvidence(evidence map[string]any) map[string]any {
+	if len(evidence) == 0 {
+		return nil
+	}
+	slim := map[string]any{}
+	for _, k := range pruneEvidenceKeys {
+		if v, ok := evidence[k]; ok {
+			slim[k] = v
+		}
+	}
+	if len(slim) == 0 {
+		return nil
+	}
+	return slim
+}
+
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
 	return one(s.db.Gen(ctx).MarkProviderIntentFailedRetryable(ctx, gen.MarkProviderIntentFailedRetryableParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,

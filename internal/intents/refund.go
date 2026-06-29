@@ -183,6 +183,13 @@ func NewNMIRefundHandler(d *db.DB, clients map[string]*nmi.NMIClient, clock cloc
 func (h *NMIRefundHandler) Type() string                         { return TypeNMIRefund }
 func (h *NMIRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
+// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): the
+// admin refund producer reads reservation_id off the durable succeeded row to
+// detect a double-refund conflict (admin_payments.go). The forensic evidence
+// (provider_refund_id) is slimmed — the completed reservation row, not the
+// intent, is the source of truth post-success.
+func (h *NMIRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
+
 func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
@@ -371,6 +378,11 @@ func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.RailSet, 
 
 func (h *StripeRefundHandler) Type() string                         { return TypeStripeRefund }
 func (h *StripeRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+
+// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): the
+// admin refund producer reads reservation_id off the durable succeeded row to
+// detect a double-refund conflict (admin_payments.go).
+func (h *StripeRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
 func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)

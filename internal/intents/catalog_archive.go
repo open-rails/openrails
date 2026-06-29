@@ -220,6 +220,14 @@ func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails config.R
 
 func (h *StripeArchiveProductHandler) Type() string { return TypeStripeArchiveProduct }
 
+// PrunePolicy keeps the result_evidence on a succeeded archive tombstone
+// (#607): the catalog status view renders its verification booleans
+// (verified_absent/already_inactive/...) off the succeeded row
+// (pkg/service/catalog_extras.go). The payload (object id) is dropped.
+func (h *StripeArchiveProductHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
+	return false, true
+}
+
 func (h *StripeArchiveProductHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {
 		extra, _ := ix.StripeProductExtra(catalog.StripeProduct{
@@ -269,6 +277,13 @@ func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails config.Rai
 }
 
 func (h *StripeArchivePriceHandler) Type() string { return TypeStripeArchivePrice }
+
+// PrunePolicy keeps the result_evidence on a succeeded archive tombstone
+// (#607): the catalog status view renders its verification booleans off the
+// succeeded row (pkg/service/catalog_extras.go).
+func (h *StripeArchivePriceHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
+	return false, true
+}
 
 func (h *StripeArchivePriceHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {

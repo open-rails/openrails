@@ -21,6 +21,7 @@ type ledger interface {
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
+	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
@@ -269,6 +270,17 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		err = r.Store.MarkSucceeded(ctx, intent.ID, now, outcome.Evidence)
 		stats.Succeeded++
 		logEntry.WithField("evidence", outcome.Evidence).Info("intent succeeded")
+		if err == nil {
+			// Prune the now-succeeded row to a slim dedupe tombstone (#607):
+			// drop the heavy payload and slim the forensic evidence, retaining
+			// only what post-success readers need (per the handler's
+			// PrunePolicy). The row survives — it is the effectively-once guard.
+			// A prune failure is non-fatal (the full row stands; dedupe intact).
+			keepPayload, keepEvidence := prunePolicyFor(handler)
+			if perr := r.Store.PruneSucceeded(ctx, intent.ID, outcome.Evidence, keepPayload, keepEvidence); perr != nil {
+				logEntry.WithError(perr).Warn("intent ledger: prune of succeeded intent failed; tombstone retains full payload (dedupe intact)")
+			}
+		}
 	case OutcomeRetryable:
 		err = r.Store.MarkFailedRetryable(ctx, intent.ID, now.Add(handler.Backoff(intent.Attempts)), outcome.Reason)
 		stats.Retryable++
@@ -302,6 +314,30 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	if err != nil {
 		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
 	}
+}
+
+// prunePolicy lets a handler keep the heavy columns the prune (#607) would
+// otherwise drop from its succeeded tombstone. A handler implements it ONLY
+// when something reads the column AFTER success:
+//   - keepPayload: the refund producer reads reservation_id off the durable
+//     succeeded row to detect a double-refund conflict (admin_payments.go).
+//   - keepEvidence: the catalog status view renders verification booleans off
+//     succeeded archive/sunset rows (pkg/service/catalog_extras.go).
+//
+// Handlers whose only post-success reader is the pointer-key path (dunning's
+// transaction_id/response_code, the admin operations view) need not implement
+// it: the default slims evidence to those keys and drops the payload.
+type prunePolicy interface {
+	PrunePolicy() (keepPayload, keepEvidence bool)
+}
+
+// prunePolicyFor resolves the handler's prune policy, defaulting to the
+// aggressive slim (drop payload, slim evidence to the pointer keys).
+func prunePolicyFor(handler Handler) (keepPayload, keepEvidence bool) {
+	if pp, ok := handler.(prunePolicy); ok {
+		return pp.PrunePolicy()
+	}
+	return false, false
 }
 
 func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, reason string) {
