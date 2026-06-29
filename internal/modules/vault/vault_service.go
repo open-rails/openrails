@@ -27,8 +27,8 @@ type VaultService struct {
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
-	MerchantSecrets      merchantSecretGetter
-	ProviderSecrets      providerAccountSecretResolver
+	MerchantSecrets      merchants.MerchantSecretReader
+	ProviderSecrets      merchants.ProviderAccountSecretResolver
 	Config               *config.Config
 	Rails                config.RailSet
 	DB                   *db.DB
@@ -47,14 +47,6 @@ type paymentMethodStore interface {
 	GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error)
 }
 
-type merchantSecretGetter interface {
-	Get(ctx context.Context, merchantID merchant.ID, name string) (merchants.Secret, error)
-}
-
-type providerAccountSecretResolver interface {
-	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
-}
-
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *VaultService) now() time.Time {
 	if s.clock != nil {
@@ -63,14 +55,14 @@ func (s *VaultService) now() time.Time {
 	return time.Now()
 }
 
-func (s *VaultService) SetMerchantSecretStore(store merchantSecretGetter) {
+func (s *VaultService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
 	if s == nil {
 		return
 	}
 	s.MerchantSecrets = store
 }
 
-func (s *VaultService) SetProviderAccountSecretResolver(resolver providerAccountSecretResolver) {
+func (s *VaultService) SetProviderAccountSecretResolver(resolver merchants.ProviderAccountSecretResolver) {
 	if s == nil {
 		return
 	}

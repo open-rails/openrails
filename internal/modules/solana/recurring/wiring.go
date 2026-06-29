@@ -69,7 +69,7 @@ func SeedMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecre
 // the secret named solana/private_key; the store backend (DB+envelope or Vault)
 // is chosen at the composition root and is transparent here.
 type secretStoreGetter struct {
-	store merchants.MerchantSecretStore
+	store merchants.MerchantSecretReader
 }
 
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
@@ -85,7 +85,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 // Submitter constructors) so the composition root can share the SAME signer
 // between the Submitter-backed services and the signer-backed
 // PrepareTierChangeService (#272), which co-signs with the merchant key directly.
-func NewSignerFromStore(store merchants.MerchantSecretStore, ttl time.Duration) solanaint.Signer {
+func NewSignerFromStore(store merchants.MerchantSecretReader, ttl time.Duration) solanaint.Signer {
 	return solanaint.NewKeypairSigner(secretStoreGetter{store: store}, ttl)
 }
 
@@ -98,20 +98,20 @@ func NewSignerFromTransit(transit solanaint.TransitClient, ttl time.Duration) so
 // NewSignerSubmitterFromStore builds the production Submitter: a per-merchant
 // keypair signer reading solana/private_key from the merchant secret store, wired
 // to the Solana RPC. ttl 0 uses the default signer cache TTL.
-func NewSignerSubmitterFromStore(store merchants.MerchantSecretStore, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
+func NewSignerSubmitterFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
 	return NewSignerSubmitter(NewSignerFromStore(store, ttl), rpc)
 }
 
 // NewCrankServiceFromStore builds a CrankService backed by the merchant secret
 // store + RPC — the value the composition root injects into the cranker worker.
-func NewCrankServiceFromStore(store merchants.MerchantSecretStore, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
+func NewCrankServiceFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
 	return NewCrankService(NewSignerSubmitterFromStore(store, rpc, ttl))
 }
 
 // NewPlanServiceFromStore builds a PlanService backed by the merchant secret store
 // + RPC for the given network (mainnet/devnet). The same RPC client serves as the
 // plan reader, enabling the idempotent re-publish guard (#254).
-func NewPlanServiceFromStore(store merchants.MerchantSecretStore, rpc *solanaint.RPCClient, network string, tokens map[string]config.TokenConfig, ttl time.Duration) *PlanService {
+func NewPlanServiceFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, network string, tokens map[string]config.TokenConfig, ttl time.Duration) *PlanService {
 	return NewPlanServiceWithReader(NewSignerSubmitterFromStore(store, rpc, ttl), rpc, network, tokens)
 }
 

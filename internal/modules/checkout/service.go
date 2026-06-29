@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -95,8 +96,8 @@ type CheckoutService struct {
 	VaultService         *vault.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
-	MerchantSecrets      merchantSecretGetter
-	ProviderSecrets      providerAccountSecretResolver
+	MerchantSecrets      merchants.MerchantSecretReader
+	ProviderSecrets      merchants.ProviderAccountSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.

@@ -15,20 +15,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type merchantSecretGetter interface {
-	Get(ctx context.Context, merchantID merchant.ID, name string) (merchants.Secret, error)
-}
-
-type providerAccountSecretResolver interface {
-	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
-}
-
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
 // checkout money paths. Static rail config remains available only when no
 // provider-account resolver is configured; once scoped provider accounts are in
 // use, missing scoped secrets fail closed instead of falling back across
 // accounts.
-func (s *CheckoutService) SetMerchantSecretStore(store merchantSecretGetter) {
+func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
 	if s == nil {
 		return
 	}
@@ -38,7 +30,7 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchantSecretGetter) {
 	}
 }
 
-func (s *CheckoutService) SetProviderAccountSecretResolver(resolver providerAccountSecretResolver) {
+func (s *CheckoutService) SetProviderAccountSecretResolver(resolver merchants.ProviderAccountSecretResolver) {
 	if s == nil {
 		return
 	}

@@ -254,6 +254,19 @@ type Secret struct {
 	Version int
 }
 
+// MerchantSecretReader is the read-only half of the per-merchant secret store.
+// Checkout, vaulting, and workers use this so fixed-credential runtimes do not
+// need write access merely to resolve credentials.
+type MerchantSecretReader interface {
+	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
+}
+
+// ProviderAccountSecretResolver resolves the canonical secret name for the
+// active provider account a merchant should use.
+type ProviderAccountSecretResolver interface {
+	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
+}
+
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
 // operation is namespaced by merchant id so one merchant can never read or
 // overwrite another merchant's Stripe credentials or webhook signing secrets.
@@ -266,8 +279,8 @@ type Secret struct {
 //     name) addressing to a merchant-scoped Vault KV path. It is a stub today and
 //     is wired in managed deployments without any schema or caller change.
 type MerchantSecretStore interface {
+	MerchantSecretReader
 	// Get returns the secret for (merchant, name), or ErrSecretNotFound.
-	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
 	// Put creates or rotates the secret for (merchant, name). It is idempotent on
 	// value: putting the same value twice is a no-op rotation. Returns the stored
 	// secret (with its new version).

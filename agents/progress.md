@@ -7,14 +7,71 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 611
+next_id: 612
+
+---
+
+# #611: exhaustive v1 catalog bootstrap examples and real HTTP coverage
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29: catalog v1 needs one canonical bootstrap example and real HTTP publish/apply coverage for the full intended product surface, not just simple subscription tiers.
+
+Added 2026-06-29 (Codex). `config/catalog.example.yaml` and the catalog publish integration tests should prove the v1 manifest can model the main OpenRails billing/product shapes without old `tier_groups` compatibility. Doujins can remain a simple single-tier premium entitlement consumer, but the OpenRails example must also cover more complex product and billing systems.
+
+## Goal
+
+Make the catalog example and integration coverage exhaustive for the planned v1 catalog surface:
+
+- Single-tier premium entitlement product for Doujins-style apps.
+- SaaS multi-tier entitlement ladder with free-trial/intro pricing before recurring renewal.
+- AI image generation credit packs and recurring AI credit grants using custom credit units.
+- Prepaid API credits for fal.ai-style API spend using a separate custom credit unit.
+- Content marketplace products, such as one-off movie/video ownership.
+- Bundle products using `includes`, such as a Prime-style package that owns several videos.
+- Claude Code-style rate-limit plans with 5x and 20x usage-limit windows.
+- DigitalOcean/Runpod-style infrastructure billing: VM rental and cloud-storage metered billing.
+
+## Implementation Tasks
+
+- [ ] Expand `config/catalog.example.yaml` into the canonical v1 catalog bootstrap example using only flat `products:` and no legacy catalog structures.
+- [ ] Keep the example readable but exhaustive: use product slugs/tier groups that map clearly to the above use cases, with comments only where needed to explain units.
+- [ ] Add explicit `interval: once` support for one-time purchases so content marketplace products are not represented as fake monthly prices.
+- [ ] Ensure recurring free-trial/intro pricing is shown with `intro: {amount: 0, period_days: ...}` and then normal recurring renewal.
+- [ ] Make `credits` examples cover custom non-money units, including `ai-image-credit` and `api-credit`.
+- [ ] Make `usage_limits` examples cover request-count windows and 5x/20x plan variants.
+- [ ] Make `meters`/metered prices examples cover counter billing for VM-hours and gauge/time billing for cloud storage.
+- [ ] Persist catalog-owned usage-limit registry rows, meter registry rows, metered price sidecars, and product include relationships during catalog publish/apply; do not fake these as parse-only fields.
+- [ ] Do not materialize customer-scoped usage bindings during catalog publish; those belong at grant/subscription/purchase time when a customer exists.
+
+## Integration Tests
+
+- [ ] Add a real HTTP integration manifest fixture that uses the same full product surface as the example, with per-test unique slugs.
+- [ ] Publish it through `POST /v1/merchant/catalog/publish` against the real standalone OpenRails server.
+- [ ] Assert the plan-only call returns changes but writes nothing.
+- [ ] Assert the apply call creates every product and price through the live HTTP surface.
+- [ ] Query the real DB after apply and assert:
+      products have expected `tier_group`, `tier_rank`, entitlements, and credit specs;
+      one-time prices have no recurring cycle;
+      intro/trial prices store initial amount/period;
+      metered prices store catalog meter sidecars;
+      usage-limit registry rows exist;
+      product include relationships exist.
+- [ ] Assert a second plan after apply is idempotent for products/prices and sidecars.
+- [ ] Keep existing smaller publish/apply tests if they still prove permission and mutation-mode behavior.
+
+## Acceptance
+
+- `config/catalog.example.yaml` is a useful bootstrap reference for all listed catalog use cases.
+- No public example or active integration fixture uses `tier_groups`.
+- Real HTTP integration coverage exercises the full manifest through OpenRails, not mocks.
+- Focused unit tests cover parser edge cases only; end-to-end catalog confidence comes from `go test -tags=integration ./internal/integrationharness -run ...`.
 
 ---
 
 # #610: explicit credential mutability posture for embedded vs standalone runtimes
 
-**Completed:** no
-**Status:** PARTIAL 2026-06-29: embedded fixed-credential posture is now explicit, standalone defaults to mutable credentials, merchant settings route registration fails closed unless mutable credentials are selected, and `go test ./...` passes. Remaining deeper cleanup is the resolver/store split so fixed and mutable modes share a read path without exposing writes.
+**Completed:** yes
+**Status:** DONE 2026-06-29: embedded fixed-credential posture is explicit, standalone builds the writable merchant secret store, fixed embedded runtimes read from `embedded.PaymentProviders` and cannot write provider-account secrets through `UpsertMerchantConfig`, merchant settings routes fail closed unless mutable credentials are selected, and checkout/vault/Solana worker paths use read-only merchant secret interfaces. Verified with focused package tests and `go test ./...` on the worktree branch.
 
 Added 2026-06-29 (Codex). OpenRails currently has both read/write merchant
 secret-store machinery and fixed runtime provider configs, but the product
@@ -50,14 +107,14 @@ credential material into embedded OpenRails.
       `/v1/merchant/payment-providers*` write surface on mutable credentials.
       In fixed mode, do not mount those routes; if directly registered, return a
       clear startup error rather than a runtime surprise.
-- [ ] Split provider credential inputs from writable merchant secret stores:
+- [x] Split provider credential inputs from writable merchant secret stores:
       fixed mode receives provider credentials/read-only secret snapshots from
       `embedded.PaymentProviders` or a read-only injected store; mutable mode
       builds a writable `MerchantSecretStore`.
-- [ ] Make checkout/vault/worker paths read through a common credential
+- [x] Make checkout/vault/worker paths read through a common credential
       resolver interface so fixed and mutable modes share lookup behavior
       without giving fixed mode write capability.
-- [ ] Keep Vault support only behind mutable mode unless a caller explicitly
+- [x] Keep Vault support only behind mutable mode unless a caller explicitly
       injects a read-only Vault-derived resolver; OpenRails should not log into
       HashiCorp Vault just because it is embedded.
 - [x] Update docs/tests: embedded defaults exclude merchant-settings routes,
