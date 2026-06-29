@@ -127,8 +127,10 @@ func TestHTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			asm := embedhttp.FromApp(suite.App)
 			asm.DelegatedAuthenticator = testHostPrincipalAuthenticator{perms: tc.perms}
+			// Merchant settings routes require mutable-credentials mode.
 			h := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
-				RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings},
+				RouteSets:      []embedhttp.RouteSet{embedhttp.RouteSetMerchantSettings},
+				CredentialMode: embedhttp.CredentialModeMutable,
 			}))
 			t.Cleanup(h.Close)
 
