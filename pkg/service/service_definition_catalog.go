@@ -337,14 +337,16 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
 type CatalogPrice struct {
-	ID               uuid.UUID            `json:"id"`
-	ProductID        uuid.UUID            `json:"product_id"`
-	Status           models.CatalogStatus `json:"status"`
-	UnitAmount       int64                `json:"unit_amount"`
-	Currency         string               `json:"currency"`
-	BillingCycleDays *int                 `json:"billing_cycle_days,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	ID                uuid.UUID            `json:"id"`
+	ProductID         uuid.UUID            `json:"product_id"`
+	Status            models.CatalogStatus `json:"status"`
+	UnitAmount        int64                `json:"unit_amount"`
+	Currency          string               `json:"currency"`
+	BillingCycleDays  *int                 `json:"billing_cycle_days,omitempty"`
+	InitialAmount     *int64               `json:"initial_amount,omitempty"`
+	InitialPeriodDays *int                 `json:"initial_period_days,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
 
 	// Providers carries the typed per-provider attachment state for every
 	// rail this price is linked to. Always populated when at least one
@@ -381,6 +383,13 @@ type CreatePriceRequest struct {
 	Currency         string `json:"currency"`
 	BillingCycleDays *int   `json:"billing_cycle_days,omitempty"`
 
+	// InitialAmount / InitialPeriodDays (#602): optional introductory/trial FIRST
+	// period that differs from the recurring terms. InitialAmount 0 = free trial;
+	// both nil = a flat price. They must be set together and require a recurring
+	// billing_cycle_days (there is a "then recurring" part).
+	InitialAmount     *int64 `json:"initial_amount,omitempty"`
+	InitialPeriodDays *int   `json:"initial_period_days,omitempty"`
+
 	// Providers is the list of provider names to attach (e.g. ["stripe",
 	// "ccbill", "mobius"]). Empty means "DB-only price with no external
 	// links" — useful for testing or for prices that are not sold externally.
@@ -415,6 +424,22 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 	if req.Currency == "" {
 		return nil, fmt.Errorf("currency required")
+	}
+	// #602 intro/trial: both-or-neither; non-negative amount (0 = free trial);
+	// positive period; requires a recurring cycle (there is a "then recurring" part).
+	if (req.InitialAmount == nil) != (req.InitialPeriodDays == nil) {
+		return nil, fmt.Errorf("initial_amount and initial_period_days must be set together")
+	}
+	if req.InitialAmount != nil {
+		if *req.InitialAmount < 0 {
+			return nil, fmt.Errorf("initial_amount must be >= 0 (0 = free trial)")
+		}
+		if *req.InitialPeriodDays <= 0 {
+			return nil, fmt.Errorf("initial_period_days must be positive")
+		}
+		if req.BillingCycleDays == nil || *req.BillingCycleDays <= 0 {
+			return nil, fmt.Errorf("introductory/trial pricing requires a recurring billing_cycle_days")
+		}
 	}
 	if err := money.ValidateCurrency(req.Currency); err != nil {
 		return nil, err
@@ -457,16 +482,18 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 	now := time.Now().UTC()
 	price := &models.Price{
-		ID:               priceID,
-		MerchantID:       tid.UUID(),
-		ProductID:        req.ProductID,
-		Status:           status,
-		Amount:           req.UnitAmount,
-		Currency:         req.Currency,
-		BillingCycleDays: req.BillingCycleDays,
-		Rails:            rails,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                priceID,
+		MerchantID:        tid.UUID(),
+		ProductID:         req.ProductID,
+		Status:            status,
+		Amount:            req.UnitAmount,
+		Currency:          req.Currency,
+		BillingCycleDays:  req.BillingCycleDays,
+		InitialAmount:     req.InitialAmount,
+		InitialPeriodDays: req.InitialPeriodDays,
+		Rails:             rails,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := prices.Create(ctx, price); err != nil {
 		return nil, err
@@ -628,14 +655,16 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 // values.
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
-		ID:               p.ID,
-		ProductID:        p.ProductID,
-		Status:           p.Status,
-		UnitAmount:       p.Amount,
-		Currency:         p.Currency,
-		BillingCycleDays: p.BillingCycleDays,
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
+		ID:                p.ID,
+		ProductID:         p.ProductID,
+		Status:            p.Status,
+		UnitAmount:        p.Amount,
+		Currency:          p.Currency,
+		BillingCycleDays:  p.BillingCycleDays,
+		InitialAmount:     p.InitialAmount,
+		InitialPeriodDays: p.InitialPeriodDays,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}
 	if len(p.Rails) == 0 {
 		return cp

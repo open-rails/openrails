@@ -172,6 +172,12 @@ type Price struct {
 	// 30 = monthly, 365 = yearly, null = one-time purchase
 	BillingCycleDays *int `json:"billing_cycle_days"`
 
+	// Introductory / trial pricing (#602): an optional FIRST period that differs
+	// from the recurring terms above. InitialAmount = first-period price (0 = free
+	// trial), InitialPeriodDays = first-period length. Both nil = a flat price.
+	InitialAmount     *int64 `json:"initial_amount,omitempty"`
+	InitialPeriodDays *int   `json:"initial_period_days,omitempty"`
+
 	// Rails is a JSONB map of rail name -> rail-specific configuration
 	// Keys: "mobius", "ccbill", "solana", etc.
 	// Values: rail-specific data (e.g., plan_id, price_id, provider)
@@ -198,10 +204,10 @@ func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
 // Rail config key constants (used in the Rails JSONB map)
 const (
-	RailKeyPlanID          = "plan_id"
-	RailKeyProvider        = "provider"
-	RailKeyCCBillFormName  = "form_name"
-	RailKeyCCBillFlexID    = "flex_id"
+	RailKeyPlanID         = "plan_id"
+	RailKeyProvider       = "provider"
+	RailKeyCCBillFormName = "form_name"
+	RailKeyCCBillFlexID   = "flex_id"
 	// RailKeyCCBillRecurringBillingOption is CCBill's price/product/plan identity
 	// (#601) — the "Recurring Billing Option" id (a zero-padded numeric, e.g.
 	// "0000042836"). It is DISTINCT from the FlexForm (form_name/flex_id, the
@@ -266,6 +272,18 @@ func (p *Price) GetCCBillRecurringBillingOption() (rboID string, ok bool) {
 func (p *Price) GetSolanaConfig() (ok bool) {
 	// Solana rail just needs to be present in the map to be enabled
 	return p.HasRail(RailSolana)
+}
+
+// HasIntro reports whether this price has an introductory/trial first period (#602).
+func (p *Price) HasIntro() bool { return p.InitialAmount != nil && p.InitialPeriodDays != nil }
+
+// GetIntro returns the intro/trial first period (initial amount + length in days)
+// and whether one is set. An initial amount of 0 is a free trial.
+func (p *Price) GetIntro() (initialAmount int64, initialPeriodDays int, ok bool) {
+	if !p.HasIntro() {
+		return 0, 0, false
+	}
+	return *p.InitialAmount, *p.InitialPeriodDays, true
 }
 
 // GetStripeConfig returns Stripe price ID

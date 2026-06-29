@@ -100,6 +100,19 @@ type Price struct {
 	// subscribers but is no longer purchasable: it is created/converged to
 	// status=archived rather than active (no purchasable gap, no double-charge).
 	LegacyImport bool `json:"legacy_import,omitempty" yaml:"legacy_import,omitempty"`
+
+	// Intro is an optional introductory/trial FIRST period that differs from the
+	// recurring terms above (#602). amount=0 is a free trial. Omit for a flat price.
+	//   intro: {amount: 1995, period_days: 30}  # $19.95 first 30d, then UnitAmount recurring
+	//   intro: {amount: 0, period_days: 7}       # free 7-day trial, then UnitAmount recurring
+	Intro *PriceIntro `json:"intro,omitempty" yaml:"intro,omitempty"`
+}
+
+// PriceIntro is the introductory/trial first period for a Price (#602): a first
+// period at its own price/length, then the Price's recurring terms.
+type PriceIntro struct {
+	Amount     int64 `json:"amount" yaml:"amount"`           // first-period price (0 = free trial)
+	PeriodDays int   `json:"period_days" yaml:"period_days"` // first-period length in days
 }
 
 // providersFor returns the effective provider list for a price, applying the

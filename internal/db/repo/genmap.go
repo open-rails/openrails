@@ -85,15 +85,17 @@ func paymentsFromGen(rows []gen.OpenrailsPayment) ([]*models.Payment, error) {
 
 func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 	m := &models.Price{
-		ID:               p.ID,
-		MerchantID:       p.MerchantID,
-		ProductID:        p.ProductID,
-		Status:           models.CatalogStatus(p.Status),
-		Amount:           p.Amount,
-		Currency:         p.Currency,
-		BillingCycleDays: derefIntPtr(p.BillingCycleDays),
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
+		ID:                p.ID,
+		MerchantID:        p.MerchantID,
+		ProductID:         p.ProductID,
+		Status:            models.CatalogStatus(p.Status),
+		Amount:            p.Amount,
+		Currency:          p.Currency,
+		BillingCycleDays:  derefIntPtr(p.BillingCycleDays),
+		InitialAmount:     p.InitialAmount,
+		InitialPeriodDays: derefIntPtr(p.InitialPeriodDays),
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}
 	if err := fromJSONB(p.Rails, &m.Rails, "prices.rails"); err != nil {
 		return nil, err

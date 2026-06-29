@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, status, amount, currency,
-    billing_cycle_days, rails, created_at, updated_at
+    billing_cycle_days, initial_amount, initial_period_days, rails, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,
-    sqlc.narg(billing_cycle_days), sqlc.narg(rails),
+    sqlc.narg(billing_cycle_days), sqlc.narg(initial_amount), sqlc.narg(initial_period_days), sqlc.narg(rails),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );

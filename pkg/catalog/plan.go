@@ -272,6 +272,13 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			ProviderLinks:    price.ProviderLinks,
 			Status:           toModelStatus(desiredStatus),
 		}
+		// #602 introductory/trial first period (a different first-period price/length).
+		if price.Intro != nil {
+			amt := price.Intro.Amount
+			days := price.Intro.PeriodDays
+			createReq.InitialAmount = &amt
+			createReq.InitialPeriodDays = &days
+		}
 		pp.Prices = append(pp.Prices, PricePlan{
 			Label:     label,
 			Action:    PriceCreate,

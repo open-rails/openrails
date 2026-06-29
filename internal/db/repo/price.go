@@ -28,16 +28,18 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               price.ID,
-		MerchantID:       price.MerchantID,
-		ProductID:        price.ProductID,
-		Status:           string(price.Status),
-		Amount:           price.Amount,
-		Currency:         price.Currency,
-		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
-		Rails:            rails,
-		CreatedAt:        price.CreatedAt,
-		UpdatedAt:        price.UpdatedAt,
+		ID:                price.ID,
+		MerchantID:        price.MerchantID,
+		ProductID:         price.ProductID,
+		Status:            string(price.Status),
+		Amount:            price.Amount,
+		Currency:          price.Currency,
+		BillingCycleDays:  intPtrTo32(price.BillingCycleDays),
+		InitialAmount:     price.InitialAmount,
+		InitialPeriodDays: intPtrTo32(price.InitialPeriodDays),
+		Rails:             rails,
+		CreatedAt:         price.CreatedAt,
+		UpdatedAt:         price.UpdatedAt,
 	})
 	if err != nil {
 		return err

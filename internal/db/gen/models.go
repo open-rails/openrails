@@ -640,6 +640,10 @@ type OpenrailsPrice struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	MerchantID       uuid.UUID
+	// #602 intro/trial: first-period price (minor units); 0 = free trial; NULL = flat price.
+	InitialAmount *int64
+	// #602 intro/trial: first-period length in days; NULL = flat price.
+	InitialPeriodDays *int32
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
