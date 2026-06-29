@@ -199,11 +199,12 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		ProductID:        productID,
 		Amount:           23_990_000,
 		Currency:         "USD",
-		Status:           string(models.CatalogStatusActive),
-		BillingCycleDays: &billingCycleDays,
-		Rails:            railsJSON,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Status:             string(models.CatalogStatusActive),
+		AccessDurationDays: &billingCycleDays,
+		AutoRenew:          true,
+		Rails:              railsJSON,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 

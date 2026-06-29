@@ -1081,20 +1081,21 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithRails = `-- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, billing_cycle_days, status, rails
+SELECT id, product_id, amount, currency, access_duration_days, auto_renew, status, rails
 FROM openrails.prices
 WHERE rails IS NOT NULL
   AND status <> 'draft'
 `
 
 type ReconcileListPricesWithRailsRow struct {
-	ID               uuid.UUID
-	ProductID        uuid.UUID
-	Amount           int64
-	Currency         string
-	BillingCycleDays *int32
-	Status           string
-	Rails            []byte
+	ID                 uuid.UUID
+	ProductID          uuid.UUID
+	Amount             int64
+	Currency           string
+	AccessDurationDays *int32
+	AutoRenew          bool
+	Status             string
+	Rails              []byte
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
@@ -1115,7 +1116,8 @@ func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]Reconcile
 			&i.ProductID,
 			&i.Amount,
 			&i.Currency,
-			&i.BillingCycleDays,
+			&i.AccessDurationDays,
+			&i.AutoRenew,
 			&i.Status,
 			&i.Rails,
 		); err != nil {

@@ -34,12 +34,13 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 		Status:            string(price.Status),
 		Amount:            price.Amount,
 		Currency:          price.Currency,
-		BillingCycleDays:  intPtrTo32(price.BillingCycleDays),
-		InitialAmount:     price.InitialAmount,
-		InitialPeriodDays: intPtrTo32(price.InitialPeriodDays),
-		Rails:             rails,
-		CreatedAt:         price.CreatedAt,
-		UpdatedAt:         price.UpdatedAt,
+		AccessDurationDays: intPtrTo32(price.AccessDurationDays),
+		AutoRenew:          price.AutoRenew,
+		TrialUnitAmount:    price.TrialUnitAmount,
+		TrialDurationDays:  intPtrTo32(price.TrialDurationDays),
+		Rails:              rails,
+		CreatedAt:          price.CreatedAt,
+		UpdatedAt:          price.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -240,9 +241,12 @@ func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
 		Status:           string(price.Status),
 		Amount:           price.Amount,
 		Currency:         price.Currency,
-		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
-		Rails:            rails,
-		UpdatedAt:        updateTimestamp(price.UpdatedAt),
+		AccessDurationDays: intPtrTo32(price.AccessDurationDays),
+		AutoRenew:          price.AutoRenew,
+		TrialUnitAmount:    price.TrialUnitAmount,
+		TrialDurationDays:  intPtrTo32(price.TrialDurationDays),
+		Rails:              rails,
+		UpdatedAt:          updateTimestamp(price.UpdatedAt),
 	})
 	if err != nil {
 		return err

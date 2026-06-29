@@ -29,7 +29,8 @@ products:
     prices:
       - currency: usd
         unit_amount: 1200
-        interval: 30d
+        duration: 30d
+        auto_renew: true
         providers: [stripe]
   - key: craftsman
     display_name: Craftsman
@@ -39,11 +40,13 @@ products:
     prices:
       - currency: usd
         unit_amount: 2900
-        interval: 30d
+        duration: 30d
+        auto_renew: true
         providers: [stripe]
       - currency: usd
         unit_amount: 1500
-        interval: 30d
+        duration: 30d
+        auto_renew: true
         active: false
         providers: [stripe]
         provider_links:
@@ -66,9 +69,9 @@ func TestLoad_Good(t *testing.T) {
 	if len(craftsman.Prices) != 2 {
 		t.Fatalf("want 2 prices, got %d", len(craftsman.Prices))
 	}
-	// Interval defaults and normalization.
-	if craftsman.Prices[0].Interval != "30d" {
-		t.Fatalf("interval not normalized: %+v", craftsman.Prices[0])
+	// Duration defaults and normalization.
+	if craftsman.Prices[0].Duration != "30d" {
+		t.Fatalf("duration not normalized: %+v", craftsman.Prices[0])
 	}
 	// Historical prices are declared directly as archived.
 	legacy := craftsman.Prices[1]
@@ -127,7 +130,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 1000
-        interval: 30d
+        duration: 30d
         provider_links:
           stripe:
             lookup_key: p-monthly
@@ -167,8 +170,8 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: 30d}
-      - {currency: usd, unit_amount: 1000, interval: 30d}
+      - {currency: usd, unit_amount: 1000, duration: 30d}
+      - {currency: usd, unit_amount: 1000, duration: 30d}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -183,8 +186,8 @@ products:
   - key: p
     display_name: P
     prices:
-      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [mobius, ccbill, solana]}
-      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [solana], active: false}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [mobius, ccbill, solana]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [solana], active: false}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("same terms with different providers should be accepted: %v", err)
@@ -195,8 +198,8 @@ func TestLoad_DuplicateProductKey(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate product key") {
@@ -208,8 +211,8 @@ func TestLoad_MissingTierRank(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "tier_rank is required") {
@@ -221,7 +224,7 @@ func TestLoad_TierRankOptionalForSingleProduct(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -236,9 +239,9 @@ func TestLoad_TierRankAllowsZeroAndNegative(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -260,8 +263,8 @@ func TestLoad_TierRankDirectionSurvivesRenumberAndNegativePrepend(t *testing.T) 
 			body: `
 version: 1
 products:
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `,
 		},
 		{
@@ -269,9 +272,9 @@ products:
 			body: `
 version: 1
 products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: 30d}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
 `,
 		},
 	}
@@ -308,7 +311,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: eur, unit_amount: 1000, interval: 30d, providers: [solana]}
+      - {currency: eur, unit_amount: 1000, duration: 30d, providers: [solana]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
@@ -432,7 +435,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usdc, unit_amount: 1000, interval: 30d, providers: [solana]}
+      - {currency: usdc, unit_amount: 1000, duration: 30d, providers: [solana]}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("usdc + solana should be accepted, got %v", err)
@@ -448,7 +451,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: 1w}
+      - {currency: usd, unit_amount: 1000, duration: 1w}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "must use h or d") {
@@ -465,7 +468,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: month}
+      - {currency: usd, unit_amount: 1000, duration: month}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "whole h or d value") {
@@ -482,14 +485,14 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: 24h}
+      - {currency: usd, unit_amount: 1000, duration: 24h}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := m.TierGroups[0].Products[0].Prices[0].Interval; got != "1d" {
-		t.Fatalf("interval = %q, want 1d", got)
+	if got := m.TierGroups[0].Products[0].Prices[0].Duration; got != "1d" {
+		t.Fatalf("duration = %q, want 1d", got)
 	}
 }
 
@@ -502,10 +505,10 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, interval: 1h}
+      - {currency: usd, unit_amount: 1000, duration: 1h}
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "whole-day duration") {
+	if err == nil || !strings.Contains(err.Error(), "must be whole days") {
 		t.Fatalf("want whole-day storage error, got %v", err)
 	}
 }

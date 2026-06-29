@@ -87,8 +87,8 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "refresh-prod-"+uuid.NewString(), "refresh-tier-"+uuid.NewString(), merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_days, auto_renew, merchant_id)
+		      VALUES ($1, $2, 999, 'usd', 30, true, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,

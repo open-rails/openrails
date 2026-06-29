@@ -168,15 +168,24 @@ type Price struct {
 	Amount     int64         `json:"amount"`
 	Currency   string        `json:"currency"`
 
-	// Billing interval in days (nullable for one-time purchases)
-	// 30 = monthly, 365 = yearly, null = one-time purchase
-	BillingCycleDays *int `json:"billing_cycle_days"`
+	// AccessDurationDays is the access window (#622) a purchase of this price
+	// grants, in days. nil = indefinite/durable (perpetual ownership); a positive
+	// value = a finite window (rental, one-off, or the billing period when
+	// AutoRenew). Drives BOTH product_access_grants.ends_at and the derived
+	// entitlement end_at.
+	AccessDurationDays *int `json:"access_duration_days"`
 
-	// Introductory / trial pricing (#602): an optional FIRST period that differs
-	// from the recurring terms above. InitialAmount = first-period price (0 = free
-	// trial), InitialPeriodDays = first-period length. Both nil = a flat price.
-	InitialAmount     *int64 `json:"initial_amount,omitempty"`
-	InitialPeriodDays *int   `json:"initial_period_days,omitempty"`
+	// AutoRenew (#622) reports whether the price charges again and extends the
+	// window at the end of AccessDurationDays. A recurring subscription is
+	// AutoRenew=true with a finite AccessDurationDays (the billing period).
+	AutoRenew bool `json:"auto_renew"`
+
+	// Trial pricing (#622): an optional FIRST phase that differs from the recurring
+	// terms above. TrialUnitAmount = first-phase price (0 = free trial),
+	// TrialDurationDays = first-phase length. Both nil = a flat price. Only valid
+	// when AutoRenew.
+	TrialUnitAmount   *int64 `json:"trial_unit_amount,omitempty"`
+	TrialDurationDays *int   `json:"trial_duration_days,omitempty"`
 
 	// Rails is a JSONB map of rail name -> rail-specific configuration
 	// Keys: "mobius", "ccbill", "solana", etc.
@@ -201,6 +210,20 @@ func (p *Price) IsPurchasable() bool { return p.Status == CatalogStatusActive }
 // billed. Archived prices are grandfathered, so the renewal/rebill path keeps
 // charging them indefinitely — anything that is not a draft remains billable.
 func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
+
+// IsRecurring reports whether the price auto-renews (a subscription). This is
+// the #622 replacement for the old "billing_cycle_days != nil" test.
+func (p *Price) IsRecurring() bool { return p.AutoRenew }
+
+// RecurringCycleDays returns the billing period in days for an auto-renewing
+// price, or nil for a one-off/durable price. It is the #622 replacement for the
+// old BillingCycleDays field where callers meant "the recurring cadence".
+func (p *Price) RecurringCycleDays() *int {
+	if p == nil || !p.AutoRenew {
+		return nil
+	}
+	return p.AccessDurationDays
+}
 
 // Rail config key constants (used in the Rails JSONB map)
 const (
@@ -274,16 +297,16 @@ func (p *Price) GetSolanaConfig() (ok bool) {
 	return p.HasRail(RailSolana)
 }
 
-// HasIntro reports whether this price has an introductory/trial first period (#602).
-func (p *Price) HasIntro() bool { return p.InitialAmount != nil && p.InitialPeriodDays != nil }
+// HasTrial reports whether this price has a trial first phase (#622).
+func (p *Price) HasTrial() bool { return p.TrialUnitAmount != nil && p.TrialDurationDays != nil }
 
-// GetIntro returns the intro/trial first period (initial amount + length in days)
-// and whether one is set. An initial amount of 0 is a free trial.
-func (p *Price) GetIntro() (initialAmount int64, initialPeriodDays int, ok bool) {
-	if !p.HasIntro() {
+// GetTrial returns the trial first phase (unit amount + length in days) and
+// whether one is set. A unit amount of 0 is a free trial.
+func (p *Price) GetTrial() (trialUnitAmount int64, trialDurationDays int, ok bool) {
+	if !p.HasTrial() {
 		return 0, 0, false
 	}
-	return *p.InitialAmount, *p.InitialPeriodDays, true
+	return *p.TrialUnitAmount, *p.TrialDurationDays, true
 }
 
 // GetStripeConfig returns Stripe price ID

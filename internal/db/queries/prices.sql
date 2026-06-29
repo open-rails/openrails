@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, status, amount, currency,
-    billing_cycle_days, initial_amount, initial_period_days, rails, created_at, updated_at
+    access_duration_days, auto_renew, trial_unit_amount, trial_duration_days, rails, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,
-    sqlc.narg(billing_cycle_days), sqlc.narg(initial_amount), sqlc.narg(initial_period_days), sqlc.narg(rails),
+    sqlc.narg(access_duration_days), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_days), sqlc.narg(rails),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -63,8 +63,8 @@ WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
   AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
-  AND (NOT sqlc.arg(only_recurring)::boolean OR (price.billing_cycle_days IS NOT NULL AND price.billing_cycle_days > 0))
-  AND (NOT sqlc.arg(only_one_time)::boolean OR (price.billing_cycle_days IS NULL OR price.billing_cycle_days = 0));
+  AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
+  AND (NOT sqlc.arg(only_one_time)::boolean OR NOT price.auto_renew);
 
 -- name: ListPricesFiltered :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
@@ -75,8 +75,8 @@ WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
   AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
-  AND (NOT sqlc.arg(only_recurring)::boolean OR (price.billing_cycle_days IS NOT NULL AND price.billing_cycle_days > 0))
-  AND (NOT sqlc.arg(only_one_time)::boolean OR (price.billing_cycle_days IS NULL OR price.billing_cycle_days = 0))
+  AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
+  AND (NOT sqlc.arg(only_one_time)::boolean OR NOT price.auto_renew)
 ORDER BY price.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
@@ -113,7 +113,10 @@ UPDATE openrails.prices SET
     status = $3,
     amount = $4,
     currency = $5,
-    billing_cycle_days = sqlc.narg(billing_cycle_days),
+    access_duration_days = sqlc.narg(access_duration_days),
+    auto_renew = sqlc.arg(auto_renew)::boolean,
+    trial_unit_amount = sqlc.narg(trial_unit_amount),
+    trial_duration_days = sqlc.narg(trial_duration_days),
     rails = sqlc.narg(rails),
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1;

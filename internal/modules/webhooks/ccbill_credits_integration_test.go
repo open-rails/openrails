@@ -77,10 +77,11 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:        productID,
 		Amount:           9_990_000,
 		Currency:         "usd",
-		Status:           string(models.CatalogStatusActive),
-		BillingCycleDays: &billingDays,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Status:             string(models.CatalogStatusActive),
+		AccessDurationDays: &billingDays,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 

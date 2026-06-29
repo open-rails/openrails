@@ -119,7 +119,8 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
 				Currency:   "usd",
-				Interval:   "30d",
+				Duration:   "30d",
+				AutoRenew:  true,
 				Providers:  []string{"solana"}, // priced for the Solana rail
 			}},
 		}},

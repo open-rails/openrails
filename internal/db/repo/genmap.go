@@ -91,11 +91,12 @@ func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 		Status:            models.CatalogStatus(p.Status),
 		Amount:            p.Amount,
 		Currency:          p.Currency,
-		BillingCycleDays:  derefIntPtr(p.BillingCycleDays),
-		InitialAmount:     p.InitialAmount,
-		InitialPeriodDays: derefIntPtr(p.InitialPeriodDays),
-		CreatedAt:         p.CreatedAt,
-		UpdatedAt:         p.UpdatedAt,
+		AccessDurationDays: derefIntPtr(p.AccessDurationDays),
+		AutoRenew:          p.AutoRenew,
+		TrialUnitAmount:    p.TrialUnitAmount,
+		TrialDurationDays:  derefIntPtr(p.TrialDurationDays),
+		CreatedAt:          p.CreatedAt,
+		UpdatedAt:          p.UpdatedAt,
 	}
 	if err := fromJSONB(p.Rails, &m.Rails, "prices.rails"); err != nil {
 		return nil, err

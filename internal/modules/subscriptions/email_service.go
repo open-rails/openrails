@@ -485,8 +485,8 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	periodEnd := s.now()
 	if subscription.CurrentPeriodStartsAt != nil {
 		periodStart = *subscription.CurrentPeriodStartsAt
-		if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
-			periodEnd = periodStart.AddDate(0, 0, *price.BillingCycleDays)
+		if cd := price.RecurringCycleDays(); cd != nil {
+			periodEnd = periodStart.AddDate(0, 0, *cd)
 		} else {
 			periodEnd = periodStart.AddDate(0, 1, 0)
 		}

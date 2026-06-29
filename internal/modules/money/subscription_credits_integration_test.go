@@ -63,11 +63,12 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Status:           string(models.CatalogStatusActive),
-		Amount:           100,
-		Currency:         "USD",
-		BillingCycleDays: &cycle,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Amount:             100,
+		Currency:           "USD",
+		AccessDurationDays: &cycle,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 
@@ -184,11 +185,12 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Status:           string(models.CatalogStatusActive),
-		Amount:           100,
-		Currency:         "USD",
-		BillingCycleDays: &cycle,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Amount:             100,
+		Currency:           "USD",
+		AccessDurationDays: &cycle,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 

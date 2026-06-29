@@ -157,10 +157,11 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		Status:           string(models.CatalogStatusActive),
 		Amount:           999,
 		Currency:         "usd",
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		BillingCycleDays: &cycleDays,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		MerchantID:         dbtest.TestMerchantID.UUID(),
+		AccessDurationDays: &cycleDays,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 

@@ -51,10 +51,11 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 		ProductID:        productID,
 		Amount:           2300,
 		Currency:         "USD",
-		Status:           string(models.CatalogStatusActive),
-		BillingCycleDays: &billingCycleDays,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Status:             string(models.CatalogStatusActive),
+		AccessDurationDays: &billingCycleDays,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 

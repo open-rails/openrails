@@ -66,13 +66,9 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 				if price.Metered == nil {
 					continue
 				}
-				_, cycleDays, err := normalizeInterval(price.Interval)
+				cycle, err := normalizeDuration(price.Duration)
 				if err != nil {
-					return fmt.Errorf("product %q price %s interval: %w", product.Key, PriceLabel(product.Key, price), err)
-				}
-				var cycle *int
-				if cycleDays > 0 {
-					cycle = &cycleDays
+					return fmt.Errorf("product %q price %s duration: %w", product.Key, PriceLabel(product.Key, price), err)
 				}
 				var perSeconds *int64
 				if price.Metered.Per != "" {

@@ -533,7 +533,7 @@ func (s *CheckoutSessionService) resolveMode(mode string, rail string, price *mo
 	}
 
 	expected := models.CheckoutSessionModeOneOff
-	if price.BillingCycleDays != nil {
+	if price.AutoRenew {
 		expected = models.CheckoutSessionModeSubscription
 	}
 	if trimmedMode == "" {
@@ -1303,7 +1303,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 			oldPrice.Amount,
 			newPrice.Amount,
 			oldSub.CurrentPeriodEndsAt,
-			newPrice.BillingCycleDays,
+			newPrice.RecurringCycleDays(),
 			s.now(),
 		)
 		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(ctx, firstChargeCents, newTerms.mintSymbol, s.priceProvider)

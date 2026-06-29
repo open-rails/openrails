@@ -64,10 +64,11 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		ProductID:        productID,
 		Amount:           9_990_000,
 		Currency:         "usd",
-		Status:           string(models.CatalogStatusActive),
-		BillingCycleDays: &billingDays,
-		CreatedAt:        clock.Now().UTC(),
-		UpdatedAt:        clock.Now().UTC(),
+		Status:             string(models.CatalogStatusActive),
+		AccessDurationDays: &billingDays,
+		AutoRenew:          true,
+		CreatedAt:          clock.Now().UTC(),
+		UpdatedAt:          clock.Now().UTC(),
 	})
 	require.NoError(t, err)
 

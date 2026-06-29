@@ -219,7 +219,7 @@ FROM openrails.solana_subscriptions;
 -- jsonb carries that id under the provider's key. Draft prices are excluded
 -- (not billable); archived prices stay (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, billing_cycle_days, status, rails
+SELECT id, product_id, amount, currency, access_duration_days, auto_renew, status, rails
 FROM openrails.prices
 WHERE rails IS NOT NULL
   AND status <> 'draft';

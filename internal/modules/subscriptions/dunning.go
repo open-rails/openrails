@@ -225,10 +225,11 @@ func DunningWindow(billingCycleDays int) time.Duration {
 // price or its cycle is unknown (one-time prices) — the defensive
 // monthly-fallback input to the Dunning* schedule functions.
 func BillingCycleDaysOf(price *models.Price) int {
-	if price == nil || price.BillingCycleDays == nil {
+	cycleDays := price.RecurringCycleDays()
+	if cycleDays == nil {
 		return 0
 	}
-	return *price.BillingCycleDays
+	return *cycleDays
 }
 
 // Renewal grace windows (#368).

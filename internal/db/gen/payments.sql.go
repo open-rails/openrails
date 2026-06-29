@@ -587,7 +587,7 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.provider_account_id, p.id, p.product_id, p.amount, p.currency, p.billing_cycle_days, p.rails, p.status, p.created_at, p.updated_at, p.merchant_id, p.initial_amount, p.initial_period_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.provider_account_id, p.id, p.product_id, p.amount, p.currency, p.rails, p.status, p.created_at, p.updated_at, p.merchant_id, p.access_duration_days, p.auto_renew, p.trial_unit_amount, p.trial_duration_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -631,14 +631,15 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPrice.ProductID,
 		&i.OpenrailsPrice.Amount,
 		&i.OpenrailsPrice.Currency,
-		&i.OpenrailsPrice.BillingCycleDays,
 		&i.OpenrailsPrice.Rails,
 		&i.OpenrailsPrice.Status,
 		&i.OpenrailsPrice.CreatedAt,
 		&i.OpenrailsPrice.UpdatedAt,
 		&i.OpenrailsPrice.MerchantID,
-		&i.OpenrailsPrice.InitialAmount,
-		&i.OpenrailsPrice.InitialPeriodDays,
+		&i.OpenrailsPrice.AccessDurationDays,
+		&i.OpenrailsPrice.AutoRenew,
+		&i.OpenrailsPrice.TrialUnitAmount,
+		&i.OpenrailsPrice.TrialDurationDays,
 		&i.OpenrailsProduct.ID,
 		&i.OpenrailsProduct.Slug,
 		&i.OpenrailsProduct.DisplayName,
@@ -1203,7 +1204,7 @@ WHERE p.subscription_id IS NOT NULL
   AND p.rail = $1
   AND sub.rail::text = p.rail::text
   AND p.amount > 0
-  AND p.amount = $2 * 10000
+  AND p.amount = $2::bigint * 10000
   AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = $3::text
   AND p.purchased_at >= $4::timestamptz
   AND p.purchased_at <= $5::timestamptz

@@ -102,10 +102,10 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	}
 
 	beforeProducts := []*models.Product{{ID: beforeProductID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, BillingCycleDays: cycle, Status: models.CatalogStatusActive}}
+	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
 
 	afterProducts := []*models.Product{{ID: afterProductID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, BillingCycleDays: cycle, Status: models.CatalogStatusActive}}
+	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
 
 	beforeSnap := buildSnapshotFromRows(beforeProducts, beforePrices)
 	afterSnap := buildSnapshotFromRows(afterProducts, afterPrices)
@@ -158,7 +158,7 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 
 	// Local catalog has the $29.00 price.
 	products := []*models.Product{{ID: productID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, BillingCycleDays: cycle, Status: models.CatalogStatusActive}}
+	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationDays: cycle, AutoRenew: true, Status: models.CatalogStatusActive}}
 	snap := buildSnapshotFromRows(products, prices)
 
 	// Stripe has a price at a DIFFERENT amount ($39.00) under its own (different)

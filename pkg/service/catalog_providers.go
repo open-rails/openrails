@@ -262,6 +262,9 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		productSlug = strings.TrimSpace(product.Slug)
 	}
 	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
+	// Provider objects key on the RECURRING cadence (nil for one-off / finite
+	// windows — those settle as one-time charges; the access window is OpenRails-side).
+	reqCycle := req.RecurringCycleDays()
 	pctx := autoCreateContext{
 		PriceID:              priceID,
 		ProductID:            req.ProductID,
@@ -269,8 +272,8 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		ProductSlug:          productSlug,
 		UnitAmount:           req.UnitAmount,
 		Currency:             req.Currency,
-		BillingCycleDays:     req.BillingCycleDays,
-		LookupKey:            internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
+		BillingCycleDays:     reqCycle,
+		LookupKey:            internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, reqCycle),
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
@@ -380,7 +383,7 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 		ProductID:        price.ProductID,
 		UnitAmount:       price.Amount,
 		Currency:         price.Currency,
-		BillingCycleDays: price.BillingCycleDays,
+		BillingCycleDays: price.RecurringCycleDays(),
 	}
 	if products, err := s.requireProductService(); err == nil {
 		if product, err := products.GetByID(ctx, price.ProductID); err == nil && product != nil {

@@ -1062,8 +1062,8 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	if subscription.Price != nil {
 		priceAmount = float64(subscription.Price.Amount) / 100.0
 		priceCurrency = subscription.Price.Currency
-		if subscription.Price.BillingCycleDays != nil {
-			billingDays, _ = safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
+		if cycle := subscription.Price.RecurringCycleDays(); cycle != nil {
+			billingDays, _ = safecast.Convert[uint32](*cycle)
 		}
 		productID = &subscription.Price.ProductID
 		priceID = &subscription.Price.ID

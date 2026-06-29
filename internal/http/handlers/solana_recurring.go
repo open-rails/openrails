@@ -386,7 +386,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 			oldPrice.Amount,
 			newPrice.Amount,
 			oldSub.CurrentPeriodEndsAt,
-			newPrice.BillingCycleDays,
+			newPrice.RecurringCycleDays(),
 			nowOrDefault(r),
 		)
 		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(

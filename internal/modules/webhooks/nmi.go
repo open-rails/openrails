@@ -385,8 +385,8 @@ func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, u
 	if sub != nil && sub.Price != nil {
 		priceAmount = float64(sub.Price.Amount) / 100.0
 		priceCurrency = sub.Price.Currency
-		if sub.Price.BillingCycleDays != nil {
-			billingDays, _ = safecast.Convert[uint32](*sub.Price.BillingCycleDays)
+		if sub.Price.RecurringCycleDays() != nil {
+			billingDays, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleDays())
 		}
 		productID = &sub.Price.ProductID
 		priceID = &sub.Price.ID

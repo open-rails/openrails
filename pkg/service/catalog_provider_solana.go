@@ -79,6 +79,12 @@ func solanaPlanID(productSlug, currency string, unitAmount int64, billingCycleDa
 }
 
 func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	// A one-off Solana price (no recurring cadence, #622) needs no on-chain Plan
+	// PDA — it settles as a direct transfer validated at payment time. Mark the
+	// rail present so checkout offers Solana; publish nothing on-chain.
+	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
+		return map[string]string{"provider": "solana"}, nil
+	}
 	plan, ok := a.planService()
 	if !ok {
 		// Solana recurring not configured here: defer to a manual/late publish.
@@ -87,9 +93,6 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	tid, ok := merchant.FromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("solana create-mode requires a merchant-scoped context")
-	}
-	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
-		return nil, fmt.Errorf("solana create-mode requires billing_cycle_days (recurring plans need a fixed on-chain period)")
 	}
 	if in.UnitAmount <= 0 {
 		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (stablecoin base units)")

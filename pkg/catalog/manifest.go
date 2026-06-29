@@ -90,11 +90,22 @@ func (p Product) tierRank() int {
 }
 
 // Price is a declared price. It has NO slug: a price's identity is its
-// financial substance (currency, unit_amount, interval).
+// financial substance (currency, unit_amount, duration, auto_renew).
 type Price struct {
 	Currency   string `json:"currency,omitempty" yaml:"currency,omitempty"`
 	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"`
-	Interval   string `json:"interval,omitempty" yaml:"interval,omitempty"`
+
+	// Duration is the access window a purchase of this price grants (#622):
+	// a finite value (`3d`/`30d`/`90d`/`365d`) or `indefinite`. Optional;
+	// defaults to `indefinite` (durable/perpetual ownership). It is the single
+	// source for the window — it drives both product-access ends_at and the
+	// derived entitlement end_at.
+	Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
+
+	// AutoRenew says whether the price charges again and extends the window after
+	// Duration (#622). Optional, defaults to false. A finite Duration is required
+	// to renew — auto_renew with an indefinite/omitted Duration is rejected.
+	AutoRenew bool `json:"auto_renew,omitempty" yaml:"auto_renew,omitempty"`
 
 	// Active mirrors Stripe's product/price availability model. nil defaults to true.
 	Active *bool `json:"active,omitempty" yaml:"active,omitempty"`
@@ -119,11 +130,12 @@ type Price struct {
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
 
-	// Intro is an optional introductory/trial FIRST period that differs from the
-	// recurring terms above (#602). amount=0 is a free trial. Omit for a flat price.
-	//   intro: {amount: 1995, interval: 30d}  # $19.95 first 30d, then UnitAmount recurring
-	//   intro: {amount: 0, interval: 7d}       # free 7-day trial, then UnitAmount recurring
-	Intro *PriceIntro `json:"intro,omitempty" yaml:"intro,omitempty"`
+	// Trial is an optional FIRST phase that differs from the recurring terms above
+	// (#622). unit_amount=0 is a free trial. Requires auto_renew. Omit for a flat
+	// price.
+	//   trial: {unit_amount: 1995, duration: 30d}  # $19.95 first 30d, then UnitAmount recurring
+	//   trial: {unit_amount: 0, duration: 7d}       # free 7-day trial, then UnitAmount recurring
+	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
 
 	Metered *MeteredPrice `json:"metered,omitempty" yaml:"metered,omitempty"`
 }
@@ -135,9 +147,10 @@ type MeteredPrice struct {
 	Per      string `json:"per,omitempty" yaml:"per,omitempty"`
 }
 
-// PriceIntro is the introductory/trial first period for a Price (#602): a first
-// period at its own price/length, then the Price's recurring terms.
-type PriceIntro struct {
-	Amount   int64  `json:"amount" yaml:"amount"`     // first-period price (0 = free trial)
-	Interval string `json:"interval" yaml:"interval"` // first-period length
+// PriceTrial is the trial first phase for a Price (#622): a first phase at its
+// own price/length, then the Price's recurring terms. Requires the price's
+// auto_renew.
+type PriceTrial struct {
+	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price (0 = free trial)
+	Duration   string `json:"duration" yaml:"duration"`       // first-phase length
 }

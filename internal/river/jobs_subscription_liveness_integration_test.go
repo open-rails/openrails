@@ -80,7 +80,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: f.priceID, ProductID: f.productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
+		Status:     string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

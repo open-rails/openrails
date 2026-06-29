@@ -605,13 +605,13 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		UpdatedAt:        now,
 	})
 	suite.InsertPrice(ctx, &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           999,
-		Currency:         "usd",
-		BillingCycleDays: &cycleDays,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
+		ID:                 priceID,
+		ProductID:          productID,
+		Status:             models.CatalogStatusActive,
+		Amount:             999,
+		Currency:           "usd",
+		AccessDurationDays: &cycleDays, AutoRenew: true,
+		MerchantID: dbtest.TestMerchantID.UUID(),
 		Rails: map[string]map[string]string{
 			string(models.RailMobius): {
 				models.RailKeyPlanID: "plan_dunning_cycle",

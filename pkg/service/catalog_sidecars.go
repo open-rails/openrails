@@ -227,7 +227,7 @@ WHERE merchant_id = $1
   AND product_id = $2
   AND amount = $3
   AND lower(currency) = lower($4)
-  AND billing_cycle_days IS NOT DISTINCT FROM $5
+  AND access_duration_days IS NOT DISTINCT FROM $5
 LIMIT 1`,
 		merchantID, productID, spec.UnitAmount, spec.Currency, spec.BillingCycleDays).Scan(&priceID); err != nil {
 		return uuid.Nil, fmt.Errorf("resolve price for product %q: %w", spec.ProductSlug, err)

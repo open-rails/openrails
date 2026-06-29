@@ -1226,8 +1226,8 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 		if curr := strings.TrimSpace(sub.Price.Currency); curr != "" {
 			priceCurrency = curr
 		}
-		if sub.Price.BillingCycleDays != nil {
-			billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.BillingCycleDays)
+		if sub.Price.RecurringCycleDays() != nil {
+			billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleDays())
 		}
 		productID = &sub.Price.ProductID
 	}
@@ -1548,8 +1548,8 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		if err != nil {
 			return fmt.Errorf("load stripe price for won dispute recovery: %w", err)
 		}
-		if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
-			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+		if price.RecurringCycleDays() != nil && *price.RecurringCycleDays() > 0 {
+			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.RecurringCycleDays()) * 24 * time.Hour)
 		}
 	}
 	if !paidThrough.After(now) {

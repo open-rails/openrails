@@ -77,7 +77,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	nowUnixNano := time.Now().UnixNano()
 	setPriceAmount(t, suite, oneOff, (100+(nowUnixNano%400))*10_000)
 	setPriceAmount(t, suite, recurring, (100+((nowUnixNano/7)%400))*10_000)
-	planID := fmt.Sprintf("openrails_e2e_nmi_%d_d%d", recurring.Amount, derefInt(recurring.BillingCycleDays))
+	planID := fmt.Sprintf("openrails_e2e_nmi_%d_d%d", recurring.Amount, derefInt(recurring.RecurringCycleDays()))
 	ensureNMISandboxPlan(t, client, securityKey, planID, recurring)
 	bindPriceToNMIProvider(t, suite, recurring.ID, planID)
 	bindPriceToNMIProvider(t, suite, oneOff.ID, "")
@@ -243,10 +243,10 @@ func pickUSDPrices(t *testing.T, suite *TestContainerSuite) (recurring, oneOff *
 			if !strings.EqualFold(p.Currency, "USD") {
 				continue
 			}
-			if p.BillingCycleDays != nil && recurring == nil {
+			if p.RecurringCycleDays() != nil && recurring == nil {
 				recurring = p
 			}
-			if p.BillingCycleDays == nil && oneOff == nil {
+			if p.RecurringCycleDays() == nil && oneOff == nil {
 				oneOff = p
 			}
 		}
@@ -266,7 +266,7 @@ func ensureNMISandboxPlan(t *testing.T, client *nmi.NMIClient, securityKey, plan
 		"plan_id":       {planID},
 		"plan_name":     {"OpenRails E2E " + planID},
 		"plan_amount":   {microUSDDecimalAmount(recurring.Amount)},
-		"day_frequency": {strconv.Itoa(derefInt(recurring.BillingCycleDays))},
+		"day_frequency": {strconv.Itoa(derefInt(recurring.RecurringCycleDays()))},
 		"plan_payments": {"0"},
 	})
 	// add_plan returns response=1 on create; an already-existing plan_id (NMI

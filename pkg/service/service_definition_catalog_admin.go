@@ -625,7 +625,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 // terms are baked into its content key, so a change is a different price minted
 // upstream (create-new + archive-old), never an in-place re-mint+transfer.
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
-	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays)
+	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.RecurringCycleDays())
 	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
 	unitAmountCents, err := moneyutil.MicrosToCentsExact(local.Amount)
 	if err != nil {
@@ -635,8 +635,8 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 		StripeProductID:  stripeProductID,
 		UnitAmount:       unitAmountCents,
 		Currency:         local.Currency,
-		BillingCycleDays: local.BillingCycleDays,
-		LookupKey:        internalStripeLookupKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays),
+		BillingCycleDays: local.RecurringCycleDays(),
+		LookupKey:        internalStripeLookupKey(prod.Slug, local.Currency, local.Amount, local.RecurringCycleDays()),
 		// Content key is the idempotency key: replaying recreate for the same
 		// price terms returns the same Stripe object rather than duplicating.
 		IdempotencyKey: "openrails-price-" + priceContentKey,

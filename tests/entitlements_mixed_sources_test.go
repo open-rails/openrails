@@ -49,15 +49,15 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           999,
-		Currency:         "usd",
-		BillingCycleDays: &billingDays,
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		CreatedAt:        clock.Now().UTC(),
-		UpdatedAt:        clock.Now().UTC(),
+		ID:                 priceID,
+		ProductID:          productID,
+		Status:             models.CatalogStatusActive,
+		Amount:             999,
+		Currency:           "usd",
+		AccessDurationDays: &billingDays, AutoRenew: true,
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		CreatedAt:  clock.Now().UTC(),
+		UpdatedAt:  clock.Now().UTC(),
 	})
 
 	userID := uuid.New().String()

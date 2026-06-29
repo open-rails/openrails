@@ -82,23 +82,25 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	price := &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           999,
-		Currency:         "usd",
-		BillingCycleDays: &billingDays,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Status:             models.CatalogStatusActive,
+		Amount:             999,
+		Currency:           "usd",
+		AccessDurationDays: &billingDays,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           999,
-		Currency:         "usd",
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		Status:           string(models.CatalogStatusActive),
-		BillingCycleDays: &billingDays32,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                 priceID,
+		ProductID:          productID,
+		Amount:             999,
+		Currency:           "usd",
+		MerchantID:         dbtest.TestMerchantID.UUID(),
+		Status:             string(models.CatalogStatusActive),
+		AccessDurationDays: &billingDays32,
+		AutoRenew:          true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	require.NoError(t, err)
 
@@ -260,7 +262,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
-		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32,
+		Status: string(models.CatalogStatusActive), AccessDurationDays: &billingDays32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)

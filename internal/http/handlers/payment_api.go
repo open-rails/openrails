@@ -178,8 +178,8 @@ func paymentAPIStatus(status string) string {
 
 func PriceToAPI(p *models.Price) api.PriceObject {
 	var recurring *api.RecurringInfo
-	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
-		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)}
+	if p.RecurringCycleDays() != nil && *p.RecurringCycleDays() > 0 {
+		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleDaysToInterval(*p.RecurringCycleDays())}
 	}
 	priceType := "one_time"
 	if recurring != nil {

@@ -46,11 +46,11 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 		p := &models.Price{
 			ID: uuid.New(), MerchantID: merchantID, ProductID: productID,
 			Status: models.CatalogStatusArchived, Amount: amount, Currency: "usd",
-			BillingCycleDays: &cycle, CreatedAt: now, UpdatedAt: now,
+			AccessDurationDays: &cycle, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		}
 		if withIntro {
 			ia, id := initialAmount, initialDays
-			p.InitialAmount, p.InitialPeriodDays = &ia, &id
+			p.TrialUnitAmount, p.TrialDurationDays = &ia, &id
 		}
 		require.NoError(t, r.Create(ctx, p))
 		return p
@@ -69,23 +69,23 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	// step-down intro round-trips
 	step := byAmount[1495]
 	require.NotNil(t, step)
-	a, d, ok := step.GetIntro()
+	a, d, ok := step.GetTrial()
 	require.True(t, ok)
 	require.Equal(t, int64(1995), a)
 	require.Equal(t, 30, d)
 
-	// free trial: initial amount 0 is still an intro (NOT "no intro")
+	// free trial: trial unit amount 0 is still a trial (NOT "no trial")
 	trial := byAmount[1500]
 	require.NotNil(t, trial)
-	ta, td, ok := trial.GetIntro()
-	require.True(t, ok, "initial_amount 0 is a free trial, still an intro")
+	ta, td, ok := trial.GetTrial()
+	require.True(t, ok, "trial_unit_amount 0 is a free trial, still a trial")
 	require.Equal(t, int64(0), ta)
 	require.Equal(t, 7, td)
 
-	// flat price has no intro
+	// flat price has no trial
 	flat := byAmount[2300]
 	require.NotNil(t, flat)
-	require.False(t, flat.HasIntro())
-	require.Nil(t, flat.InitialAmount)
-	require.Nil(t, flat.InitialPeriodDays)
+	require.False(t, flat.HasTrial())
+	require.Nil(t, flat.TrialUnitAmount)
+	require.Nil(t, flat.TrialDurationDays)
 }

@@ -58,14 +58,14 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           9_990_000,
-		Currency:         "usd",
-		BillingCycleDays: &billingDays,
-		CreatedAt:        clock.Now().UTC(),
-		UpdatedAt:        clock.Now().UTC(),
+		ID:                 priceID,
+		ProductID:          productID,
+		Status:             models.CatalogStatusActive,
+		Amount:             9_990_000,
+		Currency:           "usd",
+		AccessDurationDays: &billingDays, AutoRenew: true,
+		CreatedAt: clock.Now().UTC(),
+		UpdatedAt: clock.Now().UTC(),
 	})
 
 	suite.InsertSubscription(ctx, &models.Subscription{

@@ -200,7 +200,7 @@ func computeStripeDriftJob(
 		// the owning product for its slug.
 		if prod := productByID[pr.ProductID.String()]; prod != nil {
 			if slug := strings.TrimSpace(prod.Slug); slug != "" {
-				ck := openRailsPriceContentKeyJob(prod.Slug, pr.Currency, pr.Amount, pr.BillingCycleDays)
+				ck := openRailsPriceContentKeyJob(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				priceByContentKey[ck] = pr
 			}
 		}

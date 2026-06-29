@@ -230,7 +230,7 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 	mkPrice := func(status models.CatalogStatus) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "usd",
-			BillingCycleDays: &cycle, Status: status,
+			AccessDurationDays: &cycle, AutoRenew: true, Status: status,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": fx.pda},
 			},

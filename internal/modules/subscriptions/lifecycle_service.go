@@ -351,8 +351,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var periodEndsAt time.Time
 	if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 		periodEndsAt = params.CurrentPeriodEndsAt.UTC()
-	} else if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
-		periodEndsAt = now.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+	} else if cd := price.RecurringCycleDays(); cd != nil {
+		periodEndsAt = now.Add(time.Duration(*cd) * 24 * time.Hour)
 	} else {
 		periodEndsAt = now.Add(30 * 24 * time.Hour)
 	}
@@ -761,22 +761,28 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			}
 		}
 
-		// Calculate new billing period
+		// Calculate new billing period. A renewing subscription's price is
+		// recurring; fall back to 30d if its cadence is somehow unset.
+		cycleDays := BillingCycleDaysOf(price)
+		if cycleDays <= 0 {
+			cycleDays = 30
+		}
+		cycleWindow := time.Duration(cycleDays) * 24 * time.Hour
 		var periodStartsAt, periodEndsAt time.Time
 		if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
 			periodStartsAt = params.CurrentPeriodStartsAt.UTC()
 			if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 				periodEndsAt = params.CurrentPeriodEndsAt.UTC()
 			} else {
-				periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+				periodEndsAt = periodStartsAt.Add(cycleWindow)
 			}
 		} else if subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero() {
 			periodStartsAt = *subscription.CurrentPeriodEndsAt
-			periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+			periodEndsAt = periodStartsAt.Add(cycleWindow)
 		} else {
 			now := s.now()
 			periodStartsAt = now
-			periodEndsAt = now.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+			periodEndsAt = now.Add(cycleWindow)
 		}
 		if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 			periodEndsAt = params.CurrentPeriodEndsAt.UTC()

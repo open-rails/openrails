@@ -13,8 +13,8 @@ next_id: 623
 
 # #622: catalog prices need explicit product-access windows
 
-**Completed:** no
-**Status:** PLANNED 2026-06-29 (Codex; revised w/ Claude, verified against code). Model prices as ways to create or renew product access windows; product entitlements are granted while that access is active. This commits to an engine change (link entitlement windows to the product-access window) on top of a manifest grammar change — not a manifest-only tweak — but reuses the existing materialization primitives instead of rebuilding them.
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (v0.74.0). Hard cut to the access-window price model shipped: migration 037 drops billing_cycle_days/initial_* and adds access_duration_days/auto_renew/trial_*; manifest grammar is duration/auto_renew/trial (interval/intro removed, no alias); checkout sets entitlement end_at + product_access ends_at from the price's access window (product-level per-entitlement durations still apply when the price is indefinite); Solana adapter no-ops for one-off prices. Full build/vet/unit green; 80/83 integration packages green (3 pre-existing failures in provider-accounts/credential-posture, unrelated). Doujins manifest + validation test converted; doujins bumped to openrails v0.74.0.
 
 ## Reason
 
@@ -161,8 +161,8 @@ Make the catalog example and integration coverage exhaustive for the planned v1 
 
 # #607: provider-intents-as-boring-outbound-queue
 
-**Completed:** no
-**Status:** NOT_STARTED 2026-06-29: simplify the provider-intent system so `openrails.provider_intents` is a normal outbound message queue/current-work table, while provider mutation history lives in ClickHouse events. This issue intentionally cuts the "ledger/tombstone forever" model back to boring queue semantics.
+**Completed:** yes
+**Status:** DONE 2026-06-29 (Claude): boring-queue ergonomics WITHOUT breaking effectively-once. The succeeded `provider_intents` row is KEPT as the slim dedupe tombstone (UNIQUE merchant_id+idempotency_key) — on success the runner logs the rich attempt to ClickHouse then prunes heavy columns (`payload`→NULL, `result_evidence`→slim per-handler `PrunePolicy()`, retaining the pointer keys the dunning-repair path reads); `openrails intents` now defaults to the ACTIVE working set (the `idx_provider_intents_due` statuses), with `--status=all|succeeded` still querying the tombstone. The ON CONFLICT enqueue semantics are untouched, so a re-enqueue of a succeeded row still no-ops with NO second provider call (no double charge). Integration test `TestSucceededIntentIsPrunedToSlimTombstone` proves row-retained + payload-pruned + evidence-pointer-kept + re-enqueue/retry does not re-execute; full `internal/intents` + `internal/river` + `pkg/service` suites green vs real Postgres. Merged to master (commit fb1ff652). NOTE: the original "delete succeeded rows" plan was rejected as a double-charge bug — see the REVIEW below; "ClickHouse-only history" stays partial because the Postgres tombstone must remain the idempotency source.
 
 Make provider intents easier to reason about: pending/retryable/in-flight/dead work belongs in Postgres; historical attempts/results belong in ClickHouse; successful work should leave the queue.
 

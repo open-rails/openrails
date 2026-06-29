@@ -53,13 +53,14 @@ func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency stri
 		states[provider] = billingservice.ProviderState{Status: billingservice.ProviderStatusLinked}
 	}
 	f.prices[productID] = append(f.prices[productID], billingservice.CatalogPrice{
-		ID:               uuid.New(),
-		ProductID:        productID,
-		Status:           status,
-		UnitAmount:       amount,
-		Currency:         currency,
-		BillingCycleDays: &cd,
-		Providers:        states,
+		ID:                 uuid.New(),
+		ProductID:          productID,
+		Status:             status,
+		UnitAmount:         amount,
+		Currency:           currency,
+		AccessDurationDays: &cd,
+		AutoRenew:          true,
+		Providers:          states,
 	})
 }
 
@@ -159,13 +160,13 @@ products:
     tier_group: cozy
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1200, interval: 30d, providers: [stripe]}
+      - {currency: usd, unit_amount: 1200, duration: 30d, auto_renew: true, providers: [stripe]}
   - key: craftsman
     display_name: Craftsman
     tier_group: cozy
     tier_rank: 2
     prices:
-      - {currency: usd, unit_amount: 1300, interval: 30d, providers: [stripe]}
+      - {currency: usd, unit_amount: 1300, duration: 30d, auto_renew: true, providers: [stripe]}
 `
 
 func TestPlan_CreateWhenEmpty(t *testing.T) {
@@ -293,7 +294,7 @@ products:
   - key: premium
     display_name: Premium
     prices:
-      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [solana], active: false}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [solana], active: false}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, models.CatalogStatusActive)

@@ -12,29 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const entitlementExistsForGrant = `-- name: EntitlementExistsForGrant :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements
-    WHERE merchant_id = $1::uuid
-      AND grant_id = $2::uuid
-      AND entitlement = $3::text
-      AND deleted_at IS NULL
-) AS exists
-`
-
-type EntitlementExistsForGrantParams struct {
-	MerchantID  uuid.UUID
-	GrantID     uuid.UUID
-	Entitlement string
-}
-
-func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg EntitlementExistsForGrantParams) (bool, error) {
-	row := q.db.QueryRow(ctx, entitlementExistsForGrant, arg.MerchantID, arg.GrantID, arg.Entitlement)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const createProductUsageLimitBinding = `-- name: CreateProductUsageLimitBinding :exec
 INSERT INTO openrails.product_usage_limit_bindings (
     id, merchant_id, customer_id, usage_limit_key, measure, windows,
@@ -83,47 +60,27 @@ func (q *Queries) CreateProductUsageLimitBinding(ctx context.Context, arg Create
 	return err
 }
 
-const productUsageLimitBindingExistsForGrant = `-- name: ProductUsageLimitBindingExistsForGrant :one
+const entitlementExistsForGrant = `-- name: EntitlementExistsForGrant :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.product_usage_limit_bindings
+    SELECT 1 FROM openrails.entitlements
     WHERE merchant_id = $1::uuid
       AND grant_id = $2::uuid
-      AND usage_limit_key = $3::text
+      AND entitlement = $3::text
+      AND deleted_at IS NULL
 ) AS exists
 `
 
-type ProductUsageLimitBindingExistsForGrantParams struct {
-	MerchantID    uuid.UUID
-	GrantID       uuid.UUID
-	UsageLimitKey string
+type EntitlementExistsForGrantParams struct {
+	MerchantID  uuid.UUID
+	GrantID     uuid.UUID
+	Entitlement string
 }
 
-func (q *Queries) ProductUsageLimitBindingExistsForGrant(ctx context.Context, arg ProductUsageLimitBindingExistsForGrantParams) (bool, error) {
-	row := q.db.QueryRow(ctx, productUsageLimitBindingExistsForGrant, arg.MerchantID, arg.GrantID, arg.UsageLimitKey)
+func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg EntitlementExistsForGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, entitlementExistsForGrant, arg.MerchantID, arg.GrantID, arg.Entitlement)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
-}
-
-const revokeProductUsageLimitBindingsByGrant = `-- name: RevokeProductUsageLimitBindingsByGrant :exec
-UPDATE openrails.product_usage_limit_bindings
-SET revoked_at = $3::timestamptz,
-    updated_at = now(),
-    policy_version = policy_version + 1
-WHERE merchant_id = $1::uuid
-  AND grant_id = $2::uuid
-  AND revoked_at IS NULL
-`
-
-type RevokeProductUsageLimitBindingsByGrantParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
-	RevokedAt  time.Time
-}
-
-func (q *Queries) RevokeProductUsageLimitBindingsByGrant(ctx context.Context, arg RevokeProductUsageLimitBindingsByGrantParams) error {
-	_, err := q.db.Exec(ctx, revokeProductUsageLimitBindingsByGrant, arg.MerchantID, arg.GrantID, arg.RevokedAt)
-	return err
 }
 
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
@@ -146,49 +103,6 @@ type GetCreditGrantBySourceIDParams struct {
 // its natural source_id key (the deposit's SourceID).
 func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGrantBySourceIDParams) (OpenrailsGrant, error) {
 	row := q.db.QueryRow(ctx, getCreditGrantBySourceID, arg.MerchantID, arg.CustomerID, arg.SourceID)
-	var i OpenrailsGrant
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.ProductID,
-		&i.Kind,
-		&i.SourceType,
-		&i.SourceID,
-		&i.PaymentID,
-		&i.Event,
-		&i.SupersedesID,
-		&i.SpecSnapshot,
-		&i.StartsAt,
-		&i.EndsAt,
-		&i.Amount,
-		&i.Currency,
-		&i.Reason,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getOwnershipGrantBySourceID = `-- name: GetOwnershipGrantBySourceID :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
-WHERE merchant_id = $1::uuid
-  AND customer_id = $2::uuid
-  AND product_id = $3::uuid
-  AND kind = 'ownership' AND event = 'grant'
-  AND source_id = $4::text
-ORDER BY created_at ASC
-LIMIT 1
-`
-
-type GetOwnershipGrantBySourceIDParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ProductID  uuid.UUID
-	SourceID   string
-}
-
-func (q *Queries) GetOwnershipGrantBySourceID(ctx context.Context, arg GetOwnershipGrantBySourceIDParams) (OpenrailsGrant, error) {
-	row := q.db.QueryRow(ctx, getOwnershipGrantBySourceID, arg.MerchantID, arg.CustomerID, arg.ProductID, arg.SourceID)
 	var i OpenrailsGrant
 	err := row.Scan(
 		&i.ID,
@@ -251,6 +165,54 @@ type GetGrantParams struct {
 
 func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (OpenrailsGrant, error) {
 	row := q.db.QueryRow(ctx, getGrant, arg.MerchantID, arg.ID)
+	var i OpenrailsGrant
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.ProductID,
+		&i.Kind,
+		&i.SourceType,
+		&i.SourceID,
+		&i.PaymentID,
+		&i.Event,
+		&i.SupersedesID,
+		&i.SpecSnapshot,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.Amount,
+		&i.Currency,
+		&i.Reason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOwnershipGrantBySourceID = `-- name: GetOwnershipGrantBySourceID :one
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+WHERE merchant_id = $1::uuid
+  AND customer_id = $2::uuid
+  AND product_id = $3::uuid
+  AND kind = 'ownership' AND event = 'grant'
+  AND source_id = $4::text
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+type GetOwnershipGrantBySourceIDParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+	SourceID   string
+}
+
+func (q *Queries) GetOwnershipGrantBySourceID(ctx context.Context, arg GetOwnershipGrantBySourceIDParams) (OpenrailsGrant, error) {
+	row := q.db.QueryRow(ctx, getOwnershipGrantBySourceID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ProductID,
+		arg.SourceID,
+	)
 	var i OpenrailsGrant
 	err := row.Scan(
 		&i.ID,
@@ -418,82 +380,6 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 	return terminated, err
 }
 
-const listIncludedProductIDs = `-- name: ListIncludedProductIDs :many
-SELECT included_product_id FROM openrails.product_includes
-WHERE merchant_id = $1::uuid
-  AND product_id = $2::uuid
-ORDER BY included_product_id
-`
-
-type ListIncludedProductIDsParams struct {
-	MerchantID uuid.UUID
-	ProductID  uuid.UUID
-}
-
-func (q *Queries) ListIncludedProductIDs(ctx context.Context, arg ListIncludedProductIDsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listIncludedProductIDs, arg.MerchantID, arg.ProductID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var includedProductID uuid.UUID
-		if err := rows.Scan(&includedProductID); err != nil {
-			return nil, err
-		}
-		items = append(items, includedProductID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listProductUsageLimitSpecs = `-- name: ListProductUsageLimitSpecs :many
-SELECT pul.usage_limit_key, cul.measure, cul.windows, p.slug AS product_slug
-FROM openrails.product_usage_limits pul
-JOIN openrails.catalog_usage_limits cul
-  ON cul.merchant_id = pul.merchant_id AND cul.key = pul.usage_limit_key
-JOIN openrails.products p
-  ON p.merchant_id = pul.merchant_id AND p.id = pul.product_id
-WHERE pul.merchant_id = $1::uuid
-  AND pul.product_id = $2::uuid
-ORDER BY pul.usage_limit_key
-`
-
-type ListProductUsageLimitSpecsParams struct {
-	MerchantID uuid.UUID
-	ProductID  uuid.UUID
-}
-
-type ListProductUsageLimitSpecsRow struct {
-	UsageLimitKey string
-	Measure       string
-	Windows       []byte
-	ProductSlug   string
-}
-
-func (q *Queries) ListProductUsageLimitSpecs(ctx context.Context, arg ListProductUsageLimitSpecsParams) ([]ListProductUsageLimitSpecsRow, error) {
-	rows, err := q.db.Query(ctx, listProductUsageLimitSpecs, arg.MerchantID, arg.ProductID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListProductUsageLimitSpecsRow
-	for rows.Next() {
-		var i ListProductUsageLimitSpecsRow
-		if err := rows.Scan(&i.UsageLimitKey, &i.Measure, &i.Windows, &i.ProductSlug); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCustomerIDsWithGrants = `-- name: ListCustomerIDsWithGrants :many
 SELECT DISTINCT customer_id FROM openrails.grants
 WHERE merchant_id = $1::uuid
@@ -618,6 +504,38 @@ func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCust
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIncludedProductIDs = `-- name: ListIncludedProductIDs :many
+SELECT included_product_id FROM openrails.product_includes
+WHERE merchant_id = $1::uuid
+  AND product_id = $2::uuid
+ORDER BY included_product_id
+`
+
+type ListIncludedProductIDsParams struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+}
+
+func (q *Queries) ListIncludedProductIDs(ctx context.Context, arg ListIncludedProductIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listIncludedProductIDs, arg.MerchantID, arg.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var included_product_id uuid.UUID
+		if err := rows.Scan(&included_product_id); err != nil {
+			return nil, err
+		}
+		items = append(items, included_product_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -979,6 +897,55 @@ func (q *Queries) ListOwnershipGrantsWithStatus(ctx context.Context, arg ListOwn
 	return items, nil
 }
 
+const listProductUsageLimitSpecs = `-- name: ListProductUsageLimitSpecs :many
+SELECT pul.usage_limit_key, cul.measure, cul.windows, p.slug AS product_slug
+FROM openrails.product_usage_limits pul
+JOIN openrails.catalog_usage_limits cul
+  ON cul.merchant_id = pul.merchant_id AND cul.key = pul.usage_limit_key
+JOIN openrails.products p
+  ON p.merchant_id = pul.merchant_id AND p.id = pul.product_id
+WHERE pul.merchant_id = $1::uuid
+  AND pul.product_id = $2::uuid
+ORDER BY pul.usage_limit_key
+`
+
+type ListProductUsageLimitSpecsParams struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+}
+
+type ListProductUsageLimitSpecsRow struct {
+	UsageLimitKey string
+	Measure       string
+	Windows       []byte
+	ProductSlug   string
+}
+
+func (q *Queries) ListProductUsageLimitSpecs(ctx context.Context, arg ListProductUsageLimitSpecsParams) ([]ListProductUsageLimitSpecsRow, error) {
+	rows, err := q.db.Query(ctx, listProductUsageLimitSpecs, arg.MerchantID, arg.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProductUsageLimitSpecsRow
+	for rows.Next() {
+		var i ListProductUsageLimitSpecsRow
+		if err := rows.Scan(
+			&i.UsageLimitKey,
+			&i.Measure,
+			&i.Windows,
+			&i.ProductSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSpendableCreditLots = `-- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
@@ -1186,6 +1153,28 @@ func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnret
 	return items, nil
 }
 
+const productUsageLimitBindingExistsForGrant = `-- name: ProductUsageLimitBindingExistsForGrant :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.product_usage_limit_bindings
+    WHERE merchant_id = $1::uuid
+      AND grant_id = $2::uuid
+      AND usage_limit_key = $3::text
+) AS exists
+`
+
+type ProductUsageLimitBindingExistsForGrantParams struct {
+	MerchantID    uuid.UUID
+	GrantID       uuid.UUID
+	UsageLimitKey string
+}
+
+func (q *Queries) ProductUsageLimitBindingExistsForGrant(ctx context.Context, arg ProductUsageLimitBindingExistsForGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, productUsageLimitBindingExistsForGrant, arg.MerchantID, arg.GrantID, arg.UsageLimitKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const revokeEntitlementsByGrant = `-- name: RevokeEntitlementsByGrant :execrows
 UPDATE openrails.entitlements
 SET revoked_at = $1::timestamptz,
@@ -1214,6 +1203,27 @@ func (q *Queries) RevokeEntitlementsByGrant(ctx context.Context, arg RevokeEntit
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const revokeProductUsageLimitBindingsByGrant = `-- name: RevokeProductUsageLimitBindingsByGrant :exec
+UPDATE openrails.product_usage_limit_bindings
+SET revoked_at = $1::timestamptz,
+    updated_at = now(),
+    policy_version = policy_version + 1
+WHERE merchant_id = $2::uuid
+  AND grant_id = $3::uuid
+  AND revoked_at IS NULL
+`
+
+type RevokeProductUsageLimitBindingsByGrantParams struct {
+	RevokedAt  time.Time
+	MerchantID uuid.UUID
+	GrantID    uuid.UUID
+}
+
+func (q *Queries) RevokeProductUsageLimitBindingsByGrant(ctx context.Context, arg RevokeProductUsageLimitBindingsByGrantParams) error {
+	_, err := q.db.Exec(ctx, revokeProductUsageLimitBindingsByGrant, arg.RevokedAt, arg.MerchantID, arg.GrantID)
+	return err
 }
 
 const sumCreditGrants = `-- name: SumCreditGrants :one

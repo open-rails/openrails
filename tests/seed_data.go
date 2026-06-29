@@ -90,10 +90,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					// Price 1.1: Monthly USD recurring
-					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-					Amount:           9_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+					Amount:             9_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_monthly_usd_999",
@@ -111,10 +111,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.2: Quarterly USD recurring (discounted)
-					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222223"),
-					Amount:           24_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(90),
+					ID:                 uuid.MustParse("22222222-2222-2222-2222-222222222223"),
+					Amount:             24_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(90), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_quarterly_usd_2499",
@@ -131,10 +131,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.3: Monthly EUR recurring
-					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222224"),
-					Amount:           8_990_000,
-					Currency:         "eur",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("22222222-2222-2222-2222-222222222224"),
+					Amount:             8_990_000,
+					Currency:           "eur",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_monthly_eur_899",
@@ -147,10 +147,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.4: Monthly JPY recurring
-					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222225"),
-					Amount:           1_200_000_000,
-					Currency:         "jpy",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("22222222-2222-2222-2222-222222222225"),
+					Amount:             1_200_000_000,
+					Currency:           "jpy",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_monthly_jpy_1200",
@@ -160,10 +160,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.5: Yearly USD recurring (heavily discounted)
-					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222226"),
-					Amount:           79_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(365),
+					ID:                 uuid.MustParse("22222222-2222-2222-2222-222222222226"),
+					Amount:             79_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(365), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_yearly_usd_7999",
@@ -195,10 +195,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					// Price 2.1: Monthly USD recurring
-					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444444"),
-					Amount:           19_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("44444444-4444-4444-4444-444444444444"),
+					Amount:             19_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_pro_monthly_usd_1999",
@@ -214,10 +214,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 2.2: Yearly USD recurring
-					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444445"),
-					Amount:           149_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(365),
+					ID:                 uuid.MustParse("44444444-4444-4444-4444-444444444445"),
+					Amount:             149_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(365), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_pro_yearly_usd_14999",
@@ -233,10 +233,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 2.3: Monthly EUR recurring
-					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444446"),
-					Amount:           17_990_000,
-					Currency:         "eur",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("44444444-4444-4444-4444-444444444446"),
+					Amount:             17_990_000,
+					Currency:           "eur",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_pro_monthly_eur_1799",
@@ -264,10 +264,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					// Price 3.1: One-time USD purchase (no billing cycle)
-					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666666"),
-					Amount:           299_990_000,
-					Currency:         "usd",
-					BillingCycleDays: nil, // One-time purchase, no recurring billing
+					ID:                 uuid.MustParse("66666666-6666-6666-6666-666666666666"),
+					Amount:             299_990_000,
+					Currency:           "usd",
+					AccessDurationDays: nil, AutoRenew: false, // One-time purchase, no recurring billing
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_lifetime_usd_29999",
@@ -283,10 +283,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 3.2: One-time EUR purchase
-					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666667"),
-					Amount:           269_990_000,
-					Currency:         "eur",
-					BillingCycleDays: nil, // One-time purchase
+					ID:                 uuid.MustParse("66666666-6666-6666-6666-666666666667"),
+					Amount:             269_990_000,
+					Currency:           "eur",
+					AccessDurationDays: nil, AutoRenew: false, // One-time purchase
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_lifetime_eur_26999",
@@ -299,10 +299,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 3.3: One-time JPY purchase
-					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666668"),
-					Amount:           39_800_000_000,
-					Currency:         "jpy",
-					BillingCycleDays: nil, // One-time purchase
+					ID:                 uuid.MustParse("66666666-6666-6666-6666-666666666668"),
+					Amount:             39_800_000_000,
+					Currency:           "jpy",
+					AccessDurationDays: nil, AutoRenew: false, // One-time purchase
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_lifetime_jpy_39800",
@@ -326,10 +326,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					// Price 4.1: Monthly USD - NMI only (no CCBill)
-					ID:               uuid.MustParse("88888888-8888-8888-8888-888888888888"),
-					Amount:           4_990_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("88888888-8888-8888-8888-888888888888"),
+					Amount:             4_990_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_basic_monthly_usd_499",
@@ -415,12 +415,12 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 	status := catalogStatusOrDefault(price.Status)
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
-			id, product_id, status, amount, currency, billing_cycle_days,
+			id, product_id, status, amount, currency, access_duration_days, auto_renew,
 			rails, created_at, updated_at, merchant_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, status, price.Amount, price.Currency,
-		price.BillingCycleDays,
+		price.AccessDurationDays, price.AutoRenew,
 		suite.mustJSONB(price.Rails, len(price.Rails) == 0),
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
@@ -446,10 +446,10 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			},
 			Prices: []*models.Price{
 				{
-					ID:               uuid.MustParse("aaaa2222-2222-2222-2222-222222222222"),
-					Amount:           10_000_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("aaaa2222-2222-2222-2222-222222222222"),
+					Amount:             10_000_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_premium_basic_1000",
@@ -474,10 +474,10 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			},
 			Prices: []*models.Price{
 				{
-					ID:               uuid.MustParse("bbbb2222-2222-2222-2222-222222222222"),
-					Amount:           20_000_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("bbbb2222-2222-2222-2222-222222222222"),
+					Amount:             20_000_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_premium_plus_2000",
@@ -503,10 +503,10 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			},
 			Prices: []*models.Price{
 				{
-					ID:               uuid.MustParse("cccc2222-2222-2222-2222-222222222222"),
-					Amount:           30_000_000,
-					Currency:         "usd",
-					BillingCycleDays: intPtr(30),
+					ID:                 uuid.MustParse("cccc2222-2222-2222-2222-222222222222"),
+					Amount:             30_000_000,
+					Currency:           "usd",
+					AccessDurationDays: intPtr(30), AutoRenew: true,
 					Rails: map[string]map[string]string{
 						string(models.RailMobius): {
 							models.RailKeyPlanID: "plan_premium_ultimate_3000",

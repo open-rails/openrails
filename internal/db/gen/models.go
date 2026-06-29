@@ -180,6 +180,40 @@ type OpenrailsCatalogDriftEvent struct {
 	MerchantID            uuid.UUID
 }
 
+// #599 billing meter registry. Meters are billed-later usage streams, distinct from #594 usage limits.
+type OpenrailsCatalogMeter struct {
+	MerchantID uuid.UUID
+	Key        string
+	// counter = summed events; gauge = time-integrated level samples.
+	Kind      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// #599 optional rating sidecar for OpenRails-native metered prices. cost = aggregate * rate_micros / (per_units * per_seconds for gauges), rounded once.
+type OpenrailsCatalogPriceMetered struct {
+	PriceID    uuid.UUID
+	MerchantID uuid.UUID
+	MeterKey   string
+	RateMicros int64
+	PerUnits   int64
+	// Gauge denominator in seconds; NULL for counter meters.
+	PerSeconds *int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// #594 catalog usage-limit registry. Durable config only; Redis/Garnet owns request-time counters.
+type OpenrailsCatalogUsageLimit struct {
+	MerchantID uuid.UUID
+	Key        string
+	// Host-reported event stream key composed into admission policy; not a money meter.
+	Measure   string
+	Windows   []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type OpenrailsCheckoutSession struct {
 	ID             uuid.UUID
 	PriceID        uuid.UUID
@@ -227,6 +261,14 @@ type OpenrailsCustomer struct {
 	Subject    *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+}
+
+// #591 customer permission-group anchor. The id is the AuthKit customer permission-group id, stored as opaque text with no FK into AuthKit.
+type OpenrailsCustomerAnchor struct {
+	// Opaque AuthKit customer permission-group id. Bills by group identity, never by user_id.
+	PermissionGroupID string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type OpenrailsEntitlement struct {
@@ -446,6 +488,14 @@ type OpenrailsMerchant struct {
 	DeletedAt         *time.Time
 }
 
+// #591 merchant permission-group anchor. The id is the AuthKit merchant permission-group id, stored as opaque text with no FK into AuthKit.
+type OpenrailsMerchantAnchor struct {
+	// Opaque AuthKit merchant permission-group id. Mirrors openrails.merchants.permission_group_id without re-keying the existing merchant directory.
+	PermissionGroupID string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
 type OpenrailsMerchantConfiguration struct {
 	MerchantID uuid.UUID
@@ -628,20 +678,24 @@ type OpenrailsPaymentMethod struct {
 
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
-	ID               uuid.UUID
-	ProductID        uuid.UUID
-	Amount           int64
-	Currency         string
-	BillingCycleDays *int32
-	Rails            []byte
-	Status           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	MerchantID       uuid.UUID
-	// #602 intro/trial: first-period price (minor units); 0 = free trial; NULL = flat price.
-	InitialAmount *int64
-	// #602 intro/trial: first-period length in days; NULL = flat price.
-	InitialPeriodDays *int32
+	ID        uuid.UUID
+	ProductID uuid.UUID
+	// Price amount in row currency micros (1 major unit = 1,000,000).
+	Amount     int64
+	Currency   string
+	Rails      []byte
+	Status     string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
+	// #622 access window in days a purchase grants; NULL = indefinite/durable.
+	AccessDurationDays *int32
+	// #622 whether the price recharges and extends the window after access_duration_days (recurring).
+	AutoRenew bool
+	// #622 optional first-phase price (micros); 0 = free trial; NULL = no trial.
+	TrialUnitAmount *int64
+	// #622 optional first-phase length in days; NULL = no trial.
+	TrialDurationDays *int32
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
@@ -684,7 +738,44 @@ type OpenrailsProductEntitlementFeature struct {
 	UpdatedAt            time.Time
 }
 
-// Merchant-scoped provider account registry (#518). account_id is the provider-returned account/profile identity, not a credential hash.
+// #611 catalog bundle includes: parent product grants/owns included catalog products when materialized.
+type OpenrailsProductInclude struct {
+	MerchantID        uuid.UUID
+	ProductID         uuid.UUID
+	IncludedProductID uuid.UUID
+	CreatedAt         time.Time
+}
+
+// #617 catalog product usage-limit memberships. Grants materialize these into customer product_usage_limit_bindings.
+type OpenrailsProductUsageLimit struct {
+	MerchantID    uuid.UUID
+	ProductID     uuid.UUID
+	UsageLimitKey string
+	CreatedAt     time.Time
+}
+
+// #594 materialized product-derived usage-limit bindings. Loaded into admission policy; live counters stay in Redis.
+type OpenrailsProductUsageLimitBinding struct {
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	UsageLimitKey string
+	Measure       string
+	Windows       []byte
+	SourceType    string
+	SourceID      *uuid.UUID
+	// Catalog product key/slug whose current benefits were materialized at grant time.
+	ProductKey    *string
+	GrantID       *uuid.UUID
+	StartsAt      time.Time
+	EndsAt        *time.Time
+	RevokedAt     *time.Time
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Merchant external account registry (#591; historical table name provider_accounts). A row is one merchant x provider account; owner distinguishes merchant-owned rails from future platform-owned rails.
 type OpenrailsProviderAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -706,6 +797,8 @@ type OpenrailsProviderAccount struct {
 	ReplacedAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
+	Owner string
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.

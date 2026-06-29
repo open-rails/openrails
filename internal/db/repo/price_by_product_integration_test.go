@@ -36,8 +36,8 @@ func TestGetByProductID_IncludesArchived(t *testing.T) {
 	activeID, archivedID := uuid.New(), uuid.New()
 	insertPrice := func(id uuid.UUID, amount int64, status string) {
 		_, e := pool.Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, billing_cycle_days, status)
-			 VALUES ($1,$2,$3,$4,'usd',30,$5)`,
+			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_days, auto_renew, status)
+			 VALUES ($1,$2,$3,$4,'usd',30,true,$5)`,
 			id, productID, merchantID, amount, status)
 		require.NoError(t, e)
 	}

@@ -230,8 +230,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 			Currency:  row.Currency,
 			Status:    row.Status,
 		}
-		if row.BillingCycleDays != nil {
-			days := int(*row.BillingCycleDays)
+		// Only an auto-renewing price has a recurring cadence to match a remote
+		// provider plan against (#622).
+		if row.AutoRenew && row.AccessDurationDays != nil {
+			days := int(*row.AccessDurationDays)
 			p.BillingCycleDays = &days
 		}
 		if len(row.Rails) > 0 {

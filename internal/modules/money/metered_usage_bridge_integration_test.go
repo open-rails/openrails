@@ -45,7 +45,7 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-bridge-"+uuid.NewString(), "Metered Bridge Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency, billing_cycle_days, status) VALUES ($1, $2, $3, $4, $5, $6, 'active')`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency, access_duration_days, auto_renew, status) VALUES ($1, $2, $3, $4, $5, $6, true, 'active')`,
 		priceID, merchantID, productID, int64(0), cur, 30)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,

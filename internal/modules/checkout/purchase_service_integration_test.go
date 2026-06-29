@@ -272,21 +272,22 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 	})
 	require.NoError(t, err)
 
-	var cycleDays *int32
-	if price.BillingCycleDays != nil {
-		d := int32(*price.BillingCycleDays)
-		cycleDays = &d
+	var accessDays *int32
+	if price.AccessDurationDays != nil {
+		d := int32(*price.AccessDurationDays)
+		accessDays = &d
 	}
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               price.ID,
-		ProductID:        price.ProductID,
-		Amount:           price.Amount,
-		Currency:         price.Currency,
-		Status:           string(price.Status),
-		BillingCycleDays: cycleDays,
-		CreatedAt:        price.CreatedAt,
-		UpdatedAt:        price.UpdatedAt,
+		MerchantID:         dbtest.TestMerchantID.UUID(),
+		ID:                 price.ID,
+		ProductID:          price.ProductID,
+		Amount:             price.Amount,
+		Currency:           price.Currency,
+		Status:             string(price.Status),
+		AccessDurationDays: accessDays,
+		AutoRenew:          price.AutoRenew,
+		CreatedAt:          price.CreatedAt,
+		UpdatedAt:          price.UpdatedAt,
 	})
 	require.NoError(t, err)
 }

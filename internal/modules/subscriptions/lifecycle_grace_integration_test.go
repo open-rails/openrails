@@ -53,7 +53,7 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
-		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays, CreatedAt: now, UpdatedAt: now,
+		Status: string(models.CatalogStatusActive), AccessDurationDays: &billingDays, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)

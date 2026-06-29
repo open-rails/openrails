@@ -353,7 +353,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	}
 
 	// Determine if this is a subscription or one-time purchase
-	isSubscription := price.BillingCycleDays != nil
+	isSubscription := price.AutoRenew
 
 	if isSubscription {
 		return s.processSubscription(ctx, req, user, price, product, coverage, rail)
@@ -966,8 +966,8 @@ func (s *CheckoutService) grantImmediateNMISubscriptionEntitlements(ctx context.
 }
 
 func nmiSubscriptionPeriodEnd(start time.Time, price *models.Price) time.Time {
-	if price != nil && price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
-		return start.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+	if cd := price.RecurringCycleDays(); cd != nil {
+		return start.Add(time.Duration(*cd) * 24 * time.Hour)
 	}
 	return start.Add(30 * 24 * time.Hour)
 }
@@ -1201,8 +1201,8 @@ func stripePaidIntroUnsupported(price *models.Price) bool {
 	if price == nil {
 		return false
 	}
-	initialAmount, _, ok := price.GetIntro()
-	return ok && initialAmount != 0
+	trialAmount, _, ok := price.GetTrial()
+	return ok && trialAmount != 0
 }
 
 func stripeCheckoutTrialEnd(price *models.Price, coverage *CoverageInfo, now time.Time) int64 {
@@ -1210,9 +1210,9 @@ func stripeCheckoutTrialEnd(price *models.Price, coverage *CoverageInfo, now tim
 		return coverage.EndDate.Unix()
 	}
 	if price != nil {
-		initialAmount, initialDays, ok := price.GetIntro()
-		if ok && initialAmount == 0 && initialDays > 0 {
-			return now.UTC().AddDate(0, 0, initialDays).Unix()
+		trialAmount, trialDays, ok := price.GetTrial()
+		if ok && trialAmount == 0 && trialDays > 0 {
+			return now.UTC().AddDate(0, 0, trialDays).Unix()
 		}
 	}
 	return 0
@@ -1683,9 +1683,9 @@ func (s *CheckoutService) processUpgrade(
 	// a FRESH full period, then rebill the full new price at now + cycle. The
 	// billing cycle comes from the NEW price (the period being started), with a
 	// fallback to the old price's cycle for legacy prices that omit it.
-	billingCycleDays := newPrice.BillingCycleDays
+	billingCycleDays := newPrice.RecurringCycleDays()
 	if billingCycleDays == nil || *billingCycleDays <= 0 {
-		billingCycleDays = oldPrice.BillingCycleDays
+		billingCycleDays = oldPrice.RecurringCycleDays()
 	}
 	prorationAmount, cycleDays := CalculateModelBUpgradeCharge(
 		oldPrice.Amount,
@@ -2411,7 +2411,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	firstCharge, cycleDays := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays, now)
+	firstCharge, cycleDays := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleDays(), now)
 	nextDate := now.AddDate(0, 0, cycleDays)
 	resp.Action = "upgrade"
 	resp.AmountDueNow = firstCharge
@@ -2506,7 +2506,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		}
 
 		stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
-		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.RailSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays); err != nil {
+		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.RailSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleDays()); err != nil {
 			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 		}
 
@@ -2574,8 +2574,8 @@ func (s *CheckoutService) processTierChangeStripe(
 	// source of truth and will reconcile the exact period boundaries.
 	stripeNow := s.now()
 	stripeCycleDays := 30
-	if newPrice.BillingCycleDays != nil && *newPrice.BillingCycleDays > 0 {
-		stripeCycleDays = *newPrice.BillingCycleDays
+	if cd := newPrice.RecurringCycleDays(); cd != nil {
+		stripeCycleDays = *cd
 	}
 	stripePeriodEnd := stripeNow.AddDate(0, 0, stripeCycleDays)
 
@@ -2587,7 +2587,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		oldFull = existingSub.Price.Amount
 	}
 	oldPeriodEnd := existingSub.CurrentPeriodEndsAt
-	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.BillingCycleDays, stripeNow)
+	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.RecurringCycleDays(), stripeNow)
 
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID

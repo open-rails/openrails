@@ -17,23 +17,24 @@ const SupportedVersion = 1
 
 var invalidSlugChars = regexp.MustCompile(`[^a-z0-9_-]+`)
 
-func normalizeInterval(value string) (string, int, error) {
+// normalizeDuration parses a #622 access-window duration. An empty value or
+// "indefinite" returns nil (durable/perpetual). A finite value must be a whole
+// number of days (the storage unit). Returns the window length in days, or nil
+// for indefinite.
+func normalizeDuration(value string) (*int, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		value = "30d"
-	}
-	if value == "once" {
-		return "once", 0, nil
+	if value == "" || value == "indefinite" {
+		return nil, nil
 	}
 	d, err := ParseDurationSpec(value)
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
 	if d < 24*time.Hour || d%(24*time.Hour) != 0 {
-		return "", 0, fmt.Errorf("interval %q must be a whole-day duration until billing_cycle_days storage is replaced", value)
+		return nil, fmt.Errorf("duration %q must be whole days (e.g. 30d) or 'indefinite'", value)
 	}
 	days := int(d / (24 * time.Hour))
-	return fmt.Sprintf("%dd", days), days, nil
+	return &days, nil
 }
 
 func normalizeSlug(value string) string {
@@ -248,23 +249,34 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if err := m.validateMeteredPrice(product, price, idx, meterKinds); err != nil {
 		return err
 	}
-	interval, _, err := normalizeInterval(price.Interval)
+	durDays, err := normalizeDuration(price.Duration)
 	if err != nil {
-		return fmt.Errorf("product %q price #%d interval: %w", product.Key, idx+1, err)
+		return fmt.Errorf("product %q price #%d duration: %w", product.Key, idx+1, err)
 	}
-	price.Interval = interval
-	if price.Intro != nil {
-		introInterval, days, err := normalizeInterval(price.Intro.Interval)
+	if durDays == nil {
+		price.Duration = "indefinite"
+	} else {
+		price.Duration = fmt.Sprintf("%dd", *durDays)
+	}
+	// Nothing to renew without a finite window.
+	if price.AutoRenew && durDays == nil {
+		return fmt.Errorf("product %q price #%d: auto_renew requires a finite duration (not indefinite)", product.Key, idx+1)
+	}
+	if price.Trial != nil {
+		trialDays, err := normalizeDuration(price.Trial.Duration)
 		if err != nil {
-			return fmt.Errorf("product %q price #%d intro.interval: %w", product.Key, idx+1, err)
+			return fmt.Errorf("product %q price #%d trial.duration: %w", product.Key, idx+1, err)
 		}
-		if days <= 0 {
-			return fmt.Errorf("product %q price #%d intro.interval must be recurring", product.Key, idx+1)
+		if trialDays == nil {
+			return fmt.Errorf("product %q price #%d trial.duration must be a finite duration", product.Key, idx+1)
 		}
-		if price.Interval == "once" {
-			return fmt.Errorf("product %q price #%d intro requires a recurring interval", product.Key, idx+1)
+		if !price.AutoRenew {
+			return fmt.Errorf("product %q price #%d trial requires auto_renew (a first phase then recurring terms)", product.Key, idx+1)
 		}
-		price.Intro.Interval = introInterval
+		if price.Trial.UnitAmount < 0 {
+			return fmt.Errorf("product %q price #%d trial.unit_amount must be >= 0 (0 = free trial)", product.Key, idx+1)
+		}
+		price.Trial.Duration = fmt.Sprintf("%dd", *trialDays)
 	}
 	if price.Providers != nil {
 		price.Providers = normalizeProviders(price.Providers)
@@ -283,9 +295,8 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	}
 
 	// Per-provider eligibility (shape-only; no chain calls). Solana settles
-	// on-chain in $1-pegged stablecoins on a recurring schedule, so a Solana
-	// price must be recurring (an interval is always present here) AND priced in
-	// a stablecoin currency.
+	// on-chain in $1-pegged stablecoins, so a Solana price must be priced in a
+	// stablecoin currency (one-off finite windows and recurring are both allowed).
 	if price.Metered != nil && len(price.Providers) > 0 {
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
@@ -460,7 +471,7 @@ func priceTermsKey(p Price) string {
 	if p.Metered != nil {
 		metered = fmt.Sprintf("|metered:%s:%d:%d:%s", p.Metered.Meter, p.Metered.Rate, p.Metered.PerUnits, p.Metered.Per)
 	}
-	return fmt.Sprintf("%s|%d|%s|providers:%s%s", p.Currency, p.UnitAmount, p.Interval, providerSetKey(p.Providers), metered)
+	return fmt.Sprintf("%s|%d|%s|renew:%t|providers:%s%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, providerSetKey(p.Providers), metered)
 }
 
 func providerSetKey(providers []string) string {

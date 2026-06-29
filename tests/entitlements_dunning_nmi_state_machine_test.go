@@ -52,12 +52,12 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           999,
-		Currency:         "usd",
-		BillingCycleDays: &billingDays,
+		ID:                 priceID,
+		ProductID:          productID,
+		Status:             models.CatalogStatusActive,
+		Amount:             999,
+		Currency:           "usd",
+		AccessDurationDays: &billingDays, AutoRenew: true,
 		Rails: map[string]map[string]string{
 			string(models.RailMobius): {
 				models.RailKeyPlanID: "plan_test_999",

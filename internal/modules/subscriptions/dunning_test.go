@@ -114,7 +114,7 @@ func TestBillingCycleDaysOf(t *testing.T) {
 	require.Equal(t, 0, BillingCycleDaysOf(nil))
 	require.Equal(t, 0, BillingCycleDaysOf(&models.Price{}))
 	seven := 7
-	require.Equal(t, 7, BillingCycleDaysOf(&models.Price{BillingCycleDays: &seven}))
+	require.Equal(t, 7, BillingCycleDaysOf(&models.Price{AccessDurationDays: &seven, AutoRenew: true}))
 }
 
 // TestGraceSlack pins the renewal grace window derivation (#368): half the

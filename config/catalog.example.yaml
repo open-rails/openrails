@@ -10,10 +10,21 @@ version: 1
 # in config/merchants.example.yaml).
 #
 # Money is in MICRO-USD: 1_000_000 micro-USD = $1.00. So 9_990_000 = $9.99.
-# Price intervals are whole-day/whole-hour duration strings: "30d" (monthly),
-# "365d" (yearly), or "once" (a single non-recurring charge). A price's identity
-# is its financial substance (currency + unit_amount + interval + providers);
-# prices have no slug. A product's identity is its `key`.
+#
+# Each price declares the access window a purchase grants (#622):
+#   duration:   how long access lasts — a whole-day/whole-hour string ("30d",
+#               "365d", "72h") or "indefinite" (durable/perpetual; the default
+#               when omitted).
+#   auto_renew: whether the price charges again and extends the window at the end
+#               of `duration` (a subscription). Defaults to false. Requires a
+#               finite `duration` — auto_renew with an indefinite duration is
+#               rejected. So:
+#                 duration: 30d, auto_renew: true   -> monthly subscription
+#                 duration: 30d, auto_renew: false  -> one-off, 30 days of access
+#                 duration: indefinite              -> own it forever (one-off)
+# A price's identity is its financial substance (currency + unit_amount +
+# duration + auto_renew + providers); prices have no slug. A product's identity
+# is its `key`.
 
 catalogs:
   - merchant: local-stack
@@ -56,8 +67,8 @@ catalogs:
     products:
       # =====================================================================
       # 1. SUBSCRIPTION TIERS — recurring memberships with monthly (30d) and
-      #    yearly (365d) prices and entitlement grants. Multiple products in
-      #    one tier_group require an ordering tier_rank.
+      #    yearly (365d) auto-renewing prices and entitlement grants. Multiple
+      #    products in one tier_group require an ordering tier_rank.
       # =====================================================================
       - key: basic
         display_name: Basic
@@ -69,7 +80,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 9_990_000     # $9.99 / month
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             providers: [stripe, mobius]
             provider_links:
               stripe:
@@ -78,7 +90,8 @@ catalogs:
                 plan_id: local_stack_basic_monthly
           - currency: usd
             unit_amount: 99_900_000    # $99.90 / year
-            interval: 365d
+            duration: 365d
+            auto_renew: true
             providers: [stripe]
             provider_links:
               stripe:
@@ -95,7 +108,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 19_990_000    # $19.99 / month
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             providers: [stripe, mobius]
             provider_links:
               stripe:
@@ -104,9 +118,12 @@ catalogs:
                 plan_id: local_stack_premium_monthly
           - currency: usd
             unit_amount: 199_900_000   # $199.90 / year
-            interval: 365d
-            # Solana settles on-chain in a $1-pegged stablecoin on a recurring
-            # schedule, so a Solana price must be recurring AND priced in usd/usdc/usdg.
+            duration: 365d
+            auto_renew: true
+            # Solana settles on-chain in a $1-pegged stablecoin. A recurring
+            # Solana price publishes an on-chain Plan; a one-off Solana price
+            # (auto_renew: false) settles as a direct transfer with no plan.
+            # Either way the currency must be usd/usdc/usdg.
             providers: [stripe, solana]
             provider_links:
               stripe:
@@ -115,6 +132,16 @@ catalogs:
               # when linking an EXISTING on-chain plan:
               # solana:
               #   plan_pda: 7XyExistingPlanAccount...
+          - currency: usd
+            unit_amount: 23_000_000    # $23 one-off, 30 days of premium (no renew)
+            duration: 30d
+            auto_renew: false
+            providers: [solana]
+          - currency: usd
+            unit_amount: 62_000_000    # $62 one-off, 90 days of premium (no renew)
+            duration: 90d
+            auto_renew: false
+            providers: [solana]
 
       # A retired plan kept active:false so migrated subscriptions still resolve
       # while the price is archived from new checkout. Demonstrates archival.
@@ -129,14 +156,15 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 14_990_000
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             active: false
 
       # =====================================================================
-      # 2. FREE-TRIAL / INTRO PRICING (#602) — a first period priced/length
-      #    differently from the recurring terms. amount: 0 is a free trial.
-      #    `intro.interval` must be recurring; the price interval must not be
-      #    "once". After the intro period it renews at unit_amount.
+      # 2. FREE-TRIAL PRICING (#622) — a first phase priced/length differently
+      #    from the recurring terms. trial.unit_amount: 0 is a free trial. A
+      #    trial requires auto_renew (there is a "then recurring" part). After
+      #    the trial phase it renews at unit_amount.
       # =====================================================================
       - key: creator-pro
         display_name: Creator Pro
@@ -147,10 +175,11 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 29_990_000    # $29.99 / month after the trial
-            interval: 30d
-            intro:
-              amount: 0                # free
-              interval: 7d             # for the first 7 days
+            duration: 30d
+            auto_renew: true
+            trial:
+              unit_amount: 0           # free
+              duration: 7d             # for the first 7 days
             providers: [stripe]
             provider_links:
               stripe:
@@ -159,8 +188,8 @@ catalogs:
       # =====================================================================
       # 3. AI IMAGE CREDITS — a one-time purchase that grants a custom credit
       #    unit. `credits` is a map of grant-name -> {unit, amount, ...}; the
-      #    custom unit is minted in the merchant's credit ledger. interval:
-      #    once means a single charge (not a subscription).
+      #    custom unit is minted in the merchant's credit ledger. A one-time
+      #    charge omits auto_renew (duration defaults to indefinite).
       # =====================================================================
       - key: ai-image-credits
         display_name: AI Image Credits
@@ -174,7 +203,7 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 5_000_000     # $5.00 one-time
-            interval: once
+            duration: indefinite
             providers: [stripe]
             provider_links:
               stripe:
@@ -197,30 +226,39 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 20_000_000    # $20.00 one-time
-            interval: once
+            duration: indefinite
             providers: [stripe]
             provider_links:
               stripe:
                 lookup_key: local-stack-api-credits
 
       # =====================================================================
-      # 5. CONTENT MARKETPLACE — one-time ownership purchases (e.g. buying a
-      #    movie). interval: once with no entitlements/credits => an owned item.
-      #    Two titles in one group need tier_rank for ordering.
+      # 5. CONTENT MARKETPLACE — buying vs renting a film. Durable ownership is
+      #    duration: indefinite; a rental is a finite duration with no renew
+      #    (#622: the window sets product-access ends_at). One product can carry
+      #    both a rent price and a buy price.
       # =====================================================================
       - key: movie-classic
         display_name: "Movie: The Classic"
-        description: One-time purchase granting permanent ownership of a film.
+        description: Rent for 3 days or buy to own permanently.
         tier_group: movies
         tier_rank: 1
         prices:
           - currency: usd
-            unit_amount: 4_990_000     # $4.99 to own
-            interval: once
+            unit_amount: 990_000       # $0.99 to rent for 3 days
+            duration: 72h
+            auto_renew: false
             providers: [stripe]
             provider_links:
               stripe:
-                lookup_key: local-stack-movie-classic
+                lookup_key: local-stack-movie-classic-rent
+          - currency: usd
+            unit_amount: 4_990_000     # $4.99 to own forever
+            duration: indefinite
+            providers: [stripe]
+            provider_links:
+              stripe:
+                lookup_key: local-stack-movie-classic-own
       - key: movie-premiere
         display_name: "Movie: The Premiere"
         description: One-time purchase of a newer, premium-priced film.
@@ -229,7 +267,7 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 14_990_000    # $14.99 to own
-            interval: once
+            duration: indefinite
             providers: [stripe]
             provider_links:
               stripe:
@@ -250,7 +288,7 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 17_990_000    # $17.99 (vs $19.98 bought separately)
-            interval: once
+            duration: indefinite
             providers: [stripe]
             provider_links:
               stripe:
@@ -271,7 +309,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 20_000_000    # $20.00 / month
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             providers: [stripe]
             provider_links:
               stripe:
@@ -286,7 +325,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 80_000_000    # $80.00 / month
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             providers: [stripe]
             provider_links:
               stripe:
@@ -305,7 +345,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 0             # no flat fee; usage-only
-            interval: 30d              # metered usage is tallied per 30-day cycle
+            duration: 30d              # metered usage is tallied per 30-day cycle
+            auto_renew: true
             metered:
               meter: vm-hours          # references the counter meter above
               rate: 50_000             # $0.05 ...
@@ -317,7 +358,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 0
-            interval: 30d
+            duration: 30d
+            auto_renew: true
             metered:
               meter: cloud-storage     # references the gauge meter above
               rate: 20_000             # $0.02 ...

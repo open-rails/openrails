@@ -32,11 +32,12 @@ func extrasTestSnapshot() localCatalogSnapshot {
 	cycle := 30
 	product := &models.Product{ID: productID, Slug: "premium"}
 	price := &models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Amount:           23_000_000,
-		Currency:         "usd",
-		BillingCycleDays: &cycle,
+		ID:                 priceID,
+		ProductID:          productID,
+		Amount:             23_000_000,
+		Currency:           "usd",
+		AccessDurationDays: &cycle,
+		AutoRenew:          true,
 		Rails: map[string]map[string]string{
 			"stripe": {
 				models.RailKeyStripePriceID:   "price_local",
@@ -435,7 +436,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	mkPrice := func(pda string, status models.CatalogStatus) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
-			BillingCycleDays: &cycle, Status: status,
+			AccessDurationDays: &cycle, AutoRenew: true, Status: status,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": pda},
 			},

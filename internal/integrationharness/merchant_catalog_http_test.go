@@ -104,7 +104,8 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 1299,
 				Currency:   "usd",
-				Interval:   "30d",
+				Duration:   "30d",
+				AutoRenew:  true,
 			}},
 		}},
 	}
@@ -198,7 +199,8 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 1499,
 				Currency:   "usd",
-				Interval:   "30d",
+				Duration:   "30d",
+				AutoRenew:  true,
 			}},
 		}},
 	}
@@ -282,7 +284,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 10_000,
 				Currency:   "usd",
-				Interval:   "once",
+				Duration:   "indefinite",
 				Providers:  []string{},
 			}},
 		}},
@@ -332,7 +334,8 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 0,
 				Currency:   "usd",
-				Interval:   "30d",
+				Duration:   "30d",
+				AutoRenew:  true,
 				Providers:  []string{},
 				Metered: &catalog.MeteredPrice{
 					Meter:    meterKey,
@@ -393,7 +396,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 4_990_000,
 					Currency:   "usd",
-					Interval:   "once",
+					Duration:   "indefinite",
 					Providers:  []string{},
 				}},
 			},
@@ -405,7 +408,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,
 					Currency:   "usd",
-					Interval:   "once",
+					Duration:   "indefinite",
 					Providers:  []string{},
 				}},
 			},
@@ -496,7 +499,8 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 20_000_000,
 					Currency:   "usd",
-					Interval:   "30d",
+					Duration:   "30d",
+					AutoRenew:  true,
 					Providers:  []string{},
 				}},
 			},
@@ -509,7 +513,8 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 80_000_000,
 					Currency:   "usd",
-					Interval:   "30d",
+					Duration:   "30d",
+					AutoRenew:  true,
 					Providers:  []string{},
 				}},
 			},
@@ -668,7 +673,8 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,
 					Currency:   "usd",
-					Interval:   "30d",
+					Duration:   "30d",
+					AutoRenew:  true,
 				}},
 			},
 			{
@@ -679,7 +685,8 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 19_990_000,
 					Currency:   "usd",
-					Interval:   "30d",
+					Duration:   "30d",
+					AutoRenew:  true,
 				}},
 			},
 			{
@@ -690,8 +697,9 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Prices: []catalog.Price{{
 					UnitAmount: 49_990_000,
 					Currency:   "usd",
-					Interval:   "30d",
-					Intro:      &catalog.PriceIntro{Amount: 0, Interval: "7d"},
+					Duration:   "30d",
+					AutoRenew:  true,
+					Trial:      &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"},
 				}},
 			},
 			{
@@ -701,7 +709,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Credits: catalog.Credits{
 					"ai-image-gen": {Unit: aiUnit, Amount: 100},
 				},
-				Prices: []catalog.Price{{UnitAmount: 5_000_000, Currency: "usd", Interval: "once"}},
+				Prices: []catalog.Price{{UnitAmount: 5_000_000, Currency: "usd", Duration: "indefinite"}},
 			},
 			{
 				Key:         apiSlug,
@@ -710,13 +718,13 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Credits: catalog.Credits{
 					"fal-api": {Unit: apiUnit, Amount: 2_000},
 				},
-				Prices: []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Interval: "once"}},
+				Prices: []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Duration: "indefinite"}},
 			},
 			{
 				Key:         movieSlug,
 				DisplayName: "Catalog Movie",
 				TierGroup:   movieGroup,
-				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "usd", Interval: "once"}},
+				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "usd", Duration: "indefinite"}},
 			},
 		},
 	}
@@ -744,17 +752,19 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	proPrices, err := applier.ListPricesByProduct(ctx, pro.ID, true)
 	require.NoError(t, err)
 	require.Len(t, proPrices, 1)
-	require.NotNil(t, proPrices[0].BillingCycleDays)
-	require.Equal(t, 30, *proPrices[0].BillingCycleDays)
-	require.NotNil(t, proPrices[0].InitialAmount)
-	require.Equal(t, int64(0), *proPrices[0].InitialAmount)
-	require.NotNil(t, proPrices[0].InitialPeriodDays)
-	require.Equal(t, 7, *proPrices[0].InitialPeriodDays)
+	require.True(t, proPrices[0].AutoRenew)
+	require.NotNil(t, proPrices[0].AccessDurationDays)
+	require.Equal(t, 30, *proPrices[0].AccessDurationDays)
+	require.NotNil(t, proPrices[0].TrialUnitAmount)
+	require.Equal(t, int64(0), *proPrices[0].TrialUnitAmount)
+	require.NotNil(t, proPrices[0].TrialDurationDays)
+	require.Equal(t, 7, *proPrices[0].TrialDurationDays)
 
 	moviePrices, err := applier.ListPricesByProduct(ctx, movie.ID, true)
 	require.NoError(t, err)
 	require.Len(t, moviePrices, 1)
-	require.Nil(t, moviePrices[0].BillingCycleDays)
+	require.Nil(t, moviePrices[0].AccessDurationDays)
+	require.False(t, moviePrices[0].AutoRenew)
 
 	dbi := dbtest.OpenAppDB(t, h.DSN)
 	pool := dbi.Pool()

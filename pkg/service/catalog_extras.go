@@ -388,7 +388,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 		}
 		if st.label == "" {
 			if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
-				st.label = openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.BillingCycleDays)
+				st.label = openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 			}
 		}
 	}

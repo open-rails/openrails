@@ -522,7 +522,7 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 		// the owning product for its slug.
 		if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
 			if slug := strings.TrimSpace(prod.Slug); slug != "" {
-				ck := openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.BillingCycleDays)
+				ck := openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				snap.priceByContentKey[ck] = pr
 			}
 		}
@@ -718,7 +718,7 @@ func (s *Service) computeSolanaCatalogDrift(ctx context.Context, snap localCatal
 			IsActive:         pr.Status == models.CatalogStatusActive,
 			UnitAmount:       pr.Amount,
 			Currency:         pr.Currency,
-			BillingCycleDays: pr.BillingCycleDays,
+			BillingCycleDays: pr.RecurringCycleDays(),
 		}
 		drift, missing, err := adapter.Verify(ctx, cfg, local)
 		if err != nil {

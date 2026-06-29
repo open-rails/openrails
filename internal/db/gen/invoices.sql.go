@@ -579,7 +579,12 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 	var items []ListInvoiceThresholdCandidatesRow
 	for rows.Next() {
 		var i ListInvoiceThresholdCandidatesRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodFrom, &i.PeriodAnchor); err != nil {
+		if err := rows.Scan(
+			&i.CustomerID,
+			&i.Currency,
+			&i.PeriodFrom,
+			&i.PeriodAnchor,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

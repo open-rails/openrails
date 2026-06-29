@@ -256,17 +256,13 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 
 	for _, price := range product.Prices {
 		desiredStatus := statusFromActive(price.Active)
-		_, cycleDays, err := normalizeInterval(price.Interval)
+		accessDurationDays, err := normalizeDuration(price.Duration)
 		if err != nil {
-			return fmt.Errorf("price %s interval: %w", PriceLabel(product.Key, price), err)
-		}
-		var billingCycleDays *int
-		if cycleDays > 0 {
-			billingCycleDays = &cycleDays
+			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
 		}
 		label := PriceLabel(product.Key, price)
 
-		match := matchPrice(current, price, billingCycleDays, claimed)
+		match := matchPrice(current, price, accessDurationDays, claimed)
 		if match != nil {
 			claimed[match.ID] = struct{}{}
 			plp := PricePlan{Label: label, ExistingID: match.ID}
@@ -285,23 +281,24 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		// No financial match -> create.
 		createReq := billingservice.CreatePriceRequest{
 			// ProductID is filled at apply time once the product exists.
-			ProductID:        productID(existing),
-			UnitAmount:       price.UnitAmount,
-			Currency:         price.Currency,
-			BillingCycleDays: billingCycleDays,
-			Providers:        price.Providers,
-			ProviderLinks:    price.ProviderLinks,
-			Status:           toModelStatus(desiredStatus),
+			ProductID:          productID(existing),
+			UnitAmount:         price.UnitAmount,
+			Currency:           price.Currency,
+			AccessDurationDays: accessDurationDays,
+			AutoRenew:          price.AutoRenew,
+			Providers:          price.Providers,
+			ProviderLinks:      price.ProviderLinks,
+			Status:             toModelStatus(desiredStatus),
 		}
-		// #602 introductory/trial first period (a different first-period price/length).
-		if price.Intro != nil {
-			amt := price.Intro.Amount
-			_, days, err := normalizeInterval(price.Intro.Interval)
+		// #622 trial first phase (a different first-phase price/length).
+		if price.Trial != nil {
+			amt := price.Trial.UnitAmount
+			days, err := normalizeDuration(price.Trial.Duration)
 			if err != nil {
-				return fmt.Errorf("price %s intro.interval: %w", label, err)
+				return fmt.Errorf("price %s trial.duration: %w", label, err)
 			}
-			createReq.InitialAmount = &amt
-			createReq.InitialPeriodDays = &days
+			createReq.TrialUnitAmount = &amt
+			createReq.TrialDurationDays = days
 		}
 		pp.Prices = append(pp.Prices, PricePlan{
 			Label:     label,
@@ -332,8 +329,8 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 
 // matchPrice finds an existing OpenRails price with the same financial identity
 // as the declared price, preferring an unclaimed active match over an archived
-// one. Identity is (currency, unit_amount, billing_cycle_days, providers).
-func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays *int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+// one. Identity is (currency, unit_amount, access_duration_days, auto_renew, providers).
+func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationDays *int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
 		c := &current[i]
@@ -343,7 +340,7 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays *i
 		if c.UnitAmount != price.UnitAmount || !strings.EqualFold(c.Currency, price.Currency) {
 			continue
 		}
-		if !sameCycleDays(c.BillingCycleDays, cycleDays) {
+		if !sameCycleDays(c.AccessDurationDays, accessDurationDays) || c.AutoRenew != price.AutoRenew {
 			continue
 		}
 		if providerSetKey(price.Providers) != catalogPriceProviderSetKey(c.Providers) {
@@ -489,14 +486,18 @@ func symbol(action string) string {
 // PriceLabel derives a readable label for a price from its financial terms,
 // e.g. "starter $13.00/month". There is no price slug to lean on.
 func PriceLabel(productSlug string, price Price) string {
-	interval := price.Interval
-	if interval == "" {
-		interval = "30d"
+	duration := strings.TrimSpace(price.Duration)
+	if duration == "" {
+		duration = "indefinite"
 	}
-	if interval == "once" {
-		return fmt.Sprintf("%s %s once", productSlug, formatMoney(price.UnitAmount, price.Currency))
+	money := formatMoney(price.UnitAmount, price.Currency)
+	if price.AutoRenew {
+		return fmt.Sprintf("%s %s/%s", productSlug, money, duration)
 	}
-	return fmt.Sprintf("%s %s/%s", productSlug, formatMoney(price.UnitAmount, price.Currency), interval)
+	if duration == "indefinite" {
+		return fmt.Sprintf("%s %s once", productSlug, money)
+	}
+	return fmt.Sprintf("%s %s for %s", productSlug, money, duration)
 }
 
 // formatMoney renders an internal micros amount as a human currency string.

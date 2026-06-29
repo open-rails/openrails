@@ -242,7 +242,7 @@ WHERE p.subscription_id IS NOT NULL
   AND p.rail = sqlc.arg(rail)
   AND sub.rail::text = p.rail::text
   AND p.amount > 0
-  AND p.amount = sqlc.arg(amount_cents) * 10000
+  AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
   AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
   AND p.purchased_at >= sqlc.arg(from_at)::timestamptz
   AND p.purchased_at <= sqlc.arg(to_at)::timestamptz

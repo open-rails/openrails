@@ -72,7 +72,7 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 				if pr.Metered != nil {
 					sawMeteredPrice = true
 				}
-				if pr.Intro != nil {
+				if pr.Trial != nil {
 					sawIntro = true
 				}
 			}
