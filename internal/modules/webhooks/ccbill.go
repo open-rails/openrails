@@ -125,19 +125,37 @@ func shouldIgnoreCCBillRenewalFailure(sub *models.Subscription, failureRenewalAt
 }
 
 func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (int64, error) {
+	return parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName, false)
+}
+
+func parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName string, allowZero bool) (int64, error) {
 	amountCents, err := moneyutil.ParseDecimalToCents(rawAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse %s '%s': %w", parseFieldName, rawAmount, err)
 	}
 
-	if amountCents <= 0 {
+	if amountCents < 0 || (!allowZero && amountCents == 0) {
 		return 0, fmt.Errorf("invalid %s: %d cents - must be greater than 0", invalidFieldName, amountCents)
 	}
 
 	return amountCents, nil
 }
 
-func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, billedAmountCents, expectedAmountCents int64, contextFields map[string]interface{}, logFields log.Fields) error {
+func ccbillInitialChargeAmount(price *models.Price) int64 {
+	if price == nil {
+		return 0
+	}
+	if initialAmount, _, ok := price.GetIntro(); ok {
+		return initialAmount
+	}
+	return price.Amount
+}
+
+func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, billedAmountCents, expectedAmountMicros int64, contextFields map[string]interface{}, logFields log.Fields) error {
+	expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+	if err != nil {
+		return err
+	}
 	tolerance := int64(float64(expectedAmountCents) * 0.02) // 2% tolerance.
 	if billedAmountCents >= expectedAmountCents-tolerance && billedAmountCents <= expectedAmountCents+tolerance {
 		return nil
@@ -198,6 +216,13 @@ func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, cont
 	return billingErr
 }
 
+func ccbillPriceLookupID(rboID, flexID string) string {
+	if id := strings.TrimSpace(rboID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(flexID)
+}
+
 func (s *CCBillWebhookService) ensureFlexFormMatches(price *models.Price, flexID, formName string) error {
 	expectedFormName, expectedFlexID, ok := price.GetCCBillFlexForm()
 	if !ok {
@@ -210,6 +235,16 @@ func (s *CCBillWebhookService) ensureFlexFormMatches(price *models.Price, flexID
 		return fmt.Errorf("payment form name mismatch: got %s, want %s", formName, expectedFormName)
 	}
 	return nil
+}
+
+func (s *CCBillWebhookService) ensureCCBillPriceMatches(price *models.Price, flexID, formName, rboID string) error {
+	if expectedRBO, ok := price.GetCCBillRecurringBillingOption(); ok && strings.TrimSpace(rboID) != "" {
+		if strings.TrimSpace(rboID) != expectedRBO {
+			return fmt.Errorf("recurring billing option mismatch: got %s, want %s", rboID, expectedRBO)
+		}
+		return nil
+	}
+	return s.ensureFlexFormMatches(price, flexID, formName)
 }
 
 func (s *CCBillWebhookService) resolveUserID(ctx context.Context, username string) (string, error) {
@@ -483,27 +518,30 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 	formName := data.FormName
 	ccBillSubID := data.SubscriptionID
-	billedAmountStr := data.BilledInitialPrice
 
-	billedAmountCents, err := parseCCBillPositiveAmountCents(billedAmountStr, "billedInitialPrice", "billedAmount")
+	// Get price information
+	priceLookupID := ccbillPriceLookupID(data.SubscriptionTypeID, data.FlexID)
+	price, err := s.PriceService.GetByCCBillPriceID(ctx, priceLookupID)
+	if err != nil {
+		return fmt.Errorf("failed to find price for CCBill price ID %s: %w", priceLookupID, err)
+	}
+	if err := s.ensureCCBillPriceMatches(price, formID, formName, data.SubscriptionTypeID); err != nil {
+		return err
+	}
+
+	expectedAmountMicros := ccbillInitialChargeAmount(price)
+	billedAmountCents, err := parseCCBillAmountCents(data.BilledInitialPrice, "billedInitialPrice", "billedAmount", expectedAmountMicros == 0)
 	if err != nil {
 		return err
 	}
 	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
 
-	// Get price information
-	price, err := s.PriceService.GetByCCBillPriceID(ctx, data.FlexID)
-	if err != nil {
-		return fmt.Errorf("failed to find price for CCBill price ID %s: %w", data.FlexID, err)
-	}
-	if err := s.ensureFlexFormMatches(price, formID, formName); err != nil {
-		return err
-	}
-
 	// Validate amount against expected cents from catalog price.
-	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, price.Amount, map[string]interface{}{
-		"price_id":        price.ID.String(),
-		"ccbill_price_id": data.FlexID,
+	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, expectedAmountMicros, map[string]interface{}{
+		"price_id":                           price.ID.String(),
+		"ccbill_price_id":                    priceLookupID,
+		"recurring_billing_option_id":        data.SubscriptionTypeID,
+		"subscription_expected_first_amount": expectedAmountMicros,
 	}, log.Fields{
 		"transaction_id": transactionID,
 	}); err != nil {
@@ -523,7 +561,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 	if err := validateCCBillCurrencyMatches(currencyValue, price.Currency, map[string]interface{}{
 		"price_id":        price.ID.String(),
-		"ccbill_price_id": data.FlexID,
+		"ccbill_price_id": priceLookupID,
 		"transaction_id":  transactionID,
 	}); err != nil {
 		return err
@@ -556,7 +594,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		UserEmail:           emailPtr,
 		CurrentPeriodEndsAt: paidTermEnd,
 		TransactionID:       transactionID,
-		Amount:              billedAmountCents,
+		Amount:              moneyutil.CentsToMicros(billedAmountCents),
 		AmountProvided:      true,
 		Currency:            currencyValue,
 	})
@@ -610,10 +648,11 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	// Log payment event to ClickHouse
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
-			"transaction_id": transactionID,
-			"rail":           "ccbill",
-			"event_source":   "webhook",
-			"amount":         billedAmount,
+			"transaction_id":              transactionID,
+			"rail":                        "ccbill",
+			"event_source":                "webhook",
+			"amount":                      billedAmount,
+			"recurring_billing_option_id": data.SubscriptionTypeID,
 			// Card information for fraud monitoring and audit
 			"card_type":      data.CardType,
 			"card_last4":     data.Last4,
@@ -698,7 +737,8 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	failureCode := data.FailureCode
 	transactionID := data.TransactionID
 	failureReason := data.FailureReason
-	price, priceLookupErr := s.PriceService.GetByCCBillPriceID(ctx, data.FlexID)
+	priceLookupID := ccbillPriceLookupID(data.SubscriptionTypeID, data.FlexID)
+	price, priceLookupErr := s.PriceService.GetByCCBillPriceID(ctx, priceLookupID)
 	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
 	if err != nil {
 		return err
@@ -714,7 +754,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			log.WithContext(ctx).WithError(priceLookupErr).WithFields(log.Fields{
 				"flex_id": formID,
 			}).Warn("Unable to validate CCBill form for new sale failure")
-		} else if err := s.ensureFlexFormMatches(price, formID, formName); err != nil {
+		} else if err := s.ensureCCBillPriceMatches(price, formID, formName, data.SubscriptionTypeID); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"flex_id": formID,
 			}).Warn("Payment form mismatch in new sale failure")
@@ -818,12 +858,6 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		return fmt.Errorf("missing required field: billedInitialPrice")
 	}
 
-	billedAmountCents, err := parseCCBillPositiveAmountCents(billedAmountStr, "billedInitialPrice", "billedAmount")
-	if err != nil {
-		return err
-	}
-	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
-
 	if strings.TrimSpace(ccBillSubID) == "" {
 		return fmt.Errorf("missing required field: subscriptionId")
 	}
@@ -876,28 +910,39 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		// Store old price ID before updating
 		oldPriceID := subscription.PriceID
 
-		newPrice, err := priceService.GetByCCBillPriceID(ctx, data.FlexID)
+		priceLookupID := ccbillPriceLookupID(data.SubscriptionTypeID, data.FlexID)
+		newPrice, err := priceService.GetByCCBillPriceID(ctx, priceLookupID)
 		if err != nil {
-			return fmt.Errorf("failed to find new price for CCBill price ID %s: %w", data.FlexID, err)
+			return fmt.Errorf("failed to find new price for CCBill price ID %s: %w", priceLookupID, err)
 		}
-		if err := s.ensureFlexFormMatches(newPrice, flexID, formName); err != nil {
+		if err := s.ensureCCBillPriceMatches(newPrice, flexID, formName, data.SubscriptionTypeID); err != nil {
 			return err
 		}
 
 		// Validate the billed amount matches the new price.
-		expectedAmountCents := newPrice.Amount
+		expectedAmountMicros := ccbillInitialChargeAmount(newPrice)
+		billedAmountCents, err := parseCCBillAmountCents(billedAmountStr, "billedInitialPrice", "billedAmount", expectedAmountMicros == 0)
+		if err != nil {
+			return err
+		}
+		billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
+		expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+		if err != nil {
+			return err
+		}
 		tolerance := int64(float64(expectedAmountCents) * 0.02) // 2% tolerance
 		if billedAmountCents < (expectedAmountCents-tolerance) || billedAmountCents > (expectedAmountCents+tolerance) {
 			billingErr := newBillingError(ErrorTypeAmount,
 				"Upgrade billed amount does not match expected price",
 				map[string]interface{}{
-					"expected_amount_cents":    expectedAmountCents,
-					"billed_amount_cents":      billedAmountCents,
-					"tolerance_cents":          tolerance,
-					"new_price_id":             newPrice.ID.String(),
-					"new_flex_id":              flexID,
-					"original_subscription_id": originalSubscriptionID,
-					"new_subscription_id":      ccBillSubID,
+					"expected_amount_cents":       expectedAmountCents,
+					"billed_amount_cents":         billedAmountCents,
+					"tolerance_cents":             tolerance,
+					"new_price_id":                newPrice.ID.String(),
+					"new_flex_id":                 flexID,
+					"recurring_billing_option_id": data.SubscriptionTypeID,
+					"original_subscription_id":    originalSubscriptionID,
+					"new_subscription_id":         ccBillSubID,
 				}, nil)
 
 			s.logBillingError(ctx, billingErr, log.Fields{
@@ -915,7 +960,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			SubscriptionID: &subscription.ID,
 			Rail:           models.RailCCBill,
 			TransactionID:  transactionID,
-			Amount:         billedAmountCents,
+			Amount:         moneyutil.CentsToMicros(billedAmountCents),
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
 			PurchasedAt:    now,
@@ -957,17 +1002,18 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		// Log upgrade payment event to ClickHouse
 		if s.EventLogService != nil {
 			metadata := map[string]interface{}{
-				"transaction_id":           transactionID,
-				"rail":                     "ccbill",
-				"event_source":             "webhook",
-				"event_type":               "upgrade",
-				"amount":                   billedAmount,
-				"new_flex_id":              data.FlexID,
-				"new_form_name":            formName,
-				"original_subscription_id": originalSubscriptionID,
-				"new_subscription_id":      ccBillSubID,
-				"previous_price_id":        oldPriceID.String(),
-				"new_price_id":             newPrice.ID.String(),
+				"transaction_id":              transactionID,
+				"rail":                        "ccbill",
+				"event_source":                "webhook",
+				"event_type":                  "upgrade",
+				"amount":                      billedAmount,
+				"new_flex_id":                 data.FlexID,
+				"recurring_billing_option_id": data.SubscriptionTypeID,
+				"new_form_name":               formName,
+				"original_subscription_id":    originalSubscriptionID,
+				"new_subscription_id":         ccBillSubID,
+				"previous_price_id":           oldPriceID.String(),
+				"new_price_id":                newPrice.ID.String(),
 				// Card information for fraud monitoring and audit
 				"card_type":      data.CardType,
 				"card_last4":     data.Last4,
@@ -1616,7 +1662,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		// If refund amount is significant relative to the subscription price, terminate
 		if sub.Price != nil && sub.Price.Amount > 0 {
 			// Use integer math: percentage = (refundCents * 100) / priceAmount
-			refundPercentage := (refundAmountCents * 100) / sub.Price.Amount
+			refundPercentage := (moneyutil.CentsToMicros(refundAmountCents) * 100) / sub.Price.Amount
 			if refundPercentage >= 80 { // If refund is 80%+ of price, terminate
 				shouldTerminate = true
 			}
@@ -1667,7 +1713,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 						"refund_transaction_id": refundTransactionID,
 					}).Warn("No original payment found for CCBill refund ledger linkage")
 				} else {
-					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, refundAmountCents); refundErr != nil {
+					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, moneyutil.CentsToMicros(refundAmountCents)); refundErr != nil {
 						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
 						if shouldTerminate {
 							refundLedgerErr = err
@@ -1907,7 +1953,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
 			} else {
-				amount := voidAmountCents
+				amount := moneyutil.CentsToMicros(voidAmountCents)
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
@@ -2098,7 +2144,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing CCBill chargeback reversal: %w", lookupErr)
 			} else {
-				amount := chargebackAmountCents
+				amount := moneyutil.CentsToMicros(chargebackAmountCents)
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
@@ -2344,7 +2390,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		RailSubscriptionID:  ccBillSubID,
 		CurrentPeriodEndsAt: paidTermEnd,
 		TransactionID:       transactionID,
-		Amount:              billedAmountCents,
+		Amount:              moneyutil.CentsToMicros(billedAmountCents),
 		AmountProvided:      true,
 		Currency:            currencyValue,
 	}); err != nil {

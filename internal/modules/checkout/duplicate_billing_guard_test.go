@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -149,4 +150,41 @@ func TestCheckSubscriptionConflict(t *testing.T) {
 			t.Fatalf("expected a cancelled sub to allow re-subscribe, got %+v", got)
 		}
 	})
+}
+
+func TestCheckSubscriptionConflict_TierRankDirectionIsRelative(t *testing.T) {
+	tests := []struct {
+		name         string
+		existingRank int
+		targetRank   int
+		wantMessage  string
+	}{
+		{name: "renumber upgrade", existingRank: 10, targetRank: 20, wantMessage: "tier upgrades"},
+		{name: "renumber downgrade", existingRank: 20, targetRank: 10, wantMessage: "tier downgrades"},
+		{name: "negative prepend upgrade", existingRank: -1, targetRank: 0, wantMessage: "tier upgrades"},
+		{name: "negative prepend downgrade", existingRank: 0, targetRank: -1, wantMessage: "tier downgrades"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := "plans"
+			existingProduct := &models.Product{ID: uuid.New(), DisplayName: "Existing", TierGroup: tierGroupPtr(groupID), TierRank: tt.existingRank}
+			targetProduct := &models.Product{ID: uuid.New(), DisplayName: "Target", TierGroup: tierGroupPtr(groupID), TierRank: tt.targetRank}
+			targetPrice := &models.Price{ID: uuid.New(), ProductID: targetProduct.ID, Product: targetProduct}
+			existingPriceID := uuid.New()
+
+			svc := &CheckoutPurchaseService{SubscriptionService: &fakeSubscriptionAccess{
+				byTierGroup: map[string]*models.Subscription{
+					groupID: existingSubFor(models.StatusActive, existingProduct, existingPriceID),
+				},
+			}}
+			got, err := svc.CheckSubscriptionConflict(context.Background(), "user-1", targetPrice, targetProduct)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.Blocked || !strings.Contains(got.Message, tt.wantMessage) {
+				t.Fatalf("want blocked %q message, got %+v", tt.wantMessage, got)
+			}
+		})
+	}
 }

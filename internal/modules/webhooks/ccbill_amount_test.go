@@ -14,11 +14,11 @@ func TestValidateCCBillBilledAmount(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1000, 1000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 980, 1000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1020, 1000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1000, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 980, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1020, 10_000_000, nil, nil))
 
-	err := validateCCBillBilledAmount(ctx, nil, 979, 1000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
+	err := validateCCBillBilledAmount(ctx, nil, 979, 10_000_000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
 	require.Error(t, err)
 
 	var billingErr *BillingError
@@ -44,6 +44,33 @@ func TestValidateCCBillCurrencyMatches(t *testing.T) {
 	require.Equal(t, "eur", billingErr.Context["billed_currency"])
 	require.Equal(t, "usd", billingErr.Context["expected_currency"])
 	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
+}
+
+func TestCCBillInitialChargeAmountUsesIntro(t *testing.T) {
+	t.Parallel()
+
+	initial := int64(19_950_000)
+	initialDays := 30
+	price := &models.Price{Amount: 14_950_000, InitialAmount: &initial, InitialPeriodDays: &initialDays}
+	require.Equal(t, int64(19_950_000), ccbillInitialChargeAmount(price))
+}
+
+func TestCCBillPriceLookupIDPrefersRBO(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "0000007498", ccbillPriceLookupID(" 0000007498 ", "flex-123"))
+	require.Equal(t, "flex-123", ccbillPriceLookupID("", " flex-123 "))
+}
+
+func TestParseCCBillAmountCentsAllowsZeroForTrial(t *testing.T) {
+	t.Parallel()
+
+	got, err := parseCCBillAmountCents("0.00", "billedInitialPrice", "billedAmount", true)
+	require.NoError(t, err)
+	require.Zero(t, got)
+
+	_, err = parseCCBillAmountCents("0.00", "billedInitialPrice", "billedAmount", false)
+	require.Error(t, err)
 }
 
 func TestCCBillSuccessRequiresTransactionID(t *testing.T) {

@@ -23,6 +23,8 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
+func intPtr(v int) *int { return &v }
+
 func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
@@ -92,7 +94,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 				Slug:        productSlug,
 				DisplayName: "Plan Product",
 				Description: "inserted through HTTP-backed catalog apply",
-				TierRank:    1,
+				TierRank:    intPtr(1),
 				Prices: []catalog.Price{{
 					UnitAmount:    1299,
 					Currency:      "usd",
@@ -128,7 +130,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 			Slug:        productSlug,
 			DisplayName: "Plan Product Updated",
 			Description: "updated through HTTP-backed catalog apply",
-			TierRank:    2,
+			TierRank:    intPtr(2),
 			Prices:      manifest.TierGroups[0].Products[0].Prices,
 		}},
 	}}
@@ -190,7 +192,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 				Slug:        productSlug,
 				DisplayName: "Publish Product",
 				Description: "published through the live merchant catalog route",
-				TierRank:    1,
+				TierRank:    intPtr(1),
 				Prices: []catalog.Price{{
 					UnitAmount:    1499,
 					Currency:      "usd",

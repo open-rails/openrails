@@ -125,16 +125,16 @@ func TestTierProrationCalculation(t *testing.T) {
 		// User on Premium ($10/mo), 15 days remaining, upgrades to Premium+ ($20/mo)
 		// Expected proration: ($20 - $10) * (15/30) = $5
 
-		oldAmount := premiumPrice.Amount     // 1000 cents ($10)
-		newAmount := premiumPlusPrice.Amount // 2000 cents ($20)
-		billingCycle := 30                   // days
+		oldAmount := premiumPrice.Amount
+		newAmount := premiumPlusPrice.Amount
+		billingCycle := 30 // days
 		daysRemaining := 15
 
-		priceDiff := newAmount - oldAmount // 1000 cents ($10)
+		priceDiff := newAmount - oldAmount
 		prorationRatio := float64(daysRemaining) / float64(billingCycle)
-		expectedProration := int64(float64(priceDiff) * prorationRatio) // 500 cents ($5)
+		expectedProration := int64(float64(priceDiff) * prorationRatio)
 
-		assert.Equal(t, int64(500), expectedProration, "Proration should be $5 (500 cents)")
+		assert.Equal(t, int64(5_000_000), expectedProration, "Proration should be $5 in micros")
 	})
 
 	t.Run("proration is zero at start of cycle", func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestTierProrationCalculation(t *testing.T) {
 		prorationRatio := float64(daysRemaining) / float64(billingCycle)
 		prorationAmount := int64(float64(priceDiff) * prorationRatio)
 
-		assert.Equal(t, int64(1000), prorationAmount, "Proration should be full difference at start of cycle")
+		assert.Equal(t, int64(10_000_000), prorationAmount, "Proration should be full difference at start of cycle")
 	})
 
 	t.Run("proration is zero at end of cycle", func(t *testing.T) {

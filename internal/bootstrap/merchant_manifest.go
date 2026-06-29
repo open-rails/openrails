@@ -21,7 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -368,7 +370,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
 		}
-		if err := reconcileManifestProviderAccount(ctx, cfg, database, merchantID, account, secretStore, opts); err != nil {
+		if err := reconcileManifestProviderAccount(ctx, cfg, database, merchantID, mt.Slug, account, secretStore, opts); err != nil {
 			return err
 		}
 	}
@@ -429,7 +431,7 @@ func hasManifestProfile(p ManifestMerchantProfile) bool {
 		strings.TrimSpace(p.SupportURL) != ""
 }
 
-func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
+func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug string, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
 	providerType := normalizeManifestProviderType(account.ProviderType)
 	if providerType == "" {
 		return fmt.Errorf("provider account provider_type is required")
@@ -478,6 +480,41 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			return fmt.Errorf("store secret %s: %w", name, err)
 		}
 	}
+	vaultSecretRef := stringPtrIfNotEmpty(account.VaultSecretRef)
+	role, status, err := manifestProviderAccountMode(account.Mode)
+	if err != nil {
+		return err
+	}
+	if cfg != nil && !cfg.IsDev() && environment == "test" && role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
+		return fmt.Errorf("provider account %q cannot be mode=primary with environment=test outside development", providerType)
+	}
+	reconcileStripeWebhook := func() error {
+		if providerType != config.RailTypeStripe || (status != nil && *status == "disabled") {
+			return nil
+		}
+		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
+			Config:              cfg,
+			SecretStore:         secretStore,
+			MerchantID:          merchantID,
+			MerchantSlug:        merchantSlug,
+			ProviderEnvironment: environment,
+			ProviderAccountID:   accountID,
+			EnabledEvents:       webhooks.HandledStripeEventTypes,
+		})
+		if err != nil {
+			return fmt.Errorf("reconcile stripe webhook endpoint: %w", err)
+		}
+		fields := log.Fields{"merchant": merchantSlug, "stripe_account_id": accountID}
+		if res.Skipped {
+			fields["reason"] = res.SkipReason
+			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconcile skipped")
+		} else {
+			fields["action"] = res.Result.Action
+			fields["endpoint_id"] = res.Result.EndpointID
+			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconciled")
+		}
+		return nil
+	}
 
 	var existing gen.OpenrailsProviderAccount
 	found := false
@@ -504,7 +541,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		return fmt.Errorf("provider account %s:%s:%s is missing; rerun with --insert to create it", providerType, environment, accountID)
 	}
 	if found && !opts.Overwrite {
-		return nil
+		return reconcileStripeWebhook()
 	}
 	evidence := identity.Evidence
 	if evidence == nil {
@@ -513,14 +550,6 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
 		return fmt.Errorf("encode provider account evidence: %w", err)
-	}
-	vaultSecretRef := stringPtrIfNotEmpty(account.VaultSecretRef)
-	role, status, err := manifestProviderAccountMode(account.Mode)
-	if err != nil {
-		return err
-	}
-	if cfg != nil && !cfg.IsDev() && environment == "test" && role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
-		return fmt.Errorf("provider account %q cannot be mode=primary with environment=test outside development", providerType)
 	}
 	mctx := merchant.WithID(ctx, merchantID)
 	row := existing
@@ -581,7 +610,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	}); err != nil {
 		return err
 	}
-	return nil
+	return reconcileStripeWebhook()
 }
 
 func normalizeProviderEnvironment(raw string) (string, error) {

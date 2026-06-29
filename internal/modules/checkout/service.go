@@ -702,7 +702,7 @@ func (s *CheckoutService) processNMISubscription(
 		},
 		PlanID:          nmiPlanID,
 		CustomerVaultID: customerVaultID,
-		Amount:          float64(price.Amount) / 100.0, // Convert cents to dollars
+		Amount:          moneyutil.MicrosToMajorUnits(price.Amount),
 		Currency:        price.Currency,
 		Email:           req.Email,
 		OrderID:         orderID,
@@ -1169,10 +1169,10 @@ func (s *CheckoutService) processStripeSubscription(
 		return nil, err
 	}
 
-	trialEnd := int64(0)
-	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(s.now().Add(5*time.Minute)) {
-		trialEnd = coverage.EndDate.Unix()
+	if stripePaidIntroUnsupported(price) {
+		return nil, errors.New("stripe paid introductory pricing is not supported")
 	}
+	trialEnd := stripeCheckoutTrialEnd(price, coverage, s.now())
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "subscription",
 		PriceID:           stripePriceID,
@@ -1194,6 +1194,27 @@ func (s *CheckoutService) processStripeSubscription(
 		Message:     "Redirect to Stripe checkout",
 		RedirectURL: urlStr,
 	}, nil
+}
+
+func stripePaidIntroUnsupported(price *models.Price) bool {
+	if price == nil {
+		return false
+	}
+	initialAmount, _, ok := price.GetIntro()
+	return ok && initialAmount != 0
+}
+
+func stripeCheckoutTrialEnd(price *models.Price, coverage *CoverageInfo, now time.Time) int64 {
+	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(now.Add(5*time.Minute)) {
+		return coverage.EndDate.Unix()
+	}
+	if price != nil {
+		initialAmount, initialDays, ok := price.GetIntro()
+		if ok && initialAmount == 0 && initialDays > 0 {
+			return now.UTC().AddDate(0, 0, initialDays).Unix()
+		}
+	}
+	return 0
 }
 
 func (s *CheckoutService) processStripePayment(
@@ -2403,19 +2424,18 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	return resp, nil
 }
 
-// formatMinorAmount renders a minor-unit (cents) amount as a currency string for
-// human-facing preview/confirmation copy, e.g. (6001,"usd") -> "$60.01".
-func formatMinorAmount(minor int64, currency string) string {
-	sign := ""
-	if minor < 0 {
-		sign = "-"
-		minor = -minor
-	}
+// formatMinorAmount renders an internal micro-unit amount as currency copy,
+// e.g. (60_010_000,"usd") -> "$60.010000".
+func formatMinorAmount(micros int64, currency string) string {
 	symbol := "$"
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
 	}
-	return fmt.Sprintf("%s%s%d.%02d", sign, symbol, minor/100, minor%100)
+	amount := moneyutil.FormatMicrosDecimal(micros)
+	if strings.HasPrefix(amount, "-") {
+		return "-" + symbol + strings.TrimPrefix(amount, "-")
+	}
+	return symbol + amount
 }
 
 // processTierChangeStripe handles Stripe subscription tier changes.

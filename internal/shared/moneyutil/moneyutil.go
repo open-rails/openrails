@@ -6,7 +6,21 @@ import (
 	"strings"
 )
 
+const (
+	MicrosPerMajorUnit = int64(1_000_000)
+	CentsPerMajorUnit  = int64(100)
+	MicrosPerCent      = MicrosPerMajorUnit / CentsPerMajorUnit
+)
+
+func ParseDecimalToMicros(value string) (int64, error) {
+	return parseDecimalScaled(value, MicrosPerMajorUnit)
+}
+
 func ParseDecimalToCents(value string) (int64, error) {
+	return parseDecimalScaled(value, CentsPerMajorUnit)
+}
+
+func parseDecimalScaled(value string, scale int64) (int64, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return 0, fmt.Errorf("amount is empty")
@@ -17,22 +31,52 @@ func ParseDecimalToCents(value string) (int64, error) {
 		return 0, fmt.Errorf("invalid decimal amount %q", trimmed)
 	}
 
-	scaled := new(big.Rat).Mul(parsed, big.NewRat(100, 1))
+	scaled := new(big.Rat).Mul(parsed, big.NewRat(scale, 1))
 	return roundHalfAwayFromZero(scaled)
 }
 
+func MicrosToMajorUnits(micros int64) float64 {
+	return float64(micros) / float64(MicrosPerMajorUnit)
+}
+
 func CentsToMajorUnits(cents int64) float64 {
-	return float64(cents) / 100.0
+	return float64(cents) / float64(CentsPerMajorUnit)
+}
+
+func CentsToMicros(cents int64) int64 {
+	return cents * MicrosPerCent
+}
+
+func MicrosToCentsCeil(micros int64) int64 {
+	if micros <= 0 {
+		return 0
+	}
+	return (micros + MicrosPerCent - 1) / MicrosPerCent
+}
+
+func MicrosToCentsExact(micros int64) (int64, error) {
+	if micros%MicrosPerCent != 0 {
+		return 0, fmt.Errorf("amount %d micros is not representable in whole cents", micros)
+	}
+	return micros / MicrosPerCent, nil
+}
+
+func FormatMicrosDecimal(micros int64) string {
+	return formatDecimal(micros, MicrosPerMajorUnit, 6)
 }
 
 func FormatCentsDecimal(cents int64) string {
-	negative := cents < 0
+	return formatDecimal(cents, CentsPerMajorUnit, 2)
+}
+
+func formatDecimal(amount, scale int64, width int) string {
+	negative := amount < 0
 	// Work entirely in int64. |MinInt64/100| and |MinInt64%100| both fit in int64,
 	// so negating the quotient/remainder to their magnitudes never overflows
-	// (unlike negating cents itself at math.MinInt64) — and there is no int64↔uint64
+	// (unlike negating amount itself at math.MinInt64) — and there is no int64↔uint64
 	// conversion for gosec G115 to flag.
-	major := cents / 100
-	minor := cents % 100
+	major := amount / scale
+	minor := amount % scale
 	if major < 0 {
 		major = -major
 	}
@@ -40,14 +84,14 @@ func FormatCentsDecimal(cents int64) string {
 		minor = -minor
 	}
 	if negative {
-		return fmt.Sprintf("-%d.%02d", major, minor)
+		return fmt.Sprintf("-%d.%0*d", major, width, minor)
 	}
-	return fmt.Sprintf("%d.%02d", major, minor)
+	return fmt.Sprintf("%d.%0*d", major, width, minor)
 }
 
-func FormatDisplay(cents int64, currency string) string {
+func FormatDisplay(micros int64, currency string) string {
 	code := strings.ToUpper(strings.TrimSpace(currency))
-	amount := FormatCentsDecimal(cents)
+	amount := FormatMicrosDecimal(micros)
 	if code == "" {
 		return amount
 	}
@@ -60,8 +104,8 @@ func FormatDisplay(cents int64, currency string) string {
 	return fmt.Sprintf("%s %s", amount, code)
 }
 
-func FormatUSD(cents int64) string {
-	amount := FormatCentsDecimal(cents)
+func FormatUSD(micros int64) string {
+	amount := FormatMicrosDecimal(micros)
 	if strings.HasPrefix(amount, "-") {
 		return "-$" + strings.TrimPrefix(amount, "-")
 	}

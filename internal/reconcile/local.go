@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // localRailNames maps a reconcile Provider onto the rail name(s)
@@ -289,7 +290,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			CustomerID:        row.CustomerID,
 			Rail:              string(row.Rail),
 			TransactionID:     row.TransactionID,
-			AmountCents:       row.Amount,
+			AmountCents:       row.Amount / moneyutil.MicrosPerCent,
 			Status:            string(row.Status),
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,

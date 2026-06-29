@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // maxCatalogPageSize bounds caller-supplied pagination so a single request can
@@ -626,9 +627,13 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
 	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays)
 	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
+	unitAmountCents, err := moneyutil.MicrosToCentsExact(local.Amount)
+	if err != nil {
+		return "", err
+	}
 	newPriceID, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
 		StripeProductID:  stripeProductID,
-		UnitAmount:       local.Amount,
+		UnitAmount:       unitAmountCents,
 		Currency:         local.Currency,
 		BillingCycleDays: local.BillingCycleDays,
 		LookupKey:        internalStripeLookupKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays),

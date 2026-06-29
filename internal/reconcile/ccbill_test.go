@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -50,6 +51,7 @@ func TestCCBillFetcher_Fetch(t *testing.T) {
 				Status:          "1",
 				RebillDate:      "2026-07-03",
 				ExpiryDate:      "2026-07-03",
+				Field2:          "0000007498",
 			},
 		},
 		exportRows: []ccbill.DataLinkExportRow{
@@ -84,6 +86,7 @@ func TestCCBillFetcher_Fetch(t *testing.T) {
 	require.Equal(t, "1", active.RawStatus)
 	require.Equal(t, "u1@example.com", active.Email)
 	require.Equal(t, "user1", active.Username)
+	require.Equal(t, "0000007498", active.PlanID)
 	require.NotNil(t, active.NextBillingAt)
 	require.Equal(t, time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), *active.NextBillingAt)
 
@@ -113,6 +116,25 @@ func TestCCBillFetcher_Fetch(t *testing.T) {
 	chargeback := snap.Transactions[2]
 	require.Equal(t, TransactionTypeChargeback, chargeback.Type)
 	require.Contains(t, string(chargeback.Raw), "ccbill_datalink_export")
+}
+
+func TestCCBillPlanIndexUsesRecurringBillingOption(t *testing.T) {
+	t.Parallel()
+
+	priceID := uuid.New()
+	productID := uuid.New()
+	idx := buildPlanIndex(ProviderCCBill, []LocalPrice{{
+		ID:        priceID,
+		ProductID: productID,
+		Rails: map[string]map[string]string{
+			"ccbill": {"recurring_billing_option_id": "0000007498"},
+		},
+	}})
+
+	links := idx["0000007498"]
+	require.Len(t, links, 1)
+	require.Equal(t, priceID, links[0].price.ID)
+	require.Equal(t, "ccbill", links[0].railName)
 }
 
 func TestCCBillFetcher_SubscriptionIDFilterAppliedClientSide(t *testing.T) {

@@ -34,8 +34,8 @@ func newMobiusAdapterWithServer(t *testing.T, serverURL string) *mobiusAdapter {
 }
 
 func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
-	got := mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(30))
-	want := "premium-usd-2300-30"
+	got := mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30))
+	want := "premium-usd-23000000-30"
 	if got != want {
 		t.Fatalf("plan_id format drift: got %q want %q", got, want)
 	}
@@ -45,16 +45,16 @@ func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
 	}
 	// Content-addressed: no price-UUID input, so it is stable across a fresh DB;
 	// unchanged by cosmetic edits; distinct when money terms change.
-	if mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(30)) != want {
+	if mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30)) != want {
 		t.Error("plan_id must be deterministic for identical content")
 	}
-	if mobiusDeterministicPlanID("premium", "usd", 2900, intPtr(30)) == want {
+	if mobiusDeterministicPlanID("premium", "usd", 29_000_000, intPtr(30)) == want {
 		t.Error("a different amount must yield a different plan_id")
 	}
-	if mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(365)) == want {
+	if mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(365)) == want {
 		t.Error("a different cycle must yield a different plan_id")
 	}
-	if mobiusDeterministicPlanID("basic", "usd", 2300, intPtr(30)) == want {
+	if mobiusDeterministicPlanID("basic", "usd", 23_000_000, intPtr(30)) == want {
 		t.Error("a different product slug must yield a different plan_id")
 	}
 }
@@ -78,7 +78,7 @@ func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), UnitAmount: 999, BillingCycleDays: nil,
+		PriceID: uuid.New(), UnitAmount: 9_990_000, BillingCycleDays: nil,
 	})
 	if err == nil {
 		t.Fatal("expected error when billing_cycle_days is nil")
@@ -109,7 +109,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 
 	priceID := uuid.New()
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -117,7 +117,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	if !addCalled {
 		t.Fatal("expected AddRecurringPlan to be called for a missing plan")
 	}
-	if ids[models.RailKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30)) {
+	if ids[models.RailKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30)) {
 		t.Fatalf("plan_id mismatch: %v", ids)
 	}
 	if ids[models.RailKeyProvider] != "mobius" {
@@ -129,7 +129,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	// A FRESH-DB price gets a new random UUID, but the content-addressed plan_id is
 	// unchanged, so find-or-attach reattaches to the existing NMI plan (no create).
 	priceID := uuid.New()
-	planID := mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30))
+	planID := mobiusDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("recurring") == "add_plan" {
@@ -143,7 +143,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -176,7 +176,7 @@ func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("valid link should attach cleanly, got %v", err)
 	}
@@ -207,7 +207,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
-		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("missing plan should be created, got %v", err)
 	}
@@ -237,7 +237,7 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
-		autoCreateContext{UnitAmount: 999, BillingCycleDays: nil})
+		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: nil})
 	if err == nil || !strings.Contains(err.Error(), "billing_cycle_days") {
 		t.Fatalf("expected a loud billing_cycle_days error, got %v", err)
 	}
@@ -246,7 +246,7 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 	planID := "premium-usd-999-30"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Remote plan bills 5.00 (500 cents) but the catalog price is 999 cents.
+		// Remote plan bills 5.00 (500 cents) but the catalog price is 9_990_000 micros.
 		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "5.00", "30")))
 	}))
 	t.Cleanup(server.Close)
@@ -254,7 +254,7 @@ func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
+		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "amount") {
 		t.Fatalf("expected an amount-mismatch error, got %v", err)
 	}
@@ -271,7 +271,7 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
+		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
 		t.Fatalf("expected a billing-cycle-mismatch error, got %v", err)
 	}
@@ -300,7 +300,7 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 
 	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
 	drift, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{
-		UnitAmount: 999,
+		UnitAmount: 9_990_000,
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -312,8 +312,8 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 	for _, d := range drift {
 		fields[d.Field] = d.RemoteValue
 	}
-	if fields["unit_amount"] != "500" {
-		t.Fatalf("expected unit_amount drift (cents), got %v", drift)
+	if fields["unit_amount"] != "5000000" {
+		t.Fatalf("expected unit_amount drift (micros), got %v", drift)
 	}
 }
 

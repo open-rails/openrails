@@ -4,7 +4,7 @@
 -- $14.95 every 30 days. A free trial is the same shape with initial_amount = 0
 -- (e.g. $0 for 7 days, then $15/30d).
 --
---   initial_amount      = the first-period price (minor units; 0 = free trial).
+--   initial_amount      = the first-period price (internal micros; 0 = free trial).
 --   initial_period_days = the first-period length in days.
 -- Both NULL = a flat price (today's behavior, unchanged). The recurring terms
 -- stay in amount + billing_cycle_days; the price identity is unchanged.
@@ -24,5 +24,5 @@ ALTER TABLE openrails.prices
     ADD CONSTRAINT prices_intro_period_positive_chk
         CHECK ((initial_period_days IS NULL) OR (initial_period_days > 0));
 
-COMMENT ON COLUMN openrails.prices.initial_amount IS '#602 intro/trial: first-period price (minor units); 0 = free trial; NULL = flat price.';
+COMMENT ON COLUMN openrails.prices.initial_amount IS '#602 intro/trial: first-period price (internal micros); 0 = free trial; NULL = flat price.';
 COMMENT ON COLUMN openrails.prices.initial_period_days IS '#602 intro/trial: first-period length in days; NULL = flat price.';

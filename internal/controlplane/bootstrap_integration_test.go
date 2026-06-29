@@ -246,11 +246,10 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	}
 
 	body := map[string]any{
-		"slug":            "cozy-art-ci",
-		"issuer":          "https://cozy.art",
-		"jwks_uri":        "https://cozy.art/.well-known/jwks.json",
-		"allowed_origins": []string{"https://cozy.art"},
-		"enabled":         true,
+		"slug":     "cozy-art-ci",
+		"issuer":   "https://cozy.art",
+		"jwks_uri": "https://cozy.art/.well-known/jwks.json",
+		"enabled":  true,
 	}
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)

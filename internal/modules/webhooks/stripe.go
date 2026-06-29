@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -465,6 +466,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if railSubID == "" {
 		return fmt.Errorf("stripe invoice missing subscription id")
 	}
+	amountMicros := moneyutil.CentsToMicros(inv.AmountPaid)
 
 	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	createdSubscription := false
@@ -478,7 +480,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			CurrentPeriodStartsAt: zeroTimePtr(stripeInvoicePeriodStart(inv)),
 			CurrentPeriodEndsAt:   zeroTimePtr(stripeInvoicePeriodEnd(inv)),
 			TransactionID:         paymentTransactionID,
-			Amount:                inv.AmountPaid,
+			Amount:                amountMicros,
 			AmountProvided:        true,
 			Currency:              inv.Currency,
 			PaymentMetadata:       paymentMetadata,
@@ -494,7 +496,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			CurrentPeriodStartsAt: zeroTimePtr(stripeInvoicePeriodStart(inv)),
 			CurrentPeriodEndsAt:   zeroTimePtr(stripeInvoicePeriodEnd(inv)),
 			TransactionID:         paymentTransactionID,
-			Amount:                inv.AmountPaid,
+			Amount:                amountMicros,
 			AmountProvided:        true,
 			Currency:              inv.Currency,
 			PaymentMetadata:       paymentMetadata,
@@ -731,8 +733,9 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			return fmt.Errorf("price lookup failed: %w", err)
 		}
 	}
-	if sess.AmountTotal != price.Amount {
-		return fmt.Errorf("stripe checkout amount mismatch: got %d, want %d", sess.AmountTotal, price.Amount)
+	amountMicros := moneyutil.CentsToMicros(sess.AmountTotal)
+	if amountMicros != price.Amount {
+		return fmt.Errorf("stripe checkout amount mismatch: got %d cents (%d micros), want %d micros", sess.AmountTotal, amountMicros, price.Amount)
 	}
 	if !strings.EqualFold(strings.TrimSpace(sess.Currency), strings.TrimSpace(price.Currency)) {
 		return fmt.Errorf("stripe checkout currency mismatch: got %s, want %s", sess.Currency, price.Currency)
@@ -750,7 +753,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		PriceID:        priceID,
 		Rail:           string(models.RailStripe),
 		TransactionID:  paymentTransactionID,
-		Amount:         sess.AmountTotal,
+		Amount:         amountMicros,
 		AmountProvided: true,
 		Currency:       sess.Currency,
 		Metadata:       stripeCheckoutPaymentMetadata(sess),
@@ -1322,7 +1325,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, refund.Amount); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, moneyutil.CentsToMicros(refund.Amount)); err != nil {
 			return fmt.Errorf("record stripe refund: %w", err)
 		}
 	}
@@ -1399,7 +1402,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, dispute.Amount); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, moneyutil.CentsToMicros(dispute.Amount)); err != nil {
 			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
 			log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
 				"dispute_id":          disputeID,
@@ -1660,11 +1663,12 @@ func validateStripeInvoicePrice(inv stripeInvoice, price *models.Price) error {
 		}
 		return nil
 	}
-	if inv.AmountPaid != price.Amount {
+	amountPaidMicros := moneyutil.CentsToMicros(inv.AmountPaid)
+	if amountPaidMicros != price.Amount {
 		if inv.AmountPaid == 0 && stripeInvoiceHasNoRefundableTransaction(inv) {
 			return nil
 		}
-		return fmt.Errorf("stripe invoice amount mismatch: got %d, want %d", inv.AmountPaid, price.Amount)
+		return fmt.Errorf("stripe invoice amount mismatch: got %d cents (%d micros), want %d micros", inv.AmountPaid, amountPaidMicros, price.Amount)
 	}
 	return nil
 }

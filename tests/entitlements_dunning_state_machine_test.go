@@ -61,7 +61,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
-		Amount:           999,
+		Amount:           9_990_000,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),

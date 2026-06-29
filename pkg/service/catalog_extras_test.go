@@ -25,7 +25,7 @@ import (
 // -- fixtures -----------------------------------------------------------------
 
 // extrasTestSnapshot builds a local catalog with one product ("premium") and one
-// price (usd 2300 / 30d) linked to stripe price/product ids and an NMI plan id.
+// price (usd 23_000_000 micros / 30d) linked to stripe price/product ids and an NMI plan id.
 func extrasTestSnapshot() localCatalogSnapshot {
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -34,7 +34,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 	price := &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		Amount:           2300,
+		Amount:           23_000_000,
 		Currency:         "usd",
 		BillingCycleDays: &cycle,
 		Rails: map[string]map[string]string{
@@ -43,7 +43,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 				models.RailKeyStripeProductID: "prod_local",
 			},
 			string(models.RailMobius): {
-				models.RailKeyPlanID: "premium-usd-2300-30",
+				models.RailKeyPlanID: "premium-usd-23000000-30",
 			},
 		},
 	}
@@ -67,13 +67,13 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 	}
 	prices := []catalog.StripePrice{
 		// Matched by content key via lookup_key: NOT an extra.
-		{ID: "price_matched", Active: true, LookupKey: "openrails.premium.usd.2300.30"},
+		{ID: "price_matched", Active: true, LookupKey: "openrails.premium.usd.23000000.30"},
 		// Matched by stored stripe price id: NOT an extra.
 		{ID: "price_local", Active: true},
 		// OpenRails-marked (metadata content key) but not in catalog: OWNED extra.
-		{ID: "price_ours_extra", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsPriceKey: "retired.usd.900.30"}},
+		{ID: "price_ours_extra", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsPriceKey: "retired.usd.9000000.30"}},
 		// OpenRails-marked via lookup_key, already inactive: OWNED extra, Active=false.
-		{ID: "price_ours_inactive", Active: false, LookupKey: "openrails.retired.usd.500.30"},
+		{ID: "price_ours_inactive", Active: false, LookupKey: "openrails.retired.usd.5000000.30"},
 		// No marker: FOREIGN extra.
 		{ID: "price_foreign", Active: true, Nickname: "merchant price"},
 	}
@@ -117,9 +117,9 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 func TestComputeNMIExtras_MarkerClassification(t *testing.T) {
 	snap := extrasTestSnapshot()
 	plans := []nmiPlan{
-		{PlanID: "premium-usd-2300-30", PlanName: "Premium"}, // referenced locally: NOT an extra
-		{PlanID: "retired-usd-900-30", PlanName: "Retired"},  // content-addressed shape: OWNED extra
-		{PlanID: "legacy-vip-plan", PlanName: "Legacy VIP"},  // operator-chosen id: FOREIGN extra
+		{PlanID: "premium-usd-23000000-30", PlanName: "Premium"}, // referenced locally: NOT an extra
+		{PlanID: "retired-usd-900-30", PlanName: "Retired"},      // content-addressed shape: OWNED extra
+		{PlanID: "legacy-vip-plan", PlanName: "Legacy VIP"},      // operator-chosen id: FOREIGN extra
 	}
 	extras := computeNMIExtras(plans, snap)
 	if len(extras) != 2 {
@@ -139,7 +139,7 @@ func TestComputeNMIExtras_MarkerClassification(t *testing.T) {
 
 func TestIsContentAddressedNMIPlanID(t *testing.T) {
 	cases := map[string]bool{
-		"premium-usd-2300-30":      true,
+		"premium-usd-23000000-30":  true,
 		"pro-eur-999-365":          true,
 		"vip-gold-usd-999-onetime": true, // hyphenated slug
 		"a-b-c-usd-1-7":            true,
@@ -178,7 +178,7 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 			return
 		}
 		w.Write([]byte(`<nm_response>
-			<plan><plan_id>premium-usd-2300-30</plan_id><plan_name>Premium</plan_name><plan_amount>23.00</plan_amount></plan>
+			<plan><plan_id>premium-usd-23000000-30</plan_id><plan_name>Premium</plan_name><plan_amount>23.00</plan_amount></plan>
 			<plan><plan_id>retired-usd-900-30</plan_id><plan_name>Retired</plan_name><plan_amount>9.00</plan_amount></plan>
 			<plan><plan_id>legacy-vip-plan</plan_id><plan_name>Legacy VIP</plan_name><plan_amount>5.00</plan_amount></plan>
 		</nm_response>`))
@@ -246,7 +246,7 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		return succeededRow(p, `{"archived":true}`)
 	}}
 	extras := []CatalogExtra{
-		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours", Owned: true, Active: true, MarkerKey: "retired.usd.900.30"},
+		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours", Owned: true, Active: true, MarkerKey: "retired.usd.9000000.30"},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_ours", Owned: true, Active: true, MarkerKey: "retired"},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
@@ -434,7 +434,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	product := &models.Product{ID: productID, Slug: "premium"}
 	mkPrice := func(pda string, status models.CatalogStatus) *models.Price {
 		return &models.Price{
-			ID: uuid.New(), ProductID: productID, Amount: 2300, Currency: "usd",
+			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
 			BillingCycleDays: &cycle, Status: status,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": pda},
@@ -473,7 +473,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	if e.Provider != "solana" || e.ObjectType != "plan" || e.ExternalID != pdaActiveArchived || !e.Owned || !e.Active {
 		t.Errorf("unexpected extra %+v", e)
 	}
-	if e.Label != "premium.usd.2300.30" {
+	if e.Label != "premium.usd.23000000.30" {
 		t.Errorf("label should be the price content key, got %q", e.Label)
 	}
 }

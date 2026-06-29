@@ -88,7 +88,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
+		      VALUES ($1, $2, 9990000, 'usd', 30, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
@@ -243,7 +243,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT amount, customer_id FROM openrails.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
 			Scan(&amount, &subjectID))
-		assert.Equal(t, int64(999), amount)
+		assert.Equal(t, int64(9_990_000), amount)
 		assert.Equal(t, seeded.subjectID, subjectID)
 
 		// PS-1 + PS-8 hold in the admin queue, never auto-applied.
@@ -358,7 +358,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, rails, merchant_id)
-		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
+		      VALUES ($1, $2, 14990000, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
 		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id)
@@ -462,7 +462,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT amount, subscription_id FROM openrails.payments WHERE transaction_id = $1`, txnID).
 			Scan(&amount, &paySub))
-		assert.Equal(t, int64(1499), amount)
+		assert.Equal(t, int64(14_990_000), amount)
 		assert.Equal(t, subID, paySub)
 
 		// Entitlements granted through the normal subscription-sourced path.
@@ -728,7 +728,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
 		// Two prices for the SAME product (the scheduled downgrade target), so the
 		// subscriptions_price_product_merchant composite FK is satisfied.
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,999,'usd',$3),($4,$2,499,'usd',$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,9990000,'usd',$3),($4,$2,4990000,'usd',$3)`,
 			priceID, productID, merchantID, schedPriceID)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,

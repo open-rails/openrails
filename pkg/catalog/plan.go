@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -133,7 +134,9 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 
 func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
+	credits := creditsSpec(product.Credits)
 	tierGroup := group.Slug
+	tierRank := product.tierRank()
 	desiredStatus := product.Status
 	if desiredStatus == "" {
 		desiredStatus = StatusActive
@@ -152,8 +155,9 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 			DisplayName:      product.DisplayName,
 			Description:      strings.TrimSpace(product.Description),
 			EntitlementsSpec: entitlements,
+			CreditsSpec:      credits,
 			TierGroup:        &tierGroup,
-			TierRank:         product.TierRank,
+			TierRank:         tierRank,
 			Status:           toModelStatus(desiredStatus),
 		}
 		if err := planPrices(ctx, applier, m, product, nil, pp, opts); err != nil {
@@ -165,19 +169,20 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	pp.UpdateID = existing.ID
 	name := product.DisplayName
 	desc := strings.TrimSpace(product.Description)
-	rank := product.TierRank
 	st := toModelStatus(desiredStatus)
 	pp.UpdateReq = billingservice.UpdateProductRequest{
 		DisplayName:      &name,
 		Description:      &desc,
 		EntitlementsSpec: entitlements,
 		SetEntitlements:  true,
+		CreditsSpec:      credits,
+		SetCredits:       true,
 		TierGroup:        &tierGroup,
 		SetTierGroup:     true,
-		TierRank:         &rank,
+		TierRank:         &tierRank,
 		Status:           &st,
 	}
-	if productUnchanged(existing, product, entitlements, tierGroup, desiredStatus) {
+	if productUnchanged(existing, product, entitlements, credits, tierGroup, tierRank, desiredStatus) {
 		pp.Action = ProductUnchanged
 	} else {
 		pp.Action = ProductUpdate
@@ -189,7 +194,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	return pp, nil
 }
 
-func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, tierGroup, desiredStatus string) bool {
+func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup string, tierRank int, desiredStatus string) bool {
 	if existing == nil {
 		return false
 	}
@@ -199,7 +204,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 	if strings.TrimSpace(existing.Description) != strings.TrimSpace(product.Description) {
 		return false
 	}
-	if existing.TierRank != product.TierRank {
+	if existing.TierRank != tierRank {
 		return false
 	}
 	if existing.TierGroup == nil || !strings.EqualFold(strings.TrimSpace(*existing.TierGroup), tierGroup) {
@@ -213,6 +218,21 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 	}
 	for k := range entitlements {
 		if _, ok := existing.EntitlementsSpec[k]; !ok {
+			return false
+		}
+	}
+	if len(existing.CreditsSpec) != len(credits) {
+		return false
+	}
+	for k, v := range credits {
+		ev, ok := existing.CreditsSpec[k]
+		if !ok || ev.Unit != v.Unit || ev.Amount != v.Amount || ev.Cadence != v.Cadence {
+			return false
+		}
+		if (ev.ExpiresDays == nil) != (v.ExpiresDays == nil) {
+			return false
+		}
+		if ev.ExpiresDays != nil && *ev.ExpiresDays != *v.ExpiresDays {
 			return false
 		}
 	}
@@ -347,6 +367,22 @@ func entitlementsSpec(entitlements []string) map[string]*int {
 	return out
 }
 
+func creditsSpec(credits Credits) billingservice.CreditsSpec {
+	if len(credits) == 0 {
+		return nil
+	}
+	out := make(billingservice.CreditsSpec, len(credits))
+	for key, credit := range credits {
+		out[key] = billingservice.CreditGrantSpec{
+			Unit:        strings.TrimSpace(credit.Unit),
+			Amount:      credit.Amount,
+			ExpiresDays: credit.ExpiresDays,
+			Cadence:     billingservice.CreditGrantCadence(strings.TrimSpace(credit.Cadence)),
+		}
+	}
+	return out
+}
+
 // toModelStatus casts a manifest status string to the OpenRails CatalogStatus
 // enum exposed on the service request structs. An empty string is left empty so
 // the facade applies its own default (active).
@@ -438,15 +474,9 @@ func PriceLabel(productSlug string, price Price) string {
 	return fmt.Sprintf("%s %s/%s", productSlug, formatMoney(price.UnitAmount, price.Currency), interval)
 }
 
-// formatMoney renders a minor-unit amount as a human currency string,
-// e.g. (1300, "usd") -> "$13.00", (1300, "eur") -> "EUR 13.00".
+// formatMoney renders an internal micros amount as a human currency string.
 func formatMoney(unitAmount int64, currency string) string {
-	whole := unitAmount / 100
-	cents := unitAmount % 100
-	if cents < 0 {
-		cents = -cents
-	}
-	amount := fmt.Sprintf("%d.%02d", whole, cents)
+	amount := moneyutil.FormatMicrosDecimal(unitAmount)
 	if currency == "" || strings.EqualFold(currency, "usd") {
 		return "$" + amount
 	}

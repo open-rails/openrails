@@ -94,7 +94,8 @@ LIMIT 1;
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.rails -> 'ccbill' ->> 'flex_id' = sqlc.arg(flex_id)::text
+WHERE (price.rails -> 'ccbill' ->> 'flex_id' = sqlc.arg(ccbill_price_id)::text
+       OR price.rails -> 'ccbill' ->> 'recurring_billing_option_id' = sqlc.arg(ccbill_price_id)::text)
   AND price.status <> 'draft'
 LIMIT 1;
 

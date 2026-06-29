@@ -231,7 +231,7 @@ SELECT p.id AS payment_id,
        p.subscription_id AS subscription_id,
        COALESCE(sub.rail_subscription_id, '')::text AS rail_subscription_id,
        p.customer_id::text AS user_id,
-       p.amount AS amount_cents,
+       (p.amount / 10000)::bigint AS amount_cents,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
        COALESCE(pm.last_four, '')::text AS card_last4
@@ -242,7 +242,7 @@ WHERE p.subscription_id IS NOT NULL
   AND p.rail = sqlc.arg(rail)
   AND sub.rail::text = p.rail::text
   AND p.amount > 0
-  AND p.amount = sqlc.arg(amount_cents)
+  AND p.amount = sqlc.arg(amount_cents) * 10000
   AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
   AND p.purchased_at >= sqlc.arg(from_at)::timestamptz
   AND p.purchased_at <= sqlc.arg(to_at)::timestamptz

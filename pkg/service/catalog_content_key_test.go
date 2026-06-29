@@ -20,12 +20,12 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 	const (
 		productSlug = "pro"
 		currency    = "usd"
-		amount      = int64(2900)
+		amount      = int64(29_000_000)
 	)
 	cycle := intPtr(30)
 
-	wantLookup := "openrails.pro.usd.2900.30"
-	wantContent := "pro.usd.2900.30"
+	wantLookup := "openrails.pro.usd.29000000.30"
+	wantContent := "pro.usd.29000000.30"
 
 	// Exact format assertions.
 	if got := internalStripeLookupKey(productSlug, currency, amount, cycle); got != wantLookup {
@@ -36,11 +36,11 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 	}
 
 	// One-time price (nil cycle and 0 cycle) renders the "onetime" token.
-	wantOneTime := "openrails.pro.usd.500.onetime"
-	if got := internalStripeLookupKey(productSlug, currency, 500, nil); got != wantOneTime {
+	wantOneTime := "openrails.pro.usd.5000000.onetime"
+	if got := internalStripeLookupKey(productSlug, currency, 5_000_000, nil); got != wantOneTime {
 		t.Fatalf("one-time (nil) lookup = %q, want %q", got, wantOneTime)
 	}
-	if got := internalStripeLookupKey(productSlug, currency, 500, intPtr(0)); got != wantOneTime {
+	if got := internalStripeLookupKey(productSlug, currency, 5_000_000, intPtr(0)); got != wantOneTime {
 		t.Fatalf("one-time (0) lookup = %q, want %q", got, wantOneTime)
 	}
 
@@ -59,7 +59,7 @@ func TestContentKeysAreFinancialDeterministic(t *testing.T) {
 
 	// A DIFFERENT AMOUNT must yield a DIFFERENT key — this is the core of the
 	// model: a price change is a new price (new content key), never a mutation.
-	if internalStripeLookupKey(productSlug, currency, 2900, cycle) == internalStripeLookupKey(productSlug, currency, 3900, cycle) {
+	if internalStripeLookupKey(productSlug, currency, 29_000_000, cycle) == internalStripeLookupKey(productSlug, currency, 39_000_000, cycle) {
 		t.Fatal("distinct amounts must yield distinct lookup keys (a price change is a new price)")
 	}
 	// Distinct currency / cycle / product also yield distinct keys.
@@ -85,7 +85,8 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	const (
 		productSlug = "pro"
 		currency    = "usd"
-		amount      = int64(1000)
+		amount      = int64(10_000_000)
+		amountCents = int64(1000)
 	)
 	cycle := intPtr(365)
 
@@ -130,7 +131,7 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	// duplicate). If the keys depended on UUIDs, the post-wipe pass would emit
 	// an orphan_in_stripe instead.
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_live", UnitAmount: amount, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, amount, cycle)},
+		{ID: "price_live", UnitAmount: amountCents, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, amount, cycle)},
 	}
 	now := time.Now().UTC()
 	if events := computeCatalogDrift(nil, stripePrices, beforeSnap, now); len(events) != 0 {
@@ -157,13 +158,13 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 
 	// Local catalog has the $29.00 price.
 	products := []*models.Product{{ID: productID, Slug: productSlug, Status: models.CatalogStatusActive}}
-	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 2900, Currency: currency, BillingCycleDays: cycle, Status: models.CatalogStatusActive}}
+	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, BillingCycleDays: cycle, Status: models.CatalogStatusActive}}
 	snap := buildSnapshotFromRows(products, prices)
 
 	// Stripe has a price at a DIFFERENT amount ($39.00) under its own (different)
 	// content lookup_key. It must NOT match the $29 row — it is a separate price.
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_39", UnitAmount: 3900, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, 3900, cycle)},
+		{ID: "price_39", UnitAmount: 3900, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productSlug, currency, 39_000_000, cycle)},
 	}
 	now := time.Now().UTC()
 	events := computeCatalogDrift(nil, stripePrices, snap, now)
@@ -185,7 +186,7 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 // currency divergence between the local OpenRails price and the Stripe price.
 func TestDiffPriceFieldsAmountDrift(t *testing.T) {
 	now := time.Now().UTC()
-	local := &models.Price{ID: uuid.New(), Amount: 1000, Currency: "usd", Status: models.CatalogStatusActive}
+	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "usd", Status: models.CatalogStatusActive}
 
 	// Amount diverges only.
 	sp := catalog.StripePrice{ID: "price_1", UnitAmount: 2000, Currency: "usd", Active: true}

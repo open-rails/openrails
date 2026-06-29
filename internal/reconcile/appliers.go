@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -97,7 +98,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		PriceID:           a.PriceID,
 		Rail:              gen.OpenrailsRailType(a.Rail),
 		TransactionID:     a.TransactionID,
-		Amount:            a.AmountCents,
+		Amount:            moneyutil.CentsToMicros(a.AmountCents),
 		Currency:          currency,
 		SubscriptionID:    a.SubscriptionID,
 		Metadata:          metadataJSON(a.Metadata),
@@ -124,7 +125,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID)
 		return n > 0, err
 	}
-	amount := a.AmountCents
+	amount := moneyutil.CentsToMicros(a.AmountCents)
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}

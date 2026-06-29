@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
@@ -42,6 +43,11 @@ type ControlPlane struct {
 	// issuer/audience/keys the control plane signs with, plus a self-service
 	// permissions validator. See delegated.go.
 	delegatedVerifier *authhttp.Verifier
+	// userVerifier validates first-party AuthKit user access tokens for narrow
+	// OpenRails wrappers around AuthKit-generated routes. AuthKit still performs
+	// the authoritative route auth inside its handler; this verifier only lets
+	// OpenRails run pre-auth setup such as lazy customer-group creation.
+	userVerifier *authhttp.Verifier
 
 	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
 	// so they verify against delegatedVerifier.
@@ -179,6 +185,20 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
 
+	coreOptions := authClient.Options()
+	userVerifier := authhttp.NewVerifier(
+		authhttp.WithSkew(5*time.Second),
+		authhttp.WithAPIKeyPrefix(coreOptions.APIKeyPrefix),
+		authhttp.WithSSRFGuard(),
+	)
+	if err := userVerifier.AddIssuer(coreOptions.Issuer, coreOptions.ExpectedAudiences, authhttp.IssuerOptions{
+		RawKeys: authClient.PublicKeysByKID(),
+		IsLocal: true,
+	}); err != nil {
+		return nil, fmt.Errorf("controlplane: build user verifier: %w", err)
+	}
+	userVerifier.WithService(authClient)
+
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
 	// `openrails` audience. Customer self-service tokens may be permissionless;
@@ -204,6 +224,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		hosted:             options.hosted,
 		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:  delegatedVerifier,
+		userVerifier:       userVerifier,
 		issuer:             issuer,
 		delegatedAudiences: []string{"openrails"},
 	}

@@ -161,7 +161,7 @@ func TestComputeCatalogDriftMissingInStripe(t *testing.T) {
 	priceID := uuid.New()
 	// OpenRails believes it owns stripe price/product ids that are NOT in the pull.
 	products := []*models.Product{prod(productID, "P", "", true)}
-	prices := []*models.Price{price(priceID, productID, "Monthly", 1000, "usd", true, "price_gone", "prod_gone")}
+	prices := []*models.Price{price(priceID, productID, "Monthly", 10_000_000, "usd", true, "price_gone", "prod_gone")}
 	snap := snapFromRows(products, prices)
 	// Stripe returns nothing.
 	events := computeCatalogDrift(nil, nil, snap, now)
@@ -175,7 +175,7 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	products := []*models.Product{prod(productID, "Premium", "old desc", true)}
-	prices := []*models.Price{price(priceID, productID, "Monthly", 1000, "usd", true, "price_1", "prod_1")}
+	prices := []*models.Price{price(priceID, productID, "Monthly", 10_000_000, "usd", true, "price_1", "prod_1")}
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium Plus", Description: "new desc", Active: false, Metadata: map[string]string{
@@ -185,9 +185,9 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 2000, Currency: "eur", Active: false, Nickname: "Yearly", Metadata: map[string]string{
 			// Content key reverse-matches the LOCAL row's financial key
-			// (prod-slug, usd, 1000, one-time); the Stripe object's own
+			// (prod-slug, usd, 10_000_000 micros, one-time); the Stripe object's own
 			// amount/currency/active diverge -> field drift.
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.1000.onetime",
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.10000000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)
@@ -207,7 +207,7 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	products := []*models.Product{prod(productID, "Premium", "desc", true)}
-	prices := []*models.Price{price(priceID, productID, "Monthly", 1000, "usd", true, "price_1", "prod_1")}
+	prices := []*models.Price{price(priceID, productID, "Monthly", 10_000_000, "usd", true, "price_1", "prod_1")}
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium", Description: "desc", Active: true, Metadata: map[string]string{
@@ -216,7 +216,7 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 1000, Currency: "usd", Active: true, Nickname: "Monthly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.1000.onetime",
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.10000000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)
@@ -322,7 +322,7 @@ func TestComputeNMIDriftMissingInNMI(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	planID := "premium-usd-999-30"
-	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
+	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 9_990_000, planID)}
 	snap := snapFromRows(nil, prices)
 	// NMI returns no plans -> the price's plan is missing_in_nmi.
 	events := computeNMICatalogDrift(nil, snap, now)
@@ -336,7 +336,7 @@ func TestComputeNMIDriftFieldDrift(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	planID := "premium-usd-999-30"
-	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
+	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 9_990_000, planID)}
 	snap := snapFromRows(nil, prices)
 	// NMI plan disagrees on amount (plan_name is no longer tracked for prices).
 	plans := []nmiPlan{{PlanID: planID, PlanName: "Premium Plus", AmountCents: 1999}}
@@ -356,7 +356,7 @@ func TestComputeNMIDriftNoDriftWhenInSync(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	planID := "premium-usd-999-30"
-	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
+	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 9_990_000, planID)}
 	snap := snapFromRows(nil, prices)
 	plans := []nmiPlan{{PlanID: planID, PlanName: "Premium", AmountCents: 999}}
 	events := computeNMICatalogDrift(plans, snap, now)

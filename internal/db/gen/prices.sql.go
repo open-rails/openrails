@@ -179,7 +179,8 @@ const getPriceWithProductByCCBillPriceID = `-- name: GetPriceWithProductByCCBill
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.rails, price.status, price.created_at, price.updated_at, price.merchant_id, price.initial_amount, price.initial_period_days, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.rails -> 'ccbill' ->> 'flex_id' = $1::text
+WHERE (price.rails -> 'ccbill' ->> 'flex_id' = $1::text
+       OR price.rails -> 'ccbill' ->> 'recurring_billing_option_id' = $1::text)
   AND price.status <> 'draft'
 LIMIT 1
 `

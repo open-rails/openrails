@@ -1,6 +1,9 @@
 package controlplane
 
 import (
+	"net/http"
+	"strings"
+
 	authhttp "github.com/open-rails/authkit/http"
 )
 
@@ -53,12 +56,59 @@ func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 		return nil
 	}
 	routes := c.authSvc.Routes()
+	var specs []authhttp.RouteSpec
 	if c.SelfHostedPosture() {
-		return routes.Groups(IntentionalRouteGroups...)
+		specs = routes.Groups(IntentionalRouteGroups...)
+	} else {
+		specs = routes.DefaultAPI()
 	}
-	return routes.DefaultAPI()
+	return c.withLazyCustomerGroups(specs)
 }
 
 // The gin mounting of these route specs lives in
 // internal/controlplane/ginroutes.MountAuthRoutes (#285): it consumes RouteSpecs
 // and adapts each net/http handler to gin, keeping this core gin-free.
+
+func (c *ControlPlane) withLazyCustomerGroups(specs []authhttp.RouteSpec) []authhttp.RouteSpec {
+	out := make([]authhttp.RouteSpec, len(specs))
+	copy(out, specs)
+	for i := range out {
+		if out[i].Group != authhttp.RoutePermissionGroups {
+			continue
+		}
+		if !strings.HasPrefix(out[i].Path, "/"+CustomerType+"/{instance_slug}/") {
+			continue
+		}
+		out[i].Handler = c.lazyCustomerGroupHandler(out[i].Handler)
+	}
+	return out
+}
+
+func (c *ControlPlane) lazyCustomerGroupHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := c.ensureLazyCustomerGroupForRequest(r); err != nil {
+			http.Error(w, "customer permission-group ensure failed", http.StatusInternalServerError)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (c *ControlPlane) ensureLazyCustomerGroupForRequest(r *http.Request) error {
+	if c == nil || c.userVerifier == nil || r == nil {
+		return nil
+	}
+	instanceSlug := strings.TrimSpace(r.PathValue("instance_slug"))
+	if instanceSlug == "" {
+		return nil
+	}
+	claims, err := c.userVerifier.VerifyRequest(r)
+	if err != nil {
+		return nil
+	}
+	if strings.TrimSpace(claims.UserID) != instanceSlug {
+		return nil
+	}
+	_, err = c.EnsureCustomerPermissionGroup(r.Context(), instanceSlug, claims.UserID)
+	return err
+}

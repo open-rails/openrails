@@ -122,6 +122,7 @@ func normalizeCCBillActiveMember(rec ccbill.CCBillRecord) RemoteSubscription {
 		RawStatus:          strings.TrimSpace(rec.Status),
 		Email:              strings.TrimSpace(rec.Email),
 		Username:           strings.TrimSpace(rec.Username),
+		PlanID:             strings.TrimSpace(rec.Field2),
 		Currency:           "USD",
 		Raw: rawJSON(map[string]any{
 			"source": "ccbill_activemembers",

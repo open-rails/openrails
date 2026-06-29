@@ -68,8 +68,8 @@ type planLink struct {
 }
 
 // planLinkIDKeys are the provider-link config keys that hold a rail-side
-// plan/price identifier (models.RailKeyPlanID / RailKeyStripePriceID).
-var planLinkIDKeys = []string{"plan_id", "price_id"}
+// plan/price identifier.
+var planLinkIDKeys = []string{"plan_id", "price_id", "recurring_billing_option_id"}
 
 // buildPlanIndex maps remote plan ids onto local prices via the catalog
 // provider_links blobs, restricted to the provider's local rail names.
