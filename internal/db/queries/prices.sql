@@ -31,6 +31,13 @@ WHERE price.id = ANY(sqlc.arg(ids)::uuid[]);
 SELECT * FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active';
 
+-- All prices for a product regardless of status (active + archived/draft) — the
+-- catalog converge needs archived rows to reconcile legacy_import prices instead
+-- of re-creating them (would violate unique_prices_product_amount_cycle).
+-- name: ListPricesByProduct :many
+SELECT * FROM openrails.prices price
+WHERE price.product_id = $1;
+
 -- name: ListActivePricesByProductOrdered :many
 SELECT * FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'

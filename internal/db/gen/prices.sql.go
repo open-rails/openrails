@@ -291,6 +291,42 @@ func (q *Queries) ListActivePricesByProduct(ctx context.Context, productID uuid.
 	return items, nil
 }
 
+const listPricesByProduct = `-- name: ListPricesByProduct :many
+SELECT id, product_id, amount, currency, billing_cycle_days, rails, status, created_at, updated_at, merchant_id FROM openrails.prices price
+WHERE price.product_id = $1
+`
+
+func (q *Queries) ListPricesByProduct(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
+	rows, err := q.db.Query(ctx, listPricesByProduct, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPrice
+	for rows.Next() {
+		var i OpenrailsPrice
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.Amount,
+			&i.Currency,
+			&i.BillingCycleDays,
+			&i.Rails,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivePricesByProductOrdered = `-- name: ListActivePricesByProductOrdered :many
 SELECT id, product_id, amount, currency, billing_cycle_days, rails, status, created_at, updated_at, merchant_id FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'

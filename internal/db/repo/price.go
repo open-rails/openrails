@@ -69,7 +69,10 @@ func pricesFromGen(rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 }
 
 func (r *PriceRepo) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	rows, err := r.db.Gen(ctx).ListActivePricesByProduct(ctx, productID)
+	// All statuses (active + archived/draft). The catalog converge relies on this
+	// to reconcile already-archived legacy_import prices instead of re-creating
+	// them; GetActiveByProductID is the active-only variant.
+	rows, err := r.db.Gen(ctx).ListPricesByProduct(ctx, productID)
 	if err != nil {
 		return nil, err
 	}
