@@ -40,10 +40,10 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
-	solanamod "github.com/open-rails/openrails/internal/modules/solana"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	solanamod "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -96,7 +96,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		description = "premium tier billed over the Solana payment rail"
 		entitlement = "solana-pro-premium"
 		creditKey   = "solana-pro-usd"
-		priceCents  = int64(1999)
+		priceMicros = int64(19_990_000)
 	)
 	productSlug := "solana-pro-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 
@@ -109,7 +109,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
-			Slug:         productSlug,
+			Key:          productSlug,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
@@ -117,11 +117,10 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 				creditKey: {Currency: "usd", Amount: 50_000},
 			},
 			Prices: []catalog.Price{{
-				UnitAmount:    priceCents,
-				Currency:      "usd",
-				Interval:      "month",
-				IntervalCount: 1,
-				Providers:     []string{"solana"}, // priced for the Solana rail
+				UnitAmount: priceMicros,
+				Currency:   "usd",
+				Interval:   "30d",
+				Providers:  []string{"solana"}, // priced for the Solana rail
 			}},
 		}},
 	}
@@ -170,8 +169,8 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	reference, err := solanaint.GenerateReference()
 	require.NoError(t, err, "generate Solana Pay reference id")
 
-	tokenUnits := solanamod.FiatCentsToStablecoinBaseUnits(ctx, priceCents, "USDC", nil)
-	require.Equal(t, uint64(19_990_000), tokenUnits, "1999¢ at the $1 USDC peg = 19.99 USDC base units")
+	tokenUnits := solanamod.FiatMicrosToStablecoinBaseUnits(ctx, priceMicros, "USDC", nil)
+	require.Equal(t, uint64(19_990_000), tokenUnits, "$19.99 in micro-USD at the $1 USDC peg = 19.99 USDC base units")
 
 	rpcClient := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Network: "devnet"})
 
@@ -296,7 +295,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot)
 		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'usd', 'completed', $6::jsonb)
 		RETURNING id, entitlements_spec_snapshot
-	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(1999),
+	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
 		`{"entitlements":["`+entitlement+`"]}`).Scan(&paymentID, &snapshot)
 	require.NoError(t, err, "Solana payment + benefit snapshot recorded in openrails.payments")
 	require.NotEqual(t, uuid.Nil, paymentID)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,12 +21,6 @@ func normalizeInterval(value string) (string, int, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
 		value = "30d"
-	}
-	switch value {
-	case "month":
-		value = "30d"
-	case "year":
-		value = "365d"
 	}
 	if value == "once" {
 		return "once", 0, nil
@@ -165,9 +160,8 @@ func (m *Manifest) validateProduct(groupSlug string, product *Product, productSl
 		return err
 	}
 
-	// A price's identity is its financial substance. Dedup declared prices
-	// within a product by (currency, unit_amount, interval) —
-	// there is no slug to dedup on.
+	// A price's identity is its financial substance plus explicit provider set.
+	// There is no price slug to dedup on.
 	priceTerms := map[string]struct{}{}
 	for pri := range product.Prices {
 		price := &product.Prices[pri]
@@ -449,6 +443,9 @@ func validLedgerCurrency(value string) bool {
 
 func validCreditUnit(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
+	if left, right, ok := strings.Cut(value, "/"); ok {
+		return normalizeSlug(left) == left && normalizeSlug(right) == right
+	}
 	return validLedgerCurrency(value) || normalizeSlug(value) == value
 }
 
@@ -457,13 +454,22 @@ func validPriceCurrency(value string) bool {
 	return value != "custom" && validLedgerCurrency(value)
 }
 
-// priceTermsKey is the financial-identity key for a declared price.
+// priceTermsKey is the manifest identity key for a declared price.
 func priceTermsKey(p Price) string {
 	metered := ""
 	if p.Metered != nil {
 		metered = fmt.Sprintf("|metered:%s:%d:%d:%s", p.Metered.Meter, p.Metered.Rate, p.Metered.PerUnits, p.Metered.Per)
 	}
-	return fmt.Sprintf("%s|%d|%s%s", p.Currency, p.UnitAmount, p.Interval, metered)
+	return fmt.Sprintf("%s|%d|%s|providers:%s%s", p.Currency, p.UnitAmount, p.Interval, providerSetKey(p.Providers), metered)
+}
+
+func providerSetKey(providers []string) string {
+	if len(providers) == 0 {
+		return ""
+	}
+	out := append([]string(nil), providers...)
+	sort.Strings(out)
+	return strings.Join(out, ",")
 }
 
 func normalizeProviders(in []string) []string {

@@ -98,8 +98,8 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		switch {
 		case remote.Recurring == nil:
 			return nil, fmt.Errorf("stripe price %q is one-time but catalog price is recurring (%d days)", priceID, *in.BillingCycleDays)
-		case remote.Recurring.Interval != wantInterval || remote.Recurring.IntervalCount != wantCount:
-			return nil, fmt.Errorf("stripe price %q recurring terms (%d %s) do not match catalog price (%d %s)", priceID, remote.Recurring.IntervalCount, remote.Recurring.Interval, wantCount, wantInterval)
+		case remote.Recurring.Interval != wantInterval || remote.Recurring.Count != wantCount:
+			return nil, fmt.Errorf("stripe price %q recurring terms (%d %s) do not match catalog price (%d %s)", priceID, remote.Recurring.Count, remote.Recurring.Interval, wantCount, wantInterval)
 		}
 	} else if remote.Recurring != nil {
 		return nil, fmt.Errorf("stripe price %q is recurring but catalog price is one-time", priceID)

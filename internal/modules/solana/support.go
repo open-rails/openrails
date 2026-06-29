@@ -41,9 +41,27 @@ func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenP
 }
 
 // USDCDecimals is the SPL decimal precision for USDC (and the other $1-pegged
-// stablecoins OpenRails recurring-bills in): 6. One USD cent therefore equals
-// 10^6 / 100 = 10_000 base units at the $1 peg.
+// stablecoins OpenRails recurring-bills in): 6. One micro-USD therefore equals
+// one base unit at the $1 peg.
 const USDCDecimals = 6
+
+// FiatMicrosToStablecoinBaseUnits converts a micro-USD amount into stablecoin
+// base units for a $1-pegged token. With 6-decimal USD micros and 6-decimal USDC
+// base units, the at-peg conversion is 1:1. The depeg failsafe matches
+// FiatCentsToStablecoinBaseUnits and rounds UP so a fractional base unit never
+// under-charges the merchant.
+func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros int64, symbol string, priceProvider TokenPriceProvider) uint64 {
+	if micros <= 0 {
+		return 0
+	}
+	priceUSD := stablecoinPriceUSD(ctx, symbol, priceProvider)
+	if priceUSD <= 0 {
+		priceUSD = 1.0
+	}
+	scale := math.Pow10(USDCDecimals)
+	usd := float64(micros) / scale
+	return uint64(math.Ceil((usd / priceUSD) * scale))
+}
 
 // FiatCentsToStablecoinBaseUnits converts a fiat-cent amount into stablecoin
 // base units for a $1-pegged token (#267). At the peg, 1 cent = 10_000 base

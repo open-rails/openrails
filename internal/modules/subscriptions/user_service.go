@@ -218,8 +218,7 @@ func subscriptionCardFromPaymentMethod(pm *models.PaymentMethod) *subscriptionCa
 func priceToAPIObject(p *models.Price) api.PriceObject {
 	var recurring *api.RecurringInfo
 	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
-		interval, intervalCount := sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)
-		recurring = &api.RecurringInfo{Interval: interval, IntervalCount: intervalCount}
+		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)}
 	}
 	priceType := "one_time"
 	if recurring != nil {

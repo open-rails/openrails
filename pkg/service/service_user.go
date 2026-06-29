@@ -978,10 +978,8 @@ func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
 func priceFromModel(p *models.Price) Price {
 	var recurring *RecurringInfo
 	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
-		interval, count := sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)
 		recurring = &RecurringInfo{
-			Interval:      interval,
-			IntervalCount: count,
+			Interval: sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays),
 		}
 	}
 

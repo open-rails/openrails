@@ -46,8 +46,12 @@ func (f *fakeApplier) seedProduct(slug, tierGroup string, rank int, status model
 	return p
 }
 
-func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency string, cycleDays int, status models.CatalogStatus) {
+func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency string, cycleDays int, status models.CatalogStatus, providers ...string) {
 	cd := cycleDays
+	states := map[string]billingservice.ProviderState{}
+	for _, provider := range providers {
+		states[provider] = billingservice.ProviderState{Status: billingservice.ProviderStatusLinked}
+	}
 	f.prices[productID] = append(f.prices[productID], billingservice.CatalogPrice{
 		ID:               uuid.New(),
 		ProductID:        productID,
@@ -55,6 +59,7 @@ func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency stri
 		UnitAmount:       amount,
 		Currency:         currency,
 		BillingCycleDays: &cd,
+		Providers:        states,
 	})
 }
 
@@ -223,12 +228,12 @@ func TestPlan_UnchangedAndUpdate(t *testing.T) {
 	// initiate is fully converged -> unchanged.
 	initiate := f.seedProduct("initiate", "cozy", 1, models.CatalogStatusActive)
 	initiate.DisplayName = "Novice"
-	f.seedPrice(initiate.ID, 1200, "usd", 30, models.CatalogStatusActive)
+	f.seedPrice(initiate.ID, 1200, "usd", 30, models.CatalogStatusActive, "stripe")
 
 	// craftsman has a different display name + active matching price -> product update, price unchanged.
 	craftsman := f.seedProduct("craftsman", "cozy", 2, models.CatalogStatusActive)
 	craftsman.DisplayName = "OLD NAME"
-	f.seedPrice(craftsman.ID, 1300, "usd", 30, models.CatalogStatusActive)
+	f.seedPrice(craftsman.ID, 1300, "usd", 30, models.CatalogStatusActive, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -281,6 +286,36 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	}
 }
 
+func TestPlan_SameTermsDifferentProvidersCreateSeparatePrice(t *testing.T) {
+	m := loadFrom(t, `
+version: 1
+products:
+  - key: premium
+    display_name: Premium
+    prices:
+      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [solana], active: false}
+`)
+	f := newFakeApplier()
+	premium := f.seedProduct("premium", "default", 0, models.CatalogStatusActive)
+	premium.DisplayName = "Premium"
+	f.seedPrice(premium.ID, 23_000_000, "usd", 30, models.CatalogStatusActive, "mobius", "ccbill", "solana")
+
+	plan, err := Plan(context.Background(), f, m)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	pp := findProduct(plan, "premium")
+	var creates int
+	for _, pr := range pp.Prices {
+		if pr.Action == PriceCreate {
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("want separate solana-only price create, got %+v", pp.Prices)
+	}
+}
+
 func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testing.T) {
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
@@ -314,7 +349,7 @@ func TestPlan_ReactivateArchivedDeclaredPrice(t *testing.T) {
 	craftsman := f.seedProduct("craftsman", "cozy", 2, models.CatalogStatusActive)
 	craftsman.DisplayName = "Craftsman"
 	// The declared $13 price exists but is archived -> activate.
-	f.seedPrice(craftsman.ID, 1300, "usd", 30, models.CatalogStatusArchived)
+	f.seedPrice(craftsman.ID, 1300, "usd", 30, models.CatalogStatusArchived, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -390,10 +425,10 @@ func TestApply_Idempotent(t *testing.T) {
 	// Seed a fully-converged catalog.
 	ini := f.seedProduct("initiate", "cozy", 1, models.CatalogStatusActive)
 	ini.DisplayName = "Novice"
-	f.seedPrice(ini.ID, 1200, "usd", 30, models.CatalogStatusActive)
+	f.seedPrice(ini.ID, 1200, "usd", 30, models.CatalogStatusActive, "stripe")
 	cra := f.seedProduct("craftsman", "cozy", 2, models.CatalogStatusActive)
 	cra.DisplayName = "Craftsman"
-	f.seedPrice(cra.ID, 1300, "usd", 30, models.CatalogStatusActive)
+	f.seedPrice(cra.ID, 1300, "usd", 30, models.CatalogStatusActive, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {

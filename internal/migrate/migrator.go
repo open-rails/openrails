@@ -21,7 +21,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
+var (
+	replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
+	replicatedMergeTreePattern          = regexp.MustCompile(`ReplicatedMergeTree\([^)]*\{replica\}'\)`)
+)
 
 // RunPostgres applies all Postgres migrations for STANDALONE OpenRails:
 // 0. bootstrap schema/extensions, 1. AuthKit (`profiles` schema), 2. River
@@ -316,6 +319,7 @@ func useSingleNodeClickHouseEngines(migrations []migratekit.Migration) []migrate
 			}
 			return "ReplacingMergeTree()"
 		})
+		migration.Content = replicatedMergeTreePattern.ReplaceAllString(migration.Content, "MergeTree()")
 		out[i] = migration
 	}
 	return out

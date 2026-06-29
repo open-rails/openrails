@@ -43,6 +43,18 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 		if err != nil {
 			return err
 		}
+		if money.IsQualifiedUnit(currency) {
+			snap = &CreditAccountSnapshot{
+				CustomerID:            payer.UUID(),
+				Currency:              currency,
+				BillingMode:           money.BillingModePrepaid,
+				BalanceAmount:         bal.Balance,
+				HeldAmount:            bal.HeldBalance,
+				AvailableAmount:       bal.Balance - bal.HeldBalance,
+				OutstandingOwedAmount: 0,
+			}
+			return nil
+		}
 		settings, err := s.moneyService().GetAccountSettings(ctx, payer, currency)
 		if err != nil {
 			return err

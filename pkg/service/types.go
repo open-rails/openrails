@@ -84,8 +84,7 @@ type Price struct {
 
 // RecurringInfo describes the billing interval for recurring prices.
 type RecurringInfo struct {
-	Interval      string // "day", "week", "month", "year"
-	IntervalCount int    // Number of intervals between billings
+	Interval string // e.g. "30d", "365d"
 }
 
 // -------------------------------- Checkout Sessions --------------------------------

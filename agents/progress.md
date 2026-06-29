@@ -7,14 +7,70 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 622
+next_id: 623
+
+---
+
+# #622: catalog prices need explicit product-access windows
+
+**Completed:** no
+**Status:** PLANNED 2026-06-29 (Codex; revised w/ Claude, verified against code). Model prices as ways to create or renew product access windows; product entitlements are granted while that access is active. This commits to an engine change (link entitlement windows to the product-access window) on top of a manifest grammar change — not a manifest-only tweak — but reuses the existing materialization primitives instead of rebuilding them.
+
+## Reason
+
+Doujins has legacy Solana one-off premium prices: $23 for 30 days and $62 for 90 days. Today the catalog manifest says `entitlements: [premium]` at the product level, which loses the important detail: how long this specific price grants the entitlement.
+
+The bad workaround is defining those one-off prices as separate premium-like products. That creates two identities for the same thing: a customer could buy product A as a 30-day one-off and product B as a recurring subscription, then either get billed twice for the same premium usage or produce unclear stacked entitlement windows. Even if stacking happens to work, the catalog has lost the fact that both purchases are the same product/use case.
+
+The product should remain one product (`premium`). Prices should describe how that product is acquired and for how long: 7-day renewing access, 30-day renewing access, 365-day yearly renewing access, 30-day one-off access, 90-day one-off access, or a 7-day `trial` first phase that continues into 30-day auto-renewing access. The `trial` phase has its own `unit_amount` and may be free (`unit_amount: 0`) or paid — it is not restricted to free.
+
+The root model should be product access, not direct entitlement duration. A customer owns/has access to `premium` for a window; while that product access is active, OpenRails grants the product's entitlements. When access expires, the derived entitlements expire too. The same model covers movie rentals: access to a movie for 3 days grants viewing rights for 3 days; durable ownership is access with no end.
+
+The materialization primitives mostly exist; the new work is manifest grammar plus one small engine link (verified in code 2026-06-29):
+- `product.EntitlementsSpec map[string]*int` is entitlement name → **duration days** (nil/0 = indefinite).
+- One-off checkout already honors it: `grantProductEntitlements` (`internal/modules/checkout/purchase_service.go:582-599`) sets a finite entitlement `end_at` = start + duration, overriding the wallet/`billing_cycle_days` fallback.
+- Re-purchase already **stacks**: a new window starts at the existing access end (`coverage.EndDate`, same file `:584`). Deterministic merge is already the behavior.
+- One-off purchase already records a product-access grant (#250, `grantProductAccess` `:524`) — but ALWAYS durable; it never sets `ends_at`, even though the column + `GrantProductAccess` params support a finite window.
+- Entitlements and product-access are **independent** grant paths today; entitlements are NOT derived from active product-access (no link in `internal/modules/{entitlements,grants}` or the converge passes). Linking them is the deliberate engine change this issue commits to.
+- A two-phase price (first period at its own price/length, then recurring terms) already exists as `Price.Intro` (#602: `intro: {amount, interval}`). The `trial` phase below IS this field, renamed (`intro`→`trial`, `amount`→`unit_amount`) and extended to the new grammar — not a new parallel field.
+
+So the work splits into reuse vs new. **Reused as-is:** entitlement `end_at`, `product_access_grants.ends_at`, coverage-stacking, and `Price.Intro`. **New:** (G1) per-price access grammar in the manifest — `product.Entitlements []string` is product-level and drops durations (`entitlementsSpec` maps every name to `nil`, `pkg/catalog/plan.go:384`), so one product can't host two prices granting the same entitlement for different windows ($23/30d vs $62/90d); (G2) finite product-access — `grantProductAccess` (`:524`) must pass `ends_at` instead of always-durable; (G3) derive the entitlement window from the granted product-access window. This is an engine change, but a small one — it wires existing primitives together. `ParseDurationSpec` (`pkg/catalog/duration.go`) already parses `30d`/`72h` and rejects other units (h/d only — no month/year unit; a year is `365d`).
+
+This should be explicit catalog data, not inferred from payment provider, rail, price amount, or product name.
+
+## Scope
+
+- Design price-level access effects. Product metadata describes what is being sold; each price declares how buying that price creates or renews access to that product.
+- Keep equivalent purchase paths under the same product identity instead of creating duplicate products for one-off vs recurring access.
+- Add an explicit price access shape, reusing the existing duration grammar (`ParseDurationSpec`: `7d`/`30d`/`90d`/`365d`/`72h`, h/d only, reject other units):
+  - `duration` is the access-window length and the SINGLE source for it — there is no separate `product_access` field (that would restate the same number). A finite value (`3d`/`30d`/`90d`/`365d`) = rental/one-off window; `duration: indefinite` = durable/perpetual ownership (no end). `duration` is OPTIONAL and defaults to `indefinite` when omitted. `duration` drives BOTH `product_access_grants.ends_at` (nil for `indefinite`) and the derived entitlement `end_at`. `indefinite` reuses the codebase's existing vocabulary (entitlement service `Indefinite`, `EntitlementsSpec` nil=indefinite) and the grammar's existing non-numeric keyword precedent (`once`); it is accepted bare or quoted.
+  - `auto_renew: true|false` says whether the price charges again and extends after `duration`. OPTIONAL, defaults to `false`. Do NOT infer auto-renew from `duration` vs `interval`. A finite `duration` is required to renew: `auto_renew: true` with `duration: indefinite` OR omitted `duration` is a manifest validation ERROR (nothing to renew).
+  - `interval` is the existing recurring field — keep it ONLY as a deprecated compat alias mapping `interval: 30d` → `duration: 30d, auto_renew: true`; new manifests use `duration`+`auto_renew`.
+  - the optional first phase is the EXISTING `Price.Intro` (#602: `intro: {amount, interval}`), renamed/extended to `trial: {unit_amount, duration, auto_renew}` (`intro`→`trial`, `amount`→`unit_amount` for consistency with the price's own `unit_amount`) — a first period at its own price/length, then the price's recurring terms. Do NOT add a second parallel intro field.
+- Materialize through existing primitives only — no new tables/columns: entitlement window via entitlement `end_at`, product-access window via `product_access_grants.ends_at` (pass it into `grantProductAccess`).
+- Derive the entitlement window from the granted product-access window (the G3 link) instead of every price duplicating the product's entitlement list. When access expires, the derived entitlement expires with it.
+- Overlapping equivalent purchase: default is extend/stack the access window — already the behavior via coverage-stacking, so keep it. Blocking checkout for an active equivalent is OUT OF SCOPE for v1 (one product + stacking already prevents two unrelated identities).
+- Preserve subscription behavior: recurring prices renew/refresh the access window each billing period.
+- Avoid fake products for beta access, rentals, or legacy premium duration variants.
+
+## Acceptance
+
+- A catalog can declare multiple prices for the same product with different access shapes: `premium` for `30d` one-off (`duration: 30d`, `auto_renew: false`), `90d` one-off, `30d` auto-renewing, `365d` auto-renewing, and a free or paid `7d` `trial` phase into `30d` auto-renewing access.
+- No parallel grammar: `trial` reuses/renames `Price.Intro` (#602: `intro`→`trial`, `amount`→`unit_amount`) and `interval` is a deprecated compat alias — there is exactly one way to express "first phase then recurring," and one way to express a recurring window.
+- A catalog does not need a second premium product to model Solana one-off premium access.
+- Overlapping equivalent purchase extends/stacks the existing access window (no second unrelated identity); v1 does not block checkout.
+- A catalog can declare a movie rental price (`duration: 3d`, `auto_renew: false`) that grants product access for 3 days without granting permanent ownership; a price with `duration: indefinite` (or omitted) grants durable ownership; `auto_renew` omitted defaults to false.
+- Apply fails with a validation error when `auto_renew: true` is paired with `duration: indefinite` or an omitted `duration` (nothing to renew).
+- Checkout/purchase tests prove finite entitlement `end_at` and product access `ends_at` are set from price effects, and that the entitlement window matches the granted product-access window (G3).
+- Subscription tests prove recurring plans still renew/grant through the existing subscription window behavior.
+- Doujins legacy Solana premium prices can be represented without relying on implicit billing-cycle fallback semantics.
 
 ---
 
 # #621: catalog prices own providers explicitly
 
-**Completed:** no
-**Status:** PLANNED 2026-06-29 (Codex). Remove `default_providers` and product-level `providers` from catalog manifests. Provider sync/routing must be declared only on the price itself.
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex). Removed `default_providers` and product-level `providers` from catalog manifests. Provider sync/routing is declared only on the price itself; omitted/empty price providers means OpenRails-native/no external provider sync. OpenRails examples/tests and Doujins bootstrap were updated. Validation: `go test ./pkg/catalog ./pkg/embedded ./cmd/openrails`; Doujins `go test ./config ./internal/billing/openrailsembed`.
 
 ## Reason
 
@@ -45,197 +101,6 @@ Follow the Stripe-simple model: a price carries the provider-specific publicatio
 - Doujins embedded bootstrap tests pass after updating its manifest shape.
 
 ---
-
-# #612: end-to-end catalog provider sync, usage reporting, and metered invoicing
-
-**Completed:** no
-**Status:** EPIC — PLANNED 2026-06-29, REVIEWED 2026-06-29 (Claude). Prove the runtime lifecycle for rich v1 catalog products (provider sync, app-reported usage, metered rating, invoice finalization, collection) through real OpenRails HTTP surfaces. Too large for one issue — split into children A–G (see Recommended split); the three real wiring gaps + the native no-provider proof come first.
-
-Added 2026-06-29 (Codex). Issue #611 proves the catalog manifest/example can declare the full v1 product surface. This issue proves the declared products actually work at runtime: pushing provider-backed products into Stripe/NMI, reporting usage for metered resources, rating VM/storage usage, finalizing invoices, and collecting through supported rails. Tests must exercise real OpenRails HTTP/DB/Redis paths, not mocks-only unit tests.
-
-REVIEW 2026-06-29 (Claude), grounded in the code. The DIRECTION is right but the issue overstates
-greenfield and is an EPIC, not one issue. Reframe before working it.
-
-ALREADY EXISTS — do NOT rebuild (verified):
-- `internal/integrationharness/` ALREADY boots the real standalone gin server AND the embedded
-  surface against a shared migrated Postgres (OpenRails + AuthKit `profiles.*`) + shared Redis
-  (`harness.go`, `merchant_catalog_http_test.go`). The "add an integration suite" task is EXTEND.
-- Catalog publish over HTTP: `internal/http/handlers/merchant_catalog_publish.go` +
-  `POST /v1/merchant/catalog/publish` + `cmd/openrails/catalog_apply.go`. #611 owns proving this
-  WRITE path; #612 must consume an already-published catalog, NOT re-prove publish.
-- Rating + money primitives: `metered_rating.go` (`AccrueMeteredAggregate`), `arrears.go`
-  (`AccrueOwed` → arrears ledger), `invoice.go` / `invoice_items.go`, Stripe collection
-  (`subscriptions/stripe_invoice_collection.go`). Usage-limit ENFORCEMENT exists
-  (`admission/spendgate/policy.go` `EffectiveWindows`). Sidecar schema/repo coverage exists
-  (`migrations/postgres/034_catalog_benefits_metering.up.sql`,
-  `internal/db/repo/catalog_platform_sidecars_integration_test.go`).
-
-THE REAL RUNTIME GAPS — what #612 should actually close (all verified open):
-1. METER SIDECAR → RATING: `AccrueMeteredAggregate` takes a `MeteredRate` param and has NO catalog
-   caller — nothing reads a `catalog_price_metered` sidecar to drive the rate. Wire it.
-2. BUNDLE INCLUDES → MATERIALIZATION: `grants.go` materializes entitlements + credit deposits but
-   has NO `includes`/bundle handling — buying a bundle does not grant its included products.
-3. USAGE-LIMIT SPEC → CUSTOMER BINDING: spendgate ENFORCES windows but nothing CREATES a
-   customer-scoped binding from a catalog usage-limit spec at grant/subscribe/purchase time.
-
-SCOPE: as one issue this is an ocean — 4 rails × 8 use cases × (publish→sync→report→rate→invoice→
-collect) + idempotency + embedded AND remote. Unreviewable and unschedulable. Make #612 an EPIC and
-split (mirrors authkit #143→#145-149). The three gaps above are the actual missing wiring; provider
-sync/collection are mostly adapters over machinery that already exists, so sequence them AFTER the
-no-provider native proof.
-
-## Child issues
-
-- #614: OpenRails-NATIVE lifecycle proof (the CI-default acceptance): publish → grant → report usage →
-     rate → finalize invoice → mark payable, in the existing harness, no provider secrets. The spine; do FIRST.
-- #615: Meter sidecar → rating wiring + DigitalOcean/Runpod metered invoice proof (gap #1).
-- #616: Bundle `includes` → materialization on purchase (gap #2).
-- #617: Usage-limit spec → customer binding at grant time + Claude-Code 5x/20x admission proof (gap #3).
-- #618: Stripe test-mode sync + collection (opt-in; fail-loud when creds set).
-- #619: NMI sandbox sync + collection (opt-in).
-- #620: Solana money-movement proof: catalog metadata stays internal; Solana carries only plan/payment ids.
-
-A–D are OpenRails-native and unblock acceptance without secrets; E–G are provider adapters, opt-in.
-
-## Goal
-
-Prove the full lifecycle for the complex catalog use cases:
-
-- Push the v1 catalog into OpenRails through the real `push-merchant-catalog` / `POST /v1/merchant/catalog/publish` path.
-- Sync provider-backed catalog products/prices to Stripe and NMI as far as those providers support the data model.
-- Keep Solana as a money-movement rail: verify recurring/one-time Solana prices preserve OpenRails-owned billing/product metadata internally and only require Solana plan/payment identifiers where applicable.
-- Let embedded and remote host apps report usage for metered products, such as VM runtime and cloud storage.
-- Rate metered usage from catalog meter definitions into owed balances or invoice items.
-- Finalize a billing-period invoice and collect it through Stripe/NMI where credentials are available.
-
-## Provider Matrix
-
-- [ ] Stripe test mode: catalog product/price sync, recurring price, intro/free-trial price where Stripe supports it, one-time product price, invoice-item collection for metered invoice totals.
-- [ ] NMI sandbox: recurring plan sync where supported, one-time/charge behavior where supported, invoice collection through NMI vault/charge path.
-- [ ] Solana/devnet or local validator: prove OpenRails catalog metadata remains internal and Solana is only used for payment/recurring transfer identifiers; do not pretend Solana stores rich billing metadata.
-- [x] DB-only/OpenRails-native prices: usage-limited and metered products that intentionally do not sync to external providers.
-
-## Runtime Use Cases To Prove
-
-- [ ] Doujins-style single premium entitlement: checkout/subscription grants the premium entitlement and renewals maintain it.
-- [ ] SaaS multi-tier ladder: lower tier to higher tier upgrade is recognized by `tier_group`/`tier_rank`; free trial then recurring renewal stores and bills correctly.
-- [ ] AI credits: purchase/subscription grants custom `ai-image-credit` balances and they can be spent through existing credit paths.
-- [ ] API prepay: purchase grants custom `api-credit` balances for fal.ai-style API spend.
-- [ ] Content marketplace: one-off movie/video purchase creates durable ownership/product-access records.
-- [x] Bundle product: buying a bundle grants or materializes access for its included products, not only the parent product.
-- [x] Claude Code-style rate limits: 5x and 20x plans materialize usage-limit policy windows for the customer and admission checks enforce the correct window.
-- [x] DigitalOcean/Runpod-style metered billing: app reports VM runtime and storage usage; OpenRails rates usage from catalog meter sidecars; end-of-period invoice has correct line items and total.
-
-## Integration Test Plan
-
-- [x] EXTEND the existing `internal/integrationharness` (already boots standalone + embedded over shared Postgres + Redis) with the lifecycle assertions below — do not stand up a new harness.
-- [x] Start from an already-published catalog (reuse #611's publish path + fixture, unique slugs per run); this issue consumes the catalog, it does NOT re-prove publish.
-- [x] Drive remote host usage reporting through the public/merchant HTTP surface that a separate app would call.
-- [x] Drive embedded usage reporting through the embedded service/HTTP surface where host-owned auth is bypassed but OpenRails engine, DB, Redis, and services are real.
-- [x] Query the real DB only for assertions that are not exposed through HTTP yet: meter sidecars, invoice item source rows, product include rows, usage-limit bindings.
-- [x] Assert month-end invoice finalization from reported VM/storage usage: usage rows covered exactly once, invoice item totals match rated usage, invoice totals/payment state are correct.
-- [ ] Assert collection paths:
-      Stripe/NMI sandbox tests are opt-in via credentials and fail loudly when enabled;
-      default CI still runs the real OpenRails HTTP/DB/Redis lifecycle without live provider secrets.
-- [ ] Re-run the same invoice collection idempotently and prove duplicate usage/invoice/payment rows are not created.
-- [ ] Keep existing unit tests as parser/rating helpers only; they are not acceptance proof for this issue.
-
-## Implementation Tasks
-
-- [x] Inventory the current usage-reporting HTTP/embedded surfaces and decide the canonical app-reporting API for metered catalog usage.
-- [x] Wire catalog meter sidecars into the usage rating path so `catalog_price_metered` drives invoice item amounts.
-- [x] Wire product `includes` into ownership/materialization so bundle purchases grant included products.
-- [x] Wire product usage-limit specs into customer-scoped usage bindings at grant/subscription/purchase time.
-- [ ] Add or fix provider sync gaps for Stripe/NMI discovered by the provider matrix tests; keep provider-specific limitations explicit in docs and assertions.
-- [ ] Add docs that explain OpenRails owns rich catalog/billing metadata; providers are payment/sync adapters with smaller metadata surfaces.
-
-## Acceptance
-
-- One focused command runs the non-provider lifecycle proof against a real OpenRails HTTP server and real Postgres/Redis.
-- Separate opt-in commands run Stripe test-mode and NMI sandbox provider proofs when credentials are set.
-- The DigitalOcean/Runpod case is proven end to end: report VM/storage usage, finalize invoice, collect or mark payable, and verify exact line totals.
-- The tests do not rely on mocks as acceptance criteria; mocks may only support narrow error-path unit coverage.
-- Opt-in provider tests FAIL LOUDLY when credentials are set — they must run, never silently skip — so a configured CI cannot pass while the provider path is broken.
-
-## Non-goals
-
-- Refunds, voids, disputes, and chargebacks — out of scope; this issue proves the forward lifecycle only.
-- Full embedded × remote matrix for every use case. Prove the canonical app-reporting API end-to-end ONCE; smoke that both mounts reach it rather than re-running all 8 use cases on both surfaces.
-- Provider features beyond what the rail natively supports (e.g. rich catalog metadata on Solana) — assert OpenRails owns the metadata, do not pretend the provider stores it.
-- Re-proving #611's publish/persist write path (sidecars, registry rows, includes rows) — depend on it.
-
-## Depends on / coordinates with
-
-- #611 (catalog declare + publish + persist): #612 starts where #611 ends — from a published catalog.
-
----
-
-# #620: Solana catalog money-movement proof
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove Solana stays a payment rail while OpenRails keeps catalog, product, entitlement, usage, and invoice metadata internally. Local env check found no Solana/devnet credentials, so this cannot be marked complete from this worktree without a configured provider run.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [x] Check local environment for Solana/devnet credentials before attempting provider proof; none were configured on 2026-06-29.
-- [ ] Add an opt-in integration proof for Solana/devnet or local validator using a published catalog product.
-- [ ] Assert Solana inputs/outputs carry only payment/plan identifiers needed for money movement.
-- [ ] Assert OpenRails DB remains the source of truth for product metadata, granted benefits, and invoice/payment state.
-- [ ] Fail loudly when Solana test credentials/config are set but the provider proof cannot run.
-
-## Acceptance
-
-- Solana provider proof is skipped only when unconfigured and fails when configured but broken.
-- The test proves OpenRails-owned catalog metadata is not expected to round-trip through Solana.
-
----
-
-# #619: NMI sandbox catalog sync and collection proof
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove the NMI sandbox path can collect OpenRails-owned catalog charges without pretending NMI supports richer catalog semantics than it does. Local env check found no NMI sandbox credentials, so this cannot be marked complete from this worktree without a configured provider run.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [x] Check local environment for NMI sandbox credentials before attempting provider proof; none were configured on 2026-06-29.
-- [ ] Add opt-in NMI sandbox integration coverage starting from an already-published catalog.
-- [ ] Exercise the supported recurring/one-time charge path against real OpenRails invoice/payment state.
-- [ ] Document or assert provider limitations instead of adding compatibility shims.
-- [ ] Fail loudly when NMI credentials are set but the provider proof cannot run.
-
-## Acceptance
-
-- Configured NMI sandbox tests collect or fail with a real provider error; they do not silently skip.
-- Default CI still runs without NMI secrets.
-
----
-
-# #618: Stripe test-mode catalog sync and collection proof
-
-**Completed:** no
-**Status:** PLANNED 2026-06-29, BLOCKED LOCALLY 2026-06-29 (Codex): prove Stripe test-mode sync/collection over the existing provider machinery, with OpenRails still owning catalog semantics. Local env check found no Stripe test credentials, so this cannot be marked complete from this worktree without a configured provider run.
-
-Parent: #612.
-Depends on: #614.
-
-## Tasks
-
-- [x] Check local environment for Stripe test credentials before attempting provider proof; none were configured on 2026-06-29.
-- [ ] Add opt-in Stripe test-mode integration coverage starting from an already-published catalog.
-- [ ] Exercise recurring price, one-time price, free-trial/intro behavior where Stripe supports it, and invoice-item collection for metered totals.
-- [ ] Assert provider ids are stored and reused idempotently.
-- [ ] Fail loudly when Stripe credentials are set but the provider proof cannot run.
-
-## Acceptance
-
-- Configured Stripe tests sync/collect through real Stripe test mode and fail on broken credentials or behavior.
-- Default CI still runs without Stripe secrets.
 
 # #611: exhaustive v1 catalog bootstrap examples and real HTTP coverage
 

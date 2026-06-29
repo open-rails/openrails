@@ -391,8 +391,8 @@ type StripePrice struct {
 	Active     bool              `json:"active"`
 	Metadata   map[string]string `json:"metadata"`
 	Recurring  *struct {
-		Interval      string `json:"interval"`
-		IntervalCount int    `json:"interval_count"`
+		Interval string `json:"interval"`
+		Count    int    `json:"interval_count"`
 	} `json:"recurring,omitempty"`
 }
 
@@ -598,10 +598,8 @@ func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID st
 	return nil
 }
 
-// StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe
-// (interval, interval_count) mapping so callers outside this package (the
-// catalog provider adapter) can validate that a linked Stripe Price's recurring
-// terms match an OpenRails price's billing cycle.
+// StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe recurrence
+// mapping so callers outside this package can validate linked Stripe Prices.
 func StripeIntervalForDays(days int) (interval string, intervalCount int) {
 	return stripeIntervalForDays(days)
 }
@@ -618,7 +616,6 @@ func stripeIntervalForDays(days int) (interval string, intervalCount int) {
 	case 365:
 		return "year", 1
 	default:
-		// Stripe supports day interval with interval_count.
 		return "day", days
 	}
 }

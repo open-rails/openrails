@@ -74,9 +74,9 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	recurring, oneOff := pickUSDPrices(t, suite)
 	// NMI flags an identical amount+card as a duplicate transaction, so give each
 	// run a unique charge amount (the old shell harness did the same).
-	nanos := time.Now().UnixNano()
-	setPriceAmount(t, suite, oneOff, 1000+(nanos%4000))
-	setPriceAmount(t, suite, recurring, 1000+((nanos/7)%4000))
+	nowUnixNano := time.Now().UnixNano()
+	setPriceAmount(t, suite, oneOff, (100+(nowUnixNano%400))*10_000)
+	setPriceAmount(t, suite, recurring, (100+((nowUnixNano/7)%400))*10_000)
 	planID := fmt.Sprintf("openrails_e2e_nmi_%d_d%d", recurring.Amount, derefInt(recurring.BillingCycleDays))
 	ensureNMISandboxPlan(t, client, securityKey, planID, recurring)
 	bindPriceToNMIProvider(t, suite, recurring.ID, planID)
@@ -265,7 +265,7 @@ func ensureNMISandboxPlan(t *testing.T, client *nmi.NMIClient, securityKey, plan
 		"recurring":     {"add_plan"},
 		"plan_id":       {planID},
 		"plan_name":     {"OpenRails E2E " + planID},
-		"plan_amount":   {decimalAmount(recurring.Amount)},
+		"plan_amount":   {microUSDDecimalAmount(recurring.Amount)},
 		"day_frequency": {strconv.Itoa(derefInt(recurring.BillingCycleDays))},
 		"plan_payments": {"0"},
 	})
@@ -310,7 +310,7 @@ func createNMISandboxVault(t *testing.T, client *nmi.NMIClient, securityKey stri
 	return vaultID
 }
 
-func verifyNMITransaction(t *testing.T, client *nmi.NMIClient, securityKey, txnID string, amountMinor int64) {
+func verifyNMITransaction(t *testing.T, client *nmi.NMIClient, securityKey, txnID string, amountMicroUSD int64) {
 	t.Helper()
 	body := postNMIQuery(t, client.QueryURL, url.Values{
 		"security_key":   {securityKey},
@@ -318,7 +318,8 @@ func verifyNMITransaction(t *testing.T, client *nmi.NMIClient, securityKey, txnI
 		"transaction_id": {txnID},
 	})
 	require.Containsf(t, body, txnID, "NMI query should report transaction %s", txnID)
-	require.Containsf(t, body, decimalAmount(amountMinor), "NMI transaction %s should show amount %s", txnID, decimalAmount(amountMinor))
+	want := microUSDDecimalAmount(amountMicroUSD)
+	require.Containsf(t, body, want, "NMI transaction %s should show amount %s", txnID, want)
 }
 
 func verifyNMIRecurring(t *testing.T, client *nmi.NMIClient, securityKey, recurringID string) {
@@ -383,8 +384,9 @@ func requireSubscriptionStatus(t *testing.T, suite *TestContainerSuite, subID uu
 	t.Fatalf("subscription %s did not reach status %q within %s (last=%q)", subID, want, timeout, last)
 }
 
-func decimalAmount(minor int64) string {
-	return fmt.Sprintf("%d.%02d", minor/100, minor%100)
+func microUSDDecimalAmount(micros int64) string {
+	cents := micros / 10_000
+	return fmt.Sprintf("%d.%02d", cents/100, cents%100)
 }
 
 func derefInt(p *int) int {

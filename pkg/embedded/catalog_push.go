@@ -48,11 +48,11 @@ type catalogPushFile struct {
 }
 
 type catalogPushFileEntry struct {
-	Merchant         string               `yaml:"merchant"`
-	TierGroups       []catalog.TierGroup  `yaml:"tier_groups,omitempty"`
-	Products         []catalog.Product    `yaml:"products,omitempty"`
-	Meters           []catalog.Meter      `yaml:"meters,omitempty"`
-	UsageLimits      []catalog.UsageLimit `yaml:"usage_limits,omitempty"`
+	Merchant    string               `yaml:"merchant"`
+	TierGroups  []catalog.TierGroup  `yaml:"tier_groups,omitempty"`
+	Products    []catalog.Product    `yaml:"products,omitempty"`
+	Meters      []catalog.Meter      `yaml:"meters,omitempty"`
+	UsageLimits []catalog.UsageLimit `yaml:"usage_limits,omitempty"`
 }
 
 // PushMerchantCatalog plans and optionally applies a merchant catalog manifest.

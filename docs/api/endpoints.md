@@ -437,12 +437,19 @@ Update price display name, rails mapping, or active status.
 
 ### Provider registration & content-addressed dedup
 
+OpenRails is the source of truth for catalog, product, entitlement, usage,
+invoice, and billing semantics. Provider catalog objects are payment/sync
+adapters: Stripe can mirror product/price objects, NMI-backed rails are
+link-only for recurring plans, and Solana carries payment identifiers rather
+than rich billing metadata. Do not rely on a provider round-trip to recover the
+full OpenRails catalog.
+
 When the catalog is synced, OpenRails find-or-creates the matching provider
 objects. Matching is **content-addressed** — it keys off the catalog product key and price terms, not
 the OpenRails row UUIDs — so re-syncing or wiping the DB and re-syncing always
 re-attaches to the existing provider objects rather than duplicating them.
 
-- **Price identity** is `(product_key, currency, unit_amount, interval, interval_count)`.
+- **Price identity** is `(product_key, currency, unit_amount, interval)`.
 - **Stripe content keys** are derived from the product key and price terms.
 - These keys do not depend on row UUIDs, so a DB-wipe-and-resync that regenerates
   UUIDs reattaches to the same Stripe objects. Re-sync is idempotent: re-attach,

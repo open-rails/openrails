@@ -330,9 +330,9 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	return nil
 }
 
-// matchPrice finds an existing OpenRails price with the same financial substance
+// matchPrice finds an existing OpenRails price with the same financial identity
 // as the declared price, preferring an unclaimed active match over an archived
-// one. Identity is (currency, unit_amount, billing_cycle_days).
+// one. Identity is (currency, unit_amount, billing_cycle_days, providers).
 func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays *int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
@@ -346,11 +346,25 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays *i
 		if !sameCycleDays(c.BillingCycleDays, cycleDays) {
 			continue
 		}
+		if providerSetKey(price.Providers) != catalogPriceProviderSetKey(c.Providers) {
+			continue
+		}
 		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
 			best = c
 		}
 	}
 	return best
+}
+
+func catalogPriceProviderSetKey(providers map[string]billingservice.ProviderState) string {
+	if len(providers) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, strings.ToLower(strings.TrimSpace(name)))
+	}
+	return providerSetKey(names)
 }
 
 func sameCycleDays(a, b *int) bool {

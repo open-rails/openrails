@@ -580,6 +580,23 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	`, inv.ID).Scan(&rail, &railPaymentID))
 	require.Equal(t, string(models.RailStripe), rail)
 	require.Equal(t, "ch_openrails_invoice", railPaymentID)
+
+	n, err = svc.ChargeOutstanding(ctx, ch, 0)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+	require.Equal(t, []string{
+		"/v1/invoiceitems",
+		"/v1/invoices",
+		"/v1/invoices/in_openrails_invoice/finalize",
+		"/v1/invoices/in_openrails_invoice/pay",
+	}, calls)
+	var settledPayments int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM openrails.invoice_payments
+		WHERE invoice_id = $1 AND status = 'settled'
+	`, inv.ID).Scan(&settledPayments))
+	require.Equal(t, 1, settledPayments)
 }
 
 func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T) {

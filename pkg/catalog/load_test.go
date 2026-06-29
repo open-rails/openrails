@@ -118,6 +118,26 @@ func TestLoad_RejectsProductProviders(t *testing.T) {
 	}
 }
 
+func TestLoad_ProviderLinksRequirePriceProvider(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - currency: usd
+        unit_amount: 1000
+        interval: 30d
+        provider_links:
+          stripe:
+            lookup_key: p-monthly
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "requires providers to include") {
+		t.Fatalf("want provider_links/provider mismatch error, got %v", err)
+	}
+}
+
 func TestValidateRejectsTierGroupsOnly(t *testing.T) {
 	m := &Manifest{
 		Version:    SupportedVersion,
@@ -153,6 +173,21 @@ products:
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
 		t.Fatalf("want duplicate price terms error, got %v", err)
+	}
+}
+
+func TestLoad_AllowsSameTermsWithDifferentProviders(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [mobius, ccbill, solana]}
+      - {currency: usd, unit_amount: 23000000, interval: 30d, providers: [solana], active: false}
+`
+	if _, err := Load(writeManifest(t, body)); err != nil {
+		t.Fatalf("same terms with different providers should be accepted: %v", err)
 	}
 }
 
@@ -303,6 +338,9 @@ products:
         amount: 25_000_000
         expires: 30d
         cadence: per_renewal
+      ai-images:
+        unit: local-stack/ai-image-credit
+        amount: 100
     prices:
       - currency: usd
         unit_amount: 0
@@ -322,6 +360,9 @@ products:
 	}
 	if got := p.Credits["monthly-usd"].Unit; got != "usd" {
 		t.Fatalf("credit currency alias did not populate unit: %q", got)
+	}
+	if got := p.Credits["ai-images"].Unit; got != "local-stack/ai-image-credit" {
+		t.Fatalf("qualified custom credit unit not preserved: %q", got)
 	}
 	if p.Prices[0].Metered.PerUnits != 1_000_000 {
 		t.Fatalf("metered per_units not preserved: %+v", p.Prices[0].Metered)
@@ -412,6 +453,23 @@ products:
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "must use h or d") {
 		t.Fatalf("want interval error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsLegacyNamedInterval(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, interval: month}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "whole h or d value") {
+		t.Fatalf("want duration interval error, got %v", err)
 	}
 }
 

@@ -8,6 +8,25 @@ import (
 
 func TestBillingCycleDaysToInterval(t *testing.T) {
 	tests := []struct {
+		name string
+		days int
+		want string
+	}{
+		{name: "daily", days: 1, want: "1d"},
+		{name: "weekly", days: 7, want: "7d"},
+		{name: "monthly", days: 30, want: "30d"},
+		{name: "yearly", days: 365, want: "365d"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, BillingCycleDaysToInterval(tt.days))
+		})
+	}
+}
+
+func TestBillingCycleDaysToStripeRecurring(t *testing.T) {
+	tests := []struct {
 		name     string
 		days     int
 		interval string
@@ -23,7 +42,7 @@ func TestBillingCycleDaysToInterval(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			interval, count := BillingCycleDaysToInterval(tt.days)
+			interval, count := BillingCycleDaysToStripeRecurring(tt.days)
 			require.Equal(t, tt.interval, interval)
 			require.Equal(t, tt.count, count)
 		})

@@ -9,6 +9,116 @@
 
 ---
 
+# #612: end-to-end catalog provider sync, usage reporting, and metered invoicing
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): completed the #612 epic by extending the existing real integration harness and provider proofs rather than rebuilding lifecycle machinery. The runtime surface is verified for native catalog use cases, metered sidecar rating, bundle include materialization, usage-limit binding, invoice finalization/idempotency, Stripe test-mode sync/collection, NMI sandbox lifecycle/collection, and Solana-as-payment-rail metadata ownership.
+
+Children completed under this epic: #614, #615, #616, #617, #618, #619, #620.
+
+## Provider Matrix
+
+- [x] Stripe test mode: catalog product/price sync, recurring price, one-time product price, and invoice-item collection for metered invoice totals. Verified with `TestLiveStripeCatalogAutoCreateReusesContentKeys` and `TestLiveStripeInvoiceCollectionAgainstTestAccount`.
+- [x] NMI sandbox: supported recurring/one-time charge behavior and invoice/vault collection through NMI sandbox. Verified with `TestNMILiveLifecycleE2E` and `TestLiveNMIInvoiceCollectionAgainstSandbox`.
+- [x] Solana/devnet: OpenRails catalog metadata remains internal and Solana carries only payment identifiers/amount/mint/recipient/reference for money movement. Verified with `TestSolanaDevnetMoneyMovementProof`, including a confirmed 1 USDC devnet transfer.
+- [x] DB-only/OpenRails-native prices: usage-limited and metered products that intentionally do not sync to external providers.
+
+## Runtime Use Cases Proven
+
+- [x] Doujins-style single premium entitlement.
+- [x] SaaS multi-tier ladder with `tier_group`/`tier_rank` and free-trial/then-recurring billing fields.
+- [x] AI custom credits.
+- [x] API prepay custom credits.
+- [x] Content marketplace one-off ownership.
+- [x] Bundle product includes.
+- [x] Claude Code-style 5x/20x usage-limit plans.
+- [x] DigitalOcean/Runpod-style VM/storage metered billing and invoice totals.
+
+## Verification 2026-06-29
+
+- Native runtime use cases: `go test -tags=integration ./internal/integrationharness -run 'TestNativeCatalog(RemainingProductUseCases|BundleIncludes|MeteredUsage|UsageLimitBinding|Lifecycle)HTTP' -count=1`.
+- Parser/service helpers: `go test ./pkg/catalog ./pkg/service`.
+- ClickHouse single-node migration fix: `go test ./internal/migrate`.
+- Invoice collection idempotency: `go test -tags=integration ./internal/modules/money -run TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer -count=1 -v`.
+- Stripe catalog sync/id reuse: `OPENRAILS_LIVE_RAIL_TESTS=1 go test ./pkg/service -run TestLiveStripeCatalogAutoCreateReusesContentKeys -count=1 -v`.
+- Stripe collection: `OPENRAILS_LIVE_RAIL_TESTS=1 TEST_MODE=true RAILS_STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" go test -tags=integration ./internal/modules/money -run TestLiveStripeInvoiceCollectionAgainstTestAccount -count=1 -v`.
+- NMI collection: `OPENRAILS_LIVE_RAIL_TESTS=1 TEST_MODE=true go test -tags=integration ./internal/modules/money -run TestLiveNMIInvoiceCollectionAgainstSandbox -count=1 -v`.
+- NMI live checkout lifecycle: `TEST_MODE=true go test -tags=integration ./tests -run TestNMILiveLifecycleE2E -count=1 -v`.
+- Solana OpenRails metadata + devnet money movement: `go test -tags=integration ./internal/integrationharness -run TestSolanaDevnetMoneyMovementProof -count=1 -v`.
+- Solana micro-USD stablecoin conversion: `go test ./internal/modules/solana -run TestFiatMicrosToStablecoinBaseUnits -count=1`.
+
+---
+
+# #620: Solana catalog money-movement proof
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): proved Solana remains a money-movement rail while OpenRails keeps catalog, product, entitlement, usage, invoice, and payment metadata internally. The proof publishes a real v1 catalog product through the standalone HTTP catalog API, builds a production Solana transfer payload that carries only amount/mint/recipient/reference identifiers, asserts catalog metadata is absent from the serialized on-chain transaction, asserts OpenRails Postgres remains the source of truth for product metadata/granted benefits/invoice/payment state, and confirms a 1 USDC devnet transfer when the configured wallet is funded.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Check local environment for Solana/devnet credentials before attempting provider proof.
+- [x] Add an opt-in integration proof for Solana/devnet using a published catalog product.
+- [x] Assert Solana inputs/outputs carry only payment identifiers, amount, mint, recipient, and reference needed for money movement.
+- [x] Assert OpenRails DB remains the source of truth for product metadata, granted benefits, and invoice/payment state.
+- [x] Fail loudly when Solana test credentials/config are set but the provider proof cannot run.
+- [x] Keep monetary amounts in micro-USD internally; Solana stablecoin base units are derived with `FiatMicrosToStablecoinBaseUnits`.
+
+## Verification
+
+- `go test -tags=integration ./internal/integrationharness -run TestSolanaDevnetMoneyMovementProof -count=1 -v`.
+- `go test ./internal/modules/solana -run TestFiatMicrosToStablecoinBaseUnits -count=1`.
+
+---
+
+# #618: Stripe test-mode catalog sync and collection proof
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): proved Stripe test-mode catalog product/price sync and invoice collection over the existing provider machinery while keeping OpenRails as the catalog source of truth. Verified with real Stripe test credentials using `TestLiveStripeCatalogAutoCreateReusesContentKeys` and `TestLiveStripeInvoiceCollectionAgainstTestAccount`.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Check local environment for Stripe test credentials before attempting provider proof; a test restricted key was present in `.env` on 2026-06-29.
+- [x] Add opt-in Stripe test-mode integration coverage starting from catalog-bound OpenRails price definitions.
+- [x] Exercise recurring price, one-time price, and invoice-item collection for metered totals. Intro/free-trial behavior is subscription checkout state, not a Stripe Price object.
+- [x] Assert provider ids are stored and reused idempotently.
+- [x] Fail loudly when Stripe credentials are set but the provider proof cannot run.
+
+## Acceptance
+
+- Configured Stripe tests sync/collect through real Stripe test mode and fail on broken credentials or behavior.
+- Default CI still runs without Stripe secrets.
+
+---
+
+# #619: NMI sandbox catalog sync and collection proof
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-29 (Codex): proved the NMI sandbox path can collect OpenRails-owned catalog charges without pretending NMI supports richer catalog semantics than it does. Verified with real NMI sandbox credentials using `TestNMILiveLifecycleE2E` and `TestLiveNMIInvoiceCollectionAgainstSandbox`.
+
+Parent: #612.
+Depends on: #614.
+
+## Tasks
+
+- [x] Check local environment for NMI sandbox credentials before attempting provider proof; credentials were present in `.env` on 2026-06-29.
+- [x] Add opt-in NMI sandbox integration coverage starting from catalog-bound OpenRails prices.
+- [x] Exercise the supported recurring/one-time charge path against real OpenRails invoice/payment state.
+- [x] Document or assert provider limitations instead of adding compatibility shims.
+- [x] Fail loudly when NMI credentials are set but the provider proof cannot run.
+
+## Acceptance
+
+- Configured NMI sandbox tests collect or fail with a real provider error; they do not silently skip.
+- Default CI still runs without NMI secrets.
+
+---
+
 # #548: simplify-self-account-balance-contract
 
 **Completed:** yes

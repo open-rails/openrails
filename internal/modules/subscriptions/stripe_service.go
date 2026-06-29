@@ -465,7 +465,7 @@ func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, sub
 	interval := "month"
 	intervalCount := 1
 	if billingCycleDays != nil && *billingCycleDays > 0 {
-		interval, intervalCount = sharedformat.BillingCycleDaysToInterval(*billingCycleDays)
+		interval, intervalCount = sharedformat.BillingCycleDaysToStripeRecurring(*billingCycleDays)
 	}
 
 	updateValues := url.Values{}

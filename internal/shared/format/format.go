@@ -5,8 +5,14 @@ import (
 	"strings"
 )
 
-// BillingCycleDaysToInterval converts billing cycle days to a Stripe-style recurring interval.
-func BillingCycleDaysToInterval(days int) (string, int) {
+// BillingCycleDaysToInterval formats billing cycle days as an OpenRails duration.
+func BillingCycleDaysToInterval(days int) string {
+	return strconv.Itoa(days) + "d"
+}
+
+// BillingCycleDaysToStripeRecurring converts billing cycle days to Stripe's
+// recurring interval shape.
+func BillingCycleDaysToStripeRecurring(days int) (string, int) {
 	switch {
 	case days == 1:
 		return "day", 1
