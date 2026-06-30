@@ -232,7 +232,7 @@ Target:
 - Applier/service (`pkg/catalog/applier_service.go`, `pkg/service/catalog_sidecars.go`): map final YAML → specs directly; runtime-normalized structs allowed behind the boundary.
 - `QuoteCatalogCreditPurchase`: select an offer by (currency, provider) [reject ambiguous same-(currency,provider) duplicates for now; add an offer key later].
 - **Coordinated release:** completed. OpenRails tagged `v0.78.0`; doujins and hentai0 bumped from `v0.77.0`; cozy-art bumped from `v0.72.1` and adjusted for current embedded/config/catalog service APIs.
-- **Validation:** OpenRails focused unit + integration suite passed before tag (`pkg/pricing`, `pkg/catalog`, `pkg/embedded`, `pkg/service`, `internal/modules/money`, catalog sidecar/rating/credit-purchase integration tests, and `internal/integrationharness TestCatalogPublishRateCardsHTTP`). Consumer validation passed: doujins `go test ./internal/billing/openrailsembed ./config`; hentai0 `go test ./internal/openrails ./internal/app`; cozy-art `go test ./cmd ./internal/app ./internal/api ./internal/billing`.
+- **Validation:** OpenRails focused unit + integration suite passed before tag (`pkg/pricing`, `pkg/catalog`, `pkg/embedded`, `pkg/service`, `internal/modules/money`, catalog sidecar/rating/credit-purchase integration tests, and `internal/integrationharness TestCatalogPublishRateCardsHTTP`). Re-verified after completion from clean committed HEAD with DB-backed integration tests including `TestExampleCatalogPublishesOverHTTP`. Consumer validation passed: doujins `go test ./internal/billing/openrailsembed ./config`; hentai0 `go test ./internal/openrails ./internal/app`; cozy-art `go test ./cmd ./internal/app ./internal/api ./internal/billing`.
 
 ## Tasks
 

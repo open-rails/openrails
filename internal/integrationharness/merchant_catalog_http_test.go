@@ -1344,10 +1344,11 @@ type exampleCatalogFile struct {
 }
 
 type exampleCatalogEntry struct {
-	Merchant    string               `yaml:"merchant"`
-	Products    []catalog.Product    `yaml:"products"`
-	Meters      []catalog.Meter      `yaml:"meters"`
-	UsageLimits []catalog.UsageLimit `yaml:"usage_limits"`
+	Merchant       string                  `yaml:"merchant"`
+	Products       []catalog.Product       `yaml:"products"`
+	Meters         []catalog.Meter         `yaml:"meters"`
+	CreditBalances []catalog.CreditBalance `yaml:"credit_balances"`
+	UsageLimits    []catalog.UsageLimit    `yaml:"usage_limits"`
 }
 
 func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
@@ -1506,7 +1507,7 @@ SELECT count(*) FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE p.merchant_id = $1 AND p.key = ANY($2::text[]) AND pr.trial_unit_amount = 0 AND pr.trial_duration_hours = 168`,
 		dbtest.TestMerchantID.UUID(), keys).Scan(&n))
-	require.Equal(t, 1, n)
+	require.Equal(t, exampleFreeTrialPriceCount(m), n)
 }
 
 func exampleProductKeys(m catalog.Manifest) []string {
@@ -1515,6 +1516,21 @@ func exampleProductKeys(m catalog.Manifest) []string {
 		keys = append(keys, p.Key)
 	}
 	return keys
+}
+
+// exampleFreeTrialPriceCount counts prices in the published manifest that carry a
+// free 7-day trial — data-driven so the assertion holds for whichever merchant
+// slice the test publishes (anthropic has none), not a stale hardcoded 1.
+func exampleFreeTrialPriceCount(m catalog.Manifest) int {
+	n := 0
+	for _, p := range m.Products {
+		for _, pr := range p.Prices {
+			if pr.Trial != nil && pr.Trial.UnitAmount == 0 && pr.Trial.Duration == "7d" {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func exampleUsageLimitKeys(m catalog.Manifest) []string {
