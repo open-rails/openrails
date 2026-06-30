@@ -60,27 +60,45 @@ Defects:
    `included_per_cycle: size_slug.included` string is never parsed or consumed (0 consumption sites;
    only a struct field). Wire it or remove it.
 
-4. **Fabricated `minimum_amount` on the droplet card (example).** DO droplets have NO minimum charge
-   (pure hourly rate capped at the monthly price). The example's `minimum_amount: 10_000` with
-   comments `$0.01 / 60s minimum charge` is (a) not a real DO rule and (b) doubly mis-described — the
-   code applies `minimum_amount` as a per-PERIOD total floor (`applyCommitments` clamp), NOT per-60s.
-   The `minimum_amount`/`maximum_amount` FIELDS are legitimate primitives (a min↔cap commitment range,
-   real in SaaS/telecom min-commitments) and stay — but the example must be faithful to DO and not use
-   a floor DO does not levy.
+4. **Per-rate-card `minimum_amount` is the wrong concept — remove it.** Two different things wear the
+   word "minimum" and only one is real:
+   - a **per-line/per-resource floor** ("this droplet charges at least $0.01") — what's on the card
+     today. No real cloud floors a VM's charge (AWS/GCP/Azure/DO bill actual usage); the only relative
+     is a minimum billing *increment* ("round up to 1h"), a DURATION concept that modern per-second
+     billing retired. As a card field it degrades to "don't emit sub-cent lines" = rounding hygiene,
+     which is a global invoice policy, not pricing. On the example it is doubly wrong: DO has NO
+     droplet minimum, and the `$0.01 / 60s` comments mis-describe the code (`applyCommitments` clamps a
+     per-PERIOD total floor, NOT per-60s).
+   - a **minimum commitment / minimum spend** ("customer commits to $500/mo; if usage is less, true-up
+     to $500") — real and valuable, but a CONTRACT property of the billing relationship, not a catalog
+     field. Open-source (Lago) + commercial (Orb, Metronome, Kill Bill) all model minimums as
+     account/subscription-level commitments with true-up — none floor individual priced lines. The
+     industry puts minimums where the CONTRACT lives, not where the PRICE lives.
+   Conclusion: **drop per-rate-card `minimum_amount` entirely** (cap `maximum_amount` STAYS — a real,
+   intrinsic per-SKU pricing fact: DO genuinely caps a droplet at its monthly price). If minimums are
+   wanted, add account-level `minimum_spend` (commitment + period-end true-up) to the billing policy.
 
 ## Target design
 
-- **Rate card (catalog, pricing only):** keep a `rating_period` (the cap/allowance window) on the
-  card. The card knows WHAT is metered and HOW MUCH; nothing about WHEN money is collected.
+- **Rate card (catalog, pricing only):** keep `rating_period` (the cap/allowance window) + per-SKU
+  rate + `maximum_amount` cap + allowances on the card. The cap STAYS (a real, intrinsic per-SKU
+  pricing fact — DO caps a droplet at its monthly price). `minimum_amount` is REMOVED (a floor is not
+  pricing). The card knows WHAT is metered and HOW MUCH; nothing about WHEN money is collected, minimum
+  commitments, or true-ups. The window is decoupled from any calendar-month notion (the #638 example's
+  `divide_by` already encodes DO's 672h/28-day breakeven while `billing_cadence: 30d` says 30d-rolling
+  — the clean `rating_period` resolves that inconsistency).
 - **Merchant: collection policy (NEW).** A merchant-level billing policy
   `{mode: periodic(monthly|weekly|…) | threshold($X) | hybrid(whichever-first), value, currency}` —
   alongside the existing merchant `money_settings`. This is the DEFAULT.
-- **Customer account: override.** A customer can override the merchant default (enterprise NET-30
-  monthly vs self-serve $X-threshold), same precedence as the tier ladder (merchant default →
-  account override). The invoiced entity is the CUSTOMER ACCOUNT, which accrues ONE balance across
-  all its resources.
+- **Customer account: override + minimum commitment.** A customer can override the merchant default
+  (enterprise NET-30 monthly vs self-serve $X-threshold), same precedence as the tier ladder (merchant
+  default → account override). This is ALSO where a `minimum_spend` lives (the real "minimum": commit
+  $X/period, true-up at close if usage is less) — a contract property, NOT a catalog field, matching
+  how Lago/Orb/Metronome/Kill Bill model it. The invoiced entity is the CUSTOMER ACCOUNT, which accrues
+  ONE balance across all its resources.
 - **Invoice-close job:** per customer account, fire when `rating_period elapsed OR accrued ≥ threshold`,
-  rate the open usage for the window, and emit ONE invoice covering all the customer's rate cards.
+  rate the open usage for the window, apply any `minimum_spend` true-up, and emit ONE invoice covering
+  all the customer's rate cards.
 - **Global invoice-rounding policy (optional):** if sub-cent line suppression is wanted, it is a
   merchant invoice policy ("don't bill below $X"), NOT a per-rate-card `minimum_amount`.
 
@@ -98,20 +116,24 @@ Defects:
       customer's rate cards.
 - [ ] Wire or remove `included_per_cycle` (the accrued-allowance rater hardcodes the source card's
       `cell.Included` today).
-- [ ] Remove `minimum_amount` from the droplet example card + delete the `$0.01/60s` comments; keep
-      `minimum_amount`/`maximum_amount` as catalog primitives, demonstrated on a product that genuinely
-      has a min-commitment (reserved capacity / enterprise plan).
+- [ ] Remove `minimum_amount` from the rate-card model ENTIRELY (a per-line floor is not pricing);
+      keep `maximum_amount` (the cap is a real per-SKU pricing fact). Delete the droplet card's
+      `minimum_amount` + its `$0.01/60s` comments.
+- [ ] Add account/subscription-level `minimum_spend` (commit $X/period, period-end true-up at invoice
+      close) as the real "minimum" — a billing-relationship property next to `collection_cadence`, NOT
+      a catalog field. Matches Lago/Orb/Metronome/Kill Bill (minimums live with the contract).
 - [ ] (Optional) Add a global merchant invoice-rounding policy ("don't bill below $X") for sub-cent
       suppression, if wanted.
 - [ ] Make `config/catalog.example.yaml` faithful: the DO example uses only mechanisms DO actually
       applies (hourly rate, monthly cap, pooled egress allowance) — no fabricated minimum.
 
 Acceptance: a usage-metered product carries no `tier_group` and no collection cadence; the rate card
-carries only its rating/cap window; collection cadence is a merchant policy with per-account override
-driving an invoice-close job over the customer's accrued balance; threshold billing works (impossible
-under the old per-product `billing_cadence`); `included_per_cycle` is either functional or gone; the
-droplet example matches real DO with no fabricated minimum. The #638 catalog pricing MATH is reused
-unchanged.
+carries only its rating/cap window + rate + `maximum_amount` cap + allowances; NO `minimum_amount` on
+any rate card; minimums (if any) are an account-level `minimum_spend` with period-end true-up;
+collection cadence is a merchant policy with per-account override driving an invoice-close job over the
+customer's accrued balance; threshold billing works (impossible under the old per-product
+`billing_cadence`); `included_per_cycle` is either functional or gone; the droplet example matches real
+DO with no fabricated minimum. The #638 catalog pricing MATH is reused unchanged.
 
 ---
 
