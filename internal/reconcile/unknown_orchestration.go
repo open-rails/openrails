@@ -50,9 +50,10 @@ type UnknownReconcileResult struct {
 }
 
 // railToProvider maps a local subscription rail to its reconcile Provider.
+// (#630: mobius is a provider account on rail nmi, not a rail.)
 func railToProvider(rail string) (Provider, bool) {
 	switch rail {
-	case "nmi", "mobius":
+	case "nmi":
 		return ProviderNMI, true
 	case "ccbill":
 		return ProviderCCBill, true
@@ -78,7 +79,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
 
-	for _, rail := range []string{"nmi", "mobius", "ccbill", "stripe", "solana"} {
+	for _, rail := range []string{"nmi", "ccbill", "stripe", "solana"} {
 		provider, ok := railToProvider(rail)
 		if !ok {
 			continue

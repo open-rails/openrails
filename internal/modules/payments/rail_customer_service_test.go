@@ -6,8 +6,9 @@ import "testing"
 // remote customer object (Stripe cus_*, NMI customer_vault_id).
 func TestRailHasRemoteCustomer(t *testing.T) {
 	cases := map[string]bool{
-		"stripe": true, "nmi": true, "mobius": true, "MOBIUS": true, " stripe ": true,
-		"ccbill": false, "solana": false, "paypal": false, "admin": false, "manual": false, "": false,
+		"stripe": true, "nmi": true, " stripe ": true,
+		// #630: mobius is a provider-account name on rail nmi, not a rail.
+		"mobius": false, "ccbill": false, "solana": false, "paypal": false, "admin": false, "manual": false, "": false,
 	}
 	for rail, want := range cases {
 		if got := railHasRemoteCustomer(rail); got != want {

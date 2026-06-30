@@ -451,12 +451,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status = 'active'
   AND current_period_ends_at IS NOT NULL
   AND current_period_ends_at < sqlc.arg(now)::timestamptz
-  AND NOT (rail = 'ccbill' OR (rail IN ('nmi', 'mobius') AND payment_method_id IS NULL))
+  AND NOT (rail = 'ccbill' OR (rail = 'nmi' AND payment_method_id IS NULL))
 ORDER BY current_period_ends_at;
 
 -- #632: active subscriptions whose period elapsed (past a grace slack) with NO
 -- confirming renewal payment, that we CANNOT rebill ourselves (provider-auto-billed:
--- CCBill, or vault-less NMI/mobius). Convergence must not GUESS whether the provider
+-- CCBill, or vault-less NMI). Convergence must not GUESS whether the provider
 -- billed them — the LIFE pass flips them to `unknown` and provider-pull (#633)
 -- resolves them. A renewal payment landing at/after the period end means the provider
 -- DID bill (advance, not unknown), so such subs are excluded here.
@@ -467,7 +467,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.status = 'active'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < sqlc.arg(cutoff)::timestamptz
-  AND (s.rail = 'ccbill' OR (s.rail IN ('nmi', 'mobius') AND s.payment_method_id IS NULL))
+  AND (s.rail = 'ccbill' OR (s.rail = 'nmi' AND s.payment_method_id IS NULL))
   AND NOT EXISTS (
       SELECT 1 FROM openrails.payments p
       WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id

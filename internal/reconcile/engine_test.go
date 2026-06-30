@@ -1330,12 +1330,14 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		Currency:  "usd",
 		Status:    "active",
 		Rails: map[string]map[string]string{
-			"mobius": {"plan_id": "plan-gold"},
+			// #630: the provider-link key is the gateway rail (nmi), not the
+			// provider-account name (mobius).
+			"nmi": {"plan_id": "plan-gold"},
 		},
 	}
 	local.state.Prices = []LocalPrice{price}
 	local.state.PaymentMethods = []LocalPaymentMethod{{
-		ID: uuid.New(), CustomerID: subjectID, Rail: "mobius",
+		ID: uuid.New(), CustomerID: subjectID, Rail: "nmi",
 		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
 	}}
 	end := testNow.Add(20 * 24 * time.Hour)
@@ -1415,7 +1417,7 @@ func TestMaterializePS1(t *testing.T) {
 		}
 		require.NotNil(t, created)
 		assert.Equal(t, "active", created.Status)
-		assert.Equal(t, "mobius", created.Rail)
+		assert.Equal(t, "nmi", created.Rail)
 		require.NotNil(t, created.CurrentPeriodEndsAt)
 		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
 

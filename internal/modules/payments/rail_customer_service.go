@@ -34,7 +34,7 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 		return fmt.Errorf("invalid rail customer args")
 	}
 	// #635: only rails with a real card-independent remote CUSTOMER object get a
-	// rail_customers row — Stripe (cus_*) and NMI/mobius (customer_vault_id). CCBill
+	// rail_customers row — Stripe (cus_*) and NMI (customer_vault_id). CCBill
 	// keys on subscription_id and Solana on the wallet address; neither is a
 	// customer, so a row there would conflate a subscription/wallet with a customer.
 	// No-op for those rails: their durable handle is the subscription's
@@ -68,10 +68,10 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 
 // railHasRemoteCustomer reports whether a rail exposes a card-independent remote
 // customer object worth materializing into rail_customers (#635). Stripe (cus_*)
-// and NMI/mobius (customer_vault_id) do; CCBill, Solana, and the rest do not.
+// and NMI (customer_vault_id) do; CCBill, Solana, and the rest do not.
 func railHasRemoteCustomer(rail string) bool {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
-	case "stripe", "nmi", "mobius":
+	case "stripe", "nmi":
 		return true
 	default:
 		return false

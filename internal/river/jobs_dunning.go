@@ -645,14 +645,15 @@ func rebillOrderReference(sub *models.Subscription) string {
 
 // subscriptionProviderAutoBilled reports whether the provider bills this
 // subscription on its own side, so OpenRails must not manual-rebill or terminate
-// it (#635): CCBill always (it bills independently); NMI/mobius only when there is
-// no stored vault (a vault-less recurring sub auto-charges on the remote
-// subscription id). An NMI sub WITH a vault is our-rebill — returns false.
+// it (#635): CCBill always (it bills independently); NMI only when there is no
+// stored vault (a vault-less recurring sub auto-charges on the remote subscription
+// id). An NMI sub WITH a vault is our-rebill — returns false. (#630: mobius is a
+// provider account on rail nmi, not a rail.)
 func subscriptionProviderAutoBilled(rail string, pm *models.PaymentMethod) bool {
 	switch normalizeRail(rail) {
 	case "ccbill":
 		return true
-	case "nmi", "mobius":
+	case "nmi":
 		return pm == nil || strings.TrimSpace(pm.RailMethodRef) == ""
 	default:
 		return false
