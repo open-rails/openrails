@@ -7,14 +7,119 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 647
+next_id: 649
+
+---
+
+# #647: catalog as round-trippable YAML — push ⇄ dump, 1:1 Go↔YAML catalog structs
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-30 (Paul): like the merchant config (#646), the CATALOG (products / prices /
+meters / rate cards / credit balances) should round-trip — `push-catalog` applies a YAML, and a new
+`dump-catalog` exports a merchant's live catalog back into the SAME shape, with the Go structs 1:1 with the
+YAML so marshal/unmarshal are symmetric. Paul: "this design may not be a good idea after later inspection,
+but I like the idea anyway." Builds directly on #645 (typed catalog structs / 1:1 Go↔YAML), which is the
+prerequisite — once the catalog structs are clean typed sub-blocks, a dump is just reading the sidecars back
+into them.
+
+## Metadata
+- Category: devex
+- Status: not_started
+- Passes: false
+
+## Problem
+
+`push-catalog` applies `config/catalog.example.yaml` (products → prices/meters/rate cards/credit balances)
+but there is no `dump-catalog`: you cannot serialize a merchant's live catalog back to the manifest shape, so
+the file and the DB drift, and there is no export-to-review/version/clone for catalogs the way #646 gives for
+merchant config. #645 is making the catalog structs typed + 1:1 with YAML, which is exactly what a faithful
+dump needs.
+
+## Tasks
+
+- [ ] (depends on #645) Confirm the catalog Go structs are 1:1 with the YAML (typed price sub-blocks, credit
+      balances, rate cards) so marshal(parse(x)) == x for a canonical catalog.
+- [ ] Add `dump-catalog --slug <m>` (CLI + a service read path): read the catalog sidecars
+      (products / prices / meters / rate_cards / credit_balances / credit_purchase_prices) and rebuild the
+      `catalog.Manifest`, marshal to YAML. Mirror #646's `dump-merchant-config`.
+- [ ] Round-trip integration test (testcontainers): push the example catalog → dump → re-parse → assert the
+      manifest is structurally equal (modulo ordering / defaults).
+- [ ] Make `config/catalog.example.yaml` a faithful round-trip fixture.
+
+Acceptance: `dump-catalog` exports a merchant's catalog into the push-catalog YAML shape; push→dump→push is
+idempotent; the catalog Go structs are the single 1:1 source for both directions. Depends on #645.
+
+---
+
+# #648: Solana signer — injected keypair OR HashiCorp Vault transit signing (key never leaves the vault)
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-30 (Paul): a Solana provider account's signer keypair should be suppliable two
+ways: (a) a keypair injected directly (e.g. an `env:`/`file:` secret, as today), OR (b) HashiCorp Vault
+transit SIGNING — the private key NEVER leaves the vault; OpenRails asks Vault's API to produce signatures.
+"that should definitely be planned and done too."
+
+## Metadata
+- Category: billing
+- Status: not_started
+- Passes: false
+
+## Problem
+
+Today a Solana account declares its `private_key` as a manifest secret (`{file: …}` / `{env: …}`), so the
+raw Ed25519 key is materialized into OpenRails to sign on-chain transactions. For higher-assurance
+deployments the key should stay in HashiCorp Vault: the Vault transit engine holds a non-extractable Ed25519
+key and signs on request, so OpenRails never holds the private key. There is ALREADY groundwork —
+`internal/integrations/vault/transit.go` creates a per-merchant Ed25519 transit key as non-extractable
+(exportable=false) and can sign via Vault. The gap: the merchant manifest can't EXPRESS "this Solana
+account's signer is a vault-transit key (sign-via-vault)" vs "an injected keypair", and the Solana signer
+path doesn't branch on it.
+
+## Target design
+
+- **Manifest:** let a Solana provider account's signer declare its mode — either an injected keypair
+  (`secrets.private_key: {file|env|value}`, today's path) or a vault-transit signer
+  (e.g. `secrets.private_key: {vault_transit: <key-name>}`, or a `signer: {mode: vault_transit, key: …}`
+  block). The account_id (recipient wallet, #592) stays operator-declared either way.
+- **Signer path:** when the account is vault-transit, the Solana rail signs by calling Vault transit sign
+  (reuse `internal/integrations/vault/transit.go`) instead of loading a local keypair. Validate at boot that
+  the transit key exists / its public key matches the declared wallet.
+- **Dump (#646):** emit the vault-transit reference (key name), never key material — consistent with the
+  secrets-as-refs rule.
+
+## Tasks
+
+- [ ] Extend the manifest provider-account secret/signer shape to express vault-transit signing for Solana
+      (decide `vault_transit` secret source vs a `signer` block; validate exactly-one signer mode).
+- [ ] Branch the Solana signer to sign via Vault transit when declared; keep the injected-keypair path.
+- [ ] Boot-time validation: the transit key exists and its Ed25519 public key matches the declared wallet.
+- [ ] dump-merchant-config emits the transit reference (no key material).
+- [ ] Integration test: a vault-transit Solana account signs a transaction via Vault (no local private key),
+      and the injected-keypair path still works.
+
+Acceptance: a Solana account can be configured for EITHER an injected keypair OR Vault transit signing (key
+never leaves the vault); both produce valid signatures; the manifest + dump express the choice; secrets/key
+material are never dumped. Reuses `internal/integrations/vault/transit.go`.
 
 ---
 
 # #646: merchant config as round-trippable YAML — push ⇄ dump the complete merchant_configurations, realistic test+live example
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-30 (Paul, refined): a merchant's ENTIRE configuration should be one
+**Completed:** yes
+**Status:** DONE 2026-06-30 (commit 8125c6f2, pushed; branch issue-646). IMPLEMENTED: the manifest applies the
+COMPLETE merchant_configurations payload — added `invoice` (collection_threshold/monthly_floor/
+billing_period_boundary) + `delegated_invoker_wasted_spend_windows` to `ManifestMerchant`, wired into the same
+merchantconfig store the profile uses (omit = leave-as-is). Provider accounts gained a human `name`/alias label
+(persisted as display_name; account_id stays the routing id). New `dump-merchant-config --slug` CLI +
+`DumpMerchantConfig` serializes a live merchant back into the manifest shape — secrets as `env:` references
+(never values), so push⇄dump is round-trippable; issuer lives in AuthKit (#480/#481), out of the dump.
+`merchants.example.yaml` rewritten: realistic, self-describing header, every field with its default, TEST+LIVE
+provider-account pairs (NMI mobius + Stripe) with test_mode selecting the active set. Tests: example-parse asserts
+the new fields; testcontainers push→dump round-trip (invoice + windows + named test/live accounts + secrets-as-refs).
+FOLLOW-UPS SPLIT OUT (Paul 2026-06-30): catalog push⇄dump 1:1 YAML↔Go → #647; Solana signer keypair-or-vault-signing
+→ #648. NOTE: the runtime test/live FILTER-not-reject behavior (config.ValidateRailSet) was left to the runtime
+config layer — the manifest already declares + seeds both environments; test_mode selection is config.yaml's job.
+PROPOSED 2026-06-30 (Paul, refined): a merchant's ENTIRE configuration should be one
 round-trippable YAML — `push-merchant-config <file>` applies it, a new `dump-merchant-config` exports the
 merchant's current state back out in the SAME shape, and the Go structs map 1:1 to the YAML (one shape drives
 both directions). The example must be realistic and must show a TEST environment account right next to a LIVE
@@ -23,8 +128,8 @@ live accounts under `test_mode=false` from one declaration.
 
 ## Metadata
 - Category: devex
-- Status: not_started
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
