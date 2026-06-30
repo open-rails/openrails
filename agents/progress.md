@@ -7,7 +7,84 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 645
+next_id: 647
+
+---
+
+# #646: merchants.example.yaml = the complete merchant-config document — apply the full merchant_configurations payload via push-merchant-config
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-30 (Paul): `config/merchants.example.yaml` should be the single, comprehensive,
+declarative source for ALL merchant-level configuration — every knob a merchant has, documented AND actually
+applied by `push-merchant-config`. Today it covers only part of the surface.
+
+## Metadata
+- Category: devex
+- Status: not_started
+- Passes: false
+
+## Problem
+
+A merchant's configuration is split across two mechanisms with no single source of truth:
+
+1. **The manifest** (`config/merchants.example.yaml`, applied by `push-merchant-config` →
+   `ReconcileMerchantManifestData`). `ManifestMerchant` carries: `slug`, `display_name`, `issuer`
+   (uri / jwks_uri / public_keys / allowed_origins / slug), `profile`
+   (display_name / logo_url / from_email / support_url), and `provider_accounts`
+   (provider_type / environment / account_id / mode / secrets / vault_secret_ref).
+2. **The `merchant_configurations` JSONB row** (set ONLY via the admission API —
+   `Service.SetMerchantConfiguration` / the merchant-config HTTP handler). Its payload
+   (`models.MerchantConfiguration`) is: `profile` (dup of the manifest's), and the parts the manifest does
+   NOT apply: **invoice/collection** (`collection_threshold`, `monthly_floor`, `billing_period_boundary`)
+   and **delegated-invoker wasted-spend windows** (`[]BudgetWindowPolicy{key, window_seconds, limit, currency}`).
+
+So the invoice/collection cadence (#643's merchant policy) and the delegated-invoker abuse cutoffs are
+invisible in the example and unreachable from config-as-code — you must call the API. The example reads as
+if provider accounts + branding are "all there is."
+
+## Target design
+
+Make the manifest a superset that applies the WHOLE `merchant_configurations` payload, and make
+`merchants.example.yaml` exhaustively document every merchant-level field (with its default), so the file
+alone tells an operator everything a merchant can be configured with.
+
+Add to `ManifestMerchant` (and `ReconcileMerchantManifestData` → `SetMerchantConfiguration`):
+- `invoice:` block → `{collection_threshold, monthly_floor, billing_period_boundary}` (boundary ∈
+  calendar_month | anniversary | fixed_interval). Defaults: threshold 50_000_000 ($50), monthly_floor
+  1_000_000 ($1), boundary fixed_interval (see `money.DefaultInvoice*` / `InvoiceBoundary*`).
+- `delegated_invoker_wasted_spend_windows:` (or `invoker_abuse_windows:`) → list of
+  `{key, window, limit, currency}`. Default = `DefaultInvokerWastedWindows` (burst 15m/$5, sustained 5h/$20).
+- Reconcile semantics: config values are declarative identity-like state (idempotently ensured when
+  declared), NOT seed-once secrets — but a value omitted from the manifest must NOT clobber an
+  API-set value to the default. Mirror how `SetMerchantConfiguration` already treats nil = "leave as is".
+
+## Tasks
+
+- [ ] Extend `ManifestMerchant` with `invoice` + delegated-invoker-windows blocks (parse + validate; reuse
+      `money.NormalizeInvoiceBoundary`, the same range checks as the admission input).
+- [ ] Wire `ReconcileMerchantManifestData` to apply them via `SetMerchantConfiguration` (respecting the
+      omit = leave-as-is rule; honor the existing insert/overwrite reconcile tiers).
+- [ ] Expand `config/merchants.example.yaml` to show EVERY merchant-level field with an explanatory comment
+      + its default, including a header block that enumerates the merchant-config domains and points to the
+      sibling manifests for the rest (so the file is self-describing).
+- [ ] Update `ParseMerchantConfigManifest` validation + `TestExampleMerchantConfigManifestParses` /
+      `TestParseMerchantConfigManifest`.
+
+## Out of scope (separate manifests / runtime — cross-reference, do NOT fold in)
+
+- **Catalog** (products / prices / meters / rate cards) → `config/catalog.example.yaml` (its own apply
+  pipeline; "what you sell", not "how the merchant is configured").
+- **Auth bootstrap** (permission groups, host-app issuer-as-owner) → `config/bootstrap.example.yaml`.
+- **Process/runtime config** (DB, rails wiring, server) → top-level `config.example.yaml`.
+- **Per-CUSTOMER settings** — `money_settings` (billing_mode, spend limits, auto-topup, credit expiry) and
+  `customer_minimum_spend` (#643) are per-customer, set at runtime, never in a merchant-level file.
+- **Tier/role/budget policy templates** (`tier_schedules`, invoker/payer spend limits) — a separate
+  merchant-policy domain; note as a future candidate, not part of this issue.
+
+Acceptance: `merchants.example.yaml` documents every field of `merchant_configurations` (profile + invoice +
+delegated-invoker windows) alongside identity/issuer/provider_accounts, `push-merchant-config` actually
+applies all of them, and the file's header enumerates the full merchant-config landscape with pointers to the
+sibling manifests for catalog / auth / runtime / per-customer config.
 
 ---
 
@@ -392,12 +469,13 @@ LANDED (uncommitted, master working tree; touched packages build green, unit + t
 - Per-account inbound webhooks — `:account_id` route + account-scoped secret resolution for **NMI and Stripe** (`Load{NMIWebhookSigningSecret,StripeCredentials}ForAccount`) + dispatcher per-account NMI client; unknown account rejected (404, no fallback); records stamped with the routed account. Integration tests green; existing webhook HTTP suite still green.
 - Catalog push targets primary+secondary, skips legacy — `syncSecondaryCatalogAccounts` does an idempotent best-effort sync to each secondary; adapters account-aware via `autoCreateContext.TargetAccountID` (Stripe secret override + NMI client selection). Tested.
 - `config/merchants.example.yaml` updated (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test.
+- Environment (test|live) disambiguation on the in-process config too — added `Environment` to `config.ProviderAccountConfig` (mirrors the manifest's per-account `environment`) + `EffectiveEnvironment` + `ExpectedProviderEnvironment`. `ValidateRailSet` now enforces the all-test-or-all-live rule: an account whose declared environment contradicts `test_mode` is rejected (empty → derived from test_mode, back-compat). Tested (`config` TestRailEnvironmentMustMatchTestMode).
 
 DELIBERATELY DROPPED as over-engineering (Paul 2026-06-30 — "delete any tasks you feel are over-engineering"). The per-account PATH + write-time secondary sync already deliver the capability; these add cost without a concrete need:
 - Payload-disambiguation single-shared-endpoint mode (CCBill `clientAccnum`, Stripe Connect `event.account`) — the per-account PATH covers multi-account routing; this is a convenience alternative with no current consumer. YAGNI.
 - CCBill account-scoped path — CCBill auth is IP-allowlist + account-number match (no per-account HMAC secret), and the postback already carries the account number, so there is nothing account-scoped to add.
 - Persist per-account catalog links for secondaries — a broad links-BY-ACCOUNT model change whose only added value is drift DETECTION on failover accounts; the idempotent write-time sync already keeps secondaries current.
-- Config-layer per-(merchant,rail,environment) primary-uniqueness — NON-APPLICABLE: the in-process `ProviderAccountConfig` has no environment axis (environment is global via test_mode); the manifest/DB upsert already enforces one primary per (merchant,type,environment), and `validateRails` enforces ≤1 primary per rail.
+- Per-(merchant,rail,environment) primary-UNIQUENESS specifically — already enforced by the manifest/DB upsert (one primary per merchant,type,environment) + `validateRails` (≤1 primary per rail). The environment FIELD + test_mode-consistency guard it implied is now DONE on the in-process config (see LANDED above), so this is no longer "non-applicable" — the uniqueness sub-task itself was just already covered.
 - Strictly-require account_id in the in-process set — the name-fallback is intentional for tests/embedded callers; the manifest (production) path already requires it.
 - Stripe managed-webhook auto-registration of the per-account URL — the primary auto-registers and works on the existing route; a secondary Stripe account's webhook is one manual dashboard setting (point it at `…/webhooks/{slug}/stripe/{account_id}`). Auto-registering N endpoints across N Stripe accounts is automation polish for a rare case.
 
