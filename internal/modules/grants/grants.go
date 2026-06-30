@@ -631,7 +631,8 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 	if !ok {
 		return nil
 	}
-	return l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: productSpecKeys(sub.EntitlementsSpec), Start: start, End: &end})
+	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: productSpecKeys(sub.EntitlementsSpec), Start: start, End: &end})
+	return err
 }
 
 // DeriveWalletGrant creates the entitlement grant(s) + window for a solana wallet
@@ -644,7 +645,8 @@ func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWal
 	}
 	pid := pay.ID
 	exp := pay.ExpiresAt.UTC()
-	return l.deriveEntitlementWindows(ctx, customerWindow{Customer: pay.CustomerID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Feats: productSpecKeys(pay.EntitlementsSpec), Start: pay.PurchasedAt.UTC(), End: &exp})
+	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: pay.CustomerID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Feats: productSpecKeys(pay.EntitlementsSpec), Start: pay.PurchasedAt.UTC(), End: &exp})
+	return err
 }
 
 // AdminGrantExists reports whether an entitlement grant from this admin source is
@@ -658,19 +660,19 @@ func (l *Ledger) AdminGrantExists(ctx context.Context, sourceID string) (bool, e
 // access FACT that has no payment/subscription behind it (#636). The host (e.g. the
 // doujins legacy migrate) hands over the comp instead of writing entitlements.
 // Idempotent by sourceID. end nil = indefinite. Per-feature overlap-skip, like the
-// other derive-1 paths. Returns false if the source was already imported (skipped).
-func (l *Ledger) GrantAdmin(ctx context.Context, customer uuid.UUID, sourceID string, feats []string, start time.Time, end *time.Time) (bool, error) {
+// other derive-1 paths. Returns the number of feature-windows created (0 = every
+// feature overlapped an existing live window, i.e. blocked) and whether the source
+// was already imported (idempotent skip — no write).
+func (l *Ledger) GrantAdmin(ctx context.Context, customer uuid.UUID, sourceID string, feats []string, start time.Time, end *time.Time) (created int, alreadyExists bool, err error) {
 	exists, err := l.AdminGrantExists(ctx, sourceID)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	if exists {
-		return false, nil
+		return 0, true, nil
 	}
-	if err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: customer, Source: Admin, SourceID: sourceID, Feats: feats, Start: start.UTC(), End: end}); err != nil {
-		return false, err
-	}
-	return true, nil
+	created, err = l.deriveEntitlementWindows(ctx, customerWindow{Customer: customer, Source: Admin, SourceID: sourceID, Feats: feats, Start: start.UTC(), End: end})
+	return created, false, err
 }
 
 // customerWindow is one source's derived access window: grant N entitlement
@@ -694,14 +696,15 @@ type customerWindow struct {
 // ponytail: v1 drops a feature's window entirely when it overlaps; #631-followup
 // (O2) clips/merges partial overlaps. A fully-overlapped sub re-fires each sweep
 // until the overlapping window expires, then converges — bounded, self-healing.
-func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow) error {
+func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow) (int, error) {
 	upper := overlapUpperBound(w.End)
+	created := 0
 	for _, f := range w.Feats {
 		overlaps, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
 			MerchantID: l.merchant, CustomerID: w.Customer, Entitlement: f, LowerBound: w.Start, UpperBound: upper,
 		})
 		if err != nil {
-			return fmt.Errorf("grants: derive-1 overlap check %q: %w", f, err)
+			return created, fmt.Errorf("grants: derive-1 overlap check %q: %w", f, err)
 		}
 		if overlaps {
 			continue
@@ -711,13 +714,14 @@ func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow)
 			Spec: &Spec{Entitlements: []string{f}}, StartsAt: w.Start, EndsAt: w.End,
 		})
 		if err != nil {
-			return fmt.Errorf("grants: derive-1 grant %s/%q: %w", w.SourceID, f, err)
+			return created, fmt.Errorf("grants: derive-1 grant %s/%q: %w", w.SourceID, f, err)
 		}
 		if err := l.MaterializeGrant(ctx, g); err != nil {
-			return fmt.Errorf("grants: derive-1 materialize %s/%q: %w", w.SourceID, f, err)
+			return created, fmt.Errorf("grants: derive-1 materialize %s/%q: %w", w.SourceID, f, err)
 		}
+		created++
 	}
-	return nil
+	return created, nil
 }
 
 // overlapUpperBound is the EntitlementWindowOverlaps upper bound for a window: its

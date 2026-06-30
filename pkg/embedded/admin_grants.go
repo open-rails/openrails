@@ -39,11 +39,13 @@ type AdminGrantImportOptions struct {
 	Grants       []AdminGrant
 }
 
-// AdminGrantImportResult reports the outcome of an import batch.
+// AdminGrantImportResult reports per-source outcomes of an import batch so the
+// host preserves its row-level audit trail. The lists hold AdminGrant.SourceIDs.
 type AdminGrantImportResult struct {
-	Imported int // newly recorded as admin grants (+ entitlement materialized)
-	Skipped  int // SourceID already imported (idempotent re-run)
-	NoSpec   int // product has no entitlements_spec → nothing to grant
+	Imported []string // newly recorded as admin grants (+ entitlement materialized)
+	Skipped  []string // SourceID already imported (idempotent re-run)
+	NoSpec   []string // product has no entitlements_spec → nothing to grant
+	Blocked  []string // every feature overlapped an existing live window → not granted
 }
 
 // ImportAdminGrants records each admin comp as a source_type=admin entitlement
@@ -86,17 +88,20 @@ func ImportAdminGrants(ctx context.Context, opts AdminGrantImportOptions) (Admin
 				specCache[g.Product] = feats
 			}
 			if len(feats) == 0 {
-				res.NoSpec++
+				res.NoSpec = append(res.NoSpec, g.SourceID)
 				continue
 			}
-			created, err := gl.GrantAdmin(ctx, g.Customer, g.SourceID, feats, g.StartsAt, g.EndsAt)
+			created, alreadyExists, err := gl.GrantAdmin(ctx, g.Customer, g.SourceID, feats, g.StartsAt, g.EndsAt)
 			if err != nil {
 				return fmt.Errorf("import admin grant %s: %w", g.SourceID, err)
 			}
-			if created {
-				res.Imported++
-			} else {
-				res.Skipped++
+			switch {
+			case alreadyExists:
+				res.Skipped = append(res.Skipped, g.SourceID)
+			case created > 0:
+				res.Imported = append(res.Imported, g.SourceID)
+			default:
+				res.Blocked = append(res.Blocked, g.SourceID) // all features overlapped
 			}
 		}
 		return nil

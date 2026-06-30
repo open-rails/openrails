@@ -264,9 +264,10 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		gl := grants.New(appDB.Gen(ctx), merchantID)
 
 		// Bounded comp.
-		created, err := gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
+		created, existed, err := gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
 		require.NoError(t, err)
-		require.True(t, created, "first import creates the grant")
+		require.Equal(t, 1, created, "first import creates the grant")
+		require.False(t, existed)
 
 		var n int
 		var srcType string
@@ -282,18 +283,19 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		require.NotNil(t, endAt)
 
 		// Idempotent re-run.
-		created, err = gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
+		created, existed, err = gl.GrantAdmin(ctx, custBounded, "comp-bounded", []string{"premium"}, start, &end)
 		require.NoError(t, err)
-		require.False(t, created, "same sourceID → skipped")
+		require.Equal(t, 0, created)
+		require.True(t, existed, "same sourceID → skipped")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&n))
 		require.Equal(t, 1, n, "re-run is a no-op")
 
 		// Indefinite comp (nil end → end_at NULL).
-		created, err = gl.GrantAdmin(ctx, custIndef, "comp-indef", []string{"premium"}, start, nil)
+		created, _, err = gl.GrantAdmin(ctx, custIndef, "comp-indef", []string{"premium"}, start, nil)
 		require.NoError(t, err)
-		require.True(t, created)
+		require.Equal(t, 1, created)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custIndef).Scan(&endAt))
