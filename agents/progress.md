@@ -11,12 +11,15 @@ next_id: 647
 
 ---
 
-# #646: merchants.example.yaml = the complete merchant-config document — apply the full merchant_configurations payload via push-merchant-config
+# #646: merchant config as round-trippable YAML — push ⇄ dump the complete merchant_configurations, realistic test+live example
 
 **Completed:** no
-**Status:** PROPOSED 2026-06-30 (Paul): `config/merchants.example.yaml` should be the single, comprehensive,
-declarative source for ALL merchant-level configuration — every knob a merchant has, documented AND actually
-applied by `push-merchant-config`. Today it covers only part of the surface.
+**Status:** PROPOSED 2026-06-30 (Paul, refined): a merchant's ENTIRE configuration should be one
+round-trippable YAML — `push-merchant-config <file>` applies it, a new `dump-merchant-config` exports the
+merchant's current state back out in the SAME shape, and the Go structs map 1:1 to the YAML (one shape drives
+both directions). The example must be realistic and must show a TEST environment account right next to a LIVE
+one for the same provider (NMI, Stripe), so a deployment runs the test accounts under `test_mode=true` and the
+live accounts under `test_mode=false` from one declaration.
 
 ## Metadata
 - Category: devex
@@ -25,73 +28,88 @@ applied by `push-merchant-config`. Today it covers only part of the surface.
 
 ## Problem
 
-A merchant's configuration is split across two mechanisms with no single source of truth:
-
-1. **The manifest** (`config/merchants.example.yaml`, applied by `push-merchant-config` →
-   `ReconcileMerchantManifestData`). `ManifestMerchant` carries: `slug`, `display_name`, `issuer`
-   (uri / jwks_uri / public_keys / allowed_origins / slug), `profile`
-   (display_name / logo_url / from_email / support_url), and `provider_accounts`
-   (provider_type / environment / account_id / mode / secrets / vault_secret_ref).
-2. **The `merchant_configurations` JSONB row** (set ONLY via the admission API —
-   `Service.SetMerchantConfiguration` / the merchant-config HTTP handler). Its payload
-   (`models.MerchantConfiguration`) is: `profile` (dup of the manifest's), and the parts the manifest does
-   NOT apply: **invoice/collection** (`collection_threshold`, `monthly_floor`, `billing_period_boundary`)
-   and **delegated-invoker wasted-spend windows** (`[]BudgetWindowPolicy{key, window_seconds, limit, currency}`).
-
-So the invoice/collection cadence (#643's merchant policy) and the delegated-invoker abuse cutoffs are
-invisible in the example and unreachable from config-as-code — you must call the API. The example reads as
-if provider accounts + branding are "all there is."
+1. **Incomplete push.** `ManifestMerchant` (`config/merchants.example.yaml`, applied by `push-merchant-config`
+   → `ReconcileMerchantManifestData`) carries `slug`, `display_name`, `issuer`
+   (uri / jwks_uri / public_keys / allowed_origins / slug), `profile`, and `provider_accounts`
+   (provider_type / environment / account_id / mode / secrets / vault_secret_ref). It does NOT apply the
+   `merchant_configurations` JSONB payload (`models.MerchantConfiguration`), whose other fields are set ONLY
+   via the admission API (`Service.SetMerchantConfiguration`): **invoice/collection**
+   (`collection_threshold`, `monthly_floor`, `billing_period_boundary`) and **delegated-invoker wasted-spend
+   windows** (`[]BudgetWindowPolicy{key, window_seconds, limit, currency}`). So #643's merchant collection
+   policy + the abuse cutoffs are invisible in the file and unreachable from config-as-code.
+2. **No dump direction.** There is NO `dump-merchant-config` (the `merchant_exports` table is GDPR data export
+   #225, not config). You can push a YAML but cannot serialize a live merchant's config back to YAML, so the
+   file and reality drift and there is no "export to review/version/clone a merchant".
+3. **Example isn't realistic and shows one environment.** Today's example is plausible but doesn't model the
+   real test+live split. The runtime is all-test OR all-live (`test_mode` is the switch; `config.ValidateRailSet`
+   rejects an account whose `environment` contradicts it; the manifest already tolerates declaring test
+   accounts — only `mode=primary + environment=test` is barred outside dev, `merchant_manifest.go:497`). The
+   example should declare BOTH a test and a live account per provider so one file serves both deployments.
 
 ## Target design
 
-Make the manifest a superset that applies the WHOLE `merchant_configurations` payload, and make
-`merchants.example.yaml` exhaustively document every merchant-level field (with its default), so the file
-alone tells an operator everything a merchant can be configured with.
+ONE Go struct family (`ManifestMerchant` + new blocks) ⇄ ONE YAML shape, used by BOTH `push-merchant-config`
+(apply) and a new `dump-merchant-config` (export). The struct is the single source of truth for the shape, so
+push and dump are symmetric and a dump→push round-trip is idempotent.
 
-Add to `ManifestMerchant` (and `ReconcileMerchantManifestData` → `SetMerchantConfiguration`):
-- `invoice:` block → `{collection_threshold, monthly_floor, billing_period_boundary}` (boundary ∈
-  calendar_month | anniversary | fixed_interval). Defaults: threshold 50_000_000 ($50), monthly_floor
-  1_000_000 ($1), boundary fixed_interval (see `money.DefaultInvoice*` / `InvoiceBoundary*`).
-- `delegated_invoker_wasted_spend_windows:` (or `invoker_abuse_windows:`) → list of
-  `{key, window, limit, currency}`. Default = `DefaultInvokerWastedWindows` (burst 15m/$5, sustained 5h/$20).
-- Reconcile semantics: config values are declarative identity-like state (idempotently ensured when
-  declared), NOT seed-once secrets — but a value omitted from the manifest must NOT clobber an
-  API-set value to the default. Mirror how `SetMerchantConfiguration` already treats nil = "leave as is".
+- **Complete the payload.** Add to `ManifestMerchant` (and wire `ReconcileMerchantManifestData` →
+  `SetMerchantConfiguration`):
+  - `invoice:` → `{collection_threshold, monthly_floor, billing_period_boundary}` (boundary ∈
+    calendar_month | anniversary | fixed_interval). Defaults: threshold 50_000_000 ($50), monthly_floor
+    1_000_000 ($1), boundary fixed_interval (`money.DefaultInvoice*` / `InvoiceBoundary*`).
+  - `delegated_invoker_wasted_spend_windows:` → `[{key, window, limit, currency}]`. Default =
+    `DefaultInvokerWastedWindows` (burst 15m/$5, sustained 5h/$20).
+  - Omit = leave-as-is (never clobber an API-set value to default); mirror `SetMerchantConfiguration`'s nil rule.
+- **Dump command.** `dump-merchant-config --slug <m>` reads the merchant row + issuer/remote-app + profile +
+  provider_accounts + `merchant_configurations` and serializes to the manifest YAML. SECRETS are emitted as
+  REFERENCES/placeholders (`env:`/`file:`/`vault:` names, never decrypted values) — the dump is structurally
+  complete, not a secret leak. A dumped file re-applied with `push-merchant-config` reproduces the same state.
+- **Realistic test+live example.** For NMI and Stripe, declare a `environment: live` account AND an
+  `environment: test` account side by side (test ones as secondary/legacy or dev-primary, honoring the
+  primary+test-outside-dev guard). Document that `test_mode` selects the active environment at boot. CONFIRM
+  the activation path: the runtime must FILTER provider accounts by `ExpectedProviderEnvironment(test_mode)`
+  and activate only the matching set — if `ValidateRailSet` still hard-rejects the non-matching environment
+  when both are declared, change it to filter-not-reject (and note that selection decision here).
 
 ## Tasks
 
-- [ ] Extend `ManifestMerchant` with `invoice` + delegated-invoker-windows blocks (parse + validate; reuse
-      `money.NormalizeInvoiceBoundary`, the same range checks as the admission input).
-- [ ] Wire `ReconcileMerchantManifestData` to apply them via `SetMerchantConfiguration` (respecting the
-      omit = leave-as-is rule; honor the existing insert/overwrite reconcile tiers).
-- [ ] Expand `config/merchants.example.yaml` to show EVERY merchant-level field with an explanatory comment
-      + its default, including a header block that enumerates the merchant-config domains and points to the
-      sibling manifests for the rest (so the file is self-describing).
+- [ ] Make the manifest shape 1:1 with the YAML (one struct family); add `invoice` + delegated-invoker-windows
+      blocks (parse + validate; reuse `money.NormalizeInvoiceBoundary` + the admission range checks).
+- [ ] Wire `ReconcileMerchantManifestData` → `SetMerchantConfiguration` for the new blocks (omit = leave-as-is;
+      honor insert/overwrite reconcile tiers).
+- [ ] Add `dump-merchant-config` (CLI + service read path) → serialize full merchant state to the manifest YAML
+      shape; secrets as refs/placeholders, never values. Round-trip test: dump → push → dump is stable.
+- [ ] Rewrite `config/merchants.example.yaml`: realistic, a self-describing header enumerating every
+      merchant-config domain + pointers to sibling manifests, EVERY merchant-level field shown with its default,
+      and a TEST+LIVE account pair for NMI and Stripe demonstrating `test_mode` selection.
+- [ ] Decide + implement the test/live activation: filter provider accounts by `ExpectedProviderEnvironment`
+      (not reject) so one manifest with both environments boots under either `test_mode`.
 - [ ] Update `ParseMerchantConfigManifest` validation + `TestExampleMerchantConfigManifestParses` /
-      `TestParseMerchantConfigManifest`.
+      `TestParseMerchantConfigManifest`; add a dump↔push round-trip integration test.
 
 ## Out of scope (separate manifests / runtime — cross-reference, do NOT fold in)
 
 - **Catalog** (products / prices / meters / rate cards) → `config/catalog.example.yaml` (its own apply
   pipeline; "what you sell", not "how the merchant is configured").
 - **Auth bootstrap** (permission groups, host-app issuer-as-owner) → `config/bootstrap.example.yaml`.
-- **Process/runtime config** (DB, rails wiring, server) → top-level `config.example.yaml`.
+- **Process/runtime config** (DB, rails wiring, server, the `test_mode` flag itself) → top-level `config.example.yaml`.
 - **Per-CUSTOMER settings** — `money_settings` (billing_mode, spend limits, auto-topup, credit expiry) and
   `customer_minimum_spend` (#643) are per-customer, set at runtime, never in a merchant-level file.
 - **Tier/role/budget policy templates** (`tier_schedules`, invoker/payer spend limits) — a separate
-  merchant-policy domain; note as a future candidate, not part of this issue.
+  merchant-policy domain; future candidate, not this issue.
 
-Acceptance: `merchants.example.yaml` documents every field of `merchant_configurations` (profile + invoice +
-delegated-invoker windows) alongside identity/issuer/provider_accounts, `push-merchant-config` actually
-applies all of them, and the file's header enumerates the full merchant-config landscape with pointers to the
-sibling manifests for catalog / auth / runtime / per-customer config.
+Acceptance: one struct family ⇄ one YAML shape; `push-merchant-config` applies the COMPLETE merchant config
+(identity/issuer/profile/provider_accounts + invoice + delegated-invoker windows); `dump-merchant-config`
+exports it back (secrets as refs) such that dump→push→dump is idempotent; `merchants.example.yaml` is realistic,
+self-describing, shows every field with defaults, and declares a test+live account pair per provider with
+`test_mode` selecting the active environment.
 
 ---
 
-# #644: product-kind-contracts-prevent-tier-group-misuse
+# #644: product-kind contracts — compose typed capabilities, validate illegal mixes (no product.type)
 
 **Completed:** no
-**Status:** PROPOSED 2026-06-29: The catalog is letting different product shapes leak fields into each other. `config/catalog.example.yaml` puts `image-credit-topup` in `tier_group: ai-credit-topups`, but a variable credit top-up is a repeatable checkout/deposit product, not a mutually-exclusive SaaS membership tier. Same broader problem applies to VM rentals, durable movie ownership, API-credit purchases, and SaaS plans: they are different commercial shapes and should have inferred contracts from their fields, not a new required `product.type`.
+**Status:** PROPOSED 2026-06-30 (rewritten + split). NON-BREAKING half: enforce which product capabilities may co-exist, and fix the example's `tier_group` leak — all on the CURRENT schema. The BREAKING schema work this issue originally bundled (typed price-model sub-blocks, 1:1 Go↔YAML structs, credits map→array + `credit_balances`, retiring the `credit_purchase` wrapper, DB migration) is split into #645, which needs a coordinated consumer bump.
 
 ## Metadata
 - Category: billing
@@ -100,147 +118,123 @@ sibling manifests for catalog / auth / runtime / per-customer config.
 
 ## Problem
 
-OpenRails currently has one broad `Product` struct with optional fields. That is flexible, but it lets invalid combinations look valid:
+One broad `Product` struct with all-optional capability fields (`tier_group`/`tier_rank`, `prices`, `rate_cards`, `credit_purchase`, `credits`, `entitlements`) lets invalid combinations look valid. Live symptom: `config/catalog.example.yaml` puts `image-credit-topup` under `tier_group: ai-credit-topups`, but a variable credit top-up is a repeatable checkout, not a mutually-exclusive membership tier.
 
-- **SaaS membership tier**: mutually exclusive within a `tier_group`, usually recurring, upgrade/downgrade comparable by `tier_rank`, may grant recurring credits/entitlements.
-- **Credit/API top-up**: repeatable arbitrary checkout, deposits credits, may expire, should not upgrade/downgrade/cancel/replace anything.
-- **Durable/limited ownership** such as a movie: buy once or rent for a fixed access window; product access/ownership semantics matter, not recurring tier hierarchy.
-- **Rented infrastructure/resource usage** such as a VM: host owns the concrete resource lifecycle; OpenRails rates measured usage via meters/rate cards, not "user owns one VM product".
+## Design decision: TYPE prices, COMPOSE products
 
-`tier_group` means "choose one active product from this subscription family" and drives tier-rank / upgrade semantics. A `credit_purchase` product does not behave that way: the customer may buy it repeatedly, the amount is arbitrary, and it deposits credits rather than plan membership.
+The catalog has two axes, and they get OPPOSITE treatment — this is the crux:
 
-The immediate symptom is the example top-up product using a fake tier group. The deeper issue is missing product-kind contracts.
+- **Prices are disjoint variants.** A price is exactly one of flat / per_unit / tiered; `unit_amount` + `package_size` + `tiers` together is always a bug. → keep an explicit `price.model` discriminator, and (in #645) give each model its OWN typed sub-block so mixing is impossible by construction. Stripe/Lago/OpenMeter all type their price/charge models (OpenMeter's `price.go` is a discriminated union).
+- **Products are compositions, NOT variants.** A product is a BUNDLE of orthogonal capabilities (pricing × grants × membership-semantics), not a single kind. Legitimate real combinations: a membership tier that ALSO grants credits (cozy), and a plan with a flat base price AND metered `rate_cards` overage (the standard OpenMeter/Lago plan — the example's `spaces` product already does flat + usage rate cards). A single `product.type` (or product sum type) would FORBID those. → **NO `product.type`.** Stripe/Lago/OpenMeter don't type products either; behavior lives in the (typed) prices/features.
 
-There is a related price-model cleanup: the catalog currently carries `package` and `dynamic` price models, but the example and real use cases only exercise `flat`, `per_unit`, and `tiered`. `package` is redundant with `per_unit + divide_by + round: up` plus allowances/fixed products, and `dynamic` is speculative until a real provider-cost-plus-markup product exists.
+So the safety the catalog needs is not a product type — it is **explicit capability-compatibility rules**: testable, self-documenting, and unable to disagree with the actual fields (a derived "kind" can drift from them). Prefer direct rules over "infer a kind, then reject."
 
-## Design Direction
+## Capability-compatibility rules
 
-Separate two concepts:
+- **credit top-up** (variable credit delivery) ⇒ NO `tier_group`/`tier_rank`, NO subscription/recurring prices, NO `rate_cards`. Standalone repeatable checkout.
+- **usage / `rate_cards`** ⇒ NO `tier_group`/`tier_rank` (a metered resource is not a tier). MAY carry a flat base-fee price — do NOT reject `flat base + metered overage`; that is a valid plan.
+- **membership** (`tier_group`/`tier_rank`) ⇒ has recurring prices; mutually exclusive within its group.
+- **credits / entitlements** ⇒ orthogonal grants; allowed on memberships AND one-time/ownership products.
 
-- `price.model` is good and should stay. Stripe, Lago, and OpenMeter all use an explicit price/charge-model discriminator because the formula cannot be inferred safely from fields.
-- Do not add a required `product.type` field. Product kind should be inferred from behavior fields, then illegal mixes should be rejected.
-- The Go catalog structs must match the YAML shape 1:1. Do not keep a separate awkward Go-only representation that then has to be adapted into the YAML shape; parsing structs, validation, tests, and examples should speak the same structure.
+## Tasks (non-breaking; current schema)
 
-Use inferred product kinds. The current fields are already enough to infer the shape:
+- [ ] Remove `tier_group: ai-credit-topups` from `image-credit-topup` in `config/catalog.example.yaml`; audit for other leaks (esp. usage/rental products placed inside tier groups).
+- [ ] Add loader validation for the capability-compatibility rules above, with `credit_purchase` + `tier_group` as the first explicit rejection.
+- [ ] Explicitly ALLOW `flat price + rate_cards` (flat base + metered overage); add a test so future validation can't regress it.
+- [ ] Do NOT add a `product.type` field or a product sum type. Document the four capability shapes (membership / credit-top-up / access-ownership / metered-rental) and the rules in comments near validation.
+- [ ] Keep `price.model` explicit; document it is the price-FORMULA discriminator, not the product kind.
+- [ ] Loader tests: one good product per shape + one rejected case per illegal mix.
 
-- `credit_purchase` => top-up product.
-- usage `rate_cards` without normal subscription prices => metered/rental product.
-- `tier_group`/`tier_rank` with recurring prices => SaaS membership tier.
-- product access / entitlement / finite-duration one-time prices => ownership/rental access product.
+The price-model TYPING (sub-blocks), 1:1 Go↔YAML structs, and the credit-model reshape are #645 (breaking).
 
-Then validate illegal mixes. Keep the YAML smaller and avoid a second field that can disagree with the actual configured behavior.
+---
 
-Price model direction:
+# #645: typed price-model sub-blocks + 1:1 Go↔YAML catalog structs + credit-model reshape (BREAKING — coordinated bump)
 
-- Keep `model: flat`, `model: per_unit`, and `model: tiered`.
-- Move money currency/provider terms onto each price/offer, not the credit top-up product shape. A credit top-up product defines what balance is delivered; each price defines how much money, which currency, and which providers can sell it.
-- Allow multiple credit-purchase prices/offers for the same top-up product when needed, e.g. USD and EUR offers, Stripe-only vs Solana-only offers, monthly promo rate vs normal rate.
-- Remove duplicate credit-balance declarations. Today membership grants use `credits.ai-image-gen.unit = ai-image-credit`, while top-ups repeat `credit_type: ai-image-gen` and `unit: ai-image-credit`. The credit balance should be defined once and referenced by key. Product credit grants should be an array of keyed grant entries, not a map, so multiple grants are readable and ordered.
-- Remove `model: package` and `model: dynamic` until a real merchant/product needs them.
-- Keep both tier modes in the generic tiered price model:
-  - `mode: graduated` for marginal tiers; standard in Stripe/OpenMeter/Lago and required for credit purchases.
-  - `mode: volume` for intentional bulk repricing where the whole quantity is priced at the reached tier; standard in Stripe/OpenMeter/Lago, valid for some metered usage contracts.
-- Restrict `credit_purchase` to `mode: graduated` because `volume` creates cliffs and makes spend-to-credits inversion ambiguous near thresholds.
+**Completed:** no
+**Status:** PROPOSED 2026-06-30 (split from #644). Breaking manifest + JSONB schema change. Like #630, it must ship as ONE coordinated wave: migrate `config/catalog.example.yaml` + cozy-art's pushed catalog + the money checkout, then tag openrails and bump consumers (doujins/hentai0/cozy). Do NOT land piecemeal — that would force several separate breaks on the same consumers.
 
-## Current Shape Audit (2026-06-30)
+## Metadata
+- Category: billing
+- Status: proposed
+- Passes: false
 
-Current code is not merely missing comments/docs; the implementation shape still encodes the wrong model:
+## Goal
 
-- `pkg/catalog/manifest.go` has one broad `Product` with `TierGroup`, `Credits`, `Prices`, `RateCards`, and `CreditPurchase` all optional. There is no inferred-kind validation preventing a repeatable top-up from also being a tier.
-- `Product.Credits` is currently `map[string]CreditGrant`, where the map key is the credit balance id and the grant repeats `unit`/`currency`. This does not match the desired YAML array shape and cannot preserve ordering. It also makes absence vs zero amount hard to express for variable top-ups.
-- `Manifest` has no top-level `credit_balances`, so the `ai-image-gen` balance is defined implicitly in every membership grant and repeated again in the top-up block.
-- `CreditPurchase` is currently a wrapper under the product with `credit_type`, `unit`, `currency`, `providers`, `input_min`, `input_max`, `round`, and a singular nested `price`. That is the exact shape we want to retire: money/provider/offer fields are product-level in Go/YAML, and multiple prices are impossible.
-- `Product.Prices []Price` is the legacy fixed/subscription purchase shape (`unit_amount`, `duration`, `auto_renew`, `providers`, `provider_links`, `trial`, `metered`). It does not directly support top-up pricing fields such as `model`, `mode`, `tiers`, `input_min`, or `input_max`.
-- `RateCard.Price` uses `pricing.RatePrice`, a separate charge-model shape with `model`, `currency`, `providers`, `amount`, `unit_amount`, `divide_by`, `mode`, `tiers`, `matrix`, etc. This is useful for metered/resource pricing, but it means top-up prices and normal product prices do not currently share one catalog offer shape.
-- `pkg/pricing` and `pkg/catalog/ratecard.go` still expose and validate `package` and `dynamic`, and tests still cover them, even though no current example needs them.
-- Persistence mirrors the wrapper: migration `046_catalog_rate_cards` creates one `catalog_credit_purchases` row per product, with `credit_type`, `unit`, `currency`, `providers`, limits, round mode, and raw `price` JSON. The primary key is `product_id`, so the DB cannot represent multiple top-up prices/offers for one product.
-- Runtime quote/deposit reads that singular `catalog_credit_purchases` row by product. Supporting per-price currency/provider offers will require changing the query and input contract, not just changing YAML.
-- `config/catalog.example.yaml` still has `image-credit-topup` with `tier_group: ai-credit-topups`, a `credit_purchase` wrapper, duplicated `unit`, product-level `currency`/`providers`, and a nested singular `price`.
+Make every catalog AUTHORING struct 1:1 with its YAML so (un)marshaling is a natural fit with no parallel/adapter Go shape, and type the price models so cross-model field leakage is impossible by construction (the #644 decision).
 
-Target YAML direction:
+## 1. Typed price models — discriminator + typed sub-block
+
+Today `pkg/pricing.RatePrice` is one wide struct: `Model` plus every model's fields optional (`unit_amount`, `divide_by`, `round`, `mode`, `tiers`, `package_size`, `multiplier`, `maximum_amount`, `matrix`). Nothing structurally stops `unit_amount` + `tiers` on one price; only validation catches it.
+
+Adopt the SAME pattern #630 used for `ProviderAccountConfig` (a discriminator + exactly-one typed sub-block):
 
 ```yaml
-credit_balances:
-  - key: ai-image-gen
-    unit: ai-image-credit
-    expires_default: 30d
-
-products:
-  - key: grandmaster
-    tier_group: cozy
-    tier_rank: 4
-    credits:
-      - key: ai-image-gen
-        amount: 15_000
-        cadence: per_renewal
-    prices:
-      - currency: usd
-        unit_amount: 119_000_000
-        duration: 30d
-        auto_renew: true
-        providers: [stripe]
-
-  - key: image-credit-topup
-    credits:
-      - key: ai-image-gen
-    prices:
-      - currency: usd
-        providers: [stripe]
-        input_min: 5_000_000
-        input_max: 500_000_000
-        round: down
-        model: tiered
-        mode: graduated
-        tiers:
-          - up_to: 2_000
-            unit_amount: 10_000
-          - up_to: 10_000
-            unit_amount: 9_000
-          - up_to: null
-            unit_amount: 8_000
+price:
+  model: per_unit
+  per_unit: { unit_amount: 8_930, divide_by: 3_600, round: up, maximum_amount: 6_000_000, matrix: { ... } }
+# or
+  model: tiered
+  tiered: { mode: graduated, tiers: [ { up_to: 2_000, unit_amount: 10_000 }, { up_to: null, unit_amount: 8_000 } ] }
+# or
+  model: flat
+  flat: { amount: 5_000_000 }
 ```
 
-The top-up product says "this purchase deposits into `ai-image-gen`"; each price says "this is how this offer is bought." `amount` is required for fixed/recurring grants and omitted for variable top-ups. The Go struct should make that visible, likely with `Amount *int64` rather than `int64`, so validation can distinguish omitted from zero.
+```go
+type RatePrice struct {
+    Model   string        `json:"model" yaml:"model"`
+    Flat    *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
+    PerUnit *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
+    Tiered  *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
+}
+```
 
-## Migration Plan
+- Each variant struct holds ONLY its fields → no cross-model leakage.
+- Standard JSON/YAML marshaling (nested pointers; NO custom Unmarshaler, unlike an interface union), and it round-trips cleanly through the `catalog_rate_cards.price` JSONB column.
+- Validation collapses to "exactly one sub-block, and it matches `Model`."
+- Keep `ChargeModel` as the flat NORMALIZED EVALUATION struct; `RatePrice.ToChargeModel()` flattens at rate-time. The 1:1 rule is about AUTHORING/wire structs; the eval form is a legitimately separate normalized type behind the apply boundary.
 
-1. **Manifest structs first.** Add `Manifest.CreditBalances []CreditBalance`. Change product credits from `map[string]CreditGrant` to `[]CreditGrant` with a required `Key` field and pointer `Amount`. Keep Go field names/tags aligned exactly with the target YAML.
-2. **Unify product offer parsing.** Extend or replace `Product.Prices []Price` so top-up offers can carry `model`, `mode`, `tiers`, `input_min`, `input_max`, and `round` directly on the price entry. Do not keep a Go-only `CreditPurchase.Price` adapter shape.
-3. **Retire the `credit_purchase` wrapper.** Remove `Product.CreditPurchase` from the desired catalog shape. Infer "credit top-up" from a product with variable credit delivery (`credits: [{key: ...}]` with no fixed amount) and prices that contain charge-model fields.
-4. **Keep rate-card pricing separate only where the YAML is separate.** `rate_cards[].price` can continue to use a rate-card price struct if that YAML remains nested under `rate_cards`. The rule is not "one global price struct for everything"; it is "each YAML shape has a matching Go shape, without an extra hidden adapter shape."
-5. **Validation pass.** Validate credit balances globally, reject duplicate balance keys, reject product duplicate `credits[].key`, require every grant to reference an existing balance, require fixed membership grants to set `amount`, require variable top-ups to omit `tier_group`, reject top-up `mode: volume`, and reject ambiguous multiple top-up prices with the same currency/provider until offer keys are introduced.
-6. **Delete speculative charge models.** Remove `package` and `dynamic` constants, validation cases, engine branches, tests, and docs while keeping `flat`, `per_unit`, `tiered`, `graduated`, and `volume`.
-7. **DB sidecar migration.** Add catalog storage for canonical credit balances. Replace the one-row-per-product `catalog_credit_purchases` shape with a shape that can represent one top-up product and N prices, e.g. `catalog_credit_purchase_products(product_id, credit_balance_key, expires_hours)` plus `catalog_credit_purchase_prices(product_id, ordinal, currency, providers, input_min, input_max, round, price jsonb)`, or an equivalent normalized shape.
-8. **Applier/service mapping.** Update `pkg/catalog/applier_service.go` and `pkg/service/catalog_sidecars.go` so the final YAML maps directly into service specs. Runtime-normalized structs are fine behind this boundary, but the loader structs should not preserve the old wrapper.
-9. **Quote/runtime contract.** Update `QuoteCatalogCreditPurchase` to choose a top-up offer by product plus currency/provider or a future price key. For this pass, reject multiple indistinguishable prices rather than inventing a hidden selector.
-10. **Examples and tests.** Update `config/catalog.example.yaml` to the canonical balance + credits array + prices-on-top-up shape. Add loader tests for the new good shape and each invalid mix. Add DB-backed integration tests proving multiple top-up prices persist, quote correctly, and deposit into the same canonical credit balance.
+## 2. 1:1 Go↔YAML for all authoring structs
+
+- products, prices, credits, `credit_balances`, rate cards, meters each map directly to their YAML with no second Go shape that must be hand-adapted. (money's old duplicated pricing engine is already gone after the #638 `pkg/pricing` extraction; audit for any remaining adapter-only shapes.)
+- Precise rule: each YAML shape has a matching Go shape with no hidden adapter; normalized RUNTIME structs (e.g. `ChargeModel`, service specs that carry pre-marshaled JSON) are allowed ONLY behind the validation/apply boundary.
+
+## 3. Credit-model reshape (the breaking part of original #644)
+
+Current shape (to retire): `Product.Credits` is `map[string]CreditGrant` (repeats unit/currency, unordered); there is no top-level `credit_balances`; `CreditPurchase` is a per-product wrapper with `credit_type`/`unit`/`currency`/`providers`/`input_min`/`input_max`/`round`/singular `price`; migration `046` stores one `catalog_credit_purchases` row per product (PK `product_id`, so multiple offers are impossible); `QuoteCatalogCreditPurchase` reads that single row.
+
+Target:
+- `credit_balances: [{key, unit, expires_default}]` — canonical, declared once per catalog; memberships and top-ups reference it by `key` (no repeated `unit`).
+- product `credits: [{key, amount, cadence}]` — ARRAY (ordered, multiple grants), not a map; `Amount *int64` so omitted (variable top-up delivery) is distinct from zero. Reject duplicate `credits[].key`; every grant must reference a declared balance; fixed/recurring grants require `amount`.
+- Retire the `credit_purchase` wrapper. A top-up = a product with `credits: [{key}]` (no fixed amount) + one or more `prices` offers, each carrying `currency`, `providers`, `input_min`/`input_max`, `round`, and a typed price sub-block (§1). Multiple offers (USD/EUR, Stripe-only/Solana-only, promo). Credit-top-up offers restricted to `tiered{mode: graduated}` or `per_unit` (invertible — #640).
+
+## 4. Price-model set — keep flat/per_unit/tiered; package vs dynamic
+
+**Correction to original #644's rationale:** "`package` is redundant with `per_unit` + `divide_by` + `round: up`" is FALSE. Verified in `pkg/pricing/chargemodel.go`: `per_unit` rounds MONEY after multiply (`round(qty × unit ÷ divisor)`), while `package` rounds UNITS up to whole blocks (`ceil(qty ÷ size) × amount`). E.g. 150 units, 100-block @ 5_000: package = 10_000, per_unit{round:up} = 7_500 — different. And you cannot make `per_unit` round units instead: that breaks DO per-second pro-rating (the reason #638 made `round` = money-rounding). So:
+- **KEEP `package`** — it is the only block/round-up-to-whole-units model; standard in Stripe/Lago/OpenMeter. (Recommended; fix the "redundant" wording wherever it appears.)
+- **`dynamic`** (cost-plus markup) is the fair YAGNI cut — remove until a real passthrough/reseller product needs it. Easy to re-add (standard in Lago/OpenMeter).
+- Keep `tiered` `graduated` + `volume` in the engine.
+- (If strict minimalism is preferred, both could go — but on YAGNI grounds, NOT "redundant," and noting block pricing is dropped.)
+
+## 5. Persistence + runtime + coordinated bump
+
+- DB: add `catalog_credit_balances`; replace the one-row-per-product `catalog_credit_purchases` (PK `product_id`) with a top-up-product + N-prices shape, e.g. `catalog_credit_purchase_prices(product_id, ordinal, currency, providers, input_min, input_max, round, price jsonb)`. Price JSONB stores the typed sub-block shape (§1).
+- Applier/service (`pkg/catalog/applier_service.go`, `pkg/service/catalog_sidecars.go`): map final YAML → specs directly; runtime-normalized structs allowed behind the boundary.
+- `QuoteCatalogCreditPurchase`: select an offer by (currency, provider) [reject ambiguous same-(currency,provider) duplicates for now; add an offer key later].
+- **Coordinated release:** migrate `config/catalog.example.yaml` + cozy-art's catalog + the money checkout in lockstep, then tag openrails and bump doujins/hentai0/cozy (the #630 playbook). One break, one tag.
 
 ## Tasks
 
-- [ ] Remove `tier_group: ai-credit-topups` from `image-credit-topup` in `config/catalog.example.yaml`.
-- [ ] Add loader validation rejecting products that define both `credit_purchase` and `tier_group`.
-- [ ] Add a focused loader test proving credit-purchase products are standalone repeatable top-up products.
-- [ ] Audit `config/catalog.example.yaml` for other field leaks between product shapes, especially metered/rental products inside subscription tier groups.
-- [ ] Keep `price.model` explicit; document that it is the price formula discriminator, not the product kind.
-- [ ] Redesign top-up products so the delivered credit balance is declared by `credits: [{key: ...}]`, while `currency`, `providers`, input bounds, round mode, and price formula live on one or more `prices` entries.
-- [ ] Remove the desired YAML `credit_purchase` wrapper; if a transition shim is kept temporarily, mark it legacy and keep it out of `config/catalog.example.yaml`.
-- [ ] Add validation/tests for multiple credit-purchase prices on one top-up product and remove product-level top-up `currency`/`providers`.
-- [ ] Make Go catalog structs mirror the final YAML shapes 1:1 for all catalog items: products, prices, credits, credit balances, rate cards, and usage meters.
-- [ ] Remove adapter-only struct shapes where they exist only to compensate for YAML/Go mismatch; keep separate normalized runtime structs only behind validation/apply boundaries.
-- [ ] Introduce one canonical credit-balance definition per merchant/catalog, e.g. `credit_balances: [{key: ai-image-gen, unit: ai-image-credit, expires_default: 30d}]`, then have memberships and top-ups reference `ai-image-gen` instead of repeating `unit`.
-- [ ] Change product credit grants from a map to an array shape: `credits: [{key: ai-image-gen, amount: 15_000, cadence: per_renewal}]`.
-- [ ] Support multiple credit grants per product with the array shape; reject duplicate `credits[].key` entries on the same product.
-- [ ] Update membership `credits` and `credit_purchase` examples to reference the same credit balance key; reject mismatched duplicate unit declarations.
-- [ ] Add `CreditGrant.Amount *int64` or equivalent so validation can distinguish fixed grants from variable top-up delivery.
-- [ ] Add `Manifest.CreditBalances []CreditBalance` plus service/applier persistence for canonical balance metadata.
-- [ ] Define the small set of inferred product kinds in comments/docs near catalog validation: membership tier, credit top-up, access/ownership product, metered/rental product.
-- [ ] Add validation for any other obviously invalid combinations found in the audit; do not add a broad `product.type` migration.
-- [ ] Remove unused `package` and `dynamic` price models from catalog validation, pricing constants/engine, tests, and docs/progress wording.
-- [ ] Keep `tiered` support for both `graduated` and `volume` in the generic pricing engine.
-- [ ] Keep/ensure validation rejects `credit_purchase` with `mode: volume`; credit top-ups must use graduated tiering for stable bidirectional quotes.
-- [ ] Keep membership products that grant recurring credits in tier groups; only variable top-up products are forbidden.
-- [ ] Replace the one-row-per-product `catalog_credit_purchases` storage with a multi-price top-up storage shape, or prove the existing schema can represent multiple prices before claiming support.
-- [ ] Update credit-purchase quote/deposit integration tests to use the final YAML-shaped catalog, not hand-inserted legacy sidecar rows.
+- [ ] Reshape `pricing.RatePrice` to discriminator + typed sub-blocks (flat/per_unit/tiered); validation = exactly-one-block-matching-`model`; keep `ChargeModel` as the flat eval form; update catalog aliases + the example.
+- [ ] Audit + collapse any remaining adapter-only Go shapes; assert each authoring struct is 1:1 with its YAML.
+- [ ] `Manifest.CreditBalances []CreditBalance`; product `Credits []CreditGrant` (array, required `Key`, `Amount *int64`); retire `Product.CreditPurchase`.
+- [ ] Top-up = `credits:[{key}]` + `prices:[offers]`; multiple offers; graduated/per_unit only; reject ambiguous same-(currency,provider) offers.
+- [ ] KEEP `package` and fix the "redundant" wording everywhere; REMOVE `dynamic` (constants/engine/validation/tests/docs) — or record the decision if kept.
+- [ ] DB: `catalog_credit_balances` + multi-price top-up storage; price JSONB = typed sub-block.
+- [ ] Applier/service mapping + `QuoteCatalogCreditPurchase` offer selection (currency/provider).
+- [ ] Migrate `config/catalog.example.yaml` + cozy-art catalog; loader + DB-integration tests for the new shapes (multi-offer persist/quote/deposit into one canonical balance; each illegal mix rejected).
+- [ ] Coordinated release: tag openrails + bump doujins/hentai0/cozy (per the #630 playbook).
 
 ---
 
