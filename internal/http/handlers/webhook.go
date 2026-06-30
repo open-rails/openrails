@@ -146,7 +146,7 @@ func MerchantWebhook(r *httprequest.Request) {
 	}
 	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
 	r.Request = r.Request.WithContext(ctx)
-	processResolvedMerchantWebhook(r, provider, route.MerchantID)
+	processResolvedMerchantWebhook(r, provider, route.MerchantID, strings.TrimSpace(r.Param("account_id")))
 }
 
 // HostWebhook handles a webhook after an embedding host has resolved Host to a
@@ -163,12 +163,12 @@ func HostWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
 		return
 	}
-	processResolvedMerchantWebhook(r, provider, merchantID)
+	processResolvedMerchantWebhook(r, provider, merchantID, strings.TrimSpace(r.Param("account_id")))
 }
 
-func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) {
+func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
 	if rails.IsNMI(models.Rail(provider)) {
-		if processMerchantNMIWebhook(r, provider, merchantID) {
+		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
@@ -253,12 +253,25 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
-func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) bool {
+func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) bool {
 	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
 	if !ok {
 		return false
 	}
-	signingKey, err := r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)
+	var signingKey string
+	var err error
+	if accountID != "" {
+		// #641: per-account endpoint — verify with THIS account's secret only;
+		// an unknown account is rejected (no fallback to the primary).
+		var found bool
+		signingKey, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
+		if err == nil && !found {
+			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			return false
+		}
+	} else {
+		signingKey, err = r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)
+	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
@@ -291,15 +304,16 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Rail:           prepared.Rail,
-		EventID:        prepared.EventID,
-		EventType:      prepared.EventType,
-		Payload:        prepared.Body,
-		IPAddress:      r.GetRemoteIP(),
-		Signature:      prepared.Signature,
-		SigningSecret:  signingKey,
-		SignatureValid: &signatureVerified,
-		ReceivedAt:     time.Now(),
+		Rail:              prepared.Rail,
+		EventID:           prepared.EventID,
+		EventType:         prepared.EventType,
+		Payload:           prepared.Body,
+		IPAddress:         r.GetRemoteIP(),
+		Signature:         prepared.Signature,
+		SigningSecret:     signingKey,
+		SignatureValid:    &signatureVerified,
+		ReceivedAt:        time.Now(),
+		ProviderAccountID: accountID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {

@@ -117,6 +117,7 @@ func (m *Manifest) validate() error {
 	// Product keys are globally unique across the manifest, so the same key in
 	// two tier groups would collide on apply.
 	productKeys := map[string]struct{}{}
+	meteredPriceMeters := map[string]string{}
 
 	for gi := range m.TierGroups {
 		group := &m.TierGroups[gi]
@@ -135,7 +136,7 @@ func (m *Manifest) validate() error {
 		requireTierRank := len(group.Products) > 1
 		for pi := range group.Products {
 			product := &group.Products[pi]
-			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, meterKinds); err != nil {
+			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, meterKinds, meteredPriceMeters); err != nil {
 				return err
 			}
 		}
@@ -143,10 +144,13 @@ func (m *Manifest) validate() error {
 	if err := m.validateProductBenefitRefs(productKeys, usageLimitKeys); err != nil {
 		return err
 	}
+	if err := m.validateRateCardModel(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, meterKinds map[string]string) error {
+func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, meterKinds map[string]string, meteredPriceMeters map[string]string) error {
 	product.Key = normalizeSlug(product.Key)
 	if product.Key == "" {
 		return fmt.Errorf("tier group %q has a product without a key", groupKey)
@@ -175,6 +179,14 @@ func (m *Manifest) validateProduct(groupKey string, product *Product, productKey
 		price := &product.Prices[pri]
 		if err := m.validatePrice(*product, price, pri, meterKinds); err != nil {
 			return err
+		}
+		if price.Metered != nil {
+			meter := price.Metered.Meter
+			label := PriceLabel(product.Key, *price)
+			if previous, ok := meteredPriceMeters[meter]; ok {
+				return fmt.Errorf("meter %q is used by multiple metered prices (%s and %s); use a distinct meter per rate", meter, previous, label)
+			}
+			meteredPriceMeters[meter] = label
 		}
 		key := priceTermsKey(*price)
 		if _, ok := priceTerms[key]; ok {
@@ -330,12 +342,21 @@ func (m *Manifest) validateMeters() (map[string]string, error) {
 			return nil, fmt.Errorf("duplicate meter key %q", meter.Key)
 		}
 		meter.Kind = strings.ToLower(strings.TrimSpace(meter.Kind))
-		switch meter.Kind {
-		case "counter", "gauge":
+		meter.Aggregation = strings.ToLower(strings.TrimSpace(meter.Aggregation))
+		switch {
+		case meter.Aggregation != "": // rate-card meter (#638)
+			if _, ok := validAggregations[meter.Aggregation]; !ok {
+				return nil, fmt.Errorf("meter %q aggregation must be one of sum/count/max/min/unique_count/latest", meter.Key)
+			}
+			if meter.Kind != "" {
+				return nil, fmt.Errorf("meter %q sets both kind and aggregation; use one shape", meter.Key)
+			}
+			out[meter.Key] = meter.Aggregation
+		case meter.Kind == "counter" || meter.Kind == "gauge": // legacy meter
+			out[meter.Key] = meter.Kind
 		default:
-			return nil, fmt.Errorf("meter %q kind must be counter or gauge", meter.Key)
+			return nil, fmt.Errorf("meter %q must set kind (counter|gauge) or aggregation", meter.Key)
 		}
-		out[meter.Key] = meter.Kind
 	}
 	return out, nil
 }

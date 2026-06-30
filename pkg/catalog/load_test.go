@@ -434,6 +434,33 @@ products:
 	}
 }
 
+func TestLoad_MeteredRejectsDuplicateMeterRates(t *testing.T) {
+	body := `
+version: 1
+meters:
+  - {key: droplet-vcpu-seconds, kind: counter}
+products:
+  - key: basic-droplet
+    display_name: Basic Droplet
+    tier_group: basic
+    prices:
+      - currency: usd
+        unit_amount: 0
+        metered: {meter: droplet-vcpu-seconds, rate: 7_000, per_units: 3_600}
+  - key: premium-droplet
+    display_name: Premium Droplet
+    tier_group: premium
+    prices:
+      - currency: usd
+        unit_amount: 0
+        metered: {meter: droplet-vcpu-seconds, rate: 14_000, per_units: 3_600}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "used by multiple metered prices") {
+		t.Fatalf("want duplicate metered meter error, got %v", err)
+	}
+}
+
 func TestLoad_UsageLimitReferenceMustExist(t *testing.T) {
 	body := `
 version: 1

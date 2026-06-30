@@ -63,6 +63,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		EntitlementsSpecSnapshot: entSnap,
 		CreditsSpecSnapshot:      credSnap,
 		Status:                   string(s.Status),
+		ProviderAccountID:        s.ProviderAccountID,
 		StartedAt:                s.StartedAt,
 		EndedAt:                  s.EndedAt,
 		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
@@ -98,6 +99,9 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 		return terr
 	}
 	params.MerchantID = tid.UUID()
+	if params.ProviderAccountID == nil {
+		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), s.Rail)
+	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
 		return err

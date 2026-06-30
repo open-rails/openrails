@@ -73,6 +73,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		ListAmount:               p.ListAmount,
 		Currency:                 currency,
 		Status:                   p.Status,
+		ProviderAccountID:        p.ProviderAccountID,
 		SubscriptionID:           p.SubscriptionID,
 		RefundedPaymentID:        p.RefundedPaymentID,
 		DiscountCode:             p.DiscountCode,
@@ -102,6 +103,9 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		return terr
 	}
 	params.MerchantID = tid.UUID()
+	if params.ProviderAccountID == nil {
+		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), payment.Rail)
+	}
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
 		return err
@@ -125,6 +129,9 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		return false, terr
 	}
 	params.MerchantID = tid.UUID()
+	if params.ProviderAccountID == nil {
+		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), payment.Rail)
+	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
 		return false, err

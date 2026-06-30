@@ -317,6 +317,107 @@ func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
 	require.Zero(t, countPriceActions(again.Plan, catalog.PriceCreate))
 }
 
+// TestCatalogPublishRateCardsHTTP drives the full manifest -> apply -> DB path for
+// the #638/#639 rate-card model: a usage product priced by a matrix rate card
+// (and no flat prices) and a variable credit-purchase product, published over
+// HTTP, must create the products AND persist their rate-card / credit-purchase
+// sidecars. Guards the applier mapping that the spec-level sidecar test skips.
+func TestCatalogPublishRateCardsHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+	token := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-ratecards-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	meterKey := "droplet-seconds-" + suffix
+	dropletKey := "droplet-" + suffix
+	topupKey := "image-credit-topup-" + suffix
+	mid := dbtest.TestMerchantID.UUID()
+	t.Cleanup(func() {
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", mid, meterKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, topupKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", mid, meterKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey, topupKey})
+	})
+
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Meters: []catalog.Meter{{
+			Key:           meterKey,
+			EventType:     "droplet.usage",
+			ValueProperty: "$.seconds",
+			Aggregation:   "sum",
+			GroupBy:       map[string]string{"size_slug": "$.size_slug"},
+		}},
+		Products: []catalog.Product{
+			{
+				Key:            dropletKey,
+				DisplayName:    "Droplet",
+				TierGroup:      "droplets-" + suffix,
+				BillingCadence: "30d",
+				RateCards: []catalog.RateCard{{
+					Meter: meterKey,
+					Price: catalog.RatePrice{
+						Model: "per_unit", Currency: "usd", DivideBy: 3600,
+						Matrix: &catalog.Matrix{Dimension: "size_slug", Cells: map[string]catalog.MatrixCell{
+							"s-1vcpu-1gb": {UnitAmount: 8930, MaximumAmount: 6_000_000},
+						}},
+					},
+				}},
+			},
+			{
+				Key:         topupKey,
+				DisplayName: "Image Credit Top-up",
+				TierGroup:   "topups-" + suffix,
+				CreditPurchase: &catalog.CreditPurchase{
+					CreditType: "image-credit", Unit: "image-credit", Currency: "usd",
+					Price: catalog.RatePrice{Model: "tiered", Mode: "graduated", Tiers: []catalog.RateTier{
+						{UpTo: ptrI64(2000), UnitAmount: 10000},
+						{UnitAmount: 7500},
+					}},
+				},
+			},
+		},
+	}
+
+	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
+
+	// The matrix rate card persisted and links its meter + product.
+	var model, rcMeter string
+	require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT rc.price ->> 'model', rc.meter_key
+FROM openrails.catalog_rate_cards rc
+JOIN openrails.products p ON p.id = rc.product_id
+WHERE p.merchant_id = $1 AND p.key = $2`, mid, dropletKey).Scan(&model, &rcMeter))
+	require.Equal(t, "per_unit", model)
+	require.Equal(t, meterKey, rcMeter)
+
+	// The credit-purchase sidecar persisted.
+	var creditType string
+	require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT ccp.credit_type
+FROM openrails.catalog_credit_purchases ccp
+JOIN openrails.products p ON p.id = ccp.product_id
+WHERE p.merchant_id = $1 AND p.key = $2`, mid, topupKey).Scan(&creditType))
+	require.Equal(t, "image-credit", creditType)
+
+	// The rate-card meter persisted with its aggregation.
+	var agg string
+	require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT aggregation FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2`, mid, meterKey).Scan(&agg))
+	require.Equal(t, "sum", agg)
+}
+
+func ptrI64(v int64) *int64 { return &v }
+
 func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
@@ -1259,9 +1360,19 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 	var file exampleCatalogFile
 	require.NoError(t, yaml.UnmarshalWithOptions(raw, &file, yaml.DisallowUnknownField()))
 	require.Equal(t, catalog.SupportedVersion, file.Version)
-	require.Len(t, file.Catalogs, 1)
+	require.GreaterOrEqual(t, len(file.Catalogs), 1)
 
-	entry := file.Catalogs[0]
+	// The example is multi-merchant; exercise the HTTP apply path against the
+	// anthropic catalog (legacy usage_limits + subscription prices, which the
+	// applier fully supports). Rate-card apply (digital-ocean/cozy) gets its own
+	// test when the applier persists rate_cards (#638).
+	var entry exampleCatalogEntry
+	for _, c := range file.Catalogs {
+		if c.Merchant == "anthropic" {
+			entry = c
+		}
+	}
+	require.Equal(t, "anthropic", entry.Merchant, "example must include the anthropic catalog")
 	suffix := "-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	meterKeys := map[string]string{}
 	for i := range entry.Meters {

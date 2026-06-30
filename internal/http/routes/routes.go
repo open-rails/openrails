@@ -556,4 +556,9 @@ func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // embedded mux, so the two cannot drift.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
+	// #641: per-account endpoint — the account_id (gateway-id) in the path selects
+	// which provider account the event is for, so OpenRails verifies with THAT
+	// account's signing secret. Required for merchants with multiple accounts on a
+	// rail whose payloads carry no account identifier (e.g. NMI).
+	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider/:account_id", h(httphandlers.MerchantWebhook))
 }

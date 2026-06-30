@@ -43,6 +43,11 @@ type WebhookMessage struct {
 	SigningSecret  string
 	SignatureValid *bool
 	ReceivedAt     time.Time
+	// ProviderAccountID is the operator-declared account_id (gateway-id) the event
+	// was routed to (#641): set when the inbound URL/payload identified a specific
+	// provider account, so dispatch selects that account's rail client. Empty for
+	// the default (primary) path.
+	ProviderAccountID string
 }
 
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.
@@ -134,7 +139,14 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	}
 	var client *nmi.NMIClient
 	if d.NMIClients != nil {
-		client = d.NMIClients[event.Rail]
+		// #641: prefer the per-account client when the event was routed to a
+		// specific provider account; fall back to the rail key (primary alias).
+		if event.ProviderAccountID != "" {
+			client = d.NMIClients[event.ProviderAccountID]
+		}
+		if client == nil {
+			client = d.NMIClients[event.Rail]
+		}
 	}
 	if err := h.Verify(event); err != nil {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi queued webhook signature verification failed: %w", err))

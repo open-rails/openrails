@@ -417,11 +417,11 @@ func TestPrimaryRailByType(t *testing.T) {
 
 	rails["stripe_other"] = &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
 	_, _, err = rails.PrimaryRailByType(models.RailStripe)
-	require.ErrorContains(t, err, "multiple default provider accounts")
+	require.ErrorContains(t, err, "multiple primary provider accounts")
 	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
 		"stripe_a": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
-	}), "multiple default provider accounts")
+	}), "multiple primary provider accounts")
 }
 
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
@@ -456,7 +456,7 @@ func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
 	rails := ProviderAccountSet{
 		"mobius": {
 			Rail:    models.RailNMI,
-			Routing: RailRoutingDefault,
+			Routing: RailRoutingPrimary,
 			NMI: &NMIRailConfig{
 				SecurityKey:     "sec",
 				TokenizationKey: "tok",

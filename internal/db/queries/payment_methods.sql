@@ -4,13 +4,14 @@
 INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
-    metadata, created_at, updated_at
+    metadata, created_at, updated_at, provider_account_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
     sqlc.arg(initial_transaction_id), sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    sqlc.narg(provider_account_id)
 );
 
 -- name: GetPaymentMethodByID :one

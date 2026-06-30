@@ -177,7 +177,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, customer_id
+    card_last4, customer_id, provider_account_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
@@ -188,7 +188,8 @@ INSERT INTO openrails.payments (
     $16, $17,
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $20, $21, $22
+    $20, $21, $22,
+    $23
 )
 `
 
@@ -215,6 +216,7 @@ type CreatePaymentParams struct {
 	CardBrand                *string
 	CardLast4                *string
 	CustomerID               uuid.UUID
+	ProviderAccountID        *uuid.UUID
 }
 
 // openrails.payments — immutable payment event log.
@@ -248,6 +250,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 		arg.CardBrand,
 		arg.CardLast4,
 		arg.CustomerID,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err
@@ -261,7 +264,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, customer_id
+    card_last4, customer_id, provider_account_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
@@ -272,7 +275,8 @@ INSERT INTO openrails.payments (
     $16, $17,
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $20, $21, $22
+    $20, $21, $22,
+    $23
 )
 ON CONFLICT DO NOTHING
 `
@@ -300,6 +304,7 @@ type CreatePaymentIfNotExistsParams struct {
 	CardBrand                *string
 	CardLast4                *string
 	CustomerID               uuid.UUID
+	ProviderAccountID        *uuid.UUID
 }
 
 func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymentIfNotExistsParams) (int64, error) {
@@ -326,6 +331,7 @@ func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymen
 		arg.CardBrand,
 		arg.CardLast4,
 		arg.CustomerID,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err

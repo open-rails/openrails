@@ -46,13 +46,14 @@ const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
-    metadata, created_at, updated_at
+    metadata, created_at, updated_at, provider_account_id
 ) VALUES (
     $1, $4::uuid, $2, $3, $5, $6,
     $7, $8, $9, $10,
     $11,
     COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $14
 )
 `
 
@@ -70,6 +71,7 @@ type CreatePaymentMethodParams struct {
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	ProviderAccountID    *uuid.UUID
 }
 
 // openrails.payment_methods.
@@ -88,6 +90,7 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 		arg.Metadata,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err

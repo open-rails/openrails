@@ -24,8 +24,13 @@ type CatalogUsageLimitSpec struct {
 }
 
 type CatalogMeterSpec struct {
-	Key  string `json:"key"`
-	Kind string `json:"kind"`
+	Key           string            `json:"key"`
+	Kind          string            `json:"kind,omitempty"`
+	EventType     string            `json:"event_type,omitempty"`
+	ValueProperty string            `json:"value_property,omitempty"`
+	Aggregation   string            `json:"aggregation,omitempty"`
+	Unit          string            `json:"unit,omitempty"`
+	GroupBy       map[string]string `json:"group_by,omitempty"`
 }
 
 type CatalogProductIncludesSpec struct {
@@ -51,12 +56,38 @@ type CatalogMeteredPriceSpec struct {
 	PerSeconds          *int64 `json:"per_seconds,omitempty"`
 }
 
+type CatalogRateCardSpec struct {
+	ProductKey          string              `json:"product_key"`
+	Ordinal             int                 `json:"ordinal"`
+	MeterKey            string              `json:"meter_key,omitempty"`
+	PaymentTerm         string              `json:"payment_term,omitempty"`
+	BillingCadenceHours *int                `json:"billing_cadence_hours,omitempty"`
+	Filter              map[string][]string `json:"filter,omitempty"`
+	Allowance           json.RawMessage     `json:"allowance,omitempty"`
+	Price               json.RawMessage     `json:"price"`
+}
+
+type CatalogCreditPurchaseSpec struct {
+	ProductKey   string          `json:"product_key"`
+	CreditType   string          `json:"credit_type"`
+	Unit         string          `json:"unit"`
+	Currency     string          `json:"currency"`
+	ExpiresHours *int            `json:"expires_hours,omitempty"`
+	Providers    []string        `json:"providers,omitempty"`
+	InputMin     int64           `json:"input_min,omitempty"`
+	InputMax     int64           `json:"input_max,omitempty"`
+	Round        string          `json:"round,omitempty"`
+	Price        json.RawMessage `json:"price"`
+}
+
 type SyncCatalogSidecarsRequest struct {
 	UsageLimits     []CatalogUsageLimitSpec         `json:"usage_limits,omitempty"`
 	Meters          []CatalogMeterSpec              `json:"meters,omitempty"`
 	ProductIncludes []CatalogProductIncludesSpec    `json:"product_includes,omitempty"`
 	ProductLimits   []CatalogProductUsageLimitsSpec `json:"product_limits,omitempty"`
 	MeteredPrices   []CatalogMeteredPriceSpec       `json:"metered_prices,omitempty"`
+	RateCards       []CatalogRateCardSpec           `json:"rate_cards,omitempty"`
+	CreditPurchases []CatalogCreditPurchaseSpec     `json:"credit_purchases,omitempty"`
 }
 
 func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSidecarsRequest) error {
@@ -73,6 +104,12 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSideca
 			return err
 		}
 		if err := syncMeters(ctx, tx, tid.UUID(), req.Meters, req.MeteredPrices); err != nil {
+			return err
+		}
+		if err := syncRateCards(ctx, tx, tid.UUID(), req.RateCards); err != nil {
+			return err
+		}
+		if err := syncCreditPurchases(ctx, tx, tid.UUID(), req.CreditPurchases); err != nil {
 			return err
 		}
 		if err := syncProductUsageLimits(ctx, tx, tid.UUID(), req.ProductLimits); err != nil {
@@ -112,16 +149,30 @@ SET measure = EXCLUDED.measure, windows = EXCLUDED.windows, updated_at = now()`,
 }
 
 func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []CatalogMeterSpec, metered []CatalogMeteredPriceSpec) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1`, merchantID); err != nil {
+		return err
+	}
 	meterKeys := make([]string, 0, len(meters))
 	for _, meter := range meters {
 		key := strings.TrimSpace(meter.Key)
 		meterKeys = append(meterKeys, key)
+		groupBy, err := json.Marshal(meter.GroupBy)
+		if err != nil {
+			return fmt.Errorf("marshal meter %q group_by: %w", key, err)
+		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, kind)
-VALUES ($1, $2, $3)
+INSERT INTO openrails.catalog_meters (merchant_id, key, kind, event_type, value_property, aggregation, unit, group_by)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8::jsonb)
 ON CONFLICT (merchant_id, key) DO UPDATE
-SET kind = EXCLUDED.kind, updated_at = now()`,
-			merchantID, key, strings.TrimSpace(meter.Kind)); err != nil {
+SET kind = EXCLUDED.kind,
+    event_type = EXCLUDED.event_type,
+    value_property = EXCLUDED.value_property,
+    aggregation = EXCLUDED.aggregation,
+    unit = EXCLUDED.unit,
+    group_by = EXCLUDED.group_by,
+    updated_at = now()`,
+			merchantID, key, strings.TrimSpace(meter.Kind), strings.TrimSpace(meter.EventType), strings.TrimSpace(meter.ValueProperty),
+			strings.TrimSpace(meter.Aggregation), strings.TrimSpace(meter.Unit), string(groupBy)); err != nil {
 			return fmt.Errorf("upsert meter %q: %w", key, err)
 		}
 	}
@@ -164,6 +215,62 @@ SET meter_key = EXCLUDED.meter_key,
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND NOT (key = ANY($2::text[]))`, merchantID, meterKeys)
 	return err
+}
+
+func syncRateCards(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, rateCards []CatalogRateCardSpec) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1`, merchantID); err != nil {
+		return err
+	}
+	for _, spec := range rateCards {
+		productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
+		if err != nil {
+			return err
+		}
+		filter, err := json.Marshal(spec.Filter)
+		if err != nil {
+			return fmt.Errorf("marshal rate card %q #%d filter: %w", spec.ProductKey, spec.Ordinal, err)
+		}
+		paymentTerm := strings.TrimSpace(spec.PaymentTerm)
+		if paymentTerm == "" {
+			paymentTerm = "in_arrears"
+		}
+		if _, err := tx.Exec(ctx, `
+INSERT INTO openrails.catalog_rate_cards
+    (merchant_id, product_id, ordinal, meter_key, payment_term, billing_cadence_hours, filter, allowance, price)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7::jsonb, NULLIF($8, '')::jsonb, $9::jsonb)`,
+			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.MeterKey), paymentTerm, spec.BillingCadenceHours,
+			string(filter), string(spec.Allowance), string(spec.Price)); err != nil {
+			return fmt.Errorf("insert rate card %q #%d: %w", spec.ProductKey, spec.Ordinal, err)
+		}
+	}
+	return nil
+}
+
+func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, purchases []CatalogCreditPurchaseSpec) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1`, merchantID); err != nil {
+		return err
+	}
+	for _, spec := range purchases {
+		productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
+		if err != nil {
+			return err
+		}
+		// providers is NOT NULL with a '{}' default; a nil slice encodes as SQL NULL
+		// and would violate the constraint, so coalesce to an empty array.
+		providers := spec.Providers
+		if providers == nil {
+			providers = []string{}
+		}
+		if _, err := tx.Exec(ctx, `
+INSERT INTO openrails.catalog_credit_purchases
+    (product_id, merchant_id, credit_type, unit, currency, expires_hours, providers, input_min, input_max, round, price)
+VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, NULLIF($10, ''), $11::jsonb)`,
+			productID, merchantID, strings.TrimSpace(spec.CreditType), strings.TrimSpace(spec.Unit), strings.TrimSpace(spec.Currency),
+			spec.ExpiresHours, providers, spec.InputMin, spec.InputMax, strings.TrimSpace(spec.Round), string(spec.Price)); err != nil {
+			return fmt.Errorf("insert credit purchase %q: %w", spec.ProductKey, err)
+		}
+	}
+	return nil
 }
 
 func syncProductUsageLimits(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, productLimits []CatalogProductUsageLimitsSpec) error {

@@ -530,40 +530,34 @@ func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, datab
 		return clients, nil
 	}
 
-	// NMIClients is keyed by RAIL (the gateway): a charge/webhook resolves its
-	// client off the row's rail value ("nmi"), and the provider-account name is
-	// recorded metadata. One NMI provider account per deployment is wired through
-	// this map; a second configured NMI account is a loud error.
+	// #641: one client per configured NMI account, keyed by its operator-declared
+	// account_id (gateway-id). Multiple NMI accounts per deployment are supported;
+	// the primary is aliased under the rail key below for back-compat resolution.
 	for name, procConfig := range nmiRails {
-		accountName := strings.TrimSpace(strings.ToLower(name))
-		if accountName == "" {
-			return nil, fmt.Errorf("nmi provider account name cannot be empty")
+		accountID := procConfig.EffectiveAccountID(name)
+		if accountID == "" {
+			return nil, fmt.Errorf("nmi provider account name/account_id cannot be empty")
 		}
-		providerKey := string(models.RailNMI)
-
-		if _, exists := clients[providerKey]; exists {
-			return nil, fmt.Errorf("multiple NMI provider accounts configured (%q and another); only one NMI account is supported per deployment", accountName)
+		if _, exists := clients[accountID]; exists {
+			return nil, fmt.Errorf("duplicate NMI provider account_id %q", accountID)
 		}
 
-		// Convert the provider-account config to NMIProviderSettings. The client's
-		// identity is the account name (diagnostics); the map key is the rail.
-		settings := procConfig.ToNMIProviderSettings(accountName)
-
-		// Validate required fields
+		// The client's identity IS its account_id (#641). TestMode set by caller.
+		settings := procConfig.ToNMIProviderSettings(accountID)
 		if settings.SecurityKey == "" {
-			return nil, fmt.Errorf("nmi provider account '%s' security key is required", accountName)
+			return nil, fmt.Errorf("nmi provider account %q security key is required", accountID)
 		}
 		if settings.WebhookSecret == "" {
-			log.Warnf("nmi provider account '%s' webhook secret is not configured; signature validation will be disabled", accountName)
+			log.Warnf("nmi provider account %q webhook secret is not configured; signature validation will be disabled", accountID)
 		}
 
-		client, err := nmi.NewClient(accountName, settings, cfg.IsTestMode())
+		client, err := nmi.NewClient(accountID, settings, cfg.IsTestMode())
 		if err != nil {
 			return nil, err
 		}
 		client.ReadOnly = cfg.IsProviderReadOnly()
 
-		clients[providerKey] = client
+		clients[accountID] = client
 	}
 
 	// #348: test_mode guarantees sandbox money, but NMI accounts are
@@ -608,6 +602,29 @@ func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, datab
 				log.WithError(probeErr).Warnf("⚠️  rail %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode", providerKey)
 			}
 		}
+	}
+
+	// Back-compat alias: expose the primary NMI account under the rail key "nmi" so
+	// charge/refund/dunning/webhook paths that resolve NMIClients["nmi"] keep
+	// working until records carry provider_account_id and can target a specific
+	// account. ponytail: transitional — per-account routing (#641 follow-up) reads
+	// the stamped provider_account_id and this alias goes away.
+	railKey := string(models.RailNMI)
+	aliasName, primary, err := rails.PrimaryRailByType(models.RailNMI)
+	if err != nil {
+		return nil, err // multiple primaries: a configuration error
+	}
+	if primary == nil {
+		// No account marked primary (e.g. legacy/secondary-only): alias the
+		// lexicographically-first account (RailKeysByType is sorted) so refunds/
+		// rebills still resolve a client, preserving single-account behavior.
+		if keys := rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
+			aliasName = keys[0]
+			primary = nmiRails[keys[0]]
+		}
+	}
+	if primary != nil {
+		clients[railKey] = clients[primary.EffectiveAccountID(aliasName)]
 	}
 
 	return clients, nil

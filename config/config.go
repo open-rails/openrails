@@ -295,11 +295,19 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// Provider-account routing selectors (independent of the rail/gateway).
+// Provider-account routing roles (independent of the rail/gateway). #641: one
+// account per rail is the primary; others are secondary (redundancy) or legacy.
 const (
-	RailRoutingDefault = "default"
-	RailRoutingManual  = "manual"
-	RailRoutingLegacy  = "legacy"
+	// RailRoutingPrimary receives new default work AND catalog push. Exactly one
+	// per (merchant, rail).
+	RailRoutingPrimary = "primary"
+	// RailRoutingSecondary is a redundancy/fallback account: catalog push targets
+	// it (kept in sync so it can take over), but new work routes here only when
+	// the primary is unavailable (the fallback policy itself is #288).
+	RailRoutingSecondary = "secondary"
+	// RailRoutingLegacy is retained for old subscriptions, rebills, refunds, and
+	// inbound webhooks; it receives NO new work and NO catalog push.
+	RailRoutingLegacy = "legacy"
 )
 
 // ReservedAccountRails maps a provider-account name to the rail it implies, so a
@@ -320,9 +328,15 @@ type ProviderAccountConfig struct {
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail `koanf:"rail"`
-	// Routing selects routing for this credential set: default | manual | legacy.
-	// Empty is default; legacy is retained for old rows/rebills/refunds and must
-	// not receive new default work.
+	// AccountID is the operator-declared identity of this account on its rail —
+	// the NMI gateway-id, Stripe acct_…, CCBill client_acc_num[/sub], or Solana
+	// recipient wallet (#592: operator-declared, no runtime whoami). It is the
+	// canonical routing key (#641); the ProviderAccountSet map name is a human
+	// label. EffectiveAccountID falls back to that name when this is unset.
+	AccountID string `koanf:"account_id"`
+	// Routing is the account's routing role: primary | secondary | legacy.
+	// Empty is primary; legacy is retained for old rows/rebills/refunds and must
+	// not receive new work or catalog push.
 	Routing string `koanf:"routing"`
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
@@ -393,8 +407,8 @@ func (p *ProviderAccountConfig) EffectiveRail(name string) models.Rail {
 	return ""
 }
 
-// EffectiveRouting returns default when routing is omitted, preserving the
-// existing one-config-per-provider behavior.
+// EffectiveRouting returns primary when routing is omitted (#641): a lone account
+// with no routing role is the primary.
 func (p *ProviderAccountConfig) EffectiveRouting() string {
 	if p == nil {
 		return ""
@@ -402,7 +416,20 @@ func (p *ProviderAccountConfig) EffectiveRouting() string {
 	if routing := strings.ToLower(strings.TrimSpace(p.Routing)); routing != "" {
 		return routing
 	}
-	return RailRoutingDefault
+	return RailRoutingPrimary
+}
+
+// EffectiveAccountID returns the operator-declared account_id (the rail-native
+// identity, #641) when set, else falls back to the ProviderAccountSet map name.
+// The name is a convenience label for tests/embedded callers; production/manifest
+// configs declare an explicit account_id.
+func (p *ProviderAccountConfig) EffectiveAccountID(name string) string {
+	if p != nil {
+		if id := strings.TrimSpace(p.AccountID); id != "" {
+			return id
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 func (p *ProviderAccountConfig) normalizeTypedBlock(name string) error {
@@ -877,15 +904,15 @@ func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
 			return err
 		}
 		switch routing := proc.EffectiveRouting(); routing {
-		case RailRoutingDefault, RailRoutingManual, RailRoutingLegacy:
+		case RailRoutingPrimary, RailRoutingSecondary, RailRoutingLegacy:
 		default:
-			return fmt.Errorf("rail '%s' has unknown routing '%s'", name, proc.EffectiveRouting())
+			return fmt.Errorf("rail '%s' has unknown routing role '%s' (want primary|secondary|legacy)", name, proc.EffectiveRouting())
 		}
 
 		effectiveType := proc.EffectiveRail(name)
-		if proc.EffectiveRouting() == RailRoutingDefault {
+		if proc.EffectiveRouting() == RailRoutingPrimary {
 			if existing := primaryByType[effectiveType]; existing != "" {
-				return fmt.Errorf("multiple default provider accounts configured for rail %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
+				return fmt.Errorf("multiple primary provider accounts configured for rail %q: %q and %q (exactly one primary per rail; mark others secondary|legacy)", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
 			}
 			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
 		}
@@ -1033,10 +1060,10 @@ func (set ProviderAccountSet) RailKeysByType(rail models.Rail) []string {
 	return keys
 }
 
-// PrimaryRailByType returns the configured default provider account for a rail.
-// A single entry with no routing keeps working because empty routing is default.
-// Multiple defaults are a configuration error: OpenRails cannot guess where
-// default new work should route.
+// PrimaryRailByType returns the primary provider account for a rail (#641).
+// A single entry with no routing keeps working because empty routing is primary.
+// Multiple primaries are a configuration error: OpenRails cannot guess where new
+// work should route.
 func (set ProviderAccountSet) PrimaryRailByType(rail models.Rail) (string, *ProviderAccountConfig, error) {
 	keys := set.RailKeysByType(rail)
 	var (
@@ -1045,11 +1072,11 @@ func (set ProviderAccountSet) PrimaryRailByType(rail models.Rail) (string, *Prov
 	)
 	for _, key := range keys {
 		proc := set[key]
-		if proc.EffectiveRouting() != RailRoutingDefault {
+		if proc.EffectiveRouting() != RailRoutingPrimary {
 			continue
 		}
 		if primary != nil {
-			return "", nil, fmt.Errorf("multiple default provider accounts configured for rail %q: %q and %q", rail, primaryKey, key)
+			return "", nil, fmt.Errorf("multiple primary provider accounts configured for rail %q: %q and %q", rail, primaryKey, key)
 		}
 		primaryKey, primary = key, proc
 	}

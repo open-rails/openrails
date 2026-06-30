@@ -62,7 +62,27 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "local-stack", manifest.Merchants[0].Slug)
 	require.NotNil(t, manifest.Merchants[0].Issuer)
 	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", manifest.Merchants[0].Issuer.JWKSURI)
-	require.Len(t, manifest.Merchants[0].ProviderAccounts, 4)
+	accts := manifest.Merchants[0].ProviderAccounts
+	require.Len(t, accts, 6)
+
+	// #641: a merchant can hold multiple accounts on the SAME rail with distinct
+	// routing roles. The example declares two NMI accounts (primary + secondary)
+	// and a legacy Stripe account alongside a primary Stripe account.
+	nmi := map[string]string{} // account_id -> mode
+	for _, a := range accts {
+		if a.ProviderType == "nmi" {
+			nmi[a.AccountID] = a.Mode
+		}
+	}
+	require.Equal(t, map[string]string{"100001": "primary", "100002": "secondary"}, nmi)
+
+	var stripeModes []string
+	for _, a := range accts {
+		if a.ProviderType == "stripe" {
+			stripeModes = append(stripeModes, a.Mode)
+		}
+	}
+	require.ElementsMatch(t, []string{"primary", "legacy"}, stripeModes)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

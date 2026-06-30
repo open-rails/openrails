@@ -101,7 +101,7 @@ INSERT INTO openrails.subscriptions (
     rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
-    created_at, updated_at
+    created_at, updated_at, provider_account_id
 ) VALUES (
     $1, $5::uuid, $2, $3, $4, $6,
     $7, $8,
@@ -114,7 +114,8 @@ INSERT INTO openrails.subscriptions (
     $22, $23, $24,
     $25, $26,
     COALESCE(NULLIF($27::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($28::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    COALESCE(NULLIF($28::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $29
 )
 `
 
@@ -147,6 +148,7 @@ type CreateSubscriptionParams struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+	ProviderAccountID        *uuid.UUID
 }
 
 // openrails.subscriptions. tier_group is set by the
@@ -181,6 +183,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.GatewayResponse,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err

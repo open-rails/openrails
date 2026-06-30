@@ -568,7 +568,7 @@ func (s *MoneyService) creditGrantTxn(g gen.OpenrailsGrant, params DepositParams
 		ID:              g.ID,
 		MerchantID:      g.MerchantID,
 		CustomerID:      g.CustomerID,
-		Currency:        normalizeCurrency(derefStrOr(g.Currency, params.Currency)),
+		Currency:        normalizeUnit(derefStrOr(g.Currency, params.Currency)),
 		Invoker:         params.Invoker,
 		Amount:          derefInt(g.Amount),
 		TransactionType: "deposit",

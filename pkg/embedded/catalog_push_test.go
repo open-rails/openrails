@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 func writeCatalogPushManifest(t *testing.T, body string) string {
@@ -18,10 +20,12 @@ func writeCatalogPushManifest(t *testing.T, body string) string {
 
 // TestExampleCatalogManifestParses loads the canonical config/catalog.example.yaml
 // through the real publish path (loadCatalogPushTargets, which runs
-// catalog.Manifest.Validate per merchant) and asserts the full v1 product
-// surface is present and valid. Mirrors TestExampleMerchantConfigManifestParses.
-// This keeps the example from rotting: if a manifest-schema change breaks the
-// example, this test fails.
+// catalog.Manifest.Validate per merchant) and asserts the multi-merchant example
+// is valid and exercises both the legacy surfaces (usage_limits, credit grants,
+// subscription prices) and the #638/#639 rate-card model (aggregation meters,
+// matrix pricing with a monthly cap, allowances, and a variable credit top-up).
+// This keeps the example from rotting: a manifest-schema change that breaks it
+// fails here.
 func TestExampleCatalogManifestParses(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
 	if err != nil {
@@ -32,92 +36,115 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadCatalogPushTargets (example failed to parse/validate): %v", err)
 	}
-	if len(targets) != 1 {
-		t.Fatalf("len(targets) = %d, want 1", len(targets))
-	}
-	target := targets[0]
-	if target.Merchant != "local-stack" {
-		t.Fatalf("merchant = %q, want local-stack", target.Merchant)
-	}
-	m := target.Manifest
 
-	// manifest.Validate already ran inside loadCatalogPushTargets; assert it is
-	// idempotently happy on the normalized manifest too.
-	if err := m.Validate(); err != nil {
-		t.Fatalf("manifest.Validate: %v", err)
+	byMerchant := map[string]*catalog.Manifest{}
+	for _, tg := range targets {
+		if err := tg.Manifest.Validate(); err != nil { // idempotent re-validate
+			t.Fatalf("merchant %q manifest.Validate: %v", tg.Merchant, err)
+		}
+		byMerchant[tg.Merchant] = tg.Manifest
+	}
+	for _, want := range []string{"anthropic", "digital-ocean", "cozy-creator", "tensorhub"} {
+		if byMerchant[want] == nil {
+			t.Fatalf("example missing merchant %q (got %d merchants)", want, len(targets))
+		}
 	}
 
-	// Flatten products across tier groups (Validate buckets them by tier_group).
-	products := map[string]bool{}
-	var (
-		sawMeteredPrice bool
-		sawIntro        bool
-		sawCredits      bool
-		sawUsageLimit   bool
-		sawIncludes     bool
-	)
+	// anthropic: legacy usage_limits + subscription prices still validate (additive).
+	if len(byMerchant["anthropic"].UsageLimits) < 1 {
+		t.Error("anthropic should declare usage_limits")
+	}
+	// tensorhub: legacy credit grants still validate (additive).
+	if len(flattenProducts(byMerchant["tensorhub"])) < 2 {
+		t.Error("tensorhub should declare prepaid products")
+	}
+
+	// ---- digital-ocean: the #638 rate-card model ----
+	do := byMerchant["digital-ocean"]
+	sawAggMeter := false
+	for _, mt := range do.Meters {
+		if mt.Aggregation != "" {
+			sawAggMeter = true
+		}
+	}
+	if !sawAggMeter {
+		t.Error("digital-ocean has no rate-card meter (aggregation)")
+	}
+	doProducts := flattenProducts(do)
+	droplet, ok := doProducts["droplet"]
+	if !ok {
+		t.Fatal("digital-ocean missing droplet product")
+	}
+	if droplet.BillingCadence == "" {
+		t.Error("droplet product missing billing_cadence")
+	}
+	var dropletPrice *catalog.RatePrice
+	for i := range droplet.RateCards {
+		if droplet.RateCards[i].Price.Matrix != nil {
+			dropletPrice = &droplet.RateCards[i].Price
+		}
+	}
+	if dropletPrice == nil {
+		t.Fatal("droplet has no matrix price")
+	}
+	// The s-1vcpu-1gb SKU pro-rates per second and caps at its $6/mo price:
+	// a full 720h month exceeds the 672h cap, so it bills exactly the maximum.
+	cm, ok := dropletPrice.ChargeModelForCell("s-1vcpu-1gb")
+	if !ok {
+		t.Fatal("droplet matrix missing s-1vcpu-1gb cell")
+	}
+	cost, err := cm.Rate(720 * 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 6_000_000 {
+		t.Errorf("full-month s-1vcpu-1gb droplet = %d micros, want 6000000 (capped)", cost)
+	}
+	sawAllowance := false
+	for _, p := range doProducts {
+		for _, rc := range p.RateCards {
+			if rc.Allowance != nil {
+				sawAllowance = true
+			}
+		}
+	}
+	if !sawAllowance {
+		t.Error("digital-ocean has no allowance (pooled bandwidth)")
+	}
+
+	// ---- cozy-creator: 4 membership tiers + variable credit top-up (#639/#640) ----
+	cozyProducts := flattenProducts(byMerchant["cozy-creator"])
+	for _, key := range []string{"novice", "craftsman", "expert", "grandmaster"} {
+		if _, ok := cozyProducts[key]; !ok {
+			t.Errorf("cozy-creator missing membership tier %q", key)
+		}
+	}
+	topup, ok := cozyProducts["image-credit-topup"]
+	if !ok || topup.CreditPurchase == nil {
+		t.Fatal("cozy-creator missing image-credit-topup credit_purchase")
+	}
+	cp := topup.CreditPurchase
+	if cp.Price.Model != catalog.ModelTiered || cp.Price.Mode != catalog.TierModeGraduated {
+		t.Errorf("credit top-up must be graduated tiered, got %s/%s", cp.Price.Model, cp.Price.Mode)
+	}
+	// $20 buys exactly 2,000 credits at the $0.01/credit base band (bidirectional quote).
+	credits, spent, err := catalog.QuoteUnitsForSpend(20_000_000, cp.Price.ToChargeModel())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credits != 2_000 || spent != 20_000_000 {
+		t.Errorf("$20 top-up -> (%d credits, %d spent), want (2000, 20000000)", credits, spent)
+	}
+}
+
+func flattenProducts(m *catalog.Manifest) map[string]catalog.Product {
+	out := map[string]catalog.Product{}
 	for _, g := range m.TierGroups {
 		for _, p := range g.Products {
-			products[p.Key] = true
-			if len(p.UsageLimits) > 0 {
-				sawUsageLimit = true
-			}
-			if len(p.Includes) > 0 {
-				sawIncludes = true
-			}
-			if len(p.Credits) > 0 {
-				sawCredits = true
-			}
-			for _, pr := range p.Prices {
-				if pr.Metered != nil {
-					sawMeteredPrice = true
-				}
-				if pr.Trial != nil {
-					sawIntro = true
-				}
-			}
+			out[p.Key] = p
 		}
 	}
-
-	// Every documented use case is represented by at least one product key.
-	for _, key := range []string{
-		"basic", "premium", // subscription tiers
-		"creator-pro",                     // free-trial / intro pricing
-		"ai-image-credits", "api-credits", // custom credit grants
-		"movie-classic", "movie-premiere", // content marketplace (ownership)
-		"movie-bundle",            // bundle via includes
-		"claude-5x", "claude-20x", // usage-limit plan variants
-		"compute-metered", "storage-metered", // metered billing
-	} {
-		if !products[key] {
-			t.Errorf("example missing expected product key %q", key)
-		}
-	}
-
-	// Advanced-feature surfaces are all exercised.
-	if !sawIntro {
-		t.Error("example has no price with intro/free-trial pricing")
-	}
-	if !sawCredits {
-		t.Error("example has no product granting custom credits")
-	}
-	if !sawUsageLimit {
-		t.Error("example has no product bound to a usage_limit")
-	}
-	if !sawIncludes {
-		t.Error("example has no bundle product using includes")
-	}
-	if !sawMeteredPrice {
-		t.Error("example has no metered price")
-	}
-
-	// Top-level meters and usage_limits are declared.
-	if len(m.Meters) < 2 {
-		t.Errorf("example declares %d meters, want >= 2 (counter + gauge)", len(m.Meters))
-	}
-	if len(m.UsageLimits) < 2 {
-		t.Errorf("example declares %d usage_limits, want >= 2 (5x + 20x)", len(m.UsageLimits))
-	}
+	return out
 }
 
 func TestLoadCatalogPushTargetsRequiresMerchantPerCatalog(t *testing.T) {

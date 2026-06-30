@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -46,7 +47,15 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 		})
 	}
 	for _, meter := range m.Meters {
-		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{Key: meter.Key, Kind: meter.Kind})
+		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{
+			Key:           meter.Key,
+			Kind:          meter.Kind,
+			EventType:     meter.EventType,
+			ValueProperty: meter.ValueProperty,
+			Aggregation:   meter.Aggregation,
+			Unit:          meter.Unit,
+			GroupBy:       meter.GroupBy,
+		})
 	}
 	for _, group := range m.TierGroups {
 		for _, product := range group.Products {
@@ -60,6 +69,60 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 				req.ProductIncludes = append(req.ProductIncludes, billingservice.CatalogProductIncludesSpec{
 					ProductKey:   product.Key,
 					IncludedKeys: append([]string(nil), product.Includes...),
+				})
+			}
+			billingCadenceHours, err := productBillingCadenceHours(product)
+			if err != nil {
+				return err
+			}
+			for i, rc := range product.RateCards {
+				priceJSON, err := json.Marshal(rc.Price)
+				if err != nil {
+					return fmt.Errorf("product %q rate_card #%d price: %w", product.Key, i+1, err)
+				}
+				var allowanceJSON json.RawMessage
+				if rc.Allowance != nil {
+					allowanceJSON, err = json.Marshal(rc.Allowance)
+					if err != nil {
+						return fmt.Errorf("product %q rate_card #%d allowance: %w", product.Key, i+1, err)
+					}
+				}
+				req.RateCards = append(req.RateCards, billingservice.CatalogRateCardSpec{
+					ProductKey:          product.Key,
+					Ordinal:             i + 1,
+					MeterKey:            rc.Meter,
+					PaymentTerm:         rc.PaymentTerm,
+					BillingCadenceHours: billingCadenceHours,
+					Filter:              rc.Filter,
+					Allowance:           allowanceJSON,
+					Price:               priceJSON,
+				})
+			}
+			if product.CreditPurchase != nil {
+				cp := product.CreditPurchase
+				priceJSON, err := json.Marshal(cp.Price)
+				if err != nil {
+					return fmt.Errorf("product %q credit_purchase price: %w", product.Key, err)
+				}
+				expiresHours, err := creditPurchaseExpiresHours(product.Key, cp)
+				if err != nil {
+					return err
+				}
+				unit := cp.Unit
+				if unit == "" {
+					unit = cp.CreditType
+				}
+				req.CreditPurchases = append(req.CreditPurchases, billingservice.CatalogCreditPurchaseSpec{
+					ProductKey:   product.Key,
+					CreditType:   cp.CreditType,
+					Unit:         unit,
+					Currency:     cp.Currency,
+					ExpiresHours: expiresHours,
+					Providers:    append([]string(nil), cp.Providers...),
+					InputMin:     cp.InputMin,
+					InputMax:     cp.InputMax,
+					Round:        cp.Round,
+					Price:        priceJSON,
 				})
 			}
 			for _, price := range product.Prices {
@@ -96,3 +159,33 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 }
 
 var _ Applier = serviceApplier{}
+
+func productBillingCadenceHours(product Product) (*int, error) {
+	if product.BillingCadence == "" {
+		return nil, nil
+	}
+	hours, err := durationSpecHours(product.BillingCadence)
+	if err != nil {
+		return nil, fmt.Errorf("product %q billing_cadence: %w", product.Key, err)
+	}
+	return &hours, nil
+}
+
+func creditPurchaseExpiresHours(productKey string, cp *CreditPurchase) (*int, error) {
+	if cp.Expires == "" {
+		return nil, nil
+	}
+	hours, err := durationSpecHours(cp.Expires)
+	if err != nil {
+		return nil, fmt.Errorf("product %q credit_purchase expires: %w", productKey, err)
+	}
+	return &hours, nil
+}
+
+func durationSpecHours(spec string) (int, error) {
+	d, err := ParseDurationSpec(spec)
+	if err != nil {
+		return 0, err
+	}
+	return int(d.Hours()), nil
+}

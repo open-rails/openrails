@@ -31,9 +31,19 @@ type Manifest struct {
 	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
 
+// Meter is a billed usage stream. Two shapes are accepted (additive, #638):
+//   - legacy: {key, kind: counter|gauge}.
+//   - rate-card: {key, event_type, value_property, aggregation, group_by, unit}
+//     (OpenMeter-style). aggregation in sum/count/max/min/unique_count/latest.
 type Meter struct {
 	Key  string `json:"key" yaml:"key"`
-	Kind string `json:"kind" yaml:"kind"`
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+
+	EventType     string            `json:"event_type,omitempty" yaml:"event_type,omitempty"`
+	ValueProperty string            `json:"value_property,omitempty" yaml:"value_property,omitempty"`
+	Aggregation   string            `json:"aggregation,omitempty" yaml:"aggregation,omitempty"`
+	Unit          string            `json:"unit,omitempty" yaml:"unit,omitempty"`
+	GroupBy       map[string]string `json:"group_by,omitempty" yaml:"group_by,omitempty"`
 }
 
 type UsageLimit struct {
@@ -69,6 +79,13 @@ type Product struct {
 	Includes     []string `json:"includes,omitempty" yaml:"includes,omitempty"`
 
 	Prices []Price `json:"prices,omitempty" yaml:"prices,omitempty"`
+
+	// Rate-card model (#638): metered usage / flat-fee rate cards, a variable
+	// credit top-up (#639/#640), and the billing period for usage-only products
+	// (where no `prices[].duration` declares one).
+	RateCards      []RateCard      `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
+	CreditPurchase *CreditPurchase `json:"credit_purchase,omitempty" yaml:"credit_purchase,omitempty"`
+	BillingCadence string          `json:"billing_cadence,omitempty" yaml:"billing_cadence,omitempty"`
 }
 
 type Credits map[string]CreditGrant

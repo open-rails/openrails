@@ -599,13 +599,22 @@ func (suite *TestContainerSuite) resetNMIClients() {
 	}
 	clients := make(map[string]*nmi.NMIClient)
 	for name, proc := range suite.Rails.ByRail(models.RailNMI) {
-		settings := proc.ToNMIProviderSettings(name)
-		client, err := nmi.NewClient(name, settings, suite.Config.IsTestMode())
+		accountID := proc.EffectiveAccountID(name)
+		settings := proc.ToNMIProviderSettings(accountID)
+		client, err := nmi.NewClient(accountID, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
 		client.ReadOnly = suite.Config.IsProviderReadOnly()
-		// NMIClients is keyed by rail (Option R), matching createNMIClients: a row's
-		// rail value ("nmi") resolves its client; the account name is diagnostics.
-		clients[string(models.RailNMI)] = client
+		// #641: keyed by account_id, with the primary aliased under the rail key
+		// "nmi" below (matching createNMIClients).
+		clients[accountID] = client
+	}
+	if name, primary, err := suite.Rails.PrimaryRailByType(models.RailNMI); err == nil && primary != nil {
+		if c, ok := clients[primary.EffectiveAccountID(name)]; ok {
+			clients[string(models.RailNMI)] = c
+		}
+	} else if keys := suite.Rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
+		first := suite.Rails.ByRail(models.RailNMI)[keys[0]]
+		clients[string(models.RailNMI)] = clients[first.EffectiveAccountID(keys[0])]
 	}
 
 	rt := suite.App.Runtime

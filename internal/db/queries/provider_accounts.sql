@@ -79,3 +79,15 @@ SELECT * FROM openrails.provider_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(provider_type)::text IS NULL OR provider_type = lower(sqlc.narg(provider_type)::text))
 ORDER BY provider_type, environment, role, created_at, id;
+
+-- name: GetPrimaryProviderAccount :one
+-- The merchant's primary enabled account on a rail (#641), used to stamp new
+-- records with provider_account_id. Environment is not filtered: a deployment is
+-- all-live OR all-test (test_mode guards mixing), so there is one primary per rail.
+SELECT * FROM openrails.provider_accounts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND provider_type = lower(sqlc.arg(provider_type)::text)
+  AND role = 'primary'
+  AND status = 'enabled'
+ORDER BY created_at, id
+LIMIT 1;

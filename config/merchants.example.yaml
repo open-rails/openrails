@@ -33,10 +33,60 @@ merchants:
       from_email: billing@local-stack.example
       support_url: https://local-stack.example/support
 
+    # Provider accounts (#641): a merchant can hold MULTIPLE accounts on the SAME
+    # rail (gateway). Each is identified by its operator-declared `account_id` —
+    # the rail-native identity, NEVER an arbitrary name we invent:
+    #   nmi    -> the NMI dashboard "Gateway ID" (the merchant/gateway account id)
+    #   stripe -> the acct_… (self-discoverable via GET /v1/account)
+    #   ccbill -> client_acc_num[/client_sub_acc]
+    #   solana -> the recipient wallet address
+    #
+    # `mode` is the routing role:
+    #   primary   -> receives new charges AND catalog push (exactly one per rail)
+    #   secondary -> redundancy/fallback; catalog push keeps it in sync so it can
+    #                take over; new work routes here only if the primary is down
+    #   legacy    -> old subscriptions/rebills/refunds + inbound webhooks ONLY;
+    #                no new work, no catalog push
+    # Retire an account fully by removing/disabling it (no further inbound expected).
+    #
+    # All accounts in one `environment` share that environment's nature: keep every
+    # account `live` OR every account `test` — `test_mode` guards against mixing.
+    #
+    # Inbound webhooks are routed PER ACCOUNT: OpenRails resolves the originating
+    # account (by an identifier in the payload where the rail provides one — CCBill
+    # `clientAccnum`, Stripe Connect `event.account` — otherwise by the `account_id`
+    # in the webhook URL path) and verifies with THAT account's
+    # `webhook_signing_secret`.
     provider_accounts:
+      # --- Two NMI accounts on one merchant (e.g. different ISOs / MIDs) ---
+      - provider_type: nmi
+        environment: live
+        account_id: "100001" # NMI Gateway ID (e.g. the "mobius" account)
+        mode: primary
+        secrets:
+          security_key:
+            env: LOCAL_STACK_MOBIUS_NMI_SECURITY_KEY
+          tokenization_key:
+            env: LOCAL_STACK_MOBIUS_NMI_TOKENIZATION_KEY
+          webhook_signing_secret:
+            env: LOCAL_STACK_MOBIUS_NMI_WEBHOOK_SECRET
+
+      - provider_type: nmi
+        environment: live
+        account_id: "100002" # NMI Gateway ID (e.g. the "paykings" account)
+        mode: secondary
+        secrets:
+          security_key:
+            env: LOCAL_STACK_PAYKINGS_NMI_SECURITY_KEY
+          tokenization_key:
+            env: LOCAL_STACK_PAYKINGS_NMI_TOKENIZATION_KEY
+          webhook_signing_secret:
+            env: LOCAL_STACK_PAYKINGS_NMI_WEBHOOK_SECRET
+
+      # --- Stripe: a live primary plus a retired legacy account ---
       - provider_type: stripe
         environment: live
-        account_id: acct_localstack123
+        account_id: acct_localstack_new
         mode: primary
         secrets:
           secret_key:
@@ -44,17 +94,15 @@ merchants:
           webhook_signing_secret:
             env: LOCAL_STACK_STRIPE_WEBHOOK_SECRET
 
-      - provider_type: nmi
+      - provider_type: stripe
         environment: live
-        account_id: nmi-local-stack-profile
-        mode: primary
+        account_id: acct_localstack_old
+        mode: legacy # serves in-flight subs/refunds; no new work, no catalog push
         secrets:
-          security_key:
-            env: LOCAL_STACK_NMI_SECURITY_KEY
-          tokenization_key:
-            env: LOCAL_STACK_NMI_TOKENIZATION_KEY
+          secret_key:
+            env: LOCAL_STACK_STRIPE_LEGACY_SECRET_KEY
           webhook_signing_secret:
-            env: LOCAL_STACK_NMI_WEBHOOK_SECRET
+            env: LOCAL_STACK_STRIPE_LEGACY_WEBHOOK_SECRET
 
       - provider_type: ccbill
         environment: live

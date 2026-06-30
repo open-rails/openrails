@@ -42,6 +42,48 @@ func (q *Queries) DemoteOtherPrimaryProviderAccounts(ctx context.Context, arg De
 	return err
 }
 
+const getPrimaryProviderAccount = `-- name: GetPrimaryProviderAccount :one
+SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
+WHERE merchant_id = $1::uuid
+  AND provider_type = lower($2::text)
+  AND role = 'primary'
+  AND status = 'enabled'
+ORDER BY created_at, id
+LIMIT 1
+`
+
+type GetPrimaryProviderAccountParams struct {
+	MerchantID   uuid.UUID
+	ProviderType string
+}
+
+// The merchant's primary enabled account on a rail (#641), used to stamp new
+// records with provider_account_id. Environment is not filtered: a deployment is
+// all-live OR all-test (test_mode guards mixing), so there is one primary per rail.
+func (q *Queries) GetPrimaryProviderAccount(ctx context.Context, arg GetPrimaryProviderAccountParams) (OpenrailsProviderAccount, error) {
+	row := q.db.QueryRow(ctx, getPrimaryProviderAccount, arg.MerchantID, arg.ProviderType)
+	var i OpenrailsProviderAccount
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.ProviderType,
+		&i.Environment,
+		&i.AccountID,
+		&i.DisplayName,
+		&i.VaultSecretRef,
+		&i.Role,
+		&i.Status,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Owner,
+	)
+	return i, err
+}
+
 const getProviderAccount = `-- name: GetProviderAccount :one
 SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
 WHERE id = $1

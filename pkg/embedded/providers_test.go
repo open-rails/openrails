@@ -19,7 +19,7 @@ func TestApplyPaymentProvidersGeneratesLocalSelectors(t *testing.T) {
 	require.NoError(t, config.ValidateRailSet(&config.Config{}, rails))
 
 	require.Equal(t, "sk_live_a", rails["stripe"].Stripe.SecretKey)
-	require.Equal(t, "default", rails["stripe"].EffectiveRouting())
+	require.Equal(t, "primary", rails["stripe"].EffectiveRouting())
 	require.Equal(t, "sk_live_b", rails["stripe_2"].Stripe.SecretKey)
 	require.Equal(t, "legacy", rails["stripe_2"].EffectiveRouting())
 	require.Equal(t, "sec", rails["nmi"].NMI.SecurityKey)
