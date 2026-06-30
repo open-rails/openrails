@@ -1344,10 +1344,11 @@ type exampleCatalogFile struct {
 }
 
 type exampleCatalogEntry struct {
-	Merchant    string               `yaml:"merchant"`
-	Products    []catalog.Product    `yaml:"products"`
-	Meters      []catalog.Meter      `yaml:"meters"`
-	UsageLimits []catalog.UsageLimit `yaml:"usage_limits"`
+	Merchant       string                  `yaml:"merchant"`
+	Products       []catalog.Product       `yaml:"products"`
+	Meters         []catalog.Meter         `yaml:"meters"`
+	CreditBalances []catalog.CreditBalance `yaml:"credit_balances"`
+	UsageLimits    []catalog.UsageLimit    `yaml:"usage_limits"`
 }
 
 func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
