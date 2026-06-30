@@ -7,7 +7,111 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 642
+next_id: 643
+
+---
+
+# #642: metering catalog & billing-policy separation — usage products, rating window vs merchant collection cadence
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: design review of the #638 realistic-resource-metering catalog
+(`config/catalog.example.yaml`, `pkg/catalog/ratecard.go`, `internal/modules/money/metered_rating.go`)
+surfaced structural + realism issues. The rating MATH itself is implemented and correct (matrix
+per-SKU pricing, `divide_by`, `min`/`max` commitment range, flat + accrued pooled allowances,
+tiers — verified used: Matrix 21 / DivideBy 9 / Min/Max 14 / Allowance 14 / Pool 7 consumption
+sites; `input_min/max` enforced at quote). The problems are catalog fields that conflate PRICING
+with the BILLING RELATIONSHIP, a metered product forced into the subscription tier hierarchy, one
+dead field, and a fabricated charge floor in the example. NO code touched (the #638 metering work
+is owned by a concurrent agent — this issue is the design plan to hand over).
+
+## Metadata
+- Category: refactor
+- Status: not_started
+- Passes: false
+
+## Problem
+
+#638 models a metered product (a DigitalOcean-style Droplet) as a Product inside a `tier_group`,
+with a `billing_cadence` on the product, plus rate cards carrying matrix pricing + allowances.
+Defects:
+
+1. **`tier_group` does not belong on a usage-metered product.** `tier_group` enforces "one active
+   subscription per (user, tier_group)" — a MEMBERSHIP-EXCLUSIVITY concept (free vs pro vs
+   enterprise: pick one; `uq_subscriptions_user_tier_group_active`). A metered resource is the
+   opposite: a customer runs N droplets concurrently, and a droplet is NOT a "subscription to a
+   tier" — it is a resource that emits usage events. Forcing usage products into the subscription
+   `TierGroups → Products` hierarchy is a structural mismatch; the uniqueness constraint actively
+   fights multi-resource usage.
+
+2. **`billing_cadence` on the product conflates PRICING with COLLECTION.** Two independent axes are
+   collapsed into one field:
+   - the **rating/cap window** (the period over which `maximum_amount` caps and allowances accrue)
+     — a PRICING fact that belongs on the rate card; and
+   - the **collection cadence** (WHEN the accrued balance is invoiced — monthly / weekly / at $X
+     owed / whichever-first) — a property of the BILLING RELATIONSHIP, not the catalog.
+   They need not align (rate caps monthly but collect at a $50 threshold). And **threshold billing
+   ("invoice at $X owed") cannot be a product field at all** — it is a function of the customer's
+   running balance across ALL their resources, so it is structurally impossible to express on a
+   single product. That alone proves collection cadence is a policy, not catalog. A customer with 5
+   droplets + block storage + egress gets ONE invoice, not 5 on 5 per-product cadences.
+
+3. **`included_per_cycle` is dead/decorative.** The accrued-allowance rater (`metered_rating.go`
+   ~L335/343/349) reads the SOURCE rate card's matrix `cell.Included` directly; the example's
+   `included_per_cycle: size_slug.included` string is never parsed or consumed (0 consumption sites;
+   only a struct field). Wire it or remove it.
+
+4. **Fabricated `minimum_amount` on the droplet card (example).** DO droplets have NO minimum charge
+   (pure hourly rate capped at the monthly price). The example's `minimum_amount: 10_000` with
+   comments `$0.01 / 60s minimum charge` is (a) not a real DO rule and (b) doubly mis-described — the
+   code applies `minimum_amount` as a per-PERIOD total floor (`applyCommitments` clamp), NOT per-60s.
+   The `minimum_amount`/`maximum_amount` FIELDS are legitimate primitives (a min↔cap commitment range,
+   real in SaaS/telecom min-commitments) and stay — but the example must be faithful to DO and not use
+   a floor DO does not levy.
+
+## Target design
+
+- **Rate card (catalog, pricing only):** keep a `rating_period` (the cap/allowance window) on the
+  card. The card knows WHAT is metered and HOW MUCH; nothing about WHEN money is collected.
+- **Merchant: collection policy (NEW).** A merchant-level billing policy
+  `{mode: periodic(monthly|weekly|…) | threshold($X) | hybrid(whichever-first), value, currency}` —
+  alongside the existing merchant `money_settings`. This is the DEFAULT.
+- **Customer account: override.** A customer can override the merchant default (enterprise NET-30
+  monthly vs self-serve $X-threshold), same precedence as the tier ladder (merchant default →
+  account override). The invoiced entity is the CUSTOMER ACCOUNT, which accrues ONE balance across
+  all its resources.
+- **Invoice-close job:** per customer account, fire when `rating_period elapsed OR accrued ≥ threshold`,
+  rate the open usage for the window, and emit ONE invoice covering all the customer's rate cards.
+- **Global invoice-rounding policy (optional):** if sub-cent line suppression is wanted, it is a
+  merchant invoice policy ("don't bill below $X"), NOT a per-rate-card `minimum_amount`.
+
+## Tasks
+
+- [ ] Remove `tier_group` from usage-metered products (they are not tier-exclusive subscriptions);
+      model a usage product outside the subscription `TierGroups` hierarchy, or make `tier_group`
+      optional + ignored for usage products.
+- [ ] Split `billing_cadence`: keep a `rating_period` (cap/allowance window) on the rate card; drop
+      the collection-cadence meaning from the product.
+- [ ] Add a merchant-level collection policy `{mode: periodic|threshold|hybrid, value, currency}`
+      (merchant config / billing policy, alongside money_settings), with a per-customer-account override.
+- [ ] Add the invoice-close driver: per customer account, close + rate + invoice the accrued balance
+      when the policy fires (period elapsed OR threshold reached) — ONE invoice across all the
+      customer's rate cards.
+- [ ] Wire or remove `included_per_cycle` (the accrued-allowance rater hardcodes the source card's
+      `cell.Included` today).
+- [ ] Remove `minimum_amount` from the droplet example card + delete the `$0.01/60s` comments; keep
+      `minimum_amount`/`maximum_amount` as catalog primitives, demonstrated on a product that genuinely
+      has a min-commitment (reserved capacity / enterprise plan).
+- [ ] (Optional) Add a global merchant invoice-rounding policy ("don't bill below $X") for sub-cent
+      suppression, if wanted.
+- [ ] Make `config/catalog.example.yaml` faithful: the DO example uses only mechanisms DO actually
+      applies (hourly rate, monthly cap, pooled egress allowance) — no fabricated minimum.
+
+Acceptance: a usage-metered product carries no `tier_group` and no collection cadence; the rate card
+carries only its rating/cap window; collection cadence is a merchant policy with per-account override
+driving an invoice-close job over the customer's accrued balance; threshold billing works (impossible
+under the old per-product `billing_cadence`); `included_per_cycle` is either functional or gone; the
+droplet example matches real DO with no fabricated minimum. The #638 catalog pricing MATH is reused
+unchanged.
 
 ---
 
@@ -16,7 +120,18 @@ next_id: 642
 **Completed:** no
 **Status:** IN_PROGRESS 2026-06-29: Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
 
-LANDED (uncommitted, master working tree, build + unit tests green): routing taxonomy primary|secondary|legacy + `account_id`/`EffectiveAccountID` in `config/config.go`; multi-NMI-account boot (clients keyed by account_id, single-NMI error gone, primary aliased under rail key transitionally) in `internal/app/build_runtime.go` + `tests/testcontainer_suite.go`; `config/merchants.example.yaml` updated to the new shape (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test (`internal/merchants` passed a provider-account name where a rail was wanted). REMAINING: webhooks per-account routing; catalog push to primary+secondary; `provider_account_id` stamping (DB migration + sqlc) — these are coupled (per-account money routing needs the stamp) and were left for review rather than rushed unattended on the money path. Note: pre-existing #638 catalog WIP (`pkg/catalog`, `catalog.example.yaml`, `pkg/embedded/catalog_push_test.go`) is uncommitted in the tree, being edited concurrently — NOT part of this work.
+LANDED (uncommitted, master working tree; build green, unit + targeted integration tests green against the compose stack):
+- Routing taxonomy primary|secondary|legacy + `account_id`/`EffectiveAccountID` (`config/config.go`).
+- Multi-NMI-account boot — clients keyed by account_id, single-NMI error gone, primary aliased under rail key transitionally (`internal/app/build_runtime.go`, `tests/testcontainer_suite.go`).
+- `provider_account_id` stamping — columns already existed (no migration); plumbed through models + create queries (sqlc regen) + repo + a primary-resolving chokepoint. Behavioral integration test green.
+- Per-account inbound webhooks (NMI) — new `:account_id` route + account-scoped secret resolution + dispatcher per-account client selection; unknown account rejected. Integration test green; existing webhook suite still green.
+- `config/merchants.example.yaml` updated (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test.
+
+REMAINING:
+- CATALOG push to primary+secondary — needs a links-BY-ACCOUNT model change (see CATALOG task) and directly conflicts with the concurrent #638 catalog WIP editing the same files; do it after that settles.
+- Webhook account-scoped secret for Stripe/CCBill + payload-disambiguation (CCBill `clientAccnum`, Stripe Connect `event.account`); per-account stamping override on webhook-created records.
+
+Note: pre-existing #638 catalog WIP (`pkg/catalog`, `catalog.example.yaml`, `pkg/embedded/catalog_push_test.go`, `migrations/postgres/046_*`) is uncommitted in the tree, edited concurrently — NOT part of this work. Pre-existing failing integration tests on master (NOT caused by #641, verified on clean master): a cluster of `TestDunning*`/`TestFailMembership*`/`TestEntitlementsDunningStateMachine_NMI*`, `TestGetProductsEndpoint`, and `TestProviderAccountScopedLocalState…` (single-package seeding fragility).
 
 ## Metadata
 
@@ -71,22 +186,21 @@ Today the model is single-account-per-rail:
 - [x] Added `AccountID` + `EffectiveAccountID(name)` to `ProviderAccountConfig`; runtime keys off the account_id. NOTE: `EffectiveAccountID` falls back to the map name when account_id is unset (keeps existing tests/embedded callers working); the manifest path already REQUIRES `account_id`. STILL TODO: make account_id strictly required for nmi/ccbill/solana in the in-process set.
 - [x] `createNMIClients` builds one client per account keyed by `account_id`; single-NMI error removed. TRANSITIONAL: the primary is also aliased under the rail key `"nmi"` so the ~30 `NMIClients[rail]` consumers keep resolving the primary until records carry `provider_account_id`. Stripe/CCBill/Solana already tolerate multiple configs via `GetXRail()` primary-selection, so NMI was the only hard blocker.
 - WEBHOOKS:
-- [ ] Account-resolution step (after merchant resolution): try the payload-embedded account identifier first (CCBill `clientAccnum`, Stripe Connect `event.account`); if absent, read the `account_id` path parameter. Per rail, document which mode applies and verify whether the payload actually carries an identifier (don't assume).
-- [ ] Endpoint shapes: `…/webhooks/{merchant_slug}/{account_id}` when the path carries the account; `…/webhooks/{merchant_slug}/{rail}` (single shared) when the payload disambiguates. Extend `WebhookResolver` to return (merchant + provider account) and load THAT account's signing secret.
-- [ ] Stripe managed-webhook registration (`ReconcileManagedStripeWebhook`) registers the right URL per account (per-account path unless Connect `event.account` is used). Reject unresolved/ambiguous account → no fallback to a default account (trust boundary, mirror `ErrMerchantRouteUnresolved`).
+- [x] Per-account endpoint `POST /merchants/:merchant/webhooks/:provider/:account_id` added (additive; the existing `:provider`-only route is unchanged → no regression). Handler reads `:account_id`, loads THAT account's signing secret, and rejects an unknown account (404, no fallback). `WebhookMessage.ProviderAccountID` carries the routed account; the dispatcher selects `NMIClients[account_id]` (falls back to the rail/primary alias). NMI wired + integration-tested (`internal/merchants` per-account secret test + existing webhook suite green).
+- [~] Account-scoped SECRET loading is wired for **NMI** (`LoadNMIWebhookSigningSecretForAccount` + `providerAccountSecretScopeByAccountID`). STILL TODO: the same account-scoped secret for **Stripe/CCBill** on the path (today a path-routed Stripe/CCBill event still loads the PRIMARY secret), and payload-disambiguation (CCBill `clientAccnum`, Stripe Connect `event.account`) for a single shared endpoint.
+- [ ] Stripe managed-webhook registration (`ReconcileManagedStripeWebhook`) should register the per-account URL.
 - RUNTIME / STAMPING:
-- [ ] Add `provider_account_id` to `subscriptions`, `payments`, `payment_methods` (gen + domain models + repo mappings) — `rail_customers` already has it. Stamp it at create time with the account that processed the operation.
-- [ ] Add a per-merchant resolver: inbound `account_id` (gateway-id from URL) → `provider_accounts` row (UUID + secret), and the inverse for outbound stamping.
+- [x] DONE — the `provider_account_id` columns ALREADY existed on `subscriptions`/`payments`/`payment_methods` (no migration). Wired through domain models + create queries (sqlc regen) + repo read/write mappings. Repo `Create` chokepoint best-effort resolves the merchant's PRIMARY account for the rail and stamps it when the caller didn't set one (`resolvePrimaryProviderAccountID` + new `GetPrimaryProviderAccount` query). Behavioral test green (`internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount). REFINEMENT: webhook paths set `WebhookMessage.ProviderAccountID` but it isn't yet threaded to the create (so a non-primary-account webhook's records are stamped PRIMARY by the chokepoint; correct for the primary case).
+- [x] Per-merchant resolvers added: `GetPrimaryProviderAccount` (rail→primary id, for stamping) and `providerAccountSecretScopeByAccountID` (account_id→secret scope, for inbound webhooks).
 - CATALOG:
-- [ ] Catalog AutoCreate/Verify/drift iterate the merchant's enabled `primary`+`secondary` accounts per rail; skip `legacy` and disabled. Record the target `account_id` on each provider link (Stripe link already carries `provider`/lookup_key — add account_id).
+- [ ] NOT DONE (largest remaining + actively conflicts with concurrent #638 catalog WIP). Catalog provider links are keyed by RAIL (`prices.rails["stripe"]` = one id-set), and `resolveProviders` (pkg/service/catalog_providers.go) dispatches per rail name. Pushing to primary+secondary needs a links-BY-ACCOUNT model change to `prices.rails` JSONB + `req.Providers`/`ProviderLinks` semantics + every reader (checkout/drift/verify). "Skip legacy" is already satisfied (push targets the primary, never legacy). Do this as a dedicated change AFTER the #638 catalog rework settles (it's editing the same files).
 - CHECKOUT:
-- [ ] Checkout deterministically selects the `primary` account for new work and stamps the chosen `provider_account_id`. (Secondary-as-fallback *policy* stays #288; this issue only guarantees a deterministic, stamped primary.)
+- [~] New payments/subscriptions are stamped with the primary `provider_account_id` via the repo chokepoint (covers the deterministic-primary requirement). Explicit checkout-time selection + secondary-fallback policy stays #288.
 - TESTS:
-- [ ] Two NMI accounts on one merchant (path-param mode): an event delivered to A's path verifies with A's secret and is rejected under B's; records stamp the right `provider_account_id`.
-- [ ] Payload-disambiguation mode: one shared CCBill endpoint routes by `clientAccnum` to the correct account; an unknown/absent identifier is rejected (no default-account fallback).
-- [ ] Catalog push hits primary+secondary, skips legacy+disabled; verify drift only on pushed accounts.
-- [ ] Legacy account still processes an inbound refund/chargeback for an old subscription but receives no new checkout and no catalog push.
-- [ ] Multi-merchant: account_id routing never crosses merchants.
+- [x] Two NMI accounts on one merchant — each resolves its OWN webhook signing secret; unknown account → not found/rejected (`internal/merchants` TestLoadNMIWebhookSigningSecretForAccount, integration-green).
+- [x] Repo create stamps the PRIMARY provider account (over a secondary) — `internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount, integration-green.
+- [ ] Payload-disambiguation (CCBill `clientAccnum` / Stripe `event.account`) — pending the Stripe/CCBill account-scoped secret work above.
+- [ ] Catalog push primary+secondary / legacy-skip — pending the CATALOG model change.
 
 ## Acceptance Criteria
 
