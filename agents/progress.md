@@ -84,9 +84,14 @@ Defects:
   rate + `maximum_amount` cap + allowances on the card. The cap STAYS (a real, intrinsic per-SKU
   pricing fact — DO caps a droplet at its monthly price). `minimum_amount` is REMOVED (a floor is not
   pricing). The card knows WHAT is metered and HOW MUCH; nothing about WHEN money is collected, minimum
-  commitments, or true-ups. The window is decoupled from any calendar-month notion (the #638 example's
-  `divide_by` already encodes DO's 672h/28-day breakeven while `billing_cadence: 30d` says 30d-rolling
-  — the clean `rating_period` resolves that inconsistency).
+  commitments, or true-ups. `rating_period` is **calendar-month-anchored** (resets on the 1st), NOT a
+  rolling 30-day window — follow DO's convention, which is what businesses / accounting / invoicing
+  actually expect (books close on calendar months). So `maximum_amount` means a **flat price per
+  calendar month regardless of month length** (28 vs 31 days): the hourly rate is `monthly ÷ 672`
+  (28×24h), so a 24/7 server hits the cap exactly at the end of February and *early* in a 31-day month
+  with the remaining hours free — same monthly bill either way. (The #638 example is self-inconsistent
+  here: `divide_by` encodes the 672h/28-day breakeven while `billing_cadence: 30d` says 30d-rolling; the
+  calendar-month `rating_period` fixes it.)
 - **Merchant: collection policy (NEW).** A merchant-level billing policy
   `{mode: periodic(monthly|weekly|…) | threshold($X) | hybrid(whichever-first), value, currency}` —
   alongside the existing merchant `money_settings`. This is the DEFAULT.
@@ -107,8 +112,10 @@ Defects:
 - [ ] Remove `tier_group` from usage-metered products (they are not tier-exclusive subscriptions);
       model a usage product outside the subscription `TierGroups` hierarchy, or make `tier_group`
       optional + ignored for usage products.
-- [ ] Split `billing_cadence`: keep a `rating_period` (cap/allowance window) on the rate card; drop
-      the collection-cadence meaning from the product.
+- [ ] Split `billing_cadence`: keep a `rating_period` on the rate card, **calendar-month-anchored**
+      (cap + allowances reset on the 1st), NOT a rolling 30-day duration — so `maximum_amount` is a
+      flat price per calendar month regardless of 28/31-day length (DO convention; hourly rate =
+      monthly÷672). Drop the collection-cadence meaning from the product.
 - [ ] Add a merchant-level collection policy `{mode: periodic|threshold|hybrid, value, currency}`
       (merchant config / billing policy, alongside money_settings), with a per-customer-account override.
 - [ ] Add the invoice-close driver: per customer account, close + rate + invoice the accrued balance
@@ -128,8 +135,9 @@ Defects:
       applies (hourly rate, monthly cap, pooled egress allowance) — no fabricated minimum.
 
 Acceptance: a usage-metered product carries no `tier_group` and no collection cadence; the rate card
-carries only its rating/cap window + rate + `maximum_amount` cap + allowances; NO `minimum_amount` on
-any rate card; minimums (if any) are an account-level `minimum_spend` with period-end true-up;
+carries only its rating/cap window + rate + `maximum_amount` cap + allowances; `rating_period` resets
+on the calendar month (flat monthly cap regardless of 28/31-day length, DO convention), not a rolling
+30 days; NO `minimum_amount` on any rate card; minimums (if any) are an account-level `minimum_spend` with period-end true-up;
 collection cadence is a merchant policy with per-account override driving an invoice-close job over the
 customer's accrued balance; threshold billing works (impossible under the old per-product
 `billing_cadence`); `included_per_cycle` is either functional or gone; the droplet example matches real
