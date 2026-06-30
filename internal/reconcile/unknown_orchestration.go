@@ -205,7 +205,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,
 			PriceID:        sub.PriceID,
-			Rail:           gen.OpenrailsRailType(sub.Rail),
+			Rail:           string(sub.Rail),
 			TransactionID:  t.TransactionID,
 			Amount:         t.AmountCents,
 			ListAmount:     t.AmountCents,

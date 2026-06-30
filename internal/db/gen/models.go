@@ -66,6 +66,7 @@ const (
 	OpenrailsSubscriptionStatusCancelled OpenrailsSubscriptionStatus = "cancelled"
 	OpenrailsSubscriptionStatusFailed    OpenrailsSubscriptionStatus = "failed"
 	OpenrailsSubscriptionStatusPastDue   OpenrailsSubscriptionStatus = "past_due"
+	OpenrailsSubscriptionStatusUnknown   OpenrailsSubscriptionStatus = "unknown"
 )
 
 func (e *OpenrailsSubscriptionStatus) Scan(src interface{}) error {
