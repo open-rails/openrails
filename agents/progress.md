@@ -7,11 +7,11 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 643
+next_id: 644
 
 ---
 
-# #642: metering catalog & billing-policy separation — usage products, rating window vs merchant collection cadence
+# #642: metering catalog corrections — usage products aren't subscriptions; pricing-only rate cards (collection/invoicing → #643)
 
 **Completed:** no
 **Status:** PROPOSED 2026-06-29: design review of the #638 realistic-resource-metering catalog
@@ -21,8 +21,9 @@ per-SKU pricing, `divide_by`, `min`/`max` commitment range, flat + accrued poole
 tiers — verified used: Matrix 21 / DivideBy 9 / Min/Max 14 / Allowance 14 / Pool 7 consumption
 sites; `input_min/max` enforced at quote). The problems are catalog fields that conflate PRICING
 with the BILLING RELATIONSHIP, a metered product forced into the subscription tier hierarchy, one
-dead field, and a fabricated charge floor in the example. NO code touched (the #638 metering work
-is owned by a concurrent agent — this issue is the design plan to hand over).
+dead field, and a fabricated charge floor in the example. SPLIT: #642 is the CATALOG-LAYER cleanup
+(rate cards become pricing-only); the WHEN-to-bill / minimums / invoicing subsystem is #643. NO code
+touched (the #638 metering work is a concurrent agent's — this is the design plan to hand over).
 
 ## Metadata
 - Category: refactor
@@ -92,20 +93,11 @@ Defects:
   with the remaining hours free — same monthly bill either way. (The #638 example is self-inconsistent
   here: `divide_by` encodes the 672h/28-day breakeven while `billing_cadence: 30d` says 30d-rolling; the
   calendar-month `rating_period` fixes it.)
-- **Merchant: collection policy (NEW).** A merchant-level billing policy
-  `{mode: periodic(monthly|weekly|…) | threshold($X) | hybrid(whichever-first), value, currency}` —
-  alongside the existing merchant `money_settings`. This is the DEFAULT.
-- **Customer account: override + minimum commitment.** A customer can override the merchant default
-  (enterprise NET-30 monthly vs self-serve $X-threshold), same precedence as the tier ladder (merchant
-  default → account override). This is ALSO where a `minimum_spend` lives (the real "minimum": commit
-  $X/period, true-up at close if usage is less) — a contract property, NOT a catalog field, matching
-  how Lago/Orb/Metronome/Kill Bill model it. The invoiced entity is the CUSTOMER ACCOUNT, which accrues
-  ONE balance across all its resources.
-- **Invoice-close job:** per customer account, fire when `rating_period elapsed OR accrued ≥ threshold`,
-  rate the open usage for the window, apply any `minimum_spend` true-up, and emit ONE invoice covering
-  all the customer's rate cards.
-- **Global invoice-rounding policy (optional):** if sub-cent line suppression is wanted, it is a
-  merchant invoice policy ("don't bill below $X"), NOT a per-rate-card `minimum_amount`.
+- **Everything about WHEN money is collected → #643** (the billing-relationship layer): the
+  merchant/account collection policy (monthly / weekly / $X-threshold / hybrid), account-level
+  `minimum_spend` with true-up, the per-customer invoice-close job, and the optional global
+  invoice-rounding policy. None of it belongs on the catalog. This issue (#642) leaves the rate card
+  pricing-only; #643 builds the policy + invoicing subsystem on top.
 
 ## Tasks
 
@@ -116,32 +108,81 @@ Defects:
       (cap + allowances reset on the 1st), NOT a rolling 30-day duration — so `maximum_amount` is a
       flat price per calendar month regardless of 28/31-day length (DO convention; hourly rate =
       monthly÷672). Drop the collection-cadence meaning from the product.
-- [ ] Add a merchant-level collection policy `{mode: periodic|threshold|hybrid, value, currency}`
-      (merchant config / billing policy, alongside money_settings), with a per-customer-account override.
-- [ ] Add the invoice-close driver: per customer account, close + rate + invoice the accrued balance
-      when the policy fires (period elapsed OR threshold reached) — ONE invoice across all the
-      customer's rate cards.
 - [ ] Wire or remove `included_per_cycle` (the accrued-allowance rater hardcodes the source card's
       `cell.Included` today).
 - [ ] Remove `minimum_amount` from the rate-card model ENTIRELY (a per-line floor is not pricing);
       keep `maximum_amount` (the cap is a real per-SKU pricing fact). Delete the droplet card's
       `minimum_amount` + its `$0.01/60s` comments.
-- [ ] Add account/subscription-level `minimum_spend` (commit $X/period, period-end true-up at invoice
-      close) as the real "minimum" — a billing-relationship property next to `collection_cadence`, NOT
-      a catalog field. Matches Lago/Orb/Metronome/Kill Bill (minimums live with the contract).
-- [ ] (Optional) Add a global merchant invoice-rounding policy ("don't bill below $X") for sub-cent
-      suppression, if wanted.
 - [ ] Make `config/catalog.example.yaml` faithful: the DO example uses only mechanisms DO actually
-      applies (hourly rate, monthly cap, pooled egress allowance) — no fabricated minimum.
+      applies (hourly rate, calendar-month cap, pooled egress allowance) — no fabricated minimum, no
+      30d-rolling window.
+- [ ] (→ #643) collection policy + account `minimum_spend` + invoice-close job + optional invoice
+      rounding — the billing-relationship layer, tracked separately.
 
-Acceptance: a usage-metered product carries no `tier_group` and no collection cadence; the rate card
-carries only its rating/cap window + rate + `maximum_amount` cap + allowances; `rating_period` resets
-on the calendar month (flat monthly cap regardless of 28/31-day length, DO convention), not a rolling
-30 days; NO `minimum_amount` on any rate card; minimums (if any) are an account-level `minimum_spend` with period-end true-up;
-collection cadence is a merchant policy with per-account override driving an invoice-close job over the
-customer's accrued balance; threshold billing works (impossible under the old per-product
-`billing_cadence`); `included_per_cycle` is either functional or gone; the droplet example matches real
-DO with no fabricated minimum. The #638 catalog pricing MATH is reused unchanged.
+Acceptance: a usage-metered product carries no `tier_group`, no `billing_cadence`, no `minimum_amount`;
+its rate card carries only a **calendar-month-anchored `rating_period`** + per-SKU rate + `maximum_amount`
+cap + allowances (flat monthly cap regardless of 28/31-day length, DO convention; not a rolling 30 days);
+`included_per_cycle` is either functional or gone; the droplet example matches real DO. The #638 pricing
+MATH is reused unchanged. (Collection cadence, `minimum_spend`, threshold billing, and the invoice-close
+job → #643.)
+
+---
+
+# #643: collection & invoicing policy — merchant/account billing cadence, minimum_spend, invoice-close
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: the billing-relationship half of the #642 metering review (split out).
+Once rate cards are pricing-only (#642), WHEN to invoice, what minimums apply, and how the accrued
+balance closes into invoices live HERE — on the merchant/account policy + an invoice-close job, NOT the
+catalog. Greenfield: no such subsystem exists yet. NO code touched.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+## Problem
+
+Metered usage (#638/#642) accrues an owed balance per CUSTOMER ACCOUNT across all their resources.
+Nothing today decides WHEN that balance is invoiced, supports minimum-spend commitments, or closes the
+balance into one invoice. These are properties of the BILLING RELATIONSHIP, not the catalog:
+- **Collection cadence** — monthly / weekly / at $X owed / whichever-comes-first. Threshold billing
+  ("invoice at $X owed") cannot be a product field — it is a function of the customer's whole running
+  balance across all resources.
+- **Minimum spend** — "commit $X/period, true-up at close if usage is less." A contract commitment
+  (how Lago/Orb/Metronome/Kill Bill model minimums) — never a floor on a priced line.
+- **One invoice per customer** — a customer with 5 droplets + block storage + egress gets ONE invoice,
+  not 5 on 5 per-product cadences.
+
+## Target design
+
+- **Merchant collection policy (default):** `{mode: periodic(monthly|weekly|…) | threshold($X) |
+  hybrid(whichever-first), value, currency}`, alongside the existing merchant `money_settings`.
+- **Customer-account override:** a customer overrides the merchant default (enterprise NET-30 monthly
+  vs self-serve $X-threshold), same precedence as the tier ladder (merchant default → account
+  override). The invoiced entity is the CUSTOMER ACCOUNT (one accrued balance across all resources).
+- **Account `minimum_spend`:** commit $X/period; at invoice close, if rated usage < minimum, true-up to
+  the minimum. A contract property, NOT catalog.
+- **Invoice-close job:** per customer account, fire when `rating_period elapsed OR accrued ≥ threshold`,
+  rate the open usage for the window (reuse #638 rating math + #642's calendar-month `rating_period`),
+  apply any `minimum_spend` true-up, and emit ONE invoice covering all the customer's rate cards.
+- **Global invoice-rounding policy (optional):** sub-cent line suppression ("don't bill below $X") is a
+  merchant invoice policy, NOT a per-rate-card `minimum_amount`.
+
+## Tasks
+
+- [ ] Add a merchant-level collection policy `{mode: periodic|threshold|hybrid, value, currency}`
+      (merchant config alongside money_settings), with a per-customer-account override.
+- [ ] Add account/subscription-level `minimum_spend` (commit $X/period, period-end true-up at close).
+- [ ] Add the invoice-close driver: per customer account, close + rate (reuse #638 math) + `minimum_spend`
+      true-up + invoice the accrued balance when the policy fires (period elapsed OR threshold reached)
+      — ONE invoice across all the customer's rate cards.
+- [ ] (Optional) Add a global merchant invoice-rounding policy ("don't bill below $X").
+
+Acceptance: collection cadence is a merchant policy with per-account override; threshold billing works
+(impossible under a per-product `billing_cadence`); `minimum_spend` trues-up at close; one invoice per
+customer account covers all their rate cards. Depends on #642 (pricing-only rate cards + calendar-month
+`rating_period`); #638 pricing MATH reused unchanged.
 
 ---
 
