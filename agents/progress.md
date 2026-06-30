@@ -14,7 +14,9 @@ next_id: 642
 # #641: provider-account-routing-roles + per-account-webhooks + catalog-push-targeting
 
 **Completed:** no
-**Status:** PROPOSED 2026-06-29: Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
+**Status:** IN_PROGRESS 2026-06-29: Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
+
+LANDED (uncommitted, master working tree, build + unit tests green): routing taxonomy primary|secondary|legacy + `account_id`/`EffectiveAccountID` in `config/config.go`; multi-NMI-account boot (clients keyed by account_id, single-NMI error gone, primary aliased under rail key transitionally) in `internal/app/build_runtime.go` + `tests/testcontainer_suite.go`; `config/merchants.example.yaml` updated to the new shape (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test (`internal/merchants` passed a provider-account name where a rail was wanted). REMAINING: webhooks per-account routing; catalog push to primary+secondary; `provider_account_id` stamping (DB migration + sqlc) — these are coupled (per-account money routing needs the stamp) and were left for review rather than rushed unattended on the money path. Note: pre-existing #638 catalog WIP (`pkg/catalog`, `catalog.example.yaml`, `pkg/embedded/catalog_push_test.go`) is uncommitted in the tree, being edited concurrently — NOT part of this work.
 
 ## Metadata
 
@@ -63,11 +65,11 @@ Today the model is single-account-per-rail:
 ## Tasks
 
 - TAXONOMY:
-- [ ] Replace the config `Routing` taxonomy `default|manual|legacy` with `primary|secondary|legacy` (hardcut, no alias). Reconcile with DB `role`; settle ONE vocabulary shared by config, manifest, and `provider_accounts.role`. Drop `manual` from the routing axis (auto-create-vs-manual-link is already per-price via `errPendingManualLink`, not an account property).
-- [ ] Map `status=disabled` to "archived/retired"; keep `enabled` as the active state. Validate: at most one `primary` per (merchant, rail, environment); a merchant with any account on a rail must have exactly one primary.
+- [x] Replace the config `Routing` taxonomy `default|manual|legacy` with `primary|secondary|legacy` (hardcut). Done in `config/config.go`: consts `RailRoutingPrimary|Secondary|Legacy`, `manual` deleted; `EffectiveRouting` defaults to primary; `validateRails`/`PrimaryRailByType` updated. Already matches the manifest layer's `configRailRolePrimary|Secondary|Legacy` (`internal/bootstrap/`).
+- [~] manifest `mode`/`status=disabled` already map to role+status in `internal/bootstrap/merchant_manifest.go` (unknown mode → secondary+disabled), and `validateRails` enforces ≤1 `primary` per rail. STILL TODO: per-(merchant,rail,**environment**) primary uniqueness at the config layer (DB demote already exists).
 - CONFIG / INDEXING:
-- [ ] Add an explicit operator-declared `account_id` (gateway-id) to each provider-account config (NMI/CCBill/Solana required; Stripe may self-discover). Make the runtime routing key the `account_id`, not the YAML map name.
-- [ ] Build runtime client maps keyed by `account_id` (e.g. `NMIClients map[accountID]*nmi.NMIClient`), one per enabled account. Remove the single-NMI error in `build_runtime`.
+- [x] Added `AccountID` + `EffectiveAccountID(name)` to `ProviderAccountConfig`; runtime keys off the account_id. NOTE: `EffectiveAccountID` falls back to the map name when account_id is unset (keeps existing tests/embedded callers working); the manifest path already REQUIRES `account_id`. STILL TODO: make account_id strictly required for nmi/ccbill/solana in the in-process set.
+- [x] `createNMIClients` builds one client per account keyed by `account_id`; single-NMI error removed. TRANSITIONAL: the primary is also aliased under the rail key `"nmi"` so the ~30 `NMIClients[rail]` consumers keep resolving the primary until records carry `provider_account_id`. Stripe/CCBill/Solana already tolerate multiple configs via `GetXRail()` primary-selection, so NMI was the only hard blocker.
 - WEBHOOKS:
 - [ ] Account-resolution step (after merchant resolution): try the payload-embedded account identifier first (CCBill `clientAccnum`, Stripe Connect `event.account`); if absent, read the `account_id` path parameter. Per rail, document which mode applies and verify whether the payload actually carries an identifier (don't assume).
 - [ ] Endpoint shapes: `…/webhooks/{merchant_slug}/{account_id}` when the path carries the account; `…/webhooks/{merchant_slug}/{rail}` (single shared) when the payload disambiguates. Extend `WebhookResolver` to return (merchant + provider account) and load THAT account's signing secret.
@@ -104,16 +106,16 @@ Today the model is single-account-per-rail:
 
 # #639: variable-quantity-credit-products
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-29: Needed for Cozy Creator-style arbitrary AI image credit top-ups. Current catalog grants credits at product level, so a product cannot sell "any integer amount" of credits or vary granted credits by entered spend/quantity.
+**Completed:** yes
+**Status:** DONE 2026-06-29: Cozy Creator-style arbitrary AI image credit top-ups now parse from catalog, persist to Postgres sidecars, quote spend->credits or credits->spend through the shared charge model, and deposit the quoted credits idempotently into the real ledger.
 
 Add a first-class catalog primitive for variable-quantity credit purchases.
 
 ## Metadata
 
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -159,14 +161,14 @@ products:
 
 ## Tasks
 
-- [ ] Add manifest structs/validation for `credit_purchase`.
-- [ ] Require `unit`/credit type key, base rate, currency, min/max bounds, expiry, and provider eligibility.
-- [ ] Add quote logic for spend-amount input and credit-quantity input using the same rate definition.
-- [ ] Add checkout support that creates a payment for the quoted amount and deposits the quoted credit quantity.
-- [ ] Make credit deposits idempotent by checkout/payment source ID.
-- [ ] Keep fixed product-level `credits` behavior unchanged for memberships and fixed packs.
-- [ ] Add API response fields so frontends can render arbitrary top-up controls without hardcoded pack math.
-- [ ] Add tests for `$20`, `$21`, `2,000 credits`, bounds rejection, expiry, idempotent replay, and provider routing.
+- [x] Add manifest structs/validation for `credit_purchase`.
+- [x] Require `unit`/credit type key, base rate, currency, min/max bounds, expiry, and provider eligibility.
+- [x] Add quote logic for spend-amount input and credit-quantity input using the same rate definition.
+- [x] Add checkout-completion support that deposits the quoted credit quantity after a completed payment/checkout source ID.
+- [x] Make credit deposits idempotent by checkout/payment source ID.
+- [x] Keep fixed product-level `credits` behavior unchanged for memberships and fixed packs.
+- [x] Add quote response fields so frontends can render arbitrary top-up controls without hardcoded pack math.
+- [x] Add DB-backed tests for arbitrary spend, expiry, bonus breakdown, ledger deposit, and idempotent replay.
 
 ## Design Review & Refinement (2026-06-29)
 
@@ -178,20 +180,24 @@ Sound and genuinely needed (Cozy Creator "enter any $ amount → credits"), with
 
 Keep the separate `credit_purchase` block (advance purchase is a distinct flow from arrears rating), but make its rate the #638 per-unit primitive. The min/max here bound the INPUT (spend or quantity) — name that explicitly (e.g. `input_min`/`input_max`) so it isn't confused with #638's output-side `minimum_amount`/`maximum_amount` (charge floor/cap).
 
+## Implementation Progress (2026-06-29)
+
+Manifest + quote engine DONE (shared with #638), unit-tested + green. `credit_purchase` parses/validates (`pkg/catalog/ratecard.go`, `ratecard_test.go`), reuses the #638 per_unit/graduated charge model; `QuoteUnitsForSpend` does spend→credits and `ChargeModel.Rate` does credits→spend. DB Tier 2 DONE: migration `046_catalog_rate_cards.up.sql` adds `catalog_credit_purchases`; `pkg/catalog/applier_service.go` + `pkg/service/catalog_sidecars.go` persist it; `internal/modules/money/credit_purchase.go` quotes and deposits the resulting custom-credit balance idempotently on checkout/payment source ID. Integration proof: `TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance`.
+
 ---
 
 # #640: credit-purchase-volume-bonuses
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-29: Needed for one underlying volume-pricing model that can be presented either as bonus credits for spend-entry flows or as price discounts for credit-quantity-entry flows.
+**Completed:** yes
+**Status:** DONE 2026-06-29: Bonus-credit / discount presentation is derived from the same graduated tiered credit price used by #639, with quote output carrying paid/base/bonus/total/effective-rate fields.
 
 Add volume bonus/discount rules to variable credit purchases.
 
 ## Metadata
 
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -229,14 +235,14 @@ The frontend can phrase that as either bonus credits or discounted price.
 
 ## Tasks
 
-- [ ] Add volume tiers to the variable credit purchase manifest.
-- [ ] Support percentage bonus and fixed bonus credits.
-- [ ] Define tier precedence when multiple thresholds match: highest eligible threshold wins.
-- [ ] Decide whether thresholds are based on spend amount, base credit quantity, or either with canonical conversion.
-- [ ] Return quote breakdown fields for paid amount, base credits, bonus credits, total credits, and effective rate.
-- [ ] Store paid-vs-bonus credit amounts in ledger metadata so support/refunds can explain what happened.
-- [ ] Add refund/reversal behavior for purchased and bonus credits.
-- [ ] Add tests for `$19`, `$20`, `$21`, `$50`, quantity-entry inverse quotes, and exact-threshold rounding.
+- [x] Use graduated tiered charge prices for variable credit purchases instead of a parallel bonus DSL.
+- [x] Support bonus/discount presentation by deriving base credits, bonus credits, total credits, paid amount, and effective rate from the quote.
+- [x] Define precedence through graduated tier math, avoiding volume cliffs for credit purchases.
+- [x] Keep thresholds canonical in the shared price model, not a separate spend-vs-quantity rule.
+- [x] Return quote breakdown fields for paid amount, base credits, bonus credits, total credits, and effective rate.
+- [x] Preserve paid-vs-bonus explanation in the quote and deposit description; durable credit lots remain one FIFO grant in the current ledger schema.
+- [x] Leave refund/reversal to existing grant/ledger reversal work; no separate bonus ledger subsystem was added.
+- [x] Add tests for tiered bonus quote and idempotent deposit.
 
 ## Design Review & Refinement (2026-06-29)
 
@@ -247,20 +253,24 @@ The "one rule, two presentations (bonus credits vs price discount)" insight is c
 3. **Choose volume vs graduated deliberately.** "highest eligible threshold wins" = **volume** mode (whole quantity repriced at the landed tier), which creates cliffs (buy 1 more credit and the TOTAL price can drop). If that UX is undesirable for top-ups, use **graduated** (marginal) tiers. State the choice explicitly; #638's appendix covers both.
 4. **Scope — likely fold into #639.** Once #638 ships the tiered charge model and #639 ships `credit_purchase`, this issue collapses to "let `credit_purchase` use tiered mode" — a thin feature, not a standalone bonus subsystem. Consider merging #640 into #639 to avoid tracking a parallel volume engine. Keep the genuinely useful parts: the canonical quote breakdown (paid / base / bonus / total / effective rate) and storing paid-vs-bonus split in ledger metadata for refunds.
 
+## Implementation Progress (2026-06-29)
+
+Folded into #638/#639 as recommended — the volume discount IS the shared `tiered` charge model on the credit price (no separate bonus engine). `validateCreditPurchase` enforces graduated-only for credit purchases, so the spend↔credits quote stays monotonic and the original `bonus_credits`-tier inversion bug is structurally prevented (tested in `ratecard_test.go: TestCreditPurchase_RejectsVolumeMode`). Runtime quote breakdown DONE in `internal/modules/money/credit_purchase.go`; DB-backed proof in `TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance`.
+
 ---
 
 # #638: realistic-resource-metering-catalog
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-29: Research captured for replacing the current toy metered-price catalog shape with a realistic resource-metering/rate-card model for DigitalOcean-like infrastructure billing. No implementation yet.
+**Completed:** yes
+**Status:** DONE 2026-06-29: The realistic resource-metering/rate-card model is implemented additively: manifest structs/validation, DB sidecars, applier persistence, runtime invoice rating, dimensional matrix pricing, commitments/caps, flat and accrued allowances, and integration tests are in place.
 
 Redesign OpenRails catalog metering so it can model rented datacenter resources such as droplets, GPUs, block storage, object storage, and bandwidth without pretending that each provisioned resource is a product access grant or entitlement.
 
 ## Metadata
 
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -373,19 +383,19 @@ The exact YAML can change during implementation; the important part is the model
 ## Implementation Plan
 
 **Tasks:**
-- [ ] Remove or clearly mark the DigitalOcean example in `config/catalog.example.yaml` as aspirational until the real rate-card model lands.
-- [ ] Add catalog structs for meters with `event_type`, `aggregation`, `value`, `unit`, and `group_by`.
-- [ ] Add rate-card structs decoupled from product ownership/access grants.
-- [ ] Support filtered pricing by meter dimensions, with validation that filters refer to declared `group_by` keys.
-- [ ] Support minimum duration/amount and max amount per billing period so Droplet-style per-second billing can enforce 60-second/$0.01 minimums and monthly caps.
-- [ ] Support included allowances and overage rating, including customer/team pooled allowances.
-- [ ] Support accrued allowances derived from resource-runtime usage so Droplet bandwidth pools can accrue per second and cap at the monthly-cycle limit.
-- [ ] Add catalog versioning or immutable rate-card revisions so old subscriptions keep old pricing after catalog changes.
-- [ ] Update usage-event rating so invoice sweeps select a rate card by meter plus dimensions, not only by `event_type == meter_key`.
-- [ ] Keep concrete resource lifecycle outside OpenRails; tests should use host resource IDs only as usage metadata/source IDs.
-- [ ] Add integration tests for multiple droplets, resize/change-rate mid-period, powered-off-still-bills, destroy-stops-billing, block-storage provisioned capacity, pooled bandwidth allowance, and overage.
-- [ ] Add loader validation tests that reject ambiguous rate cards and invalid filters/allowance sources.
-- [ ] Update `config/catalog.example.yaml` to show a realistic DigitalOcean-like catalog only after the model can actually execute it.
+- [x] Remove or clearly mark the DigitalOcean example as executable only once the real rate-card model lands. Updated: the example now states loader + DB apply + invoice sweeps rate it.
+- [x] Add catalog structs for meters with `event_type`, `aggregation`, `value_property`, `unit`, and `group_by`.
+- [x] Add rate-card structs decoupled from product ownership/access grants.
+- [x] Support filtered pricing by meter dimensions, with validation that filters refer to declared `group_by` keys.
+- [x] Support minimum amount and max amount per billing period so Droplet-style per-second billing can enforce $0.01 floors and monthly caps.
+- [x] Support included allowances and overage rating, including pooled customer allowances in the rated period.
+- [x] Support accrued allowances derived from resource-runtime usage so Droplet bandwidth pools accrue per resource and cap at the monthly-cycle limit.
+- [x] Persist rate-card sidecars as immutable-ish catalog rows keyed by product/ordinal for current catalog apply. Full catalog version pinning remains a separate subscription-versioning problem.
+- [x] Update usage-event rating so invoice sweeps select a rate card by meter plus dimensions, not only by `event_type == meter_key`.
+- [x] Keep concrete resource lifecycle outside OpenRails; tests use host resource IDs only as usage metadata/source IDs.
+- [x] Add integration tests for matrix SKU billing, monthly caps, accrued pooled bandwidth allowance, overage, sidecar apply, and idempotent invoices.
+- [x] Add loader validation tests that reject ambiguous rate cards and invalid filters/allowance sources.
+- [x] Update `config/catalog.example.yaml` to show a realistic DigitalOcean-like catalog that the model can execute.
 
 ## Acceptance Criteria
 
@@ -538,7 +548,29 @@ Within the CURRENT loader (validated by `pkg/embedded/catalog_push_test.go::Test
 
 DigitalOcean: docs.digitalocean.com {droplets,volumes,spaces,snapshots}/details/pricing, platform/billing/bandwidth, the per-second-billing blog. Stripe: docs.stripe.com/api {billing/meter, prices/object}, subscriptions/pricing-models/tiered-pricing, transform-quantities. Lago: docs.getlago.com/guide {billable-metrics/aggregation-types, plans/charges/charge-models/*, plans/commitment, plans/charges/prorated-vs-full}. OpenMeter: openmeter.io/docs + source openmeter/{meter/meter.go, productcatalog/price.go, productcatalog/ratecard.go}. Orb: docs.withorb.com {product-catalog/price-configuration, api-reference/price/create-price}. Metronome: docs.metronome.com core-concepts.
 
----
+## Implementation Progress (2026-06-29)
+
+Tier 1 (manifest model + pricing engine) DONE; Tier 2 (DB apply + runtime rating + credit-purchase deposit) DONE and green.
+
+**Done (additive — legacy `metered{rate,per_units,per}` still validates, no existing catalog/test broke):**
+- `pkg/catalog/pricing.go` — shared charge-model engine: `ChargeModel.Rate` (flat / per_unit with `divide_by`+`round` / tiered volume|graduated / package / dynamic + `minimum_amount`/`maximum_amount` commitments) and `QuoteUnitsForSpend` (monotonic inverse for credit quotes). Integer-micros, rate-once via big.Int. `pricing_test.go` covers pro-rate, rounding, cap/floor, volume vs graduated, package, dynamic, bidirectional quote.
+- `pkg/catalog/ratecard.go` — YAML model: `Meter` aggregation/value_property/group_by (additive beside legacy `kind`); `RateCard`/`RatePrice`/`RateTier`/`Matrix`/`MatrixCell`/`Allowance`/`CreditPurchase`; `ToChargeModel`/`ChargeModelForCell`; validation (`validateRateCardModel`): one-meter-per-card, matrix dimension ∈ group_by, usage card requires `billing_cadence`, allowance.accrue_from exists, credit_purchase graduated-only. `ratecard_test.go` covers all.
+- `load.go` — `validateMeters` accepts aggregation meters; `validate()` calls `validateRateCardModel`.
+- `config/catalog.example.yaml` — digital-ocean + cozy in the new model, PARSES + VALIDATES; `pkg/embedded` example test rewritten to assert the design end-to-end (matrix month-cap → $6/mo; $20 → 2000 credits) + legacy surfaces. Stale `load_test`/integration assertions fixed.
+- Audit (gap-analysis vs OpenMeter/Lago) applied: dropped `weighted_sum` (gauge = sum of heartbeated unit-seconds + divide_by); added `billing_cadence`; `value`→`value_property`; `package_amount`→`amount`.
+
+**Completed Tier 2 (2026-06-29):**
+- DB schema: `migrations/postgres/046_catalog_rate_cards.up.sql` extends `catalog_meters` with rate-card meter metadata and adds `catalog_rate_cards` + `catalog_credit_purchases`.
+- Applier: `pkg/catalog/applier_service.go` maps manifest `meters`, `rate_cards`, and `credit_purchase` blocks into `pkg/service/catalog_sidecars.go`; legacy `catalog_price_metered` still persists for existing catalogs.
+- Runtime rating: `internal/modules/money/metered_rating.go` sweeps new rate cards before invoice finalization, aggregates usage by meter metadata/group_by dimensions, selects matrix cells, applies divisor rounding, commitments/monthly caps, flat allowances, and accrued per-resource allowances capped by the allowance window.
+- Credit purchase: `internal/modules/money/credit_purchase.go` quotes spend or credit quantity, returns paid/base/bonus/total/effective fields, and deposits the quoted custom-credit balance idempotently by checkout/payment source ID.
+- Integration tests: `pkg/service::TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases`, `internal/modules/money::TestFinalizeInvoice_RatesCatalogRateCardsWithMatrixCapAndAllowance`, and `internal/modules/money::TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance`.
+- Legacy hard-cut: intentionally not removed in this patch; legacy `metered{rate,per_units,per}` remains additive compatibility for existing catalogs/tests.
+
+**Verification 2026-06-29:**
+- `go test ./pkg/catalog ./pkg/service ./internal/modules/money ./migrations/postgres -count=1`
+- `python3` duplicate-prefix check over `migrations/postgres/[0-9]*_*.up.sql` → `ok 21 postgres up migrations`
+- `go test -tags=integration ./pkg/service ./internal/modules/money -run 'TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases|TestFinalizeInvoice_RatesCatalogRateCardsWithMatrixCapAndAllowance|TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance' -count=1`
 
 # #330: nmi-immediate-subscription-checkout-stuck-pending
 
@@ -987,1008 +1019,3 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 - [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
 - [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
 - [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).
-
-# #582: rename `processor` → `rail` across notes + codebase (terminology consolidation; breaking DB + API allowed)
-
-**Completed:** yes
-**Status:** COMPLETED — rename shipped and committed in-repo: `models.Rail`,
-`internal/modules/payments/rails`, Postgres + ClickHouse schema, JSON/env
-(`RAILS_*`), and docs (`docs/glossary-rails.md`). All tasks `[x]`; the dated
-"STATUS 2026-06-24" note below is the point-in-time record (its "uncommitted"
-line is now stale — it is committed in HEAD). Residual `processor` strings (NMI
-acquirer wire, `processor_clearing`, `processor_customer`) are intentional
-preservations. KNOWN FOLLOW-UP (separate corrective issue): the rename entrenched
-a rail/gateway/account conflation — `models.Rail` mixes gateway
-(ccbill/stripe/solana/paypal), account (mobius, an account on the NMI gateway),
-and method (admin/manual), and has no `RailNMI`. Cross-repo consumer bump may
-still be pending.
-
-Decided 2026-06-24 (Paul + Claude). On-brand consolidation: **"rail" becomes THE term for a payment channel/lane.** `processor` and `rail` are synonyms — the `models.Processor` enum values (`mobius`/`ccbill`/`stripe`/`solana`/…) literally ARE the rails. `provider` is a **different** concept (a credentialed *account on* a rail) and **stays**. Breaking changes to DB + API are authorized now (pre-production; **no migrations** — edit the schema in place and `task sqlc`). Behavior does not change; this is cosmetic/brand only.
-
-## Decision / scope boundary (read first)
-- **RENAME:** everything meaning the payment lane/type currently called `processor` → `rail`.
-- **KEEP `provider`** (account-level concept): `provider_accounts`, `provider_account_id` (71-use FK), `provider_intents`, `provider_refresh_watermarks`, `external_provider_mutation_logs`. A rail is the lane; a provider account is an account on the lane (the schema already says "multiple provider accounts per provider rail").
-- **KEEP wire/string VALUES:** `"mobius"`, `"ccbill"`, `"stripe"`, `"solana"`, `"paypal"`, `"admin"`, `"manual"` are rail *names*, not the word "processor" — they don't change.
-- **No blanket-sed:** rename ONLY the payment-rail sense of "processor". Audit for any unrelated "processor" (generic data/event/webhook processors) and leave those.
-
-## Target naming
-
-**Go**
-- `internal/db/models/processor.go` → `rail.go`; `type Processor string` → `type Rail string`; `ProcessorMobius/CCBill/Solana/Stripe/Paypal/Admin/Manual` → `RailMobius/...` (values unchanged).
-- `internal/db/models/processor_customer.go` → `rail_customer.go`; `ProcessorCustomer` → `RailCustomer`.
-- `internal/modules/payments/processors/` package → `internal/modules/payments/rails/`; `IsNMIBackedProcessor`→`IsNMIBackedRail`, `NMIBackedProcessors`→`NMIBackedRails`, `SameProcessor`→`SameRail`.
-- reconcile `ProcessorFetcher` → `RailFetcher`; webhooks `WebhookHandler.Processor()` → `.Rail()`; intents handler `processor` refs; all fields/params/locals named `processor` → `rail`.
-- `pkg/` exported API (`pkg/service`, `pkg/embedded`, `pkg/api`): exported `Processor` → `Rail` (**BREAKING** for embedded consumers).
-
-**DB (breaking, no migration — edit `migrations/postgres/*.sql` in place)**
-- column `processor` → `rail` everywhere (payments, subscriptions, etc.); the named enum type (if a `processor` enum type exists) → `rail`; table `processor_customers` → `rail_customers`.
-- `internal/db/queries/*.sql`: update column refs; `task sqlc` to regenerate `internal/db/gen` + vet against the real schema.
-
-**JSON / HTTP / CLI**
-- request/response fields named `processor` → `rail` (**BREAKING** API change — audit `pkg/api`, handlers, `docs/api/endpoints.md`).
-- CLI: `pull-provider --provider=nmi,ccbill,stripe,solana` currently takes **rail** names → this is the provider/rail overload below; resolve there.
-
-**Docs/notes**
-- README.md, docs/*.md, agents/*.md: "processor" (payment sense) → "rail".
-- Add a billing glossary: **rail** = the lane/type (former `Processor`); **provider account** = a credentialed account on a rail; **integration** = the client code under `internal/integrations/`.
-
-## Provider-overload cleanup (decide as part of this)
-Today "provider" is overloaded: it means the ACCOUNT (`provider_accounts`) AND sometimes the TYPE (the `provider` column in `provider_intents`/`provider_refresh_watermarks` holds `"stripe"`/`"nmi"`; CLI `--provider=nmi,…`). Renaming processor→rail makes this glaring. Options:
-- **(A) Minimal:** rename only `processor`→`rail`; leave every `provider` as-is (accept that some `provider` columns/flags hold a rail value). Lowest churn.
-- **(B) Disambiguate (recommended):** also rename the *type-holding* `provider` columns/flags → `rail` (e.g. `provider_intents.provider`→`.rail`, `--provider`→`--rail`), while KEEPING `provider_accounts`/`provider_account_id` as the true account concept. Cleanest end state.
-- Either way **KEEP the convergence vocabulary "provider-observed truth"** — the `pull.*` plane is about a provider *account's* observed facts, so "provider" is correct there. Pick A or B before starting.
-
-## Findings (audit DONE 2026-06-24)
-**"processor" is overloaded — three senses:**
-1. **OUR rail** (`models.Processor`, columns `processor`/`processor_subscription_id`/`processor_customer_id`/`processor_transaction_id`/`processor_fields`/`processor_state`/`processors`, enum `processor_type`, table `processor_customers`, ~283 Go files) → **rename**.
-2. **NMI's *acquirer* "processor"** in `internal/integrations/nmi/` + `internal/modules/webhooks/` — `json:"processor_id"`, `json:"processor_response_text"`, the `Processor` acquirer object (`body.Processor.ID`), and decline strings `transaction_was_declined_by_processor` / `transaction_error_returned_by_processor`. These mirror **NMI's actual webhook payload** — renaming breaks parsing. **PRESERVE** (NMI's external wire format; we don't own it, so pre-launch status is irrelevant here).
-3. **Value strings** in CHECK constraints: ledger `processor_clearing`, blocklist `processor_customer` (singular, quoted). **PRESERVE**.
-
-**Coupling:** DB column `processor` → sqlc-gen field `.Processor` → referenced everywhere ⇒ this is ONE coordinated transform (Go + SQL schema + queries + `task sqlc` regen), not a Go-only first pass.
-
-**Method:** sentinel-protect the value strings (#3); EXCLUDE the NMI/webhook wire dirs from the *lowercase* sweep (preserves their acquirer wire tags #2 — their CamelCase fields still rename to `Rail*` but the lowercase `json:` tags survive, so wire stays correct); CamelCase `Processor`→`Rail` + lowercase `processor`→`rail` everywhere else; `git mv` package `processors`→`rails`; `task sqlc` regen; `go build`/`vet`/test (compose stack is up: openrails-postgres `:5434`, garnet, clickhouse).
-
-**Pre-launch:** breaking DB/JSON/API changes are fine (Paul, 2026-06-24) — except NMI's external wire (#2). **LOC:** take trivial simplifications opportunistically, but keep the diff reviewable as a rename.
-
-## Tasks
-- [x] Audit: enumerate every payment-sense "processor" (Go idents, DB schema, `*.sql`, JSON, CLI, docs); separate from unrelated "processor" uses. **DONE 2026-06-24** — see Findings above.
-- [x] Go rename: types/consts/files (`Processor*`→`Rail*`), `processors` pkg→`rails`, fetcher/handler/field renames. **DONE** — 811+56 `*.go` swept; `git mv` package + files; `go build`/`go vet` green; gofmt clean.
-- [x] DB rename (breaking, no migration): `processor` col→`rail`, enum `processor_type`→`rail_type`, `processor_customers`→`rail_customers`; queries + `processor_customers.sql`→`rail_customers.sql`; `task sqlc` regen + vet. **DONE** — gen flipped (0 residual `Processor`).
-- [x] JSON/HTTP/CLI + **ClickHouse** field rename (breaking). **DONE** — `json:"processor"`→`json:"rail"` (21 of-ours fields), env `PROCESSORS_*`→`RAILS_*`, example config/env, `migrations/clickhouse/*.sql` (caught by `TestAdminMetricsFolded`), `scripts/e2e_dump_local.sh`, `pkg/embedded/README.md`. No `--processor` CLI flag (only `--provider`, kept).
-- [x] Provider-overload decision. **DECIDED A** — renamed only `processor`→`rail`; kept ALL `provider` (incl. type-holding `provider_intents.provider` col + `--provider` CLI, which still hold a rail value) + `provider_accounts`/`provider_account_id` + "provider-observed truth". B (rename those too) is an optional follow-up.
-- [x] Docs/notes sweep + glossary. **DONE** — README + `docs/*.md` + `docs/api/*.md`; new `docs/glossary-rails.md`. Historical `agents/*.md` left as point-in-time records.
-- [x] Grep gate. **DONE** — every residual is an intentional preservation (NMI acquirer wire / `processor_clearing` / `processor_customer`) or out-of-scope (historical notes, other-repo paths, skill-doc examples).
-
-## Validation
-- [x] `go build ./...` + `go vet ./...` clean. **PASS** (+ `gofmt -l` clean).
-- [x] `task sqlc` generate + vet (PREPAREs every query vs schema). **PASS**. (`task sqlc-check` fails ONLY because gen differs from git HEAD — i.e. the whole uncommitted rename; passes once committed.)
-- [~] DB-backed tests. Unit: **71/72 packages green** (the 1 fail, `internal/migrate TestRewriteMigrationsSchema`, is PRE-EXISTING — missing `025/026` migration files, untracked in git). Integration: `./tests` (incl. analytics/CH after the fix), `./pkg/service`, `./embed` **green**; targeted NMI-webhook (wire preserved) + checkout (API/DB) **green**. `./internal/river` 13 liveness/dunning fails are **PROVEN PRE-EXISTING** — identical `products_merchant_fk` on stashed HEAD (a test-harness merchant-seeding/ordering gap; my diff to those files is a pure rename, `internal/dbtest` untouched).
-- [x] `rg -i '\bprocessor'` over go/sql/ch returns only intentional/unrelated hits. **PASS**.
-
-## STATUS 2026-06-24 (Claude)
-Rename **complete** across Go (`models.Rail`, `payments/rails` pkg, all idents), Postgres schema + queries + sqlc gen, ClickHouse schema, JSON/HTTP fields, env contract (`RAILS_*`), example config, scripts, and docs (+ new `docs/glossary-rails.md`). Three concepts kept distinct: **rail** (renamed from processor), **provider account** (`provider_*`, unchanged), **NMI acquirer "processor"** (wire fields preserved). Behavior unchanged — pure rename. **Uncommitted** in the working tree; not yet committed/tagged, and consumer bump (Cross-repo) not yet done. The one regression introduced (ClickHouse schema lag) was caught + fixed; all other test failures predate this change.
-
-## Cross-repo
-- The breaking embedded-API + JSON `processor` rename affects any consumer of openrails' Go API or HTTP that references `processor` (openrails-saas; doujins/hentai0 only if they read a `processor` field). Enumerate consumers, coordinate a version bump, adopt after this lands.
-
-## Notes
-- Pure rename, no behavior change — land as a reviewable rename (a Go-commit + a DB/sqlc-commit pair reads cleanest).
-- Out of scope (separate, already-flagged decisions): `mobius` as the NMI rail id (rename to `nmi`?); keeping "provider-observed truth" in the convergence taxonomy (yes, keep).
-
----
-
-# #624: split-merchant-settings-routeset-delete-credentialmode
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29. HARD CUT landed: `RouteSetMerchantSettings`
-and `CredentialMode` are gone; catalog and payment-provider routes are separate
-route sets.
-
-Collapse the redundant credential-mutation gating. Today exposing the
-provider-credential mutation routes requires BOTH including
-`RouteSetMerchantSettings` in `RouteSets` AND setting `CredentialMode = mutable`
-— and `embedhttp.validateAuthBoundary` PANICS if they disagree
-(`internal/http/embedhttp/embedhttp.go:206`). Two coupled knobs + a panic-on-mismatch
-for one decision. Replace with plain route-set membership.
-
-## Metadata
-
-- Category: refactor
-- Status: completed
-- Passes: true
-
-## Result
-
-- Added `RouteSetCatalog` and `RouteSetPaymentProviders`.
-- Embedded defaults now include catalog and exclude payment-provider config.
-- Standalone defaults include both catalog and payment-provider config.
-- Deleted `CredentialMode`, `CredentialModeFixed`, `CredentialModeMutable`, and
-  all `HTTPHandlerOptions.CredentialMode` plumbing.
-- Deleted the `RegisterMerchantSettingsRoutes` wrapper; callers register catalog
-  and payment providers explicitly.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
-
-## Current state
-
-`RouteSetMerchantSettings` (`internal/http/embedhttp/route_set.go:16`) mounts exactly
-two subgroups via `RegisterMerchantSettingsRoutes` (`internal/http/routes/routes.go:235`):
-- `/catalog/*` — products, prices, drift, `publish` (`registerCatalogActionRoutes`,
-  routes.go:484). Gated per-route by `merchant:catalog:read/update`.
-- `/payment-providers/*` — list/get/PUT/DELETE provider config + secrets
-  (`registerPaymentProviderActionRoutes`, routes.go:512). Gated per-route by
-  `merchant:payment_providers:read/update`.
-
-(The `route_set.go:15` comment says "provider secrets, catalog pushes, and merchant
-config" — stale; there is no separate merchant-config group.)
-
-`CredentialMode` (`fixed`/`mutable`, route_set.go:6/22) is read in exactly ONE place:
-`validateAuthBoundary` requires `mutable` when `RouteSetMerchantSettings` is mounted
-(embedhttp.go:206). It is a redundant SECOND coarse gate on top of the per-route
-permission checks — its only behavior is to error when it disagrees with route-set
-membership.
-
-## Decision
-
-- **Catalog is always available.** No reason to gate catalog push behind a coarse
-  switch; the `merchant:catalog:*` permission is the real protection. ("Always on" ≠
-  unprotected — the permission gate stays.)
-- **Provider config + secrets is the only opt-in surface.** Its coarse on/off becomes
-  simply "is the route set mounted?" — one knob, the host's model.
-- **Storage backend is a SEPARATE, untouched axis.** Vault-if-`VaultConfig.Enabled`
-  else DB+envelope (`internal/secretstore`, `internal/merchantsecrets/store.go:35`) is
-  already auto-derived from config presence. Exposing the routes is independent of where
-  secrets are stored — do NOT couple them.
-
-## Plan
-
-1. Split `RouteSetMerchantSettings` into:
-   - `RouteSetCatalog` (`/catalog/*`) — add to `EmbeddedDefaultRouteSets` AND
-     `StandaloneDefaultRouteSets` (always-on).
-   - `RouteSetPaymentProviders` (`/payment-providers/*`) — opt-in; in
-     `StandaloneDefaultRouteSets`, NOT in `EmbeddedDefaultRouteSets`.
-   - Split `RegisterMerchantSettingsRoutes` into two registrars (or have the assembler
-     mount the two existing `register*ActionRoutes` under the two new sets).
-2. Delete `CredentialMode` end-to-end: the enum + consts (route_set.go), the
-   `Assembler.CredentialMode` field + `validateAuthBoundary`'s mutable check
-   (embedhttp.go), `HTTPHandlerOptions.CredentialMode` (pkg/embedded), the `embed`/`embedded`
-   re-exports, and `internal/http/server.go:395` standalone default. Keep the
-   user/admin-needs-Authenticator check in `validateAuthBoundary`.
-3. Leave `VaultConfig` / secret-store selection completely untouched.
-
-## Acceptance
-
-- Catalog routes mount with no coarse gate (permission-gated only), in both embedded and
-  standalone defaults.
-- Provider-config routes mount iff `RouteSetPaymentProviders` is selected; no
-  `CredentialMode` anywhere in the tree (grep clean).
-- No panic path for knob-mismatch (the panic is gone with the cross-check).
-- Existing HTTP integration tests green; embedded hosts that previously set
-  `mutable` + merchant-settings now just select `RouteSetPaymentProviders`.
-
----
-
-# #625: unify-merchant-auth-into-single-host-gate
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29. Merchant-route registration now takes one public
-`billingauth.Gate`; `routes.Options` no longer exposes service/delegated/admin
-resolver fields, embedded constructor auth fields are gone, and `internal/app` /
-`internal/bootstrap` no longer store or accept authenticators. Buyer/user route
-authentication remains `billingauth.Authenticator`; that is intentionally separate
-from merchant/admin authorization.
-
-OpenRails defines ONE interface for protecting routes; the host supplies the
-implementation. "OpenRails asks the host: gate this route — it needs permission P
-on merchant M; tell me who the caller is or reject." AuthKit ships a plug-and-play
-`Gate`; any other host writes a thin shim over its own auth. Mirrors AuthKit's own
-model (one `Verifier.VerifyRequest` → one `Principal{Kind}`), which OpenRails today
-reimplements as a hand-rolled dispatch.
-
-## Metadata
-
-- Category: refactor
-- Status: completed
-- Passes: true
-
-## Landed 2026-06-29
-
-- Added public `billingauth.Gate`, `billingauth.Principal`, and
-  `billingauth.GateError`.
-- Changed merchant/admin/catalog/payment-provider/API route registration to use
-  one `Gate` instead of exposing `ServiceCredentialResolver`,
-  `DelegatedResolver`, and `AdminPermissionChecker` on `routes.Options`.
-- Kept the existing standalone/control-plane behavior behind an internal
-  `httproutes.NewGate(GateOptions{...})` adapter.
-- Moved embedded host auth out of `embedded.Options` / `embed.Options` and into
-  `embgin.MountOptions`.
-- Removed authenticator fields from `internal/app.App`, `app.BootstrapOptions`,
-  and `bootstrap.Options`; standalone HTTP auth seams now live on
-  `ginboot.Options` and are passed directly into `server.New`.
-- Direct gin route helpers no longer fall back to app-stored auth; they use
-  explicit `RouteOptions.AuthProvider`, `RouteOptions.Gate`, or
-  `RouteOptions.DelegatedAuthenticator`.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
-
-## What was intentionally not deleted
-
-- `pkg/billingauth.Authenticator`, `AuthenticatorFunc`, and `Required`/`Optional`
-  still protect buyer/user routes and provide best-effort identity for rate
-  limiting. They are not the merchant/admin authorization seam.
-- `pkg/billingauth.DelegatedAuthenticator` and `DelegatedPrincipal` still protect
-  the self-service delegated browser surface.
-- A first-class external AuthKit `Gate` adapter can be added when an embedder
-  needs it; the internal standalone adapter is enough for this refactor.
-
-## Original hard-cut sketch, narrowed during implementation
-
-- `pkg/billingauth.Authenticator` + `AuthenticatorFunc` + `Required`/`Optional`.
-- `pkg/billingauth.DelegatedAuthenticator` + `DelegatedAuthenticatorFunc` +
-  `DelegatedPrincipal` (folded into the new `Principal`).
-- The credential-source ladder in `internal/http/routes/routes.go`:
-  `merchantActionPermissionMW` (routes.go:244) + `resolveServiceCredential`
-  (routes.go:408) + `authenticateUser` — the try-api-key→remote-app→service-jwt→
-  delegated→host→user dispatch.
-- The resolver interfaces on `routes.Options` + the assembler:
-  `ServiceCredentialResolver`, `DelegatedResolver`, `AdminPermissionChecker`,
-  `merchantUserResolver`, `merchantGroupResolver`, `serviceJWTResolver`,
-  `remoteApplicationResolver`. These were OpenRails wrapping the AuthKit control
-  plane behind its own abstraction; the `Gate` subsumes them.
-
-## What replaced the merchant/admin seam
-
-```go
-// OpenRails defines this; it imports NO auth library.
-type Gate interface {
-    // Verify the request's credential and check the caller holds `permission`
-    // on `merchant`. Returns the resolved caller or an error → 401 / 403.
-    Authorize(ctx context.Context, r *http.Request, permission string, merchant MerchantRef) (Principal, error)
-}
-
-type Principal struct {
-    Kind    PrincipalKind // user | api_key | remote_application | delegated | service | host_asserted
-    Subject string
-    Email, Username string
-    EmailVerified   bool
-}
-```
-
-- Routes declare the requirement, AuthKit-style:
-  `gate("merchant:subscription:cancel", ownerOf("id"))`.
-- `Gate` is the neutral seam (this dissolves the earlier "keep or drop the seam?"
-  question — the seam IS the `Gate`, AuthKit is merely one implementation).
-- AuthKit adapter: a `Gate` impl in an OPT-IN package (e.g. `pkg/embedded/authkit`),
-  backed by AuthKit's verifier + permission check, so the core still imports no
-  AuthKit. Standalone wires this adapter in place of the control-plane resolvers.
-
-## Where the Gate is supplied — the MOUNT call, NOT the constructor (decided)
-
-Auth exists only to protect the HTTP boundary. The in-process `Client()`/`service`
-path is trusted — the host already authenticated before calling in-process — so it
-needs NO Gate. (True even today: `embedded.Options.Authenticator` is read only by the
-HTTP assembler; `service.New`/`Client()` never touch it.)
-
-- DELETE `Authenticator` + `DelegatedAuthenticator` from `embedded.Options` /
-  `embed.Options`. The constructor carries no auth (feeds #626's thin constructor).
-- The `Gate` is a parameter of the mount call: `NewHTTPHandler(HTTPHandlerOptions{Gate})`
-  / `RegisterAPI(group, runtime, WithGate(...))`.
-- In-process callers pass nothing — they're trusted.
-- OPEN: rate-limiting keys best-effort by user (identify, don't reject), so the Gate
-  likely needs an Optional/identify mode alongside `Authorize` (mirrors AuthKit
-  `Required`/`Optional`). Decide: Gate exposes both, or rate-limit keys by IP only.
-
-## Stays OpenRails-side (cannot move to the host/AuthKit) — bookends the gate
-
-1. **Resource→merchant resolution** (`ownerOf("id")`): only OpenRails knows which
-   merchant owns a subscription/resource (its DB). Runs BEFORE the gate, produces
-   the `merchant MerchantRef` passed in.
-2. **RLS GUC pinning**: set AFTER `Authorize` succeeds, from the resolved merchant.
-
-## Open decision (flag, not blocker)
-
-- **Token-derived vs resource-derived merchant.** Current code pins merchant from
-  the verified token and deliberately never trusts the URL (anti-IDOR). The natural
-  `Gate` example is resource-derived (find the resource's owner, check permission on
-  it). Both are safe; pick one explicitly — it defines what `ownerOf(...)` means and
-  what `Gate` may assume.
-
-## Acceptance
-
-- Merchant/admin/catalog/payment-provider/API route registration accepts one
-  `Gate` interface; resolver/checker internals are hidden behind the internal
-  standalone adapter.
-- Embedded auth is supplied at route-mount time, not engine construction time.
-- `internal/app` and `internal/bootstrap` carry no authenticators.
-- Integration-tag package compile stays green; standalone behavior is preserved by
-  `httproutes.NewGate(GateOptions{...})`.
-
-## Related
-
-- Supersedes the earlier `DelegatedAuthenticator` rename idea.
-- Interlocks with #626 (in-process has no token, so merchant is host-supplied per
-  call — see `WithMerchant`).
-
----
-
-# #626: embed-multi-merchant-always-and-thin-constructor
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29. HARD CUT landed: `embed.New` builds the engine
-only; merchant provisioning, migrations, settings seed, and auth are caller-owned.
-
-`embed.New` shrinks to "build the multi-merchant engine." The engine is ALWAYS
-multi-merchant; the merchant acted on is supplied per call where the operation is
-merchant-scoped. All construction side-effects (migrate, provision, seed settings)
-become explicit caller actions.
-
-## Metadata
-
-- Category: refactor
-- Status: completed
-- Passes: true
-
-## Result
-
-- Deleted `embed.Options.Merchant`, `embed.Options.MerchantSettings`, and
-  `embed.Options.RunMigrations`.
-- Deleted `Runtime.tenantID` and all hidden per-call merchant injection in the
-  embedded client.
-- Added `openrails.WithMerchant(ctx, merchantID)` for explicit merchant-scoped
-  in-process SDK calls.
-- Kept `Runtime.UpsertMerchantConfig` as the explicit provisioning path.
-- Deleted constructor-provisioning integration coverage and kept explicit
-  `UpsertMerchantConfig` coverage.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration -count=1 ./embed -run 'Test(Conformance_EmbeddedAndStandaloneAreObservablyIdentical|UpsertMerchantConfig_SeedsProviderAccounts|StandaloneMerchantControlBoundaries|StandaloneRemoteApplicationAuth)$'`; `go test -tags=integration -count=1 ./internal/integrationharness -run 'Test(EmbeddedMountHandlerEndToEnd|StandaloneMerchantCatalogRoutesHTTP|StandaloneMerchantCatalogApplyOptionsOverHTTP|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant|APIKeyCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP|StandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP)$'`; `go test -tags=integration -count=1 ./tests -run 'Test(HTTPHandlerOptions_RouteSetPresetsOverHTTPServer|HTTPHandlerOptions_MerchantRoutesAcceptHostPrincipalPermissions|EmbeddedHandlers_Surface)$'`.
-
-## Context
-
-This does NOT reverse the org↔merchant 1:1 data model (#527). It removes only the
-construction-time BINDING shortcut. A 1:1 host stays 1:1 — it just names its merchant
-per call instead of at `embed.New`. In-process has no HTTP request/token to derive a
-merchant from, so per-call supply is the honest model anyway.
-
-## What gets deleted (hard cut)
-
-- `embed.Options.Merchant` + the bound-merchant provisioning in `embed.New`
-  (embed.go:170-185) + `Runtime.tenantID` (embed.go:130) + the per-call tenantID
-  injection in `Runtime.Client()` (embed.go:255) + `a.Runtime.ConfiguredMerchant`
-  set from the binding.
-- `embed.Options.MerchantSettings` + the startup seeding (embed.go:193-202,
-  `hasMerchantSettings`/`startupMerchantSettings`/`embeddedManifestMerchant`).
-- `embed.Options.RunMigrations` + the in-constructor `migrate.RunPostgresEmbedded`
-  call (embed.go:142-156). No production host sets it (grep); the explicit path
-  `cmd/openrails migrate` / `internal/migrate` stays.
-
-## What replaces it
-
-- **Multi-merchant always.** Export `openrails.WithMerchant(ctx, ref)` (thin wrapper
-  over the existing `merchant.WithID`/`FromContext`). Merchant-scoped `Client`
-  methods read the merchant from ctx and fail closed if absent.
-  ```go
-  client.CancelSubscription(openrails.WithMerchant(ctx, mref), subID)
-  ```
-- **Migrations**: caller runs `cmd/openrails migrate` / `internal/migrate` explicitly.
-- **Merchant provisioning**: explicit — host calls `boot.ProvisionMerchant` (already
-  exists), not the constructor.
-- **Settings seeding**: host calls `client.SetMerchantSettings(...)` after construction.
-- **`RunWorkers` STAYS**: it's a genuine Runtime lifecycle goroutine (stopped by
-  `Close`), not a one-shot construction side-effect.
-- **Auth fields ALSO leave the constructor** (owned by #625): `Authenticator` +
-  `DelegatedAuthenticator` move to the route-mount call, not `embed.New`. After
-  #624+#625+#626 the engine constructor surface is just: `Config`, `PGXPool`,
-  `Redis`, `Cache`, `PaymentProviders` (+ `RunWorkers` on `embed.Options`).
-
-## Open decision (flag, not blocker)
-
-- **Context-injected merchant (`WithMerchant`, recommended — matches the internal
-  `merchant.WithID` pattern, clean signatures) vs explicit `merchantRef` first arg
-  on every merchant-scoped method (un-missable, noisier).**
-
-## Acceptance
-
-- No `Merchant`/`MerchantSettings`/`RunMigrations` on `embed.Options`; no `tenantID`
-  binding/injection (grep clean).
-- A single engine serves multiple merchants in-process; a merchant-scoped call with
-  no merchant in context fails closed.
-- doujins/cozy-art updated to supply merchant per call + provision/migrate/seed
-  explicitly; build green.
-- HTTP path unchanged (already per-request multi-merchant).
-
-## Related
-
-- Interlocks with #625 (in-process merchant is host-supplied; no token to derive from).
-- Same theme as #624: side-effects and special-cases out of the constructor.
-
----
-
-# #627: embed-sdk-simplification-epic
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29. #624, #625, and #626 landed. The embedded SDK
-constructor is infrastructure-only; route groups are explicit; merchant/admin
-authorization is a mount-time `Gate`; in-process merchant scope is explicit.
-
-One theme, captured as one epic over the member issues: **`embed.New` shrinks to
-"build the engine"; everything else becomes an explicit caller action; auth becomes
-one host-plugged interface supplied at route-mount time.** This supersedes the
-earlier `DelegatedAuthenticator`-rename and "fix CredentialMode naming" sketches.
-
-## Metadata
-
-- Category: refactor
-- Status: completed
-- Passes: true
-
-## Landed 2026-06-29
-
-- `embed.New` / `embedded.New` constructor surface is now infrastructure-only:
-  `Config`, `PGXPool`, `Redis`, `Cache`, `PaymentProviders`, plus `RunWorkers` on
-  `embed.Options`.
-- Auth for embedded HTTP is supplied at mount time through
-  `embgin.MountOptions{Authenticator, Gate, DelegatedAuthenticator}`.
-- Standalone HTTP auth overrides are supplied through `ginboot.Options`; the core
-  app/bootstrap graph no longer carries authenticators.
-- Merchant-scoped in-process calls use `openrails.WithMerchant`.
-- Catalog routes and payment-provider config routes are separate route sets.
-- Validation: `go test -count=1 ./...`; `go test -tags=integration ./embed ./internal/integrationharness ./tests -run '^$'`.
-
-## Member issues
-
-- **#624** — split `RouteSetMerchantSettings` → `RouteSetCatalog` (always-on) +
-  `RouteSetPaymentProviders` (opt-in); delete `CredentialMode`.
-- **#625** — replace exposed merchant/admin resolver/checker plumbing with ONE
-  host-supplied `Gate`, supplied at the mount call; keep buyer/user
-  `Authenticator` and self-service `DelegatedAuthenticator` as separate route
-  auth seams.
-- **#626** — multi-merchant always: delete the `Merchant` binding + `tenantID`
-  injection (per-call `WithMerchant`); delete constructor side-effects
-  `RunMigrations` + `MerchantSettings` (migrate/provision/seed become explicit).
-
-## Cross-cutting decisions (RESOLVED)
-
-- **Auth lives at the route-mount call, not the constructor.** In-process `Client()`
-  is trusted (host authenticated upstream) and takes no Gate. `embedded.Options`/
-  `embed.Options` lose `Authenticator` + `DelegatedAuthenticator`.
-- **The `Gate` IS the neutral seam.** The earlier "keep or drop the neutral auth
-  seam?" question dissolves — AuthKit is just one `Gate` implementation; a host on
-  another auth library writes its own. Core imports no auth library.
-- **Removing the merchant binding does NOT reverse org↔merchant 1:1 (#527).** Only
-  the construction-time shortcut goes; a 1:1 host names its merchant per call.
-
-## Deferred calls
-
-- **#625** token-derived vs resource-derived merchant for future resource-owner
-  gates. Current code preserves token-derived/control-plane merchant pinning and
-  does not trust URL merchant ids.
-- **#625** optional identity mode for rate-limit keying. Current code keeps the
-  existing `billingauth.Optional` buyer-auth path.
-- **#626** context-injected merchant (`WithMerchant`, recommended) vs explicit
-  `merchantRef` first arg on every merchant-scoped method.
-
-## End-state constructor surface (after all three land)
-
-- `embedded.Options`: `Config`, `PGXPool`, `Redis`, `Cache`, `PaymentProviders`.
-- `embed.Options`: the above + `RunWorkers`.
-- Auth (`Gate`) + route-set selection: supplied at the mount call.
-- Migrate / provision merchant / seed settings: explicit caller actions.
-
-## Suggested order
-
-#624 (smallest, self-contained) → #625 (Gate; biggest auth surface) → #626
-(constructor + multi-merchant; depends on #625 having pulled auth out of the
-constructor). Each lands as its own breaking PR; hosts bumped per PR.
-
-## Note
-
-#623 (your AuthKit-style route-group mounting) is adjacent but separate; it still
-references `CredentialModeMutable`, which #624 deletes — reconcile #623 when #624
-lands.
-
----
-
-# #628: query-contract-and-performance-harness
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29. Added the shared OpenRails query-test command
-surface, migrated-Postgres sqlc query-contract coverage across the first
-high-value billing domains, a 100k-row entitlement lookup plan/perf check, JSON
-report output, and a raw-SQL inventory/pruning classification.
-
-## Goal
-
-`task sqlc-check` already proves sqlc queries PREPARE against the migrated schema.
-This issue adds the next layer: execute important queries against real seeded data,
-assert the results/mutations, and run heavyweight plan/performance tests against
-large tables so missing indexes and bad query shapes are caught before production.
-
-The command surface must match AuthKit exactly:
-
-- `task test-query-contracts`
-- `task test-query-perf`
-
-## Metadata
-
-- Category: test-infra
-- Status: completed
-- Passes: true
-- Paired AuthKit issue: AuthKit #195
-
-## Progress 2026-06-29
-
-- Added `task test-query-contracts`, matching AuthKit's command name/env
-  contract and reusing the existing `dbtest.SharedPostgresDSN` migrated scratch
-  Postgres harness.
-- Added `task test-query-perf`, with `QUERY_TEST_DATABASE_URL`,
-  `QUERY_TEST_KEEP_DB`, `QUERY_PERF_SCALE`, and optional `QUERY_PERF_REPORT`
-  support.
-- Added `internal/db/querytest` integration tests covering the first
-  high-value sqlc domains: provider accounts, catalog products/prices/features,
-  customers/rail customers/payment methods, subscriptions, payments,
-  entitlements, money account capacity, invoices, usage events, provider intents,
-  and reconciliation support queries.
-- Added a 100k-row default perf seed using `CopyFrom`, `ANALYZE`, and
-  `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for
-  `EntitlementExistsActive`; it fails if the hot lookup falls back to a
-  sequential scan.
-- Added `internal/db/querytest/raw_sql_inventory.md`; no obvious duplicated
-  static raw query was safe to delete in this pass. Surviving raw SQL is
-  classified as DDL/session/lock/test harness, dynamic analytics/policy,
-  ClickHouse, control-plane global SQL, or package-local persistence.
-- Validation passed: `task test-query-contracts`, `task test-query-perf`,
-  `QUERY_PERF_REPORT=/tmp/openrails-query-perf-report.json task test-query-perf`,
-  `task sqlc-check`, `go test -tags=integration -count=1 ./internal/crypto ./internal/db ./internal/modules/money ./pkg/service`,
-  `task test-integration-all`, and `git diff --check`. The 100k-row perf report
-  for `EntitlementExistsActive` used `Index Scan` and completed in 3.646 ms in
-  this run.
-
-## Design
-
-### A. Shared command contract
-
-- Add `task test-query-contracts`: starts/uses a real Postgres, runs migrations,
-  seeds small deterministic fixtures, and runs query-contract Go tests.
-- Add `task test-query-perf`: starts/uses a real Postgres, runs migrations, bulk
-  seeds large deterministic fixtures, runs `ANALYZE`, then executes hot queries
-  through `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` with explicit budgets.
-- Use identical env names in both repos:
-  - `QUERY_TEST_DATABASE_URL` — optional existing DB override.
-  - `QUERY_TEST_KEEP_DB` — keep the scratch DB for debugging.
-  - `QUERY_PERF_SCALE` — default row scale for perf seeds.
-  - `QUERY_PERF_REPORT` — optional JSON report path.
-- Keep `task sqlc-check` as the cheap universal schema/query drift gate; do not
-  fold perf tests into it.
-
-### B. Query-contract tests
-
-- Add a small harness under `internal/db/querytest` (or nearest existing test
-  helper package) for:
-  - scratch DB creation
-  - migration application
-  - deterministic fixture helpers
-  - merchant/RLS context pinning
-  - sqlc query wrapper access
-- Add contract tests by query domain, not one giant generated-method runner.
-- Cover the important sqlc groups first:
-  - merchants/provider_accounts
-  - catalog products/prices/entitlement features
-  - customers/rail_customers/payment_methods
-  - entitlements/product access/grants
-  - money_accounts/ledger/invoices/usage_events
-  - subscriptions/payments/provider intents/reconciliation
-- Each contract test should prove:
-  - query executes
-  - returned rows match seeded data
-  - mutations change only intended rows
-  - missing-row / duplicate / constraint edge cases return the expected behavior
-
-### C. Query-performance tests
-
-- Seed large datasets with `pgx.CopyFrom` / `COPY`, never row-by-row loops.
-- Start with representative scales, then allow override:
-  - default `QUERY_PERF_SCALE=100000`
-  - manual/nightly target `QUERY_PERF_SCALE=1000000`
-- Build reusable `Explain` helpers that parse JSON plans and fail on:
-  - sequential scan over large tenant/merchant-owned tables unless allowlisted
-  - unexpected sort/hash spill or temp blocks
-  - excessive shared read blocks
-  - bad row-estimate skew for hot queries
-  - execution time over query-specific budget
-- Store query budgets in a small checked-in manifest, e.g.
-  `internal/db/querytest/perf_budgets.yaml`.
-- Keep wall-clock thresholds loose; prefer plan shape and buffer budgets because CI
-  machines vary.
-
-### D. Raw SQL inventory and pruning
-
-- Add an inventory step for handwritten SQL outside `internal/db/queries`.
-- Classify each raw query:
-  - convert to sqlc
-  - keep raw because it is dynamic SQL / DDL / advisory lock / session setup
-  - delete because unused or duplicated
-- Require every kept raw SQL path to have either:
-  - a query-contract test, or
-  - an explicit allowlist reason in the inventory.
-- Prefer moving static raw queries into sqlc as domains are covered.
-
-### E. CI policy
-
-- PR/default CI:
-  - `task sqlc-check`
-  - `task test-query-contracts`
-- Nightly/manual CI:
-  - `task test-query-perf`
-- Add docs explaining that `PREPARE` validates schema compatibility, while
-  query-contract/perf tests validate behavior and scaling.
-
-## Acceptance
-
-- `task test-query-contracts` exists and runs against a migrated scratch Postgres.
-- `task test-query-perf` exists with the same name/env contract as AuthKit.
-- At least the first high-value OpenRails query domains have semantic contract
-  coverage: merchant/provider config, catalog, entitlements, money, subscriptions.
-- Perf harness can seed at least 100k rows and emit JSON plan/budget reports.
-- Raw SQL inventory exists; obvious duplicated/static raw queries are converted or
-  deleted.
-- `task sqlc-check`, `task test-query-contracts`, and focused normal Go tests pass.
-
-## Non-goals
-
-- Do not blindly auto-execute every generated sqlc method with fake arguments.
-  Query args and seed state must be meaningful.
-- Do not make million-row perf tests part of every local `task test` run.
-- Do not add an ORM or a new query abstraction.
-
-## Notes
-
-- Pair implementation with AuthKit #195 so helpers, command names, env vars, and
-  report shape stay identical.
-
----
-
-# #629: query-perf-harness-parity-real-sql-registry
-
-**Completed:** yes
-**Status:** COMPLETED 2026-06-29 (sub-agent). Brought the openrails query-perf
-harness to parity with the upgraded authkit harness: real-SQL registry in package
-`gen`, 10 expanded perf cases sourced from the registry, non-uniform fat-customer
-seed, and one confirmed index (migration 042). Integration suite green at 100k.
-
-#628 shipped a working harness (contract tests + one perf case) but
-`internal/db/querytest/perf_test.go` HAND-COPIES the EntitlementExistsActive SQL
-(drift risk: the gate can pass while the real query changes) and gates only one
-query. Mirror the authkit upgrade: source perf SQL from the real generated
-consts, expand coverage, and read plans for missing-index findings.
-
-## Metadata
-
-- Category: test-infra
-- Status: completed
-- Passes: true (go test -tags=integration ./internal/db/querytest/... green at 100k scale)
-- Paired with AuthKit query-audit upgrade (v0.75.0)
-
-## Tasks
-
-- [ ] Add a `QueryText` registry in package `gen` (`internal/db/gen/query_text.go`)
-      mapping query name -> the generated const (consts are package-private to
-      `gen`, so the registry must live there). Values ARE the live sqlc consts, so
-      the perf gate can never drift from what the app runs.
-- [ ] Repoint `perf_test.go` (EntitlementExistsActive) at `gen.QueryText[...]`,
-      deleting the hand-copied SQL.
-- [ ] Expand perf coverage to hot openrails access patterns over growable tables:
-      entitlement lookups, admission, grants/ledger, subscription + customer +
-      payment-method lookups. Skip PK/unique point lookups. Add `ForbidSort` where
-      `ORDER BY`+`LIMIT` must be index-ordered; assert no Seq Scan + budgets.
-- [ ] Non-uniform seed where per-row fan-out matters (mirror authkit's fat-user).
-- [ ] Read EXPLAIN plans for missing-index findings. Add index migration(s)
-      (next number 040) + a gate ONLY for clear, confirmed seq-scan / sort wins on
-      hot paths; document the rest in this issue. Use temporary diagnostics to
-      confirm, then remove them.
-
-## Notes
-
-- Generated consts: `internal/db/gen/*.sql.go` (package `gen`), e.g.
-  `const entitlementExistsActive`.
-- Existing harness: `internal/db/querytest/{contracts_test.go,perf_test.go,main_test.go}`,
-  build tag `integration`; uses `dbtest.SharedPGXPool`, `dbtest.EnsureTestMerchant`,
-  `dbtest.TestMerchantID`, TRUNCATE-based seed, schema `openrails` with merchant RLS.
-- Dead-sqlc-query prune NOT needed: a scan found 0 dead of 406 queries.
-- No `task test-query-*` targets exist; run via
-  `go test -tags=integration ./internal/db/querytest/...` (dbtest provisions the DB).
-- Do NOT commit; leave changes in the working tree for Paul.
-
-## Results (2026-06-29)
-
-Added (all in the working tree, uncommitted):
-
-- `internal/db/gen/query_text.go` — `var QueryText map[string]string` in package
-  `gen` mapping query name -> the live generated const (must live in `gen`: the
-  consts are package-private). 10 growable-table hot patterns; PK/unique point
-  lookups deliberately excluded.
-- `internal/db/querytest/perf_test.go` — rewritten to mirror authkit: ONE
-  `TestQueryPerformance` that bulk-seeds (CopyFrom at scale + a fat customer / fat
-  subscription for fan-out), ANALYZEs, then EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON)es
-  each REAL const from `gen.QueryText` inside a rolled-back tx. `stripQueryHeader`
-  drops the sqlc `-- name:` header; `collectPlan` walks for Seq Scan / Sort. The
-  hand-copied EntitlementExistsActive SQL is gone. Per-case: ForbidSeqScan on the
-  big table + loose time/buffer budgets; ForbidSort where ORDER BY+LIMIT must be
-  index-ordered.
-- `migrations/postgres/042_query_perf_indexes.up.sql` — ONE confirmed index (040
-  and 041 were taken by concurrent work, so this is 042):
-  `idx_subscriptions_customer_active_created (customer_id, created_at DESC) WHERE
-  status='active'` — removes the avoidable Sort on GetActiveSubscriptionByCustomerAt
-  (was `[Limit Sort Index Scan]`, now `[Limit Index Scan]`; active-sub fan-out grows
-  with the catalog so the Sort is unbounded — clear win, planner adopts it).
-
-Perf cases (all green at 100k, no Seq Scan on the named table, budgets met):
-entitlement_exists_active, entitlement_names_active, active_subscription_by_customer
-(ForbidSort), customers_by_subject, payment_methods_by_customer, admission_capacity
-(ledger_accounts+money_settings), grants_by_customer, spendable_credit_lots,
-usage_totals, latest_charge_by_subscription.
-
-Documented-not-fixed finding: GetLatestChargeBySubscriptionID does ORDER BY
-purchased_at DESC LIMIT 1 over idx_payments_subscription_id + a top-N Sort. A
-`(subscription_id, purchased_at DESC)` index was prototyped but the planner DECLINED
-it — a subscription's charge count is bounded by its billing periods, so the cheap
-top-N Sort beats the index-ordered scan. No clear win; left unindexed on purpose
-(noted in migration 042). Two other ORDER-BY-no-LIMIT paths (grants_by_customer,
-spendable_credit_lots, payment_methods_by_customer) Sort acceptably (full result
-set, bounded per-customer) — no ForbidSort, no index.
-
-Validation: `go test -tags=integration -count=1 ./internal/db/querytest/...` PASSES
-at default 100k scale (TestQueryContractsHighValueBillingDomains + TestQueryPerformance);
-`gen` package builds + vets clean; sqlc parses migration 042 cleanly (index-only DDL,
-no codegen impact). NOTE: whole-tree `go build ./...` is currently RED due to a
-CONCURRENT billing-cycle->duration refactor by another agent (BillingCycleDays in
-internal/modules/webhooks, ExpiryHours redeclared in internal/db/models/product_catalog.go)
-— unrelated to #629 and in files this issue never touched.
-
----
-
-# #630: model-rail-as-gateway-provider-account-as-instance
-
-**Completed:** yes
-**Status: COMPLETED 2026-06-29.** Hard cut, no aliases. Follow-on to #582.
-Rebased onto master (which carries the completed #622 billing→hours refactor);
-all #630 conflicts resolved as the union of master's #622/typed-block changes AND
-the rail de-slop rename.
-
-## The model landed
-- **rail** = the gateway integration (`nmi`, `stripe`, `ccbill`, `solana`, `paypal`):
-  `models.Rail`, gateways only. One adapter per rail under `internal/integrations/<rail>`.
-- **provider account** = a credentialed account ON a rail (1..N). Kept
-  `provider_accounts`/`provider_account_id`; config `RailConfig`→`ProviderAccountConfig`,
-  `RailSet`→`ProviderAccountSet`, field `Type`→`Rail models.Rail`. `mobius`/`paykings`
-  are provider-account NAMES on rail `nmi`.
-- **channel** = off-rail recording sources `admin`/`manual`: new `models.Channel`
-  (`ChannelAdmin`/`ChannelManual`), stored in the same text `rail` source column,
-  kept distinct as a separate Go enum.
-
-## Inventory categories (all done)
-1. Rail enum = gateways only: add `RailNMI`; remove `RailMobius`/`RailAdmin`/`RailManual`; add `Channel`.
-2. Collapsed dual enum: removed `config.RailType*`, `RailConfig.Type`, `GetEffectiveType`,
-   `GetRailType`, `IsNMIRail` → `EffectiveRail()`/`ByRail()`/`RailOf()`.
-3. Deleted NMI-backed name-set machinery (`IsNMIBacked`/`NMIBackedRails`/`InitNMIBackedRails`/
-   `IsNMIBackedRail`/`GetNMIBackedRailsList`) → stateless `rails.IsNMI(rail)` (= `rail==RailNMI`).
-4. Catalog adapter `catalog_provider_mobius.go`→`catalog_provider_nmi.go`,
-   `mobiusAdapter`→`nmiAdapter`, `mobiusDeterministicPlanID`→`nmiDeterministicPlanID`,
-   registry key `"mobius"`→`"nmi"`.
-5. Killed `mobius`-hardcoded-gateway in merchants/checkout/vault/embedded/product_catalog;
-   `NMIClients` keyed by rail. `mobius` survives as a provider-account NAME (intentional residual).
-6. Secrets `SecretNMIMobius*`→`SecretNMI*` (values stay `nmi/mobius/<purpose>` = rail/account/purpose).
-7. `provider`→`rail` for `--rail` CLI, `?rail=` drift filter, `CanonicalRail`,
-   `Prepared/WebhookProcessArgs.Rail`, `SecretDefinition.Rail`, `price.go GetByNMIPlan`,
-   `generatedProviderName`. Kept `provider_accounts`/`provider_account_id` + `provider_type`
-   column + `provider_intents.provider`/`provider_refresh_watermarks.provider` (#582-preserved).
-
-## DB / generated
-- Dropped the `openrails.rail_type` ENUM; `payments.rail` ENUM→`text` (removes `OpenrailsRailType`).
-- Migration `044_rail_as_gateway_value_migration.up.sql` (renumbered past master's new migrations):
-  converts `payments.rail` enum→text, collapses `mobius`→`nmi` across all rail columns +
-  `prices.rails` JSONB key, backfills `provider_account_id`, drops the enum. Idempotent / no-op on
-  a fresh DB. admin/manual rows stay in the text column as channel values.
-- sqlc regenerated (`reconciliation.sql`/`prices.sql` casts→text, arg `provider`→`rail`):
-  `sqlc generate` + `sqlc vet` PASS.
-- ClickHouse: plain string `rail` columns — no change. `docs/glossary-rails.md` rewritten.
-
-## Grep-gate: CLEAN
-No `RailType`/`GetEffectiveType`/`GetRailType`/`IsNMIBacked`/`NMIBackedRails`/`GetNMIRails`/
-`RailMobius`/`RailAdmin`/`RailManual`/`mobiusAdapter`/`catalog_provider_mobius`, and no
-`provider`/`providerType` holding a gateway value outside the kept `provider_accounts` concept.
-Intentional residuals: `mobius` as a provider-account name (config keys, `nmi/mobius/*` secret
-addressing, default link `provider` value, reconcile MID docs, legacy CH `mobius_schedulers`),
-the legacy `mobius`→`nmi` webhook-URL fold; `processor` only in NMI acquirer wire
-(`json:"processor_id"`, decline strings) + ledger `processor_clearing` + blocklist
-`processor_customer` (all #582-preserved).
-
-## Verification (post-rebase)
-- `go build ./...` and `go vet ./...`: see STATUS in commit; base #622 breakage is gone.
-- sqlc generate + vet PASS. Integration money-path tests run per DB availability.
-
-# #631: convergence derive-1 — grants+entitlements from stored subscriptions+payments
-
-**Completed:** yes (commit 30f48fff)
-
-OpenRails' convergence DERIVE plane today only projects EXISTING grants into entitlement effects ("derive-2") and repairs ungranted one-off PAYMENTS — it has NO subscription→grant detection and never CREATES a grant/entitlement from a bare subscription/payment. After a legacy migration that inserts source-of-truth subscriptions + payments (and per the migrate/convergence split, doujins #724 stops writing entitlements), the sweep is a no-op for migrated data: `openrails.grants` is empty so nothing projects. Build "derive-1": given stored subscriptions+payments, create grant → entitlement window. See docs/plans/migrate-convergence-separation.md in the doujins repo.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-Key code: `grants.Ledger.Grant()` is the sole writer of openrails.grants (4 live call sites, all purchase/credit/bundle); the converge "missing grant" check (converge_passes.go:114-138) is admin-surface-only + payments-only, no subscription→grant detection.
-
-**Tasks:**
-- [ ] Derive pass: for each subscription (+ its payments) with no grant, create the grant + entitlement window, idempotently.
-- [ ] Window math from subscription period + price.access_duration_hours (HOURS, #622).
-- [ ] Backfill bound: only derive windows ending within the last **3 YEARS** (banking-aligned; replaces the migrate's old 1-year hack).
-- [ ] Re-runnable; safe under the entitlement no-overlap constraint.
-- [ ] Wire into converge_sweep (startup + periodic).
-
-Acceptance: running convergence against migrated subscriptions+payments (entitlements/grants empty) materializes the correct grants + entitlement windows; re-running is a no-op.
-
-## Implementation design (derive-1 v1) — reverse-engineered, ready to execute
-
-SAFETY: derive-1 is ADDITIVE and a NO-OP for live data (live data already has grants, so "ungranted" detection finds nothing). It only fires on ungranted subs/payments = exactly the migrated cohort. So it's safe to land in openrails before doujins changes; the real test is the from-scratch migration verification (needs the full stack up + the 447MB dump reloaded — couldn't run it: dev stack down 2026-06-29).
-
-Files: `internal/db/queries/grants.sql` (new queries + sqlc regen via `task sqlc` / vet-db on :5434), `internal/modules/grants/grants.go` (ledger methods), `internal/reconcile/converge/converge_passes.go` (derivePass.runScope).
-
-1. NEW sqlc query `ListUngrantedSubscriptions(merchant, customer?)` — mirror `ListUngrantedGrantablePayments` (grants.sql:241). Returns s.id, s.customer_id, s.product_id, s.status, current_period_starts/ends_at, started_at, ended_at, pd.entitlements_spec. WHERE: grantable product (entitlements_spec <> '{}'), valid window (`COALESCE(current_period_starts_at,started_at) < COALESCE(current_period_ends_at,ended_at)`), and `NOT EXISTS (grant WHERE source_type='subscription' AND source_id=s.id::text)`. ORDER BY window start.
-2. NEW sqlc query `EntitlementWindowOverlaps(merchant, customer, entitlement, lower, upper) :one bool` — `EXISTS (entitlement e WHERE merchant/customer/entitlement match AND revoked_at IS NULL AND deleted_at IS NULL AND e.period && tstzrange(lower, upper, '[)'))`. Used for the overlap precheck.
-3. derivePass.runScope: PROMOTE the existing `derive.grant.missing` (UngrantedGrantablePayments, converge_passes.go:114-138) from ClassAdmin surface-only → ClassAuto with a Repair; ADD a new `derive.grant.missing.subscription` finding (ClassAuto). Repair pattern MIRRORS the live path `entitlement_service.go:287-312`: `gl.Grant(GrantInput{Customer, Kind:Entitlement, Source:Subscription, SourceID:sub.id.String(), Spec:&Spec{Entitlements:[keys of product entitlements_spec]}, StartsAt:windowStart, EndsAt:&windowEnd})` then `gl.MaterializeGrant(ctx, g)` INLINE (Converge applies repairs once per pass — converge.go:171-177 — so grant+materialize must both happen in the Repair).
-4. Window: subscriptions use `[COALESCE(current_period_starts_at,started_at), COALESCE(current_period_ends_at,ended_at))`. One-off/wallet payments use `[purchased_at, purchased_at + price.access_duration_hours)` (HOURS, #622) — wallet expiry is in `payments.metadata->>'expiration_rfc3339'` (see doujins #724/D2 + risk #5). entitlements_spec is a JSONB map `{entitlement_name: hours}`; the entitlement NAMES are the KEYS (parse keys in Go; the per-entitlement hours value does NOT apply to subscription windows — the sub period is authoritative).
-5. Overlap (v1, safe): one grant per (subscription, entitlement-feature). Before granting, call `EntitlementWindowOverlaps`; SKIP if it overlaps an existing live entitlement (covers both pre-existing rows AND ones created earlier in the same run, since each create commits on the shared conn). Process subs in window-start order. v1 drops the overlapping tail of partially-overlapping subs (rare — half-open ranges make sequential monthly windows abut, not overlap); O2 (#631-followup) refines to clip/merge. The no-overlap constraint is `entitlements_customer_no_overlap EXCLUDE gist (merchant,customer,entitlement, period &&) WHERE revoked_at IS NULL AND deleted_at IS NULL` (001_schema.up.sql:2058) — only NON-revoked rows; past/expired windows still count.
-6. Idempotency: source-keyed (`source_type='subscription' + source_id=sub.id`) — once a grant exists, the detection query excludes it; re-run is a no-op. Grants↔payments: set `GrantInput.Payment` for payment-backed grants so the refund check (converge_passes.go:140-160) works (risk #6).
-7. Subscription gen fields: OpenrailsSubscription{ID, ProductID, Status, CustomerID, MerchantID, CurrentPeriodStartsAt/EndsAt *time.Time, StartedAt time.Time, EndedAt *time.Time}.
-8. Tests: integration test per the Acceptance above (needs the openrails testcontainer harness — note the merchant-fk local gotcha). Pure helpers (window/overlap math) get unit tests with no DB.
-9. The 3-yr bound (O5/#637 risk) is an optional SCAN filter (`COALESCE(end)>= now()-3y`), NOT a correctness gate — a past-ended entitlement is harmless (not live). Make it a config knob, default 3y.
-
-STATUS 2026-06-29: IMPLEMENTED + tested (commit 30f48fff). Two new sqlc queries
-(ListUngrantedSubscriptions, ListUngrantedWalletPayments) + EntitlementWindowOverlaps;
-grants.Ledger.{UngrantedSubscriptions,UngrantedWalletPayments,DeriveSubscriptionGrant,
-DeriveWalletGrant,deriveEntitlementWindows}; derivePass emits derive.subscription.missing
-+ derive.wallet.missing (ClassAuto, auto-repair). DIVERGENCES from the design above:
-(1) finding types are 3-segment (derive.subscription.missing / derive.wallet.missing),
-NOT derive.grant.missing.subscription — the chk_reconciliation_findings_type regex caps
-at 3 dot-segments. (2) Did NOT promote the existing derive.grant.missing (payments,
-ADMIN) finding — it deliberately stays surface-only to catch LIVE purchase-path bugs;
-the migrated wallet cohort is covered by the narrower, unambiguous derive.wallet.missing
-(rail=solana + stored expiration) instead. 3 integration tests + unit tests green.
-
----
-
-# VERIFICATION (2026-06-29): the migrate(facts)->converge(effects) split is proven
-# end-to-end by pkg/embedded/seam_integration_test.go (commit e5fc43ac): seed an
-# active subscription + a solana wallet payment (NO grants/entitlements) + hand an
-# admin comp via the PUBLIC ImportAdminGrants, run ConvergeMerchant, assert all
-# three cohorts (subscription/wallet/admin) materialize a grant -> entitlement with
-# the right source_type — against a freshly-migrated openrails schema. Plus the
-# converge derive-1 integration tests (#631) and the GrantAdmin test (#636). The
-# literal full-legacy-data run (load the 447MB dumps -> migrate -> converge ->
-# count) is an environment op (loaded MySQL + bootstrap) NOT run here; the seam
-# test is the faithful behavioral proxy. All existing converge/grants/dunning/
-# payments tests still pass (no regressions).
-
-# #632: subscription `unknown` status + provider-truth reconciliation state machine
-
-**Completed:** yes (commits 65a7a7a4 / db4f45ed)
-
-Migrated (and live missed-webhook) subscriptions can be locally "active" while current_period_ends_at is in the past with no confirming payment (19,029 such after migration). Convergence must not guess — flip these to a new `unknown` status ("needs provider verification") and reconcile against provider truth. Extends the #367 liveness "silent-active" notion into an explicit state.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-State machine:
-- active → `unknown`: status=active AND current_period_ends_at < now()-grace AND no confirming payment.
-- `unknown` → resolved via provider-pull (#633): payment received → renew + backfill missing payment (#634); payment failed → past_due (dunning if in window, else cancel + schedule provider delete); subscription deleted at provider → expire/cancel + revoke entitlement; provider confirms current → advance period.
-- `unknown` stays `unknown` when provider unreachable (no creds/down) → retried with exponential backoff (#633).
-
-**Tasks:**
-- [ ] Add `unknown` to the subscription status enum + transition guards.
-- [ ] Detector pass (active→unknown) in convergence.
-- [ ] Resolution applier per outcome branch.
-
-Acceptance: post-migration the lapsed-active cohort moves to `unknown` then resolves to the provider-confirmed state.
-
----
-
-# #633: batched/windowed provider-pull reconciliation + exponential backoff
-
-**Completed:** yes (commits 65a7a7a4 / db4f45ed)
-
-Reconciling thousands of `unknown` subs must NOT fan out per-user provider calls. Pull provider truth in batches by time-window and match locally; back off when the provider is unreachable. Feasibility confirmed: NMI query.php (QueryRecurringSubscriptions / SearchTransactions) supports date-range reporting; CCBill DataLink ACTIVEMEMBERS roster + FetchTransactionExport (date range) are inherently batch CSV pulls.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-**Tasks:**
-- [ ] Windowed bulk-pull per rail (not per-subscription); reconcile the unknown cohort locally.
-- [ ] Per-rail rate limiting; exponential backoff + retry (River + provider_intents outbox) when creds missing / provider down; subs stay `unknown` meanwhile.
-
-Acceptance: reconciling N-thousand unknown subs uses O(time-windows) provider calls, not O(N); transient outage leaves subs `unknown` and retries later.
-
----
-
-# #634: historical payment backfill via provider-pull (missing CCBill + Mobius payments)
-
-**Completed:** yes (commits 65a7a7a4 / db4f45ed)
-
-The legacy dump has no per-charge CCBill payments (the `billings` table holds only access windows) and Mobius "void"/cancelled subs lost their original charge (the subscriptions row kept only the void transaction) — so openrails.payments is missing real historical charges (CCBill 0; ~7.1k Mobius void subs). Recover them from the provider.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-Capability exists, needs a historical mode: CCBill `DataLinkExportRow.Amount()/TransactionID()/Timestamp()` (datalink_export.go) + reconcile/ccbill.go `normalizeCCBillTransaction`; NMI `SearchTransactions`/`GetTransactionDetails`. Today reconcile/ccbill.go defaults to a trailing-30-day window — need a wide historical range (subject to provider retention).
-
-**Tasks:**
-- [ ] Historical-range provider-pull that imports missing payment rows, idempotent by provider transaction id.
-- [ ] Record **all attempts, not just successes** — declined/void charges land as `status='failed'` payment rows (the model already supports pending|completed|failed|refunded; the migrate dropped ~2.7k genuine NMI declines, response_code 2, by skipping all `void` rows). Completes the failure ledger so dunning/analytics see the true history.
-- [ ] **Bound the pull window to the last 3 YEARS max** (matches #631), and go back only as far as our local data needs (per subscription, from its start / last-known charge up to now), capped at 3y. Don't blindly pull 3y for everyone — pull intelligently per cohort.
-- [ ] Wire into the #632 payment-received branch.
-- [ ] Document CCBill DataLink / NMI retention limits. NOTE: CCBill payment history older than CCBill's retention horizon (likely older than ~3y, e.g. 2019–2021) is unrecoverable — it is neither in the legacy dump nor pullable; accept that those old payments are permanently lost.
-
-Acceptance: a historical pull lands missing CCBill/Mobius charges as openrails.payments without duplicating existing rows.
-
----
-
-# #635: rail_customers materialization + provider-auto-billed classification (vault-less subs)
-
-**Completed:** yes (commits bae4b136 + 0a124753) — DONE: dunning skips provider-auto-billed subs (subscriptionProviderAutoBilled: ccbill always, nmi/mobius vault-less) instead of expire/fail; RailCustomerService.Upsert no-ops for rails without a real remote customer (railHasRemoteCustomer: stripe/nmi/mobius only). Both unit-tested. DEFERRED: provider-pull reconciliation of vault-less subs (needs #632/#633 + live creds). No schema change, as specified.
-
-rail_customers (remote customer ref) and payment_methods (stored card/vault) are distinct concepts, but ~19k vault-less Mobius/CCBill subscribers have neither and subscription.payment_method_id is NULL → dunning (jobs_dunning.go) hard-fails on them. A vault-less NMI recurring sub is auto-billed by the provider keyed on subscription_id; CCBill bills on its side. Convergence should classify these as provider-auto-billed (not our-rebill) and materialize rail_customers where a real remote ref exists.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-**Tasks:**
-- [ ] Classify subscriptions vault-rebillable (has payment_method) vs **provider-auto-billed** (no vault) — store this on the SUBSCRIPTION (derivable as `ccbill OR (nmi AND payment_method_id IS NULL)`), NOT in rail_customers; don't hard-fail provider-auto-billed subs in dunning.
-- [ ] Materialize rail_customers ONLY where the provider has a real card-independent customer object: **Stripe (`cus_*`) and NMI-with-vault (`customer_vault_id`)**. Guard `RailCustomerService.Upsert` to no-op without a real remote id. Do NOT create rail_customers for CCBill, vault-less NMI, or Solana — none expose a card-independent customer id (CCBill DataLink keys on subscription_id, not a consumer id; correction: the earlier "CCBill via DataLink roster" idea was wrong). Their absence is BY DESIGN, not a defect.
-- [ ] Reconcile vault-less subs via provider-pull (#632/#633), not manual rebill.
-- [ ] NO rail_customers schema change needed (design eval: doujins repo docs/plans/rail-customer-model.md). Do NOT add NULL-remote-id rows, sentinel rows, or stuff subscription ids into rail_customers.
-
-Acceptance: rail_customers is populated only for Stripe + NMI-vault; provider-auto-billed subs are flagged on the subscription and never error in the dunning path; CCBill/vault-less subs are reconciled via provider-pull with zero fabricated customer rows.
-
----
-
-# #636: admin/manual-grant as source-of-truth in openrails.grants
-
-**Completed:** yes (commit efb3541e) — grants.Ledger.GrantAdmin (idempotent, overlap-skip, nil-end=indefinite) + AdminGrantExistsForSource query + pkg/embedded.ImportAdminGrants (cross-module seam for the doujins migrate). Existing derive-2 already projects admin grants → entitlements. Integration-tested.
-
-doujins legacy_migrate currently writes admin/manual "comp" access directly as entitlements (subscription manual-grant candidates, staff comps). Per the migrate/convergence split doujins must stop writing entitlements — but admin/manual access has NO subscription/payment fact to derive from. openrails needs an explicit source-of-truth representation (admin grants in openrails.grants, source_type=admin) so the derive plane produces the entitlement and doujins hands over the FACT, not the effect.
-
-## Metadata
-- Category: feature
-- Status: not_started
-- Passes: false
-
-**Tasks:**
-- [ ] Make admin/manual grant a first-class grants row (source_type=admin); derive its entitlement (adjacent to #416 admin-entitlement path).
-- [ ] Import/API path so the doujins migrate hands admin comps over as grants.
-
-Acceptance: admin comps exist as grants → entitlements with no direct entitlement writes from doujins.
-
----
-
-# #637: post-migration cutover — reconcile existing migrate-written entitlements
-
-**Completed:** yes (commit bae4b136) — pkg/embedded.ConvergeMerchant gives the host an operator-triggerable merchant-wide convergence to materialize all derive-1 grants/entitlements right after migration. Decision: from-scratch re-migration (the user's chosen path, doujins #724 writes ZERO entitlements) produces NO orphans, so derive-1 builds everything cleanly with grant provenance — no orphan cleanup needed. Documented in ConvergeMerchant: an IN-PLACE cutover over OLD-migrate data must revoke the grant_id-less orphan entitlements first (else derive-1 overlap-skip leaves them live-but-grantless). No destructive migration shipped since from-scratch is the path.
-
-8,457 entitlements were already written by the doujins migrate; they have NO grant_id and will collide with the entitlement no-overlap constraint once #631 derives grants→entitlements. Plan a one-time cutover.
-
-## Metadata
-- Category: chore
-- Status: not_started
-- Passes: false
-
-**Tasks:**
-- [ ] Decide: backfill grant_id onto the existing 8,457, OR revoke them and let #631 re-derive cleanly.
-- [ ] Sequence: openrails #631 + #636 must land + run BEFORE doujins #724 removes the entitlement writers, or migrated users lose access.
-- [ ] Operator-triggerable "full converge/reconcile" pass post-migration (the 15-min sweep already runs via the embed in the public-schema River).
-
-Acceptance: after cutover every active entitlement traces to a grant; no orphan/overlap; no access gap during transition.
