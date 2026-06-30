@@ -122,6 +122,13 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 					}
 				}
 			}
+			// #633: reconcile the `unknown` cohort against provider truth (one
+			// windowed bulk pull per rail). Tolerant of missing/failed fetchers —
+			// those rails' subs stay `unknown` and are retried next pass (backoff).
+			if err := w.runUnknownReconcile(tctx, mid, fetchers); err != nil {
+				stats.LaneErrors++
+				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
+			}
 			return nil
 		}); err != nil {
 			stats.LaneErrors++
@@ -165,6 +172,29 @@ func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context) error
 		NotificationService: w.NotificationService,
 	}
 	return worker.Work(ctx, &river.Job[CCBillReconcileArgs]{})
+}
+
+// runUnknownReconcile resolves the merchant's `unknown` subscription cohort (#632)
+// against provider truth via one windowed bulk pull per rail (#633), backfilling
+// missing charges (#634). The lifecycle service is built with nil deps (like the
+// converge engine): the resolver only needs local-state writes + the entitlement
+// service it constructs internally for revokes. Best-effort: a rail whose pull
+// fails leaves its subs `unknown` for the next scheduled pass (River backoff).
+func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher) error {
+	clock := w.Clock
+	if clock == nil {
+		clock = clockwork.NewRealClock()
+	}
+	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, w.EventLogService, clock)
+	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
+	if res.Renewed+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"merchant_id": mid, "renewed": res.Renewed, "past_due": res.PastDue,
+			"cancelled": res.Cancelled, "still_unknown": res.StillUnknown,
+			"backfilled": res.Backfilled, "rail_errors": len(res.RailErrors),
+		}).Info("Provider Refresh: unknown-cohort reconcile")
+	}
+	return err
 }
 
 func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUID) error {
