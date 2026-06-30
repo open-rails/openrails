@@ -41,12 +41,25 @@ func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
 
 // UnknownReconcileResult summarizes one pass.
 type UnknownReconcileResult struct {
-	Renewed      int
-	PastDue      int
-	Cancelled    int
-	StillUnknown int
-	Backfilled   int                 // payments imported (#634)
-	RailErrors   map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
+	Renewed       int
+	PastDue       int
+	Cancelled     int
+	StillUnknown  int
+	Backfilled    int                 // payments imported (#634)
+	RailCustomers int                 // rail_customers materialized from a remote customer id (#635)
+	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
+}
+
+// railExposesRemoteCustomer reports whether a rail has a card-independent remote
+// CUSTOMER object worth materializing into rail_customers (#635): Stripe (cus_*)
+// and NMI (customer_vault_id). CCBill keys on subscription_id and Solana on the
+// wallet address — neither is a customer, so no rail_customers row.
+func railExposesRemoteCustomer(rail string) bool {
+	switch rail {
+	case "stripe", "nmi":
+		return true
+	}
+	return false
 }
 
 // railToProvider maps a local subscription rail to its reconcile Provider.
@@ -152,6 +165,24 @@ func applyUnknownVerdict(ctx context.Context, database *db.DB, lc *subscriptions
 		return fmt.Errorf("reconcile unknown: backfill %s: %w", subID, err)
 	}
 	res.Backfilled += backfilled
+
+	// #635: materialize a rail_customers row when the provider exposed a real
+	// card-independent customer id (Stripe cus_*, NMI vault) for this sub. Guarded to
+	// stripe/nmi — CCBill/Solana/vault-less never fabricate one. Idempotent upsert.
+	if v.RemoteCustomerID != "" && railExposesRemoteCustomer(string(sub.Rail)) {
+		if err := q.UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
+			ID:             uuid.New(),
+			CustomerID:     sub.CustomerID,
+			Rail:           string(sub.Rail),
+			RailCustomerID: v.RemoteCustomerID,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			MerchantID:     sub.MerchantID,
+		}); err != nil {
+			return fmt.Errorf("reconcile unknown: materialize rail_customer %s: %w", subID, err)
+		}
+		res.RailCustomers++
+	}
 
 	switch v.Outcome {
 	case UnknownOutcomeRenewed:

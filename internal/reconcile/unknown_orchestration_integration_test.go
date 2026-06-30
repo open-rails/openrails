@@ -36,8 +36,9 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 
 	// rail_subscription_ids drive the match.
-	rsRenew, rsCancel, rsDecline, rsNMI := "rs-renew-"+sfx, "rs-cancel-"+sfx, "rs-decline-"+sfx, "rs-nmi-"+sfx
-	subRenew, subCancel, subDecline, subNMI := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	rsRenew, rsCancel, rsDecline, rsNMI, rsSolana := "rs-renew-"+sfx, "rs-cancel-"+sfx, "rs-decline-"+sfx, "rs-nmi-"+sfx, "rs-sol-"+sfx
+	subRenew, subCancel, subDecline, subNMI, subSolana := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	nmiVault := "vault-" + sfx
 	prices := map[uuid.UUID]uuid.UUID{}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
@@ -59,10 +60,12 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		mk(subCancel, "ccbill", rsCancel)
 		mk(subDecline, "ccbill", rsDecline)
 		mk(subNMI, "nmi", rsNMI)
+		mk(subSolana, "solana", rsSolana)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_customers WHERE rail_customer_id=$1`, nmiVault)
 			for id, price := range prices {
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, id)
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, id)
@@ -84,9 +87,18 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			{TransactionID: "tx-decline-" + sfx, SubscriptionID: rsDecline, Type: TransactionTypeDecline, Success: false, OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
+	// #635: an NMI vault sub — the remote sub carries a customer_vault_id, so a
+	// rail_customers row is materialized on resolution.
+	nmiSnap := &RemoteSnapshot{
+		Provider: ProviderNMI,
+		Subscriptions: []RemoteSubscription{
+			{RailSubscriptionID: rsNMI, Status: SubscriptionStatusActive, CustomerID: nmiVault, NextBillingAt: &nextEnd},
+		},
+	}
 	fetchers := map[Provider]RailFetcher{
 		ProviderCCBill: &fakeFetcher{provider: ProviderCCBill, snap: ccbillSnap},
-		ProviderNMI:    &fakeFetcher{provider: ProviderNMI, err: errors.New("nmi unreachable")}, // backoff path
+		ProviderNMI:    &fakeFetcher{provider: ProviderNMI, snap: nmiSnap},
+		ProviderSolana: &fakeFetcher{provider: ProviderSolana, err: errors.New("solana unreachable")}, // backoff path
 	}
 
 	var res UnknownReconcileResult
@@ -96,8 +108,8 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		return err
 	}))
 
-	// Backoff: the NMI fetch failed → its sub stays unknown + a RailError recorded.
-	require.Contains(t, res.RailErrors, ProviderNMI)
+	// Backoff: the Solana fetch failed → its sub stays unknown + a RailError recorded.
+	require.Contains(t, res.RailErrors, ProviderSolana)
 	require.GreaterOrEqual(t, res.StillUnknown, 1)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
@@ -111,17 +123,27 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status=$2`, id, st).Scan(&n))
 			return n
 		}
+		railCustomerCount := func(id uuid.UUID, ridVal string) int {
+			var n int
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+				`SELECT count(*) FROM openrails.rail_customers rc JOIN openrails.subscriptions s ON s.customer_id = rc.customer_id
+				 WHERE s.id=$1 AND rc.rail='nmi' AND rc.rail_customer_id=$2`, id, ridVal).Scan(&n))
+			return n
+		}
 		require.Equal(t, "active", status(subRenew), "successful renewal → active")
 		require.Equal(t, 1, payCount(subRenew, "completed"), "renewal charge backfilled as completed")
 		require.Equal(t, "cancelled", status(subCancel), "roster cancelled → cancelled")
 		require.Equal(t, "past_due", status(subDecline), "declined within window → past_due")
 		require.Equal(t, 1, payCount(subDecline, "failed"), "declined charge backfilled as failed")
-		require.Equal(t, "unknown", status(subNMI), "unreachable rail → stays unknown")
+		require.Equal(t, "active", status(subNMI), "nmi vault sub renewed → active")
+		require.Equal(t, 1, railCustomerCount(subNMI, nmiVault), "#635: nmi vault → rail_customer materialized")
+		require.Equal(t, "unknown", status(subSolana), "unreachable rail → stays unknown")
 		return nil
 	}))
 
-	require.Equal(t, 1, res.Renewed)
+	require.Equal(t, 2, res.Renewed) // ccbill renew + nmi vault
 	require.Equal(t, 1, res.PastDue)
 	require.Equal(t, 1, res.Cancelled)
 	require.Equal(t, 2, res.Backfilled)
+	require.Equal(t, 1, res.RailCustomers) // #635
 }

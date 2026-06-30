@@ -191,7 +191,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid, "renewed": res.Renewed, "past_due": res.PastDue,
 			"cancelled": res.Cancelled, "still_unknown": res.StillUnknown,
-			"backfilled": res.Backfilled, "rail_errors": len(res.RailErrors),
+			"backfilled": res.Backfilled, "rail_customers": res.RailCustomers, "rail_errors": len(res.RailErrors),
 		}).Info("Provider Refresh: unknown-cohort reconcile")
 	}
 	return err

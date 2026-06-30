@@ -35,6 +35,10 @@ type UnknownVerdict struct {
 	// the lapsed period end — the missing payments to import (#634), INCLUDING
 	// declines/voids (recorded as failed). The orchestration dedups by transaction id.
 	Backfill []RemoteTransaction
+	// RemoteCustomerID is the provider's card-independent customer object id when it
+	// has one (Stripe cus_*, NMI customer_vault_id) — empty for CCBill/Solana. The
+	// orchestration materializes a rail_customers row from it for Stripe/NMI (#635).
+	RemoteCustomerID string
 }
 
 // UnknownSubject is the local `unknown` subscription's matchable fields.
@@ -48,6 +52,21 @@ type UnknownSubject struct {
 // so the whole decision table is fixture-testable. dunningWindow bounds how far
 // past the period end a FAILED renewal is still recoverable (past_due) vs terminal.
 func ResolveUnknownFromSnapshot(sub UnknownSubject, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) UnknownVerdict {
+	v := resolveUnknownOutcome(sub, snap, now, dunningWindow)
+	// Carry the provider's card-independent customer id (Stripe cus_*, NMI vault)
+	// so the orchestration can materialize a rail_customers row (#635).
+	if snap != nil {
+		for i := range snap.Subscriptions {
+			if snap.Subscriptions[i].RailSubscriptionID == sub.RailSubscriptionID {
+				v.RemoteCustomerID = snap.Subscriptions[i].CustomerID
+				break
+			}
+		}
+	}
+	return v
+}
+
+func resolveUnknownOutcome(sub UnknownSubject, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) UnknownVerdict {
 	if snap == nil {
 		return UnknownVerdict{Outcome: UnknownOutcomeUnreachable}
 	}
