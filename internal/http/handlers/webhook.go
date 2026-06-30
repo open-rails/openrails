@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -69,7 +70,7 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 }
 
 func Webhook(r *httprequest.Request) {
-	provider := webhookutil.CanonicalProvider(r.Param("provider"))
+	provider := webhookutil.CanonicalRail(r.Param("provider"))
 	clientIP := r.GetRemoteIP()
 	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
 	if r.State == nil || r.State.Config == nil {
@@ -89,7 +90,7 @@ func Webhook(r *httprequest.Request) {
 		return
 	}
 	isTestMode := r.State.Config.IsTestMode()
-	if rails.IsNMIBacked(provider) {
+	if rails.IsNMI(models.Rail(provider)) {
 		if enqueueNMIWebhook(r, provider, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -132,7 +133,7 @@ func MerchantWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
 		return
 	}
-	provider := webhookutil.CanonicalProvider(r.Param("provider"))
+	provider := webhookutil.CanonicalRail(r.Param("provider"))
 	route, err := r.State.Merchants.ResolveBySlug(r.Request.Context(), r.Param("merchant"))
 	if err != nil {
 		if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
@@ -156,7 +157,7 @@ func HostWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
 		return
 	}
-	provider := webhookutil.CanonicalProvider(r.Param("provider"))
+	provider := webhookutil.CanonicalRail(r.Param("provider"))
 	merchantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
@@ -166,7 +167,7 @@ func HostWebhook(r *httprequest.Request) {
 }
 
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) {
-	if rails.IsNMIBacked(provider) {
+	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -290,7 +291,7 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Rail:           prepared.Provider,
+		Rail:           prepared.Rail,
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
@@ -731,7 +732,7 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 	if !ok {
 		return false
 	}
-	providerKey := webhookutil.CanonicalProvider(provider)
+	providerKey := webhookutil.CanonicalRail(provider)
 	client, ok := r.State.NMIClients[providerKey]
 	if !ok || client == nil {
 		r.ErrorJSON(http.StatusNotFound, fmt.Sprintf("unknown nmi provider '%s'", providerKey))

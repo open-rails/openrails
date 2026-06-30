@@ -49,7 +49,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 
 	// The REAL NMI client, pointed at the REAL sandbox Direct Post endpoint (no URL
 	// override). test_mode=true mirrors the TEST_MODE=true sandbox configuration.
-	client, err := nmi.NewClient(string(models.RailMobius), &config.NMIProviderSettings{
+	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{
 		SecurityKey:     securityKey,
 		TokenizationKey: strings.TrimSpace(os.Getenv("NMI_TOKENIZATION_KEY")),
 		WebhookSecret:   strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET")),
@@ -71,7 +71,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 
 	// The payment method OpenRails will collect against: rail=mobius (NMI-backed),
 	// rail_customer_ref = the sandbox vault id.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailMobius), vaultID)
+	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailNMI), vaultID)
 
 	// Build the owed OpenRails invoice from real arrears state. owed is in ledger
 	// internal units (1e4 per cent). Randomize within the simulator's approving
@@ -90,7 +90,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	require.Equal(t, owedInternal, inv.AmountDue)
 
 	charger := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
-		string(models.RailMobius): client,
+		string(models.RailNMI): client,
 	}))
 
 	// ACT: collect the open invoice through the real path. A non-nil error here is
@@ -126,7 +126,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&settledCount, &rail, &railPaymentID))
 	require.Equal(t, 1, settledCount)
-	require.Equal(t, string(models.RailMobius), rail)
+	require.Equal(t, string(models.RailNMI), rail)
 	require.NotEmpty(t, railPaymentID, "OpenRails must record the real NMI sandbox transaction id")
 	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; real transaction id = %s", inv.ID, railPaymentID)
 }

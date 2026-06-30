@@ -67,7 +67,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	return gen.CreatePaymentParams{
 		ID:                       p.ID,
 		PriceID:                  p.PriceID,
-		Rail:                     gen.OpenrailsRailType(p.Rail),
+		Rail:                     string(p.Rail),
 		TransactionID:            p.TransactionID,
 		Amount:                   p.Amount,
 		ListAmount:               p.ListAmount,
@@ -202,7 +202,7 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 
 func (r *PaymentRepo) GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
 	row, err := r.db.Gen(ctx).GetPaymentByTransactionID(ctx, gen.GetPaymentByTransactionIDParams{
-		Rail:          gen.OpenrailsRailType(rail),
+		Rail:          string(rail),
 		TransactionID: transactionID,
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*m
 }
 
 func (r *PaymentRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByRail(ctx, gen.OpenrailsRailType(rail))
+	rows, err := r.db.Gen(ctx).ListPaymentsByRail(ctx, string(rail))
 	if err != nil {
 		return nil, err
 	}
@@ -552,7 +552,7 @@ func (r *PaymentRepo) GetLatestByUserAndRail(ctx context.Context, userID string,
 	}
 	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerRail(ctx, gen.GetLatestPaymentByCustomerRailParams{
 		CustomerID: tsid,
-		Rail:       gen.OpenrailsRailType(rail),
+		Rail:       string(rail),
 	})
 	if err != nil {
 		return nil, err
@@ -586,7 +586,7 @@ func (r *PaymentRepo) CountByUserAndRail(ctx context.Context, userID string, rai
 	}
 	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectRail(ctx, gen.CountPaymentOutcomesBySubjectRailParams{
 		CustomerID: tsid,
-		Rail:       gen.OpenrailsRailType(rail),
+		Rail:       string(rail),
 	})
 	if err != nil {
 		return 0, 0, err

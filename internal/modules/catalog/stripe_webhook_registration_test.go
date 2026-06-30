@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -59,8 +60,8 @@ func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	rail := &config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
-	rails := config.RailSet{"stripe": rail}
+	rail := &config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
+	rails := config.ProviderAccountSet{"stripe": rail}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		Config:        &config.Config{APIURL: "https://billing.example.com"},

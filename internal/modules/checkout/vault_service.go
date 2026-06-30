@@ -36,7 +36,7 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 			return "", nil, fmt.Errorf("invalid payment method: %w", err)
 		}
 
-		if !rails.IsNMIBackedRail(pm.Rail) {
+		if !rails.IsNMI(pm.Rail) {
 			return "", nil, errors.New("payment method is not compatible with card payments")
 		}
 		if !rails.SameRail(pm.Rail, models.Rail(provider)) {

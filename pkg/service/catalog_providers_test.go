@@ -86,7 +86,7 @@ func TestCCBillAdapter_AutoCreatePending(t *testing.T) {
 }
 
 func TestMobiusAdapter_Attach(t *testing.T) {
-	a := &mobiusAdapter{}
+	a := &nmiAdapter{}
 	ids, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium_monthly"}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -100,16 +100,16 @@ func TestMobiusAdapter_Attach(t *testing.T) {
 }
 
 func TestMobiusAdapter_AutoCreatePending(t *testing.T) {
-	a := &mobiusAdapter{}
+	a := &nmiAdapter{}
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{})
 	if err != errPendingManualLink {
 		t.Fatalf("expected errPendingManualLink, got %v", err)
 	}
 	tmpl := a.PendingActionTemplate(uuid.New())
-	if tmpl.Provider != "mobius" || tmpl.Action != "create_recurring_plan" {
+	if tmpl.Provider != "nmi" || tmpl.Action != "create_recurring_plan" {
 		t.Fatalf("unexpected template: %+v", tmpl)
 	}
-	if tmpl.PatchRequired["provider_links"]["mobius"]["plan_id"] == "" {
+	if tmpl.PatchRequired["provider_links"]["nmi"]["plan_id"] == "" {
 		t.Fatalf("expected patch_required to mention plan_id, got %+v", tmpl.PatchRequired)
 	}
 }
@@ -149,11 +149,11 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"stripe", "ccbill", "mobius"},
+		Providers:  []string{"stripe", "ccbill", "nmi"},
 		ProviderLinks: map[string]map[string]string{
 			"stripe": {models.RailKeyStripePriceID: "price_xxx"},
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
-			"mobius": {"plan_id": "premium_monthly"},
+			"nmi":    {"plan_id": "premium_monthly"},
 		},
 	}
 	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
@@ -163,7 +163,7 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 	if len(pending) != 0 {
 		t.Fatalf("expected no pending actions, got %v", pending)
 	}
-	for _, name := range []string{"stripe", "ccbill", "mobius"} {
+	for _, name := range []string{"stripe", "ccbill", "nmi"} {
 		if states[name].Status != ProviderStatusLinked {
 			t.Errorf("%s: expected linked, got %s", name, states[name].Status)
 		}
@@ -181,7 +181,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"ccbill", "mobius"},
+		Providers:  []string{"ccbill", "nmi"},
 		ProviderLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 			// mobius intentionally has no link -> pending
@@ -194,13 +194,13 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	if states["ccbill"].Status != ProviderStatusLinked {
 		t.Errorf("ccbill: expected linked, got %s", states["ccbill"].Status)
 	}
-	if states["mobius"].Status != ProviderStatusPendingManualLink {
-		t.Errorf("mobius: expected pending_manual_link, got %s", states["mobius"].Status)
+	if states["nmi"].Status != ProviderStatusPendingManualLink {
+		t.Errorf("mobius: expected pending_manual_link, got %s", states["nmi"].Status)
 	}
-	if _, ok := rails["mobius"]; ok {
+	if _, ok := rails["nmi"]; ok {
 		t.Error("mobius should not have a rails entry while pending")
 	}
-	if len(pending) != 1 || pending[0].Provider != "mobius" {
+	if len(pending) != 1 || pending[0].Provider != "nmi" {
 		t.Fatalf("expected one mobius pending action, got %v", pending)
 	}
 }
@@ -212,13 +212,13 @@ func TestResolveProviders_AllPending(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"ccbill", "mobius"},
+		Providers:  []string{"ccbill", "nmi"},
 	}
 	_, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if states["ccbill"].Status != ProviderStatusPendingManualLink || states["mobius"].Status != ProviderStatusPendingManualLink {
+	if states["ccbill"].Status != ProviderStatusPendingManualLink || states["nmi"].Status != ProviderStatusPendingManualLink {
 		t.Fatalf("expected both pending, got %+v", states)
 	}
 	if len(pending) != 2 {
@@ -276,7 +276,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeLimited}}}
 	priceID := uuid.New()
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
-		Providers:  []string{"stripe", "mobius"},
+		Providers:  []string{"stripe", "nmi"},
 		UnitAmount: 23_000_000,
 		Currency:   "usd",
 	}, priceID)
@@ -286,7 +286,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	if len(rails) != 0 {
 		t.Fatalf("no provider objects may be linked in limited mode, got %v", rails)
 	}
-	for _, name := range []string{"stripe", "mobius"} {
+	for _, name := range []string{"stripe", "nmi"} {
 		st, ok := states[name]
 		if !ok || st.Status != ProviderStatusPendingManualLink {
 			t.Fatalf("%s: expected pending_manual_link, got %+v", name, st)

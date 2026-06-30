@@ -200,13 +200,13 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 	return out, total, nil
 }
 
-func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
+func (r *PriceRepo) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string) (*models.Price, error) {
 	// Resolve any non-draft price (active or archived). Archived prices must
 	// still resolve here so grandfathered subscriptions keep openrails.
 	row, err := r.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
-		Provider:           provider,
+		Rail:               rail,
 		PlanID:             nmiPlanID,
-		IncludeNmiFallback: provider != "nmi",
+		IncludeNmiFallback: rail != string(models.RailNMI),
 	})
 	if err != nil {
 		return nil, err

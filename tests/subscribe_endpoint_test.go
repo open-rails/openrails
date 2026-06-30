@@ -134,7 +134,7 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 
 	// Inject the mock client into the runtime
 	suite.App.Runtime.NMIClients = map[string]*nmi.NMIClient{
-		"mobius": client,
+		"nmi": client,
 	}
 
 	// Also update the subscription service's NMI clients

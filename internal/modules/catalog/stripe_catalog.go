@@ -16,7 +16,7 @@ import (
 
 type StripeCatalogService struct {
 	Config *config.Config
-	Rails  config.RailSet
+	Rails  config.ProviderAccountSet
 	// BaseURL overrides the Stripe API root (https://api.stripe.com). Empty in
 	// production; tests point it at an httptest server. Only the entitlements
 	// (Features) methods read it via baseURL(); the older methods hardcode the

@@ -100,7 +100,7 @@ type CreateCheckoutSessionRequest struct {
 
 // CheckoutPayment specifies payment details for checkout.
 type CheckoutPayment struct {
-	Rail            string // "mobius", "ccbill", "solana", "stripe"
+	Rail            string // "nmi", "ccbill", "solana", "stripe"
 	PaymentMethodID string // For returning customers with saved payment methods
 	PaymentToken    string // For new card tokenization (NMI Collect.js)
 
@@ -180,7 +180,7 @@ type GetSubscriptionsOptions struct {
 type Subscription struct {
 	ID                    string
 	Status                string // "pending", "active", "past_due", "cancelled"
-	Rail                  string // "mobius", "ccbill", "solana", "stripe"
+	Rail                  string // "nmi", "ccbill", "solana", "stripe"
 	RailSubscriptionID    string
 	StartedAt             int64  // Unix epoch seconds
 	EndedAt               *int64 // Unix epoch seconds (nil if active)
@@ -311,7 +311,7 @@ type GetPaymentMethodsOptions struct {
 type PaymentMethod struct {
 	ID             string
 	Type           string // "card"
-	Rail           string // "mobius", "ccbill", "stripe", etc.
+	Rail           string // "nmi", "ccbill", "stripe", etc.
 	Created        int64  // Unix epoch seconds
 	BillingDetails *BillingDetails
 	Card           *CardDetails
@@ -615,7 +615,7 @@ type ChurnMetrics struct {
 
 // HandleWebhookRequest contains the raw webhook data.
 type HandleWebhookRequest struct {
-	Provider  string            // "mobius", "ccbill", "stripe", "solana"
+	Provider  string            // "nmi", "ccbill", "stripe", "solana"
 	Body      []byte            // Raw request body
 	Headers   map[string]string // Relevant headers (signatures, etc.)
 	ClientIP  string

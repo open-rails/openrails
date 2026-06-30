@@ -485,7 +485,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	}
 
 	// Only NMI-backed rails can be cancelled via this service
-	if !rails.IsNMIBackedRail(subscription.Rail) {
+	if !rails.IsNMI(subscription.Rail) {
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 

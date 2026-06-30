@@ -280,5 +280,5 @@ func GraceSlack(cycleHours int) time.Duration {
 // from CCBill's nextRetryDate); Solana is pull-based — OpenRails is the only
 // puller, so there is no webhook silence to bridge.
 func RenewalGraceEligibleRail(rail models.Rail) bool {
-	return rails.IsNMIBackedRail(rail) || rail == models.RailStripe
+	return rails.IsNMI(rail) || rail == models.RailStripe
 }

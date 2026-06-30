@@ -27,7 +27,7 @@ func seedMetricsData(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID)
 		UserID:    userID,
 		PriceID:   priceID,
 		Status:    models.StatusActive,
-		Rail:      models.RailMobius,
+		Rail:      models.RailNMI,
 		RailSubID: "metrics-" + uuid.NewString()[:8],
 	})
 
@@ -35,7 +35,7 @@ func seedMetricsData(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID)
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		Amount:         999,
 		TransactionID:  "txn-" + uuid.NewString()[:8],
 	})
@@ -86,7 +86,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 		int64(1), &scheduled,
 		int64(0), int64(0), int64(0), int64(0),
 		int64(0), int64(1), int64(0), int64(0), amount, &entitlements,
-		[]string{string(models.RailMobius)}, []int64{1}, []int64{1}, []int64{0},
+		[]string{string(models.RailNMI)}, []int64{1}, []int64{1}, []int64{0},
 		[]int64{amount}, []int64{amount}, []int64{0},
 		[]int64{0}, []int64{0},
 		[]int64{1}, []int64{0},

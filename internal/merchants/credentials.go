@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -68,13 +69,11 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 	if s.secrets == nil || id.IsZero() {
 		return "", nil
 	}
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "mobius", "nmi":
-	default:
+	if strings.ToLower(strings.TrimSpace(provider)) != string(models.RailNMI) {
 		return "", nil
 	}
 	if s.pool == nil {
-		return s.secretValue(ctx, id, SecretNMIMobiusWebhookSigning)
+		return s.secretValue(ctx, id, SecretNMIWebhookSigning)
 	}
 	scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, "nmi", "live")
 	if err != nil {
@@ -101,10 +100,10 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 
 	var keyName, urlName string
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "mobius":
+	case string(models.RailNMI):
 		if s.pool == nil {
-			keyName = SecretNMIMobiusTokenizationKey
-			urlName = SecretNMIMobiusTokenizationURL
+			keyName = SecretNMITokenizationKey
+			urlName = SecretNMITokenizationURL
 			break
 		}
 		scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, "nmi", "live")

@@ -62,7 +62,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailMobius),
+		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailNMI),
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
@@ -74,7 +74,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
-		Status: string(models.StatusPastDue), Rail: string(models.RailMobius),
+		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		RailSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -108,7 +108,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{"mobius": client}}
+	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -198,7 +198,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
-		Status: string(models.StatusPastDue), Rail: string(models.RailMobius),
+		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		RailSubscriptionID:    "sub_wexp_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -228,7 +228,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{"mobius": client}}
+	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

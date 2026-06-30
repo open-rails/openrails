@@ -304,10 +304,10 @@ func testSolanaCheckoutConfig() *config.Config {
 	}
 }
 
-func testSolanaCheckoutRails() config.RailSet {
-	return config.RailSet{
+func testSolanaCheckoutRails() config.ProviderAccountSet {
+	return config.ProviderAccountSet{
 		"solana": {
-			Type: config.RailTypeSolana,
+			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{
 				Network:         "devnet",
 				RecipientWallet: testRecipientWallet,

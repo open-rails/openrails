@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCanonicalProvider(t *testing.T) {
-	require.Equal(t, "mobius", CanonicalProvider(" Mobius "))
-	require.Equal(t, "mobius", CanonicalProvider("nmi"))
-	require.Equal(t, "stripe", CanonicalProvider("/stripe/"))
+func TestCanonicalRail(t *testing.T) {
+	require.Equal(t, "nmi", CanonicalRail(" Mobius "))
+	require.Equal(t, "nmi", CanonicalRail("nmi"))
+	require.Equal(t, "stripe", CanonicalRail("/stripe/"))
 }
 
 func TestParseStripeEventMeta(t *testing.T) {
@@ -28,7 +28,7 @@ func TestParseStripeEventMeta(t *testing.T) {
 }
 
 func TestComputeUniqueKey(t *testing.T) {
-	require.Equal(t, "webhook:mobius:evt_123", ComputeUniqueKey("mobius", "evt_123", "", []byte(`{}`)))
+	require.Equal(t, "webhook:nmi:evt_123", ComputeUniqueKey("nmi", "evt_123", "", []byte(`{}`)))
 	require.NotEmpty(t, ComputeUniqueKey("ccbill", "", "NewSaleSuccess", []byte(`{"a":1}`)))
 }
 
@@ -144,7 +144,7 @@ func TestValidateNMISignature(t *testing.T) {
 func TestPrepareCCBill(t *testing.T) {
 	prepared, err := PrepareCCBill([]byte("eventType=NewSaleSuccess&subscriptionId=123"), " NewSaleSuccess ")
 	require.NoError(t, err)
-	require.Equal(t, subscriptions.RailCCBill, prepared.Provider)
+	require.Equal(t, subscriptions.RailCCBill, prepared.Rail)
 	require.Equal(t, "NewSaleSuccess", prepared.EventType)
 	require.JSONEq(t, `{"eventType":"NewSaleSuccess","subscriptionId":"123"}`, string(prepared.Body))
 	require.Equal(t, prepared.UniqueKey(), prepared.QueueArgs("127.0.0.1").UniqueKey)
@@ -167,7 +167,7 @@ func TestPrepareStripe(t *testing.T) {
 
 	prepared, err := PrepareStripe(body, secret, header, time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, subscriptions.RailStripe, prepared.Provider)
+	require.Equal(t, subscriptions.RailStripe, prepared.Rail)
 	require.Equal(t, "evt_123", prepared.EventID)
 	require.Equal(t, "checkout.session.completed", prepared.EventType)
 	require.True(t, prepared.SignatureVerified)
@@ -196,7 +196,7 @@ func TestPrepareNMI(t *testing.T) {
 
 	prepared, err := PrepareNMI(" Mobius ", body, secret, header)
 	require.NoError(t, err)
-	require.Equal(t, "mobius", prepared.Provider)
+	require.Equal(t, "nmi", prepared.Rail)
 	require.Equal(t, "evt_123", prepared.EventID)
 	require.Equal(t, "transaction.sale.success", prepared.EventType)
 	require.True(t, prepared.SignatureVerified)

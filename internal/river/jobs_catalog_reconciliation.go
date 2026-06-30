@@ -49,7 +49,7 @@ type CatalogReconciliationPullWorker struct {
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
 	DB         *db.DB
 	Config     *config.Config
-	Rails      config.RailSet
+	Rails      config.ProviderAccountSet
 	NMIClients map[string]*nmi.NMIClient
 }
 
@@ -96,7 +96,7 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	}
 
 	// --- NMI pass (skipped if unconfigured) ---
-	if client, ok := w.NMIClients["mobius"]; ok && client != nil {
+	if client, ok := w.NMIClients[string(models.RailNMI)]; ok && client != nil {
 		raw, err := client.GetRecurringPlanData()
 		if err != nil {
 			return fmt.Errorf("catalog reconciliation: list nmi recurring plans: %w", err)
@@ -108,7 +108,7 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 		scannedPlans = len(plans)
 		desired = append(desired, computeNMIDriftJob(plans, priceRows, now)...)
 	} else {
-		log.WithContext(ctx).Info("CatalogReconciliation: nmi (mobius) not configured; skipping nmi pass")
+		log.WithContext(ctx).Info("CatalogReconciliation: nmi not configured; skipping nmi pass")
 	}
 
 	for _, e := range desired {
@@ -393,11 +393,11 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 	priceByPlanID := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
-		mobius := pr.Rails[string(models.RailMobius)]
-		if mobius == nil {
+		nmiLink := pr.Rails[string(models.RailNMI)]
+		if nmiLink == nil {
 			continue
 		}
-		if planID := strings.TrimSpace(mobius[models.RailKeyPlanID]); planID != "" {
+		if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 			planIDByOpenRailsPrice[pr.ID.String()] = planID
 			priceByPlanID[planID] = pr.ID.String()
 		}

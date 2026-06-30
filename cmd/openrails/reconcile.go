@@ -11,7 +11,7 @@ import (
 
 // newPullProviderCmd wires the #107/#511 provider-pull CLI:
 //
-//	openrails pull-provider [--provider=... --since=... --until=...] [--insert|--overwrite|--prune]
+//	openrails pull-provider [--rail=... --since=... --until=...] [--insert|--overwrite|--prune]
 //	openrails pull-provider report [--run=ID] latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
@@ -47,7 +47,7 @@ func newPullProviderCmd() *cobra.Command {
 			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, logDir, insert, overwrite, prune)
 		},
 	}
-	cmd.Flags().StringSliceVar(&providers, "provider", nil, "Provider(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
+	cmd.Flags().StringSliceVar(&providers, "rail", nil, "Rail(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
 	cmd.Flags().StringVar(&providerAccount, "provider-account", "", "Provider account UUID to pull explicitly (requires matching configured credentials)")
 	cmd.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")

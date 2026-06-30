@@ -575,7 +575,7 @@ func describePaymentMethod(subscription *models.Subscription) string {
 }
 
 func railDisplayName(rail models.Rail) string {
-	if rails.IsNMIBackedRail(rail) {
+	if rails.IsNMI(rail) {
 		return "Credit Card"
 	}
 

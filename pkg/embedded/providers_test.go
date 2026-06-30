@@ -6,13 +6,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 func TestApplyPaymentProvidersGeneratesLocalSelectors(t *testing.T) {
 	rails, err := ApplyPaymentProviders([]PaymentProvider{
-		{Config: config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
-		{Config: config.RailConfig{Type: config.RailTypeStripe, Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
-		{Config: config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{SecurityKey: "sec"}}},
+		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
+		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
+		{Config: config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: "sec"}}},
 	})
 	require.NoError(t, err)
 	require.NoError(t, config.ValidateRailSet(&config.Config{}, rails))
@@ -28,11 +29,11 @@ func TestApplyPaymentProvidersAcceptsExplicitLocalSelectors(t *testing.T) {
 	rails, err := ApplyPaymentProviders([]PaymentProvider{
 		{
 			Name:   "stripe_primary",
-			Config: config.RailConfig{Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}},
+			Config: config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}},
 		},
 		{
 			Name:   "stripe_legacy",
-			Config: config.RailConfig{Type: config.RailTypeStripe, Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}},
+			Config: config.ProviderAccountConfig{Rail: models.RailStripe, Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}},
 		},
 	})
 	require.NoError(t, err)
@@ -42,5 +43,5 @@ func TestApplyPaymentProvidersAcceptsExplicitLocalSelectors(t *testing.T) {
 
 func TestApplyPaymentProvidersRequiresTypeWhenNameDoesNotImplyIt(t *testing.T) {
 	_, err := ApplyPaymentProviders([]PaymentProvider{{Name: "stripe_primary"}})
-	require.ErrorContains(t, err, "requires config type")
+	require.ErrorContains(t, err, "requires config rail")
 }

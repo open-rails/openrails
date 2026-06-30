@@ -76,7 +76,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	if !rails.IsNMIBackedRail(subscription.Rail) {
+	if !rails.IsNMI(subscription.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed subscriptions can have their payment method updated")
 		return
 	}
@@ -102,7 +102,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		}
 	}
 
-	if !rails.IsNMIBackedRail(paymentMethod.Rail) {
+	if !rails.IsNMI(paymentMethod.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be used")
 		return
 	}

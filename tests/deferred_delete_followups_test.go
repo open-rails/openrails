@@ -105,7 +105,7 @@ func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 		UserID:              uuid.New().String(),
 		PriceID:             priceID,
 		Status:              models.StatusCancelled,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		DeletionScheduledAt: &futureDelete,
 	})
 
@@ -114,7 +114,7 @@ func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 		UserID:              uuid.New().String(),
 		PriceID:             priceID,
 		Status:              models.StatusCancelled,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		DeletionScheduledAt: &pastDelete,
 	})
 
@@ -167,7 +167,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		PaymentMethodID:     &pm.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -177,7 +177,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 
 	reason := "rebill declined"
 	err := suite.App.Runtime.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	})
@@ -230,7 +230,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 		UserID:        userID,
 		PriceID:       priceID,
 		Status:        models.StatusPastDue,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		RetryAttempts: &retryAttempts,
 		NextRetryAt:   &pastRetry,
 	})
@@ -243,7 +243,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 
 	reason := "rebill declined"
 	require.NoError(t, lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))
@@ -279,7 +279,7 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 		UserID:        userID,
 		PriceID:       priceID,
 		Status:        models.StatusPastDue,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		RetryAttempts: &retryAttempts,
 		NextRetryAt:   &pastRetry,
 	})
@@ -295,7 +295,7 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 
 	reason := "rebill declined"
 	require.NoError(t, lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
 	}))
@@ -330,7 +330,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		PaymentMethodID:     &pm.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
@@ -342,7 +342,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:          suite.App.Runtime.DB,
 		Config:      suite.App.Runtime.Config,
-		NMIClients:  map[string]*nmi.NMIClient{string(models.RailMobius): {}},
+		NMIClients:  map[string]*nmi.NMIClient{string(models.RailNMI): {}},
 		DeferDelete: recorder,
 	}
 
@@ -381,7 +381,7 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Rail:                models.RailMobius,
+		Rail:                models.RailNMI,
 		CurrentPeriodEndsAt: &periodEnd,
 	})
 

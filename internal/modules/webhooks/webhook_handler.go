@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
@@ -90,22 +89,15 @@ func (r *WebhookHandlerRegistry) Register(h WebhookHandler) {
 	r.handlers[strings.ToLower(strings.TrimSpace(h.Rail()))] = h
 }
 
-// Handler resolves the handler for a rail name, mapping NMI gateway aliases
-// (e.g. "nmi", "mobius") onto the registered "nmi" handler.
+// Handler resolves the registered handler for a rail. The rail value is already
+// canonical (webhookutil.CanonicalRail folds the legacy "mobius" path onto "nmi").
 func (r *WebhookHandlerRegistry) Handler(rail string) (WebhookHandler, bool) {
 	if r == nil {
 		return nil, false
 	}
 	key := strings.ToLower(strings.TrimSpace(rail))
-	if h, ok := r.handlers[key]; ok {
-		return h, true
-	}
-	if rails.IsNMIBacked(key) {
-		if h, ok := r.handlers["nmi"]; ok {
-			return h, true
-		}
-	}
-	return nil, false
+	h, ok := r.handlers[key]
+	return h, ok
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import (
 
 // newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:
 //
-//	openrails intents [--status=pending|all|...] [--provider=...] [--type=...] [--merchant=...]
+//	openrails intents [--status=pending|all|...] [--rail=...] [--type=...] [--merchant=...]
 //
 // Under mode=limited/readonly this is the dry-run view: the pending rows are
 // exactly the provider writes the executor will drain when the mode lifts —
@@ -46,7 +46,7 @@ func newIntentsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "active", "Status filter: active (the live working set: pending, in_flight, failed_retryable, unknown), pending, in_flight, succeeded, failed_retryable, failed (terminal), unknown, superseded, expired, all")
-	cmd.Flags().StringVar(&provider, "provider", "", "Provider filter (e.g. mobius, stripe)")
+	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intentType, "type", "", "Intent type filter (e.g. nmi_delete_subscription, manual_rebill, stripe_refund)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (default: the default merchant)")
@@ -73,7 +73,7 @@ func newIntentsLogCmd() *cobra.Command {
 			return runIntentsMutationLog(c, provider, intent, providerAccount, phase, format, merchant, limit)
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "", "Provider filter (e.g. mobius, stripe)")
+	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
 	cmd.Flags().StringVar(&providerAccount, "provider-account", "", "Provider account id filter")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")

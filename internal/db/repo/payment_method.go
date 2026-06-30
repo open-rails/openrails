@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -246,7 +245,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 
 // GetAllNMIBacked returns all payment methods for NMI-backed rails
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, rails.GetNMIBackedRailsList())
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, []string{string(models.RailNMI)})
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +260,7 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 	}
 	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{
 		CustomerID: tsid,
-		Rails:      rails.GetNMIBackedRailsList(),
+		Rails:      []string{string(models.RailNMI)},
 	})
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -81,22 +82,19 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
-		return nil, errors.New("provider is required")
+		return nil, errors.New("rail is required")
 	}
 
-	secretKey := ""
-	if provider == "mobius" {
-		secretKey = "production_key"
-	}
-	if secretKey != "" {
-		if value, ok, err := s.merchantProviderSecret(ctx, config.RailTypeNMI, "live", secretKey); err != nil {
+	// The NMI security key is addressed under the rail's "production_key" secret.
+	if rails.IsNMI(models.Rail(provider)) {
+		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), "live", "production_key"); err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		} else if ok {
-			proc := cloneRailConfig(s.railConfig(provider))
+			proc := cloneRailConfig(s.primaryNMIConfig())
 			if proc == nil {
-				proc = &config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{}}
+				proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
 			}
-			proc.Type = config.RailTypeNMI
+			proc.Rail = models.RailNMI
 			if proc.NMI == nil {
 				proc.NMI = &config.NMIRailConfig{}
 			}
@@ -112,8 +110,10 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			return client, nil
 		}
 	}
-	if proc := s.railConfig(provider); proc != nil && rails.IsNMIBacked(provider) {
-		return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
+	if rails.IsNMI(models.Rail(provider)) {
+		if proc := s.primaryNMIConfig(); proc != nil {
+			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
+		}
 	}
 	return nil, fmt.Errorf("missing client")
 }
@@ -135,7 +135,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 		base = &config.CCBillConfig{}
 	}
 
-	value, ok, err := s.merchantProviderSecret(ctx, config.RailTypeCCBill, "live", "account_config")
+	value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), "live", "account_config")
 	if err != nil {
 		return nil, fmt.Errorf("load merchant CCBill secret: %w", err)
 	}
@@ -156,14 +156,23 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 	return base, nil
 }
 
-func (s *CheckoutService) railConfig(name string) *config.RailConfig {
+func (s *CheckoutService) railConfig(name string) *config.ProviderAccountConfig {
 	if s == nil || s.Rails == nil {
 		return nil
 	}
 	return s.Rails.GetRail(name)
 }
 
-func cloneRailConfig(in *config.RailConfig) *config.RailConfig {
+// primaryNMIConfig returns the configured primary NMI provider account, if any.
+func (s *CheckoutService) primaryNMIConfig() *config.ProviderAccountConfig {
+	if s == nil || s.Rails == nil {
+		return nil
+	}
+	_, proc, _ := s.Rails.PrimaryRailByType(models.RailNMI)
+	return proc
+}
+
+func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
 	if in == nil {
 		return nil
 	}

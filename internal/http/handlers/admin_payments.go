@@ -223,7 +223,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
 		}
 		stripeRefundTargetID = refundTargetID
-	case rails.IsNMIBackedRail(payment.Rail):
+	case rails.IsNMI(payment.Rail):
 		providerName := strings.ToLower(string(payment.Rail))
 		client, ok := r.State.NMIClients[providerName]
 		if !ok {
@@ -312,7 +312,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	switch {
 	case prepared.payment.Rail == models.RailStripe:
 		providerTarget = prepared.stripeRefundTargetID
-	case rails.IsNMIBackedRail(prepared.payment.Rail):
+	case rails.IsNMI(prepared.payment.Rail):
 		providerTarget = prepared.payment.TransactionID
 	default:
 		// Unreachable by construction: prepareAdminRefund already rejects CCBill
@@ -545,7 +545,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		tm = tm.UTC()
 		purchasedAt = &tm
 	}
-	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.RailManual, transactionID); err == nil {
+	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.Rail(models.ChannelManual), transactionID); err == nil {
 		r.JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
 		return
 	}
@@ -553,7 +553,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	if req.Amount != nil {
 		amount = *req.Amount
 	}
-	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Rail: string(models.RailManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
+	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Rail: string(models.ChannelManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

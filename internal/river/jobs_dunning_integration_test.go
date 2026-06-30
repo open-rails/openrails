@@ -109,7 +109,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
 		CustomerID:           tenantSubjectID,
-		Rail:                 models.RailMobius,
+		Rail:                 models.RailNMI,
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -139,7 +139,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:             productID,
 		PriceID:               priceID,
 		Status:                models.StatusPastDue,
-		Rail:                  models.RailMobius,
+		Rail:                  models.RailNMI,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart,
@@ -199,7 +199,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	worker := &DunningWorker{
 		DB:         dbi,
-		NMIClients: map[string]*nmi.NMIClient{"mobius": client},
+		NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client},
 	}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -270,7 +270,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "mobius",
+		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
@@ -282,7 +282,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	nextRetry := now.Add(-30 * time.Second)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
-		Status: string(models.StatusPastDue), Rail: "mobius",
+		Status: string(models.StatusPastDue), Rail: "nmi",
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
@@ -296,14 +296,14 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	durableTxn := "txn_durable_" + uuid.NewString()[:8]
 	orderRef := fmt.Sprintf("rebill-%s-%d", subID, periodEnd.Unix())
 	payloadJSON := fmt.Sprintf(
-		`{"subscription_id":%q,"period_end":%q,"rail":"mobius","order_reference":%q,"attempt":0}`,
+		`{"subscription_id":%q,"period_end":%q,"rail":"nmi","order_reference":%q,"attempt":0}`,
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.provider_intents
 		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
-		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
+		VALUES ('nmi', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
-		intents.ManualRebillIdempotencyKey(subID, periodEnd, "mobius", orderRef, 0),
+		intents.ManualRebillIdempotencyKey(subID, periodEnd, "nmi", orderRef, 0),
 		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 
@@ -334,7 +334,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{"mobius": client}}
+	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

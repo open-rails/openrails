@@ -17,9 +17,9 @@ import (
 
 func intPtr(i int) *int { return &i }
 
-// newMobiusAdapterWithServer builds a mobiusAdapter whose NMI client points at
+// newMobiusAdapterWithServer builds a nmiAdapter whose NMI client points at
 // the given test server for both direct-post and query traffic.
-func newMobiusAdapterWithServer(t *testing.T, serverURL string) *mobiusAdapter {
+func newMobiusAdapterWithServer(t *testing.T, serverURL string) *nmiAdapter {
 	t.Helper()
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "test-security-key",
@@ -29,12 +29,12 @@ func newMobiusAdapterWithServer(t *testing.T, serverURL string) *mobiusAdapter {
 	}
 	client.DirectPostURL = serverURL
 	client.QueryURL = serverURL
-	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{"mobius": client}}}
-	return &mobiusAdapter{svc: svc}
+	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{"nmi": client}}}
+	return &nmiAdapter{svc: svc}
 }
 
 func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
-	got := mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30))
+	got := nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30))
 	want := "premium-usd-23000000-30"
 	if got != want {
 		t.Fatalf("plan_id format drift: got %q want %q", got, want)
@@ -45,23 +45,23 @@ func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
 	}
 	// Content-addressed: no price-UUID input, so it is stable across a fresh DB;
 	// unchanged by cosmetic edits; distinct when money terms change.
-	if mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30)) != want {
+	if nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30)) != want {
 		t.Error("plan_id must be deterministic for identical content")
 	}
-	if mobiusDeterministicPlanID("premium", "usd", 29_000_000, intPtr(30)) == want {
+	if nmiDeterministicPlanID("premium", "usd", 29_000_000, intPtr(30)) == want {
 		t.Error("a different amount must yield a different plan_id")
 	}
-	if mobiusDeterministicPlanID("premium", "usd", 23_000_000, intPtr(365)) == want {
+	if nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(365)) == want {
 		t.Error("a different cycle must yield a different plan_id")
 	}
-	if mobiusDeterministicPlanID("basic", "usd", 23_000_000, intPtr(30)) == want {
+	if nmiDeterministicPlanID("basic", "usd", 23_000_000, intPtr(30)) == want {
 		t.Error("a different product key must yield a different plan_id")
 	}
 }
 
 func TestMobiusAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 	// No NMI client configured -> fall back to manual link.
-	a := &mobiusAdapter{svc: &Service{rt: &app.Runtime{}}}
+	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{
 		PriceID: uuid.New(), BillingCycleDays: intPtr(30),
 	})
@@ -117,7 +117,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	if !addCalled {
 		t.Fatal("expected AddRecurringPlan to be called for a missing plan")
 	}
-	if ids[models.RailKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30)) {
+	if ids[models.RailKeyPlanID] != nmiDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30)) {
 		t.Fatalf("plan_id mismatch: %v", ids)
 	}
 	if ids[models.RailKeyProvider] != "mobius" {
@@ -129,7 +129,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	// A FRESH-DB price gets a new random UUID, but the content-addressed plan_id is
 	// unchanged, so find-or-attach reattaches to the existing NMI plan (no create).
 	priceID := uuid.New()
-	planID := mobiusDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30))
+	planID := nmiDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("recurring") == "add_plan" {
@@ -335,7 +335,7 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 }
 
 func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
-	a := &mobiusAdapter{svc: &Service{rt: &app.Runtime{}}}
+	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
 	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{})
 	if err != nil || missing || drift != nil {
 		t.Fatalf("expected sync_disabled (nil,false,nil), got drift=%v missing=%v err=%v", drift, missing, err)

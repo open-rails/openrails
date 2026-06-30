@@ -179,7 +179,7 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretStripeSecretKey, "not-stripe"); err == nil {
 		t.Fatal("invalid Stripe secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretNMIMobiusTokenizationURL, "http://example.test/Collect.js"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretNMITokenizationURL, "http://example.test/Collect.js"); err == nil {
 		t.Fatal("invalid NMI tokenization URL should be rejected")
 	}
 }

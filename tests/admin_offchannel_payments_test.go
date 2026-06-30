@@ -62,7 +62,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 
 	require.Equal(t, userID, p.CustomerID.String())
 	require.Equal(t, lifetimePriceID, p.PriceID)
-	require.Equal(t, models.RailManual, p.Rail)
+	require.Equal(t, models.Rail(models.ChannelManual), p.Rail)
 	require.Equal(t, int64(15_000_000), p.Amount)
 	require.Equal(t, int64(299_990_000), p.ListAmount) // canonical list price from seed data
 	require.Equal(t, "usd", p.Currency)

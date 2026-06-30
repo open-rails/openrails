@@ -59,7 +59,7 @@ func TestAdminListPayments(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		Amount:         999,
 		PurchasedAt:    time.Now().Add(-24 * time.Hour),
 	})
@@ -67,7 +67,7 @@ func TestAdminListPayments(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		Amount:         999,
 		PurchasedAt:    time.Now(),
 	})
@@ -133,7 +133,7 @@ func TestAdminListPayments(t *testing.T) {
 
 	t.Run("filters by rail", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/merchant/payments?rail=mobius", nil)
+		req, _ := http.NewRequest("GET", "/v1/merchant/payments?rail=nmi", nil)
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
@@ -146,7 +146,7 @@ func TestAdminListPayments(t *testing.T) {
 		data := response["data"].([]interface{})
 		for _, p := range data {
 			payment := p.(map[string]interface{})
-			assert.Equal(t, "mobius", payment["rail"], "Payment should use mobius rail")
+			assert.Equal(t, "nmi", payment["rail"], "Payment should use nmi rail")
 		}
 	})
 
@@ -177,7 +177,7 @@ func TestAdminListPayments(t *testing.T) {
 			UserID:            userID,
 			PriceID:           priceID,
 			RefundedPaymentID: &payment1.ID,
-			Rail:              models.RailMobius,
+			Rail:              models.RailNMI,
 			Amount:            -999, // Negative amount for refund
 		})
 
@@ -292,7 +292,7 @@ func TestAdminGetPayment(t *testing.T) {
 		UserID:         userID,
 		PriceID:        priceID,
 		SubscriptionID: &sub.ID,
-		Rail:           models.RailMobius,
+		Rail:           models.RailNMI,
 		Amount:         999,
 	})
 
@@ -314,7 +314,7 @@ func TestAdminGetPayment(t *testing.T) {
 		assert.Equal(t, float64(999), response["amount"], "Amount should match")
 		assert.Equal(t, "usd", response["currency"], "Currency should match")
 		assert.Equal(t, api.FormatUserID(userID), response["user"], "User should have usr_ prefix")
-		assert.Equal(t, "mobius", response["rail"], "Rail should match")
+		assert.Equal(t, "nmi", response["rail"], "Rail should match")
 		assert.NotNil(t, response["subscription"], "Should include subscription ID")
 		assert.Equal(t, false, response["refunded"], "Should not be refunded")
 		assert.Equal(t, float64(0), response["amount_refunded"], "Amount refunded should be 0")
@@ -338,7 +338,7 @@ func TestAdminGetPayment(t *testing.T) {
 			UserID:            userID,
 			PriceID:           priceID,
 			RefundedPaymentID: &payment.ID,
-			Rail:              models.RailMobius,
+			Rail:              models.RailNMI,
 			Amount:            -500, // Partial refund (negative)
 			TransactionID:     "refund-txn-" + uuid.New().String()[:8],
 		})
@@ -404,7 +404,7 @@ func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:        userID,
 		PriceID:       priceID,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		Amount:        999,
 		TransactionID: transactionID,
 	})
@@ -458,7 +458,7 @@ func TestAdminRefund_RequiresPaymentsWrite(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:  uuid.New().String(),
 		PriceID: priceID,
-		Rail:    models.RailMobius,
+		Rail:    models.RailNMI,
 		Amount:  1000,
 	})
 
@@ -511,7 +511,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:  userID,
 			PriceID: priceID,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 			Amount:  1000,
 		})
 
@@ -530,7 +530,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:  userID,
 			PriceID: priceID,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 			Amount:  1000,
 		})
 
@@ -662,7 +662,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:        userID,
 		PriceID:       priceID,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		TransactionID: "txn-ledger-" + uuid.NewString()[:8],
 		Amount:        1000,
 	})
@@ -686,7 +686,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	require.NoError(t, err)
 	nmiClient.DirectPostURL = srv.URL
 	nmiClient.QueryURL = srv.URL
-	suite.App.Runtime.NMIClients["mobius"] = nmiClient
+	suite.App.Runtime.NMIClients["nmi"] = nmiClient
 
 	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()

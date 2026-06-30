@@ -151,15 +151,15 @@ LIMIT 1
 `
 
 type GetPriceByNMIPlanParams struct {
-	Provider           string
+	Rail               string
 	PlanID             string
 	IncludeNmiFallback bool
 }
 
-// include_nmi_fallback replicates the bun-era behavior: for non-"nmi"
-// providers the legacy "nmi" key is also consulted.
+// include_nmi_fallback consults the canonical "nmi" rail key when a non-"nmi"
+// rail key is supplied (legacy compatibility).
 func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanParams) (OpenrailsPrice, error) {
-	row := q.db.QueryRow(ctx, getPriceByNMIPlan, arg.Provider, arg.PlanID, arg.IncludeNmiFallback)
+	row := q.db.QueryRow(ctx, getPriceByNMIPlan, arg.Rail, arg.PlanID, arg.IncludeNmiFallback)
 	var i OpenrailsPrice
 	err := row.Scan(
 		&i.ID,

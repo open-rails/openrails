@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,7 @@ func liveStripeSvc(t *testing.T) *StripeCatalogService {
 	if !strings.HasPrefix(key, "rk_test_") && !strings.HasPrefix(key, "sk_test_") {
 		t.Skipf("STRIPE_SECRET_KEY is not a test-mode key (prefix %.7s); refusing to run live test", key)
 	}
-	return &StripeCatalogService{Rails: config.RailSet{"stripe": {Type: config.RailTypeStripe, SecretKey: key}}}
+	return &StripeCatalogService{Rails: config.ProviderAccountSet{"stripe": {Rail: models.RailStripe, SecretKey: key}}}
 }
 
 // deleteLiveTestEndpoints removes any managed endpoint at one of our test URLs.

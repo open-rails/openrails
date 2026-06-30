@@ -1812,7 +1812,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// marker and intent). The intent executor plus the #344 client-level
 		// kill switch then govern actual execution.
 		if subscription.Status == models.StatusCancelled &&
-			rails.IsNMIBackedRail(subscription.Rail) &&
+			rails.IsNMI(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
 			if s.Config != nil && s.Config.IsLimitedMode() {
 				// Limited mode (#345): no proactive provider action — leave the

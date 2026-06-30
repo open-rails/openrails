@@ -43,7 +43,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 				models.RailKeyStripePriceID:   "price_local",
 				models.RailKeyStripeProductID: "prod_local",
 			},
-			string(models.RailMobius): {
+			string(models.RailNMI): {
 				models.RailKeyPlanID: "premium-usd-23000000-30",
 			},
 		},
@@ -130,7 +130,7 @@ func TestComputeNMIExtras_MarkerClassification(t *testing.T) {
 	for _, e := range extras {
 		byID[e.ExternalID] = e
 	}
-	if e := byID["retired-usd-900-30"]; !e.Owned || e.Provider != "mobius" || e.ObjectType != "plan" || !e.Active {
+	if e := byID["retired-usd-900-30"]; !e.Owned || e.Provider != "nmi" || e.ObjectType != "plan" || !e.Active {
 		t.Errorf("content-addressed plan must be an owned active plan extra, got %+v", e)
 	}
 	if e := byID["legacy-vip-plan"]; e.Owned {
@@ -157,9 +157,9 @@ func TestIsContentAddressedNMIPlanID(t *testing.T) {
 			t.Errorf("isContentAddressedNMIPlanID(%q) = %v, want %v", id, got, want)
 		}
 	}
-	// The shape must accept exactly what mobiusDeterministicPlanID mints.
+	// The shape must accept exactly what nmiDeterministicPlanID mints.
 	cycle := 30
-	if minted := mobiusDeterministicPlanID("premium", "USD", 2300, &cycle); !isContentAddressedNMIPlanID(minted) {
+	if minted := nmiDeterministicPlanID("premium", "USD", 2300, &cycle); !isContentAddressedNMIPlanID(minted) {
 		t.Errorf("minted plan id %q must classify as content-addressed", minted)
 	}
 }
@@ -252,8 +252,8 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours_inactive", Owned: true, Active: false},
-		{Provider: "mobius", ObjectType: "plan", ExternalID: "retired-usd-900-30", Owned: true, Active: true},
-		{Provider: "mobius", ObjectType: "plan", ExternalID: "legacy-vip-plan", Owned: false, Active: true},
+		{Provider: "nmi", ObjectType: "plan", ExternalID: "retired-usd-900-30", Owned: true, Active: true},
+		{Provider: "nmi", ObjectType: "plan", ExternalID: "legacy-vip-plan", Owned: false, Active: true},
 		{Provider: "solana", ObjectType: "plan", ExternalID: "5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd", Owned: true, Active: true},
 	}
 	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
@@ -318,7 +318,7 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		t.Errorf("NMI manual action detail must instruct verifying zero subscribers, got %q", d)
 	}
 	for _, c := range exec.calls {
-		if c.Provider == "mobius" {
+		if c.Provider == "nmi" {
 			t.Fatalf("an NMI archive intent was enqueued; NMI must stay manual-only: %+v", c)
 		}
 	}
@@ -329,7 +329,7 @@ func TestArchiveCatalogExtrasVia_ForeignNeverTouchedEvenOnExhaustive(t *testing.
 	extras := []CatalogExtra{
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
-		{Provider: "mobius", ObjectType: "plan", ExternalID: "merchant-plan", Owned: false, Active: true},
+		{Provider: "nmi", ObjectType: "plan", ExternalID: "merchant-plan", Owned: false, Active: true},
 	}
 	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
@@ -489,8 +489,8 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 	if key == "" {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
-	rails := config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
+	rails := config.ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 	}
 	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}
 	products, prices, err := fetchStripeCatalog(context.Background(), lister)

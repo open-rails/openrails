@@ -77,11 +77,11 @@ ORDER BY price.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetPriceByNMIPlan :one
--- include_nmi_fallback replicates the bun-era behavior: for non-"nmi"
--- providers the legacy "nmi" key is also consulted.
+-- include_nmi_fallback consults the canonical "nmi" rail key when a non-"nmi"
+-- rail key is supplied (legacy compatibility).
 SELECT * FROM openrails.prices price
 WHERE price.status <> 'draft'
-  AND (price.rails -> sqlc.arg(provider)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
+  AND (price.rails -> sqlc.arg(rail)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
        OR (sqlc.arg(include_nmi_fallback)::boolean
            AND price.rails -> 'nmi' ->> 'plan_id' = sqlc.arg(plan_id)::text))
 LIMIT 1;

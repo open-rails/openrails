@@ -914,7 +914,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
-    $2, $3::openrails.rail_type,
+    $2, $3::text,
     $4, $5, $5,
     $6,
     'completed', $7, $8,
@@ -927,7 +927,7 @@ ON CONFLICT DO NOTHING
 type ReconcileBackfillPaymentParams struct {
 	MerchantID        uuid.UUID
 	PriceID           uuid.UUID
-	Rail              OpenrailsRailType
+	Rail              string
 	TransactionID     string
 	Amount            int64
 	Currency          string
@@ -1122,7 +1122,7 @@ type ReconcileListPaymentsByTransactionIDsParams struct {
 type ReconcileListPaymentsByTransactionIDsRow struct {
 	ID                uuid.UUID
 	CustomerID        uuid.UUID
-	Rail              OpenrailsRailType
+	Rail              string
 	TransactionID     string
 	Amount            int64
 	Status            OpenrailsPurchaseStatus
@@ -1492,7 +1492,7 @@ INSERT INTO openrails.payments (
     customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
-    $2, $3::openrails.rail_type,
+    $2, $3::text,
     $4, $5, $5,
     $6,
     'completed', $7, $8,
@@ -1506,7 +1506,7 @@ ON CONFLICT DO NOTHING
 type ReconcileRecordRefundParams struct {
 	MerchantID        uuid.UUID
 	PriceID           uuid.UUID
-	Rail              OpenrailsRailType
+	Rail              string
 	TransactionID     string
 	Amount            int64
 	Currency          string

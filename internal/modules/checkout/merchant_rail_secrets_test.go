@@ -94,7 +94,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	svc.SetMerchantSecretStore(store)
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"})
 
-	client, err := svc.resolveNMIClient(ctx, "mobius")
+	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "merchant-mobius-key", client.SecurityKey)
 	require.Contains(t, fakeKV.data, "secret/openrails/merchants/cozy-art/provider_accounts/nmi/live/mobius-account/production_key")
@@ -104,7 +104,7 @@ func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testi
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 
-	client, err := svc.resolveNMIClient(ctx, "mobius")
+	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "static-mobius-key", client.SecurityKey)
 }
@@ -115,7 +115,7 @@ func TestCheckoutProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClien
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
 	svc.SetProviderAccountSecretResolver(checkoutMissingProviderSecretResolver{})
 
-	_, err := svc.resolveNMIClient(ctx, "mobius")
+	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing scoped merchant NMI secret")
 }
@@ -126,7 +126,7 @@ func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	svc.SetMerchantSecretStore(unavailableSecretStore{})
 	svc.SetProviderAccountSecretResolver(checkoutStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"})
 
-	_, err := svc.resolveNMIClient(ctx, "mobius")
+	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merchants.ErrSecretBackendUnavailable), "err = %v", err)
 }
@@ -217,14 +217,14 @@ func checkoutRailConfig(testMode bool) *config.Config {
 	}
 }
 
-func checkoutRailSet(mobiusKey string) config.RailSet {
-	return config.RailSet{
+func checkoutRailSet(mobiusKey string) config.ProviderAccountSet {
+	return config.ProviderAccountSet{
 		"mobius": {
-			Type: config.RailTypeNMI,
+			Rail: models.RailNMI,
 			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},
 		},
 		"ccbill": {
-			Type: config.RailTypeCCBill,
+			Rail: models.RailCCBill,
 			CCBill: &config.CCBillRailConfig{
 				ClientAccNum: "static-acc",
 				ClientSubAcc: "static-sub",

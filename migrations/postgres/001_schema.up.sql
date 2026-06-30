@@ -40,20 +40,10 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE SCHEMA IF NOT EXISTS openrails;
 
 --
--- Name: rail_type; Type: TYPE; Schema: openrails; Owner: -
+-- Rail values are stored as plain text (#630): rail = gateway (nmi, ccbill,
+-- stripe, solana, paypal); off-rail recording channels (admin, manual) share the
+-- same source column. No enum so the two senses can coexist without a type bump.
 --
-
-CREATE TYPE openrails.rail_type AS ENUM (
-    'paypal',
-    'solana',
-    'mobius',
-    'ccbill',
-    'stripe',
-    'admin',
-    'nmi',
-    'manual'
-);
-
 
 --
 -- Name: purchase_status; Type: TYPE; Schema: openrails; Owner: -
@@ -1182,7 +1172,7 @@ COMMENT ON COLUMN openrails.payment_methods.provider_account_id IS 'Provider acc
 CREATE TABLE openrails.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid NOT NULL,
-    rail openrails.rail_type NOT NULL,
+    rail text NOT NULL,
     transaction_id text NOT NULL,
     amount bigint NOT NULL,
     list_amount bigint NOT NULL,
@@ -1504,7 +1494,7 @@ COMMENT ON TABLE openrails.provider_intents IS 'Durable, effectively-once outbox
 -- Name: COLUMN provider_intents.provider; Type: COMMENT; Schema: openrails; Owner: -
 --
 
-COMMENT ON COLUMN openrails.provider_intents.provider IS 'Provider/rail key the mutation targets (e.g. ''mobius'' for an NMI-backed rail, ''stripe'').';
+COMMENT ON COLUMN openrails.provider_intents.provider IS 'Rail the mutation targets (e.g. ''nmi'', ''stripe'').';
 
 
 --

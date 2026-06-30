@@ -143,13 +143,13 @@ func TestGraceSlack(t *testing.T) {
 // TestRenewalGraceEligibleRail pins which rails get the
 // pre-appended renewal grace window: NMI-backed + Stripe only.
 func TestRenewalGraceEligibleRail(t *testing.T) {
-	if !RenewalGraceEligibleRail(models.RailMobius) {
-		t.Error("mobius (NMI-backed) must be grace-eligible")
+	if !RenewalGraceEligibleRail(models.RailNMI) {
+		t.Error("nmi must be grace-eligible")
 	}
 	if !RenewalGraceEligibleRail(models.RailStripe) {
 		t.Error("stripe must be grace-eligible")
 	}
-	for _, p := range []models.Rail{models.RailCCBill, models.RailSolana, models.RailPayPal, models.RailAdmin, models.RailManual} {
+	for _, p := range []models.Rail{models.RailCCBill, models.RailSolana, models.RailPayPal} {
 		if RenewalGraceEligibleRail(p) {
 			t.Errorf("%s must NOT be grace-eligible", p)
 		}

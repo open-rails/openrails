@@ -43,7 +43,7 @@ var (
 type Service struct {
 	repo       *repo.USDCFundingSessionRepo
 	cfg        *config.Config
-	rails      config.RailSet
+	rails      config.ProviderAccountSet
 	httpClient *http.Client
 	balances   SolanaBalanceReader
 	now        func() time.Time
@@ -92,8 +92,8 @@ type ProviderWebhookEvent struct {
 	Payload   map[string]any
 }
 
-func NewService(repo *repo.USDCFundingSessionRepo, cfg *config.Config, railSets ...config.RailSet) *Service {
-	var rails config.RailSet
+func NewService(repo *repo.USDCFundingSessionRepo, cfg *config.Config, railSets ...config.ProviderAccountSet) *Service {
+	var rails config.ProviderAccountSet
 	if len(railSets) > 0 {
 		rails = railSets[0]
 	}

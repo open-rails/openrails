@@ -179,10 +179,10 @@ type Price struct {
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
-	// Rails is a JSONB map of rail name -> rail-specific configuration
-	// Keys: "mobius", "ccbill", "solana", etc.
-	// Values: rail-specific data (e.g., plan_id, price_id, provider)
-	// Example: {"mobius": {"plan_id": "123"}, "ccbill": {"price_id": "456"}}
+	// Rails is a JSONB map of rail -> rail-specific link configuration.
+	// Keys: "nmi", "ccbill", "solana", "stripe" (the gateway rail).
+	// Values: rail-specific data (e.g., plan_id, price_id, provider account name)
+	// Example: {"nmi": {"plan_id": "123", "provider": "mobius"}, "ccbill": {"price_id": "456"}}
 	Rails map[string]map[string]string `json:"rails,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -260,8 +260,8 @@ func (p *Price) HasRail(rail Rail) bool {
 	return p.GetRailConfig(rail) != nil
 }
 
-// GetNMIConfigForRail returns the NMI config for a specific rail (e.g., "mobius", "acme")
-// This allows support for multiple NMI-backed rails with different plan IDs
+// GetNMIConfigForRail returns the NMI plan link for the given rail key (the
+// gateway rail, e.g. "nmi").
 func (p *Price) GetNMIConfigForRail(railName string) (planID string, ok bool) {
 	config := p.GetRailConfig(Rail(railName))
 	if config == nil {
@@ -333,21 +333,16 @@ func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
 	p.Rails[string(rail)] = config
 }
 
-// SetNMIConfig sets the NMI rail configuration using "mobius" as the key
+// SetNMIConfig sets the NMI link under the "nmi" rail key. provider is the
+// provider-account NAME the plan lives under (default "mobius"); the rail key
+// itself is always RailNMI.
 func (p *Price) SetNMIConfig(planID, provider string) {
-	provider = normalize.FirstNonEmpty(normalize.Lower(provider), string(RailMobius))
+	provider = normalize.FirstNonEmpty(normalize.Lower(provider), "mobius")
 	config := map[string]string{
 		RailKeyPlanID:   planID,
 		RailKeyProvider: provider,
 	}
-	p.SetRailConfig(RailMobius, config)
-}
-
-// SetNMIConfigForRail sets the NMI config for a specific rail (e.g., "acme")
-func (p *Price) SetNMIConfigForRail(railName, planID string) {
-	p.SetRailConfig(Rail(railName), map[string]string{
-		RailKeyPlanID: planID,
-	})
+	p.SetRailConfig(RailNMI, config)
 }
 
 // SetCCBillConfig sets the CCBill rail configuration

@@ -239,7 +239,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -348,7 +348,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -444,7 +444,7 @@ func TestDunningRetrySchedule(t *testing.T) {
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusPastDue,
-		Rail:            models.RailMobius,
+		Rail:            models.RailNMI,
 		RailSubID:       railSubID,
 		PeriodStart:     startTime.Add(-30 * 24 * time.Hour), // Started 30 days ago
 		PeriodEnd:       startTime.Add(-1 * time.Hour),       // Just expired
@@ -460,7 +460,7 @@ func TestDunningRetrySchedule(t *testing.T) {
 			WHERE sub.rail = $1
 			  AND sub.status = $2
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3`,
-			string(models.RailMobius), string(models.StatusPastDue), clock.Now())
+			string(models.RailNMI), string(models.StatusPastDue), clock.Now())
 	}
 
 	t.Run("subscription is past_due with scheduled retry", func(t *testing.T) {
@@ -535,7 +535,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		UserID:        userID,
 		PriceID:       priceID,
 		Status:        models.StatusPastDue,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		RailSubID:     railSubID,
 		PeriodStart:   startTime.Add(-30 * 24 * time.Hour),
 		PeriodEnd:     startTime.Add(-1 * time.Hour),
@@ -575,7 +575,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		failureReason := "Card declined"
 		failureCode := "05"
 		err := lifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Rail:           models.RailMobius,
+			Rail:           models.RailNMI,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &failureReason,
 			FailureCode:    &failureCode,
@@ -641,7 +641,7 @@ func TestDunningSuccessReactivates(t *testing.T) {
 		UserID:        userID,
 		PriceID:       priceID,
 		Status:        models.StatusPastDue,
-		Rail:          models.RailMobius,
+		Rail:          models.RailNMI,
 		RailSubID:     railSubID,
 		PeriodStart:   startTime.Add(-30 * 24 * time.Hour),
 		PeriodEnd:     originalPeriodEnd,
@@ -665,7 +665,7 @@ func TestDunningSuccessReactivates(t *testing.T) {
 		// Simulate successful rebill via RenewMembership
 		// RenewMembership uses the mock clock for period calculations
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Rail:               models.RailMobius,
+			Rail:               models.RailNMI,
 			RailSubscriptionID: railSubID,
 			TransactionID:      "rebill-" + uuid.NewString(),
 		})
@@ -747,7 +747,7 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		RailSubID:   railSubID,
 		PeriodStart: periodStart,
 		PeriodEnd:   periodEnd,
@@ -766,7 +766,7 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 	t.Run("renewal extends period by billing cycle hours", func(t *testing.T) {
 		// Simulate renewal webhook
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Rail:               models.RailMobius,
+			Rail:               models.RailNMI,
 			RailSubscriptionID: railSubID,
 			TransactionID:      "renewal-" + uuid.NewString(),
 		})
@@ -832,7 +832,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			ID:            uuid.New(),
 			CustomerID:    suite.ensureCustomer(ctx, userID),
 			PriceID:       priceID,
-			Rail:          models.RailMobius,
+			Rail:          models.RailNMI,
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
@@ -857,7 +857,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			ID:            uuid.New(),
 			CustomerID:    suite.ensureCustomer(ctx, userID),
 			PriceID:       priceID,
-			Rail:          models.RailMobius,
+			Rail:          models.RailNMI,
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
@@ -898,7 +898,7 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		PeriodStart: startTime,
 		PeriodEnd:   periodEnd,
 	})
@@ -971,7 +971,7 @@ func TestCancellationTimestamp(t *testing.T) {
 		UserID:      userID,
 		PriceID:     priceID,
 		Status:      models.StatusActive,
-		Rail:        models.RailMobius,
+		Rail:        models.RailNMI,
 		RailSubID:   railSubID,
 		PeriodStart: cancelTime.Add(-15 * 24 * time.Hour),
 		PeriodEnd:   periodEnd,
@@ -1001,7 +1001,7 @@ func TestCancellationTimestamp(t *testing.T) {
 			UserID:      uuid.New().String(),
 			PriceID:     priceID,
 			Status:      models.StatusActive,
-			Rail:        models.RailMobius,
+			Rail:        models.RailNMI,
 			RailSubID:   railSubID2,
 			PeriodStart: cancelTime,
 			PeriodEnd:   cancelTime.Add(30 * 24 * time.Hour),
@@ -1041,7 +1041,7 @@ func TestVaultTimestamps(t *testing.T) {
 	pm := &models.PaymentMethod{
 		ID:              uuid.New(),
 		CustomerID:      suite.ensureCustomer(ctx, userID),
-		Rail:            models.RailMobius,
+		Rail:            models.RailNMI,
 		RailCustomerRef: "test-vault-" + uuid.New().String()[:8],
 		CreatedAt:       mockClock.Now(),
 		UpdatedAt:       mockClock.Now(),

@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -153,11 +152,10 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	suite.Rails[provider] = &config.RailConfig{
-		Type: config.RailTypeNMI,
+	suite.Rails[provider] = &config.ProviderAccountConfig{
+		Rail: models.RailNMI,
 		NMI:  &config.NMIRailConfig{SecurityKey: "test-security-key-" + provider},
 	}
-	rails.InitNMIBackedRails(suite.Rails)
 
 	settings := &config.NMIProviderSettings{
 		Name:        provider,

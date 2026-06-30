@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -86,7 +87,7 @@ type refundFixture struct {
 	originalTxn   string
 }
 
-// seedRefundablePayment inserts product/price/payment (completed mobius
+// seedRefundablePayment inserts product/price/payment (completed nmi
 // charge) plus the open admin refund reservation the intent finalizes.
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
@@ -115,7 +116,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
 		priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
-	      VALUES ($1, $2, 'mobius', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
+	      VALUES ($1, $2, 'nmi', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
 		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
 
 	reservation, err := payments.NewPaymentService(dbi).ReserveRefund(ctx, fx.paymentID,
@@ -146,7 +147,7 @@ func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 	paymentID := fx.paymentID
 	return EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
-		Provider:       "mobius",
+		Provider:       "nmi",
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,
 		Payload:        fx.payload(amountCents),
@@ -160,7 +161,7 @@ func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 func (fx refundFixture) refundRunner(client *nmi.NMIClient, cfg *config.Config) *Runner {
 	return &Runner{
 		Store:    fx.store,
-		Registry: NewRegistry(NewNMIRefundHandler(fx.db, map[string]*nmi.NMIClient{"mobius": client}, nil)),
+		Registry: NewRegistry(NewNMIRefundHandler(fx.db, map[string]*nmi.NMIClient{"nmi": client}, nil)),
 		Config:   cfg,
 	}
 }
@@ -404,9 +405,9 @@ func stripeIntegrationConfig(mode string) *config.Config {
 	}
 }
 
-func stripeIntegrationRails() config.RailSet {
-	return config.RailSet{
-		"stripe": {Type: config.RailTypeStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
+func stripeIntegrationRails() config.ProviderAccountSet {
+	return config.ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
 

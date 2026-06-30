@@ -16,7 +16,7 @@ import (
 
 type StripePortalService struct {
 	Config *config.Config
-	Rails  config.RailSet
+	Rails  config.ProviderAccountSet
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,9 +16,9 @@ func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
 	cfg.TestMode = true
-	rails := config.RailSet{
+	rails := config.ProviderAccountSet{
 		"ccbill": {
-			Type: config.RailTypeCCBill,
+			Rail: models.RailCCBill,
 			CCBill: &config.CCBillRailConfig{
 				ClientAccNum:     "945280",
 				ClientSubAcc:     "0001",
@@ -65,13 +66,13 @@ func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
 // feed check. These tests pin the degrade-not-die policy matrix.
 // ----------------------------------------------------------------------------
 
-func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.RailSet) {
+func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.ProviderAccountSet) {
 	t.Helper()
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
 	cfg.TestMode = testMode
-	rails := config.RailSet{
-		"solana": {Type: config.RailTypeSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},
+	rails := config.ProviderAccountSet{
+		"solana": {Rail: models.RailSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},
 	}
 	return cfg, rails
 }

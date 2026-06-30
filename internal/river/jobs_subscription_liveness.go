@@ -97,7 +97,7 @@ type SubscriptionLivenessWorker struct {
 	river.WorkerDefaults[SubscriptionLivenessArgs]
 	DB              *db.DB
 	Config          *config.Config
-	Rails           config.RailSet
+	Rails           config.ProviderAccountSet
 	Clock           clockwork.Clock
 	NMIClients      map[string]*nmi.NMIClient
 	EventLogService *analytics.EventLogService
@@ -137,7 +137,7 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 	// lapsed past the probe slack with no payment recorded for the boundary.
 	// past_due rows are dunning's, excluded by the query. Re-derived every
 	// pass, so unreachable providers are retried for free.
-	cohortRails := append(rails.GetNMIBackedRailsList(), string(models.RailStripe))
+	cohortRails := append([]string{string(models.RailNMI)}, string(models.RailStripe))
 	cutoff := w.now().UTC().Add(-subscriptions.LivenessProbeSlack)
 	cohort, err := repo.NewSubscriptionRepo(w.DB).ListSilentLapsed(ctx, cohortRails, cutoff)
 	if err != nil {
@@ -242,7 +242,7 @@ func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, su
 	}
 
 	provider := resolveSubscriptionRail(sub)
-	if provider == "" || !rails.IsNMIBackedRail(models.Rail(provider)) {
+	if provider == "" || !rails.IsNMI(models.Rail(provider)) {
 		logEntry.WithField("rail", string(sub.Rail)).Warn("Liveness: unsupported rail in cohort; skipping")
 		return livenessOutcomeSkipped
 	}

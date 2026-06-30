@@ -13,8 +13,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// mobiusAdapter implements providerAdapter for the Mobius (NMI-backed)
-// recurring-plan provider.
+// nmiAdapter implements providerAdapter for the NMI rail's recurring plans. The
+// provider-account name a plan lives under (e.g. "mobius") is recorded in the
+// link's provider field; the rail key in provider_links is always "nmi".
 //
 // As of issue #207, NMI is a first-class create-capable provider: OpenRails
 // programmatically creates, attaches to, updates, and reconciles NMI Recurring
@@ -36,20 +37,20 @@ import (
 // Divergence from Stripe: on price deactivation OpenRails does NOT delete the
 // NMI plan. NMI delete_recurring_plan does not stop subscriptions already
 // billing on the plan, so the plan must outlive the OpenRails price.
-type mobiusAdapter struct {
+type nmiAdapter struct {
 	svc *Service
 }
 
-func (a *mobiusAdapter) Name() string { return "mobius" }
+func (a *nmiAdapter) Name() string { return string(models.RailNMI) }
 
-func (a *mobiusAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
+func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
-		Provider: "mobius",
+		Provider: string(models.RailNMI),
 		Action:   "create_recurring_plan",
-		Hint:     "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with provider_links.mobius.plan_id",
+		Hint:     "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with provider_links.nmi.plan_id",
 		PatchRequired: map[string]map[string]map[string]string{
 			"provider_links": {
-				"mobius": {
+				string(models.RailNMI): {
 					"plan_id": "<plan id>",
 				},
 			},
@@ -57,12 +58,14 @@ func (a *mobiusAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	}
 }
 
-func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
+func (a *nmiAdapter) Attach(_ context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
-		return nil, fmt.Errorf("mobius link requires provider_links.mobius.plan_id")
+		return nil, fmt.Errorf("nmi link requires provider_links.nmi.plan_id")
 	}
+	// provider is the provider-account NAME the plan lives under (recorded
+	// metadata; client resolution is by rail). Default to "mobius".
 	provider := "mobius"
 	if override := strings.TrimSpace(link[models.RailKeyProvider]); override != "" {
 		provider = strings.ToLower(override)
@@ -75,7 +78,7 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 	//   - missing: create the plan at the supplied id from the price's terms.
 	// When no NMI rail is configured there is no API to verify/create
 	// against, so the link is stored as-is (operator-owned).
-	if client, ok := a.nmiClient(provider); ok && client != nil {
+	if client, ok := a.nmiClient(); ok && client != nil {
 		detail, err := client.GetRecurringPlanDetailByID(planID)
 		if err != nil {
 			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
@@ -109,7 +112,7 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 // money terms. Shared by AutoCreate (content-addressed id) and Attach (operator
 // id). NMI plans are inherently recurring, so a fixed billing frequency and a
 // positive amount are required.
-func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCreateContext) error {
+func (a *nmiAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCreateContext) error {
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
 		return fmt.Errorf("recurring day cadence is required (NMI plans need a recurring frequency)")
 	}
@@ -131,7 +134,7 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 	return client.AddRecurringPlan(planID, planName, amountCents, *in.BillingCycleDays, 0)
 }
 
-// mobiusDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
+// nmiDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
 // It is CONTENT-addressed — derived from the price content key (product key +
 // immutable money terms), NOT the per-DB price UUID — so it is stable across a
 // FRESH OpenRails DB: a rebuilt catalog re-derives the same plan_id and
@@ -143,40 +146,37 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 // The plan_id carries NO "openrails-"/merchant/application prefix: the content key
 // is the whole id. Operator-supplied (Attach) plan_ids are owned by the operator
 // and never renamed by OpenRails, even when this template changes.
-func mobiusDeterministicPlanID(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
+func nmiDeterministicPlanID(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	key := openRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
 	return strings.ReplaceAll(key, ".", "-")
 }
 
-// nmiClient resolves the NMI client backing the given provider name (defaulting
-// to "mobius"). Returns (nil, false) when no NMI rail is configured.
-func (a *mobiusAdapter) nmiClient(provider string) (*nmi.NMIClient, bool) {
+// nmiClient resolves the NMI gateway client. NMIClients is keyed by rail, so the
+// provider-account name on the link is recorded metadata, not a routing key.
+// Returns (nil, false) when no NMI rail is configured.
+func (a *nmiAdapter) nmiClient() (*nmi.NMIClient, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.NMIClients == nil {
 		return nil, false
 	}
-	key := strings.ToLower(strings.TrimSpace(provider))
-	if key == "" {
-		key = "mobius"
-	}
-	client, ok := a.svc.rt.NMIClients[key]
+	client, ok := a.svc.rt.NMIClients[string(models.RailNMI)]
 	return client, ok
 }
 
 // AutoCreate creates (or attaches to) the NMI Recurring Plan for a price under a
 // deterministic plan_id. When no NMI rail is configured it returns
 // errPendingManualLink so the dispatcher converts the slot to a manual link.
-func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
-	client, ok := a.nmiClient("mobius")
+func (a *nmiAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
+	client, ok := a.nmiClient()
 	if !ok || client == nil {
 		// No NMI rail configured: defer to manual link.
 		return nil, errPendingManualLink
 	}
 	// NMI recurring plans require a fixed billing frequency.
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
-		return nil, fmt.Errorf("mobius create-mode requires recurring day cadence (NMI plans need a recurring frequency)")
+		return nil, fmt.Errorf("nmi create-mode requires recurring day cadence (NMI plans need a recurring frequency)")
 	}
 
-	planID := mobiusDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	planID := nmiDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
 
 	// Find-or-create: prefer an existing plan with this deterministic id.
 	found, _, _, err := client.GetRecurringPlanByID(planID)
@@ -196,16 +196,15 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 }
 
 // Verify performs a live retrieve of the NMI plan and computes plan_name drift.
-func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
-	provider := strings.TrimSpace(ids[models.RailKeyProvider])
-	client, ok := a.nmiClient(provider)
+func (a *nmiAdapter) Verify(_ context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
+	client, ok := a.nmiClient()
 	if !ok || client == nil {
 		// No read API available (NMI not configured): signal sync_disabled.
 		return nil, false, nil
 	}
 	planID := strings.TrimSpace(ids[models.RailKeyPlanID])
 	if planID == "" {
-		return nil, false, fmt.Errorf("mobius plan_id missing on local rails map")
+		return nil, false, fmt.Errorf("nmi plan_id missing on local rails map")
 	}
 	found, _, remoteAmountCents, err := client.GetRecurringPlanByID(planID)
 	if err != nil {
@@ -232,6 +231,6 @@ func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *
 // and amount/frequency are immutable post-create (parallel to Stripe Price
 // financials). With the price display_name removed there are no mutable fields
 // left to propagate.
-func (a *mobiusAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
+func (a *nmiAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
 	return nil
 }

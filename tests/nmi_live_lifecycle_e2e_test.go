@@ -43,7 +43,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 const (
@@ -181,8 +180,7 @@ func postSelfCheckout(t *testing.T, router *gin.Engine, body map[string]any) sel
 
 func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
 	t.Helper()
-	suite.Rails[nmiE2EProvider] = &config.RailConfig{Type: config.RailTypeNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
-	rails.InitNMIBackedRails(suite.Rails)
+	suite.Rails[nmiE2EProvider] = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
 		Name:        nmiE2EProvider,

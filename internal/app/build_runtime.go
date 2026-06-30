@@ -41,7 +41,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -77,7 +76,7 @@ type runtimeOverrides struct {
 	DB    *db.DB
 	Redis *redis.Client
 	Clock clockwork.Clock
-	Rails config.RailSet
+	Rails config.ProviderAccountSet
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -105,7 +104,7 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 //     keeps working.
 //
 // The error return is retained for signature stability; it is always nil.
-func configureSolanaRail(cfg *config.Config, rails config.RailSet) error {
+func configureSolanaRail(cfg *config.Config, rails config.ProviderAccountSet) error {
 	proc := rails.GetSolanaRail()
 	if proc == nil {
 		return nil
@@ -182,7 +181,7 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 	return 1.0, nil
 }
 
-func createPythPriceProvider(cfg *config.Config, rails config.RailSet) (solanamodule.TokenPriceProvider, error) {
+func createPythPriceProvider(cfg *config.Config, rails config.ProviderAccountSet) (solanamodule.TokenPriceProvider, error) {
 	if rails.GetSolanaRail() == nil {
 		return nil, nil
 	}
@@ -212,16 +211,13 @@ func createPythPriceProvider(cfg *config.Config, rails config.RailSet) (solanamo
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
-	var railSet config.RailSet
+	var railSet config.ProviderAccountSet
 	if overrides != nil {
 		railSet = overrides.Rails
 	}
 	if err := config.ValidateRailSet(cfg, railSet); err != nil {
 		return nil, err
 	}
-	// Initialize NMI-backed rails from config BEFORE creating clients
-	// This ensures IsNMIBacked() works correctly for all configured rails
-	rails.InitNMIBackedRails(railSet)
 
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
@@ -526,36 +522,42 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	return nil
 }
 
-func createNMIClients(cfg *config.Config, rails config.RailSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
+func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
 	clients := make(map[string]*nmi.NMIClient)
 
-	nmiRails := rails.GetNMIRails()
+	nmiRails := rails.ByRail(models.RailNMI)
 	if len(nmiRails) == 0 {
 		return clients, nil
 	}
 
+	// NMIClients is keyed by RAIL (the gateway): a charge/webhook resolves its
+	// client off the row's rail value ("nmi"), and the provider-account name is
+	// recorded metadata. One NMI provider account per deployment is wired through
+	// this map; a second configured NMI account is a loud error.
 	for name, procConfig := range nmiRails {
-		providerKey := strings.TrimSpace(strings.ToLower(name))
-		if providerKey == "" {
-			return nil, fmt.Errorf("nmi provider name cannot be empty")
+		accountName := strings.TrimSpace(strings.ToLower(name))
+		if accountName == "" {
+			return nil, fmt.Errorf("nmi provider account name cannot be empty")
 		}
+		providerKey := string(models.RailNMI)
 
 		if _, exists := clients[providerKey]; exists {
-			return nil, fmt.Errorf("duplicate nmi provider '%s' detected in configuration", providerKey)
+			return nil, fmt.Errorf("multiple NMI provider accounts configured (%q and another); only one NMI account is supported per deployment", accountName)
 		}
 
-		// Convert RailConfig to NMIProviderSettings
-		settings := procConfig.ToNMIProviderSettings(providerKey)
+		// Convert the provider-account config to NMIProviderSettings. The client's
+		// identity is the account name (diagnostics); the map key is the rail.
+		settings := procConfig.ToNMIProviderSettings(accountName)
 
 		// Validate required fields
 		if settings.SecurityKey == "" {
-			return nil, fmt.Errorf("nmi provider '%s' security key is required", providerKey)
+			return nil, fmt.Errorf("nmi provider account '%s' security key is required", accountName)
 		}
 		if settings.WebhookSecret == "" {
-			log.Warnf("nmi provider '%s' webhook secret is not configured; signature validation will be disabled", providerKey)
+			log.Warnf("nmi provider account '%s' webhook secret is not configured; signature validation will be disabled", accountName)
 		}
 
-		client, err := nmi.NewClient(providerKey, settings, cfg.IsTestMode())
+		client, err := nmi.NewClient(accountName, settings, cfg.IsTestMode())
 		if err != nil {
 			return nil, err
 		}
@@ -636,7 +638,7 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	return client, nil
 }
 
-func createCCBillClient(cfg *config.Config, rails config.RailSet) *ccbill.CCBillClient {
+func createCCBillClient(cfg *config.Config, rails config.ProviderAccountSet) *ccbill.CCBillClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		log.Info("CCBill config missing; CCBill integration disabled")
@@ -646,7 +648,7 @@ func createCCBillClient(cfg *config.Config, rails config.RailSet) *ccbill.CCBill
 	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
 }
 
-func createCCBillRESTClient(rails config.RailSet) *ccbill.RESTClient {
+func createCCBillRESTClient(rails config.ProviderAccountSet) *ccbill.RESTClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
@@ -654,7 +656,7 @@ func createCCBillRESTClient(rails config.RailSet) *ccbill.RESTClient {
 	return ccbill.NewRESTClient(ccbillProc.ToCCBillConfig())
 }
 
-func createCCBillDataLinkClient(cfg *config.Config, rails config.RailSet) *ccbill.DataLinkClient {
+func createCCBillDataLinkClient(cfg *config.Config, rails config.ProviderAccountSet) *ccbill.DataLinkClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
@@ -712,7 +714,7 @@ type servicesInstances struct {
 	RailCustomerService    *payments.RailCustomerService
 }
 
-func createServices(database *db.DB, cfg *config.Config, railSet config.RailSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railSet config.ProviderAccountSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime

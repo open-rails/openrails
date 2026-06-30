@@ -32,12 +32,12 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 	return s.repo.GetByProductID(ctx, productID)
 }
 
-func (s *PriceService) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
-	provider = normalize.Lower(provider)
-	if provider == "" {
-		return nil, fmt.Errorf("nmi provider is required for plan %q", normalize.Trim(nmiPlanID))
+func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string) (*models.Price, error) {
+	rail = normalize.Lower(rail)
+	if rail == "" {
+		return nil, fmt.Errorf("nmi rail is required for plan %q", normalize.Trim(nmiPlanID))
 	}
-	return s.repo.GetByNMIPlan(ctx, provider, nmiPlanID)
+	return s.repo.GetByNMIPlan(ctx, rail, nmiPlanID)
 }
 
 func (s *PriceService) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string) (*models.Price, error) {

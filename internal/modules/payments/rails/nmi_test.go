@@ -10,7 +10,7 @@ import (
 func TestSameRail(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, SameRail(models.Rail(" Mobius "), models.RailMobius))
-	require.False(t, SameRail(models.RailMobius, models.Rail("other_nmi")))
-	require.False(t, SameRail(models.Rail(""), models.RailMobius))
+	require.True(t, SameRail(models.Rail(" Nmi "), models.RailNMI))
+	require.False(t, SameRail(models.RailNMI, models.Rail("other_nmi")))
+	require.False(t, SameRail(models.Rail(""), models.RailNMI))
 }

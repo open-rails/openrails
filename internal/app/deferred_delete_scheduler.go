@@ -136,7 +136,7 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 
 	converted := 0
 	for _, sub := range rows {
-		if !rails.IsNMIBackedRail(models.Rail(sub.Rail)) {
+		if !rails.IsNMI(models.Rail(sub.Rail)) {
 			// Only NMI-backed paths set the marker; skip defensively (the
 			// marker stays discoverable for #107 reconciliation).
 			log.WithFields(log.Fields{

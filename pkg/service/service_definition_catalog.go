@@ -400,7 +400,7 @@ type CreatePriceRequest struct {
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
 	// Providers is the list of provider names to attach (e.g. ["stripe",
-	// "ccbill", "mobius"]). Empty means "DB-only price with no external
+	// "ccbill", "nmi"]). Empty means "DB-only price with no external
 	// links" — useful for testing or for prices that are not sold externally.
 	Providers []string `json:"providers,omitempty"`
 
@@ -408,7 +408,7 @@ type CreatePriceRequest struct {
 	// Schema is per-provider:
 	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
 	//   ccbill : {"form_name": "...", "flex_id": "..."}
-	//   mobius : {"plan_id": "..."}
+	//   nmi : {"plan_id": "..."}
 	// Any provider with a non-empty link here is implicitly added to the
 	// attach set even if absent from Providers.
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`

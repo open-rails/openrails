@@ -30,7 +30,7 @@ var (
 )
 
 type Prepared struct {
-	Provider          string
+	Rail              string
 	EventID           string
 	EventType         string
 	Body              []byte
@@ -39,7 +39,7 @@ type Prepared struct {
 }
 
 func (p Prepared) UniqueKey() string {
-	return ComputeUniqueKey(p.Provider, p.EventID, p.EventType, p.Body)
+	return ComputeUniqueKey(p.Rail, p.EventID, p.EventType, p.Body)
 }
 
 func (p Prepared) QueueArgs(clientIP string) riverjobs.WebhookProcessArgs {
@@ -50,7 +50,7 @@ func (p Prepared) QueueArgs(clientIP string) riverjobs.WebhookProcessArgs {
 	}
 
 	return riverjobs.WebhookProcessArgs{
-		Provider:       p.Provider,
+		Rail:           p.Rail,
 		EventID:        p.EventID,
 		EventType:      p.EventType,
 		Body:           p.Body,
@@ -61,12 +61,14 @@ func (p Prepared) QueueArgs(clientIP string) riverjobs.WebhookProcessArgs {
 	}
 }
 
-func CanonicalProvider(provider string) string {
-	provider = strings.Trim(strings.ToLower(provider), " /")
-	if provider == "nmi" {
-		return "mobius"
+// CanonicalRail normalizes a webhook URL's rail segment. The legacy "mobius"
+// path resolves to the NMI rail; everything else passes through lower-cased.
+func CanonicalRail(rail string) string {
+	rail = strings.Trim(strings.ToLower(rail), " /")
+	if rail == "mobius" {
+		return "nmi"
 	}
-	return provider
+	return rail
 }
 
 func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
@@ -86,7 +88,7 @@ func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
 	}
 
 	return Prepared{
-		Provider:  subscriptions.RailCCBill,
+		Rail:      subscriptions.RailCCBill,
 		EventType: eventType,
 		Body:      normalizedBody,
 	}, nil
@@ -128,7 +130,7 @@ func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) 
 	}
 
 	return Prepared{
-		Provider:          subscriptions.RailStripe,
+		Rail:              subscriptions.RailStripe,
 		EventID:           eventID,
 		EventType:         eventType,
 		Body:              body,
@@ -137,7 +139,7 @@ func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) 
 	}, nil
 }
 
-func PrepareNMI(provider string, body []byte, secret, header string) (Prepared, error) {
+func PrepareNMI(rail string, body []byte, secret, header string) (Prepared, error) {
 	signature, err := ValidateNMISignature(secret, body, header)
 	if err != nil {
 		return Prepared{}, err
@@ -157,7 +159,7 @@ func PrepareNMI(provider string, body []byte, secret, header string) (Prepared, 
 	}
 
 	return Prepared{
-		Provider:          CanonicalProvider(provider),
+		Rail:              CanonicalRail(rail),
 		EventID:           payload.EventID,
 		EventType:         strings.TrimSpace(payload.EventType),
 		Body:              body,
@@ -180,14 +182,14 @@ func ParseStripeEventMeta(body []byte) (string, string, error) {
 	return payload.ID, payload.Type, nil
 }
 
-func ComputeUniqueKey(provider, eventID, eventType string, body []byte) string {
-	provider = CanonicalProvider(provider)
+func ComputeUniqueKey(rail, eventID, eventType string, body []byte) string {
+	rail = CanonicalRail(rail)
 	eventID = strings.TrimSpace(eventID)
 	if eventID != "" {
-		return fmt.Sprintf("webhook:%s:%s", provider, eventID)
+		return fmt.Sprintf("webhook:%s:%s", rail, eventID)
 	}
-	hash := sha256.Sum256(append([]byte(provider+"|"+eventType+"|"), body...))
-	return fmt.Sprintf("webhook:%s:%s", provider, hex.EncodeToString(hash[:8]))
+	hash := sha256.Sum256(append([]byte(rail+"|"+eventType+"|"), body...))
+	return fmt.Sprintf("webhook:%s:%s", rail, hex.EncodeToString(hash[:8]))
 }
 
 func NormalizeCCBillPayload(body []byte) ([]byte, error) {

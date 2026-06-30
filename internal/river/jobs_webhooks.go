@@ -19,7 +19,7 @@ const (
 
 // WebhookProcessArgs carries all data needed to process a webhook asynchronously.
 type WebhookProcessArgs struct {
-	Provider       string `json:"provider"`
+	Rail           string `json:"rail"`
 	EventID        string `json:"event_id,omitempty"`
 	EventType      string `json:"event_type,omitempty"`
 	Body           []byte `json:"body"`
@@ -50,7 +50,7 @@ func (w WebhookProcessWorker) Work(ctx context.Context, job *river.Job[WebhookPr
 	if args.ReceivedAt.IsZero() {
 		args.ReceivedAt = time.Now()
 	}
-	provider := strings.TrimSpace(strings.ToLower(args.Provider))
+	provider := strings.TrimSpace(strings.ToLower(args.Rail))
 	if provider == "" {
 		return fmt.Errorf("webhook provider required")
 	}

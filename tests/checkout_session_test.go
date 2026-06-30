@@ -22,7 +22,7 @@ func TestCheckoutSessionRequiresAuth(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"rail": "mobius",
+			"rail": "nmi",
 		},
 	}
 	jsonBody, _ := json.Marshal(body)
@@ -50,7 +50,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"rail":          "mobius",
+			"rail":          "nmi",
 			"payment_token": "tok_test_123",
 			"email":         email,
 			"first_name":    "Test",
@@ -82,7 +82,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 
 	payment, ok := resp["payment"].(map[string]any)
 	require.True(t, ok, "payment should be an object")
-	assert.Equal(t, "mobius", payment["rail"], "Rail should be mobius")
+	assert.Equal(t, "nmi", payment["rail"], "Rail should be nmi")
 	assert.NotEmpty(t, payment["transaction_id"], "Should include transaction_id")
 }
 
@@ -183,7 +183,7 @@ func TestCheckoutSessionMobiusTokenXOR(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"rail":              "mobius",
+			"rail":              "nmi",
 			"payment_token":     "tok_test_123",
 			"payment_method_id": "pm_123",
 		},

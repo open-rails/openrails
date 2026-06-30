@@ -66,7 +66,7 @@ func TestTierGroupDetection(t *testing.T) {
 			UserID:  userID,
 			PriceID: premiumPriceID,
 			Status:  models.StatusActive,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 
@@ -86,7 +86,7 @@ func TestTierGroupDetection(t *testing.T) {
 			UserID:  userID,
 			PriceID: premiumPlusPriceID,
 			Status:  models.StatusActive,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 
@@ -186,7 +186,7 @@ func TestScheduledDowngrade(t *testing.T) {
 			UserID:              userID,
 			PriceID:             premiumPlusPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			PeriodStart:         now.Add(-15 * 24 * time.Hour), // Started 15 days ago
 			CurrentPeriodEndsAt: &periodEnd,
 		})
@@ -229,7 +229,7 @@ func TestScheduledDowngrade(t *testing.T) {
 			UserID:              userID,
 			PriceID:             premiumPlusPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			RailSubID:           "test-renewal-" + uuid.New().String()[:8],
 			PeriodStart:         now.Add(-30 * 24 * time.Hour),
 			CurrentPeriodEndsAt: &periodEnd,
@@ -251,7 +251,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
 
 		err = lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Rail:               models.RailMobius,
+			Rail:               models.RailNMI,
 			RailSubscriptionID: sub.RailSubscriptionID,
 			TransactionID:      "renewal-txn-" + uuid.New().String()[:8],
 			Amount:             1000, // $10 (Premium price)
@@ -289,7 +289,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 			UserID:              userID,
 			PriceID:             premiumPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			CurrentPeriodEndsAt: &periodEnd,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
@@ -338,7 +338,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 			UserID:              userID2,
 			PriceID:             premiumPlusPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			CurrentPeriodEndsAt: &periodEnd,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID2)
@@ -428,7 +428,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 			UserID:  userID,
 			PriceID: premiumPriceID,
 			Status:  models.StatusActive,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 
@@ -459,7 +459,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 		// Create Premium subscription with payment method
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 			UserID:  userID,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 			VaultID: "vault-" + uuid.New().String()[:8],
 		})
 
@@ -467,7 +467,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 			UserID:              userID,
 			PriceID:             premiumPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			RailSubID:           "nmi-sub-" + uuid.New().String()[:8],
 			PaymentMethodID:     &pm.ID,
 			CurrentPeriodEndsAt: &periodEnd,
@@ -522,7 +522,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 			UserID:              userID,
 			PriceID:             premiumPlusPriceID,
 			Status:              models.StatusActive,
-			Rail:                models.RailMobius,
+			Rail:                models.RailNMI,
 			RailSubID:           "nmi-sub-" + uuid.New().String()[:8],
 			CurrentPeriodEndsAt: &periodEnd,
 		})
@@ -579,7 +579,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 			UserID:  userID,
 			PriceID: premiumPriceID,
 			Status:  models.StatusActive,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 
@@ -589,7 +589,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 		body := map[string]any{
 			"price_id": premiumPlusPriceID.String(),
 			"payment": map[string]any{
-				"rail":          "mobius",
+				"rail":          "nmi",
 				"payment_token": "tok_test_123",
 				"email":         email,
 				"first_name":    "Test",
@@ -624,7 +624,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 			UserID:  userID,
 			PriceID: premiumPlusPriceID,
 			Status:  models.StatusActive,
-			Rail:    models.RailMobius,
+			Rail:    models.RailNMI,
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 
@@ -634,7 +634,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 		body := map[string]any{
 			"price_id": premiumPriceID.String(),
 			"payment": map[string]any{
-				"rail":          "mobius",
+				"rail":          "nmi",
 				"payment_token": "tok_test_123",
 				"email":         email,
 				"first_name":    "Test",
@@ -670,7 +670,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 		body := map[string]any{
 			"price_id": premiumPriceID.String(),
 			"payment": map[string]any{
-				"rail":          "mobius",
+				"rail":          "nmi",
 				"payment_token": "tok_test_123",
 				"email":         email,
 				"first_name":    "Test",

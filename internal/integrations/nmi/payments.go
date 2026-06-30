@@ -117,8 +117,8 @@ func (c *NMIClient) Refund(params RefundParams) (*RefundResponse, error) {
 		return nil, &CustomerVaultError{
 			Message:        fmt.Sprintf("refund failed: %s", responseText(output, response)),
 			ResponseCode:   responseCode,
-			LocalizationID: mobiusLocalizationID(responseCode),
-			Detail:         mobiusResponseDetail(responseCode),
+			LocalizationID: nmiLocalizationID(responseCode),
+			Detail:         nmiResponseDetail(responseCode),
 			RawResponse:    response,
 		}
 	}

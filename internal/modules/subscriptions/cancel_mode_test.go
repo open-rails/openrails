@@ -43,20 +43,20 @@ func TestCancelMode_PerRail(t *testing.T) {
 	})
 
 	t.Run("nmi/mobius destructive when no deferred delete", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		require.Equal(t, CancelModeDestructive, CancelModeFor(sub, now))
 	})
 
 	t.Run("nmi/mobius reversible only while deferred delete pending in-window", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusCancelled)
+		sub := baseSub(models.RailNMI, models.StatusCancelled)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		sub.DeletionScheduledAt = ptrTime(future.Add(-48 * time.Hour))
 		require.Equal(t, CancelModeReversible, CancelModeFor(sub, now))
 	})
 
 	t.Run("nmi/mobius destructive once delete executed (DeletionScheduledAt cleared)", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusCancelled)
+		sub := baseSub(models.RailNMI, models.StatusCancelled)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		sub.DeletionScheduledAt = nil
 		require.Equal(t, CancelModeDestructive, CancelModeFor(sub, now))
@@ -103,14 +103,14 @@ func TestResumable(t *testing.T) {
 	})
 
 	t.Run("nmi cancelled without deferred delete is NOT resumable", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusCancelled)
+		sub := baseSub(models.RailNMI, models.StatusCancelled)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		sub.DeletionScheduledAt = nil
 		require.False(t, Resumable(sub, now))
 	})
 
 	t.Run("nmi cancelled with deferred delete in-window IS resumable", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusCancelled)
+		sub := baseSub(models.RailNMI, models.StatusCancelled)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		sub.DeletionScheduledAt = ptrTime(future.Add(-48 * time.Hour))
 		require.True(t, Resumable(sub, now))
@@ -169,13 +169,13 @@ func TestResumableMatchesHandlerWorkerPrecondition(t *testing.T) {
 			return s
 		}(),
 		func() *models.Subscription {
-			s := baseSub(models.RailMobius, models.StatusCancelled)
+			s := baseSub(models.RailNMI, models.StatusCancelled)
 			s.CurrentPeriodEndsAt = ptrTime(future)
 			s.DeletionScheduledAt = ptrTime(future.Add(-48 * time.Hour))
 			return s
 		}(),
 		func() *models.Subscription {
-			s := baseSub(models.RailMobius, models.StatusCancelled)
+			s := baseSub(models.RailNMI, models.StatusCancelled)
 			s.CurrentPeriodEndsAt = ptrTime(future)
 			return s
 		}(),
@@ -198,7 +198,7 @@ func TestNMIDeferredDeleteAt(t *testing.T) {
 
 	t.Run("cancel >48h before rebill defers at period_end-48h", func(t *testing.T) {
 		periodEnd := now.Add(10 * 24 * time.Hour)
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = ptrTime(periodEnd)
 
 		deleteAt, defer_ := NMIDeferredDeleteAt(sub, now)
@@ -210,7 +210,7 @@ func TestNMIDeferredDeleteAt(t *testing.T) {
 	t.Run("cancel exactly at the 48h boundary deletes immediately", func(t *testing.T) {
 		// period_end - 48h == now  => deleteAt is not strictly after now => immediate.
 		periodEnd := now.Add(NMIDeleteSafetyMargin)
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = ptrTime(periodEnd)
 
 		_, defer_ := NMIDeferredDeleteAt(sub, now)
@@ -219,7 +219,7 @@ func TestNMIDeferredDeleteAt(t *testing.T) {
 
 	t.Run("cancel within 48h of rebill deletes immediately", func(t *testing.T) {
 		periodEnd := now.Add(12 * time.Hour) // well inside the 48h window
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = ptrTime(periodEnd)
 
 		_, defer_ := NMIDeferredDeleteAt(sub, now)
@@ -227,14 +227,14 @@ func TestNMIDeferredDeleteAt(t *testing.T) {
 	})
 
 	t.Run("unknown period end deletes immediately", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = nil
 		_, defer_ := NMIDeferredDeleteAt(sub, now)
 		require.False(t, defer_)
 	})
 
 	t.Run("past period end deletes immediately", func(t *testing.T) {
-		sub := baseSub(models.RailMobius, models.StatusActive)
+		sub := baseSub(models.RailNMI, models.StatusActive)
 		sub.CurrentPeriodEndsAt = ptrTime(now.Add(-1 * time.Hour))
 		_, defer_ := NMIDeferredDeleteAt(sub, now)
 		require.False(t, defer_)
@@ -255,7 +255,7 @@ func TestNMIResumeWindowLifecycle(t *testing.T) {
 	deleteAt := periodEnd.Add(-NMIDeleteSafetyMargin)
 
 	// 1. Cancelled with deferred delete pending, before deadline: reversible & resumable.
-	sub := baseSub(models.RailMobius, models.StatusCancelled)
+	sub := baseSub(models.RailNMI, models.StatusCancelled)
 	sub.CurrentPeriodEndsAt = ptrTime(periodEnd)
 	sub.DeletionScheduledAt = ptrTime(deleteAt)
 	require.Equal(t, CancelModeReversible, CancelModeFor(sub, now))
