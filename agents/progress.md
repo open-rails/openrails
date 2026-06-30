@@ -70,11 +70,20 @@ push and dump are symmetric and a dump→push round-trip is idempotent.
   the activation path: the runtime must FILTER provider accounts by `ExpectedProviderEnvironment(test_mode)`
   and activate only the matching set — if `ValidateRailSet` still hard-rejects the non-matching environment
   when both are declared, change it to filter-not-reject (and note that selection decision here).
+- **Name each provider account (Paul 2026-06-30).** A manifest `provider_accounts[]` entry has no human label
+  today (`provider_type` + `account_id` + secrets only), yet the runtime config keys accounts by a NAME
+  ("mobius", "paykings") — visible only as a prefix buried in the secret env-var names. Add an explicit label
+  field so a `nmi` account reads `{provider_type: nmi, name: mobius, account_id: "100001", …}`. The label is
+  the readable account NAME (config map key), NOT a second routing id — `account_id` stays the routing identity
+  (#641). (Paul suggested `provider: mobius`; `name`/`alias` reads clearer next to `provider_type` — pick the
+  key, keep the meaning.) The label also makes dump output legible.
 
 ## Tasks
 
 - [ ] Make the manifest shape 1:1 with the YAML (one struct family); add `invoice` + delegated-invoker-windows
       blocks (parse + validate; reuse `money.NormalizeInvoiceBoundary` + the admission range checks).
+- [ ] Add a human `name`/`alias` label to manifest `provider_accounts[]` (the config-layer account name), keep
+      `account_id` as the routing id; thread it through reconcile + dump.
 - [ ] Wire `ReconcileMerchantManifestData` → `SetMerchantConfiguration` for the new blocks (omit = leave-as-is;
       honor insert/overwrite reconcile tiers).
 - [ ] Add `dump-merchant-config` (CLI + service read path) → serialize full merchant state to the manifest YAML
