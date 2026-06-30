@@ -160,12 +160,12 @@ The price-model TYPING (sub-blocks), 1:1 Go↔YAML structs, and the credit-model
 
 # #645: typed price-model sub-blocks + 1:1 Go↔YAML catalog structs + credit-model reshape (BREAKING — coordinated bump)
 
-**Completed:** no
-**Status:** IMPLEMENTED IN OPENRAILS 2026-06-30; release/consumer bump still pending. Breaking manifest + JSONB schema change landed locally: typed `RatePrice` sub-blocks, `credit_balances`, credit grants as arrays, top-ups as variable credit grants plus price offers, `catalog_credit_purchase_prices`, and runtime quote/deposit selection from the new offer table. Like #630, the remaining work is one coordinated release wave: migrate cozy-art's pushed catalog, tag openrails, and bump consumers (doujins/hentai0/cozy).
+**Completed:** yes
+**Status:** DONE 2026-06-30. Breaking manifest + JSONB schema change shipped in OpenRails `v0.78.0`: typed `RatePrice` sub-blocks, `credit_balances`, credit grants as arrays, top-ups as variable credit grants plus price offers, `catalog_credit_purchase_prices`, and runtime quote/deposit selection from the new offer table. Consumer bumps completed for doujins, hentai0, and cozy-art.
 
 ## Metadata
 - Category: billing
-- Status: in_progress
+- Status: done
 - Passes: true
 
 ## Goal
@@ -231,7 +231,8 @@ Target:
 - DB: add `catalog_credit_balances`; replace the one-row-per-product `catalog_credit_purchases` (PK `product_id`) with a top-up-product + N-prices shape, e.g. `catalog_credit_purchase_prices(product_id, ordinal, currency, providers, input_min, input_max, round, price jsonb)`. Price JSONB stores the typed sub-block shape (§1).
 - Applier/service (`pkg/catalog/applier_service.go`, `pkg/service/catalog_sidecars.go`): map final YAML → specs directly; runtime-normalized structs allowed behind the boundary.
 - `QuoteCatalogCreditPurchase`: select an offer by (currency, provider) [reject ambiguous same-(currency,provider) duplicates for now; add an offer key later].
-- **Coordinated release:** migrate `config/catalog.example.yaml` + cozy-art's catalog + the money checkout in lockstep, then tag openrails and bump doujins/hentai0/cozy (the #630 playbook). One break, one tag.
+- **Coordinated release:** completed. OpenRails tagged `v0.78.0`; doujins and hentai0 bumped from `v0.77.0`; cozy-art bumped from `v0.72.1` and adjusted for current embedded/config/catalog service APIs.
+- **Validation:** OpenRails focused unit + integration suite passed before tag (`pkg/pricing`, `pkg/catalog`, `pkg/embedded`, `pkg/service`, `internal/modules/money`, catalog sidecar/rating/credit-purchase integration tests, and `internal/integrationharness TestCatalogPublishRateCardsHTTP`). Consumer validation passed: doujins `go test ./internal/billing/openrailsembed ./config`; hentai0 `go test ./internal/openrails ./internal/app`; cozy-art `go test ./cmd ./internal/app ./internal/api ./internal/billing`.
 
 ## Tasks
 
