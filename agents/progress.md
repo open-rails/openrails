@@ -7,7 +7,536 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 638
+next_id: 642
+
+---
+
+# #641: provider-account-routing-roles + per-account-webhooks + catalog-push-targeting
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
+
+## Metadata
+
+- Category: billing
+- Status: proposed
+- Passes: false
+
+## Problem
+
+A merchant can legitimately hold multiple credentialed accounts on the SAME rail:
+
+- **NMI** — multiple gateway accounts (different ISOs/MIDs: e.g. mobius + paykings) for redundancy or per-product routing. This is common.
+- **Stripe** — an old/legacy `acct_…` kept for in-flight subscriptions plus a new `acct_…` for fresh business.
+- Multi-merchant hosts run one process across many merchants, each with their own accounts.
+
+Today the model is single-account-per-rail:
+
+- Runtime client maps are keyed by rail (`rt.NMIClients[string(models.RailNMI)]`), so only ONE NMI client can exist; `build_runtime` hard-errors on a second NMI account ("only one NMI account is supported per deployment").
+- Catalog adapters resolve THE primary account per rail (`GetStripeRail()`, `nmiClient()`); there is no notion of pushing to a fallback account, nor of skipping a retired one.
+- Inbound webhooks are routed merchant-by-slug then secret-by-rail. With N accounts on a rail (each its own signing secret), an inbound event cannot be matched to the right account — the NMI payload carries no gateway-id, so the rail alone is ambiguous.
+- Money records (`subscriptions`, `payments`, `payment_methods`) are not stamped with which account processed them, so reconciliation/refunds/rebills can't target the originating account.
+
+## Decisions (settled with Paul 2026-06-29)
+
+1. **Routing roles: `primary` / `secondary` / `legacy`.** Per provider account, per rail.
+   - `primary` — receives new default work AND catalog push.
+   - `secondary` — redundancy/fallback; receives catalog push (kept in sync so it can take over); not selected for new work unless the primary is unavailable (the actual fallback *policy* is #288's job — this issue only makes secondary a deterministic, pushable target).
+   - `legacy` — retained for old subscriptions, rebills, refunds, and INBOUND webhooks; receives NO new work and NO catalog push.
+   - **Retirement uses the existing `status` axis, not a fourth role:** `status=disabled` ("archived") = fully retired, no inbound expected. `role` and `status` are the two columns `openrails.provider_accounts` already has.
+2. **Resolve the inbound account by id — prefer the payload, fall back to the path.** One webhook configured per external account. Resolution order:
+   - **Preferred: an account identifier carried IN the webhook payload** — disambiguate on it, and a single shared endpoint per rail suffices. Known cases: **CCBill** postback carries `clientAccnum`/`clientSubacc`; **Stripe Connect** events carry `event.account` (`acct_…`).
+   - **Fallback: the `account_id` as a path parameter** — required for any rail/event whose payload does NOT carry the identifier (assume **NMI** here; verify each rail). The path then names which external account the event is for.
+   This is the only correct mechanism when one merchant has N accounts on a rail and when one process hosts many merchants. Either way OpenRails resolves the SPECIFIC account, loads THAT account's signing secret, and stamps the resulting records.
+3. **Index provider accounts by their ID (gateway-id / `account_id`), never by an arbitrary config name.** The YAML map key ("mobius", "paykings") is a human label only; the routing identity is the operator-declared `account_id` (NMI gateway-id, Stripe `acct_…`, CCBill `client_acc_num[/sub]`, Solana recipient wallet — per #592, operator-declared, no runtime whoami). Self-discovering rails (Stripe) may fill it from `GET /v1/account`; the rest must declare it.
+4. **Catalog push/verify/drift target primary + secondary only.** Legacy and disabled accounts are never pushed to — old pricing on a retired account is intentional and must not be mutated.
+
+## Current state (verified)
+
+- `config.ProviderAccountConfig` has `Routing string` (`default|manual|legacy`) + `PrimaryRailByType()` which returns the single default and ERRORS on multiple defaults. `GetStripeRail/GetCCBillRail/GetSolanaRail` return that single primary.
+- `openrails.provider_accounts` already has `role` + `status` columns, `PromoteProviderAccountToPrimary` / `DemoteOtherPrimaryProviderAccounts` queries, and manifest reconcile (`internal/bootstrap/merchant_manifest.go`).
+- `NMIWebhookHandler.SecretFor func(rail string)` and `WebhookMessage.{Rail,SigningSecret}` already allow per-message secret selection ("NMI deployments can run multiple gateway aliases, each with its own secret") — but the HTTP layer never sets a per-account secret; `merchants/webhook_routing.go ResolveBySlug` resolves only the merchant.
+- `rt.NMIClients` is keyed by rail (single client/rail); `build_runtime` errors on a 2nd NMI account.
+- `NMIRailConfig{SecurityKey,TokenizationKey,WebhookSecret}` has NO gateway-id field — can't be indexed by ID yet.
+- `openrails.rail_customers` already has a `provider_account_id` column; `subscriptions`/`payments`/`payment_methods` domain models do NOT.
+
+## Tasks
+
+- TAXONOMY:
+- [ ] Replace the config `Routing` taxonomy `default|manual|legacy` with `primary|secondary|legacy` (hardcut, no alias). Reconcile with DB `role`; settle ONE vocabulary shared by config, manifest, and `provider_accounts.role`. Drop `manual` from the routing axis (auto-create-vs-manual-link is already per-price via `errPendingManualLink`, not an account property).
+- [ ] Map `status=disabled` to "archived/retired"; keep `enabled` as the active state. Validate: at most one `primary` per (merchant, rail, environment); a merchant with any account on a rail must have exactly one primary.
+- CONFIG / INDEXING:
+- [ ] Add an explicit operator-declared `account_id` (gateway-id) to each provider-account config (NMI/CCBill/Solana required; Stripe may self-discover). Make the runtime routing key the `account_id`, not the YAML map name.
+- [ ] Build runtime client maps keyed by `account_id` (e.g. `NMIClients map[accountID]*nmi.NMIClient`), one per enabled account. Remove the single-NMI error in `build_runtime`.
+- WEBHOOKS:
+- [ ] Account-resolution step (after merchant resolution): try the payload-embedded account identifier first (CCBill `clientAccnum`, Stripe Connect `event.account`); if absent, read the `account_id` path parameter. Per rail, document which mode applies and verify whether the payload actually carries an identifier (don't assume).
+- [ ] Endpoint shapes: `…/webhooks/{merchant_slug}/{account_id}` when the path carries the account; `…/webhooks/{merchant_slug}/{rail}` (single shared) when the payload disambiguates. Extend `WebhookResolver` to return (merchant + provider account) and load THAT account's signing secret.
+- [ ] Stripe managed-webhook registration (`ReconcileManagedStripeWebhook`) registers the right URL per account (per-account path unless Connect `event.account` is used). Reject unresolved/ambiguous account → no fallback to a default account (trust boundary, mirror `ErrMerchantRouteUnresolved`).
+- RUNTIME / STAMPING:
+- [ ] Add `provider_account_id` to `subscriptions`, `payments`, `payment_methods` (gen + domain models + repo mappings) — `rail_customers` already has it. Stamp it at create time with the account that processed the operation.
+- [ ] Add a per-merchant resolver: inbound `account_id` (gateway-id from URL) → `provider_accounts` row (UUID + secret), and the inverse for outbound stamping.
+- CATALOG:
+- [ ] Catalog AutoCreate/Verify/drift iterate the merchant's enabled `primary`+`secondary` accounts per rail; skip `legacy` and disabled. Record the target `account_id` on each provider link (Stripe link already carries `provider`/lookup_key — add account_id).
+- CHECKOUT:
+- [ ] Checkout deterministically selects the `primary` account for new work and stamps the chosen `provider_account_id`. (Secondary-as-fallback *policy* stays #288; this issue only guarantees a deterministic, stamped primary.)
+- TESTS:
+- [ ] Two NMI accounts on one merchant (path-param mode): an event delivered to A's path verifies with A's secret and is rejected under B's; records stamp the right `provider_account_id`.
+- [ ] Payload-disambiguation mode: one shared CCBill endpoint routes by `clientAccnum` to the correct account; an unknown/absent identifier is rejected (no default-account fallback).
+- [ ] Catalog push hits primary+secondary, skips legacy+disabled; verify drift only on pushed accounts.
+- [ ] Legacy account still processes an inbound refund/chargeback for an old subscription but receives no new checkout and no catalog push.
+- [ ] Multi-merchant: account_id routing never crosses merchants.
+
+## Acceptance Criteria
+
+- A merchant can declare ≥2 NMI accounts (and ≥2 Stripe accounts) with roles, and OpenRails boots (no single-account error).
+- Every inbound event resolves to exactly one provider account — by payload identifier where available, else by path parameter — and is verified with that account's secret (rejected under any other's). No event falls back to a default account.
+- New subscriptions/payments/payment-methods carry `provider_account_id`; an inbound event resolves the originating account by id.
+- Catalog push/verify touches only primary+secondary; legacy/disabled accounts are never mutated.
+- Provider accounts are indexed by operator-declared `account_id` everywhere; no arbitrary config name is load-bearing.
+
+## Relationships
+
+- Builds on #630 (rail/gateway + provider-account model) and #592 (account_id is operator-declared; no runtime whoami).
+- Uses the #518 `provider_accounts` table (role/status/promote/demote already present).
+- Foundation under #288 (processor routing & fallback policy): #641 provides account identity, routing role, and stamping; #288 adds the smart selection/fallback policy on top.
+
+---
+
+# #639: variable-quantity-credit-products
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: Needed for Cozy Creator-style arbitrary AI image credit top-ups. Current catalog grants credits at product level, so a product cannot sell "any integer amount" of credits or vary granted credits by entered spend/quantity.
+
+Add a first-class catalog primitive for variable-quantity credit purchases.
+
+## Metadata
+
+- Category: billing
+- Status: proposed
+- Passes: false
+
+## Problem
+
+The current catalog shape can express fixed products and fixed credit grants:
+
+- product `image-credit-pack`
+- price `$20`
+- product-level grant `2,000 ai-image-credit`
+
+It cannot express the actual desired Cozy Creator flow:
+
+- Customer enters a dollar amount, e.g. `$20` or `$21`, and receives credits at `100 credits = $1`.
+- Or customer enters a credit quantity, e.g. `2,000` or `2,100 credits`, and OpenRails computes the charge.
+- The product is one top-up product, not one catalog product per pack size.
+- The purchased credits should deposit into a named balance key such as `ai-image-credit`.
+- Top-up credits can have their own expiry policy, distinct from monthly membership grants.
+
+## Proposed Model
+
+Add a variable credit purchase shape under a product, separate from ordinary fixed `prices`:
+
+```yaml
+products:
+  - key: ai-image-credit-topup
+    display_name: AI Image Credits
+    credit_purchase:
+      unit: ai-image-credit
+      credit_type_key: ai-image-gen
+      base_rate:
+        credits: 100
+        unit_amount: 1_000_000
+      input_mode: spend_amount
+      min_unit_amount: 1_000_000
+      max_unit_amount: 500_000_000
+      expires: 30d
+      providers: [stripe]
+```
+
+`input_mode` is presentation metadata. Under the hood the same purchase quote should support both:
+
+- spend amount -> credited quantity
+- credit quantity -> price amount
+
+## Tasks
+
+- [ ] Add manifest structs/validation for `credit_purchase`.
+- [ ] Require `unit`/credit type key, base rate, currency, min/max bounds, expiry, and provider eligibility.
+- [ ] Add quote logic for spend-amount input and credit-quantity input using the same rate definition.
+- [ ] Add checkout support that creates a payment for the quoted amount and deposits the quoted credit quantity.
+- [ ] Make credit deposits idempotent by checkout/payment source ID.
+- [ ] Keep fixed product-level `credits` behavior unchanged for memberships and fixed packs.
+- [ ] Add API response fields so frontends can render arbitrary top-up controls without hardcoded pack math.
+- [ ] Add tests for `$20`, `$21`, `2,000 credits`, bounds rejection, expiry, idempotent replay, and provider routing.
+
+## Design Review & Refinement (2026-06-29)
+
+Sound and genuinely needed (Cozy Creator "enter any $ amount → credits"), with three fixes — all of which fold this onto the shared pricing grammar proposed in #638 instead of a new parallel one:
+
+1. **Reuse the #638 `per_unit` charge model — don't invent a separate rate field.** `base_rate: {credits: 100, unit_amount: 1_000_000}` IS a per-unit price: `unit_amount` per credit (10_000 micros/credit) with a `divide_by: 100` block (or its inverse). A variable top-up = a `per_unit`-priced product whose deliverable is a credit DEPOSIT (pay-in-advance), versus #638's metered-usage rating (pay-in-arrears) — same math, different delivery. Express it with #638's `{model: per_unit, unit_amount, divide_by, round}` so OpenRails has ONE pricing vocabulary, not three (`metered{rate,per_units,per}`, `credit_purchase{base_rate}`, and #640's `volume_tiers`).
+2. **Specify the rounding policy (currently missing).** $20.005, or 2,001 credits at 100/$1, don't divide evenly. Pick and document a rule — recommend floor-credits / ceil-price (never grant more value than paid) — using the same `round` knob as #638. Without it the quote is ambiguous and the spend→credits and credits→price directions can disagree by a credit/micro.
+3. **Example is missing `currency`** (the task list mentions it; the YAML block omits it). Add it.
+
+Keep the separate `credit_purchase` block (advance purchase is a distinct flow from arrears rating), but make its rate the #638 per-unit primitive. The min/max here bound the INPUT (spend or quantity) — name that explicitly (e.g. `input_min`/`input_max`) so it isn't confused with #638's output-side `minimum_amount`/`maximum_amount` (charge floor/cap).
+
+---
+
+# #640: credit-purchase-volume-bonuses
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: Needed for one underlying volume-pricing model that can be presented either as bonus credits for spend-entry flows or as price discounts for credit-quantity-entry flows.
+
+Add volume bonus/discount rules to variable credit purchases.
+
+## Metadata
+
+- Category: billing
+- Status: proposed
+- Passes: false
+
+## Problem
+
+Cozy Creator wants one top-up model that supports both merchant presentations:
+
+- If the customer enters dollars, show bonus credits: "$20 gets 2,200 credits".
+- If the customer enters credit quantity, show a discount: "2,200 credits costs $20".
+
+Those are the same pricing rule expressed from opposite directions. OpenRails should store one canonical set of volume tiers and quote either display mode from it.
+
+## Proposed Model
+
+Attach volume rules to `credit_purchase`:
+
+```yaml
+credit_purchase:
+  unit: ai-image-credit
+  base_rate: {credits: 100, unit_amount: 1_000_000}
+  volume_tiers:
+    - min_unit_amount: 20_000_000
+      bonus_percent: 10
+    - min_unit_amount: 50_000_000
+      bonus_credits: 2_000
+```
+
+The quote engine canonicalizes the result as:
+
+- paid amount
+- base credits
+- bonus credits
+- total credits
+- effective price per credit
+
+The frontend can phrase that as either bonus credits or discounted price.
+
+## Tasks
+
+- [ ] Add volume tiers to the variable credit purchase manifest.
+- [ ] Support percentage bonus and fixed bonus credits.
+- [ ] Define tier precedence when multiple thresholds match: highest eligible threshold wins.
+- [ ] Decide whether thresholds are based on spend amount, base credit quantity, or either with canonical conversion.
+- [ ] Return quote breakdown fields for paid amount, base credits, bonus credits, total credits, and effective rate.
+- [ ] Store paid-vs-bonus credit amounts in ledger metadata so support/refunds can explain what happened.
+- [ ] Add refund/reversal behavior for purchased and bonus credits.
+- [ ] Add tests for `$19`, `$20`, `$21`, `$50`, quantity-entry inverse quotes, and exact-threshold rounding.
+
+## Design Review & Refinement (2026-06-29)
+
+The "one rule, two presentations (bonus credits vs price discount)" insight is correct — keep it. But the `volume_tiers: {bonus_percent | bonus_credits}` parameterization is the weak part and should be **replaced with standard volume/graduated tiers on the per-credit price** — the same `tiered {mode: volume|graduated, tiers:[{up_to, unit_amount, flat_amount}]}` charge model #638 already needs:
+
+1. **Bonuses ARE tiered pricing.** "$20 → 2,200 credits" is just a better $/credit rate above a threshold. Store ONE volume/graduated tier table on the credit unit price and derive BOTH "bonus credits" and "% discount" as display projections of it. This unifies #638/#639/#640 on one primitive rather than adding a fourth bespoke DSL.
+2. **The bespoke bonus model has an inversion bug — this is the main reason to switch.** Task "thresholds on spend or quantity?" is the symptom. With fixed `bonus_credits` tiers keyed on spend, the spend→credits function is DISCONTINUOUS at each threshold, so the inverse direction (customer enters a credit quantity → price) is non-monotonic / ill-defined near a threshold: two nearby quantities can map to the same or inverted prices, and exact-threshold quotes become arbitrary. A monotonic volume/graduated unit-price table makes the inverse well-defined by construction — which the spec REQUIRES, since both entry directions must agree.
+3. **Choose volume vs graduated deliberately.** "highest eligible threshold wins" = **volume** mode (whole quantity repriced at the landed tier), which creates cliffs (buy 1 more credit and the TOTAL price can drop). If that UX is undesirable for top-ups, use **graduated** (marginal) tiers. State the choice explicitly; #638's appendix covers both.
+4. **Scope — likely fold into #639.** Once #638 ships the tiered charge model and #639 ships `credit_purchase`, this issue collapses to "let `credit_purchase` use tiered mode" — a thin feature, not a standalone bonus subsystem. Consider merging #640 into #639 to avoid tracking a parallel volume engine. Keep the genuinely useful parts: the canonical quote breakdown (paid / base / bonus / total / effective rate) and storing paid-vs-bonus split in ledger metadata for refunds.
+
+---
+
+# #638: realistic-resource-metering-catalog
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: Research captured for replacing the current toy metered-price catalog shape with a realistic resource-metering/rate-card model for DigitalOcean-like infrastructure billing. No implementation yet.
+
+Redesign OpenRails catalog metering so it can model rented datacenter resources such as droplets, GPUs, block storage, object storage, and bandwidth without pretending that each provisioned resource is a product access grant or entitlement.
+
+## Metadata
+
+- Category: billing
+- Status: proposed
+- Passes: false
+
+## Problem
+
+The current catalog metered-price shape is too small:
+
+- `products[].prices[].metered` is only `{meter, rate, per_units, per}`.
+- `RateMeteredUsageFromEvents` aggregates usage by `event_type == meter_key` and one dimension named after that same meter key.
+- The model has no first-class rate-card dimensions, filter pricing, included allowances, overage pools, minimum charge, capped monthly charge, rating formula, or catalog version.
+- A DigitalOcean-like product is not "user owns droplet-vcpu forever/for 30d". The host owns resource inventory and lifecycle. OpenRails should rate measured resource usage.
+
+This is enough for simple API calls or host-prepriced usage, but it is not enough for real infrastructure billing.
+
+## Research Notes
+
+DigitalOcean-like billing facts:
+
+- CPU/GPU Droplets are billed per second with a minimum charge of 60 seconds or $0.01, whichever is higher.
+- Billing starts when the Droplet is created and ends when it is destroyed; powered-off Droplets still bill because reserved resources remain allocated.
+- GPU Droplets follow the same per-second/minimum model.
+- Droplet bandwidth is not a naive per-resource `bandwidth-gb` SKU. Each plan contributes included outbound transfer allowance, the allowance accrues per second, it is capped at 2,419,200 seconds/28 days per monthly billing cycle, and it is pooled at the team level. Overage is $0.01/GiB.
+- Volumes block storage is provisioned-capacity billing with hourly/monthly caps, e.g. 100 GiB at about $0.015/hour or $10/month, not a durable product-access grant.
+- Spaces-style object storage combines a base subscription, included storage/egress allowances, pooled bucket usage, hourly proration, and overage rates.
+
+Other billing/catalog systems:
+
+- Lago models plans as pricing/billing/access/invoicing packages assigned to subscriptions. Usage is driven by billable metrics; charges can be filtered by metric dimensions, and metrics can be recurring or reset per period.
+- OpenMeter separates events, meters, features, rate cards, prices, entitlements, plans, plan versions, and subscriptions. Meters support aggregation types such as sum, count, unique count, latest, min, and max, plus `groupBy` dimensions. Pricing supports per-unit, tiered, package, overage, flat-fee, and dynamic cost-based models.
+- Kill Bill catalogs separate products, plans, phases, recurring/fixed prices, and usage sections. The common pattern is still catalog/rate-card + usage records + invoice rating, not one product row per concrete VM.
+
+Useful references:
+
+- DigitalOcean Droplet pricing: https://docs.digitalocean.com/products/droplets/details/pricing/
+- DigitalOcean bandwidth billing: https://docs.digitalocean.com/platform/billing/bandwidth/
+- DigitalOcean Volumes pricing: https://www.digitalocean.com/pricing/volumes
+- DigitalOcean Spaces pricing: https://docs.digitalocean.com/products/spaces/details/pricing/
+- Lago plan overview: https://getlago.com/docs/guide/plans/overview
+- Lago charges with filters: https://getlago.com/docs/guide/plans/charges/charges-with-filters
+- Lago recurring vs metered metrics: https://getlago.com/docs/guide/billable-metrics/recurring-vs-metered
+- OpenMeter metering overview: https://openmeter.io/docs/metering/overview
+- OpenMeter meter creation: https://openmeter.io/docs/metering/guides/creating-meters
+- OpenMeter product catalog overview: https://openmeter.io/docs/product-catalog/overview
+- OpenMeter pricing models: https://openmeter.io/docs/product-catalog/pricing-models
+- Kill Bill catalog examples: https://docs.killbill.io/latest/catalog-examples
+
+## Proposed Model
+
+Keep the host/resource boundary simple:
+
+- Host app owns concrete resources: droplet IDs, volume IDs, power state, resize history, region, image, network interfaces, lifecycle timestamps, and authorization.
+- OpenRails owns finance-grade billing: catalog rate cards, meter definitions, usage event ingestion, rating, invoice lines, credits, receivables, and provider collection.
+
+Replace the current one-rate-per-meter shape with:
+
+- `meters`: define event type, value extraction, aggregation, unit, optional group-by dimensions, and late-data/idempotency rules.
+- `features`: billable/limitable things like `droplet-runtime`, `block-storage`, `public-egress`, `snapshot-storage`.
+- `rate_cards`: attach one feature/meter to pricing rules inside a product/plan. Rate cards can carry filters such as `{size_slug: s-1vcpu-1gb, region: nyc3}` and a default fallback.
+- `prices`: support flat recurring fees, per-unit usage, tiered/graduated/volume pricing, package pricing, dynamic pass-through/markup, minimum charges, maximum charges/monthly caps, and included allowances.
+- `allowances`: model included usage that can be per subscription, per active resource, or accrued by resource-runtime and pooled by customer/team.
+- `catalog_versions`: preserve old pricing for existing subscriptions while allowing new catalog pushes to change future rates.
+
+Example shape to aim for:
+
+```yaml
+meters:
+  - key: droplet-runtime
+    event_type: droplet.lifecycle
+    aggregation: sum
+    value: $.seconds
+    unit: second
+    group_by:
+      size_slug: $.size_slug
+      region: $.region
+      resource_id: $.droplet_id
+
+  - key: public-egress
+    event_type: network.egress
+    aggregation: sum
+    value: $.bytes
+    unit: byte
+    group_by:
+      region: $.region
+
+plans:
+  - key: droplets
+    rate_cards:
+      - feature: droplet-runtime
+        meter: droplet-runtime
+        prices:
+          - filters: {size_slug: s-1vcpu-1gb}
+            unit_amount: 6_000_000
+            per: 30d
+            prorate: second
+            minimum_duration: 60s
+            minimum_amount: 10_000
+            max_amount: 6_000_000
+      - feature: public-egress
+        meter: public-egress
+        allowance:
+          source: droplet-runtime
+          value: $.included_transfer_bytes
+          accrual: per_second
+          pool: customer
+        overage:
+          unit_amount: 10_000
+          per_units: 1_073_741_824
+```
+
+The exact YAML can change during implementation; the important part is the model: metric dimensions and rate cards, not fake ownership rows.
+
+## Implementation Plan
+
+**Tasks:**
+- [ ] Remove or clearly mark the DigitalOcean example in `config/catalog.example.yaml` as aspirational until the real rate-card model lands.
+- [ ] Add catalog structs for meters with `event_type`, `aggregation`, `value`, `unit`, and `group_by`.
+- [ ] Add rate-card structs decoupled from product ownership/access grants.
+- [ ] Support filtered pricing by meter dimensions, with validation that filters refer to declared `group_by` keys.
+- [ ] Support minimum duration/amount and max amount per billing period so Droplet-style per-second billing can enforce 60-second/$0.01 minimums and monthly caps.
+- [ ] Support included allowances and overage rating, including customer/team pooled allowances.
+- [ ] Support accrued allowances derived from resource-runtime usage so Droplet bandwidth pools can accrue per second and cap at the monthly-cycle limit.
+- [ ] Add catalog versioning or immutable rate-card revisions so old subscriptions keep old pricing after catalog changes.
+- [ ] Update usage-event rating so invoice sweeps select a rate card by meter plus dimensions, not only by `event_type == meter_key`.
+- [ ] Keep concrete resource lifecycle outside OpenRails; tests should use host resource IDs only as usage metadata/source IDs.
+- [ ] Add integration tests for multiple droplets, resize/change-rate mid-period, powered-off-still-bills, destroy-stops-billing, block-storage provisioned capacity, pooled bandwidth allowance, and overage.
+- [ ] Add loader validation tests that reject ambiguous rate cards and invalid filters/allowance sources.
+- [ ] Update `config/catalog.example.yaml` to show a realistic DigitalOcean-like catalog only after the model can actually execute it.
+
+## Acceptance Criteria
+
+- A host can provision 3 droplets of the same SKU and 2 of another SKU, report lifecycle/usage events, and receive correct invoice lines without any product-access grants.
+- A powered-off resource continues billing until a destroy event stops its runtime interval.
+- A resized resource bills old and new SKUs for their respective intervals.
+- A 30-second droplet bills the documented minimum; a full-month droplet caps at the monthly SKU amount.
+- Customer/team bandwidth overage is billed only after pooled accrued allowance is consumed.
+- Re-finalizing the same invoice window stays idempotent.
+- Catalog examples only show behavior that the code and tests actually support.
+
+## Research Appendix — verified 2026-06-29 (four-source deep dive)
+
+Primary-source verification of the Research Notes above (DigitalOcean docs; Stripe/Lago/OpenMeter/Orb/Metronome docs + source). Where this disagrees with the notes above, the figure here is the corrected one.
+
+### DigitalOcean — corrected billing mechanics
+
+- **Compute is per-second, capped at a monthly DOLLAR amount.** The advertised monthly price IS the cap; the per-second rate = `monthly ÷ 672`, where **672 = 24h × 28d** is a FIXED constant (not the calendar month's hours). A resource up all month hits the dollar cap before month-end (real months are 720–744h > 672), so the advertised monthly price holds. Verified against published tiers: $4/mo→$0.00595/h, $6→$0.00893, $12→$0.01786, $18→$0.02679 (each = monthly ÷ 672, matching the rates already in the example file).
+- **Minimum charge:** 60 seconds, or $0.01, whichever is higher.
+- **Powered-off Droplets still bill** (resources stay reserved); only DESTROY stops the clock. Billing runs create→destroy.
+- **Volumes:** **$0.10 / GiB / month** (100 GiB = $10/mo), prorated hourly, billed attached or not. (The earlier "~$0.015/hour" note was the per-GiB hourly slice = $0.10 ÷ 672; the rate to model is $0.10/GiB-mo.)
+- **Bandwidth:** ingress free, egress only. Each Droplet plan bundles 500 GiB–11 TiB/mo; the allowance **accrues per second, caps at 2,419,200 s (= 28 d) per cycle, and is POOLED at the team level**; overage **$0.01/GiB**, no rollover.
+- **Spaces:** **$5/mo** base incl. 250 GiB storage + 1,024 GiB egress (pooled across buckets); storage overage **$0.02/GiB-mo**, egress overage **$0.01/GiB**.
+- **Flat-ish monthly (billed hourly, shown monthly):** Managed DBs from $15/mo; Load Balancers $12/mo (regional HTTP) / $15 (network, global) per node; Snapshots $0.06/GiB-mo; reserved IPv4 unattached $5/mo (free attached; IPv6 free).
+
+### The structural lesson: every system separates THREE layers
+
+The current `metered: {meter, rate, per_units, per}` fuses three independent concerns into one record. Stripe, Lago, OpenMeter and Orb all keep them apart:
+
+**1. Meter (event → quantity) — aggregation lives HERE, not on the price.**
+- Aggregation sets: Stripe sum/count/last · Lago count/sum/max/unique_count/latest/**weighted_sum**/(custom) · OpenMeter sum/count/avg/min/max/unique_count/latest · Metronome count/sum/max/latest.
+- Value extraction: a property/JSONPath (`event_payload_key` / `field_name` / `valueProperty`).
+- Dimensions: `group_by` (OpenMeter) / metric `filters` (Lago) — the substrate for dimensional pricing.
+- **Gauge:** only Lago integrates time natively (`weighted_sum_agg` + `weighted_interval` → GiB-seconds prorated by time-in-effect). OpenMeter has NO engine-side integration: emitters HEARTBEAT (periodically emit unit-seconds) and SUM. → design fork below.
+
+**2. Price (quantity → money) — a discriminated union; names shared across systems:**
+- `flat` — fixed recurring/one-time fee (OpenMeter FlatPrice; Lago plan amount). e.g. Spaces $5/mo, LB $12/mo.
+- `per_unit` — `unit_amount` × qty, with an optional **divisor**: Stripe `transform_quantity {divide_by, round: up|down}` — divide, round, then multiply. **This is the principled `per_units`.**
+- `tiered {mode: volume|graduated, tiers:[{up_to, unit_amount, flat_amount}]}` — graduated = slice & sum; volume = whole qty at the landed tier (Stripe tiers_mode; OpenMeter TieredPrice.Mode; Lago graduated/volume; Orb tiered/bulk). A tier may carry BOTH a per-unit and a flat amount.
+- `package {package_size, package_amount, free_units}`, round-up — block pricing (Lago/Orb/OpenMeter). = per_unit + divisor(round: up).
+- `dynamic {multiplier}` — event already carries the cost; apply markup/passthrough (Lago/OpenMeter).
+- **Commitments `{minimum_amount, maximum_amount}`** (OpenMeter Commitments; Lago min_amount true-up + plan minimum_commitment). `maximum_amount` IS DO's **monthly cap**; a per-charge `minimum` ≈ DO's $0.01 minimum charge.
+- **Free allowance / included units** before overage (OpenMeter usage-discount; Lago free_units). DO's bundled transfer/storage.
+
+**3. Dimensional rate cards (price keyed on meter dimensions).** Orb `matrix`/dimensional pricing keys a unit price on a tuple of event properties (`region × instance_type`) with a default cell. → ONE `droplet-runtime` meter + a matrix price over `size_slug` replaces the per-SKU-meter explosion. (The current loader even FORBIDS sharing a meter across prices — "meter is used by multiple metered prices" — which is what forces today's per-SKU meters.)
+
+### Why `per_units: 1` is meaningless — and the fix
+
+Current rating: `cost = aggregate × rate / denom`, where `denom = per_units` (counter) or `per_units × per_seconds` (gauge). A gauge therefore has TWO divisors (`per_units` AND `per`) multiplying into one denominator, so `per_units: 1` is vestigial — the real normalizer is `per`. The fix is Stripe's single `transform_quantity`: one `divide_by` + explicit `round`. Then:
+- counter "$/hour from seconds" → `divide_by: 3600`.
+- gauge "$/GiB-month from GiB-seconds" → `divide_by: 2_592_000` (30 d) — ONE divisor, no `per_units`.
+- **The counter/gauge `kind` dissolves**: it only ever encoded (a) the aggregation choice (sum-of-counts vs sum-of-unit-seconds — now `aggregation` on the meter) plus (b) a time divisor (now `divide_by`).
+
+### Keep micros
+
+Stripe uses cents (+ `unit_amount_decimal`, ≤12 dp, for sub-cent). Lago/OpenMeter use decimal strings. OpenRails micros (1e6/unit) already represent DO's sub-cent rates exactly ($0.00595/h = 5_950 micros) — keep it; strictly better than cents, on par with decimal strings for this domain.
+
+### Design fork to decide: gauge integration
+
+- **A — native time-weighting** (today's gauge): host emits level samples/unit-seconds; OpenRails integrates over the period (Lago `weighted_sum`).
+- **B — host pre-integrates** (OpenMeter heartbeat): host emits unit-seconds via the EXISTING `dimensions[meter_key]` convention; OpenRails just SUMs. `RateMeteredUsageFromEvents` already SUMs `dimensions->>meter_key`, so B is nearly free and deletes the gauge special-case.
+- **Recommend B**: gauge becomes "sum of unit-seconds + `divide_by` time" — same result as today's sweep, less code.
+
+### Must-haves vs nice-to-haves for THIS use case
+
+DO's real catalog needs only a SUBSET of the union: `flat`, `per_unit` + `divide_by`/`round`, `commitments {min,max}` (the cap + min-charge), included **allowance** + **pooled overage**, and **dimensional/matrix** SKU pricing. `tiered`/`package`/`dynamic` are for other domains (analytics, AI passthrough) — design the union so they slot in, but they aren't required to model DigitalOcean.
+
+### Full-fidelity DigitalOcean catalog in the proposed model (target shape)
+
+```yaml
+meters:
+  - key: droplet-runtime          # host heartbeats uptime
+    event_type: droplet.usage
+    value: $.seconds
+    aggregation: sum
+    group_by: { size_slug: $.size_slug, region: $.region, resource_id: $.droplet_id }
+  - key: volume-storage           # host heartbeats GiB held × interval
+    event_type: volume.usage
+    value: $.gib_seconds
+    aggregation: sum
+    group_by: { resource_id: $.volume_id }
+  - key: public-egress
+    event_type: network.egress
+    value: $.bytes
+    aggregation: sum
+    group_by: { resource_id: $.droplet_id }
+
+products:
+  - key: droplet
+    display_name: Droplet
+    rate_cards:
+      - meter: droplet-runtime
+        price:
+          model: per_unit
+          divide_by: 3_600         # seconds -> hours
+          round: up
+          minimum_amount: 10_000   # $0.01 / 60s minimum charge
+          matrix:                  # one meter, priced per SKU
+            dimension: size_slug
+            cells:
+              s-1vcpu-512mb: { unit_amount: 5_950,  maximum_amount: 4_000_000 }   # $0.00595/h, cap $4/mo
+              s-1vcpu-1gb:   { unit_amount: 8_930,  maximum_amount: 6_000_000 }   # cap $6/mo
+              s-1vcpu-2gb:   { unit_amount: 17_860, maximum_amount: 12_000_000 }  # cap $12/mo
+      - meter: public-egress
+        allowance:                 # bundled transfer, accrued by runtime, pooled per team
+          accrue_from: droplet-runtime
+          per_second_bytes: $.included_transfer_bytes_per_second
+          cap_seconds: 2_419_200   # 28-day accrual cap
+          pool: customer
+        price:
+          model: per_unit
+          unit_amount: 10_000      # $0.01 / GiB overage
+          divide_by: 1_073_741_824 # bytes -> GiB
+          round: up
+
+  - key: volume
+    display_name: Block Storage Volume
+    rate_cards:
+      - meter: volume-storage
+        price:
+          model: per_unit
+          unit_amount: 100_000     # $0.10 / GiB-month
+          divide_by: 2_592_000     # GiB-seconds -> GiB-months (30d)
+          round: down
+
+  - key: spaces
+    display_name: Spaces Object Storage
+    rate_cards:
+      - price: { model: flat, amount: 5_000_000, per: 30d }          # $5/mo base
+      - meter: spaces-storage
+        allowance: { included_gib_months: 250 }
+        price: { model: per_unit, unit_amount: 20_000, divide_by: 2_592_000, round: down }  # $0.02/GiB-mo
+      - meter: spaces-egress
+        allowance: { included_gib: 1_024 }
+        price: { model: per_unit, unit_amount: 10_000, divide_by: 1_073_741_824, round: up } # $0.01/GiB
+
+  - key: load-balancer
+    display_name: Regional Load Balancer
+    rate_cards:
+      - price: { model: flat, amount: 12_000_000, per: 30d }         # $12/mo per node
+```
+
+YAML keys are illustrative; the load-bearing parts are: aggregation on the meter, a `divide_by`+`round` per-unit divisor that subsumes `per_units`/`per`, `minimum_amount`/`maximum_amount` for DO's floor+cap, `allowance`+`pool` for bundled/pooled transfer, and `matrix` for per-SKU pricing off one meter.
+
+### Done in the working tree now
+
+Within the CURRENT loader (validated by `pkg/embedded/catalog_push_test.go::TestExampleCatalogManifestParses`), cleaned `config/catalog.example.yaml`'s `digital-ocean` section: removed the four vestigial `per_units: 1` lines (the loader defaults PerUnits=1, so this is behavior-preserving), annotated each rate with its real June-2026 DO figure, and added a header comment stating what the flat-rate model cannot yet express, pointing here. Full-fidelity rewrite waits on the model above.
+
+### Sources
+
+DigitalOcean: docs.digitalocean.com {droplets,volumes,spaces,snapshots}/details/pricing, platform/billing/bandwidth, the per-second-billing blog. Stripe: docs.stripe.com/api {billing/meter, prices/object}, subscriptions/pricing-models/tiered-pricing, transform-quantities. Lago: docs.getlago.com/guide {billable-metrics/aggregation-types, plans/charges/charge-models/*, plans/commitment, plans/charges/prorated-vs-full}. OpenMeter: openmeter.io/docs + source openmeter/{meter/meter.go, productcatalog/price.go, productcatalog/ratecard.go}. Orb: docs.withorb.com {product-catalog/price-configuration, api-reference/price/create-price}. Metronome: docs.metronome.com core-concepts.
 
 ---
 
@@ -1408,7 +1937,7 @@ Acceptance: a historical pull lands missing CCBill/Mobius charges as openrails.p
 
 # #635: rail_customers materialization + provider-auto-billed classification (vault-less subs)
 
-**Completed:** partial (commit bae4b136) — DONE: dunning skips provider-auto-billed subs (subscriptionProviderAutoBilled: ccbill always, nmi/mobius vault-less) instead of expire/fail; RailCustomerService.Upsert no-ops for rails without a real remote customer (railHasRemoteCustomer: stripe/nmi/mobius only). Both unit-tested. DEFERRED: provider-pull reconciliation of vault-less subs (needs #632/#633 + live creds). No schema change, as specified.
+**Completed:** yes (commits bae4b136 + 0a124753) — DONE: dunning skips provider-auto-billed subs (subscriptionProviderAutoBilled: ccbill always, nmi/mobius vault-less) instead of expire/fail; RailCustomerService.Upsert no-ops for rails without a real remote customer (railHasRemoteCustomer: stripe/nmi/mobius only). Both unit-tested. DEFERRED: provider-pull reconciliation of vault-less subs (needs #632/#633 + live creds). No schema change, as specified.
 
 rail_customers (remote customer ref) and payment_methods (stored card/vault) are distinct concepts, but ~19k vault-less Mobius/CCBill subscribers have neither and subscription.payment_method_id is NULL → dunning (jobs_dunning.go) hard-fails on them. A vault-less NMI recurring sub is auto-billed by the provider keyed on subscription_id; CCBill bills on its side. Convergence should classify these as provider-auto-billed (not our-rebill) and materialize rail_customers where a real remote ref exists.
 
