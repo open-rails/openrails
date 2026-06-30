@@ -19,6 +19,11 @@ const (
 	StatusActive    SubscriptionStatus = "active"    // Normal good-standing, successful payments, rebill scheduled
 	StatusPastDue   SubscriptionStatus = "past_due"  // Payment failed but we're still attempting rebills (will retry)
 	StatusCancelled SubscriptionStatus = "cancelled" // Will never rebill again (user cancelled, max retries, admin cancelled, expired)
+	// StatusUnknown (#632): locally "active" but the period elapsed with no
+	// confirming payment AND we cannot rebill it ourselves (provider-auto-billed:
+	// CCBill or vault-less NMI). A needs-provider-verification holding state —
+	// convergence will not GUESS; provider-pull (#633) resolves it to the real state.
+	StatusUnknown SubscriptionStatus = "unknown"
 )
 
 // CancelType represents who/what caused the cancellation

@@ -442,13 +442,56 @@ ORDER BY created_at;
 -- #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
 -- current_period_ends_at that never advanced (missed rebill/failure webhook).
 -- name: ListPeriodOverdueSubscriptions :many
+-- #632: only OUR-rebill subs enter dunning here. Provider-auto-billed subs (CCBill
+-- or vault-less NMI) we cannot rebill — they route to `unknown` via
+-- ListNeedsVerificationSubscriptions instead, so the two cohorts stay disjoint.
 SELECT id, current_period_ends_at FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND status = 'active'
   AND current_period_ends_at IS NOT NULL
   AND current_period_ends_at < sqlc.arg(now)::timestamptz
+  AND NOT (rail = 'ccbill' OR (rail IN ('nmi', 'mobius') AND payment_method_id IS NULL))
 ORDER BY current_period_ends_at;
+
+-- #632: active subscriptions whose period elapsed (past a grace slack) with NO
+-- confirming renewal payment, that we CANNOT rebill ourselves (provider-auto-billed:
+-- CCBill, or vault-less NMI/mobius). Convergence must not GUESS whether the provider
+-- billed them — the LIFE pass flips them to `unknown` and provider-pull (#633)
+-- resolves them. A renewal payment landing at/after the period end means the provider
+-- DID bill (advance, not unknown), so such subs are excluded here.
+-- name: ListNeedsVerificationSubscriptions :many
+SELECT s.id, s.rail, s.current_period_ends_at FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.status = 'active'
+  AND s.current_period_ends_at IS NOT NULL
+  AND s.current_period_ends_at < sqlc.arg(cutoff)::timestamptz
+  AND (s.rail = 'ccbill' OR (s.rail IN ('nmi', 'mobius') AND s.payment_method_id IS NULL))
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+        AND p.status = 'completed' AND p.purchased_at >= s.current_period_ends_at
+  )
+ORDER BY s.current_period_ends_at;
+
+-- #632 resolver: flip an active subscription to `unknown` (needs provider
+-- verification). Idempotent — only an active row transitions.
+-- name: SetSubscriptionUnknown :execrows
+UPDATE openrails.subscriptions
+SET status = 'unknown', updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
+
+-- #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
+-- period first, bounded per call so provider-pull (#633) windows them in batches.
+-- name: ListUnknownSubscriptions :many
+SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND status = 'unknown'
+  AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
+ORDER BY current_period_ends_at
+LIMIT sqlc.arg(max_rows)::int;
 
 -- #511: the period_overdue repair (active → past_due + grace window) now routes
 -- through subscriptions.SubscriptionLifecycleService.ApplyLocalPastDue (the shared

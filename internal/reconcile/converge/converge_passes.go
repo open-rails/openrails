@@ -339,6 +339,38 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
+	// life.subscription.needs_verification (#632) — an active, period-elapsed,
+	// provider-auto-billed sub (CCBill / vault-less NMI) with NO confirming renewal
+	// payment. We cannot rebill it and must NOT guess whether the provider billed it:
+	// flip to `unknown`. Access stays intact (no revoke on a guess); provider-pull
+	// (#633) then resolves it. MISMATCH, AUTO. Disjoint from period_overdue (which now
+	// excludes the provider-auto-billed cohort).
+	needsVerify, err := q.ListNeedsVerificationSubscriptions(ctx, gen.ListNeedsVerificationSubscriptionsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-periodGrace),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("life: scan needs-verification subscriptions: %w", err)
+	}
+	for i := range needsVerify {
+		subID := needsVerify[i].ID
+		out = append(out, ConvergeFinding{
+			Type:       "life.subscription.needs_verification",
+			Shape:      ShapeMismatch,
+			Class:      ClassAuto,
+			Severity:   "medium",
+			SubjectKey: "subscription:" + subID.String(),
+			Provider:   "self",
+			Evidence:   map[string]any{"subscription_id": subID.String(), "rail": needsVerify[i].Rail, "cause": "provider_auto_billed_period_elapsed_no_payment"},
+			Repair: func(ctx context.Context) error {
+				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				if err != nil {
+					return fmt.Errorf("life: load needs-verification subscription %s: %w", subID, err)
+				}
+				return p.e.lifecycle.ApplyLocalUnknown(ctx, p.e.DB, sub)
+			},
+		})
+	}
+
 	// life.subscription.pending_stale — a `pending` sub that never confirmed
 	// within the threshold is abandoned; cancel it (no entitlements/money to
 	// unwind). Time-driven EXCESS → AUTO, not gated.

@@ -1385,6 +1385,115 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 	return nil
 }
 
+// ApplyLocalUnknown is the side-effect-free LOCAL transition of an active,
+// period-elapsed, provider-auto-billed subscription into `unknown` (#632): a
+// needs-provider-verification holding state. Convergence will NOT guess whether the
+// provider billed it — provider-pull (#633) resolves it via ResolveUnknownSubscription.
+// No-op unless the sub is currently active (idempotent). Access (the entitlement
+// window) is intentionally LEFT INTACT while unknown — we do not revoke on a guess;
+// only a confirmed provider outcome (cancel) revokes.
+func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+	if dbb == nil || sub == nil {
+		return fmt.Errorf("apply local unknown: db handle and subscription are required")
+	}
+	if sub.Status != models.StatusActive {
+		return nil // idempotent: only an active sub enters verification limbo
+	}
+	sub.Status = models.StatusUnknown
+	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+		return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
+	}
+	return nil
+}
+
+// UnknownResolution is the provider-confirmed outcome for an `unknown` subscription,
+// produced by the #633 batched provider-pull and applied by ResolveUnknownSubscription.
+type UnknownResolution int
+
+const (
+	// ResolveUnreachable: the provider was not reachable (no creds / down / rate
+	// limited). The sub STAYS unknown and is retried with exponential backoff (#633).
+	ResolveUnreachable UnknownResolution = iota
+	// ResolveRenewed: the provider confirms a current/renewed billing relationship
+	// (a charge landed for the new period, or the remote sub is active). Advance the
+	// local period to the provider's period end and return to `active`.
+	ResolveRenewed
+	// ResolvePastDue: the provider confirms the renewal payment FAILED but the sub is
+	// still recoverable within the dunning window. Enter `past_due` so dunning/grace
+	// runs (an our-rebill sub) or grace_exhausted terminates it.
+	ResolvePastDue
+	// ResolveCancelled: the provider deleted/cancelled the remote subscription.
+	// Terminal: cancel locally and revoke the access window as-of the period end.
+	ResolveCancelled
+)
+
+// ResolveUnknownSubscription applies a provider-confirmed outcome to an `unknown`
+// subscription (#632). Side-effect-free local-state transition on the supplied
+// `dbb` (the caller owns atomicity), mirroring ApplyLocalPastDue/Cancellation.
+// No-op unless the sub is currently `unknown` (idempotent — a concurrent resolve or
+// a re-run of the same pull lands the same state once). newPeriodEnd is the
+// provider's confirmed period end (used by ResolveRenewed); graceEndsAt dates the
+// dunning grace window (ResolvePastDue), normally the missed period end.
+func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
+	if dbb == nil || sub == nil {
+		return fmt.Errorf("resolve unknown: db handle and subscription are required")
+	}
+	if sub.Status != models.StatusUnknown {
+		return nil // idempotent
+	}
+	now := s.now()
+	switch res {
+	case ResolveUnreachable:
+		return nil // stay unknown; #633 retries with backoff
+	case ResolveRenewed:
+		sub.Status = models.StatusActive
+		if newPeriodEnd != nil {
+			// New period starts at the prior period end (or now if unknown), ends at
+			// the provider-confirmed end. The renewal payment is backfilled by #634.
+			start := now
+			if sub.CurrentPeriodEndsAt != nil {
+				start = *sub.CurrentPeriodEndsAt
+			}
+			if newPeriodEnd.After(start) {
+				sub.CurrentPeriodStartsAt = &start
+				end := *newPeriodEnd
+				sub.CurrentPeriodEndsAt = &end
+			}
+		}
+		sub.ClearRetrySchedule()
+		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+			return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
+		}
+		return nil
+	case ResolvePastDue:
+		sub.Status = models.StatusPastDue
+		if sub.GraceEndsAt == nil {
+			ge := graceEndsAt
+			sub.GraceEndsAt = &ge
+		}
+		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+			return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
+		}
+		return nil
+	case ResolveCancelled:
+		asOf := now
+		if sub.CurrentPeriodEndsAt != nil {
+			asOf = *sub.CurrentPeriodEndsAt
+		}
+		fb := "cancelled at provider (converged from unknown)"
+		return s.ApplyLocalCancellation(ctx, dbb, sub, LocalCancellation{
+			EndedAt:       now,
+			CancelType:    models.CancelTypeExpired,
+			Feedback:      &fb,
+			RevokeReason:  models.EntitlementRevokeDunning,
+			RevokeAsOf:    asOf,
+			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
+		})
+	default:
+		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
+	}
+}
+
 // cancelSolanaSubscriptionCascade flips the linked openrails.solana_subscriptions
 // row to cancelled so the hourly Solana cranker's ListDue (which filters
 // status = active) no longer returns it — billing stops because OpenRails is the

@@ -1,0 +1,12 @@
+-- #632: subscription `unknown` status — a "needs provider verification" holding
+-- state. A migrated (or live missed-webhook) subscription can be locally `active`
+-- with its current period elapsed and NO confirming payment; convergence must not
+-- GUESS whether the provider billed it. For the provider-auto-billed cohort (CCBill,
+-- or vault-less NMI) we cannot rebill ourselves, so the LIFE pass flips such subs to
+-- `unknown` and reconciles them against provider truth via provider-pull (#633),
+-- rather than forcing them into dunning/cancel. Our-rebill (vaulted NMI) subs keep
+-- the existing period_overdue -> past_due path.
+--
+-- ADD VALUE IF NOT EXISTS is transaction-safe on PG12+ as long as the new value is
+-- not USED in this same migration (it is not — only added here).
+ALTER TYPE openrails.subscription_status ADD VALUE IF NOT EXISTS 'unknown';

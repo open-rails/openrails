@@ -507,6 +507,60 @@ func (q *Queries) ListGraceExhaustedSubscriptions(ctx context.Context, arg ListG
 	return items, nil
 }
 
+const listNeedsVerificationSubscriptions = `-- name: ListNeedsVerificationSubscriptions :many
+SELECT s.id, s.rail, s.current_period_ends_at FROM openrails.subscriptions s
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.status = 'active'
+  AND s.current_period_ends_at IS NOT NULL
+  AND s.current_period_ends_at < $3::timestamptz
+  AND (s.rail = 'ccbill' OR (s.rail IN ('nmi', 'mobius') AND s.payment_method_id IS NULL))
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+        AND p.status = 'completed' AND p.purchased_at >= s.current_period_ends_at
+  )
+ORDER BY s.current_period_ends_at
+`
+
+type ListNeedsVerificationSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Cutoff     time.Time
+}
+
+type ListNeedsVerificationSubscriptionsRow struct {
+	ID                  uuid.UUID
+	Rail                string
+	CurrentPeriodEndsAt *time.Time
+}
+
+// #632: active subscriptions whose period elapsed (past a grace slack) with NO
+// confirming renewal payment, that we CANNOT rebill ourselves (provider-auto-billed:
+// CCBill, or vault-less NMI/mobius). Convergence must not GUESS whether the provider
+// billed them — the LIFE pass flips them to `unknown` and provider-pull (#633)
+// resolves them. A renewal payment landing at/after the period end means the provider
+// DID bill (advance, not unknown), so such subs are excluded here.
+func (q *Queries) ListNeedsVerificationSubscriptions(ctx context.Context, arg ListNeedsVerificationSubscriptionsParams) ([]ListNeedsVerificationSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listNeedsVerificationSubscriptions, arg.MerchantID, arg.CustomerID, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNeedsVerificationSubscriptionsRow
+	for rows.Next() {
+		var i ListNeedsVerificationSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.Rail, &i.CurrentPeriodEndsAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPeriodOverdueSubscriptions = `-- name: ListPeriodOverdueSubscriptions :many
 SELECT id, current_period_ends_at FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
@@ -514,6 +568,7 @@ WHERE merchant_id = $1::uuid
   AND status = 'active'
   AND current_period_ends_at IS NOT NULL
   AND current_period_ends_at < $3::timestamptz
+  AND NOT (rail = 'ccbill' OR (rail IN ('nmi', 'mobius') AND payment_method_id IS NULL))
 ORDER BY current_period_ends_at
 `
 
@@ -530,6 +585,9 @@ type ListPeriodOverdueSubscriptionsRow struct {
 
 // #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
 // current_period_ends_at that never advanced (missed rebill/failure webhook).
+// #632: only OUR-rebill subs enter dunning here. Provider-auto-billed subs (CCBill
+// or vault-less NMI) we cannot rebill — they route to `unknown` via
+// ListNeedsVerificationSubscriptions instead, so the two cohorts stay disjoint.
 func (q *Queries) ListPeriodOverdueSubscriptions(ctx context.Context, arg ListPeriodOverdueSubscriptionsParams) ([]ListPeriodOverdueSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listPeriodOverdueSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -686,6 +744,62 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnknownSubscriptions = `-- name: ListUnknownSubscriptions :many
+SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND status = 'unknown'
+  AND ($3::text IS NULL OR rail = $3::text)
+ORDER BY current_period_ends_at
+LIMIT $4::int
+`
+
+type ListUnknownSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Rail       *string
+	MaxRows    int32
+}
+
+type ListUnknownSubscriptionsRow struct {
+	ID                  uuid.UUID
+	Rail                string
+	CurrentPeriodEndsAt *time.Time
+	RailSubscriptionID  string
+}
+
+// #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
+// period first, bounded per call so provider-pull (#633) windows them in batches.
+func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownSubscriptionsParams) ([]ListUnknownSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listUnknownSubscriptions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Rail,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnknownSubscriptionsRow
+	for rows.Next() {
+		var i ListUnknownSubscriptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Rail,
+			&i.CurrentPeriodEndsAt,
+			&i.RailSubscriptionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1471,6 +1585,27 @@ type SetSubscriptionNextRetryParams struct {
 // worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
 func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscriptionNextRetryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setSubscriptionUnknown = `-- name: SetSubscriptionUnknown :execrows
+UPDATE openrails.subscriptions
+SET status = 'unknown', updated_at = now()
+WHERE id = $1::uuid AND merchant_id = $2::uuid AND status = 'active'
+`
+
+type SetSubscriptionUnknownParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// #632 resolver: flip an active subscription to `unknown` (needs provider
+// verification). Idempotent — only an active row transitions.
+func (q *Queries) SetSubscriptionUnknown(ctx context.Context, arg SetSubscriptionUnknownParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSubscriptionUnknown, arg.ID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}
