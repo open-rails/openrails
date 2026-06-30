@@ -298,8 +298,8 @@ job → #643.)
 
 # #643: collection & invoicing policy — merchant/account billing cadence, minimum_spend, invoice-close
 
-**Completed:** core done; one optional follow-up open (per-account override)
-**Status:** DONE-CORE 2026-06-30 (commit 9beec4d5). MAJOR DISCOVERY during implementation: this was NOT
+**Completed:** yes
+**Status:** DONE 2026-06-30 (commit 9beec4d5). MAJOR DISCOVERY during implementation: this was NOT
 greenfield — ~80% already existed. `FinalizeThresholdInvoices` (threshold mode), `FinalizeDueInvoicesForBoundary`
 (periodic, calendar-month-anchored via `InvoiceBillingBoundary`), the `InvoiceWorker` River driver (runs
 threshold-finalize always + monthly-finalize when scheduled + collect → effectively hybrid), one-invoice-
@@ -315,16 +315,19 @@ COMMITMENT with true-up — built here:
 - Wired into the periodic boundary close (`FinalizeDueInvoicesForBoundary`) — the monthly path the
   InvoiceWorker drives. testcontainers integration tests: true-up to minimum, real owed ledger, idempotency,
   no-op without the option / when usage already meets the minimum.
-REMAINING (optional, low value for current products — enterprise feature): per-CUSTOMER override of the
-merchant collection cadence/threshold (today `InvoiceSettings` is merchant-wide; the override would thread a
-per-customer threshold/boundary into `InvoiceSettings` + `ListInvoiceThresholdCandidates`), and an admin/HTTP
-surface for `SetCustomerMinimumSpend` (the service method exists + is tested; no caller wired yet). Left
-unbuilt per YAGNI — the merchant-level config covers the common case.
+DROPPED as over-engineering (Paul 2026-06-30 — not lingering, deliberately out of scope): (a) per-CUSTOMER
+override of the merchant collection cadence/threshold — an enterprise feature with no current use case; the
+merchant-level config covers every product we run. (b) an admin/HTTP surface for `SetCustomerMinimumSpend` —
+the service method exists + is tested; wire an endpoint when a real caller appears, not before. (c) a global
+invoice-rounding policy — there is no sub-cent-suppression requirement. None block this issue; revive only on
+a concrete need. Merchant collection policy is NOT in `merchants.example.yaml` (that manifest carries identity/
+profile/provider_accounts only) — it's runtime config in `merchant_configurations` via the admission API, which
+is the right home; `minimum_spend` is per-customer so it never belongs in a merchant file.
 PROPOSED 2026-06-29: the billing-relationship half of the #642 metering review (split out).
 
 ## Metadata
 - Category: feature
-- Status: core_done
+- Status: done
 - Passes: true
 
 ## Problem
@@ -360,17 +363,19 @@ balance into one invoice. These are properties of the BILLING RELATIONSHIP, not 
 - [x] Merchant-level collection policy — ALREADY EXISTED: `InvoiceCollectionThreshold` (threshold) +
       `InvoiceBillingBoundary` (periodic: calendar_month|anniversary|fixed_interval) in merchant config,
       read by `InvoiceSettings`. The mode is expressed by which finalize the `InvoiceWorker` runs
-      (threshold always + monthly when scheduled = hybrid). [~] per-customer OVERRIDE still open (see Status).
+      (threshold always + monthly when scheduled = hybrid).
 - [x] Account-level `minimum_spend` (commit $X/period, period-end true-up at close) — BUILT: migration 047
       `customer_minimum_spend` + `SetCustomerMinimumSpend` + `FinalizeInvoice` `WithMinimumSpendTrueUp`.
 - [x] Invoice-close driver — ALREADY EXISTED (`FinalizeThresholdInvoices` + `FinalizeDueInvoicesForBoundary`
       + `InvoiceWorker`); ONE invoice per customer per currency across all rate cards is how `FinalizeInvoice`
       already rolls up. Minimum-spend true-up now hooks the periodic close.
-- [ ] (Optional) Global merchant invoice-rounding policy ("don't bill below $X") — not built (low value).
+- DROPPED (over-engineering, no current need): per-customer collection-cadence override; admin/HTTP setter for
+      `minimum_spend`; global invoice-rounding policy. See Status.
 
-Acceptance: collection cadence is a merchant policy with per-account override; threshold billing works
-(impossible under a per-product `billing_cadence`); `minimum_spend` trues-up at close; one invoice per
-customer account covers all their rate cards. Depends on #642 (pricing-only rate cards + calendar-month
+Acceptance (delivered): collection cadence is a merchant policy (periodic/threshold/hybrid via merchant config
++ the InvoiceWorker); threshold billing works (impossible under a per-product `billing_cadence`); `minimum_spend`
+trues-up at the periodic close; one invoice per customer account covers all their rate cards. Per-account override
+descoped as over-engineering. Depends on #642 (pricing-only rate cards + calendar-month
 `rating_period`); #638 pricing MATH reused unchanged.
 
 ---
