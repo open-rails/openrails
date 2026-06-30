@@ -31,7 +31,6 @@ CREATE TABLE openrails.catalog_rate_cards (
     ordinal integer NOT NULL,
     meter_key text,
     payment_term text DEFAULT 'in_arrears'::text NOT NULL,
-    billing_cadence_hours integer,
     filter jsonb DEFAULT '{}'::jsonb NOT NULL,
     allowance jsonb,
     price jsonb NOT NULL,
@@ -39,8 +38,7 @@ CREATE TABLE openrails.catalog_rate_cards (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT catalog_rate_cards_pkey PRIMARY KEY (id),
     CONSTRAINT catalog_rate_cards_ordinal_positive CHECK (ordinal >= 1),
-    CONSTRAINT catalog_rate_cards_payment_term_check CHECK (payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text])),
-    CONSTRAINT catalog_rate_cards_billing_cadence_positive CHECK ((billing_cadence_hours IS NULL) OR (billing_cadence_hours > 0))
+    CONSTRAINT catalog_rate_cards_payment_term_check CHECK (payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text]))
 );
 
 COMMENT ON TABLE openrails.catalog_rate_cards IS '#638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON.';

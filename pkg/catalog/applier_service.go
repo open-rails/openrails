@@ -71,10 +71,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 					IncludedKeys: append([]string(nil), product.Includes...),
 				})
 			}
-			billingCadenceHours, err := productBillingCadenceHours(product)
-			if err != nil {
-				return err
-			}
 			for i, rc := range product.RateCards {
 				priceJSON, err := json.Marshal(rc.Price)
 				if err != nil {
@@ -88,14 +84,13 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 					}
 				}
 				req.RateCards = append(req.RateCards, billingservice.CatalogRateCardSpec{
-					ProductKey:          product.Key,
-					Ordinal:             i + 1,
-					MeterKey:            rc.Meter,
-					PaymentTerm:         rc.PaymentTerm,
-					BillingCadenceHours: billingCadenceHours,
-					Filter:              rc.Filter,
-					Allowance:           allowanceJSON,
-					Price:               priceJSON,
+					ProductKey:  product.Key,
+					Ordinal:     i + 1,
+					MeterKey:    rc.Meter,
+					PaymentTerm: rc.PaymentTerm,
+					Filter:      rc.Filter,
+					Allowance:   allowanceJSON,
+					Price:       priceJSON,
 				})
 			}
 			if product.CreditPurchase != nil {
@@ -159,17 +154,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 }
 
 var _ Applier = serviceApplier{}
-
-func productBillingCadenceHours(product Product) (*int, error) {
-	if product.BillingCadence == "" {
-		return nil, nil
-	}
-	hours, err := durationSpecHours(product.BillingCadence)
-	if err != nil {
-		return nil, fmt.Errorf("product %q billing_cadence: %w", product.Key, err)
-	}
-	return &hours, nil
-}
 
 func creditPurchaseExpiresHours(productKey string, cp *CreditPurchase) (*int, error) {
 	if cp.Expires == "" {

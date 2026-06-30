@@ -136,7 +136,13 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
 	credits := creditsSpec(product.Credits)
-	tierGroup := group.Key
+	// Usage-metered products carry no tier_group — they aren't tier-exclusive
+	// subscriptions (#642). The loader put them in a synthetic singleton group;
+	// persist NULL so they never share tier exclusivity.
+	tierGroupPtr := &group.Key
+	if len(product.RateCards) > 0 {
+		tierGroupPtr = nil
+	}
 	tierRank := product.tierRank()
 	desiredStatus := statusFromActive(product.Active)
 
@@ -154,7 +160,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 			Description:      strings.TrimSpace(product.Description),
 			EntitlementsSpec: entitlements,
 			CreditsSpec:      credits,
-			TierGroup:        &tierGroup,
+			TierGroup:        tierGroupPtr,
 			TierRank:         tierRank,
 			Status:           toModelStatus(desiredStatus),
 		}
@@ -175,12 +181,12 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 		SetEntitlements:  true,
 		CreditsSpec:      credits,
 		SetCredits:       true,
-		TierGroup:        &tierGroup,
+		TierGroup:        tierGroupPtr,
 		SetTierGroup:     true,
 		TierRank:         &tierRank,
 		Status:           &st,
 	}
-	if productUnchanged(existing, product, entitlements, credits, tierGroup, tierRank, desiredStatus) {
+	if productUnchanged(existing, product, entitlements, credits, tierGroupPtr, tierRank, desiredStatus) {
 		pp.Action = ProductUnchanged
 	} else {
 		pp.Action = ProductUpdate
@@ -192,7 +198,16 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	return pp, nil
 }
 
-func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup string, tierRank int, desiredStatus string) bool {
+// sameTierGroup compares the persisted tier_group against the desired one, both
+// nullable: a usage product persists NULL (#642), a subscription product a slug.
+func sameTierGroup(existing, desired *string) bool {
+	if existing == nil || desired == nil {
+		return existing == nil && desired == nil
+	}
+	return strings.EqualFold(strings.TrimSpace(*existing), strings.TrimSpace(*desired))
+}
+
+func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup *string, tierRank int, desiredStatus string) bool {
 	if existing == nil {
 		return false
 	}
@@ -205,7 +220,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 	if existing.TierRank != tierRank {
 		return false
 	}
-	if existing.TierGroup == nil || !strings.EqualFold(strings.TrimSpace(*existing.TierGroup), tierGroup) {
+	if !sameTierGroup(existing.TierGroup, tierGroup) {
 		return false
 	}
 	if string(existing.Status) != desiredStatus {

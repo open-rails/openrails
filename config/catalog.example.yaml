@@ -81,12 +81,18 @@ catalogs:
     #   • Compute and most resources meter PER-SECOND, but the hourly rate is
     #     just monthly ÷ 672 (24h × 28d) and the charge is CAPPED at the monthly
     #     price (maximum_amount): run all month → you pay the advertised monthly
-    #     price, never more. Minimum charge 60s/$0.01 (minimum_amount).
+    #     price, never more. There is no minimum charge — a resource alive for a
+    #     few seconds bills its true pro-rated cost (sub-cent lines are fine).
     #   • Powered-off droplets still bill; the host emits runtime until destroy.
     #   • ONE meter per resource kind; SKUs are priced by a `matrix` on size_slug
     #     — not one product per size.
     #   • Bandwidth: ingress free; each running droplet contributes its plan's
-    #     included egress, accrued per-second, pooled per team; $0.01/GiB over.
+    #     included egress (the matrix cell's `included`), accrued per-second,
+    #     pooled per team; $0.01/GiB over.
+    #   • These are usage-metered resources, NOT tier subscriptions: no
+    #     tier_group, and no billing cadence on the product — the cap/allowance
+    #     window is the invoice period (set the merchant invoice boundary to
+    #     calendar_month to reset on the 1st; collection cadence is policy, #643).
     # ───────────────────────────────────────────────────────────────────────
     meters:
       - key: droplet-runtime          # host heartbeats uptime seconds per droplet
@@ -129,12 +135,11 @@ catalogs:
 
     products:
       # Droplets — one meter, priced per SKU by matrix. Per-second (divide_by
-      # 3600), $0.01/60s floor, each SKU capped at its monthly price. The cell's
-      # included feeds the pooled egress allowance in the next card.
+      # 3600), each SKU capped at its monthly price (maximum_amount). No floor:
+      # a droplet alive 30s bills ~$0.0005. The cell's `included` feeds the
+      # pooled egress allowance in the next card.
       - key: droplet
         display_name: Droplet
-        tier_group: droplets
-        billing_cadence: 30d
         rate_cards:
           - meter: droplet-runtime
             price:
@@ -142,7 +147,6 @@ catalogs:
               currency: usd
               divide_by: 3_600              # seconds → hours
               round: up
-              minimum_amount: 10_000        # $0.01 / 60s minimum charge
               matrix:
                 dimension: size_slug
                 cells:
@@ -151,11 +155,11 @@ catalogs:
                   s-1vcpu-2gb:        { unit_amount: 17_860, maximum_amount: 12_000_000, included: 2_000 }
                   s-2vcpu-4gb:        { unit_amount: 35_710, maximum_amount: 24_000_000, included: 4_000 }
           - meter: public-egress
-            # Each running droplet contributes its SKU's monthly included egress,
-            # accrued per-second, capped at 28 days, pooled across the team.
+            # Each running droplet contributes its SKU's monthly included egress
+            # (the droplet-runtime matrix cell's `included`), accrued per-second,
+            # capped at 28 days, pooled across the team.
             allowance:
               accrue_from: droplet-runtime
-              included_per_cycle: size_slug.included
               cap: 28d
               pool: customer
             price:
@@ -169,8 +173,6 @@ catalogs:
       # exists (attached or not). $0.10 / GiB-month.
       - key: volume
         display_name: Block Storage Volume
-        tier_group: block-storage
-        billing_cadence: 30d
         rate_cards:
           - meter: volume-storage
             price:
@@ -184,8 +186,6 @@ catalogs:
       # across all buckets); overage $0.02/GiB-mo storage, $0.01/GiB egress.
       - key: spaces
         display_name: Spaces Object Storage
-        tier_group: object-storage
-        billing_cadence: 30d
         rate_cards:
           - price: { model: flat, currency: usd, amount: 5_000_000, per: 30d, auto_renew: true, providers: [stripe] }
           - meter: spaces-storage
@@ -198,8 +198,6 @@ catalogs:
       # Snapshots — $0.06 / GiB-month for as long as the snapshot exists.
       - key: snapshot
         display_name: Snapshot Storage
-        tier_group: snapshots
-        billing_cadence: 30d
         rate_cards:
           - meter: snapshot-storage
             price:
@@ -208,14 +206,11 @@ catalogs:
               unit_amount: 60_000          # $0.06 / GiB-month
               divide_by: 2_592_000
               round: down
-              minimum_amount: 10_000       # $0.01 minimum
 
       # Load Balancers — billed hourly, advertised monthly; HTTP $12 / network
       # $15 per node. Per-second with the monthly price as the cap, per type.
       - key: load-balancer
         display_name: Regional Load Balancer
-        tier_group: load-balancers
-        billing_cadence: 30d
         rate_cards:
           - meter: lb-runtime
             price:
@@ -233,8 +228,6 @@ catalogs:
       # from $15/mo. Per-second with the monthly price as the cap.
       - key: managed-database
         display_name: Managed Database
-        tier_group: databases
-        billing_cadence: 30d
         rate_cards:
           - meter: db-runtime
             price:

@@ -67,9 +67,9 @@ type ChargeModel struct {
 	// (micros-per-micro; 1_000_000 == passthrough, 1_500_000 == +50%).
 	Multiplier int64
 
-	// commitments applied to the computed cost, after the model.
-	MinimumAmount int64 // floor (0 = none)
-	MaximumAmount int64 // cap   (0 = none)
+	// cap applied to the computed cost, after the model (0 = uncapped). There is
+	// no per-line floor — minimums are an account commitment, not pricing (#642).
+	MaximumAmount int64
 }
 
 // ChargeTier is one band of a tiered price.
@@ -106,17 +106,10 @@ func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return applyCommitments(cost, cm.MinimumAmount, cm.MaximumAmount), nil
-}
-
-func applyCommitments(cost, min, max int64) int64 {
-	if min > 0 && cost < min {
-		cost = min
+	if cm.MaximumAmount > 0 && cost > cm.MaximumAmount {
+		cost = cm.MaximumAmount
 	}
-	if max > 0 && cost > max {
-		cost = max
-	}
-	return cost
+	return cost, nil
 }
 
 func ratePerUnit(quantity, unitAmount, divideBy int64, round string) (int64, error) {

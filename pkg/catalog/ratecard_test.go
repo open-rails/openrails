@@ -33,15 +33,13 @@ meters:
 products:
   - key: droplet
     display_name: Droplet
-    tier_group: droplets
-    billing_cadence: 30d
     rate_cards:
       - meter: droplet-runtime
         price:
           model: per_unit
           currency: usd
           divide_by: 3_600
-          minimum_amount: 10_000
+          round: up
           matrix:
             dimension: size_slug
             cells:
@@ -57,9 +55,6 @@ func TestRateCard_DOStyleLoadsAndRates(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	droplet := productByKey(t, m, "droplet")
-	if droplet.BillingCadence != "30d" {
-		t.Fatalf("billing_cadence = %q, want 30d", droplet.BillingCadence)
-	}
 	cm, ok := droplet.RateCards[0].Price.ChargeModelForCell("s-1vcpu-1gb")
 	if !ok {
 		t.Fatal("ChargeModelForCell s-1vcpu-1gb missing")
@@ -68,9 +63,9 @@ func TestRateCard_DOStyleLoadsAndRates(t *testing.T) {
 	if got, _ := cm.Rate(720 * 3_600); got != 6_000_000 {
 		t.Fatalf("capped month = %d, want 6000000", got)
 	}
-	// 30 seconds floors to the $0.01 minimum charge.
-	if got, _ := cm.Rate(30); got != 10_000 {
-		t.Fatalf("min charge = %d, want 10000", got)
+	// 30 seconds bills its true pro-rated cost (no floor): 30 * 8930/3600 -> 75.
+	if got, _ := cm.Rate(30); got != 75 {
+		t.Fatalf("sub-cent charge = %d, want 75 (no floor)", got)
 	}
 }
 
@@ -94,7 +89,10 @@ func TestRateUsage_MatrixAndBaseDispatch(t *testing.T) {
 	}
 }
 
-func TestRateCard_UsageRequiresBillingCadence(t *testing.T) {
+// A usage-metered product loads with no tier_group and no billing cadence — it
+// isn't a tier subscription, and its cap/allowance window is the invoice period
+// (#642). The loader places it in its own synthetic singleton group.
+func TestRateCard_UsageProductNeedsNoTierGroupOrCadence(t *testing.T) {
 	body := `
 version: 1
 meters:
@@ -106,9 +104,15 @@ products:
       - meter: m
         price: {model: per_unit, currency: usd, unit_amount: 1}
 `
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "billing_cadence") {
-		t.Fatalf("want billing_cadence error, got %v", err)
+	m, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("usage product without tier_group/billing_cadence should load: %v", err)
+	}
+	if len(m.TierGroups) != 1 || len(m.TierGroups[0].Products) != 1 {
+		t.Fatalf("want one singleton group, got %+v", m.TierGroups)
+	}
+	if got := m.TierGroups[0].Key; got != "usage-p" {
+		t.Fatalf("synthetic group key = %q, want usage-p", got)
 	}
 }
 
@@ -120,7 +124,6 @@ meters:
 products:
   - key: p
     display_name: P
-    billing_cadence: 30d
     rate_cards:
       - meter: m
         price:
@@ -144,7 +147,6 @@ meters:
 products:
   - key: p
     display_name: P
-    billing_cadence: 30d
     rate_cards:
       - meter: m
         price: {model: per_unit, currency: usd, unit_amount: 1}
@@ -165,7 +167,6 @@ meters:
 products:
   - key: p
     display_name: P
-    billing_cadence: 30d
     rate_cards:
       - meter: egress
         allowance: {accrue_from: ghost-meter, pool: customer}

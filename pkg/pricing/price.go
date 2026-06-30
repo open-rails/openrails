@@ -8,15 +8,14 @@ package pricing
 
 // Allowance models included units before overage. The simple form is a flat
 // `included` amount per period. The DO-bandwidth form accrues per active resource
-// of `accrue_from` (using each resource's `included_per_cycle` attribute) and
-// pools across `pool`.
+// of `accrue_from` (drawing each resource's matrix-cell `included`) and pools
+// across `pool`.
 type Allowance struct {
-	Included         int64  `json:"included,omitempty" yaml:"included,omitempty"`
-	Unit             string `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Pool             string `json:"pool,omitempty" yaml:"pool,omitempty"`
-	AccrueFrom       string `json:"accrue_from,omitempty" yaml:"accrue_from,omitempty"`
-	IncludedPerCycle string `json:"included_per_cycle,omitempty" yaml:"included_per_cycle,omitempty"`
-	Cap              string `json:"cap,omitempty" yaml:"cap,omitempty"`
+	Included   int64  `json:"included,omitempty" yaml:"included,omitempty"`
+	Unit       string `json:"unit,omitempty" yaml:"unit,omitempty"`
+	Pool       string `json:"pool,omitempty" yaml:"pool,omitempty"`
+	AccrueFrom string `json:"accrue_from,omitempty" yaml:"accrue_from,omitempty"`
+	Cap        string `json:"cap,omitempty" yaml:"cap,omitempty"`
 }
 
 // RatePrice is the YAML/JSON form of a charge model. ToChargeModel normalizes it
@@ -47,11 +46,13 @@ type RatePrice struct {
 	// dynamic: micros-per-micro markup over a reported cost (1_000_000 == 1.0x).
 	Multiplier int64 `json:"multiplier,omitempty" yaml:"multiplier,omitempty"`
 
-	// commitments — period floor/cap on the computed cost.
-	MinimumAmount int64 `json:"minimum_amount,omitempty" yaml:"minimum_amount,omitempty"`
+	// maximum_amount — per-period cap on the computed cost (0 = uncapped). A real
+	// per-SKU pricing fact: DO caps a resource at its advertised monthly price.
+	// There is deliberately no per-line minimum/floor — minimums are an
+	// account-level commitment (minimum_spend, #643), not a pricing field (#642).
 	MaximumAmount int64 `json:"maximum_amount,omitempty" yaml:"maximum_amount,omitempty"`
 
-	// matrix — unit_amount (and optional per-cell commitments/included) vary by
+	// matrix — unit_amount (and optional per-cell cap/included) vary by
 	// one meter group_by dimension (Orb matrix). Only valid with model: per_unit.
 	Matrix *Matrix `json:"matrix,omitempty" yaml:"matrix,omitempty"`
 }
@@ -69,9 +70,8 @@ type Matrix struct {
 
 type MatrixCell struct {
 	UnitAmount    int64 `json:"unit_amount" yaml:"unit_amount"`
-	MinimumAmount int64 `json:"minimum_amount,omitempty" yaml:"minimum_amount,omitempty"`
 	MaximumAmount int64 `json:"maximum_amount,omitempty" yaml:"maximum_amount,omitempty"`
-	Included      int64 `json:"included,omitempty" yaml:"included,omitempty"` // feeds allowance.included_per_cycle
+	Included      int64 `json:"included,omitempty" yaml:"included,omitempty"` // per-cycle included units other cards' allowances accrue from
 }
 
 // ToChargeModel normalizes a RatePrice into a ChargeModel. The shared Amount
@@ -89,7 +89,6 @@ func (rp RatePrice) ToChargeModel() ChargeModel {
 		PackageAmount: rp.Amount,
 		FreeUnits:     rp.FreeUnits,
 		Multiplier:    rp.Multiplier,
-		MinimumAmount: rp.MinimumAmount,
 		MaximumAmount: rp.MaximumAmount,
 	}
 	for _, t := range rp.Tiers {
@@ -99,8 +98,8 @@ func (rp RatePrice) ToChargeModel() ChargeModel {
 }
 
 // ChargeModelForCell builds the per_unit ChargeModel for one matrix dimension
-// value: the cell's unit_amount with the price's divisor/rounding, and per-cell
-// commitments (falling back to the price-level commitments). Returns false if the
+// value: the cell's unit_amount with the price's divisor/rounding, and the
+// per-cell cap (falling back to the price-level cap). Returns false if the
 // price is not a matrix or the dimension value has no cell.
 func (rp RatePrice) ChargeModelForCell(dimValue string) (ChargeModel, bool) {
 	if rp.Matrix == nil {
@@ -109,10 +108,6 @@ func (rp RatePrice) ChargeModelForCell(dimValue string) (ChargeModel, bool) {
 	cell, ok := rp.Matrix.Cells[dimValue]
 	if !ok {
 		return ChargeModel{}, false
-	}
-	minAmt := cell.MinimumAmount
-	if minAmt == 0 {
-		minAmt = rp.MinimumAmount
 	}
 	maxAmt := cell.MaximumAmount
 	if maxAmt == 0 {
@@ -123,7 +118,6 @@ func (rp RatePrice) ChargeModelForCell(dimValue string) (ChargeModel, bool) {
 		UnitAmount:    cell.UnitAmount,
 		DivideBy:      rp.DivideBy,
 		Round:         rp.Round,
-		MinimumAmount: minAmt,
 		MaximumAmount: maxAmt,
 	}, true
 }

@@ -57,14 +57,13 @@ type CatalogMeteredPriceSpec struct {
 }
 
 type CatalogRateCardSpec struct {
-	ProductKey          string              `json:"product_key"`
-	Ordinal             int                 `json:"ordinal"`
-	MeterKey            string              `json:"meter_key,omitempty"`
-	PaymentTerm         string              `json:"payment_term,omitempty"`
-	BillingCadenceHours *int                `json:"billing_cadence_hours,omitempty"`
-	Filter              map[string][]string `json:"filter,omitempty"`
-	Allowance           json.RawMessage     `json:"allowance,omitempty"`
-	Price               json.RawMessage     `json:"price"`
+	ProductKey  string              `json:"product_key"`
+	Ordinal     int                 `json:"ordinal"`
+	MeterKey    string              `json:"meter_key,omitempty"`
+	PaymentTerm string              `json:"payment_term,omitempty"`
+	Filter      map[string][]string `json:"filter,omitempty"`
+	Allowance   json.RawMessage     `json:"allowance,omitempty"`
+	Price       json.RawMessage     `json:"price"`
 }
 
 type CatalogCreditPurchaseSpec struct {
@@ -236,9 +235,9 @@ func syncRateCards(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, rateCar
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, billing_cadence_hours, filter, allowance, price)
-VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7::jsonb, NULLIF($8, '')::jsonb, $9::jsonb)`,
-			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.MeterKey), paymentTerm, spec.BillingCadenceHours,
+    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6::jsonb, NULLIF($7, '')::jsonb, $8::jsonb)`,
+			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.MeterKey), paymentTerm,
 			string(filter), string(spec.Allowance), string(spec.Price)); err != nil {
 			return fmt.Errorf("insert rate card %q #%d: %w", spec.ProductKey, spec.Ordinal, err)
 		}

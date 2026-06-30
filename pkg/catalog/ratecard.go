@@ -140,11 +140,8 @@ func validateRatePrice(where string, rp *RatePrice) error {
 			return fmt.Errorf("%s: currency must be an ISO money currency", where)
 		}
 	}
-	if rp.MinimumAmount < 0 || rp.MaximumAmount < 0 {
-		return fmt.Errorf("%s: minimum_amount/maximum_amount must be >= 0", where)
-	}
-	if rp.MaximumAmount > 0 && rp.MinimumAmount > rp.MaximumAmount {
-		return fmt.Errorf("%s: minimum_amount %d exceeds maximum_amount %d", where, rp.MinimumAmount, rp.MaximumAmount)
+	if rp.MaximumAmount < 0 {
+		return fmt.Errorf("%s: maximum_amount must be >= 0", where)
 	}
 
 	switch rp.Model {
@@ -226,11 +223,8 @@ func validateMatrix(where string, mx *Matrix) error {
 		return fmt.Errorf("%s: matrix requires at least one cell", where)
 	}
 	for key, cell := range mx.Cells {
-		if cell.UnitAmount < 0 || cell.MinimumAmount < 0 || cell.MaximumAmount < 0 || cell.Included < 0 {
+		if cell.UnitAmount < 0 || cell.MaximumAmount < 0 || cell.Included < 0 {
 			return fmt.Errorf("%s: matrix cell %q amounts must be >= 0", where, key)
-		}
-		if cell.MaximumAmount > 0 && cell.MinimumAmount > cell.MaximumAmount {
-			return fmt.Errorf("%s: matrix cell %q minimum exceeds maximum", where, key)
 		}
 	}
 	return nil
@@ -299,13 +293,6 @@ func (m *Manifest) validateRateCardModel() error {
 		for pi := range m.TierGroups[gi].Products {
 			p := &m.TierGroups[gi].Products[pi]
 
-			if p.BillingCadence != "" {
-				if _, err := ParseDurationSpec(p.BillingCadence); err != nil {
-					return fmt.Errorf("product %q billing_cadence: %w", p.Key, err)
-				}
-			}
-
-			hasUsageCard := false
 			for ci := range p.RateCards {
 				rc := &p.RateCards[ci]
 				where := fmt.Sprintf("product %q rate_card #%d", p.Key, ci+1)
@@ -315,7 +302,6 @@ func (m *Manifest) validateRateCardModel() error {
 				if rc.Price.Model == ModelFlat {
 					continue
 				}
-				hasUsageCard = true
 				mt, ok := meters[rc.Meter]
 				if !ok {
 					return fmt.Errorf("%s references unknown meter %q", where, rc.Meter)
@@ -338,9 +324,8 @@ func (m *Manifest) validateRateCardModel() error {
 					}
 				}
 			}
-			if hasUsageCard && p.BillingCadence == "" {
-				return fmt.Errorf("product %q has usage rate cards and must declare billing_cadence", p.Key)
-			}
+			// Usage products need no declared cadence: the cap/allowance window is
+			// the invoice period (calendar-month via the merchant boundary), #642.
 
 			if p.CreditPurchase != nil {
 				if err := validateCreditPurchase(p.Key, p.CreditPurchase); err != nil {

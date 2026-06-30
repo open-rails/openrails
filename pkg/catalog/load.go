@@ -209,7 +209,15 @@ func (m *Manifest) normalizeProducts() error {
 	for _, p := range m.Products {
 		group := normalizeSlug(p.TierGroup)
 		if group == "" {
-			group = "default"
+			// A usage-metered product isn't a tier-exclusive subscription (#642):
+			// give it its own singleton group keyed by product key so it needs no
+			// tier_group and never shares tier exclusivity with a sibling resource.
+			// planProduct persists its tier_group as NULL.
+			if len(p.RateCards) > 0 {
+				group = "usage:" + normalizeSlug(p.Key)
+			} else {
+				group = "default"
+			}
 		}
 		idx, ok := groups[group]
 		if !ok {

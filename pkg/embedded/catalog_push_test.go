@@ -75,8 +75,12 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 	if !ok {
 		t.Fatal("digital-ocean missing droplet product")
 	}
-	if droplet.BillingCadence == "" {
-		t.Error("droplet product missing billing_cadence")
+	// A usage-metered product carries no tier_group and no billing cadence (#642).
+	if droplet.TierGroup != "" {
+		t.Errorf("droplet usage product should carry no tier_group, got %q", droplet.TierGroup)
+	}
+	if len(droplet.RateCards) == 0 {
+		t.Error("droplet product missing rate cards")
 	}
 	var dropletPrice *catalog.RatePrice
 	for i := range droplet.RateCards {

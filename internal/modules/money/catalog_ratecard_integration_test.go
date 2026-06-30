@@ -46,15 +46,15 @@ VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', 'second', '{"size_slug":"meta
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, billing_cadence_hours, price)
+    (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES
-    ($1, $2, 1, $4, 'in_arrears', 730, '{
+    ($1, $2, 1, $4, 'in_arrears', '{
       "model":"per_unit",
       "currency":"USD",
       "divide_by":3600,
       "matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1}}}
     }'::jsonb),
-    ($1, $3, 1, $5, 'in_arrears', 730, '{
+    ($1, $3, 1, $5, 'in_arrears', '{
       "model":"per_unit",
       "currency":"USD",
       "unit_amount":10000,
@@ -66,7 +66,6 @@ VALUES
 UPDATE openrails.catalog_rate_cards
 SET allowance = jsonb_build_object(
 	'accrue_from', $3::text,
-	'included_per_cycle', 'size_slug.included',
 	'cap', '28d',
 	'pool', 'customer'
 )
@@ -216,8 +215,8 @@ INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_proper
 VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', '{"size_slug":"metadata.size_slug","resource_id":"metadata.resource_id"}'::jsonb)`, merchantID, meterKey)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, billing_cadence_hours, price)
-VALUES ($1, $2, 1, $3, 'in_arrears', 730, '{
+INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+VALUES ($1, $2, 1, $3, 'in_arrears', '{
   "model":"per_unit","currency":"USD","divide_by":3600,
   "matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1000}}}
 }'::jsonb)`, merchantID, productID, meterKey)

@@ -58,18 +58,19 @@ func TestRate_PerUnitRoundingModes(t *testing.T) {
 	}
 }
 
-func TestRate_Commitments(t *testing.T) {
-	// $0.01/60s minimum charge floor.
-	floor := ChargeModel{Kind: ModelPerUnit, UnitAmount: 5_950, DivideBy: 3_600, MinimumAmount: 10_000}
-	got, _ := floor.Rate(30) // 30s -> ~49 micros, floored to 10_000
-	if got != 10_000 {
-		t.Fatalf("minimum floor = %d, want 10000", got)
-	}
-	// Monthly cap: a droplet running far past 672h still bills only the cap.
+func TestRate_Cap(t *testing.T) {
+	// Monthly cap: a droplet running far past 672h still bills only the cap. There
+	// is no per-line floor — sub-cent lines are intentional (#642); minimums live
+	// at the account level (minimum_spend, #643).
 	cap := ChargeModel{Kind: ModelPerUnit, UnitAmount: 5_950, DivideBy: 3_600, MaximumAmount: 4_000_000}
-	got, _ = cap.Rate(3_000 * 3_600) // 3000 hours
+	got, _ := cap.Rate(3_000 * 3_600) // 3000 hours
 	if got != 4_000_000 {
 		t.Fatalf("monthly cap = %d, want 4000000", got)
+	}
+	// Below a cent, a tiny window bills its true pro-rated cost (no floor).
+	small := ChargeModel{Kind: ModelPerUnit, UnitAmount: 5_950, DivideBy: 3_600, Round: RoundUp}
+	if got, _ := small.Rate(30); got != 50 { // 30s * 5950/3600 = 49.58 -> 50
+		t.Fatalf("sub-cent line = %d, want 50 (no floor)", got)
 	}
 }
 

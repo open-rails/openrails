@@ -355,10 +355,8 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 		}},
 		Products: []catalog.Product{
 			{
-				Key:            dropletKey,
-				DisplayName:    "Droplet",
-				TierGroup:      "droplets-" + suffix,
-				BillingCadence: "30d",
+				Key:         dropletKey,
+				DisplayName: "Droplet", // usage-metered: no tier_group, no billing cadence (#642)
 				RateCards: []catalog.RateCard{{
 					Meter: meterKey,
 					Price: catalog.RatePrice{

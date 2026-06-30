@@ -47,11 +47,10 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			GroupBy:       map[string]string{"size_slug": "metadata.size_slug"},
 		}},
 		RateCards: []CatalogRateCardSpec{{
-			ProductKey:          productKey,
-			Ordinal:             1,
-			MeterKey:            meterKey,
-			PaymentTerm:         "in_arrears",
-			BillingCadenceHours: intPtrSidecar(730),
+			ProductKey:  productKey,
+			Ordinal:     1,
+			MeterKey:    meterKey,
+			PaymentTerm: "in_arrears",
 			Price: json.RawMessage(`{
 				"model":"per_unit",
 				"currency":"USD",
@@ -88,5 +87,3 @@ WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 	require.Equal(t, "USD", priceCurrency)
 	require.Equal(t, "image-credit", creditUnit)
 }
-
-func intPtrSidecar(v int) *int { return &v }

@@ -80,12 +80,13 @@ type Product struct {
 
 	Prices []Price `json:"prices,omitempty" yaml:"prices,omitempty"`
 
-	// Rate-card model (#638): metered usage / flat-fee rate cards, a variable
-	// credit top-up (#639/#640), and the billing period for usage-only products
-	// (where no `prices[].duration` declares one).
+	// Rate-card model (#638): metered usage / flat-fee rate cards and a variable
+	// credit top-up (#639/#640). A usage product declares no billing cadence — its
+	// cap/allowance window is the invoice period (calendar-month via the merchant
+	// invoice boundary), so collection cadence is a billing-policy concern (#643),
+	// not catalog (#642).
 	RateCards      []RateCard      `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
 	CreditPurchase *CreditPurchase `json:"credit_purchase,omitempty" yaml:"credit_purchase,omitempty"`
-	BillingCadence string          `json:"billing_cadence,omitempty" yaml:"billing_cadence,omitempty"`
 }
 
 type Credits map[string]CreditGrant
