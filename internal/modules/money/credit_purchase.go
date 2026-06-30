@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -15,6 +16,8 @@ import (
 
 type CatalogCreditPurchaseQuoteInput struct {
 	ProductKey  string
+	Currency    string
+	Provider    string
 	SpendMicros int64
 	Credits     int64
 }
@@ -57,7 +60,7 @@ func (s *MoneyService) QuoteCatalogCreditPurchase(ctx context.Context, input Cat
 	if (input.SpendMicros == 0) == (input.Credits == 0) {
 		return nil, fmt.Errorf("provide exactly one of spend or credits")
 	}
-	row, err := s.loadCatalogCreditPurchase(ctx, productKey)
+	row, err := s.loadCatalogCreditPurchase(ctx, productKey, input.Currency, input.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -143,26 +146,50 @@ func (s *MoneyService) DepositCatalogCreditPurchase(ctx context.Context, payer i
 	return quote, trx, nil
 }
 
-func (s *MoneyService) loadCatalogCreditPurchase(ctx context.Context, productKey string) (catalogCreditPurchaseRow, error) {
+func (s *MoneyService) loadCatalogCreditPurchase(ctx context.Context, productKey, currency, provider string) (catalogCreditPurchaseRow, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return catalogCreditPurchaseRow{}, err
 	}
+	currency = strings.ToLower(strings.TrimSpace(currency))
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	var row catalogCreditPurchaseRow
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var priceJSON []byte
-		err := s.db.Pool().QueryRow(ctx, `
-SELECT p.key, ccp.credit_type, ccp.unit, ccp.currency, ccp.expires_hours, ccp.input_min, ccp.input_max, ccp.price
-FROM openrails.catalog_credit_purchases ccp
+		rows, err := s.db.Pool().Query(ctx, `
+SELECT p.key, cpp.credit_key, cb.unit, cpp.currency, cb.expires_hours, cpp.input_min, cpp.input_max, cpp.price
+FROM openrails.catalog_credit_purchase_prices cpp
 JOIN openrails.products p
-  ON p.id = ccp.product_id AND p.merchant_id = ccp.merchant_id
-WHERE ccp.merchant_id = $1 AND p.key = $2`, tid.UUID(), productKey).
-			Scan(&row.ProductKey, &row.CreditType, &row.Unit, &row.Currency, &row.ExpiresHours, &row.InputMin, &row.InputMax, &priceJSON)
+  ON p.id = cpp.product_id AND p.merchant_id = cpp.merchant_id
+JOIN openrails.catalog_credit_balances cb
+  ON cb.merchant_id = cpp.merchant_id AND cb.key = cpp.credit_key
+WHERE cpp.merchant_id = $1
+  AND p.key = $2
+  AND ($3 = '' OR lower(cpp.currency) = lower($3))
+  AND ($4 = '' OR $4 = ANY(cpp.providers))
+ORDER BY cpp.ordinal`, tid.UUID(), productKey, currency, provider)
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(priceJSON, &row.Price); err != nil {
-			return fmt.Errorf("decode credit_purchase %q price: %w", productKey, err)
+		defer rows.Close()
+		count := 0
+		for rows.Next() {
+			var priceJSON []byte
+			if err := rows.Scan(&row.ProductKey, &row.CreditType, &row.Unit, &row.Currency, &row.ExpiresHours, &row.InputMin, &row.InputMax, &priceJSON); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(priceJSON, &row.Price); err != nil {
+				return fmt.Errorf("decode credit_purchase %q price: %w", productKey, err)
+			}
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if count == 0 {
+			return pgx.ErrNoRows
+		}
+		if count > 1 {
+			return fmt.Errorf("credit purchase %q has multiple matching offers; specify currency/provider", productKey)
 		}
 		return nil
 	})
@@ -217,12 +244,12 @@ func baseCreditQuantity(paid int64, price pricing.RatePrice) (int64, error) {
 	switch price.Model {
 	case pricing.ModelPerUnit:
 	case pricing.ModelTiered:
-		if len(price.Tiers) == 0 {
+		if price.Tiered == nil || len(price.Tiered.Tiers) == 0 {
 			return 0, fmt.Errorf("tiered credit purchase requires tiers")
 		}
 		base = pricing.ChargeModel{
 			Kind:       pricing.ModelPerUnit,
-			UnitAmount: price.Tiers[0].UnitAmount,
+			UnitAmount: price.Tiered.Tiers[0].UnitAmount,
 			Round:      pricing.RoundDown,
 		}
 	default:

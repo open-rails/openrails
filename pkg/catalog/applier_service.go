@@ -32,6 +32,17 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 		UsageLimits: make([]billingservice.CatalogUsageLimitSpec, 0, len(m.UsageLimits)),
 		Meters:      make([]billingservice.CatalogMeterSpec, 0, len(m.Meters)),
 	}
+	for _, balance := range m.CreditBalances {
+		expiresHours, err := creditBalanceExpiresHours(balance)
+		if err != nil {
+			return err
+		}
+		req.CreditBalances = append(req.CreditBalances, billingservice.CatalogCreditBalanceSpec{
+			Key:          balance.Key,
+			Unit:         balance.Unit,
+			ExpiresHours: expiresHours,
+		})
+	}
 	for _, limit := range m.UsageLimits {
 		windows := make([]billingservice.CatalogUsageLimitWindowSpec, 0, len(limit.Windows))
 		for _, window := range limit.Windows {
@@ -93,32 +104,26 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 					Price:       priceJSON,
 				})
 			}
-			if product.CreditPurchase != nil {
-				cp := product.CreditPurchase
-				priceJSON, err := json.Marshal(cp.Price)
-				if err != nil {
-					return fmt.Errorf("product %q credit_purchase price: %w", product.Key, err)
+			if product.isCreditTopUp() {
+				creditKey := product.Credits[0].Key
+				for i, price := range product.Prices {
+					rp := price.ratePrice()
+					priceJSON, err := json.Marshal(rp)
+					if err != nil {
+						return fmt.Errorf("product %q top-up price #%d: %w", product.Key, i+1, err)
+					}
+					req.CreditPurchases = append(req.CreditPurchases, billingservice.CatalogCreditPurchasePriceSpec{
+						ProductKey: product.Key,
+						Ordinal:    i + 1,
+						CreditKey:  creditKey,
+						Currency:   price.Currency,
+						Providers:  append([]string(nil), price.Providers...),
+						InputMin:   price.InputMin,
+						InputMax:   price.InputMax,
+						Round:      price.Round,
+						Price:      priceJSON,
+					})
 				}
-				expiresHours, err := creditPurchaseExpiresHours(product.Key, cp)
-				if err != nil {
-					return err
-				}
-				unit := cp.Unit
-				if unit == "" {
-					unit = cp.CreditType
-				}
-				req.CreditPurchases = append(req.CreditPurchases, billingservice.CatalogCreditPurchaseSpec{
-					ProductKey:   product.Key,
-					CreditType:   cp.CreditType,
-					Unit:         unit,
-					Currency:     cp.Currency,
-					ExpiresHours: expiresHours,
-					Providers:    append([]string(nil), cp.Providers...),
-					InputMin:     cp.InputMin,
-					InputMax:     cp.InputMax,
-					Round:        cp.Round,
-					Price:        priceJSON,
-				})
 			}
 			for _, price := range product.Prices {
 				if price.Metered == nil {
@@ -155,13 +160,13 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 
 var _ Applier = serviceApplier{}
 
-func creditPurchaseExpiresHours(productKey string, cp *CreditPurchase) (*int, error) {
-	if cp.Expires == "" {
+func creditBalanceExpiresHours(balance CreditBalance) (*int, error) {
+	if balance.ExpiresDefault == "" {
 		return nil, nil
 	}
-	hours, err := durationSpecHours(cp.Expires)
+	hours, err := durationSpecHours(balance.ExpiresDefault)
 	if err != nil {
-		return nil, fmt.Errorf("product %q credit_purchase expires: %w", productKey, err)
+		return nil, fmt.Errorf("credit balance %q expires_default: %w", balance.Key, err)
 	}
 	return &hours, nil
 }

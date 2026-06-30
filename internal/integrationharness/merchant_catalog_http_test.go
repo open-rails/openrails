@@ -339,7 +339,8 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 	mid := dbtest.TestMerchantID.UUID()
 	t.Cleanup(func() {
 		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", mid, meterKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, topupKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, topupKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", mid, "image-credit")
 		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", mid, meterKey)
 		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey, topupKey})
 	})
@@ -353,6 +354,7 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 			Aggregation:   "sum",
 			GroupBy:       map[string]string{"size_slug": "$.size_slug"},
 		}},
+		CreditBalances: []catalog.CreditBalance{{Key: "image-credit", Unit: "image-credit"}},
 		Products: []catalog.Product{
 			{
 				Key:         dropletKey,
@@ -360,24 +362,28 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 				RateCards: []catalog.RateCard{{
 					Meter: meterKey,
 					Price: catalog.RatePrice{
-						Model: "per_unit", Currency: "usd", DivideBy: 3600,
-						Matrix: &catalog.Matrix{Dimension: "size_slug", Cells: map[string]catalog.MatrixCell{
-							"s-1vcpu-1gb": {UnitAmount: 8930, MaximumAmount: 6_000_000},
-						}},
+						Model: "per_unit", Currency: "usd",
+						PerUnit: &catalog.PerUnitPrice{
+							DivideBy: 3600,
+							Matrix: &catalog.Matrix{Dimension: "size_slug", Cells: map[string]catalog.MatrixCell{
+								"s-1vcpu-1gb": {UnitAmount: 8930, MaximumAmount: 6_000_000},
+							}},
+						},
 					},
 				}},
 			},
 			{
 				Key:         topupKey,
 				DisplayName: "Image Credit Top-up",
-				TierGroup:   "topups-" + suffix,
-				CreditPurchase: &catalog.CreditPurchase{
-					CreditType: "image-credit", Unit: "image-credit", Currency: "usd",
-					Price: catalog.RatePrice{Model: "tiered", Mode: "graduated", Tiers: []catalog.RateTier{
+				Credits:     []catalog.CreditGrant{{Key: "image-credit"}},
+				Prices: []catalog.Price{{
+					Currency: "usd",
+					Model:    "tiered",
+					Tiered: &catalog.TieredPrice{Mode: "graduated", Tiers: []catalog.RateTier{
 						{UpTo: ptrI64(2000), UnitAmount: 10000},
 						{UnitAmount: 7500},
 					}},
-				},
+				}},
 			},
 		},
 	}
@@ -401,9 +407,9 @@ WHERE p.merchant_id = $1 AND p.key = $2`, mid, dropletKey).Scan(&model, &rcMeter
 	// The credit-purchase sidecar persisted.
 	var creditType string
 	require.NoError(t, h.Pool().QueryRow(ctx, `
-SELECT ccp.credit_type
-FROM openrails.catalog_credit_purchases ccp
-JOIN openrails.products p ON p.id = ccp.product_id
+SELECT cpp.credit_key
+FROM openrails.catalog_credit_purchase_prices cpp
+JOIN openrails.products p ON p.id = cpp.product_id
 WHERE p.merchant_id = $1 AND p.key = $2`, mid, topupKey).Scan(&creditType))
 	require.Equal(t, "image-credit", creditType)
 
@@ -430,15 +436,14 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 
 	productKey := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
+		Version:        catalog.SupportedVersion,
+		CreditBalances: []catalog.CreditBalance{{Key: "native-lifecycle-usd", Unit: "usd"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  "Native Lifecycle Product",
 			Description:  "published catalog anchor for native lifecycle proof",
 			Entitlements: []string{"native-lifecycle-premium"},
-			Credits: catalog.Credits{
-				"native-lifecycle-usd": {Currency: "usd", Amount: 10_000},
-			},
+			Credits:      []catalog.CreditGrant{{Key: "native-lifecycle-usd", Currency: "usd", Amount: ptrI64(10_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: 10_000,
 				Currency:   "usd",
@@ -806,9 +811,6 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	tierGroup := "saas-" + suffix
 	premiumGroup := "premium-" + suffix
-	aiGroup := "ai-credits-" + suffix
-	apiGroup := "api-credits-" + suffix
-	movieGroup := "movies-" + suffix
 	premiumKey := "premium-" + suffix
 	basicKey := "basic-" + suffix
 	proKey := "pro-" + suffix
@@ -822,6 +824,10 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
+		CreditBalances: []catalog.CreditBalance{
+			{Key: "ai-image-gen", Unit: aiUnit},
+			{Key: "fal-api", Unit: apiUnit},
+		},
 		Products: []catalog.Product{
 			{
 				Key:          premiumKey,
@@ -863,25 +869,18 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 			{
 				Key:         aiSlug,
 				DisplayName: "AI Image Credits",
-				TierGroup:   aiGroup,
-				Credits: catalog.Credits{
-					"ai-image-gen": {Unit: aiUnit, Amount: 100},
-				},
-				Prices: []catalog.Price{{UnitAmount: 5_000_000, Currency: "usd", Duration: "indefinite"}},
+				Credits:     []catalog.CreditGrant{{Key: "ai-image-gen", Unit: aiUnit, Amount: ptrI64(100)}},
+				Prices:      []catalog.Price{{UnitAmount: 5_000_000, Currency: "usd", Duration: "indefinite"}},
 			},
 			{
 				Key:         apiSlug,
 				DisplayName: "fal.ai API Credits",
-				TierGroup:   apiGroup,
-				Credits: catalog.Credits{
-					"fal-api": {Unit: apiUnit, Amount: 2_000},
-				},
-				Prices: []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Duration: "indefinite"}},
+				Credits:     []catalog.CreditGrant{{Key: "fal-api", Unit: apiUnit, Amount: ptrI64(2_000)}},
+				Prices:      []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Duration: "indefinite"}},
 			},
 			{
 				Key:         movieKey,
 				DisplayName: "Catalog Movie",
-				TierGroup:   movieGroup,
 				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "usd", Duration: "indefinite"}},
 			},
 		},

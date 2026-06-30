@@ -15,19 +15,23 @@ import (
 // catalog API stable.
 //
 // Naming follows OpenMeter's catalog vocabulary (value_property, group_by,
-// mode: volume|graduated, minimum/maximum_amount, payment_term, dynamic
-// multiplier) with Stripe's transform_quantity divisor (divide_by/round, which
+// mode: volume|graduated, maximum_amount, payment_term) with Stripe's
+// transform_quantity divisor (divide_by/round, which
 // integer-micros needs and OpenMeter/Lago lack) and Orb's matrix for per-SKU
 // pricing. See #638's Research Appendix.
 
 type (
-	RatePrice   = pricing.RatePrice
-	RateTier    = pricing.RateTier
-	Matrix      = pricing.Matrix
-	MatrixCell  = pricing.MatrixCell
-	Allowance   = pricing.Allowance
-	ChargeModel = pricing.ChargeModel
-	ChargeTier  = pricing.ChargeTier
+	RatePrice    = pricing.RatePrice
+	FlatPrice    = pricing.FlatPrice
+	PerUnitPrice = pricing.PerUnitPrice
+	TieredPrice  = pricing.TieredPrice
+	PackagePrice = pricing.PackagePrice
+	RateTier     = pricing.RateTier
+	Matrix       = pricing.Matrix
+	MatrixCell   = pricing.MatrixCell
+	Allowance    = pricing.Allowance
+	ChargeModel  = pricing.ChargeModel
+	ChargeTier   = pricing.ChargeTier
 )
 
 const (
@@ -35,7 +39,6 @@ const (
 	ModelPerUnit = pricing.ModelPerUnit
 	ModelTiered  = pricing.ModelTiered
 	ModelPackage = pricing.ModelPackage
-	ModelDynamic = pricing.ModelDynamic
 
 	TierModeVolume    = pricing.TierModeVolume
 	TierModeGraduated = pricing.TierModeGraduated
@@ -87,23 +90,6 @@ type RateCard struct {
 	Price       RatePrice  `json:"price" yaml:"price"`
 }
 
-// CreditPurchase is a variable prepaid credit top-up (#639/#640): the customer
-// buys an arbitrary quantity priced by a per_unit or graduated tiered model and
-// the credits deposit into a balance. Quoted both directions via the pricing
-// engine (Rate for credits->spend, QuoteUnitsForSpend for spend->credits), so the
-// price MUST be monotonic — graduated, never volume (#640).
-type CreditPurchase struct {
-	CreditType string    `json:"credit_type" yaml:"credit_type"`
-	Unit       string    `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Currency   string    `json:"currency" yaml:"currency"`
-	Expires    string    `json:"expires,omitempty" yaml:"expires,omitempty"`
-	Providers  []string  `json:"providers,omitempty" yaml:"providers,omitempty"`
-	InputMin   int64     `json:"input_min,omitempty" yaml:"input_min,omitempty"`
-	InputMax   int64     `json:"input_max,omitempty" yaml:"input_max,omitempty"`
-	Round      string    `json:"round,omitempty" yaml:"round,omitempty"`
-	Price      RatePrice `json:"price" yaml:"price"`
-}
-
 // RateUsage rates `quantity` metered units against this rate card, selecting the
 // matrix cell for dimValue when the price is a matrix (else the base price). This
 // is the seam the runtime rater calls once it has loaded a rate card and the
@@ -112,10 +98,10 @@ type CreditPurchase struct {
 // accrued allowances) is applied UPSTREAM by the rating engine — see #638's
 // allowance/divisor unit note — not here, so this stays a pure quantity->cost map.
 func (rc RateCard) RateUsage(dimValue string, quantity int64) (int64, error) {
-	if rc.Price.Matrix != nil {
+	if rc.Price.PerUnit != nil && rc.Price.PerUnit.Matrix != nil {
 		cm, ok := rc.Price.ChargeModelForCell(dimValue)
 		if !ok {
-			return 0, fmt.Errorf("meter %q rate card has no matrix cell for %q=%q", rc.Meter, rc.Price.Matrix.Dimension, dimValue)
+			return 0, fmt.Errorf("meter %q rate card has no matrix cell for %q=%q", rc.Meter, rc.Price.PerUnit.Matrix.Dimension, dimValue)
 		}
 		return cm.Rate(quantity)
 	}
@@ -130,60 +116,85 @@ var validRoundModes = map[string]struct{}{
 // human label for error messages (e.g. `product "droplet" rate_card #1`).
 func validateRatePrice(where string, rp *RatePrice) error {
 	rp.Model = strings.ToLower(strings.TrimSpace(rp.Model))
-	rp.Round = strings.ToLower(strings.TrimSpace(rp.Round))
-	if _, ok := validRoundModes[rp.Round]; !ok {
-		return fmt.Errorf("%s: round must be up, down or half_up, got %q", where, rp.Round)
-	}
 	if rp.Currency != "" {
 		rp.Currency = normalizeCurrency(rp.Currency)
 		if !validPriceCurrency(rp.Currency) {
 			return fmt.Errorf("%s: currency must be an ISO money currency", where)
 		}
 	}
-	if rp.MaximumAmount < 0 {
-		return fmt.Errorf("%s: maximum_amount must be >= 0", where)
+	blocks := 0
+	if rp.Flat != nil {
+		blocks++
+	}
+	if rp.PerUnit != nil {
+		blocks++
+	}
+	if rp.Tiered != nil {
+		blocks++
+	}
+	if rp.Package != nil {
+		blocks++
+	}
+	if blocks != 1 {
+		return fmt.Errorf("%s: price model requires exactly one matching sub-block", where)
 	}
 
 	switch rp.Model {
 	case ModelFlat:
-		if rp.Amount <= 0 {
+		if rp.Flat == nil {
+			return fmt.Errorf("%s: model flat requires flat block", where)
+		}
+		if rp.Flat.Amount <= 0 {
 			return fmt.Errorf("%s: flat price requires a positive amount", where)
 		}
 	case ModelPerUnit:
-		if rp.Matrix == nil && rp.UnitAmount < 0 {
+		if rp.PerUnit == nil {
+			return fmt.Errorf("%s: model per_unit requires per_unit block", where)
+		}
+		rp.PerUnit.Round = strings.ToLower(strings.TrimSpace(rp.PerUnit.Round))
+		if _, ok := validRoundModes[rp.PerUnit.Round]; !ok {
+			return fmt.Errorf("%s: round must be up, down or half_up, got %q", where, rp.PerUnit.Round)
+		}
+		if rp.PerUnit.MaximumAmount < 0 {
+			return fmt.Errorf("%s: maximum_amount must be >= 0", where)
+		}
+		if rp.PerUnit.Matrix == nil && rp.PerUnit.UnitAmount < 0 {
 			return fmt.Errorf("%s: per_unit unit_amount must be >= 0", where)
 		}
-		if rp.DivideBy < 0 {
+		if rp.PerUnit.DivideBy < 0 {
 			return fmt.Errorf("%s: divide_by must be >= 0", where)
 		}
-		if rp.Matrix != nil {
-			if err := validateMatrix(where, rp.Matrix); err != nil {
+		if rp.PerUnit.Matrix != nil {
+			if err := validateMatrix(where, rp.PerUnit.Matrix); err != nil {
 				return err
 			}
 		}
 	case ModelTiered:
-		if rp.Mode != TierModeVolume && rp.Mode != TierModeGraduated {
-			return fmt.Errorf("%s: tiered mode must be %q or %q, got %q", where, TierModeVolume, TierModeGraduated, rp.Mode)
+		if rp.Tiered == nil {
+			return fmt.Errorf("%s: model tiered requires tiered block", where)
 		}
-		if err := validateTiers(where, rp.Tiers); err != nil {
+		rp.Tiered.Mode = strings.ToLower(strings.TrimSpace(rp.Tiered.Mode))
+		if rp.Tiered.Mode != TierModeVolume && rp.Tiered.Mode != TierModeGraduated {
+			return fmt.Errorf("%s: tiered mode must be %q or %q, got %q", where, TierModeVolume, TierModeGraduated, rp.Tiered.Mode)
+		}
+		if err := validateTiers(where, rp.Tiered.Tiers); err != nil {
 			return err
 		}
 	case ModelPackage:
-		if rp.PackageSize <= 0 {
+		if rp.Package == nil {
+			return fmt.Errorf("%s: model package requires package block", where)
+		}
+		if rp.Package.PackageSize <= 0 {
 			return fmt.Errorf("%s: package_size must be > 0", where)
 		}
-		if rp.Amount <= 0 {
+		if rp.Package.Amount <= 0 {
 			return fmt.Errorf("%s: package amount must be > 0", where)
 		}
-		if rp.FreeUnits < 0 {
+		if rp.Package.FreeUnits < 0 {
 			return fmt.Errorf("%s: free_units must be >= 0", where)
 		}
-	case ModelDynamic:
-		if rp.Multiplier <= 0 {
-			return fmt.Errorf("%s: dynamic multiplier must be > 0 (1_000_000 == passthrough)", where)
-		}
 	default:
-		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package/dynamic, got %q", where, rp.Model)
+		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package, got %q", where, rp.Model)
 	}
 	return nil
 }
@@ -310,8 +321,8 @@ func (m *Manifest) validateRateCardModel() error {
 					return fmt.Errorf("%s: meter %q is already rated by %s; one meter per usage rate card", where, rc.Meter, prev)
 				}
 				usedMeters[rc.Meter] = where
-				if rc.Price.Matrix != nil {
-					if err := validateMatrixDimension(where, rc.Price.Matrix, mt); err != nil {
+				if rc.Price.PerUnit != nil && rc.Price.PerUnit.Matrix != nil {
+					if err := validateMatrixDimension(where, rc.Price.PerUnit.Matrix, mt); err != nil {
 						return err
 					}
 				}
@@ -326,12 +337,6 @@ func (m *Manifest) validateRateCardModel() error {
 			}
 			// Usage products need no declared cadence: the cap/allowance window is
 			// the invoice period (calendar-month via the merchant boundary), #642.
-
-			if p.CreditPurchase != nil {
-				if err := validateCreditPurchase(p.Key, p.CreditPurchase); err != nil {
-					return err
-				}
-			}
 		}
 	}
 	return nil
@@ -355,54 +360,6 @@ func validateFilterKeys(where string, filter map[string][]string, mt Meter) erro
 		if _, ok := mt.GroupBy[k]; !ok {
 			return fmt.Errorf("%s filter key %q is not a group_by key of meter %q", where, k, mt.Key)
 		}
-	}
-	return nil
-}
-
-// validateCreditPurchase validates a variable credit top-up. The price must be a
-// monotonic model (per_unit or graduated tiered) so the spend<->credits quote is
-// invertible (#640); volume/package/flat/dynamic are rejected.
-func validateCreditPurchase(productKey string, cp *CreditPurchase) error {
-	where := fmt.Sprintf("product %q credit_purchase", productKey)
-	cp.CreditType = normalizeSlug(cp.CreditType)
-	if cp.CreditType == "" {
-		return fmt.Errorf("%s: credit_type is required", where)
-	}
-	cp.Currency = normalizeCurrency(cp.Currency)
-	if !validPriceCurrency(cp.Currency) {
-		return fmt.Errorf("%s: currency must be an ISO money currency", where)
-	}
-	if cp.Unit != "" {
-		if unit := strings.ToLower(strings.TrimSpace(cp.Unit)); !validCreditUnit(unit) {
-			return fmt.Errorf("%s: invalid unit %q", where, cp.Unit)
-		}
-	}
-	if cp.Expires != "" {
-		if _, err := ParseDurationSpec(cp.Expires); err != nil {
-			return fmt.Errorf("%s: expires: %w", where, err)
-		}
-	}
-	if cp.InputMin < 0 || cp.InputMax < 0 {
-		return fmt.Errorf("%s: input_min/input_max must be >= 0", where)
-	}
-	if cp.InputMax > 0 && cp.InputMin > cp.InputMax {
-		return fmt.Errorf("%s: input_min %d exceeds input_max %d", where, cp.InputMin, cp.InputMax)
-	}
-	cp.Providers = normalizeProviders(cp.Providers)
-	if err := validateRatePrice(where, &cp.Price); err != nil {
-		return err
-	}
-	switch cp.Price.Model {
-	case ModelPerUnit:
-		if cp.Price.Matrix != nil {
-			return fmt.Errorf("%s: matrix pricing is not supported for credit purchases", where)
-		}
-	case ModelTiered:
-		if cp.Price.Mode != TierModeGraduated {
-			return fmt.Errorf("%s: credit_purchase tiered price must use graduated mode (volume is not invertible, see #640)", where)
-		}
-	default:
-		return fmt.Errorf("%s: price model must be per_unit or graduated tiered, got %q", where, cp.Price.Model)
 	}
 	return nil
 }

@@ -18,43 +18,45 @@ type Allowance struct {
 	Cap        string `json:"cap,omitempty" yaml:"cap,omitempty"`
 }
 
-// RatePrice is the YAML/JSON form of a charge model. ToChargeModel normalizes it
-// into the ChargeModel that Rate/QuoteUnitsForSpend evaluate.
+// RatePrice is the YAML/JSON form of a charge model. Model selects exactly one
+// typed block; ToChargeModel normalizes it into the evaluator shape.
 type RatePrice struct {
 	Model    string `json:"model" yaml:"model"`
 	Currency string `json:"currency,omitempty" yaml:"currency,omitempty"`
 
-	// flat / package headline price.
-	Amount    int64    `json:"amount,omitempty" yaml:"amount,omitempty"`
-	Per       string   `json:"per,omitempty" yaml:"per,omitempty"`
-	AutoRenew bool     `json:"auto_renew,omitempty" yaml:"auto_renew,omitempty"`
-	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
+	Flat    *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
+	PerUnit *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
+	Tiered  *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
+	Package *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
+}
 
-	// per_unit: cost = round(quantity * unit_amount / divide_by).
+type FlatPrice struct {
+	Amount int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+}
+
+type PerUnitPrice struct {
 	UnitAmount int64  `json:"unit_amount,omitempty" yaml:"unit_amount,omitempty"`
 	DivideBy   int64  `json:"divide_by,omitempty" yaml:"divide_by,omitempty"`
 	Round      string `json:"round,omitempty" yaml:"round,omitempty"`
 
-	// tiered.
-	Mode  string     `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Tiers []RateTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
-
-	// package.
-	PackageSize int64 `json:"package_size,omitempty" yaml:"package_size,omitempty"`
-	FreeUnits   int64 `json:"free_units,omitempty" yaml:"free_units,omitempty"`
-
-	// dynamic: micros-per-micro markup over a reported cost (1_000_000 == 1.0x).
-	Multiplier int64 `json:"multiplier,omitempty" yaml:"multiplier,omitempty"`
-
 	// maximum_amount — per-period cap on the computed cost (0 = uncapped). A real
 	// per-SKU pricing fact: DO caps a resource at its advertised monthly price.
-	// There is deliberately no per-line minimum/floor — minimums are an
-	// account-level commitment (minimum_spend, #643), not a pricing field (#642).
 	MaximumAmount int64 `json:"maximum_amount,omitempty" yaml:"maximum_amount,omitempty"`
 
 	// matrix — unit_amount (and optional per-cell cap/included) vary by
 	// one meter group_by dimension (Orb matrix). Only valid with model: per_unit.
 	Matrix *Matrix `json:"matrix,omitempty" yaml:"matrix,omitempty"`
+}
+
+type TieredPrice struct {
+	Mode  string     `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Tiers []RateTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
+}
+
+type PackagePrice struct {
+	Amount      int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+	PackageSize int64 `json:"package_size,omitempty" yaml:"package_size,omitempty"`
+	FreeUnits   int64 `json:"free_units,omitempty" yaml:"free_units,omitempty"`
 }
 
 type RateTier struct {
@@ -79,20 +81,27 @@ type MatrixCell struct {
 // relevant to Model is read by Rate. For matrix prices use ChargeModelForCell.
 func (rp RatePrice) ToChargeModel() ChargeModel {
 	cm := ChargeModel{
-		Kind:          rp.Model,
-		UnitAmount:    rp.UnitAmount,
-		DivideBy:      rp.DivideBy,
-		Round:         rp.Round,
-		FlatAmount:    rp.Amount,
-		Mode:          rp.Mode,
-		PackageSize:   rp.PackageSize,
-		PackageAmount: rp.Amount,
-		FreeUnits:     rp.FreeUnits,
-		Multiplier:    rp.Multiplier,
-		MaximumAmount: rp.MaximumAmount,
+		Kind: rp.Model,
 	}
-	for _, t := range rp.Tiers {
-		cm.Tiers = append(cm.Tiers, ChargeTier{UpTo: t.UpTo, UnitAmount: t.UnitAmount, FlatAmount: t.FlatAmount})
+	if rp.Flat != nil {
+		cm.FlatAmount = rp.Flat.Amount
+	}
+	if rp.PerUnit != nil {
+		cm.UnitAmount = rp.PerUnit.UnitAmount
+		cm.DivideBy = rp.PerUnit.DivideBy
+		cm.Round = rp.PerUnit.Round
+		cm.MaximumAmount = rp.PerUnit.MaximumAmount
+	}
+	if rp.Tiered != nil {
+		cm.Mode = rp.Tiered.Mode
+		for _, t := range rp.Tiered.Tiers {
+			cm.Tiers = append(cm.Tiers, ChargeTier{UpTo: t.UpTo, UnitAmount: t.UnitAmount, FlatAmount: t.FlatAmount})
+		}
+	}
+	if rp.Package != nil {
+		cm.PackageSize = rp.Package.PackageSize
+		cm.PackageAmount = rp.Package.Amount
+		cm.FreeUnits = rp.Package.FreeUnits
 	}
 	return cm
 }
@@ -102,22 +111,22 @@ func (rp RatePrice) ToChargeModel() ChargeModel {
 // per-cell cap (falling back to the price-level cap). Returns false if the
 // price is not a matrix or the dimension value has no cell.
 func (rp RatePrice) ChargeModelForCell(dimValue string) (ChargeModel, bool) {
-	if rp.Matrix == nil {
+	if rp.PerUnit == nil || rp.PerUnit.Matrix == nil {
 		return ChargeModel{}, false
 	}
-	cell, ok := rp.Matrix.Cells[dimValue]
+	cell, ok := rp.PerUnit.Matrix.Cells[dimValue]
 	if !ok {
 		return ChargeModel{}, false
 	}
 	maxAmt := cell.MaximumAmount
 	if maxAmt == 0 {
-		maxAmt = rp.MaximumAmount
+		maxAmt = rp.PerUnit.MaximumAmount
 	}
 	return ChargeModel{
 		Kind:          ModelPerUnit,
 		UnitAmount:    cell.UnitAmount,
-		DivideBy:      rp.DivideBy,
-		Round:         rp.Round,
+		DivideBy:      rp.PerUnit.DivideBy,
+		Round:         rp.PerUnit.Round,
 		MaximumAmount: maxAmt,
 	}, true
 }

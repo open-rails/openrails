@@ -135,8 +135,8 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 			}
 		}
 		dimensionKey := ""
-		if rc.Price.Matrix != nil {
-			dimensionKey = rc.Price.Matrix.Dimension
+		if rc.Price.PerUnit != nil && rc.Price.PerUnit.Matrix != nil {
+			dimensionKey = rc.Price.PerUnit.Matrix.Dimension
 		}
 		groupProperty := propertyKey(rc.GroupBy[dimensionKey])
 		if groupProperty == "" {
@@ -276,10 +276,10 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 	if allowance == nil || strings.TrimSpace(allowance.AccrueFrom) == "" {
 		return 0, nil
 	}
-	if source.Price.Matrix == nil {
+	if source.Price.PerUnit == nil || source.Price.PerUnit.Matrix == nil {
 		return 0, fmt.Errorf("allowance source meter %q must use matrix cells with included units", source.MeterKey)
 	}
-	dimensionKey := source.Price.Matrix.Dimension
+	dimensionKey := source.Price.PerUnit.Matrix.Dimension
 	dimensionProperty := propertyKey(source.GroupBy[dimensionKey])
 	resourceProperty := propertyKey(source.GroupBy["resource_id"])
 	if dimensionProperty == "" || resourceProperty == "" {
@@ -332,7 +332,7 @@ GROUP BY dim_value, resource_id`, merchantID, payer.UUID(), currency, source.Eve
 			if resourceID == "" || quantity <= 0 {
 				continue
 			}
-			cell, ok := source.Price.Matrix.Cells[dimValue]
+			cell, ok := source.Price.PerUnit.Matrix.Cells[dimValue]
 			if !ok || cell.Included <= 0 {
 				continue
 			}
@@ -391,10 +391,10 @@ func allowanceCapSeconds(spec string) (int64, error) {
 
 func rateCatalogRateCardUsage(price pricing.RatePrice, allowance *pricing.Allowance, dimValue string, quantity, includedOverride int64) (int64, error) {
 	cm := price.ToChargeModel()
-	if price.Matrix != nil {
+	if price.PerUnit != nil && price.PerUnit.Matrix != nil {
 		cellCM, ok := price.ChargeModelForCell(dimValue)
 		if !ok {
-			return 0, fmt.Errorf("rate card has no matrix cell for %q=%q", price.Matrix.Dimension, dimValue)
+			return 0, fmt.Errorf("rate card has no matrix cell for %q=%q", price.PerUnit.Matrix.Dimension, dimValue)
 		}
 		cm = cellCM
 	}

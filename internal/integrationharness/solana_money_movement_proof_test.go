@@ -107,15 +107,14 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	)
 
 	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
+		Version:        catalog.SupportedVersion,
+		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "usd"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
-			Credits: catalog.Credits{
-				creditKey: {Currency: "usd", Amount: 50_000},
-			},
+			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "usd", Amount: solanaPtrI64(50_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
 				Currency:   "usd",
@@ -458,6 +457,8 @@ func tokenTransferAmount(t *testing.T, tx *solanago.Transaction) (uint64, bool) 
 	}
 	return 0, false
 }
+
+func solanaPtrI64(v int64) *int64 { return &v }
 
 // assertNoMetadataInTx is the heart of proof (a): no catalog/product/entitlement
 // metadata may appear anywhere in the serialized on-chain transaction bytes.

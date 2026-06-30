@@ -49,11 +49,12 @@ type catalogPushFile struct {
 }
 
 type catalogPushFileEntry struct {
-	Merchant    string               `yaml:"merchant"`
-	TierGroups  []catalog.TierGroup  `yaml:"tier_groups,omitempty"`
-	Products    []catalog.Product    `yaml:"products,omitempty"`
-	Meters      []catalog.Meter      `yaml:"meters,omitempty"`
-	UsageLimits []catalog.UsageLimit `yaml:"usage_limits,omitempty"`
+	Merchant       string                  `yaml:"merchant"`
+	TierGroups     []catalog.TierGroup     `yaml:"tier_groups,omitempty"`
+	Products       []catalog.Product       `yaml:"products,omitempty"`
+	Meters         []catalog.Meter         `yaml:"meters,omitempty"`
+	CreditBalances []catalog.CreditBalance `yaml:"credit_balances,omitempty"`
+	UsageLimits    []catalog.UsageLimit    `yaml:"usage_limits,omitempty"`
 }
 
 // PushMerchantCatalog plans and optionally applies a merchant catalog manifest.
@@ -162,11 +163,12 @@ func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error
 			return nil, fmt.Errorf("catalog #%d merchant is required", i+1)
 		}
 		manifest := &catalog.Manifest{
-			Version:     catalog.SupportedVersion,
-			TierGroups:  append([]catalog.TierGroup(nil), entry.TierGroups...),
-			Products:    append([]catalog.Product(nil), entry.Products...),
-			Meters:      append([]catalog.Meter(nil), entry.Meters...),
-			UsageLimits: append([]catalog.UsageLimit(nil), entry.UsageLimits...),
+			Version:        catalog.SupportedVersion,
+			TierGroups:     append([]catalog.TierGroup(nil), entry.TierGroups...),
+			Products:       append([]catalog.Product(nil), entry.Products...),
+			Meters:         append([]catalog.Meter(nil), entry.Meters...),
+			CreditBalances: append([]catalog.CreditBalance(nil), entry.CreditBalances...),
+			UsageLimits:    append([]catalog.UsageLimit(nil), entry.UsageLimits...),
 		}
 		if err := manifest.Validate(); err != nil {
 			return nil, fmt.Errorf("catalog %s: %w", merchantSlug, err)
