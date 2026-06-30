@@ -59,30 +59,46 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	manifest, err := ParseMerchantConfigManifest(raw)
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 1)
-	require.Equal(t, "local-stack", manifest.Merchants[0].Slug)
-	require.NotNil(t, manifest.Merchants[0].Issuer)
-	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", manifest.Merchants[0].Issuer.JWKSURI)
-	accts := manifest.Merchants[0].ProviderAccounts
-	require.Len(t, accts, 6)
+	m := manifest.Merchants[0]
+	require.Equal(t, "local-stack", m.Slug)
+	require.NotNil(t, m.Issuer)
+	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", m.Issuer.JWKSURI)
 
-	// #641: a merchant can hold multiple accounts on the SAME rail with distinct
-	// routing roles. The example declares two NMI accounts (primary + secondary)
-	// and a legacy Stripe account alongside a primary Stripe account.
-	nmi := map[string]string{} // account_id -> mode
-	for _, a := range accts {
-		if a.ProviderType == "nmi" {
-			nmi[a.AccountID] = a.Mode
-		}
-	}
-	require.Equal(t, map[string]string{"100001": "primary", "100002": "secondary"}, nmi)
+	// #646: the example carries the COMPLETE merchant_configurations payload.
+	require.NotNil(t, m.Invoice)
+	require.Equal(t, "calendar_month", m.Invoice.BillingPeriodBoundary)
+	require.NotNil(t, m.Invoice.CollectionThreshold)
+	require.Equal(t, int64(50_000_000), *m.Invoice.CollectionThreshold)
+	require.NotNil(t, m.Invoice.MonthlyFloor)
+	require.Equal(t, int64(1_000_000), *m.Invoice.MonthlyFloor)
 
-	var stripeModes []string
+	require.Len(t, m.DelegatedInvokerWastedSpendWindows, 2)
+	require.Equal(t, "burst", m.DelegatedInvokerWastedSpendWindows[0].Key)
+	require.Equal(t, "15m", m.DelegatedInvokerWastedSpendWindows[0].Window)
+	require.Equal(t, int64(5_000_000), m.DelegatedInvokerWastedSpendWindows[0].Limit)
+
+	// #641/#646: multiple accounts per rail, each with a human name, account_id
+	// routing identity, and a live+test environment pair for NMI and Stripe.
+	accts := m.ProviderAccounts
+	require.Len(t, accts, 7)
+	type key struct{ name, env string } // name disambiguates two accounts on one rail
+	byName := map[key]ManifestProviderAccount{}
 	for _, a := range accts {
-		if a.ProviderType == "stripe" {
-			stripeModes = append(stripeModes, a.Mode)
-		}
+		require.NotEmpty(t, a.Name, "every provider account has a human name (#646)")
+		byName[key{a.Name, a.Environment}] = a
 	}
-	require.ElementsMatch(t, []string{"primary", "legacy"}, stripeModes)
+	// NMI gateway "mobius": live (primary, legacy gateway-id) + its sandbox.
+	require.Equal(t, "nmi", byName[key{"mobius", "live"}].ProviderType)
+	require.Equal(t, "579145", byName[key{"mobius", "live"}].AccountID)
+	require.Equal(t, "primary", byName[key{"mobius", "live"}].Mode)
+	require.Equal(t, "579145-sandbox", byName[key{"mobius", "test"}].AccountID)
+	// A second NMI gateway (paykings) — secondary.
+	require.Equal(t, "secondary", byName[key{"paykings", "live"}].Mode)
+	// Stripe live + test side by side.
+	require.Equal(t, "acct_localstack_live", byName[key{"stripe", "live"}].AccountID)
+	require.Equal(t, "acct_localstack_test", byName[key{"stripe", "test"}].AccountID)
+	// CCBill — one account.
+	require.Equal(t, "945280/0000", byName[key{"ccbill", "live"}].AccountID)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

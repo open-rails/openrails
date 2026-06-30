@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
@@ -71,9 +72,39 @@ type ManifestMerchant struct {
 	// fully administer this merchant — and only this merchant. Optional: a
 	// merchant with no issuer (e.g. embedded mode, where the host authenticates
 	// in-process) is still provisioned with its permission-group.
-	Issuer           *ManifestIssuer           `yaml:"issuer,omitempty"`
-	Profile          ManifestMerchantProfile   `yaml:"profile,omitempty"`
-	ProviderAccounts []ManifestProviderAccount `yaml:"provider_accounts,omitempty"`
+	Issuer  *ManifestIssuer         `yaml:"issuer,omitempty"`
+	Profile ManifestMerchantProfile `yaml:"profile,omitempty"`
+	// Invoice is the merchant's billing/collection policy (#643/#646): when/how the
+	// accrued balance is invoiced. Omitted leaves all values at the service default;
+	// an omitted field within the block leaves that field as-is.
+	Invoice *ManifestInvoiceConfig `yaml:"invoice,omitempty"`
+	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
+	// delegated invokers (#646): per-window spend ceilings on wasted (failed/abused)
+	// generation. Empty leaves the service-default windows (burst 15m/$5, sustained 5h/$20).
+	DelegatedInvokerWastedSpendWindows []ManifestBudgetWindow    `yaml:"delegated_invoker_wasted_spend_windows,omitempty"`
+	ProviderAccounts                   []ManifestProviderAccount `yaml:"provider_accounts,omitempty"`
+}
+
+// ManifestInvoiceConfig is the merchant invoice/collection policy block, mirroring
+// the merchant_configurations invoice fields. Amounts are in the currency's micros.
+type ManifestInvoiceConfig struct {
+	// CollectionThreshold: invoice an arrears customer once their accrued balance
+	// reaches this (micros). Default 50_000_000 ($50).
+	CollectionThreshold *int64 `yaml:"collection_threshold,omitempty"`
+	// MonthlyFloor: don't bother collecting below this (micros). Default 1_000_000 ($1).
+	MonthlyFloor *int64 `yaml:"monthly_floor,omitempty"`
+	// BillingPeriodBoundary: calendar_month | anniversary | fixed_interval.
+	// Default fixed_interval (rolling 30d). calendar_month resets on the 1st.
+	BillingPeriodBoundary string `yaml:"billing_period_boundary,omitempty"`
+}
+
+// ManifestBudgetWindow is one delegated-invoker wasted-spend window. Window is a
+// Go duration ("15m", "5h"); Limit is the per-window ceiling in the currency's micros.
+type ManifestBudgetWindow struct {
+	Key      string `yaml:"key"`
+	Window   string `yaml:"window"`
+	Limit    int64  `yaml:"limit"`
+	Currency string `yaml:"currency,omitempty"`
 }
 
 // ManifestIssuer declares the host-app issuer trusted for a merchant. Provide
@@ -100,7 +131,11 @@ type ManifestMerchantProfile struct {
 }
 
 type ManifestProviderAccount struct {
-	ProviderType   string                          `yaml:"provider_type"`
+	ProviderType string `yaml:"provider_type"`
+	// Name is the human label for this account (the config-layer account name,
+	// e.g. "mobius", "paykings"). It is NOT the routing identity — account_id is
+	// (#641). Persisted as the provider account's display_name and emitted on dump.
+	Name           string                          `yaml:"name,omitempty"`
 	Environment    string                          `yaml:"environment,omitempty"`
 	AccountID      string                          `yaml:"account_id,omitempty"`
 	VaultSecretRef string                          `yaml:"vault_secret_ref,omitempty"`
@@ -355,23 +390,55 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (
 
 func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
-	if hasManifestProfile(mt.Profile) {
+	// Apply the merchant_configurations payload (#646): profile, invoice/collection
+	// policy, and delegated-invoker abuse windows. Load once, mutate only the
+	// declared parts (omit = leave-as-is), upsert if anything changed.
+	if hasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 {
 		store := merchantconfig.NewStore(database)
-		cfg, _, err := store.Get(mctx)
+		conf, _, err := store.Get(mctx)
 		if err != nil {
 			return fmt.Errorf("load merchant configuration: %w", err)
 		}
-		cfg.Profile = models.MerchantProfileConfiguration{
-			DisplayName: strings.TrimSpace(mt.Profile.DisplayName),
-			LogoURL:     strings.TrimSpace(mt.Profile.LogoURL),
-			FromEmail:   strings.TrimSpace(mt.Profile.FromEmail),
-			SupportURL:  strings.TrimSpace(mt.Profile.SupportURL),
+		if hasManifestProfile(mt.Profile) {
+			conf.Profile = models.MerchantProfileConfiguration{
+				DisplayName: strings.TrimSpace(mt.Profile.DisplayName),
+				LogoURL:     strings.TrimSpace(mt.Profile.LogoURL),
+				FromEmail:   strings.TrimSpace(mt.Profile.FromEmail),
+				SupportURL:  strings.TrimSpace(mt.Profile.SupportURL),
+			}
+			if conf.Profile.DisplayName == "" {
+				conf.Profile.DisplayName = strings.TrimSpace(mt.DisplayName)
+			}
 		}
-		if cfg.Profile.DisplayName == "" {
-			cfg.Profile.DisplayName = strings.TrimSpace(mt.DisplayName)
+		if mt.Invoice != nil {
+			if mt.Invoice.CollectionThreshold != nil {
+				conf.InvoiceCollectionThreshold = mt.Invoice.CollectionThreshold
+			}
+			if mt.Invoice.MonthlyFloor != nil {
+				conf.InvoiceMonthlyFloor = mt.Invoice.MonthlyFloor
+			}
+			if b := strings.TrimSpace(mt.Invoice.BillingPeriodBoundary); b != "" {
+				conf.InvoiceBillingBoundary = b
+			}
 		}
-		if err := store.Upsert(mctx, cfg); err != nil {
-			return fmt.Errorf("upsert merchant profile: %w", err)
+		if len(mt.DelegatedInvokerWastedSpendWindows) > 0 {
+			windows := make([]models.BudgetWindowPolicy, 0, len(mt.DelegatedInvokerWastedSpendWindows))
+			for _, w := range mt.DelegatedInvokerWastedSpendWindows {
+				d, err := time.ParseDuration(strings.TrimSpace(w.Window))
+				if err != nil {
+					return fmt.Errorf("delegated_invoker_wasted_spend_windows %q: window: %w", w.Key, err)
+				}
+				windows = append(windows, models.BudgetWindowPolicy{
+					Key:           strings.TrimSpace(w.Key),
+					WindowSeconds: int64(d / time.Second),
+					Limit:         w.Limit,
+					Currency:      strings.TrimSpace(w.Currency),
+				})
+			}
+			conf.DelegatedInvokerWastedSpendWindows = windows
+		}
+		if err := store.Upsert(mctx, conf); err != nil {
+			return fmt.Errorf("upsert merchant configuration: %w", err)
 		}
 	}
 
@@ -552,6 +619,12 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	if found && !opts.Overwrite {
 		return reconcileStripeWebhook()
 	}
+	// The manifest's human `name` label is the account's display_name (#646); it
+	// takes precedence over a resolver-derived name, and seeds it when absent.
+	displayName := identity.DisplayName
+	if n := strings.TrimSpace(account.Name); n != "" {
+		displayName = &n
+	}
 	evidence := identity.Evidence
 	if evidence == nil {
 		evidence = map[string]any{"source": "merchant_config_manifest"}
@@ -569,7 +642,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			ProviderType:   providerType,
 			Environment:    stringPtrIfNotEmpty(environment),
 			AccountID:      accountID,
-			DisplayName:    identity.DisplayName,
+			DisplayName:    displayName,
 			VaultSecretRef: vaultSecretRef,
 			Role:           role,
 			Status:         status,

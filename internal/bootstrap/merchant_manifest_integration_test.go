@@ -40,6 +40,7 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug                TEXT NOT NULL UNIQUE,
+    display_name        TEXT,
     status              TEXT NOT NULL DEFAULT 'active',
     permission_group_id     TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -256,6 +257,120 @@ func TestReconcileMerchantManifestDiscoversProviderAccountIdentityFromSecrets(t 
 		WHERE merchant_id = $1::uuid AND name = $2
 	`, merchantID, secretName).Scan(&secretValue))
 	require.JSONEq(t, `{"client_acc_num":"900000","client_sub_acc":"0000","salt":"secret"}`, secretValue)
+}
+
+// #646: the merchant config round-trips — push the complete payload (profile +
+// invoice + delegated-invoker windows + named test/live provider accounts), then
+// dump it back into the same struct shape, with secret VALUES never emitted.
+func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	pool := newMerchantManifestTestPool(t)
+	cp := newMerchantManifestControlPlane(t, pool)
+	cfg := &config.Config{}
+
+	threshold := int64(75_000_000)
+	floor := int64(2_000_000)
+	manifest := cozyArtMerchantManifest()
+	mt := &manifest.Merchants[0]
+	mt.DisplayName = "Cozy Art"
+	mt.Profile = ManifestMerchantProfile{DisplayName: "Cozy Art Billing", FromEmail: "billing@example.com"}
+	mt.Invoice = &ManifestInvoiceConfig{
+		CollectionThreshold:   &threshold,
+		MonthlyFloor:          &floor,
+		BillingPeriodBoundary: "calendar_month",
+	}
+	mt.DelegatedInvokerWastedSpendWindows = []ManifestBudgetWindow{
+		{Key: "burst", Window: "15m", Limit: 5_000_000},
+		{Key: "sustained", Window: "5h", Limit: 20_000_000},
+	}
+	// NMI gateway "mobius": a live primary and its sandbox, side by side (#646).
+	mt.ProviderAccounts = []ManifestProviderAccount{
+		{ProviderType: "nmi", Name: "mobius", Environment: "live", AccountID: "579145", Mode: "primary",
+			Secrets: map[string]ManifestSecretSource{
+				"security_key":     {Value: "live-security"},
+				"tokenization_key": {Value: "live-token"},
+			}},
+		{ProviderType: "nmi", Name: "mobius", Environment: "test", AccountID: "579145-sandbox", Mode: "secondary",
+			Secrets: map[string]ManifestSecretSource{
+				"security_key": {Value: "test-security"},
+			}},
+	}
+
+	// First push creates the merchant; second push syncs the display name onto the
+	// existing merchant row (the `found` path) — mirrors a real re-apply.
+	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
+
+	// merchant_configurations carries the invoice policy.
+	var merchantID string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	var boundary string
+	var gotThreshold, gotFloor int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT config #>> '{billing_period_boundary}',
+		       (config #>> '{collection_threshold}')::bigint,
+		       (config #>> '{monthly_floor}')::bigint
+		FROM openrails.merchant_configurations WHERE merchant_id = $1::uuid
+	`, merchantID).Scan(&boundary, &gotThreshold, &gotFloor))
+	require.Equal(t, "calendar_month", boundary)
+	require.Equal(t, threshold, gotThreshold)
+	require.Equal(t, floor, gotFloor)
+
+	// the manifest `name` persisted as the provider account display_name.
+	var liveDisplayName string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT display_name FROM openrails.provider_accounts
+		WHERE merchant_id = $1::uuid AND provider_type = 'nmi' AND environment = 'live'
+	`, merchantID).Scan(&liveDisplayName))
+	require.Equal(t, "mobius", liveDisplayName)
+
+	// dump the merchant back into the manifest shape.
+	dumped, err := DumpMerchantConfig(ctx, cfg, cp, "cozy-art")
+	require.NoError(t, err)
+	require.Len(t, dumped.Merchants, 1)
+	d := dumped.Merchants[0]
+	require.Equal(t, "cozy-art", d.Slug)
+	require.Equal(t, "Cozy Art", d.DisplayName)
+	require.Equal(t, "Cozy Art Billing", d.Profile.DisplayName)
+	require.Equal(t, "billing@example.com", d.Profile.FromEmail)
+
+	require.NotNil(t, d.Invoice)
+	require.Equal(t, "calendar_month", d.Invoice.BillingPeriodBoundary)
+	require.Equal(t, threshold, *d.Invoice.CollectionThreshold)
+	require.Equal(t, floor, *d.Invoice.MonthlyFloor)
+
+	require.Len(t, d.DelegatedInvokerWastedSpendWindows, 2)
+	gotWindows := map[string]ManifestBudgetWindow{}
+	for _, w := range d.DelegatedInvokerWastedSpendWindows {
+		gotWindows[w.Key] = w
+	}
+	require.Equal(t, "15m", gotWindows["burst"].Window)
+	require.Equal(t, int64(5_000_000), gotWindows["burst"].Limit)
+	require.Equal(t, "5h", gotWindows["sustained"].Window)
+
+	require.Len(t, d.ProviderAccounts, 2)
+	byEnv := map[string]ManifestProviderAccount{}
+	for _, a := range d.ProviderAccounts {
+		byEnv[a.Environment] = a
+	}
+	require.Equal(t, "mobius", byEnv["live"].Name)
+	require.Equal(t, "579145", byEnv["live"].AccountID)
+	require.Equal(t, "primary", byEnv["live"].Mode)
+	require.Equal(t, "secondary", byEnv["test"].Mode)
+	// Secret VALUES are never dumped — only env references. NMI's security_key
+	// canonicalizes to production_key on storage, so the dump emits that key.
+	require.NotEmpty(t, byEnv["live"].Secrets["production_key"].Env, "secret emitted as env reference")
+	require.Empty(t, byEnv["live"].Secrets["production_key"].Value, "secret value must never be dumped")
+	require.NotEmpty(t, byEnv["live"].Secrets["tokenization_key"].Env)
+
+	// the dump re-marshals to valid YAML that re-parses (round-trip closure).
+	encoded, err := MarshalMerchantManifest(dumped)
+	require.NoError(t, err)
+	reparsed, err := ParseMerchantConfigManifest(encoded)
+	require.NoError(t, err)
+	require.Equal(t, "cozy-art", reparsed.Merchants[0].Slug)
+	require.NotNil(t, reparsed.Merchants[0].Invoice)
+	require.Len(t, reparsed.Merchants[0].ProviderAccounts, 2)
 }
 
 func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T) {

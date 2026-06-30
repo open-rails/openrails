@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -44,6 +45,12 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 				return err
 			}
 		}
+		if err := validateManifestInvoice(slug, t.Invoice); err != nil {
+			return err
+		}
+		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
+			return err
+		}
 		for j := range t.ProviderAccounts {
 			if err := validateManifestProviderAccount(slug, j, t.ProviderAccounts[j]); err != nil {
 				return err
@@ -83,6 +90,51 @@ func validateManifestIssuer(merchantSlug string, iss *ManifestIssuer) error {
 	for _, origin := range iss.AllowedOrigins {
 		if o := strings.TrimSpace(origin); o != "" && !validHTTPURL(o) {
 			return fmt.Errorf("merchant %q issuer.allowed_origins entry %q must be an http or https URL", merchantSlug, origin)
+		}
+	}
+	return nil
+}
+
+// validInvoiceBoundaries mirrors money.NormalizeInvoiceBoundary's accepted set
+// (kept inline to avoid importing the money module into bootstrap).
+var validInvoiceBoundaries = map[string]struct{}{
+	"calendar_month": {}, "anniversary": {}, "fixed_interval": {},
+}
+
+func validateManifestInvoice(slug string, inv *ManifestInvoiceConfig) error {
+	if inv == nil {
+		return nil
+	}
+	if inv.CollectionThreshold != nil && *inv.CollectionThreshold < 0 {
+		return fmt.Errorf("merchant %q invoice.collection_threshold must be >= 0", slug)
+	}
+	if inv.MonthlyFloor != nil && *inv.MonthlyFloor < 0 {
+		return fmt.Errorf("merchant %q invoice.monthly_floor must be >= 0", slug)
+	}
+	if b := strings.ToLower(strings.TrimSpace(inv.BillingPeriodBoundary)); b != "" {
+		if _, ok := validInvoiceBoundaries[b]; !ok {
+			return fmt.Errorf("merchant %q invoice.billing_period_boundary must be calendar_month, anniversary, or fixed_interval", slug)
+		}
+	}
+	return nil
+}
+
+func validateManifestWastedWindows(slug string, windows []ManifestBudgetWindow) error {
+	seen := map[string]struct{}{}
+	for i, w := range windows {
+		key := strings.TrimSpace(w.Key)
+		if key == "" {
+			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].key is required", slug, i)
+		}
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("merchant %q duplicate delegated_invoker_wasted_spend_windows key %q", slug, key)
+		}
+		seen[key] = struct{}{}
+		if _, err := time.ParseDuration(strings.TrimSpace(w.Window)); err != nil {
+			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].window %q: %w", slug, i, w.Window, err)
+		}
+		if w.Limit <= 0 {
+			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].limit must be > 0", slug, i)
 		}
 	}
 	return nil

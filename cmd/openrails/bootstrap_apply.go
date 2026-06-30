@@ -175,6 +175,62 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	})
 }
 
+type dumpMerchantConfigOptions struct {
+	slug string
+	out  string
+}
+
+func newDumpMerchantConfigCmd() *cobra.Command {
+	opts := dumpMerchantConfigOptions{}
+	cmd := &cobra.Command{
+		Use:   "dump-merchant-config",
+		Short: "Dump a merchant's OpenRails configuration (identity + profile + invoice + provider accounts) as push-merchant-config YAML; secrets are emitted as env references, never values",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runDumpMerchantConfig(cmd, opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.slug, "slug", "", "merchant slug to dump (required)")
+	cmd.Flags().StringVarP(&opts.out, "out", "o", "", "write YAML to this file (default: stdout)")
+	_ = cmd.MarkFlagRequired("slug")
+	return cmd
+}
+
+func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) error {
+	ctx := cmd.Context()
+	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	if cfg == nil {
+		return fmt.Errorf("config not loaded; dump-merchant-config requires --config")
+	}
+
+	application := &app.App{Config: cfg}
+	defer func() {
+		if closeErr := application.Close(context.Background()); closeErr != nil {
+			log.WithError(closeErr).Error("dump-merchant-config cleanup failed")
+		}
+	}()
+	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, embcp.Get(application), opts.slug)
+	if err != nil {
+		return err
+	}
+	encoded, err := bootstrap.MarshalMerchantManifest(manifest)
+	if err != nil {
+		return fmt.Errorf("marshal merchant config: %w", err)
+	}
+	if path := strings.TrimSpace(opts.out); path != "" {
+		if err := os.WriteFile(path, encoded, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+		log.WithField("file", path).Info("dump-merchant-config: wrote merchant config YAML")
+		return nil
+	}
+	_, err = cmd.OutOrStdout().Write(encoded)
+	return err
+}
+
 // applyStartupBootstrap applies the AuthKit authority manifest on the FIRST
 // server start only. Merchant config and catalog files are never reconciled from
 // normal server startup; operators run those explicit CLI commands as init jobs
