@@ -590,7 +590,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// the entire rails map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
 	if req.ProviderLinks != nil {
-		// The existing price + its product give the substance (slug + money terms)
+		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
 		// regardless of merge/replace so a rotated link is verified, not blindly
 		// stored.

@@ -351,8 +351,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var periodEndsAt time.Time
 	if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 		periodEndsAt = params.CurrentPeriodEndsAt.UTC()
-	} else if cd := price.RecurringCycleDays(); cd != nil {
-		periodEndsAt = now.Add(time.Duration(*cd) * 24 * time.Hour)
+	} else if cycleHours := price.RecurringCycleHours(); cycleHours != nil {
+		periodEndsAt = now.Add(time.Duration(*cycleHours) * time.Hour)
 	} else {
 		periodEndsAt = now.Add(30 * 24 * time.Hour)
 	}

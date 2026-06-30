@@ -586,17 +586,18 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 
 // createDunningCycleProductPrice seeds an active Mobius product+price with the
 // given billing cycle, for exercising the cadence-relative dunning tiers (#359).
-func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cycleDays int) uuid.UUID {
+func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cycleHours int) uuid.UUID {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 	now := suite.GetClock().Now().UTC()
 	productID := uuid.New()
 	priceID := uuid.New()
+	cycleLabel := fmt.Sprintf("%dh", cycleHours)
 
 	suite.InsertProduct(ctx, &models.Product{
 		ID:               productID,
-		Key:              fmt.Sprintf("dunning-cycle-%dd-%s", cycleDays, uuid.New().String()[:8]),
-		DisplayName:      fmt.Sprintf("Dunning %dd cycle", cycleDays),
+		Key:              fmt.Sprintf("dunning-cycle-%s-%s", cycleLabel, uuid.New().String()[:8]),
+		DisplayName:      fmt.Sprintf("Dunning %s cycle", cycleLabel),
 		Description:      "cadence-relative dunning fixture",
 		EntitlementsSpec: map[string]*int{"premium": nil},
 		Status:           models.CatalogStatusActive,
@@ -610,7 +611,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		Status:              models.CatalogStatusActive,
 		Amount:              999,
 		Currency:            "usd",
-		AccessDurationHours: &cycleDays, AutoRenew: true,
+		AccessDurationHours: &cycleHours, AutoRenew: true,
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Rails: map[string]map[string]string{
 			string(models.RailMobius): {
@@ -630,7 +631,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
-	priceID := createDunningCycleProductPrice(t, suite, 7)
+	priceID := createDunningCycleProductPrice(t, suite, 7*24)
 	pastRetry := time.Now().Add(-1 * time.Hour)
 	retryAttempts := 1
 
@@ -691,7 +692,7 @@ func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
-	priceID := createDunningCycleProductPrice(t, suite, 1)
+	priceID := createDunningCycleProductPrice(t, suite, 24)
 
 	userID := uuid.New().String()
 	pm := suite.CreateTestPaymentMethod(userID)
@@ -736,7 +737,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 	rt := suite.App.Runtime
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	priceID := createDunningCycleProductPrice(t, suite, 1)
+	priceID := createDunningCycleProductPrice(t, suite, 24)
 
 	userID := uuid.New().String()
 	pm := suite.CreateTestPaymentMethod(userID)
@@ -774,7 +775,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 	rt := suite.App.Runtime
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	priceID := createDunningCycleProductPrice(t, suite, 7)
+	priceID := createDunningCycleProductPrice(t, suite, 7*24)
 
 	userID := uuid.New().String()
 	pm := suite.CreateTestPaymentMethod(userID)

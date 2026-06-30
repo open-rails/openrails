@@ -197,9 +197,9 @@ func computeStripeDriftJob(
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
 		// Content key = "<product_key>.<currency>.<unit_amount>.<cycle>"; needs
-		// the owning product for its slug.
+		// the owning product for its key.
 		if prod := productByID[pr.ProductID.String()]; prod != nil {
-			if slug := strings.TrimSpace(prod.Key); slug != "" {
+			if key := strings.TrimSpace(prod.Key); key != "" {
 				ck := openRailsPriceContentKeyJob(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 				priceByContentKey[ck] = pr
 			}

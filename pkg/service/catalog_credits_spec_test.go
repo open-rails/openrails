@@ -9,12 +9,12 @@ import (
 )
 
 func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
-	expiresDays := 30
+	expiryHours := 30 * 24
 	in := CreditsSpec{
 		"monthly_eur": {
 			Unit:        "EUR",
 			Amount:      2500,
-			ExpiryHours: &expiresDays,
+			ExpiryHours: &expiryHours,
 			Cadence:     CreditGrantCadencePerRenewal,
 		},
 	}
@@ -29,7 +29,7 @@ func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
 			"monthly_eur": {
 				Unit:        "EUR",
 				Amount:      2500,
-				ExpiryHours: &expiresDays,
+				ExpiryHours: &expiryHours,
 				Cadence:     models.CreditGrantCadencePerRenewal,
 			},
 		},
@@ -40,7 +40,7 @@ func TestCatalogCreditsSpecPreservesUnit(t *testing.T) {
 		"monthly_eur": {
 			Unit:        "EUR",
 			Amount:      2500,
-			ExpiryHours: &expiresDays,
+			ExpiryHours: &expiryHours,
 			Cadence:     models.CreditGrantCadencePerRenewal,
 		},
 	})

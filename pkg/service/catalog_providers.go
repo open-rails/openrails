@@ -87,7 +87,7 @@ type providerAdapter interface {
 	// rails[provider] map. Called when the caller provided
 	// provider_links[provider] in the create/update request.
 	//
-	// in carries the OpenRails price substance (slug + immutable money terms) so
+	// in carries the OpenRails price substance (product key + immutable money terms) so
 	// the adapter can VERIFY the linked remote object actually exists AND matches
 	// that substance (amount / currency / billing cycle / provider-specific
 	// immutable terms). A missing or mismatched remote object is a loud error —

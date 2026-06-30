@@ -50,8 +50,8 @@ func TestCCBillInitialChargeAmountUsesIntro(t *testing.T) {
 	t.Parallel()
 
 	initial := int64(19_950_000)
-	initialDays := 720
-	price := &models.Price{Amount: 14_950_000, AutoRenew: true, TrialUnitAmount: &initial, TrialDurationHours: &initialDays}
+	trialHours := 30 * 24
+	price := &models.Price{Amount: 14_950_000, AutoRenew: true, TrialUnitAmount: &initial, TrialDurationHours: &trialHours}
 	require.Equal(t, int64(19_950_000), ccbillInitialChargeAmount(price))
 }
 

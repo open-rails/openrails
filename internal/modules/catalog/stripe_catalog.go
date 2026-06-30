@@ -61,7 +61,7 @@ type stripeObject struct {
 // Stripe metadata keys used by OpenRails to mark catalog items it owns.
 // These are read on both reconciliation and orphan-discovery paths.
 //
-// Identity / matching keys are CONTENT-based (derived from catalog slugs) so
+// Identity / matching keys are CONTENT-based (derived from catalog product keys) so
 // they survive a DB rebuild (which regenerates row UUIDs). The *ID keys are
 // retained as informational breadcrumbs only — never used for matching.
 const (

@@ -2099,23 +2099,23 @@ func (s *CheckoutService) processDowngrade(
 // billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
 // full period, and then rebilled `newFull` at `now + cycle`.
 //
-//	oldUnused   = oldFull * (daysRemaining / cycleDays)   // integer math
+//	oldUnused   = oldFull * (hoursRemaining / cycleHours) // integer math
 //	firstCharge = newFull - oldUnused                     // clamped to >= 0
 //
-// where daysRemaining is the number of WHOLE days left in the current paid
+// where hoursRemaining is the number of WHOLE hours left in the current paid
 // period (0 if the period has already ended or periodEndsAt is nil).
 //
-// Example: $20 -> $50, 2 days into a 30-day cycle => daysRemaining=28,
-// oldUnused = 2000*28/30 = 1866c, firstCharge = 5000-1866 = 3134c. The new
+// Example: $20 -> $50, 2 days into a 30-day cycle => hoursRemaining=672,
+// oldUnused = 2000*672/720 = 1866c, firstCharge = 5000-1866 = 3134c. The new
 // period becomes [now, now+30d] and the next bill is $50.
 //
 // Boundary behavior:
-//   - 0 days remaining            => firstCharge = newFull
+//   - 0 hours remaining           => firstCharge = newFull
 //   - full period remaining       => firstCharge = newFull - oldFull
 //
 // This helper is intentionally pure (no receiver state) so other rails
-// (e.g. the Solana path in #267) can reuse the exact same math. cycleDays is
-// returned so callers can advance the period end (now + cycleDays).
+// (e.g. the Solana path in #267) can reuse the exact same math. cycleHours is
+// returned so callers can advance the period end (now + cycleHours).
 func CalculateModelBUpgradeCharge(
 	oldFull int64,
 	newFull int64,

@@ -25,7 +25,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 	}{
 		{
 			// Issue example: $20 -> $50, 2 days into a 30-day cycle.
-			// daysRemaining = 28, old_unused = 2000*28/30 = 1866,
+			// hoursRemaining = 672, old_unused = 2000*672/720 = 1866,
 			// first_charge = 5000 - 1866 = 3134.
 			name:        "issue example $20->$50 28 days remaining",
 			oldFull:     2000,
@@ -36,11 +36,11 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// Boundary: 0 days remaining => no credit => first_charge = new_full.
-			name:        "zero days remaining charges full new price",
+			// Boundary: 0 hours remaining => no credit => first_charge = new_full.
+			name:        "zero hours remaining charges full new price",
 			oldFull:     2000,
 			newFull:     5000,
-			periodEnd:   timePtr(now), // not After(now) => 0 days
+			periodEnd:   timePtr(now), // not After(now) => 0 hours
 			cycleHours:  intPtr(30 * 24),
 			expectFirst: 5000,
 			expectCycle: 30 * 24,
@@ -56,7 +56,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// nil periodEnd => 0 days remaining => full new price.
+			// nil periodEnd => 0 hours remaining => full new price.
 			name:        "nil period end charges full new price",
 			oldFull:     2000,
 			newFull:     5000,
@@ -66,7 +66,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// periodEnd in the past => 0 days remaining => full new price.
+			// periodEnd in the past => 0 hours remaining => full new price.
 			name:        "past period end charges full new price",
 			oldFull:     2000,
 			newFull:     5000,
@@ -76,8 +76,8 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// Default 30-day cycle when billingCycleDays is nil.
-			name:        "nil cycle days defaults to 30",
+			// Default 30-day (720h) cycle when billingCycleHours is nil.
+			name:        "nil cycle hours defaults to 720",
 			oldFull:     2000,
 			newFull:     5000,
 			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
@@ -86,8 +86,8 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// Non-positive cycle days falls back to default 30.
-			name:        "zero cycle days defaults to 30",
+			// Non-positive cycle hours falls back to default 720.
+			name:        "zero cycle hours defaults to 720",
 			oldFull:     2000,
 			newFull:     5000,
 			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
@@ -119,9 +119,9 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			expectCycle: 30 * 24,
 		},
 		{
-			// daysRemaining capped at cycleDays: a period end far beyond one
+			// hoursRemaining capped at cycleHours: a period end far beyond one
 			// cycle never credits more than a full cycle of old plan.
-			name:        "days remaining exceeding cycle is capped",
+			name:        "hours remaining exceeding cycle is capped",
 			oldFull:     2000,
 			newFull:     5000,
 			periodEnd:   timePtr(now.Add(100 * 24 * time.Hour)),
@@ -148,7 +148,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 				t.Fatalf("first charge: expected %d, got %d", tt.expectFirst, first)
 			}
 			if cycle != tt.expectCycle {
-				t.Fatalf("cycle days: expected %d, got %d", tt.expectCycle, cycle)
+				t.Fatalf("cycle hours: expected %d, got %d", tt.expectCycle, cycle)
 			}
 			if first < 0 {
 				t.Fatalf("first charge must never be negative, got %d", first)
@@ -158,7 +158,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 }
 
 // TestModelBNewPeriodEnd documents the period-reset contract used by the
-// NMI/Stripe upgrade paths: the new period is [now, now+cycleDays].
+// NMI/Stripe upgrade paths: the new period is [now, now+cycleHours].
 func TestModelBNewPeriodEnd(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
 	_, cycle := CalculateModelBUpgradeCharge(

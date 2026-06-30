@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 631
+next_id: 638
 
 ---
 
@@ -1336,3 +1336,195 @@ gateway. Blast radius: ~110 `.go` files touch `models.Rail`.
   (connector + merchant connector account) and Spreedly (gateway_type +
   gateway-instance); both use exactly this two-layer split and do not model the
   ISO company separately (it is a label on the account).
+
+---
+
+# #631: convergence derive-1 — grants+entitlements from stored subscriptions+payments
+
+**Completed:** yes (commit 30f48fff)
+
+OpenRails' convergence DERIVE plane today only projects EXISTING grants into entitlement effects ("derive-2") and repairs ungranted one-off PAYMENTS — it has NO subscription→grant detection and never CREATES a grant/entitlement from a bare subscription/payment. After a legacy migration that inserts source-of-truth subscriptions + payments (and per the migrate/convergence split, doujins #724 stops writing entitlements), the sweep is a no-op for migrated data: `openrails.grants` is empty so nothing projects. Build "derive-1": given stored subscriptions+payments, create grant → entitlement window. See docs/plans/migrate-convergence-separation.md in the doujins repo.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+Key code: `grants.Ledger.Grant()` is the sole writer of openrails.grants (4 live call sites, all purchase/credit/bundle); the converge "missing grant" check (converge_passes.go:114-138) is admin-surface-only + payments-only, no subscription→grant detection.
+
+**Tasks:**
+- [ ] Derive pass: for each subscription (+ its payments) with no grant, create the grant + entitlement window, idempotently.
+- [ ] Window math from subscription period + price.access_duration_hours (HOURS, #622).
+- [ ] Backfill bound: only derive windows ending within the last **3 YEARS** (banking-aligned; replaces the migrate's old 1-year hack).
+- [ ] Re-runnable; safe under the entitlement no-overlap constraint.
+- [ ] Wire into converge_sweep (startup + periodic).
+
+Acceptance: running convergence against migrated subscriptions+payments (entitlements/grants empty) materializes the correct grants + entitlement windows; re-running is a no-op.
+
+## Implementation design (derive-1 v1) — reverse-engineered, ready to execute
+
+SAFETY: derive-1 is ADDITIVE and a NO-OP for live data (live data already has grants, so "ungranted" detection finds nothing). It only fires on ungranted subs/payments = exactly the migrated cohort. So it's safe to land in openrails before doujins changes; the real test is the from-scratch migration verification (needs the full stack up + the 447MB dump reloaded — couldn't run it: dev stack down 2026-06-29).
+
+Files: `internal/db/queries/grants.sql` (new queries + sqlc regen via `task sqlc` / vet-db on :5434), `internal/modules/grants/grants.go` (ledger methods), `internal/reconcile/converge/converge_passes.go` (derivePass.runScope).
+
+1. NEW sqlc query `ListUngrantedSubscriptions(merchant, customer?)` — mirror `ListUngrantedGrantablePayments` (grants.sql:241). Returns s.id, s.customer_id, s.product_id, s.status, current_period_starts/ends_at, started_at, ended_at, pd.entitlements_spec. WHERE: grantable product (entitlements_spec <> '{}'), valid window (`COALESCE(current_period_starts_at,started_at) < COALESCE(current_period_ends_at,ended_at)`), and `NOT EXISTS (grant WHERE source_type='subscription' AND source_id=s.id::text)`. ORDER BY window start.
+2. NEW sqlc query `EntitlementWindowOverlaps(merchant, customer, entitlement, lower, upper) :one bool` — `EXISTS (entitlement e WHERE merchant/customer/entitlement match AND revoked_at IS NULL AND deleted_at IS NULL AND e.period && tstzrange(lower, upper, '[)'))`. Used for the overlap precheck.
+3. derivePass.runScope: PROMOTE the existing `derive.grant.missing` (UngrantedGrantablePayments, converge_passes.go:114-138) from ClassAdmin surface-only → ClassAuto with a Repair; ADD a new `derive.grant.missing.subscription` finding (ClassAuto). Repair pattern MIRRORS the live path `entitlement_service.go:287-312`: `gl.Grant(GrantInput{Customer, Kind:Entitlement, Source:Subscription, SourceID:sub.id.String(), Spec:&Spec{Entitlements:[keys of product entitlements_spec]}, StartsAt:windowStart, EndsAt:&windowEnd})` then `gl.MaterializeGrant(ctx, g)` INLINE (Converge applies repairs once per pass — converge.go:171-177 — so grant+materialize must both happen in the Repair).
+4. Window: subscriptions use `[COALESCE(current_period_starts_at,started_at), COALESCE(current_period_ends_at,ended_at))`. One-off/wallet payments use `[purchased_at, purchased_at + price.access_duration_hours)` (HOURS, #622) — wallet expiry is in `payments.metadata->>'expiration_rfc3339'` (see doujins #724/D2 + risk #5). entitlements_spec is a JSONB map `{entitlement_name: hours}`; the entitlement NAMES are the KEYS (parse keys in Go; the per-entitlement hours value does NOT apply to subscription windows — the sub period is authoritative).
+5. Overlap (v1, safe): one grant per (subscription, entitlement-feature). Before granting, call `EntitlementWindowOverlaps`; SKIP if it overlaps an existing live entitlement (covers both pre-existing rows AND ones created earlier in the same run, since each create commits on the shared conn). Process subs in window-start order. v1 drops the overlapping tail of partially-overlapping subs (rare — half-open ranges make sequential monthly windows abut, not overlap); O2 (#631-followup) refines to clip/merge. The no-overlap constraint is `entitlements_customer_no_overlap EXCLUDE gist (merchant,customer,entitlement, period &&) WHERE revoked_at IS NULL AND deleted_at IS NULL` (001_schema.up.sql:2058) — only NON-revoked rows; past/expired windows still count.
+6. Idempotency: source-keyed (`source_type='subscription' + source_id=sub.id`) — once a grant exists, the detection query excludes it; re-run is a no-op. Grants↔payments: set `GrantInput.Payment` for payment-backed grants so the refund check (converge_passes.go:140-160) works (risk #6).
+7. Subscription gen fields: OpenrailsSubscription{ID, ProductID, Status, CustomerID, MerchantID, CurrentPeriodStartsAt/EndsAt *time.Time, StartedAt time.Time, EndedAt *time.Time}.
+8. Tests: integration test per the Acceptance above (needs the openrails testcontainer harness — note the merchant-fk local gotcha). Pure helpers (window/overlap math) get unit tests with no DB.
+9. The 3-yr bound (O5/#637 risk) is an optional SCAN filter (`COALESCE(end)>= now()-3y`), NOT a correctness gate — a past-ended entitlement is harmless (not live). Make it a config knob, default 3y.
+
+STATUS 2026-06-29: IMPLEMENTED + tested (commit 30f48fff). Two new sqlc queries
+(ListUngrantedSubscriptions, ListUngrantedWalletPayments) + EntitlementWindowOverlaps;
+grants.Ledger.{UngrantedSubscriptions,UngrantedWalletPayments,DeriveSubscriptionGrant,
+DeriveWalletGrant,deriveEntitlementWindows}; derivePass emits derive.subscription.missing
++ derive.wallet.missing (ClassAuto, auto-repair). DIVERGENCES from the design above:
+(1) finding types are 3-segment (derive.subscription.missing / derive.wallet.missing),
+NOT derive.grant.missing.subscription — the chk_reconciliation_findings_type regex caps
+at 3 dot-segments. (2) Did NOT promote the existing derive.grant.missing (payments,
+ADMIN) finding — it deliberately stays surface-only to catch LIVE purchase-path bugs;
+the migrated wallet cohort is covered by the narrower, unambiguous derive.wallet.missing
+(rail=solana + stored expiration) instead. 3 integration tests + unit tests green.
+
+---
+
+# VERIFICATION (2026-06-29): the migrate(facts)->converge(effects) split is proven
+# end-to-end by pkg/embedded/seam_integration_test.go (commit e5fc43ac): seed an
+# active subscription + a solana wallet payment (NO grants/entitlements) + hand an
+# admin comp via the PUBLIC ImportAdminGrants, run ConvergeMerchant, assert all
+# three cohorts (subscription/wallet/admin) materialize a grant -> entitlement with
+# the right source_type — against a freshly-migrated openrails schema. Plus the
+# converge derive-1 integration tests (#631) and the GrantAdmin test (#636). The
+# literal full-legacy-data run (load the 447MB dumps -> migrate -> converge ->
+# count) is an environment op (loaded MySQL + bootstrap) NOT run here; the seam
+# test is the faithful behavioral proxy. All existing converge/grants/dunning/
+# payments tests still pass (no regressions).
+
+# #632: subscription `unknown` status + provider-truth reconciliation state machine
+
+**Completed:** no
+
+Migrated (and live missed-webhook) subscriptions can be locally "active" while current_period_ends_at is in the past with no confirming payment (19,029 such after migration). Convergence must not guess — flip these to a new `unknown` status ("needs provider verification") and reconcile against provider truth. Extends the #367 liveness "silent-active" notion into an explicit state.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+State machine:
+- active → `unknown`: status=active AND current_period_ends_at < now()-grace AND no confirming payment.
+- `unknown` → resolved via provider-pull (#633): payment received → renew + backfill missing payment (#634); payment failed → past_due (dunning if in window, else cancel + schedule provider delete); subscription deleted at provider → expire/cancel + revoke entitlement; provider confirms current → advance period.
+- `unknown` stays `unknown` when provider unreachable (no creds/down) → retried with exponential backoff (#633).
+
+**Tasks:**
+- [ ] Add `unknown` to the subscription status enum + transition guards.
+- [ ] Detector pass (active→unknown) in convergence.
+- [ ] Resolution applier per outcome branch.
+
+Acceptance: post-migration the lapsed-active cohort moves to `unknown` then resolves to the provider-confirmed state.
+
+---
+
+# #633: batched/windowed provider-pull reconciliation + exponential backoff
+
+**Completed:** no
+
+Reconciling thousands of `unknown` subs must NOT fan out per-user provider calls. Pull provider truth in batches by time-window and match locally; back off when the provider is unreachable. Feasibility confirmed: NMI query.php (QueryRecurringSubscriptions / SearchTransactions) supports date-range reporting; CCBill DataLink ACTIVEMEMBERS roster + FetchTransactionExport (date range) are inherently batch CSV pulls.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+**Tasks:**
+- [ ] Windowed bulk-pull per rail (not per-subscription); reconcile the unknown cohort locally.
+- [ ] Per-rail rate limiting; exponential backoff + retry (River + provider_intents outbox) when creds missing / provider down; subs stay `unknown` meanwhile.
+
+Acceptance: reconciling N-thousand unknown subs uses O(time-windows) provider calls, not O(N); transient outage leaves subs `unknown` and retries later.
+
+---
+
+# #634: historical payment backfill via provider-pull (missing CCBill + Mobius payments)
+
+**Completed:** no
+
+The legacy dump has no per-charge CCBill payments (the `billings` table holds only access windows) and Mobius "void"/cancelled subs lost their original charge (the subscriptions row kept only the void transaction) — so openrails.payments is missing real historical charges (CCBill 0; ~7.1k Mobius void subs). Recover them from the provider.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+Capability exists, needs a historical mode: CCBill `DataLinkExportRow.Amount()/TransactionID()/Timestamp()` (datalink_export.go) + reconcile/ccbill.go `normalizeCCBillTransaction`; NMI `SearchTransactions`/`GetTransactionDetails`. Today reconcile/ccbill.go defaults to a trailing-30-day window — need a wide historical range (subject to provider retention).
+
+**Tasks:**
+- [ ] Historical-range provider-pull that imports missing payment rows, idempotent by provider transaction id.
+- [ ] Record **all attempts, not just successes** — declined/void charges land as `status='failed'` payment rows (the model already supports pending|completed|failed|refunded; the migrate dropped ~2.7k genuine NMI declines, response_code 2, by skipping all `void` rows). Completes the failure ledger so dunning/analytics see the true history.
+- [ ] **Bound the pull window to the last 3 YEARS max** (matches #631), and go back only as far as our local data needs (per subscription, from its start / last-known charge up to now), capped at 3y. Don't blindly pull 3y for everyone — pull intelligently per cohort.
+- [ ] Wire into the #632 payment-received branch.
+- [ ] Document CCBill DataLink / NMI retention limits. NOTE: CCBill payment history older than CCBill's retention horizon (likely older than ~3y, e.g. 2019–2021) is unrecoverable — it is neither in the legacy dump nor pullable; accept that those old payments are permanently lost.
+
+Acceptance: a historical pull lands missing CCBill/Mobius charges as openrails.payments without duplicating existing rows.
+
+---
+
+# #635: rail_customers materialization + provider-auto-billed classification (vault-less subs)
+
+**Completed:** partial (commit bae4b136) — DONE: dunning skips provider-auto-billed subs (subscriptionProviderAutoBilled: ccbill always, nmi/mobius vault-less) instead of expire/fail; RailCustomerService.Upsert no-ops for rails without a real remote customer (railHasRemoteCustomer: stripe/nmi/mobius only). Both unit-tested. DEFERRED: provider-pull reconciliation of vault-less subs (needs #632/#633 + live creds). No schema change, as specified.
+
+rail_customers (remote customer ref) and payment_methods (stored card/vault) are distinct concepts, but ~19k vault-less Mobius/CCBill subscribers have neither and subscription.payment_method_id is NULL → dunning (jobs_dunning.go) hard-fails on them. A vault-less NMI recurring sub is auto-billed by the provider keyed on subscription_id; CCBill bills on its side. Convergence should classify these as provider-auto-billed (not our-rebill) and materialize rail_customers where a real remote ref exists.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+**Tasks:**
+- [ ] Classify subscriptions vault-rebillable (has payment_method) vs **provider-auto-billed** (no vault) — store this on the SUBSCRIPTION (derivable as `ccbill OR (nmi AND payment_method_id IS NULL)`), NOT in rail_customers; don't hard-fail provider-auto-billed subs in dunning.
+- [ ] Materialize rail_customers ONLY where the provider has a real card-independent customer object: **Stripe (`cus_*`) and NMI-with-vault (`customer_vault_id`)**. Guard `RailCustomerService.Upsert` to no-op without a real remote id. Do NOT create rail_customers for CCBill, vault-less NMI, or Solana — none expose a card-independent customer id (CCBill DataLink keys on subscription_id, not a consumer id; correction: the earlier "CCBill via DataLink roster" idea was wrong). Their absence is BY DESIGN, not a defect.
+- [ ] Reconcile vault-less subs via provider-pull (#632/#633), not manual rebill.
+- [ ] NO rail_customers schema change needed (design eval: doujins repo docs/plans/rail-customer-model.md). Do NOT add NULL-remote-id rows, sentinel rows, or stuff subscription ids into rail_customers.
+
+Acceptance: rail_customers is populated only for Stripe + NMI-vault; provider-auto-billed subs are flagged on the subscription and never error in the dunning path; CCBill/vault-less subs are reconciled via provider-pull with zero fabricated customer rows.
+
+---
+
+# #636: admin/manual-grant as source-of-truth in openrails.grants
+
+**Completed:** yes (commit efb3541e) — grants.Ledger.GrantAdmin (idempotent, overlap-skip, nil-end=indefinite) + AdminGrantExistsForSource query + pkg/embedded.ImportAdminGrants (cross-module seam for the doujins migrate). Existing derive-2 already projects admin grants → entitlements. Integration-tested.
+
+doujins legacy_migrate currently writes admin/manual "comp" access directly as entitlements (subscription manual-grant candidates, staff comps). Per the migrate/convergence split doujins must stop writing entitlements — but admin/manual access has NO subscription/payment fact to derive from. openrails needs an explicit source-of-truth representation (admin grants in openrails.grants, source_type=admin) so the derive plane produces the entitlement and doujins hands over the FACT, not the effect.
+
+## Metadata
+- Category: feature
+- Status: not_started
+- Passes: false
+
+**Tasks:**
+- [ ] Make admin/manual grant a first-class grants row (source_type=admin); derive its entitlement (adjacent to #416 admin-entitlement path).
+- [ ] Import/API path so the doujins migrate hands admin comps over as grants.
+
+Acceptance: admin comps exist as grants → entitlements with no direct entitlement writes from doujins.
+
+---
+
+# #637: post-migration cutover — reconcile existing migrate-written entitlements
+
+**Completed:** yes (commit bae4b136) — pkg/embedded.ConvergeMerchant gives the host an operator-triggerable merchant-wide convergence to materialize all derive-1 grants/entitlements right after migration. Decision: from-scratch re-migration (the user's chosen path, doujins #724 writes ZERO entitlements) produces NO orphans, so derive-1 builds everything cleanly with grant provenance — no orphan cleanup needed. Documented in ConvergeMerchant: an IN-PLACE cutover over OLD-migrate data must revoke the grant_id-less orphan entitlements first (else derive-1 overlap-skip leaves them live-but-grantless). No destructive migration shipped since from-scratch is the path.
+
+8,457 entitlements were already written by the doujins migrate; they have NO grant_id and will collide with the entitlement no-overlap constraint once #631 derives grants→entitlements. Plan a one-time cutover.
+
+## Metadata
+- Category: chore
+- Status: not_started
+- Passes: false
+
+**Tasks:**
+- [ ] Decide: backfill grant_id onto the existing 8,457, OR revoke them and let #631 re-derive cleanly.
+- [ ] Sequence: openrails #631 + #636 must land + run BEFORE doujins #724 removes the entitlement writers, or migrated users lose access.
+- [ ] Operator-triggerable "full converge/reconcile" pass post-migration (the 15-min sweep already runs via the embed in the public-schema River).
+
+Acceptance: after cutover every active entitlement traces to a grant; no orphan/overlap; no access gap during transition.

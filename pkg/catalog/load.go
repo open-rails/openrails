@@ -114,9 +114,8 @@ func (m *Manifest) validate() error {
 	}
 
 	groupKeys := map[string]struct{}{}
-	// Product keys are globally unique across the manifest. OpenRails still
-	// stores this value in products.slug, so the same key in two tier
-	// groups would collide on apply.
+	// Product keys are globally unique across the manifest, so the same key in
+	// two tier groups would collide on apply.
 	productKeys := map[string]struct{}{}
 
 	for gi := range m.TierGroups {

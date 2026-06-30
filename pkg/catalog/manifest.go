@@ -10,7 +10,7 @@
 //
 //   - A product's identity is its key.
 //   - A price's identity is its FINANCIAL SUBSTANCE (currency, unit_amount,
-//     interval). There is no price slug. Prices are a SET:
+//     access duration, renewal flag, and trial terms). There is no price slug. Prices are a SET:
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //

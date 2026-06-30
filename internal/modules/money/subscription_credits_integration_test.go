@@ -58,7 +58,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NoError(t, err)
 
 	priceID := uuid.New()
-	cycle := int32(30)
+	cycleHours := int32(30 * 24)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		MerchantID:          dbtest.TestMerchantID.UUID(),
@@ -66,7 +66,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		Status:              string(models.CatalogStatusActive),
 		Amount:              100,
 		Currency:            "USD",
-		AccessDurationHours: &cycle,
+		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -180,7 +180,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	require.NoError(t, err)
 
 	priceID := uuid.New()
-	cycle := int32(30)
+	cycleHours := int32(30 * 24)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		MerchantID:          dbtest.TestMerchantID.UUID(),
@@ -188,7 +188,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		Status:              string(models.CatalogStatusActive),
 		Amount:              100,
 		Currency:            "USD",
-		AccessDurationHours: &cycle,
+		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
 		CreatedAt:           now,
 		UpdatedAt:           now,

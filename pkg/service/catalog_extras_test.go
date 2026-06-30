@@ -57,11 +57,11 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 	snap := extrasTestSnapshot()
 
 	products := []catalog.StripeProduct{
-		// Matched by content key (openrails_product_key -> local slug): NOT an extra.
+		// Matched by content key (openrails_product_key -> local product key): NOT an extra.
 		{ID: "prod_matched", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsProductKey: "premium"}},
 		// Matched by stored stripe product id: NOT an extra even without a marker.
 		{ID: "prod_local", Active: true},
-		// OpenRails-marked but slug unknown locally: OWNED extra.
+		// OpenRails-marked but product key unknown locally: OWNED extra.
 		{ID: "prod_ours_extra", Name: "Old Tier", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsProductKey: "retired"}},
 		// No marker at all: FOREIGN extra (logged, never archived).
 		{ID: "prod_foreign", Name: "Merchant Native", Active: true},

@@ -23,7 +23,7 @@ type ExtrasIndex struct {
 	// StripeProductIDs / StripePriceIDs: remote ids some local price links.
 	StripeProductIDs map[string]struct{}
 	StripePriceIDs   map[string]struct{}
-	// ProductKeys: local product content keys (= slugs).
+	// ProductKeys: local product content keys.
 	ProductKeys map[string]struct{}
 	// PriceContentKeys: local price content keys
 	// ("<product_key>.<currency>.<unit_amount>.<cycle>").

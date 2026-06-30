@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateCreditGrantSpec(t *testing.T) {
-	days := 30
+	expiryHours := 30 * 24
 	tests := []struct {
 		name    string
 		ctype   string
@@ -17,8 +17,8 @@ func TestValidateCreditGrantSpec(t *testing.T) {
 	}{
 		{"ok once default cadence", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD"}, false},
 		{"ok per_renewal", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", Cadence: models.CreditGrantCadencePerRenewal}, false},
-		{"ok expires", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &days}, false},
-		{"ok expiry_hours", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &days}, false},
+		{"ok expires", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &expiryHours}, false},
+		{"ok expiry_hours", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &expiryHours}, false},
 		{"ok expiry_hours zero never", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: ptrInt(0)}, false},
 		{"ok explicit unit lowercase", "promo", models.CreditGrantSpec{Amount: 1, Unit: "usd"}, false},
 		{"ok explicit unit eur", "promo", models.CreditGrantSpec{Amount: 1, Unit: "EUR"}, false},

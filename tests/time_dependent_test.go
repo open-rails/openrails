@@ -763,7 +763,7 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 			"Period should have ended")
 	})
 
-	t.Run("renewal extends period by billing cycle days", func(t *testing.T) {
+	t.Run("renewal extends period by billing cycle hours", func(t *testing.T) {
 		// Simulate renewal webhook
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Rail:               models.RailMobius,

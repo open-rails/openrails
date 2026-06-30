@@ -42,7 +42,7 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 
 // seedTenantAndProduct inserts a merchant + one product (super-owned would bypass
 // RLS, but here we run everything as the app role inside the correct merchant tx).
-func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid merchant.ID, productID uuid.UUID, slug string) {
+func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid merchant.ID, productID uuid.UUID, productKey string) {
 	t.Helper()
 	require.NoError(t, appDB.MerchantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
@@ -53,7 +53,7 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid m
 		}
 		_, err := tx.Exec(ctx,
 			`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, $3)`,
-			productID, tid.UUID(), slug,
+			productID, tid.UUID(), productKey,
 		)
 		return err
 	}))

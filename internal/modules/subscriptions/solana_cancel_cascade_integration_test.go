@@ -150,7 +150,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	})
 	require.NoError(t, err)
 
-	cycleDays := int32(billingDays)
+	cycleHours := int32(billingDays * 24)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		ProductID:           productID,
@@ -158,7 +158,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		Amount:              999,
 		Currency:            "usd",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
-		AccessDurationHours: &cycleDays,
+		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
 		CreatedAt:           now,
 		UpdatedAt:           now,

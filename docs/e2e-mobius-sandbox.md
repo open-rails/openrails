@@ -153,7 +153,7 @@ task seed-e2e-nmi
 ```
 
 This creates:
-- `billing.products.slug = e2e_mobius`
+- a catalog product with key `e2e_mobius`
 - one active `billing.prices` row with `rails.mobius.plan_id = $E2E_NMI_PLAN_ID`
 
 ## 5) Mint a JWT for API calls

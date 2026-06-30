@@ -88,7 +88,7 @@ func catalogStatusFromActive(active bool) models.CatalogStatus {
 
 // helper builders
 func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
-	return &models.Product{ID: id, Key: "prod-slug", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
+	return &models.Product{ID: id, Key: "prod-key", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
 }
 
 func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
@@ -179,15 +179,15 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium Plus", Description: "new desc", Active: false, Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsProductKey: "prod-slug",
+			catalog.StripeMetadataOpenRailsProductKey: "prod-key",
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 2000, Currency: "eur", Active: false, Nickname: "Yearly", Metadata: map[string]string{
 			// Content key reverse-matches the LOCAL row's financial key
-			// (prod-slug, usd, 10_000_000 micros, one-time); the Stripe object's own
+			// (prod-key, usd, 10_000_000 micros, one-time); the Stripe object's own
 			// amount/currency/active diverge -> field drift.
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.10000000.onetime",
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-key.usd.10000000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)
@@ -211,12 +211,12 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium", Description: "desc", Active: true, Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsProductKey: "prod-slug",
+			catalog.StripeMetadataOpenRailsProductKey: "prod-key",
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 1000, Currency: "usd", Active: true, Nickname: "Monthly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.10000000.onetime",
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-key.usd.10000000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)

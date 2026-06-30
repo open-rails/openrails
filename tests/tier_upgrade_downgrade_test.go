@@ -123,15 +123,15 @@ func TestTierProrationCalculation(t *testing.T) {
 
 	t.Run("calculates correct proration for mid-cycle upgrade", func(t *testing.T) {
 		// User on Premium ($10/mo), 15 days remaining, upgrades to Premium+ ($20/mo)
-		// Expected proration: ($20 - $10) * (15/30) = $5
+		// Expected proration: ($20 - $10) * (360h/720h) = $5
 
 		oldAmount := premiumPrice.Amount
 		newAmount := premiumPlusPrice.Amount
-		billingCycle := 30 // days
-		daysRemaining := 15
+		billingCycleHours := 30 * 24
+		hoursRemaining := 15 * 24
 
 		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(daysRemaining) / float64(billingCycle)
+		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
 		expectedProration := int64(float64(priceDiff) * prorationRatio)
 
 		assert.Equal(t, int64(5_000_000), expectedProration, "Proration should be $5 in micros")
@@ -140,11 +140,11 @@ func TestTierProrationCalculation(t *testing.T) {
 	t.Run("proration is zero at start of cycle", func(t *testing.T) {
 		oldAmount := premiumPrice.Amount
 		newAmount := premiumPlusPrice.Amount
-		billingCycle := 30
-		daysRemaining := 30 // Full cycle remaining
+		billingCycleHours := 30 * 24
+		hoursRemaining := 30 * 24 // Full cycle remaining
 
 		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(daysRemaining) / float64(billingCycle)
+		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
 		prorationAmount := int64(float64(priceDiff) * prorationRatio)
 
 		assert.Equal(t, int64(10_000_000), prorationAmount, "Proration should be full difference at start of cycle")
@@ -153,11 +153,11 @@ func TestTierProrationCalculation(t *testing.T) {
 	t.Run("proration is zero at end of cycle", func(t *testing.T) {
 		oldAmount := premiumPrice.Amount
 		newAmount := premiumPlusPrice.Amount
-		billingCycle := 30
-		daysRemaining := 0 // End of cycle
+		billingCycleHours := 30 * 24
+		hoursRemaining := 0 // End of cycle
 
 		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(daysRemaining) / float64(billingCycle)
+		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
 		prorationAmount := int64(float64(priceDiff) * prorationRatio)
 
 		assert.Equal(t, int64(0), prorationAmount, "Proration should be zero at end of cycle")

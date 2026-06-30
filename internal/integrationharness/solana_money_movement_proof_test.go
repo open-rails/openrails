@@ -136,16 +136,16 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	// The catalog/product/price/benefit metadata is persisted in Postgres (the
 	// source of truth) — read it straight from the products table.
 	var (
-		dbSlug, dbDisplayName, dbDescription string
-		entitlementsSpec, creditsSpec        []byte
+		dbProductKey, dbDisplayName, dbDescription string
+		entitlementsSpec, creditsSpec              []byte
 	)
 	err = h.Pool().QueryRow(ctx, `
 		SELECT key, display_name, description, entitlements_spec, credits_spec
           FROM openrails.products
-		 WHERE merchant_id = ::uuid AND key = 
-	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbSlug, &dbDisplayName, &dbDescription, &entitlementsSpec, &creditsSpec)
+		 WHERE merchant_id = $1::uuid AND key = $2
+	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbProductKey, &dbDisplayName, &dbDescription, &entitlementsSpec, &creditsSpec)
 	require.NoError(t, err, "product metadata must be persisted in openrails.products")
-	require.Equal(t, productKey, dbSlug)
+	require.Equal(t, productKey, dbProductKey)
 	require.Equal(t, displayName, dbDisplayName)
 	require.Equal(t, description, dbDescription)
 	require.Contains(t, string(entitlementsSpec), entitlement, "granted benefit (entitlement) stored in DB")

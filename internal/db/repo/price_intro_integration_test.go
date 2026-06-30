@@ -16,7 +16,7 @@ import (
 )
 
 // #602: a price can carry an introductory/trial FIRST period (initial_amount +
-// initial_period_days) distinct from its recurring terms. Proves the schema +
+// initial_period_hours) distinct from its recurring terms. Proves the schema +
 // generated code + model round-trip against real Postgres: a step-down intro
 // ($19.95 -> $14.95), a free trial (initial_amount 0), and a flat price (no
 // intro) all persist and read back correctly. A $0 initial is a valid trial,
@@ -40,24 +40,24 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	})
 
 	now := time.Now().UTC().Truncate(time.Second)
-	cycle := 30
+	recurringHours := 30 * 24
 	r := NewPriceRepo(dbi)
-	mk := func(amount, initialAmount int64, initialDays int, withIntro bool) *models.Price {
+	mk := func(amount, initialAmount int64, initialHours int, withIntro bool) *models.Price {
 		p := &models.Price{
 			ID: uuid.New(), MerchantID: merchantID, ProductID: productID,
 			Status: models.CatalogStatusArchived, Amount: amount, Currency: "usd",
-			AccessDurationHours: &cycle, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+			AccessDurationHours: &recurringHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		}
 		if withIntro {
-			ia, id := initialAmount, initialDays
+			ia, id := initialAmount, initialHours
 			p.TrialUnitAmount, p.TrialDurationHours = &ia, &id
 		}
 		require.NoError(t, r.Create(ctx, p))
 		return p
 	}
-	mk(1495, 1995, 30, true) // step-down: $19.95 first 30d -> $14.95/30d
-	mk(1500, 0, 7, true)     // free trial: $0/7d -> $15/30d
-	mk(2300, 0, 0, false)    // flat $23/30d, no intro
+	mk(1495, 1995, 30*24, true) // step-down: $19.95 first 30d -> $14.95/30d
+	mk(1500, 0, 7*24, true)     // free trial: $0/7d -> $15/30d
+	mk(2300, 0, 0, false)       // flat $23/30d, no intro
 
 	prices, err := r.GetByProductID(ctx, productID)
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	a, d, ok := step.GetTrial()
 	require.True(t, ok)
 	require.Equal(t, int64(1995), a)
-	require.Equal(t, 30, d)
+	require.Equal(t, 30*24, d)
 
 	// free trial: trial unit amount 0 is still a trial (NOT "no trial")
 	trial := byAmount[1500]
@@ -80,7 +80,7 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	ta, td, ok := trial.GetTrial()
 	require.True(t, ok, "trial_unit_amount 0 is a free trial, still a trial")
 	require.Equal(t, int64(0), ta)
-	require.Equal(t, 7, td)
+	require.Equal(t, 7*24, td)
 
 	// flat price has no trial
 	flat := byAmount[2300]

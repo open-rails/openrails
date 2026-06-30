@@ -314,8 +314,8 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 	for id := range snap.stripePriceIDs {
 		ix.StripePriceIDs[id] = struct{}{}
 	}
-	for slug := range snap.productByKey {
-		ix.ProductKeys[slug] = struct{}{}
+	for key := range snap.productByKey {
+		ix.ProductKeys[key] = struct{}{}
 	}
 	for ck := range snap.priceByContentKey {
 		ix.PriceContentKeys[ck] = struct{}{}
@@ -325,7 +325,7 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 
 // computeNMIExtras is the pure NMI diff: recurring plans on the account whose
 // plan_id is not referenced by any local price. Owned = the plan_id matches the
-// content-addressed "<slug>-<currency>-<amount>-<cycle>" shape OpenRails mints
+// content-addressed "<product-key>-<currency>-<amount>-<cycle>" shape OpenRails mints
 // (mobiusDeterministicPlanID). NMI plans have no active flag, so Active is
 // always true.
 func computeNMIExtras(plans []nmiPlan, snap localCatalogSnapshot) []CatalogExtra {
@@ -437,9 +437,9 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 }
 
 // isContentAddressedNMIPlanID reports whether a plan_id matches the
-// content-addressed shape OpenRails mints: "<slug>-<currency>-<amount>-<cycle>"
+// content-addressed shape OpenRails mints: "<product-key>-<currency>-<amount>-<cycle>"
 // where currency is a 3-letter code, amount is an integer, and cycle is a day
-// count or "onetime" (see mobiusDeterministicPlanID). The slug may itself
+// count or "onetime" (see mobiusDeterministicPlanID). The product key may itself
 // contain hyphens, so the id is parsed from the right. Operator-chosen plan ids
 // that happen not to match this shape are treated as foreign (never archived).
 func isContentAddressedNMIPlanID(planID string) bool {
@@ -450,8 +450,8 @@ func isContentAddressedNMIPlanID(planID string) bool {
 	cycle := parts[len(parts)-1]
 	amount := parts[len(parts)-2]
 	currency := parts[len(parts)-3]
-	slug := strings.Join(parts[:len(parts)-3], "-")
-	if slug == "" {
+	productKey := strings.Join(parts[:len(parts)-3], "-")
+	if productKey == "" {
 		return false
 	}
 	if cycle != "onetime" && !isAllDigits(cycle) {

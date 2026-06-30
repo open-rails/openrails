@@ -37,16 +37,15 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
 
 	// Idempotently seed two tenants' products as super (super bypasses RLS, so it
-	// can write any merchant's rows). Slugs carry a unique suffix so this test's
-	// fixtures never collide with sibling tests sharing the DB on the global
-	// products.slug / tenants.slug UNIQUE constraints.
+	// can write any merchant's rows). Keys carry a unique suffix so this test's
+	// fixtures never collide with sibling tests sharing the DB.
 	suffix := uuid.NewString()[:8]
 	tenantA := uuid.NewString()
 	tenantB := uuid.NewString()
 	productA := uuid.NewString()
 	productB := uuid.NewString()
-	slugA := "prod-a-" + suffix
-	slugB := "prod-b-" + suffix
+	keyA := "prod-a-" + suffix
+	keyB := "prod-b-" + suffix
 	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
 	require.NoError(t, err)
 	defer super.Close()
@@ -55,8 +54,8 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 		   ('` + tenantA + `','merchant-` + suffix + `-a'), ('` + tenantB + `','merchant-` + suffix + `-b')
 		 ON CONFLICT (id) DO NOTHING`,
 		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES
-		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
-		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
+		   ('` + productA + `','` + tenantA + `','` + keyA + `','Product A'),
+		   ('` + productB + `','` + tenantB + `','` + keyB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,
 	} {
 		_, e := super.Pool().Exec(ctx, stmt)
@@ -86,7 +85,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	gotA, err := repo.GetAll(connA)
 	require.NoError(t, err)
 	require.Len(t, gotA, 1, "merchant A sees exactly its own product")
-	require.Equal(t, slugA, gotA[0].Key)
+	require.Equal(t, keyA, gotA[0].Key)
 	releaseA()
 
 	// (3) Pinned to merchant B: sees only merchant B's product. No cross-merchant bleed.
@@ -96,7 +95,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	gotB, err := repo.GetAll(connB)
 	require.NoError(t, err)
 	require.Len(t, gotB, 1)
-	require.Equal(t, slugB, gotB[0].Key)
+	require.Equal(t, keyB, gotB[0].Key)
 	releaseB()
 }
 

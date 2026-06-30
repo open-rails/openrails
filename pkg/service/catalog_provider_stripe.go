@@ -129,7 +129,7 @@ func (a *stripeAdapter) stripeConfigured() bool {
 }
 
 // AutoCreate implements the find-or-create flow for Stripe. Identity is
-// CONTENT-based (catalog slugs), so it is wipe-safe — re-syncing after a DB
+// CONTENT-based (catalog product keys), so it is wipe-safe — re-syncing after a DB
 // rebuild finds the same Stripe objects rather than duplicating them. The
 // discovery chain (in order):
 //
