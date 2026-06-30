@@ -25,7 +25,8 @@ func TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases(t *testing.T) {
 	productKey := "sidecar-product-" + uuid.NewString()
 	meterKey := "droplet-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1", merchantID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1", merchantID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1", merchantID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1", merchantID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -54,18 +55,21 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			Price: json.RawMessage(`{
 				"model":"per_unit",
 				"currency":"USD",
-				"divide_by":3600,
-				"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000}}}
+				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000}}}}
 			}`),
 		}},
-		CreditPurchases: []CatalogCreditPurchaseSpec{{
+		CreditBalances: []CatalogCreditBalanceSpec{{
+			Key:  "image-credit",
+			Unit: "image-credit",
+		}},
+		CreditPurchases: []CatalogCreditPurchasePriceSpec{{
 			ProductKey: productKey,
-			CreditType: "image-credit",
-			Unit:       "image-credit",
+			Ordinal:    1,
+			CreditKey:  "image-credit",
 			Currency:   "USD",
 			InputMin:   1_000_000,
 			Providers:  []string{"stripe"},
-			Price:      json.RawMessage(`{"model":"per_unit","unit_amount":10000}`),
+			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`),
 		}},
 	}))
 
@@ -74,12 +78,14 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 SELECT cm.event_type,
        cm.group_by ->> 'size_slug',
        rc.price ->> 'currency',
-       ccp.unit
+       cb.unit
 FROM openrails.catalog_meters cm
 JOIN openrails.catalog_rate_cards rc
   ON rc.merchant_id = cm.merchant_id AND rc.meter_key = cm.key
-JOIN openrails.catalog_credit_purchases ccp
-  ON ccp.merchant_id = cm.merchant_id
+JOIN openrails.catalog_credit_purchase_prices cpp
+  ON cpp.merchant_id = cm.merchant_id
+JOIN openrails.catalog_credit_balances cb
+  ON cb.merchant_id = cpp.merchant_id AND cb.key = cpp.credit_key
 WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 		Scan(&eventType, &groupBy, &priceCurrency, &creditUnit))
 	require.Equal(t, "droplet.usage", eventType)

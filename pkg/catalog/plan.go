@@ -140,7 +140,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	// subscriptions (#642). The loader put them in a synthetic singleton group;
 	// persist NULL so they never share tier exclusivity.
 	tierGroupPtr := &group.Key
-	if len(product.RateCards) > 0 {
+	if len(product.RateCards) > 0 || product.hasMeteredPrice() {
 		tierGroupPtr = nil
 	}
 	tierRank := product.tierRank()
@@ -270,6 +270,9 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	claimed := map[uuid.UUID]struct{}{}
 
 	for _, price := range product.Prices {
+		if price.Model != "" {
+			continue
+		}
 		desiredStatus := statusFromActive(price.Active)
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
@@ -422,18 +425,24 @@ func entitlementsSpec(entitlements []string) map[string]*int {
 	return out
 }
 
-func creditsSpec(credits Credits) billingservice.CreditsSpec {
+func creditsSpec(credits []CreditGrant) billingservice.CreditsSpec {
 	if len(credits) == 0 {
 		return nil
 	}
 	out := make(billingservice.CreditsSpec, len(credits))
-	for key, credit := range credits {
-		out[key] = billingservice.CreditGrantSpec{
+	for _, credit := range credits {
+		if credit.Amount == nil {
+			continue
+		}
+		out[credit.Key] = billingservice.CreditGrantSpec{
 			Unit:        strings.TrimSpace(credit.Unit),
-			Amount:      credit.Amount,
+			Amount:      *credit.Amount,
 			ExpiryHours: credit.ExpiryHours,
 			Cadence:     billingservice.CreditGrantCadence(strings.TrimSpace(credit.Cadence)),
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

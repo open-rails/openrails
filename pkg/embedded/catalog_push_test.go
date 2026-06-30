@@ -84,7 +84,7 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 	}
 	var dropletPrice *catalog.RatePrice
 	for i := range droplet.RateCards {
-		if droplet.RateCards[i].Price.Matrix != nil {
+		if droplet.RateCards[i].Price.PerUnit != nil && droplet.RateCards[i].Price.PerUnit.Matrix != nil {
 			dropletPrice = &droplet.RateCards[i].Price
 		}
 	}
@@ -124,15 +124,19 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 		}
 	}
 	topup, ok := cozyProducts["image-credit-topup"]
-	if !ok || topup.CreditPurchase == nil {
-		t.Fatal("cozy-creator missing image-credit-topup credit_purchase")
+	if !ok || len(topup.Credits) != 1 || topup.Credits[0].Amount != nil || len(topup.Prices) != 1 {
+		t.Fatal("cozy-creator missing image-credit-topup credit offer")
 	}
-	cp := topup.CreditPurchase
-	if cp.Price.Model != catalog.ModelTiered || cp.Price.Mode != catalog.TierModeGraduated {
-		t.Errorf("credit top-up must be graduated tiered, got %s/%s", cp.Price.Model, cp.Price.Mode)
+	offer := catalog.RatePrice{
+		Model:   topup.Prices[0].Model,
+		Tiered:  topup.Prices[0].Tiered,
+		PerUnit: topup.Prices[0].PerUnit,
+	}
+	if offer.Model != catalog.ModelTiered || offer.Tiered == nil || offer.Tiered.Mode != catalog.TierModeGraduated {
+		t.Errorf("credit top-up must be graduated tiered, got %+v", offer)
 	}
 	// $20 buys exactly 2,000 credits at the $0.01/credit base band (bidirectional quote).
-	credits, spent, err := catalog.QuoteUnitsForSpend(20_000_000, cp.Price.ToChargeModel())
+	credits, spent, err := catalog.QuoteUnitsForSpend(20_000_000, offer.ToChargeModel())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +166,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 100
+            duration: 30d
+            auto_renew: true
 `)
 
 	_, err := loadCatalogPushTargets(CatalogPushOptions{File: path})
@@ -201,6 +207,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 100
+            duration: 30d
+            auto_renew: true
   - merchant: cozy-art
     products:
       - key: premium-basic
@@ -210,6 +218,8 @@ catalogs:
         prices:
           - currency: usd
             unit_amount: 200
+            duration: 30d
+            auto_renew: true
 `)
 
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: raw})

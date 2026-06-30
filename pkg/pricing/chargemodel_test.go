@@ -102,14 +102,10 @@ func TestRate_Package(t *testing.T) {
 	}
 }
 
-func TestRate_FlatAndDynamic(t *testing.T) {
+func TestRate_Flat(t *testing.T) {
 	flat := ChargeModel{Kind: ModelFlat, FlatAmount: 5_000_000}
 	if got, _ := flat.Rate(99); got != 5_000_000 {
 		t.Fatalf("flat = %d, want 5000000", got)
-	}
-	dyn := ChargeModel{Kind: ModelDynamic, Multiplier: 1_500_000} // +50% markup
-	if got, _ := dyn.Rate(1_000_000); got != 1_500_000 {
-		t.Fatalf("dynamic = %d, want 1500000", got)
 	}
 }
 

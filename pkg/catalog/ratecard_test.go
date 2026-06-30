@@ -38,15 +38,19 @@ products:
         price:
           model: per_unit
           currency: usd
-          divide_by: 3_600
-          round: up
-          matrix:
-            dimension: size_slug
-            cells:
-              s-1vcpu-1gb: {unit_amount: 8_930, maximum_amount: 6_000_000}
+          per_unit:
+            divide_by: 3_600
+            round: up
+            matrix:
+              dimension: size_slug
+              cells:
+                s-1vcpu-1gb: {unit_amount: 8_930, maximum_amount: 6_000_000}
       - meter: public-egress
         allowance: {accrue_from: droplet-runtime, pool: customer, cap: 28d}
-        price: {model: per_unit, currency: usd, unit_amount: 10_000, divide_by: 1_073_741_824, round: up}
+        price:
+          model: per_unit
+          currency: usd
+          per_unit: {unit_amount: 10_000, divide_by: 1_073_741_824, round: up}
 `
 
 func TestRateCard_DOStyleLoadsAndRates(t *testing.T) {
@@ -102,7 +106,7 @@ products:
     display_name: P
     rate_cards:
       - meter: m
-        price: {model: per_unit, currency: usd, unit_amount: 1}
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 1}}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -129,9 +133,10 @@ products:
         price:
           model: per_unit
           currency: usd
-          matrix:
-            dimension: size_slug
-            cells: {a: {unit_amount: 1}}
+          per_unit:
+            matrix:
+              dimension: size_slug
+              cells: {a: {unit_amount: 1}}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "not a group_by key") {
@@ -149,9 +154,9 @@ products:
     display_name: P
     rate_cards:
       - meter: m
-        price: {model: per_unit, currency: usd, unit_amount: 1}
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 1}}
       - meter: m
-        price: {model: per_unit, currency: usd, unit_amount: 2}
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 2}}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "already rated") {
@@ -170,7 +175,7 @@ products:
     rate_cards:
       - meter: egress
         allowance: {accrue_from: ghost-meter, pool: customer}
-        price: {model: per_unit, currency: usd, unit_amount: 1}
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 1}}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "accrue_from references unknown meter") {
@@ -194,24 +199,27 @@ products:
 
 const creditTopupManifest = `
 version: 1
+credit_balances:
+  - key: ai-image-gen
+    unit: ai-image-credit
+    expires_default: 30d
 products:
   - key: image-credit-topup
     display_name: AI Image Credits
-    tier_group: topups
-    credit_purchase:
-      credit_type: ai-image-gen
-      unit: ai-image-credit
-      currency: usd
-      expires: 30d
-      input_min: 5_000_000
-      round: down
-      price:
+    credits:
+      - key: ai-image-gen
+    prices:
+      - currency: usd
+        providers: [stripe]
+        input_min: 5_000_000
+        round: down
         model: tiered
-        mode: graduated
-        tiers:
-          - {up_to: 2_000, unit_amount: 10_000}
-          - {up_to: 10_000, unit_amount: 9_000}
-          - {unit_amount: 8_000}
+        tiered:
+          mode: graduated
+          tiers:
+            - {up_to: 2_000, unit_amount: 10_000}
+            - {up_to: 10_000, unit_amount: 9_000}
+            - {unit_amount: 8_000}
 `
 
 func TestCreditPurchase_GraduatedLoadsAndQuotes(t *testing.T) {
@@ -219,11 +227,8 @@ func TestCreditPurchase_GraduatedLoadsAndQuotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cp := productByKey(t, m, "image-credit-topup").CreditPurchase
-	if cp == nil {
-		t.Fatal("credit_purchase not parsed")
-	}
-	credits, spent, err := QuoteUnitsForSpend(20_000_000, cp.Price.ToChargeModel())
+	price := productByKey(t, m, "image-credit-topup").Prices[0].ratePrice()
+	credits, spent, err := QuoteUnitsForSpend(20_000_000, price.ToChargeModel())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,18 +240,20 @@ func TestCreditPurchase_GraduatedLoadsAndQuotes(t *testing.T) {
 func TestCreditPurchase_RejectsVolumeMode(t *testing.T) {
 	body := `
 version: 1
+credit_balances:
+  - {key: ai-image-gen, unit: ai-image-credit}
 products:
   - key: topup
     display_name: Topup
-    credit_purchase:
-      credit_type: ai-image-gen
-      currency: usd
-      price:
+    credits: [{key: ai-image-gen}]
+    prices:
+      - currency: usd
         model: tiered
-        mode: volume
-        tiers:
-          - {up_to: 2_000, unit_amount: 10_000}
-          - {unit_amount: 9_000}
+        tiered:
+          mode: volume
+          tiers:
+            - {up_to: 2_000, unit_amount: 10_000}
+            - {unit_amount: 9_000}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "graduated mode") {
@@ -257,13 +264,16 @@ products:
 func TestCreditPurchase_RejectsFlatModel(t *testing.T) {
 	body := `
 version: 1
+credit_balances:
+  - {key: ai-image-gen, unit: ai-image-credit}
 products:
   - key: topup
     display_name: Topup
-    credit_purchase:
-      credit_type: ai-image-gen
-      currency: usd
-      price: {model: flat, amount: 5_000_000}
+    credits: [{key: ai-image-gen}]
+    prices:
+      - currency: usd
+        model: flat
+        flat: {amount: 5_000_000}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "per_unit or graduated tiered") {

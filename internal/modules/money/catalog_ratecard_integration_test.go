@@ -51,14 +51,12 @@ VALUES
     ($1, $2, 1, $4, 'in_arrears', '{
       "model":"per_unit",
       "currency":"USD",
-      "divide_by":3600,
-      "matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1}}}
+      "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1}}}}
     }'::jsonb),
     ($1, $3, 1, $5, 'in_arrears', '{
       "model":"per_unit",
       "currency":"USD",
-      "unit_amount":10000,
-      "divide_by":1073741824
+      "per_unit":{"unit_amount":10000,"divide_by":1073741824}
     }'::jsonb)`,
 		merchantID, dropletProductID, bandwidthProductID, dropletMeter, bandwidthMeter)
 	require.NoError(t, err)
@@ -129,7 +127,8 @@ func TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance(t *tes
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.ledger_transfers WHERE customer_id = $1 AND currency = $2", payer.UUID(), unit)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1 AND currency = $2", payer.UUID(), unit)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", merchantID, "image-credit")
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
@@ -140,16 +139,23 @@ INSERT INTO openrails.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Image Credit Top-up', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_credit_purchases
-    (product_id, merchant_id, credit_type, unit, currency, expires_hours, input_min, price)
-VALUES ($1, $2, 'image-credit', 'image-credit', 'USD', 720, 1000000, '{
+INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit, expires_hours)
+VALUES ($1, 'image-credit', 'image-credit', 720)
+ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours`, merchantID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_credit_purchase_prices
+    (merchant_id, product_id, ordinal, credit_key, currency, input_min, price)
+VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
   "model":"tiered",
-  "mode":"graduated",
-  "tiers":[
-    {"up_to":2000,"unit_amount":10000},
-    {"unit_amount":7500}
-  ]
-}'::jsonb)`, productID, merchantID)
+  "tiered":{
+    "mode":"graduated",
+    "tiers":[
+      {"up_to":2000,"unit_amount":10000},
+      {"unit_amount":7500}
+    ]
+  }
+}'::jsonb)`, merchantID, productID)
 	require.NoError(t, err)
 
 	quote, err := svc.QuoteCatalogCreditPurchase(ctx, money.CatalogCreditPurchaseQuoteInput{
@@ -217,8 +223,8 @@ VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', '{"size_slug":"metadata.size_
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', '{
-  "model":"per_unit","currency":"USD","divide_by":3600,
-  "matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1000}}}
+  "model":"per_unit","currency":"USD",
+  "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1000}}}}
 }'::jsonb)`, merchantID, productID, meterKey)
 	require.NoError(t, err)
 
@@ -246,7 +252,8 @@ func TestCatalogCreditPurchase_QuotesByCreditsEntryWithinSpendBounds(t *testing.
 	productID := uuid.New()
 	productKey := "image-credit-topup-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchases WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", merchantID, "image-credit")
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 	_, err := svc.DefineCustomCreditType(ctx, "image-credit", 0)
@@ -254,10 +261,15 @@ func TestCatalogCreditPurchase_QuotesByCreditsEntryWithinSpendBounds(t *testing.
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Topup', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_credit_purchases (product_id, merchant_id, credit_type, unit, currency, input_min, price)
-VALUES ($1, $2, 'image-credit', 'image-credit', 'USD', 1000000, '{
-  "model":"tiered","mode":"graduated","tiers":[{"up_to":2000,"unit_amount":10000},{"unit_amount":7500}]
-}'::jsonb)`, productID, merchantID)
+INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit)
+VALUES ($1, 'image-credit', 'image-credit')
+ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_credit_purchase_prices (merchant_id, product_id, ordinal, credit_key, currency, input_min, price)
+VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
+  "model":"tiered","tiered":{"mode":"graduated","tiers":[{"up_to":2000,"unit_amount":10000},{"unit_amount":7500}]}
+}'::jsonb)`, merchantID, productID)
 	require.NoError(t, err)
 
 	// 6000 credits as a raw number is < input_min(1_000_000), but the $50 charge

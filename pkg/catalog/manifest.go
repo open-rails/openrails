@@ -23,10 +23,11 @@ package catalog
 // Every price declares its own `currency` and `providers` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
-	Version     int          `json:"version" yaml:"version"`
-	Products    []Product    `json:"products,omitempty" yaml:"products,omitempty"`
-	Meters      []Meter      `json:"meters,omitempty" yaml:"meters,omitempty"`
-	UsageLimits []UsageLimit `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
+	Version        int             `json:"version" yaml:"version"`
+	Products       []Product       `json:"products,omitempty" yaml:"products,omitempty"`
+	Meters         []Meter         `json:"meters,omitempty" yaml:"meters,omitempty"`
+	CreditBalances []CreditBalance `json:"credit_balances,omitempty" yaml:"credit_balances,omitempty"`
+	UsageLimits    []UsageLimit    `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
 
 	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
@@ -72,11 +73,11 @@ type Product struct {
 	TierGroup   string `json:"tier_group,omitempty" yaml:"tier_group,omitempty"`
 	TierRank    *int   `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
 	// Active mirrors Stripe's product/price availability model. nil defaults to true.
-	Active       *bool    `json:"active,omitempty" yaml:"active,omitempty"`
-	Entitlements []string `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
-	Credits      Credits  `json:"credits,omitempty" yaml:"credits,omitempty"`
-	UsageLimits  []string `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
-	Includes     []string `json:"includes,omitempty" yaml:"includes,omitempty"`
+	Active       *bool         `json:"active,omitempty" yaml:"active,omitempty"`
+	Entitlements []string      `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
+	Credits      []CreditGrant `json:"credits,omitempty" yaml:"credits,omitempty"`
+	UsageLimits  []string      `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
+	Includes     []string      `json:"includes,omitempty" yaml:"includes,omitempty"`
 
 	Prices []Price `json:"prices,omitempty" yaml:"prices,omitempty"`
 
@@ -85,16 +86,20 @@ type Product struct {
 	// cap/allowance window is the invoice period (calendar-month via the merchant
 	// invoice boundary), so collection cadence is a billing-policy concern (#643),
 	// not catalog (#642).
-	RateCards      []RateCard      `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
-	CreditPurchase *CreditPurchase `json:"credit_purchase,omitempty" yaml:"credit_purchase,omitempty"`
+	RateCards []RateCard `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
 }
 
-type Credits map[string]CreditGrant
+type CreditBalance struct {
+	Key            string `json:"key" yaml:"key"`
+	Unit           string `json:"unit" yaml:"unit"`
+	ExpiresDefault string `json:"expires_default,omitempty" yaml:"expires_default,omitempty"`
+}
 
 type CreditGrant struct {
+	Key         string `json:"key" yaml:"key"`
 	Unit        string `json:"unit,omitempty" yaml:"unit,omitempty"`
 	Currency    string `json:"currency,omitempty" yaml:"currency,omitempty"`
-	Amount      int64  `json:"amount" yaml:"amount"`
+	Amount      *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
 	ExpiryHours *int   `json:"expiry_hours,omitempty" yaml:"expiry_hours,omitempty"`
 	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
 	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
@@ -156,6 +161,17 @@ type Price struct {
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
 
 	Metered *MeteredPrice `json:"metered,omitempty" yaml:"metered,omitempty"`
+
+	// Variable credit top-up offer fields. Fixed catalog prices keep using the
+	// UnitAmount/Duration shape above.
+	InputMin int64         `json:"input_min,omitempty" yaml:"input_min,omitempty"`
+	InputMax int64         `json:"input_max,omitempty" yaml:"input_max,omitempty"`
+	Round    string        `json:"round,omitempty" yaml:"round,omitempty"`
+	Model    string        `json:"model,omitempty" yaml:"model,omitempty"`
+	Flat     *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
+	PerUnit  *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
+	Tiered   *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
+	Package  *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
 }
 
 type MeteredPrice struct {
@@ -171,4 +187,25 @@ type MeteredPrice struct {
 type PriceTrial struct {
 	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price (0 = free trial)
 	Duration   string `json:"duration" yaml:"duration"`       // first-phase length
+}
+
+func (p Price) ratePrice() RatePrice {
+	return RatePrice{
+		Model:    p.Model,
+		Currency: p.Currency,
+		Flat:     p.Flat,
+		PerUnit:  p.PerUnit,
+		Tiered:   p.Tiered,
+		Package:  p.Package,
+	}
+}
+
+func (p Price) withRatePrice(rp RatePrice) Price {
+	p.Model = rp.Model
+	p.Currency = rp.Currency
+	p.Flat = rp.Flat
+	p.PerUnit = rp.PerUnit
+	p.Tiered = rp.Tiered
+	p.Package = rp.Package
+	return p
 }

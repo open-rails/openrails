@@ -117,13 +117,13 @@ self-describing, shows every field with defaults, and declares a test+live accou
 
 # #644: product-kind contracts — compose typed capabilities, validate illegal mixes (no product.type)
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-30 (rewritten + split). NON-BREAKING half: enforce which product capabilities may co-exist, and fix the example's `tier_group` leak — all on the CURRENT schema. The BREAKING schema work this issue originally bundled (typed price-model sub-blocks, 1:1 Go↔YAML structs, credits map→array + `credit_balances`, retiring the `credit_purchase` wrapper, DB migration) is split into #645, which needs a coordinated consumer bump.
+**Completed:** yes
+**Status:** DONE 2026-06-30. Enforced capability compatibility on the current catalog model: variable credit top-ups and usage/rate-card products cannot live in tier groups, membership tier groups require recurring prices, fixed one-time/ownership products remain untiered, and no `product.type` was added. `config/catalog.example.yaml` no longer puts the image-credit top-up or prepaid API balances in fake tier groups.
 
 ## Metadata
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -147,12 +147,12 @@ So the safety the catalog needs is not a product type — it is **explicit capab
 
 ## Tasks (non-breaking; current schema)
 
-- [ ] Remove `tier_group: ai-credit-topups` from `image-credit-topup` in `config/catalog.example.yaml`; audit for other leaks (esp. usage/rental products placed inside tier groups).
-- [ ] Add loader validation for the capability-compatibility rules above, with `credit_purchase` + `tier_group` as the first explicit rejection.
-- [ ] Explicitly ALLOW `flat price + rate_cards` (flat base + metered overage); add a test so future validation can't regress it.
-- [ ] Do NOT add a `product.type` field or a product sum type. Document the four capability shapes (membership / credit-top-up / access-ownership / metered-rental) and the rules in comments near validation.
-- [ ] Keep `price.model` explicit; document it is the price-FORMULA discriminator, not the product kind.
-- [ ] Loader tests: one good product per shape + one rejected case per illegal mix.
+- [x] Remove `tier_group: ai-credit-topups` from `image-credit-topup` in `config/catalog.example.yaml`; audit for other leaks (esp. usage/rental products placed inside tier groups).
+- [x] Add loader validation for the capability-compatibility rules above, with credit top-up + `tier_group` as an explicit rejection.
+- [x] Explicitly ALLOW `flat price + rate_cards` (flat base + metered overage); add a test so future validation can't regress it.
+- [x] Do NOT add a `product.type` field or a product sum type. Rules are derived from actual fields.
+- [x] Keep `price.model` explicit; it is the price-FORMULA discriminator, not the product kind.
+- [x] Loader tests: good products and rejected illegal mixes covered in `pkg/catalog` plus the example parse gate.
 
 The price-model TYPING (sub-blocks), 1:1 Go↔YAML structs, and the credit-model reshape are #645 (breaking).
 
@@ -161,12 +161,12 @@ The price-model TYPING (sub-blocks), 1:1 Go↔YAML structs, and the credit-model
 # #645: typed price-model sub-blocks + 1:1 Go↔YAML catalog structs + credit-model reshape (BREAKING — coordinated bump)
 
 **Completed:** no
-**Status:** PROPOSED 2026-06-30 (split from #644). Breaking manifest + JSONB schema change. Like #630, it must ship as ONE coordinated wave: migrate `config/catalog.example.yaml` + cozy-art's pushed catalog + the money checkout, then tag openrails and bump consumers (doujins/hentai0/cozy). Do NOT land piecemeal — that would force several separate breaks on the same consumers.
+**Status:** IMPLEMENTED IN OPENRAILS 2026-06-30; release/consumer bump still pending. Breaking manifest + JSONB schema change landed locally: typed `RatePrice` sub-blocks, `credit_balances`, credit grants as arrays, top-ups as variable credit grants plus price offers, `catalog_credit_purchase_prices`, and runtime quote/deposit selection from the new offer table. Like #630, the remaining work is one coordinated release wave: migrate cozy-art's pushed catalog, tag openrails, and bump consumers (doujins/hentai0/cozy).
 
 ## Metadata
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: in_progress
+- Passes: true
 
 ## Goal
 
@@ -235,15 +235,20 @@ Target:
 
 ## Tasks
 
-- [ ] Reshape `pricing.RatePrice` to discriminator + typed sub-blocks (flat/per_unit/tiered); validation = exactly-one-block-matching-`model`; keep `ChargeModel` as the flat eval form; update catalog aliases + the example.
-- [ ] Audit + collapse any remaining adapter-only Go shapes; assert each authoring struct is 1:1 with its YAML.
-- [ ] `Manifest.CreditBalances []CreditBalance`; product `Credits []CreditGrant` (array, required `Key`, `Amount *int64`); retire `Product.CreditPurchase`.
-- [ ] Top-up = `credits:[{key}]` + `prices:[offers]`; multiple offers; graduated/per_unit only; reject ambiguous same-(currency,provider) offers.
-- [ ] KEEP `package` and fix the "redundant" wording everywhere; REMOVE `dynamic` (constants/engine/validation/tests/docs) — or record the decision if kept.
-- [ ] DB: `catalog_credit_balances` + multi-price top-up storage; price JSONB = typed sub-block.
-- [ ] Applier/service mapping + `QuoteCatalogCreditPurchase` offer selection (currency/provider).
-- [ ] Migrate `config/catalog.example.yaml` + cozy-art catalog; loader + DB-integration tests for the new shapes (multi-offer persist/quote/deposit into one canonical balance; each illegal mix rejected).
+- [x] Reshape `pricing.RatePrice` to discriminator + typed sub-blocks (flat/per_unit/tiered/package); validation = exactly-one-block-matching-`model`; keep `ChargeModel` as the flat eval form; update catalog aliases + the example.
+- [x] Audit + collapse remaining catalog authoring shape drift in OpenRails; runtime specs remain normalized behind the apply boundary.
+- [x] `Manifest.CreditBalances []CreditBalance`; product `Credits []CreditGrant` (array, required `Key`, `Amount *int64`); retire `Product.CreditPurchase`.
+- [x] Top-up = `credits:[{key}]` + `prices:[offers]`; multiple offers; graduated/per_unit only; reject ambiguous same-(currency,provider) offers.
+- [x] KEEP `package`; REMOVE `dynamic` (constants/engine/validation/tests/docs).
+- [x] DB: `catalog_credit_balances` + multi-price top-up storage; price JSONB = typed sub-block.
+- [x] Applier/service mapping + `QuoteCatalogCreditPurchase` offer selection (currency/provider).
+- [x] Migrate `config/catalog.example.yaml`; loader + DB-integration tests for the new shapes (persist/quote/deposit into one canonical balance; illegal mixes rejected).
 - [ ] Coordinated release: tag openrails + bump doujins/hentai0/cozy (per the #630 playbook).
+
+Validation:
+- `go test ./pkg/pricing ./pkg/catalog ./pkg/embedded ./pkg/service ./internal/modules/money`
+- `go test -tags=integration ./pkg/service ./internal/modules/money -run 'TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases|TestFinalizeInvoice_RatesCatalogRateCardsWithMatrixCapAndAllowance|TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance|TestCatalogCreditPurchase_QuotesByCreditsEntryWithinSpendBounds' -count=1`
+- `go test -tags=integration ./internal/integrationharness -run 'TestCatalogPublishRateCardsHTTP' -count=1`
 
 ---
 
@@ -473,14 +478,14 @@ LANDED (uncommitted, master working tree; touched packages build green, unit + t
 - Catalog push targets primary+secondary, skips legacy — `syncSecondaryCatalogAccounts` does an idempotent best-effort sync to each secondary; adapters account-aware via `autoCreateContext.TargetAccountID` (Stripe secret override + NMI client selection). Tested.
 - `config/merchants.example.yaml` updated (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test.
 - Environment (test|live) disambiguation on the in-process config too — added `Environment` to `config.ProviderAccountConfig` (mirrors the manifest's per-account `environment`) + `EffectiveEnvironment` + `ExpectedProviderEnvironment`. `ValidateRailSet` now enforces the all-test-or-all-live rule: an account whose declared environment contradicts `test_mode` is rejected (empty → derived from test_mode, back-compat). Tested (`config` TestRailEnvironmentMustMatchTestMode).
+- Stripe managed-webhook per-account URL auto-registration (Paul 2026-06-30) — `PublicStripeWebhookURL` appends the account_id (per-account endpoint) when set; `ReconcileManagedStripeWebhook` passes it; the River reconcile job (`jobs_stripe_webhooks.go`) now iterates EVERY enabled Stripe account (primary/secondary/legacy), not just the primary, registering one managed endpoint each (matched by `openrails_managed` metadata, so the primary's existing endpoint is updated in place, not duplicated). Config-rail/embedded path (no account_id) keeps the shared URL. Tested (`internal/modules/catalog` TestPublicStripeWebhookURL + TestReconcileManagedStripeWebhook* + the example manifest's primary+legacy Stripe via `internal/bootstrap`).
 
 DELIBERATELY DROPPED as over-engineering (Paul 2026-06-30 — "delete any tasks you feel are over-engineering"). The per-account PATH + write-time secondary sync already deliver the capability; these add cost without a concrete need:
 - Payload-disambiguation single-shared-endpoint mode (CCBill `clientAccnum`, Stripe Connect `event.account`) — the per-account PATH covers multi-account routing; this is a convenience alternative with no current consumer. YAGNI.
 - CCBill account-scoped path — CCBill auth is IP-allowlist + account-number match (no per-account HMAC secret), and the postback already carries the account number, so there is nothing account-scoped to add.
 - Persist per-account catalog links for secondaries — a broad links-BY-ACCOUNT model change whose only added value is drift DETECTION on failover accounts; the idempotent write-time sync already keeps secondaries current.
 - Per-(merchant,rail,environment) primary-UNIQUENESS specifically — already enforced by the manifest/DB upsert (one primary per merchant,type,environment) + `validateRails` (≤1 primary per rail). The environment FIELD + test_mode-consistency guard it implied is now DONE on the in-process config (see LANDED above), so this is no longer "non-applicable" — the uniqueness sub-task itself was just already covered.
-- Strictly-require account_id in the in-process set — the name-fallback is intentional for tests/embedded callers; the manifest (production) path already requires it.
-- Stripe managed-webhook auto-registration of the per-account URL — the primary auto-registers and works on the existing route; a secondary Stripe account's webhook is one manual dashboard setting (point it at `…/webhooks/{slug}/stripe/{account_id}`). Auto-registering N endpoints across N Stripe accounts is automation polish for a rare case.
+- ~~Strictly-require account_id in-process~~ DONE (Paul 2026-06-30 disliked the fallback): removed the name-fallback — `EffectiveAccountID()` returns the real `account_id` or "". `ValidateRailSet` requires `account_id` when a rail has >1 account (the made-up map name can never be the routing key); a single account still works via the rail-primary path, and `createNMIClients` always requires it for NMI. Tested (`config` TestPrimaryRailByType + TestCatalogTargetSelectors). BREAKING for embedded hosts with multiple accounts on a rail or any NMI account (e.g. doujins must declare its NMI gateway-id) — single-Stripe hosts (cozy-art) are unaffected.
 
 Note: a separate, concurrent #638/#639/#642 catalog rework is editing `pkg/catalog`/`pkg/pricing` in the same tree (transient full-build breaks there are NOT this work). Pre-existing failing integration tests on master (NOT caused by #641, verified on clean master): a cluster of `TestDunning*`/`TestFailMembership*`/`TestEntitlementsDunningStateMachine_NMI*`, `TestGetProductsEndpoint`, and `TestProviderAccountScopedLocalState…` (single-package seeding fragility).
 

@@ -25,7 +25,6 @@ const (
 	ModelPerUnit = "per_unit"
 	ModelTiered  = "tiered"
 	ModelPackage = "package"
-	ModelDynamic = "dynamic"
 )
 
 // Tiered modes (OpenMeter TieredPriceMode / Lago graduated|volume / Stripe tiers_mode).
@@ -63,10 +62,6 @@ type ChargeModel struct {
 	PackageAmount int64
 	FreeUnits     int64
 
-	// dynamic: quantity IS a reported cost in micros; scale by Multiplier
-	// (micros-per-micro; 1_000_000 == passthrough, 1_500_000 == +50%).
-	Multiplier int64
-
 	// cap applied to the computed cost, after the model (0 = uncapped). There is
 	// no per-line floor — minimums are an account commitment, not pricing (#642).
 	MaximumAmount int64
@@ -80,7 +75,7 @@ type ChargeTier struct {
 }
 
 // Rate computes the cost in micros for `quantity` units under the charge model.
-// quantity must be >= 0 (for dynamic it is the reported cost in micros). The
+// quantity must be >= 0. The
 // function is non-decreasing in quantity for flat/per_unit/package/graduated, so
 // it is safely invertible (see QuoteUnitsForSpend); volume is NOT (tier cliffs).
 func (cm ChargeModel) Rate(quantity int64) (int64, error) {
@@ -98,8 +93,6 @@ func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 		cost, err = rateTiered(quantity, cm.Mode, cm.Tiers)
 	case ModelPackage:
 		cost, err = ratePackage(quantity, cm.PackageSize, cm.PackageAmount, cm.FreeUnits)
-	case ModelDynamic:
-		cost, err = mulDivRound(quantity, cm.Multiplier, 1_000_000, RoundHalfUp)
 	default:
 		return 0, fmt.Errorf("unknown charge model %q", cm.Kind)
 	}

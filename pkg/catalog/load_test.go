@@ -170,8 +170,8 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, duration: 30d}
-      - {currency: usd, unit_amount: 1000, duration: 30d}
+      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}
+      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -220,8 +220,8 @@ func TestLoad_DuplicateProductKey(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate product key") {
@@ -233,8 +233,8 @@ func TestLoad_MissingTierRank(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "tier_rank is required") {
@@ -246,7 +246,7 @@ func TestLoad_TierRankOptionalForSingleProduct(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -261,9 +261,9 @@ func TestLoad_TierRankAllowsZeroAndNegative(t *testing.T) {
 	body := `
 version: 1
 products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -285,8 +285,8 @@ func TestLoad_TierRankDirectionSurvivesRenumberAndNegativePrepend(t *testing.T) 
 			body: `
 version: 1
 products:
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `,
 		},
 		{
@@ -294,9 +294,9 @@ products:
 			body: `
 version: 1
 products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d}]}
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
 `,
 		},
 	}
@@ -352,18 +352,23 @@ usage_limits:
 meters:
   - key: api-calls
     kind: counter
+credit_balances:
+  - key: monthly-usd
+    unit: usd
+  - key: ai-images
+    unit: local-stack/ai-image-credit
 products:
   - key: premium
     display_name: Premium
     entitlements: [premium]
     usage_limits: [starter-spend]
     credits:
-      monthly-usd:
+      - key: monthly-usd
         currency: usd
         amount: 25_000_000
         expires: 30d
         cadence: per_renewal
-      ai-images:
+      - key: ai-images
         unit: local-stack/ai-image-credit
         amount: 100
     prices:
@@ -376,17 +381,17 @@ products:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(m.TierGroups) != 1 || m.TierGroups[0].Key != "default" {
+	if len(m.TierGroups) != 1 || m.TierGroups[0].Key != "usage-premium" {
 		t.Fatalf("flat products were not normalized: %+v", m.TierGroups)
 	}
 	p := m.TierGroups[0].Products[0]
 	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
-	if got := p.Credits["monthly-usd"].Unit; got != "usd" {
+	if got := p.Credits[0].Unit; got != "usd" {
 		t.Fatalf("credit currency alias did not populate unit: %q", got)
 	}
-	if got := p.Credits["ai-images"].Unit; got != "local-stack/ai-image-credit" {
+	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
 		t.Fatalf("qualified custom credit unit not preserved: %q", got)
 	}
 	if p.Prices[0].Metered.PerUnits != 1_000_000 {
@@ -442,14 +447,12 @@ meters:
 products:
   - key: basic-droplet
     display_name: Basic Droplet
-    tier_group: basic
     prices:
       - currency: usd
         unit_amount: 0
         metered: {meter: droplet-vcpu-seconds, rate: 7_000, per_units: 3_600}
   - key: premium-droplet
     display_name: Premium Droplet
-    tier_group: premium
     prices:
       - currency: usd
         unit_amount: 0
@@ -484,7 +487,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usdc, unit_amount: 1000, duration: 30d, providers: [solana]}
+      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, providers: [solana]}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("usdc + solana should be accepted, got %v", err)
@@ -534,7 +537,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, duration: 24h}
+      - {currency: usd, unit_amount: 1000, duration: 24h, auto_renew: true}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -554,7 +557,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, duration: 1h}
+      - {currency: usd, unit_amount: 1000, duration: 1h, auto_renew: true}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
