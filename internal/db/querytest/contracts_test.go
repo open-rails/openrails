@@ -39,7 +39,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Evidence:     []byte(`{"source":"query-contract"}`),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "primary", account.Role)
+	require.Equal(t, "primary", account.Routing)
 
 	_, err = q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         customerID,

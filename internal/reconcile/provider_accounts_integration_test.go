@@ -31,6 +31,15 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 		q := appDB.Gen(ctx)
 		now := time.Now().UTC()
 		var err error
+		_, err = appDB.Qx(ctx).Exec(ctx, `
+			UPDATE openrails.provider_accounts
+			   SET routing = 'legacy',
+			       updated_at = now()
+			 WHERE merchant_id = $1::uuid
+			   AND provider_type = 'nmi'
+			   AND routing = 'primary'
+		`, dbtest.TestMerchantID.UUID())
+		require.NoError(t, err)
 		accountA, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			ProviderType:   "nmi",
@@ -45,8 +54,8 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			LastVerifiedAt: &now,
 		})
 		require.NoError(t, err)
-		require.Equal(t, "primary", accountA.Role)
-		require.Equal(t, "secondary", accountB.Role)
+		require.Equal(t, "primary", accountA.Routing)
+		require.Equal(t, "secondary", accountB.Routing)
 
 		customerA = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		customerB = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
@@ -74,7 +83,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payment_methods
 				   (id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
-				 VALUES ($1, 'mobius', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
+				 VALUES ($1, 'nmi', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
 				pmID, marker, marker, dbtest.TestMerchantID.UUID(), customerID, account.ID)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
@@ -82,7 +91,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 				   (id, price_id, product_id, status, rail, rail_subscription_id,
 				    payment_method_id, current_period_starts_at, current_period_ends_at, started_at,
 				    entitlements_spec_snapshot, customer_id, merchant_id, provider_account_id)
-				 VALUES ($1, $2, $3, 'active', 'mobius', 'sub-shared',
+				 VALUES ($1, $2, $3, 'active', 'nmi', 'sub-shared',
 				    $4, $5, $6, $5, jsonb_build_object('premium', null), $7, $8, $9)`,
 				subID, priceID, productID, pmID, start, end, customerID, dbtest.TestMerchantID.UUID(), account.ID)
 			require.NoError(t, err)

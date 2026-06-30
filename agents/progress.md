@@ -7,14 +7,514 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 649
+next_id: 655
+
+---
+
+# #654: rename provider_accounts table to payment_provider_accounts
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 (Paul): `payment_provider_accounts` is the clearer table name. The table is not a
+catalog of rails/providers (`stripe`, `nmi`, `ccbill`, `solana`); it is the merchant-owned account registry for
+payment providers on rails. Do not rename it to `payment_providers`.
+
+## Metadata
+- Category: data-integrity
+- Status: not_started
+- Passes: false
+
+## Problem
+
+`openrails.provider_accounts` is vague after the naming cleanup in #652. Each row is one merchant payment-provider
+account on one rail, e.g. `doujins + nmi + 579145` or `doujins + stripe + acct_...`. The current name is workable,
+but `payment_provider_accounts` is more accurate and avoids confusing this table with a future provider/rail
+catalog. The rename should be done once, cleanly, and only if we are willing to pay the migration/query/FK churn.
+
+The rename does not change identity: the durable logical identity remains `(rail, environment, account_id)`; the
+row UUID remains an internal FK target; any config `key` remains mutable operator metadata.
+
+## Tasks
+
+- [ ] Rename table `openrails.provider_accounts` to `openrails.payment_provider_accounts` in a forward-only
+      migration.
+- [ ] Rename associated constraints, indexes, RLS policy comments, FK constraint names, and generated query names
+      where practical. Prefer clear names over preserving historical `provider_accounts_*` leftovers.
+- [ ] Update sqlc queries, generated models, repo code, reconciliation, webhook, catalog push, merchant config
+      push/dump, and tests to use `payment_provider_accounts`.
+- [ ] Keep public/operator naming aligned with #652: column currently named `provider_type` should become `rail`
+      in the same pass if feasible; otherwise explicitly track it as remaining debt.
+- [ ] Preserve all existing FKs and behavior: payments/subscriptions/payment_methods/checkout_sessions/intents/
+      refresh watermarks continue to reference the same rows after migration.
+- [ ] Add an integration migration/query test proving existing rows survive the rename and all FK-backed reads
+      still work.
+- [ ] Do not expose the internal UUID as the preferred public identity; keep APIs oriented around
+      `(rail, environment, account_id)` or rail-qualified strings like `nmi:579145`.
+
+Acceptance: the DB table and generated code use `payment_provider_accounts`; no operator-facing docs call it
+`payment_providers`; row identity remains `(rail, environment, account_id)`; existing FK relationships still work;
+and tests prove migration from `provider_accounts` preserves rows and references.
+
+---
+
+# #653: merchant billing-config mechanics — koanf map-shaped config, plain-value secrets, symmetric redacted dump
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 (split out of #649, which over-grew past its "rename" title). Treat the
+merchant/provider-account manifest as ordinary koanf-loaded runtime config: map-shaped (not arrays), secrets as
+plain resolved values with koanf owning source precedence, one canonical key per secret, non-secret config
+under `settings`, and a dump that is the exact reverse of the typed config (redacted by default). Depends on
+#652 for the naming vocabulary (rail / provider-account `key` / `account_id`) and relates to #650 (identity).
+
+## Metadata
+- Category: config
+- Status: not_started
+- Passes: false
+
+## Problem
+
+The merchant manifest carries a bespoke secret-source DSL (`{value|env|file|vault}` per secret), array-indexed
+identity (`merchants[0].provider_accounts[2]`), `Manifest*` struct names, and a dump shape that isn't symmetric
+with input. That fights koanf (built to merge file/env/flags/Vault into one tree), makes env/file overrides
+position-coupled, risks leaking secrets on dump, and accepts multiple spellings for one secret (NMI
+`production_key`/`secret_key`/`security_key`).
+
+## Tasks
+
+- [ ] One canonical key per provider secret; reject aliases — NMI `security_key` only (not `production_key`/
+      `secret_key`); Stripe `secret_key`/`webhook_signing_secret`/`webhook_signing_secret_thin`; CCBill
+      `account_config`; Solana `private_key`. (NMI research: `security_key` is NMI's own wire/API term; test
+      accounts also use a security key, so lifecycle names like `production_key` are wrong.)
+- [ ] Replace `ManifestSecretSource` with `Secrets map[string]string`; koanf/provider loading owns source
+      precedence BEFORE manifest validation. No `{value|env|file|vault}` descriptors in YAML.
+- [ ] Arrays → maps: `merchants.<slug>` + `provider_accounts.<key>`; drop redundant `slug`/`name` fields (the
+      map key is the handle). Map-shaped typed blocks `provider_accounts.<key>.<rail>` (e.g. `…mobius.nmi`).
+      (Names `key`/`rail` per #652.)
+- [ ] Rename koanf-loaded structs `Manifest*` → `*Config` (`BillingConfig`, `MerchantConfig`, …); keep
+      `Manifest` only for a standalone CLI envelope if one remains. (See "ProviderAccountConfig collision" below.)
+- [ ] `settings` map beside `secrets` for non-secret account config (NMI `tokenization_url`; CCBill
+      `datalink_username`/`allowed_cidrs`), validated per rail. CCBill FlexForm/RBO stay catalog provider-links
+      (per-price), never account settings.
+- [ ] Dedicated single-underscore `BILLING_` env mapper (schema-aware), exported as a reusable helper for
+      embedded hosts (doujins/hentai0/cozy) to attach to their own koanf env callback. (See ambiguity below.)
+- [ ] Mounted Vault/secret files as structured YAML/JSON overlays with the same `billing.*` shape, merged after
+      the public config (which may leave secret leaves blank). Choose an explicit koanf provider
+      (`k8smount`/Vault) or a documented+tested filename→key mapping — don't assume a koanf convention.
+- [ ] Symmetric dump: `dump-merchant-config` emits the SAME typed map-shaped `*Config` structs as input (no
+      arrays, no `provider_type`/`name`, no `{env:…}` placeholders); secrets redacted by default; plaintext only
+      via an explicit `--include-secrets` flag, with regression coverage that a normal dump can't leak secrets.
+- [ ] Round-trip tests: load → apply → dump → load, asserting stable non-secret shape + account identities
+      (sorted map keys — see below).
+- [ ] Route merchant-config loading through the same koanf pipeline as runtime config; no `os.Getenv`/secret-file
+      reads inside the manifest parser.
+
+## Open design questions (resolve before building)
+
+- **`BILLING_` env mapper ambiguity.** Single underscore + arbitrary map keys is ambiguous:
+  `BILLING_MERCHANTS_MY_MERCHANT_PROVIDER_ACCOUNTS_MOBIUS_2_NMI_SECURITY_KEY` — is the slug `my` or
+  `my_merchant`? the account `mobius` or `mobius_2`? The mapper must anchor on FIXED schema tokens (`MERCHANTS`,
+  `PROVIDER_ACCOUNTS`, the rail blocks `NMI`/`STRIPE`/`CCBILL`/`SOLANA`, known field names) and treat spans
+  between them as keys — and the key charset MUST be constrained + documented (e.g. lowercase, no underscores,
+  never a reserved token). This is the fiddliest part; decide + test it explicitly.
+- **`ProviderAccountConfig` name collision.** `config.ProviderAccountConfig` ALREADY exists (the in-process
+  railSet entry, #641). Decide: does the koanf-loaded merchant-config provider account UNIFY with it (one
+  struct, one source of truth — preferred), or stay separate? If separate, the names MUST differ — two
+  same-named structs for the same concept is exactly the confusion this issue removes.
+- **Dump symmetry vs map order.** Go map iteration is unordered — dump must sort merchant/account keys for
+  stable, diffable, round-trippable output.
+
+Acceptance: secret values are plain strings loaded by koanf providers (no `{env|file|value|vault}` objects);
+exactly one canonical key per provider secret (aliases fail validation); merchant/provider-account identity is
+map-keyed (no numeric array indexes); non-secret account config lives under `settings`; the `BILLING_` mapper is
+a documented, exported, tested helper that unambiguously parses map keys; dump uses the same typed structs as
+input, redacted by default with opt-in plaintext; and load⇄dump round-trips stably.
+
+---
+
+# #652: normalize payment naming — rail vs provider account
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 (Paul): OpenRails should use one naming model consistently. A `rail` is the
+integration/backend/protocol OpenRails speaks (`stripe`, `nmi`, `ccbill`, `solana`, future
+`authorize_net`). A merchant payment provider is a configured provider account on that rail: usually the same
+name as the rail for single-account providers, but distinct for multi-processor rails such as NMI
+(`mobius`, `paykings`). Stop using `provider_type`, `provider`, `payment provider`, and `rail` interchangeably.
+HARD CUT (no legacy, no aliases): `provider_type`/ambiguous `provider` become `rail` EVERYWHERE — DB column,
+structs, DTOs, YAML, route params, comments — with no compatibility column/view/field alias and no
+canonicalizing shim (same discipline as #649's `role`→`routing`). This issue OWNS the canonical struct/field
+names; it should land FIRST in the cluster (#650 identity and #653 config-mechanics build on this vocabulary).
+
+## Metadata
+- Category: config
+- Status: not_started
+- Passes: false
+
+## Problem
+
+The current codebase still mixes three concepts:
+
+- **Rail**: the backend family/protocol (`nmi`, `stripe`, `ccbill`, `solana`). This is what selects code paths,
+  webhook handlers, provider clients, catalog push adapters, and credential validation rules.
+- **Provider account / payment-provider account**: one merchant-owned account on a rail. Examples:
+  `mobius` and `paykings` are two arbitrary local keys for NMI provider accounts; a Stripe account may simply be
+  keyed `stripe`.
+- **External account identity**: the durable provider-native ID (`acct_...`, NMI gateway/merchant id, CCBill
+  client/subaccount, Solana signing-authority public key). This is `account_id` and is not a display/config name.
+  For Solana specifically, `account_id` is the rebill/cranking authority public key, because existing rebill
+  accounts are tied to that signer; recipient/treasury wallets are settings, not provider-account identity. When
+  a single string identity is needed, qualify it with the rail, e.g. `nmi:579145` or
+  `solana:<signing-authority-pubkey>`, rather than inventing a random public UUID. Include `environment` in
+  uniqueness where live/test accounts can share identifiers.
+
+The old `provider_type` name blurs rail and provider account. It is especially wrong for NMI because `nmi` is
+not the merchant's payment provider in the operational sense; `mobius` or `paykings` is the configured payment
+provider account on the NMI rail. The same pattern will likely matter for future rails like Authorize.net.
+
+## Tasks
+
+- [ ] Write the naming glossary into config/API docs and examples: `rail`, provider-account local key,
+      `account_id`, `routing`, `environment`.
+- [ ] Standardize on `key` for the operator-chosen local handle when it must be represented as a field. In the
+      YAML map shape, the map key is the `key`; it is encouraged to be stable for env/secret overlays and diffs,
+      but it is not provider identity.
+- [ ] Rename every field/param/tag that means backend family from `provider_type` / ambiguous `provider` to
+      `rail` — public AND internal, no exceptions, no alias kept for either spelling.
+- [ ] Keep provider-account local names as map keys (`mobius`, `paykings`, `stripe`) rather than duplicate
+      `name:` fields. Use optional `display_name` only if a prettier UI label is needed.
+- [ ] Audit structs, comments, CLI flags, JSON/YAML tags, route params, and examples for ambiguous naming:
+      `PaymentProviderConfig`, `ProviderAccountConfig`, embedded `PaymentProviders`, webhook `Rail()`,
+      provider-account DB/query comments, merchant-config dump/push paths.
+- [ ] DECIDE THE CANONICAL STRUCT/FIELD NAMES HERE — this issue is the naming authority; #653 only applies them.
+      Resolve the `ProviderAccountConfig` collision: `config.ProviderAccountConfig` already exists (the in-process
+      railSet entry, #641). Either UNIFY it with the koanf merchant-config provider-account struct (one type, one
+      source of truth — preferred) or give them distinct names. Two same-named structs for the same concept is
+      exactly the confusion this issue removes.
+- [ ] HARD-RENAME the DB column `provider_accounts.provider_type` → `rail` (forward-only migration + sqlc query
+      names + generated structs + fixtures + the `ProviderAccountSecretName(rail, …)` scheme + query comments).
+      No legacy column, no compatibility view — the same hard cut as #649's `role`→`routing`. The durable logical
+      identity is `(rail, environment, account_id)`, never the local `key` and never a random external UUID.
+- [ ] Make the planned map-shaped config use rail as the typed block key:
+      `provider_accounts.<local_key>.<rail>`, e.g. `provider_accounts.mobius.nmi`.
+- [ ] Update env mapper planning/tests so rail and provider-account keys are parsed separately:
+      `BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_NMI_SECURITY_KEY`. (The `<key>.<rail>` shape helps the
+      #653 env-mapper: the rail block — `nmi`/`stripe`/`ccbill`/`solana` — is a FIXED anchor token between the
+      arbitrary local key and the field name, which is what makes the single-underscore key parseable.)
+- [ ] Add tests or static assertions for config parse/dump examples proving two NMI provider accounts can exist
+      under different local keys on the same `nmi` rail without treating `mobius`/`paykings` as rail names.
+- [ ] Define Solana provider-account identity explicitly: `account_id` is the signing authority public key used
+      for rebill/cranking, and startup validation must prove the configured signer resolves to that public key.
+      Recipient/treasury/funding/RPC values are account settings, not identity. NOTE: this is a hard change from
+      the CURRENT convention — fixtures + `merchants.example.yaml` use the RECIPIENT WALLET as the Solana
+      `account_id` — so migrate existing Solana `account_id`s to the signer pubkey and update all examples/fixtures
+      (coordinate with #650, which owns provider-account identity/uniqueness).
+
+Acceptance: config, docs, AND the DB use `rail` for backend family — grepping provider-account code/queries/DB
+for `provider_type` or `provider`-meaning-rail finds nothing (no alias survives anywhere, public or internal);
+provider-account `key`s name merchant payment providers; examples show `mobius`/`paykings` as arbitrary stable
+local `key` values on the `nmi` rail, not rails; `account_id` is the provider-native identity (Solana = signer
+pubkey, NOT recipient wallet), with rail-qualified strings like `nmi:579145` preferred over random UUIDs; no field
+carries both a rail discriminator and a typed rail block; exactly one struct per concept (no duplicate
+`ProviderAccountConfig`); and future multi-account rails follow the same shape without a new naming layer.
+
+---
+
+# #651: stop fabricating provider data — record source truthfully, derive downstream deterministically
+
+**Completed:** no
+**Status:** IMPLEMENTED 2026-06-30 (uncommitted; whole repo `go build ./...` clean, full non-integration
+`go test ./...` GREEN, integration test files compile under `-tags integration`). Landed:
+(1) dropped the `"premium"` fallback in CreateMembership + Reactivate → warn + grant only what's declared
+(none); (2) Stripe `charge.refunded` empty refund status → non-retryable error (no `"succeeded"` assumption);
+(3) reconcile backfill currency → fall back to the subscription's REAL billing currency (`sub.Price.Currency`,
+which GetByID populates), skip+warn only if both unknown — never `"usd"`; the decline-backfill integration test
+stays green because the sub's price currency is truthful; (4) missing cadence → derive the period from
+`price.AccessDurationHours` (truthful; also fixes one-off/durable prices that `RecurringCycleHours` —
+AutoRenew-gated — wrongly 30d'd), warn+30d ONLY when no duration exists at all. DECISION: warn-not-error here —
+a hard error would break legitimate one-off prices; a loud warning satisfies the policy without breakage;
+(5) `nmi.RunSale` empty currency → error; (6) amount fallback (create+renew) warns when substituting catalog
+list price for an unsupplied charged amount; (7) timestamps — added `PurchasedAt *time.Time` to both lifecycle
+params (`RegisterPurchaseRequest` already had it), consumed in both inserts; threaded STRIPE from the invoice's
+own `created` (added to `stripeInvoice`) on invoice-paid create/renew + the failed-payment row. NMI/CCBill/Solana
+left on now() — DECISION: their webhook/poller fires ~at event time so now() is an HONEST approximation, and no
+distinct provider timestamp is parsed at those sites; guessing a field would be the fabrication we're fighting.
+Clean follow-ups: CCBill `timestamp` (parseCCBillTimestamp), an NMI body txn-time field, Solana block time via
+`GetBlock(slot)`; Stripe dispute-recovery + non-scheduled-cancel `canceled_at` also deferred (edge paths);
+(8) Status set explicitly (`completed`) on both lifecycle inserts. DECISION: KEEP the SQL
+`COALESCE(NULLIF(status,''),'completed')` fallback rather than removing it — removal needs sqlc regen + touching
+~5 semantically-correct callers for a purely LATENT risk (the nmi-failure path self-corrects via MarkFailed);
+explicit status at the flagged sites removes the reliance. REMAINING: run the full testcontainers integration
+suite; commit (Paul does commits).
+PLANNED 2026-06-30 (Paul, from a fabrication audit of the ingestion + lifecycle layer):
+the money core is clean (double-entry + grant ledgers record truthfully; catalog PULL is alert-only;
+provider-account identity is operator-declared per #592/#641). The fabrication lives in the
+SUBSCRIPTION-LIFECYCLE and WEBHOOK-INGESTION layer, where fields that should come from the provider are
+defaulted/coalesced/synthesized to satisfy the schema. POLICY (Paul 2026-06-30): record source data from the
+payment provider verbatim, then create downstream effects (entitlements, grants, periods) deterministically
+from it. When a REQUIRED value is missing, THROW an error — or at minimum LOG A WARNING — never silently fall
+back onto a made-up value or incorrect default behavior. That is the standing rule, not just for these sites.
+DECLARED CONFIG DEFAULTS ARE FINE — a documented default for a config knob is intentional and explicit; the
+target is SILENT runtime fallbacks buried in error-handling / ingestion code that invent provider data.
+Sibling to #649 (which already bans inventing `provider_account_id` from `routing=primary`).
+
+## Metadata
+- Category: billing
+- Status: in_progress
+- Passes: false
+
+## Problem
+
+A repo-wide audit hunted one anti-pattern: a field that should come from the provider being defaulted to a
+literal, coalesced from nil, replaced with `time.Now()`, or synthesized to satisfy a NOT NULL column. Verified
+findings, ranked:
+
+**Tier 1 — active fabrication (records something the provider never said):**
+1. **Hardcoded `"premium"` entitlement** — `internal/modules/subscriptions/lifecycle_service.go:462-464`
+   (and the Reactivate path ~`:1058`). When both the subscription snapshot AND `product.EntitlementsSpec`
+   are empty, the code grants a `"premium"` entitlement nobody declared. Worst finding: a downstream effect
+   invented from nothing. An unmapped/empty product must grant NOTHING (the loop already runs zero times) or
+   fail loudly — never conjure access.
+2. **Stripe refund status forced to `"succeeded"`** — `internal/modules/webhooks/stripe.go:1263-1264`. Stripe
+   always sends a refund status; empty = malformed input. Assuming `"succeeded"` records a refund outcome we
+   never confirmed. (Sibling lines 1266-1271 inheriting `Charge`/`PaymentIntent` from the parent charge are
+   LEGITIMATE cross-linking — leave them.)
+3. **Reconcile backfill currency → `"usd"`** — `internal/reconcile/unknown_orchestration.go:232-233`. The
+   function's own docstring says it records "the true attempt history, so dunning/analytics see reality", then
+   invents missing currency. (Same path's `status` from `t.Success` and `PurchasedAt: t.OccurredAt` are CORRECT
+   — this path otherwise does it right; it's the model for the others.)
+
+**Tier 2 — invented period / amount boundaries (downstream effect not derived from source):**
+4. **30-day billing period fabricated when the price has no cadence** — `lifecycle_service.go:357` and
+   `:767-768` (`periodEndsAt = now.Add(30*24*time.Hour)` / `cycleHours = 30*24`). A recurring price with no
+   cadence is a misconfiguration; inventing 30 days grants a wrong access window. Fail instead. (When the
+   provider supplies `CurrentPeriodEndsAt` it's used correctly — fabrication only on the missing-data branch.)
+5. **Charged amount falls back to catalog list price** — `lifecycle_service.go:551-552` and `:708-709`
+   (`if !params.AmountProvided && amount == 0 { amount = price.Amount }`). Substitutes the EXPECTED catalog
+   price for the ACTUAL charged amount — wrong under proration/discount/tax. Narrow (guarded by
+   `AmountProvided`) but it's catalog data masquerading as transaction truth.
+
+**Tier 3 — timestamp truth (processing-time recorded as transaction-time):** `PurchasedAt`/`CreatedAt` set to
+`s.now()` instead of the provider's timestamp, in `lifecycle_service.go:572` & `:731`; `webhooks/stripe.go:1152`
+(failed payment — invoice has `created`), `:1494` (dispute recovery), `:1076` (cancel — Stripe sends
+`canceled_at`); `webhooks/nmi.go:1206`; and Solana `internal/modules/solana/poller.go` `RegisterPurchase`
+(no `PurchasedAt` → defaults to now, instead of on-chain block time). Provider timestamps exist but aren't
+threaded through `CreateMembershipParams`/`RenewMembershipParams`/`RegisterPurchaseRequest`. No money value is
+fabricated, but audit/dunning/period math keys off these. The #634 backfill (`PurchasedAt: t.OccurredAt`)
+proves the threading is feasible.
+
+**Tier 4 — latent schema-default trap (not firing today):** `payments.status` carries DB
+`DEFAULT 'completed'` (`migrations/postgres/001_*`), and the lifecycle inserts at `:559` and `:718` omit
+`Status` entirely. Today only success paths reach them, so no false data YET — but any future caller that
+forgets `status` silently records a SUCCESSFUL payment. Exactly the "default value to satisfy the schema"
+pattern. The codebase already has the right shape elsewhere (`payments/payment.go:201` `ReserveProviderAttempt`
+sets `pending` explicitly).
+
+## Out of scope — verified CLEAN, do NOT re-audit
+- Double-entry ledger + grant ledger: no fabricated amounts/currency, no plug entries, no FX;
+  `COALESCE(SUM(...),0)` is mathematically correct; grant amount/currency validated as required.
+- Catalog PULL reconciliation (`jobs_catalog_reconciliation.go`): correctly alert-only, never mutates.
+- Provider-account identity (#592/#641): operator-declared, no runtime guessing; manifest rejects empty
+  `account_id`; Stripe self-discovers via `/v1/account`; webhook-secret routing rejects unknown accounts;
+  `provider_account_stamp` leaves `nil` rather than inventing provenance.
+- Card fields (last4/brand/exp): correctly nullable — `NormalizeStripeCard` returns nil, no `"0000"`.
+- `nmi.RunSale` currency→usd default (`integrations/nmi/payments.go:48`): unreachable defensive code (call
+  sites always pass DB-sourced currency) — still convert to an error on the money path (task below).
+
+## Tasks
+
+Standing policy for every task: missing REQUIRED source value ⇒ throw (or at minimum log a warning) — never a
+silent made-up fallback.
+
+Unambiguous (clear fix):
+- [x] Drop the `"premium"` entitlement fallback (CreateMembership + Reactivate): now warns + grants only the
+      declared spec (none) instead of conjuring `"premium"`.
+- [x] Stop assuming Stripe refund `status`: empty status → `MarkWebhookErrorNonRetryable`, no `"succeeded"`.
+      Charge/PaymentIntent inherit kept.
+- [x] Stop defaulting reconcile backfill currency to `"usd"`: falls back to the subscription's real billing
+      currency (`sub.Price.Currency`), skip+warn only when both are unknown.
+- [x] Missing billing cadence: derive period from `price.AccessDurationHours` (also fixes one-off prices),
+      warn+30d only when truly absent. DECISION changed error→warn (a hard error breaks legitimate one-off
+      prices; AutoRenew-gated `RecurringCycleHours` was the trap).
+- [x] Convert `nmi.RunSale` empty-currency default to an error.
+
+Needs a small decision (thread provider data through params):
+- [x] Charged amount fallback now WARNS (create+renew) when substituting catalog list price for an unsupplied
+      amount (kept the fallback, removed the silence).
+- [x] Threaded the provider timestamp into `PurchasedAt` via a new `PurchasedAt` param consumed by both
+      lifecycle inserts; STRIPE wired from the invoice's own `created`. NMI/CCBill/Solana intentionally left on
+      now() (honest event-time approximation; no distinct provider timestamp is parsed there — guessing would
+      be fabrication). Follow-ups in Status (CCBill timestamp / NMI body time / Solana GetBlock; Stripe
+      dispute+cancel edge paths).
+- [x] Set `Status` explicitly (`completed`) on both lifecycle inserts. DECISION: KEEP the SQL
+      `COALESCE(NULLIF(status,''),'completed')` fallback (removal = sqlc regen + many semantically-correct
+      callers for a latent-only risk; nmi-failure path self-corrects via MarkFailed).
+
+Acceptance: the subscription-lifecycle and webhook-ingestion paths record provider-supplied status, currency,
+amount, and timestamps verbatim; entitlements/grants/periods derive only from recorded source data; a missing
+required source value throws or warns at the boundary instead of defaulting to a made-up value; grepping these
+paths for hardcoded `"premium"`/`"usd"`/`"succeeded"`/`30*24`/`s.now()`-as-purchase-time finds no
+truth-recording use; the `payments.status` schema can no longer silently record a successful payment from an
+omitted field.
+
+---
+
+# #650: globally unique provider-account identity, route merchant from provider account
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 (Paul): a payment-provider account must belong to exactly one merchant. If an
+inbound webhook or provider callback carries a provider-native account id, OpenRails should resolve the provider
+account first and derive the merchant from that row, instead of requiring both merchant and provider-account in
+the route. Every provider interaction must make the payment-provider account explicit from the route, request
+payload, provider payload, or deterministic routing-policy output before calling/recording against a provider.
+Webhook routes should be one canonical endpoint per provider/rail when the provider event carries account
+identity. Stripe direct-account webhooks are the exception: they need an account-id route because normal Stripe
+events do not carry `acct_...` in the body.
+This also prevents ambiguous cross-merchant ownership of the same Stripe/NMI/CCBill account.
+
+## Metadata
+- Category: data-integrity
+- Status: not_started
+- Passes: false
+
+## Problem
+
+Provider accounts are real external accounts, not reusable OpenRails config labels, and sharing them across
+merchants is not allowed. A Stripe `acct_...`, NMI
+gateway/merchant id, CCBill `clientAccnum/clientSubacc`, or Solana signing-authority public key should be owned
+by exactly one merchant in an OpenRails deployment. The stable logical identity is the natural provider identity
+qualified by rail and environment, e.g. `(rail=nmi, environment=live, account_id=579145)` or external string form
+`nmi:579145`. For Solana, `account_id` is the signer authority public key that owns/controls rebill cranking;
+changing it is a provider-account migration because old rebill accounts remain tied to the old authority. The
+local config `key` is mutable metadata and must not be the identity. Today
+`openrails.provider_accounts` only enforces uniqueness inside one
+merchant: `(merchant_id, provider_type, environment, account_id)`. That allows the same provider account id to be
+registered under two merchants, which makes webhook routing, provenance stamping, catalog pushes, refunds, and
+reconciliation ambiguous.
+
+If provider account identity is unique globally, a webhook that includes provider account identity does not also
+need a merchant path segment. The account row already points to the only merchant that may own it. Provider type
+alone (`stripe`, `nmi`, `ccbill`) is not enough; provider account identity is enough. The canonical webhook shape
+should therefore be provider-only for NMI and CCBill (`/webhooks/nmi`, `/webhooks/ccbill`) because their payloads
+carry account identity. Direct Stripe webhooks should stay account-scoped (`/webhooks/stripe/:account_id`) because
+normal Stripe direct-account events do not carry the account id. Merchant-scoped paths are redundant once the
+handler can derive account→merchant; keep them only as transition aliases, if needed, and have them validate that
+any route merchant/account matches the resolved provider account.
+
+The provider account is the primary routing fact. Merchant is derivable from it; the reverse is not true when a
+merchant has multiple accounts on one rail. So boundaries must resolve provider-account identity first whenever
+the request/event contains it, and only derive/check merchant after that.
+
+## Tasks
+
+- [ ] Add a forward-only Postgres migration replacing `uq_provider_accounts_identity` with a global uniqueness
+      constraint/index on `(provider_type, environment, account_id)`.
+- [ ] Add a preflight duplicate check before the constraint is created, with a clear error listing duplicated
+      `(provider_type, environment, account_id)` values and their merchant ids.
+- [ ] Update `UpsertProviderAccount` conflict handling to use `(provider_type, environment, account_id)` and reject
+      cross-merchant upserts instead of silently moving or merging ownership.
+- [ ] Treat the provider-account natural key as `(rail/provider_type, environment, account_id)` in APIs and
+      provenance. Do not expose a random UUID as the preferred external identifier; if a compact string is needed,
+      use a rail-qualified account id such as `nmi:579145` (plus environment where ambiguous).
+- [ ] For Solana, validate that the configured signer public key equals `account_id`. Store recipient/treasury
+      wallets separately as settings; do not use them for provider-account identity or uniqueness.
+- [ ] Add a lookup query for provider account by provider-native identity without merchant id, returning the row
+      and owning `merchant_id`.
+- [ ] Audit all provider-touching HTTP/worker/CLI boundaries and classify how provider-account identity is made
+      explicit: route parameter, request payload, provider webhook payload/header, or routing-policy output.
+      Fix any boundary that only has merchant + rail/provider type.
+- [ ] Make the canonical NMI and CCBill webhook routes provider-only (`/webhooks/nmi`, `/webhooks/ccbill`), with
+      no merchant slug and no provider-account id in the path.
+- [ ] Keep canonical direct Stripe webhooks account-scoped (`/webhooks/stripe/:account_id`) because ordinary
+      Stripe direct-account events do not include `acct_...` in the event body. Stripe Connect/org webhooks may
+      use provider-only routing when account/context is present in the payload.
+- [ ] Use account-derived webhook routing before dispatch: CCBill by `clientAccnum/clientSubacc`, NMI by
+      merchant/gateway id, direct Stripe by route `:account_id`, and Stripe Connect/org by payload account/context.
+- [ ] For merchant-scoped account routes, verify the provider account owner matches the path merchant; reject
+      mismatches instead of treating the path merchant as authoritative.
+- [ ] Keep merchant/account-id webhook URL forms only as transition aliases or for a provider event class that
+      cannot be safely resolved by payload identity. Do not identify Stripe accounts by trying configured webhook
+      secrets until one verifies; direct Stripe account identity must come from the route.
+- [ ] Checkout and saved-payment-method creation must resolve one concrete provider account before calling a
+      provider. `payment.rail`/`provider` names the rail; it is not enough when a merchant has multiple accounts
+      on that rail. If routing policy chooses an account, record that chosen account; do not call NMI/Stripe/etc.
+      through a primary-account fallback and leave `provider_account_id` blank.
+- [ ] Make saved-payment-method creation validate provider/rail at the handler boundary, and require either a
+      concrete provider account or enough routing context to select one. Do not accept an optional `provider`
+      field only to let vault creation fail later.
+- [ ] Add integration tests proving duplicate provider accounts across two merchants fail, same provider account
+      under the same merchant still upserts, and account-derived webhook routing resolves the merchant correctly.
+
+Acceptance: the same `(provider_type, environment, account_id)` cannot exist under two merchants; provider-account
+lookups can derive merchant ownership directly from provider-native account identity; canonical NMI/CCBill
+webhooks are one endpoint per provider/rail and derive provider account→merchant from payload; canonical direct
+Stripe webhooks use `/webhooks/stripe/:account_id`; merchant-scoped webhook URL forms, if retained, are transition
+aliases that reject mismatches; checkout/vault creation records the provider account it actually uses; and
+provenance stamping uses the resolved provider-account row, never a separate merchant guess.
+
+---
+
+# #649: hard-rename provider-account `mode` to `routing` everywhere
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30: the provider-account routing concept is named `routing` end-to-end (manifest
+field + DB column + structs/DTOs/dump/validation), no `mode`/`role` alias; and `provider_account_id` is never
+invented from routing — it records only an explicitly observed/pinned external account.
+NARROWED 2026-06-30: this issue had accreted a whole manifest/secret/config-loading redesign well past its
+"rename" title. That redesign is split into #653 (koanf map-shaped billing config + plain-value secrets +
+symmetric redacted dump). See also #652 (rail vs provider-account naming), #651 (stop fabricating provider
+data — broader audit), #650 (global provider-account identity + account→merchant routing).
+
+## Metadata
+- Category: config
+- Status: complete
+- Passes: true
+
+## Problem
+
+Two coupled hard cuts:
+
+1. **`mode`/`role` → `routing`.** `provider_accounts[].mode` (manifest) and the DB `role` column were vague —
+   `mode` collides with signer mode, `provider_write_mode`, and pricing-tier mode. Rename the routing concept
+   (primary/secondary/legacy, with disabled via `status`) to `routing` everywhere — structs, YAML, DB column,
+   DTOs, dump, validation errors, tests, docs — with NO compatibility alias.
+2. **Provenance is not routing.** `provider_account_id` on payments/subscriptions/payment_methods must be the
+   external account that ACTUALLY produced the row, not the configured `primary` defaulted in. Stamping an
+   internal config choice as historical fact is wrong for an audit/money system: if the producer can't be
+   resolved, leave it unset (or fail at the boundary), never guess.
+
+Everything else that previously lived here — one-canonical-key-per-secret, `ManifestSecretSource` → plain
+values, arrays → maps, `Manifest*` → `*Config`, koanf/Vault overlays, the `BILLING_` env mapper, `settings`,
+and the symmetric redacted dump — moved to **#653**.
+
+## Tasks
+
+- [x] Rename DB `provider_accounts.role` → `routing` (migration, sqlc, generated structs, fixtures, API DTOs).
+- [x] Rename manifest field `mode` → `routing` (structs, YAML tags, examples, dump, validation errors, tests).
+- [x] Rename helpers/locals/comments (`manifestProviderAccountMode`, `providerAccountModeFromRoleStatus`, …).
+- [x] Update `config/merchants.example.yaml` + dump round-trip to emit `routing`.
+- [x] Hard-cut: `provider_accounts[].mode` fails unknown-field validation (no alias).
+- [x] Remove primary-routing fallback stamping; `resolveProviderAccountIDForStamp` returns ONLY the
+      context-pinned account. `GetPrimaryProviderAccount` is for default selection, not provenance.
+- [x] Keep unrelated `mode` concepts unchanged (Solana `signer.mode`, `provider_write_mode`, tiered-pricing
+      `mode`, AuthKit remote-app mode, invoice/collection policy mode).
+- [x] `go test ./...` + focused integration (manifest push/dump, stamping, query contracts, provisioning).
+
+Acceptance: provider-account config/DB/docs use `routing` (no `mode`/`role` routing uses); `mode` under
+`provider_accounts[]` fails as unknown; DB persistence is `provider_accounts.routing` + `status`;
+`provider_account_id` is never derived from `routing=primary` and is stamped only from an observed account.
 
 ---
 
 # #647: catalog as round-trippable YAML — push ⇄ dump, 1:1 Go↔YAML catalog structs
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-30 (Paul): like the merchant config (#646), the CATALOG (products / prices /
+**Completed:** yes
+**Status:** DONE 2026-06-30: `dump-merchant-catalog` / `dump-catalog` now exists and exports
+OpenRails-owned catalog DB state back into the push-catalog YAML envelope (`version` + `catalogs[]`) using
+the existing typed `catalog.Manifest` structs. It reads products/prices/meters/rate_cards/credit_balances/
+usage_limits/product includes/credit-purchase prices and marshals the existing push shape. Added a real
+testcontainer push→dump→reparse→push→dump integration test for a canonical catalog fixture; the round-trip
+dump is stable. `config/catalog.example.yaml` is now covered as the faithful provider-backed round-trip
+fixture by applying it under readonly provider mode, dumping every merchant, reparsing, reapplying, and
+asserting the second dump is stable.
+PROPOSED 2026-06-30 (Paul): like the merchant config (#646), the CATALOG (products / prices /
 meters / rate cards / credit balances) should round-trip — `push-catalog` applies a YAML, and a new
 `dump-catalog` exports a merchant's live catalog back into the SAME shape, with the Go structs 1:1 with the
 YAML so marshal/unmarshal are symmetric. Paul: "this design may not be a good idea after later inspection,
@@ -24,8 +524,8 @@ into them.
 
 ## Metadata
 - Category: devex
-- Status: not_started
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -37,14 +537,14 @@ dump needs.
 
 ## Tasks
 
-- [ ] (depends on #645) Confirm the catalog Go structs are 1:1 with the YAML (typed price sub-blocks, credit
+- [x] (depends on #645) Confirm the catalog Go structs are 1:1 with the YAML (typed price sub-blocks, credit
       balances, rate cards) so marshal(parse(x)) == x for a canonical catalog.
-- [ ] Add `dump-catalog --slug <m>` (CLI + a service read path): read the catalog sidecars
+- [x] Add `dump-catalog --slug <m>` (CLI + a service read path): read the catalog sidecars
       (products / prices / meters / rate_cards / credit_balances / credit_purchase_prices) and rebuild the
       `catalog.Manifest`, marshal to YAML. Mirror #646's `dump-merchant-config`.
-- [ ] Round-trip integration test (testcontainers): push the example catalog → dump → re-parse → assert the
+- [x] Round-trip integration test (testcontainers): push the example catalog → dump → re-parse → assert the
       manifest is structurally equal (modulo ordering / defaults).
-- [ ] Make `config/catalog.example.yaml` a faithful round-trip fixture.
+- [x] Make `config/catalog.example.yaml` a faithful round-trip fixture.
 
 Acceptance: `dump-catalog` exports a merchant's catalog into the push-catalog YAML shape; push→dump→push is
 idempotent; the catalog Go structs are the single 1:1 source for both directions. Depends on #645.
@@ -53,16 +553,24 @@ idempotent; the catalog Go structs are the single 1:1 source for both directions
 
 # #648: Solana signer — injected keypair OR HashiCorp Vault transit signing (key never leaves the vault)
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-30 (Paul): a Solana provider account's signer keypair should be suppliable two
+**Completed:** yes
+**Status:** DONE 2026-06-30: manifest Solana provider accounts can now declare `signer:
+{mode: vault_transit, key: ...}` or use `secrets.private_key` / `signer: {mode: keypair}`. Push validates
+Vault transit public key == `account_id` and stores signer mode in provider-account evidence; dump emits the
+transit reference, never key material. Runtime recurring Solana services now use one provider-account-aware
+signer: declared Vault transit signs via Vault; keypair mode reads the provider-account scoped private_key
+with legacy `solana/private_key` fallback. Added an integration test proving provider-account evidence selects
+the named Vault transit key for public-key lookup and signing, plus the `vaultint` live test now exercises the
+OpenRails Solana signer wrapper over Vault Transit. Targeted unit/integration tests pass.
+PROPOSED 2026-06-30 (Paul): a Solana provider account's signer keypair should be suppliable two
 ways: (a) a keypair injected directly (e.g. an `env:`/`file:` secret, as today), OR (b) HashiCorp Vault
 transit SIGNING — the private key NEVER leaves the vault; OpenRails asks Vault's API to produce signatures.
 "that should definitely be planned and done too."
 
 ## Metadata
 - Category: billing
-- Status: not_started
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -89,12 +597,12 @@ path doesn't branch on it.
 
 ## Tasks
 
-- [ ] Extend the manifest provider-account secret/signer shape to express vault-transit signing for Solana
+- [x] Extend the manifest provider-account secret/signer shape to express vault-transit signing for Solana
       (decide `vault_transit` secret source vs a `signer` block; validate exactly-one signer mode).
-- [ ] Branch the Solana signer to sign via Vault transit when declared; keep the injected-keypair path.
-- [ ] Boot-time validation: the transit key exists and its Ed25519 public key matches the declared wallet.
-- [ ] dump-merchant-config emits the transit reference (no key material).
-- [ ] Integration test: a vault-transit Solana account signs a transaction via Vault (no local private key),
+- [x] Branch the Solana signer to sign via Vault transit when declared; keep the injected-keypair path.
+- [x] Boot-time validation: the transit key exists and its Ed25519 public key matches the declared wallet.
+- [x] dump-merchant-config emits the transit reference (no key material).
+- [x] Integration test: a vault-transit Solana account signs a transaction via Vault (no local private key),
       and the injected-keypair path still works.
 
 Acceptance: a Solana account can be configured for EITHER an injected keypair OR Vault transit signing (key

@@ -3,7 +3,7 @@
 -- name: UpsertProviderAccount :one
 INSERT INTO openrails.provider_accounts (
     merchant_id, provider_type, environment, account_id, display_name,
-    vault_secret_ref, role, status, evidence, last_verified_at
+    vault_secret_ref, routing, status, evidence, last_verified_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     lower(sqlc.arg(provider_type)::text),
@@ -12,7 +12,7 @@ INSERT INTO openrails.provider_accounts (
     sqlc.narg(display_name),
     sqlc.narg(vault_secret_ref),
     COALESCE(
-        sqlc.narg(role)::text,
+        sqlc.narg(routing)::text,
         CASE
             WHEN EXISTS (
                 SELECT 1
@@ -20,7 +20,7 @@ INSERT INTO openrails.provider_accounts (
                 WHERE existing.merchant_id = sqlc.arg(merchant_id)::uuid
                   AND existing.provider_type = lower(sqlc.arg(provider_type)::text)
                   AND existing.environment = COALESCE(sqlc.narg(environment)::text, 'live')
-                  AND existing.role = 'primary'
+                  AND existing.routing = 'primary'
                   AND existing.status = 'enabled'
             ) THEN 'secondary'
             ELSE 'primary'
@@ -52,19 +52,19 @@ LIMIT 1;
 
 -- name: DemoteOtherPrimaryProviderAccounts :exec
 UPDATE openrails.provider_accounts
-SET role = 'legacy',
+SET routing = 'legacy',
     replaced_at = COALESCE(replaced_at, now()),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND provider_type = lower(sqlc.arg(provider_type)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND id <> sqlc.arg(id)::uuid
-  AND role = 'primary'
+  AND routing = 'primary'
   AND status = 'enabled';
 
 -- name: PromoteProviderAccountToPrimary :one
 UPDATE openrails.provider_accounts
-SET role = 'primary',
+SET routing = 'primary',
     status = 'enabled',
     replaced_at = NULL,
     updated_at = now()
@@ -78,16 +78,16 @@ RETURNING *;
 SELECT * FROM openrails.provider_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(provider_type)::text IS NULL OR provider_type = lower(sqlc.narg(provider_type)::text))
-ORDER BY provider_type, environment, role, created_at, id;
+ORDER BY provider_type, environment, routing, created_at, id;
 
 -- name: GetPrimaryProviderAccount :one
--- The merchant's primary enabled account on a rail (#641), used to stamp new
--- records with provider_account_id. Environment is not filtered: a deployment is
+-- The merchant's primary enabled account on a rail (#641), used for default
+-- provider selection, not historical provenance. Environment is not filtered: a deployment is
 -- all-live OR all-test (test_mode guards mixing), so there is one primary per rail.
 SELECT * FROM openrails.provider_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND provider_type = lower(sqlc.arg(provider_type)::text)
-  AND role = 'primary'
+  AND routing = 'primary'
   AND status = 'enabled'
 ORDER BY created_at, id
 LIMIT 1;

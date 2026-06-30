@@ -125,6 +125,57 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	}
 }
 
+// TestMobiusAdapter_AutoCreateTargetsSecondaryAccount proves #641 catalog
+// secondary-sync routing: with a TargetAccountID set, AutoCreate uses THAT
+// account's NMI client (not the primary alias), so a catalog push reaches the
+// secondary account.
+func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
+	var primaryCalled, secondaryCalled bool
+	mkServer := func(flag *bool) *httptest.Server {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			if r.Form.Get("recurring") == "add_plan" {
+				*flag = true
+				_, _ = w.Write([]byte("response=1"))
+				return
+			}
+			_, _ = w.Write([]byte("<nm_response></nm_response>"))
+		}))
+		t.Cleanup(s.Close)
+		return s
+	}
+	primarySrv := mkServer(&primaryCalled)
+	secondarySrv := mkServer(&secondaryCalled)
+
+	mkClient := func(url string) *nmi.NMIClient {
+		c, err := nmi.NewClient("acct", &config.NMIProviderSettings{SecurityKey: "k"}, false)
+		if err != nil {
+			t.Fatalf("new nmi client: %v", err)
+		}
+		c.DirectPostURL = url
+		c.QueryURL = url
+		return c
+	}
+	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{
+		"nmi":    mkClient(primarySrv.URL),   // primary (rail-key alias)
+		"100002": mkClient(secondarySrv.URL), // secondary, keyed by account_id
+	}}}
+	a := &nmiAdapter{svc: svc}
+
+	if _, err := a.AutoCreate(context.Background(), autoCreateContext{
+		PriceID: uuid.New(), ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000,
+		BillingCycleDays: intPtr(30), TargetAccountID: "100002",
+	}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !secondaryCalled {
+		t.Fatal("secondary account's client must receive the plan create")
+	}
+	if primaryCalled {
+		t.Fatal("primary account's client must NOT be called when targeting the secondary")
+	}
+}
+
 func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	// A FRESH-DB price gets a new random UUID, but the content-addressed plan_id is
 	// unchanged, so find-or-attach reattaches to the existing NMI plan (no create).

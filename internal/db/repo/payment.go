@@ -104,7 +104,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	}
 	params.MerchantID = tid.UUID()
 	if params.ProviderAccountID == nil {
-		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), payment.Rail)
+		params.ProviderAccountID = resolveProviderAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
@@ -130,7 +130,7 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 	}
 	params.MerchantID = tid.UUID()
 	if params.ProviderAccountID == nil {
-		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), payment.Rail)
+		params.ProviderAccountID = resolveProviderAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {

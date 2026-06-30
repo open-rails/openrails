@@ -142,7 +142,7 @@ func main() {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newPushCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

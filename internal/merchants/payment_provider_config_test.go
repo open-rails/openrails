@@ -24,7 +24,7 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 		ProviderType:   "stripe",
 		Environment:    "live",
 		AccountID:      "acct_123",
-		Role:           "primary",
+		Routing:        "primary",
 		Status:         "enabled",
 		Evidence:       []byte(`{"public_config":{"publishable_key":"pk_live_123"}}`),
 		FirstSeenAt:    now,

@@ -11,8 +11,8 @@ import (
 
 func TestApplyPaymentProvidersGeneratesLocalSelectors(t *testing.T) {
 	rails, err := ApplyPaymentProviders([]PaymentProvider{
-		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
-		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
+		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, AccountID: "acct_a", Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
+		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, AccountID: "acct_b", Routing: config.RailRoutingLegacy, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
 		{Config: config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: "sec"}}},
 	})
 	require.NoError(t, err)

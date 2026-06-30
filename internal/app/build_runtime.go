@@ -533,10 +533,10 @@ func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, datab
 	// #641: one client per configured NMI account, keyed by its operator-declared
 	// account_id (gateway-id). Multiple NMI accounts per deployment are supported;
 	// the primary is aliased under the rail key below for back-compat resolution.
-	for name, procConfig := range nmiRails {
-		accountID := procConfig.EffectiveAccountID(name)
+	for _, procConfig := range nmiRails {
+		accountID := procConfig.EffectiveAccountID()
 		if accountID == "" {
-			return nil, fmt.Errorf("nmi provider account name/account_id cannot be empty")
+			return nil, fmt.Errorf("nmi provider account is missing account_id (the rail-native gateway id)")
 		}
 		if _, exists := clients[accountID]; exists {
 			return nil, fmt.Errorf("duplicate NMI provider account_id %q", accountID)
@@ -604,27 +604,23 @@ func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, datab
 		}
 	}
 
-	// Back-compat alias: expose the primary NMI account under the rail key "nmi" so
-	// charge/refund/dunning/webhook paths that resolve NMIClients["nmi"] keep
-	// working until records carry provider_account_id and can target a specific
-	// account. ponytail: transitional — per-account routing (#641 follow-up) reads
-	// the stamped provider_account_id and this alias goes away.
+	// #641: also expose the primary under the rail key "nmi" so existing
+	// NMIClients["nmi"] consumers keep resolving it. Provider-account-specific
+	// callers should use observed provider identity instead.
 	railKey := string(models.RailNMI)
-	aliasName, primary, err := rails.PrimaryRailByType(models.RailNMI)
+	_, primary, err := rails.PrimaryRailByType(models.RailNMI)
 	if err != nil {
 		return nil, err // multiple primaries: a configuration error
 	}
 	if primary == nil {
-		// No account marked primary (e.g. legacy/secondary-only): alias the
-		// lexicographically-first account (RailKeysByType is sorted) so refunds/
-		// rebills still resolve a client, preserving single-account behavior.
+		// No primary (legacy/secondary-only): alias the lexicographically-first
+		// account (RailKeysByType is sorted) so refunds/rebills still resolve.
 		if keys := rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
-			aliasName = keys[0]
 			primary = nmiRails[keys[0]]
 		}
 	}
 	if primary != nil {
-		clients[railKey] = clients[primary.EffectiveAccountID(aliasName)]
+		clients[railKey] = clients[primary.EffectiveAccountID()]
 	}
 
 	return clients, nil

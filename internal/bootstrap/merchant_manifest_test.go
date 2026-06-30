@@ -1,13 +1,24 @@
 package bootstrap
 
 import (
+	"context"
+	"crypto/ed25519"
 	"os"
 	"path/filepath"
 	"testing"
 
+	solanago "github.com/gagliardetto/solana-go"
 	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeTransit struct {
+	pub []byte
+	err error
+}
+
+func (f fakeTransit) Sign(context.Context, string, []byte) ([]byte, error) { return nil, nil }
+func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)    { return f.pub, f.err }
 
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
@@ -30,7 +41,7 @@ merchants:
       - provider_type: stripe
         environment: test
         account_id: acct_test_123
-        mode: primary
+        routing: primary
         secrets:
           secret_key:
             env: STRIPE_SECRET_KEY
@@ -90,10 +101,10 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// NMI gateway "mobius": live (primary, legacy gateway-id) + its sandbox.
 	require.Equal(t, "nmi", byName[key{"mobius", "live"}].ProviderType)
 	require.Equal(t, "579145", byName[key{"mobius", "live"}].AccountID)
-	require.Equal(t, "primary", byName[key{"mobius", "live"}].Mode)
+	require.Equal(t, "primary", byName[key{"mobius", "live"}].Routing)
 	require.Equal(t, "579145-sandbox", byName[key{"mobius", "test"}].AccountID)
 	// A second NMI gateway (paykings) — secondary.
-	require.Equal(t, "secondary", byName[key{"paykings", "live"}].Mode)
+	require.Equal(t, "secondary", byName[key{"paykings", "live"}].Routing)
 	// Stripe live + test side by side.
 	require.Equal(t, "acct_localstack_live", byName[key{"stripe", "live"}].AccountID)
 	require.Equal(t, "acct_localstack_test", byName[key{"stripe", "test"}].AccountID)
@@ -104,6 +115,34 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {
 	_, err := akembedded.LoadBootstrapManifestFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
+}
+
+func TestManifestSolanaSignerEvidence(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	accountID := solanago.PublicKeyFromBytes(pub).String()
+	secrets, err := newManifestSecretValues("solana", map[string]ManifestSecretSource{
+		"private_key": {Value: "keypair"},
+	})
+	require.NoError(t, err)
+
+	got, err := manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{}, secrets, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"mode": "keypair"}, got)
+
+	_, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{
+		Signer: &ManifestProviderAccountSigner{Mode: "vault_transit", Key: "openrails-solana-local"},
+	}, secrets, fakeTransit{pub: pub})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot also set secrets.private_key")
+
+	emptySecrets, err := newManifestSecretValues("solana", nil)
+	require.NoError(t, err)
+	got, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{
+		Signer: &ManifestProviderAccountSigner{Mode: "vault_transit", Key: "openrails-solana-local"},
+	}, emptySecrets, fakeTransit{pub: pub})
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
 }
 
 func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
@@ -181,9 +220,14 @@ merchants:
 			want: "profile.logo_url",
 		},
 		{
-			name: "invalid provider account mode",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        mode: standby\n"),
-			want: "mode must be primary, secondary, legacy, or disabled",
+			name: "invalid provider account routing",
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        routing: standby\n"),
+			want: "routing must be primary, secondary, legacy, or disabled",
+		},
+		{
+			name: "provider account mode removed",
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        mode: primary\n"),
+			want: "unknown field \"mode\"",
 		},
 		{
 			name: "provider account role removed",

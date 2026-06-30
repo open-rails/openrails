@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -219,18 +218,11 @@ func New(deps Dependencies) (*Server, error) {
 		// plan-publish, and enroll services. The cranker MUST be injected BEFORE
 		// workers start (InitRiver).
 		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
-			var submitter recurring.Submitter
 			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
-			var solanaSigner solanaint.Signer
-			if solanaTransit != nil {
-				solanaSigner = recurring.NewSignerFromTransit(solanaTransit, 0)
-				submitter = recurring.NewSignerSubmitterFromTransit(solanaTransit, deps.Runtime.SolanaRPC, 0)
-			} else {
-				solanaSigner = recurring.NewSignerFromStore(secretStore, 0)
-				submitter = recurring.NewSignerSubmitterFromStore(secretStore, deps.Runtime.SolanaRPC, 0)
-			}
+			solanaSigner := recurring.NewSignerFromProviderAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0)
+			submitter := recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
 			network := "mainnet"
 			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {
 				network = pc.Solana.Network

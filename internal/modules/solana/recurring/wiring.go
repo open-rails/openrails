@@ -2,14 +2,19 @@ package recurring
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -69,10 +74,28 @@ func SeedMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecre
 // the secret named solana/private_key; the store backend (DB+envelope or Vault)
 // is chosen at the composition root and is transparent here.
 type secretStoreGetter struct {
-	store merchants.MerchantSecretReader
+	store    merchants.MerchantSecretReader
+	database *db.DB
 }
 
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
+	if name == solanaint.SecretSolanaPrivateKey && g.database != nil {
+		if account, ok, err := primarySolanaProviderAccount(ctx, g.database, merchantID); err != nil {
+			return "", err
+		} else if ok {
+			secretName, err := merchants.ProviderAccountSecretName(account.ProviderType, account.Environment, account.AccountID, "private_key")
+			if err != nil {
+				return "", err
+			}
+			sec, err := g.store.Get(ctx, merchantID, secretName)
+			switch {
+			case err == nil:
+				return sec.Value, nil
+			case !errors.Is(err, merchants.ErrSecretNotFound):
+				return "", err
+			}
+		}
+	}
 	sec, err := g.store.Get(ctx, merchantID, name)
 	if err != nil {
 		return "", err
@@ -87,6 +110,15 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 // PrepareTierChangeService (#272), which co-signs with the merchant key directly.
 func NewSignerFromStore(store merchants.MerchantSecretReader, ttl time.Duration) solanaint.Signer {
 	return solanaint.NewKeypairSigner(secretStoreGetter{store: store}, ttl)
+}
+
+func NewSignerFromProviderAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration) solanaint.Signer {
+	return providerAccountSigner{
+		keypair: solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database}, ttl),
+		transit: transit,
+		db:      database,
+		ttl:     ttl,
+	}
 }
 
 // NewSignerFromTransit builds the per-merchant signer whose key lives in Vault
@@ -125,4 +157,88 @@ func NewSignerSubmitterFromTransit(transit solanaint.TransitClient, rpc *solanai
 // signed via Vault Transit.
 func NewCrankServiceFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
 	return NewCrankService(NewSignerSubmitterFromTransit(transit, rpc, ttl))
+}
+
+type providerAccountSigner struct {
+	keypair solanaint.Signer
+	transit solanaint.TransitClient
+	db      *db.DB
+	ttl     time.Duration
+}
+
+func (s providerAccountSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
+	signer, err := s.resolve(ctx, merchantID)
+	if err != nil {
+		return solanago.PublicKey{}, err
+	}
+	return signer.PublicKey(ctx, merchantID)
+}
+
+func (s providerAccountSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
+	signer, err := s.resolve(ctx, merchantID)
+	if err != nil {
+		return solanago.Signature{}, err
+	}
+	return signer.SignMessage(ctx, merchantID, message)
+}
+
+func (s providerAccountSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
+	account, ok, err := primarySolanaProviderAccount(ctx, s.db, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		cfg := signerConfigFromEvidence(account.Evidence)
+		switch cfg.Mode {
+		case "", "keypair":
+			return s.keypair, nil
+		case "vault_transit":
+			if s.transit == nil {
+				return nil, fmt.Errorf("solana: provider account %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
+			}
+			return solanaint.NewTransitSigner(s.transit, func(merchant.ID) string { return cfg.Key }, s.ttl), nil
+		default:
+			return nil, fmt.Errorf("solana: unknown signer mode %q", cfg.Mode)
+		}
+	}
+	if s.transit != nil {
+		return solanaint.NewTransitSigner(s.transit, nil, s.ttl), nil
+	}
+	return s.keypair, nil
+}
+
+type solanaSignerConfig struct {
+	Mode string `json:"mode"`
+	Key  string `json:"key"`
+}
+
+func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
+	var evidence struct {
+		Signer solanaSignerConfig `json:"signer"`
+	}
+	_ = json.Unmarshal(raw, &evidence)
+	evidence.Signer.Mode = strings.ToLower(strings.TrimSpace(evidence.Signer.Mode))
+	evidence.Signer.Key = strings.TrimSpace(evidence.Signer.Key)
+	return evidence.Signer
+}
+
+func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID) (gen.OpenrailsProviderAccount, bool, error) {
+	if database == nil || merchantID.IsZero() {
+		return gen.OpenrailsProviderAccount{}, false, nil
+	}
+	var row gen.OpenrailsProviderAccount
+	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		var err error
+		row, err = database.Gen(ctx).GetPrimaryProviderAccount(ctx, gen.GetPrimaryProviderAccountParams{
+			MerchantID:   merchantID.UUID(),
+			ProviderType: "solana",
+		})
+		return err
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.OpenrailsProviderAccount{}, false, nil
+		}
+		return gen.OpenrailsProviderAccount{}, false, fmt.Errorf("solana: lookup primary provider account: %w", err)
+	}
+	return row, true, nil
 }

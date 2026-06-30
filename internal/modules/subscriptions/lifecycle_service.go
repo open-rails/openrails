@@ -349,11 +349,21 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		periodStartsAt = params.CurrentPeriodStartsAt.UTC()
 	}
 	var periodEndsAt time.Time
-	if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
+	switch {
+	case params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt):
 		periodEndsAt = params.CurrentPeriodEndsAt.UTC()
-	} else if cycleHours := price.RecurringCycleHours(); cycleHours != nil {
-		periodEndsAt = now.Add(time.Duration(*cycleHours) * time.Hour)
-	} else {
+	case price.AccessDurationHours != nil:
+		// Truthful window from the price's declared access duration — covers both
+		// recurring and one-off/durable prices (RecurringCycleHours is AutoRenew-gated).
+		periodEndsAt = now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
+	default:
+		// #651: no provider period and no declared access duration. Don't silently
+		// invent a cadence — warn, then fall back to 30d so the row stays valid.
+		log.WithContext(ctx).WithFields(log.Fields{
+			"price_id":   price.ID,
+			"product_id": price.ProductID,
+			"user_id":    params.UserID,
+		}).Warn("price has no access duration and provider supplied no period end; defaulting membership period to 30d")
 		periodEndsAt = now.Add(30 * 24 * time.Hour)
 	}
 	product, err := productService.GetByID(ctx, price.ProductID)
@@ -460,7 +470,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				entNames = append(entNames, name)
 			}
 		} else {
-			entNames = append(entNames, "premium")
+			// #651: never fabricate a "premium" entitlement nobody declared. Grant
+			// what the product specifies (here: nothing) and warn so an empty spec
+			// surfaces as misconfiguration instead of silent access.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"product_id":      price.ProductID,
+				"user_id":         subscription.CustomerID.String(),
+			}).Warn("subscription product declares no entitlements; granting none (was fabricating \"premium\")")
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -549,6 +566,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// Use provided amount/currency or fall back to price defaults
 		amount := params.Amount
 		if !params.AmountProvided && amount == 0 {
+			// #651: caller supplied no charged amount; record the catalog list price
+			// but warn — this is the expected price, not a confirmed charged amount.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"price_id":       price.ID,
+				"transaction_id": params.TransactionID,
+				"user_id":        subscription.CustomerID.String(),
+			}).Warn("no charged amount supplied for membership payment; recording catalog list price")
 			amount = price.Amount
 		}
 		currency := params.Currency
@@ -556,6 +580,12 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			currency = price.Currency
 		}
 
+		// #651: record the provider's transaction time when supplied; now() only as
+		// last resort. Status is set explicitly (was relying on the SQL empty->'completed').
+		purchasedAt := now
+		if params.PurchasedAt != nil && !params.PurchasedAt.IsZero() {
+			purchasedAt = params.PurchasedAt.UTC()
+		}
 		payment := &models.Payment{
 			ID:                       uuidutil.NewV7(),
 			CustomerID:               subscription.CustomerID,
@@ -566,10 +596,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			Amount:                   amount,
 			ListAmount:               price.Amount,
 			Currency:                 currency,
+			Status:                   payments.PaymentStatusCompletedValue,
 			Metadata:                 params.PaymentMetadata,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
-			PurchasedAt:              now,
+			PurchasedAt:              purchasedAt,
 			CreatedAt:                now,
 		}
 		if err := paymentService.Create(ctx, payment); err != nil {
@@ -715,6 +746,21 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		if params.TransactionID != "" {
 			now := s.now().UTC()
+			if !params.AmountProvided && params.Amount <= 0 {
+				// #651: recording a renewal payment with no charged amount supplied;
+				// fall back to catalog list price but warn (expected price, not a
+				// confirmed charge).
+				log.WithContext(ctx).WithFields(log.Fields{
+					"price_id":             price.ID,
+					"rail_subscription_id": params.RailSubscriptionID,
+					"transaction_id":       params.TransactionID,
+				}).Warn("no charged amount supplied for renewal payment; recording catalog list price")
+			}
+			// #651: provider transaction time when supplied; now() only as last resort.
+			purchasedAt := now
+			if params.PurchasedAt != nil && !params.PurchasedAt.IsZero() {
+				purchasedAt = params.PurchasedAt.UTC()
+			}
 			payment := &models.Payment{
 				ID:                       uuidutil.NewV7(),
 				CustomerID:               subscription.CustomerID,
@@ -725,10 +771,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				Amount:                   amount,
 				ListAmount:               amount,
 				Currency:                 currency,
+				Status:                   payments.PaymentStatusCompletedValue,
 				Metadata:                 params.PaymentMetadata,
 				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
-				PurchasedAt:              now,
+				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
@@ -765,6 +812,12 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		// recurring; fall back to 30d (720h) if its cadence is somehow unset.
 		cycleHours := BillingCycleHoursOf(price)
 		if cycleHours <= 0 {
+			// #651: a renewing subscription should carry a recurring cadence; if it
+			// doesn't, warn instead of silently inventing 30d.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"price_id":             price.ID,
+				"rail_subscription_id": params.RailSubscriptionID,
+			}).Warn("renewing price has no billing cadence; defaulting renewal period to 30d")
 			cycleHours = 30 * 24
 		}
 		cycleWindow := time.Duration(cycleHours) * time.Hour
@@ -1057,13 +1110,18 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 		entNames := make([]string, 0)
 		entitlementsSpec := subscription.EntitlementsSpecSnapshot
-		if entitlementsSpec != nil && len(entitlementsSpec) > 0 {
+		if len(entitlementsSpec) > 0 {
 			entNames = make([]string, 0, len(entitlementsSpec))
 			for name := range entitlementsSpec {
 				entNames = append(entNames, name)
 			}
 		} else {
-			entNames = append(entNames, "premium")
+			// #651: don't fabricate a "premium" entitlement on reactivation; restore
+			// only what the subscription snapshot declares (here: nothing) and warn.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.CustomerID.String(),
+			}).Warn("reactivated subscription declares no entitlements; restoring none (was fabricating \"premium\")")
 		}
 
 		notBefore := periodStartsAt.UTC()

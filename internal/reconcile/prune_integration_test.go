@@ -39,7 +39,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, role, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
+		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, routing, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
 			paID, merchantID, "acct-"+suffix)
 		// One product+price per sub (uq_subscriptions_customer_product_lifecycle
 		// forbids multiple live subs per customer/product).
@@ -160,7 +160,7 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, role, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
+		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, routing, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
 			paID, merchantID, "acct-pay-"+suffix)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)

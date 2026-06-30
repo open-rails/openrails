@@ -148,7 +148,7 @@ func validateManifestProviderAccount(slug string, idx int, account ManifestProvi
 	if _, err := normalizeProviderEnvironment(account.Environment); err != nil {
 		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
 	}
-	if _, _, err := manifestProviderAccountMode(account.Mode); err != nil {
+	if _, _, err := manifestProviderAccountRouting(account.Routing); err != nil {
 		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
 	}
 	for key, source := range account.Secrets {
@@ -182,9 +182,9 @@ func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets
 }
 
 const (
-	configRailRolePrimary   = "primary"
-	configRailRoleSecondary = "secondary"
-	configRailRoleLegacy    = "legacy"
+	providerAccountRoutingPrimary   = "primary"
+	providerAccountRoutingSecondary = "secondary"
+	providerAccountRoutingLegacy    = "legacy"
 )
 
 func validHTTPURL(raw string) bool {

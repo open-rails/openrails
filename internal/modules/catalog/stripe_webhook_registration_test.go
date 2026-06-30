@@ -13,12 +13,18 @@ import (
 )
 
 func TestPublicStripeWebhookURL(t *testing.T) {
-	got, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme")
+	got, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "https://billing.example.com/billing/v1/merchants/acme/webhooks/stripe", got)
 
-	_, ok, err = PublicStripeWebhookURL(&config.Config{APIURL: "http://localhost:3053"}, "acme")
+	// #641: a set account_id yields the per-account endpoint.
+	perAcct, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "acct_123")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "https://billing.example.com/billing/v1/merchants/acme/webhooks/stripe/acct_123", perAcct)
+
+	_, ok, err = PublicStripeWebhookURL(&config.Config{APIURL: "http://localhost:3053"}, "acme", "")
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -53,7 +59,7 @@ func TestReconcileManagedStripeWebhookStoresProviderAccountSecret(t *testing.T) 
 	sec, err := store.Get(ctx, merchantID, webhookName)
 	require.NoError(t, err)
 	require.Equal(t, "whsec_fake_0", sec.Value)
-	require.Equal(t, "https://billing.example.com/v1/merchants/acme/webhooks/stripe", fake.endpoints[res.Result.EndpointID].URL)
+	require.Equal(t, "https://billing.example.com/v1/merchants/acme/webhooks/stripe/acct_123", fake.endpoints[res.Result.EndpointID].URL)
 }
 
 func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {

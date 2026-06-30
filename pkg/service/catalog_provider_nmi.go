@@ -151,14 +151,22 @@ func nmiDeterministicPlanID(productKey, currency string, unitAmount int64, billi
 	return strings.ReplaceAll(key, ".", "-")
 }
 
-// nmiClient resolves the NMI gateway client. NMIClients is keyed by rail, so the
-// provider-account name on the link is recorded metadata, not a routing key.
-// Returns (nil, false) when no NMI rail is configured.
+// nmiClient resolves the primary NMI client (the rail-key alias); see nmiClientFor.
 func (a *nmiAdapter) nmiClient() (*nmi.NMIClient, bool) {
+	return a.nmiClientFor("")
+}
+
+// nmiClientFor resolves the NMI client for a target account (#641): empty → the
+// primary (rail-key alias); an account_id → that account's client.
+func (a *nmiAdapter) nmiClientFor(targetAccountID string) (*nmi.NMIClient, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.NMIClients == nil {
 		return nil, false
 	}
-	client, ok := a.svc.rt.NMIClients[string(models.RailNMI)]
+	key := string(models.RailNMI)
+	if id := strings.TrimSpace(targetAccountID); id != "" {
+		key = id
+	}
+	client, ok := a.svc.rt.NMIClients[key]
 	return client, ok
 }
 
@@ -166,9 +174,9 @@ func (a *nmiAdapter) nmiClient() (*nmi.NMIClient, bool) {
 // deterministic plan_id. When no NMI rail is configured it returns
 // errPendingManualLink so the dispatcher converts the slot to a manual link.
 func (a *nmiAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
-	client, ok := a.nmiClient()
+	client, ok := a.nmiClientFor(in.TargetAccountID)
 	if !ok || client == nil {
-		// No NMI rail configured: defer to manual link.
+		// No NMI rail configured (or unknown target account): defer to manual link.
 		return nil, errPendingManualLink
 	}
 	// NMI recurring plans require a fixed billing frequency.

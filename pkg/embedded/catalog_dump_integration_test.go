@@ -1,0 +1,158 @@
+//go:build integration
+
+package embedded
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
+)
+
+func TestCatalogPushDumpRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	_, appDSN := dbtest.SharedRLSPostgres(t)
+	pool, err := pgxpool.New(ctx, appDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	merchantID := uuid.New()
+	merchantSlug := "catalog-roundtrip-" + strings.ReplaceAll(merchantID.String()[:8], "-", "")
+	_, err = pool.Exec(ctx,
+		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		merchantID, merchantSlug)
+	require.NoError(t, err)
+
+	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}}
+	manifest := []byte(`version: 1
+catalogs:
+  - merchant: ` + merchantSlug + `
+    meters:
+      - key: api_calls
+        kind: counter
+    credit_balances:
+      - key: image_credits
+        unit: credit
+        expires_default: 720h
+    usage_limits:
+      - key: daily_generations
+        measure: generations
+        windows:
+          - window: 1d
+            amount: 50
+    products:
+      - key: base
+        display_name: Base
+        entitlements: [base]
+        credits:
+          - key: image_credits
+            amount: 100
+            expires: 720h
+        usage_limits: [daily_generations]
+        prices:
+          - currency: usd
+            unit_amount: 1200000
+            duration: 30d
+            auto_renew: true
+            metered:
+              meter: api_calls
+              rate: 10
+              per_units: 100
+      - key: bundle
+        display_name: Bundle
+        includes: [base]
+        prices:
+          - currency: usd
+            unit_amount: 2500000
+            duration: 30d
+            auto_renew: true
+`)
+
+	var applyOut bytes.Buffer
+	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
+		Config: cfg, PGXPool: pool, Manifest: manifest, Out: &applyOut,
+		Insert: true, Overwrite: true, Prune: true,
+	}))
+
+	var firstDump bytes.Buffer
+	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
+		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &firstDump,
+	}))
+	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
+	require.NoError(t, err, "dump should parse as push-catalog YAML")
+	require.Len(t, targets, 1)
+	require.Equal(t, merchantSlug, targets[0].Merchant)
+
+	var secondApply bytes.Buffer
+	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
+		Config: cfg, PGXPool: pool, Manifest: firstDump.Bytes(), Out: &secondApply,
+		Insert: true, Overwrite: true, Prune: true,
+	}))
+
+	var secondDump bytes.Buffer
+	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
+		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &secondDump,
+	}))
+	require.Equal(t, firstDump.String(), secondDump.String(), "push -> dump -> push should not drift")
+}
+
+func TestExampleCatalogRoundTripsThroughDump(t *testing.T) {
+	ctx := context.Background()
+	_, appDSN := dbtest.SharedRLSPostgres(t)
+	pool, err := pgxpool.New(ctx, appDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
+	require.NoError(t, err)
+	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: raw})
+	require.NoError(t, err)
+	require.NotEmpty(t, targets)
+
+	for _, target := range targets {
+		id := uuid.New()
+		_, err = pool.Exec(ctx,
+			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+			id, target.Merchant)
+		require.NoError(t, err)
+	}
+
+	cfg := &config.Config{
+		ProviderWriteMode: config.ProviderWriteModeReadOnly,
+		DB:                &config.DBConfig{Schema: config.DefaultSchema},
+	}
+	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
+		Config: cfg, PGXPool: pool, Manifest: raw, Out: io.Discard,
+		Insert: true, Overwrite: true, Prune: true,
+	}))
+
+	for _, target := range targets {
+		var firstDump bytes.Buffer
+		require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
+			Config: cfg, PGXPool: pool, Merchant: target.Merchant, Out: &firstDump,
+		}))
+		_, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
+		require.NoError(t, err, "dump for %s should parse as push-catalog YAML", target.Merchant)
+
+		require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
+			Config: cfg, PGXPool: pool, Manifest: firstDump.Bytes(), Out: io.Discard,
+			Insert: true, Overwrite: true, Prune: true,
+		}))
+
+		var secondDump bytes.Buffer
+		require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
+			Config: cfg, PGXPool: pool, Merchant: target.Merchant, Out: &secondDump,
+		}))
+		require.Equal(t, firstDump.String(), secondDump.String(), "%s example catalog dump should be stable", target.Merchant)
+	}
+}

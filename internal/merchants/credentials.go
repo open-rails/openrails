@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -218,7 +219,7 @@ func (s *Service) primaryProviderAccountSecretScope(ctx context.Context, id merc
 			 WHERE merchant_id = $1::uuid
 			   AND provider_type = lower($2)
 			   AND environment = $3
-			   AND role = 'primary'
+			   AND routing = 'primary'
 			   AND status = 'enabled'
 			 LIMIT 1
 		`, id.String(), providerType, environment).Scan(&scope.providerType, &scope.environment, &scope.accountID)
@@ -232,11 +233,9 @@ func (s *Service) primaryProviderAccountSecretScope(ctx context.Context, id merc
 	return scope, true, nil
 }
 
-// providerAccountSecretScopeByAccountID resolves the secret scope for a SPECIFIC
-// enabled provider account identified by its operator-declared account_id (#641
-// per-account webhooks). Environment is not an input: account_id is unique per
-// (merchant, provider_type, environment) and a deployment is all-live OR all-test.
-// Returns ok=false when no enabled account with that id exists for the merchant.
+// providerAccountSecretScopeByAccountID resolves the secret scope for a specific
+// enabled account by its account_id (#641). Environment isn't an input — a
+// deployment is all-live or all-test. ok=false when no such enabled account.
 func (s *Service) providerAccountSecretScopeByAccountID(ctx context.Context, id merchant.ID, providerType, accountID string) (providerAccountSecretScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
 		return providerAccountSecretScope{}, false, nil
@@ -263,10 +262,8 @@ func (s *Service) providerAccountSecretScopeByAccountID(ctx context.Context, id 
 	return scope, true, nil
 }
 
-// LoadNMIWebhookSigningSecretForAccount loads the webhook signing secret for a
-// SPECIFIC NMI provider account (#641 per-account inbound webhooks). Returns
-// ("", false, nil) when no enabled account with that id exists for the merchant
-// — the caller MUST reject the webhook rather than fall back to another account.
+// LoadNMIWebhookSigningSecretForAccount loads the webhook secret for a specific NMI
+// account (#641). ok=false when no such enabled account — the caller must reject.
 func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id merchant.ID, accountID string) (string, bool, error) {
 	if s.secrets == nil || id.IsZero() {
 		return "", false, nil
@@ -281,6 +278,60 @@ func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id 
 	}
 	secret, err := s.secretValue(ctx, id, secretName)
 	return secret, true, err
+}
+
+// LoadStripeCredentialsForAccount loads credentials for a specific Stripe account
+// by account_id (#641). ok=false when no such enabled account.
+func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id merchant.ID, accountID string) (StripeCredentials, bool, error) {
+	var creds StripeCredentials
+	if s.secrets == nil {
+		return creds, false, nil
+	}
+	scope, ok, err := s.providerAccountSecretScopeByAccountID(ctx, id, "stripe", accountID)
+	if err != nil || !ok {
+		return creds, ok, err
+	}
+	secretKeyName, err := scope.secretName("secret_key")
+	if err != nil {
+		return creds, false, err
+	}
+	webhookName, err := scope.secretName("webhook_signing_secret")
+	if err != nil {
+		return creds, false, err
+	}
+	thinName, err := scope.secretName("webhook_signing_secret_thin")
+	if err != nil {
+		return creds, false, err
+	}
+	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+	return c, true, err
+}
+
+// ResolveProviderAccountID returns the row id of an enabled account by account_id
+// (#641), to stamp records from a per-account webhook. ok=false when none matches.
+func (s *Service) ResolveProviderAccountID(ctx context.Context, id merchant.ID, providerType, accountID string) (uuid.UUID, bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
+		return uuid.Nil, false, nil
+	}
+	providerType = normalizeProviderSecretType(providerType)
+	var pid uuid.UUID
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT id FROM openrails.provider_accounts
+			 WHERE merchant_id = $1::uuid
+			   AND provider_type = lower($2)
+			   AND account_id = $3
+			   AND status = 'enabled'
+			 LIMIT 1
+		`, id.String(), providerType, strings.TrimSpace(accountID)).Scan(&pid)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return pid, true, nil
 }
 
 // PutCredential stores/rotates a single per-merchant credential.

@@ -38,7 +38,7 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	}
 	providerAccountID := m.ProviderAccountID
 	if providerAccountID == nil {
-		providerAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), m.Rail)
+		providerAccountID = resolveProviderAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,

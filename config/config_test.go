@@ -419,9 +419,72 @@ func TestPrimaryRailByType(t *testing.T) {
 	_, _, err = rails.PrimaryRailByType(models.RailStripe)
 	require.ErrorContains(t, err, "multiple primary provider accounts")
 	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
-		"stripe_a": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
-		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
+		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
+		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}), "multiple primary provider accounts")
+
+	// Two accounts on a rail without account_id is rejected: the made-up map name
+	// can't be the routing key (#641).
+	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
+		"stripe_a": {Rail: models.RailStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
+		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
+	}), "must declare account_id")
+}
+
+// TestCatalogTargetSelectors covers the #641 routing the catalog push uses:
+// PrimaryRailByType + SecondaryRailKeysByType (primary+secondary are sync targets;
+// legacy is skipped) and FindByAccountID (resolve a specific account by gateway-id).
+func TestCatalogTargetSelectors(t *testing.T) {
+	rails := ProviderAccountSet{
+		"mobius":   {Rail: models.RailNMI, AccountID: "100001", NMI: &NMIRailConfig{SecurityKey: "a"}}, // no routing -> primary
+		"paykings": {Rail: models.RailNMI, AccountID: "100002", Routing: RailRoutingSecondary, NMI: &NMIRailConfig{SecurityKey: "b"}},
+		"old-nmi":  {Rail: models.RailNMI, AccountID: "100003", Routing: RailRoutingLegacy, NMI: &NMIRailConfig{SecurityKey: "c"}},
+	}
+
+	pk, primary, err := rails.PrimaryRailByType(models.RailNMI)
+	require.NoError(t, err)
+	require.Equal(t, "mobius", pk)
+	require.Equal(t, "100001", primary.AccountID)
+
+	// Only the secondary is a catalog-sync target — legacy is excluded.
+	require.Equal(t, []string{"paykings"}, rails.SecondaryRailKeysByType(models.RailNMI))
+
+	// FindByAccountID resolves by operator-declared gateway-id.
+	got, ok := rails.FindByAccountID(models.RailNMI, "100002")
+	require.True(t, ok)
+	require.Equal(t, "b", got.NMI.SecurityKey)
+	_, ok = rails.FindByAccountID(models.RailNMI, "999")
+	require.False(t, ok)
+}
+
+// TestRailEnvironmentMustMatchTestMode covers the #641 "all-test or all-live"
+// guard: an account whose declared environment contradicts test_mode is rejected;
+// a matching or unset (derived) environment passes.
+func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
+	// test_mode=true (sandbox) rejects a live-declared account.
+	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}, ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
+	})
+	require.ErrorContains(t, err, "requires environment=test")
+
+	// test_mode=false (production) rejects a test-declared account.
+	cfgLive := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
+	require.ErrorContains(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Environment: "test", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+	}), "requires environment=live")
+
+	// A garbage environment is rejected.
+	require.ErrorContains(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Environment: "staging", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+	}), "unknown environment")
+
+	// Matching environment passes; unset (derived from test_mode) passes.
+	require.NoError(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+	}))
+	require.NoError(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+	}))
 }
 
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {

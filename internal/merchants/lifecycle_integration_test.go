@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
     provider_type text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
-    role text DEFAULT 'primary' NOT NULL,
+    routing text DEFAULT 'primary' NOT NULL,
     status text DEFAULT 'enabled' NOT NULL,
     PRIMARY KEY (id),
     UNIQUE (merchant_id, provider_type, environment, account_id)
@@ -165,7 +165,7 @@ func newSvc(t *testing.T) *Service {
 func seedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, providerType, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, role, status)
+		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, routing, status)
 		VALUES ($1::uuid, lower($2), $3, $4, 'primary', 'enabled')
 		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO NOTHING
 	`, merchantID.String(), providerType, environment, accountID)

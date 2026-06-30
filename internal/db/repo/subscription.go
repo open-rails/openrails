@@ -100,7 +100,7 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	}
 	params.MerchantID = tid.UUID()
 	if params.ProviderAccountID == nil {
-		params.ProviderAccountID = resolvePrimaryProviderAccountID(ctx, r.db.Gen(ctx), tid.UUID(), s.Rail)
+		params.ProviderAccountID = resolveProviderAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {

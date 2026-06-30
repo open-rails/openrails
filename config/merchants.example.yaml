@@ -69,7 +69,7 @@ merchants:
     #                 config.yaml `test_mode` flag selects which set is active at
     #                 boot (live under test_mode=false, test under test_mode=true).
     #                 Declaring BOTH here lets one file serve both deployments.
-    #   mode        — primary | secondary | legacy | disabled. primary receives new
+    #   routing     — primary | secondary | legacy | disabled. primary receives new
     #                 work + catalog push; secondary is a kept-in-sync fallback;
     #                 legacy is old rows / rebills / refunds / webhooks only.
     #   secrets     — each entry sets exactly one of {value, env, file, vault}.
@@ -80,16 +80,17 @@ merchants:
         name: mobius
         environment: live
         account_id: "579145"
-        mode: primary
+        routing: primary
         secrets:
           security_key:           { env: LOCAL_STACK_MOBIUS_NMI_SECURITY_KEY }
           tokenization_key:       { env: LOCAL_STACK_MOBIUS_NMI_TOKENIZATION_KEY }
           webhook_signing_secret: { env: LOCAL_STACK_MOBIUS_NMI_WEBHOOK_SECRET }
+
       - provider_type: nmi
         name: mobius
         environment: test
         account_id: "579145-sandbox"
-        mode: primary                 # active only under test_mode=true (development); ignored in production
+        routing: primary              # active only under test_mode=true (development); ignored in production
         secrets:
           security_key:           { env: LOCAL_STACK_MOBIUS_NMI_TEST_SECURITY_KEY }
           tokenization_key:       { env: LOCAL_STACK_MOBIUS_NMI_TEST_TOKENIZATION_KEY }
@@ -100,7 +101,7 @@ merchants:
         name: paykings
         environment: live
         account_id: "884512"
-        mode: secondary
+        routing: secondary
         secrets:
           security_key:           { env: LOCAL_STACK_PAYKINGS_NMI_SECURITY_KEY }
           tokenization_key:       { env: LOCAL_STACK_PAYKINGS_NMI_TOKENIZATION_KEY }
@@ -111,7 +112,7 @@ merchants:
         name: ccbill
         environment: live
         account_id: "945280/0000"
-        mode: primary
+        routing: primary
         secrets:
           account_config: { file: ./.secrets/openrails/local-stack-ccbill-account.json }
 
@@ -120,7 +121,7 @@ merchants:
         name: stripe
         environment: live
         account_id: acct_localstack_live
-        mode: primary
+        routing: primary
         secrets:
           secret_key:             { env: LOCAL_STACK_STRIPE_SECRET_KEY }
           webhook_signing_secret: { env: LOCAL_STACK_STRIPE_WEBHOOK_SECRET }
@@ -128,7 +129,7 @@ merchants:
         name: stripe
         environment: test
         account_id: acct_localstack_test
-        mode: primary                 # active only under test_mode=true
+        routing: primary              # active only under test_mode=true
         secrets:
           secret_key:             { env: LOCAL_STACK_STRIPE_TEST_SECRET_KEY }
           webhook_signing_secret: { env: LOCAL_STACK_STRIPE_TEST_WEBHOOK_SECRET }
@@ -138,6 +139,7 @@ merchants:
         name: solana
         environment: live
         account_id: 11111111111111111111111111111111
-        mode: secondary
+        routing: secondary
+        signer: { mode: keypair } # or: { mode: vault_transit, key: openrails-solana-local-stack }
         secrets:
           private_key: { file: ./.secrets/openrails/local-stack-solana-keypair.json }

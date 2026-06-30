@@ -193,7 +193,25 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	if !ok {
 		return
 	}
-	creds, err := r.State.Merchants.LoadStripeCredentials(r.Request.Context(), merchantID)
+	var creds merchants.StripeCredentials
+	var err error
+	if accountID != "" {
+		// #641: per-account endpoint — verify with THIS Stripe account's secret and
+		// stamp records with it. Unknown account is rejected (no primary fallback).
+		var found bool
+		creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
+		if err == nil && !found {
+			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			return
+		}
+		if err == nil && found {
+			if pid, ok, rerr := r.State.Merchants.ResolveProviderAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(repo.WithProviderAccountID(r.Request.Context(), pid))
+			}
+		}
+	} else {
+		creds, err = r.State.Merchants.LoadStripeCredentials(r.Request.Context(), merchantID)
+	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
@@ -268,6 +286,13 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 		if err == nil && !found {
 			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
 			return false
+		}
+		// Pin the routed account so records this event creates are stamped with it
+		// (overriding the repo's primary-default stamping).
+		if err == nil && found {
+			if pid, ok, rerr := r.State.Merchants.ResolveProviderAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(repo.WithProviderAccountID(r.Request.Context(), pid))
+			}
 		}
 	} else {
 		signingKey, err = r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)

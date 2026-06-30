@@ -35,7 +35,12 @@ type ManagedStripeWebhookResult struct {
 	WebhookURL string
 }
 
-func PublicStripeWebhookURL(cfg *config.Config, merchantSlug string) (string, bool, error) {
+// PublicStripeWebhookURL builds the inbound Stripe webhook URL for a merchant.
+// When accountID is set it returns the per-account endpoint
+// (…/merchants/{slug}/webhooks/stripe/{account_id}, #641) so a merchant with
+// multiple Stripe accounts gets one managed endpoint each; empty accountID
+// returns the shared …/webhooks/stripe path.
+func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
 		base = strings.TrimSpace(cfg.APIURL)
@@ -54,6 +59,9 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug string) (string, bo
 	parts := []string{"v1"}
 	if strings.TrimSpace(merchantSlug) != "" {
 		parts = append(parts, "merchants", merchantSlug, "webhooks", "stripe")
+		if id := strings.TrimSpace(accountID); id != "" {
+			parts = append(parts, id) // #641 per-account endpoint
+		}
 	} else {
 		parts = append(parts, "webhooks", "stripe")
 	}
@@ -68,7 +76,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	if p.Config != nil && p.Config.IsLimitedMode() {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
 	}
-	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.MerchantSlug)
+	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.MerchantSlug, p.ProviderAccountID)
 	if err != nil {
 		return ManagedStripeWebhookResult{}, err
 	}

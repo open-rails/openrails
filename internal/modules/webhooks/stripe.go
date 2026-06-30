@@ -96,7 +96,10 @@ func (li stripeInvoiceLineItem) priceID() string {
 }
 
 type stripeInvoice struct {
-	ID            string `json:"id"`
+	ID string `json:"id"`
+	// Created is the invoice's own creation time (Unix sec) — the provider's
+	// transaction timestamp (#651), recorded instead of webhook-processing now().
+	Created       int64  `json:"created"`
 	Subscription  string `json:"subscription"`
 	Customer      string `json:"customer"`
 	CustomerEmail string `json:"customer_email"`
@@ -128,6 +131,17 @@ type stripeInvoice struct {
 			Metadata     map[string]string `json:"metadata"`
 		} `json:"subscription_details"`
 	} `json:"parent"`
+}
+
+// stripeInvoiceCreatedAt is the invoice's own creation time (#651) — the
+// provider's transaction timestamp. Returns nil when absent so the payment row
+// falls back to now() rather than recording a 1970 epoch.
+func stripeInvoiceCreatedAt(inv stripeInvoice) *time.Time {
+	if inv.Created <= 0 {
+		return nil
+	}
+	t := time.Unix(inv.Created, 0).UTC()
+	return &t
 }
 
 // railSubscriptionID returns the Stripe subscription id, reading the
@@ -484,6 +498,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			Amount:                amountMicros,
 			AmountProvided:        true,
 			Currency:              inv.Currency,
+			PurchasedAt:           stripeInvoiceCreatedAt(inv),
 			PaymentMetadata:       paymentMetadata,
 		})
 		if err != nil {
@@ -500,6 +515,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			Amount:                amountMicros,
 			AmountProvided:        true,
 			Currency:              inv.Currency,
+			PurchasedAt:           stripeInvoiceCreatedAt(inv),
 			PaymentMetadata:       paymentMetadata,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
@@ -1138,6 +1154,11 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 		}
 		txnID := failedPaymentTransactionID(inv)
 		subID := sub.ID
+		// #651: record the invoice's own time when present; now() only as fallback.
+		purchasedAt := s.now()
+		if t := stripeInvoiceCreatedAt(inv); t != nil {
+			purchasedAt = *t
+		}
 		failed := &models.Payment{
 			ID:             uuidutil.NewV7(),
 			CustomerID:     sub.CustomerID,
@@ -1149,7 +1170,7 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 			ListAmount:     amount,
 			Currency:       currency,
 			Status:         "failed",
-			PurchasedAt:    s.now(),
+			PurchasedAt:    purchasedAt,
 		}
 		if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
 			return fmt.Errorf("record failed payment: %w", err)
@@ -1261,7 +1282,10 @@ func (s *StripeWebhookService) handleChargeRefunded(ctx context.Context, obj jso
 	}
 	for _, refund := range charge.Refunds.Data {
 		if strings.TrimSpace(refund.Status) == "" {
-			refund.Status = "succeeded"
+			// #651: Stripe always sends a refund status; empty is malformed. Don't
+			// assume "succeeded" — reject as non-retryable instead of recording a
+			// refund outcome we never confirmed.
+			return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe charge.refunded missing refund status (charge %s)", charge.ID))
 		}
 		if strings.TrimSpace(refund.Charge) == "" {
 			refund.Charge = charge.ID

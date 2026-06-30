@@ -102,7 +102,7 @@ func postMerchantWebhookWithHeader(t *testing.T, url string, body []byte, header
 func seedProviderAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, role, status)
+		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, routing, status)
 		VALUES ($1::uuid, $2, 'live', $3, 'primary', 'enabled')
 	`, merchantID, provider, accountID)
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			account_id text NOT NULL,
 			display_name text,
 			vault_secret_ref text,
-			role text NOT NULL DEFAULT 'primary',
+			routing text NOT NULL DEFAULT 'primary',
 			status text NOT NULL DEFAULT 'enabled',
 			evidence jsonb,
 			first_seen_at timestamptz NOT NULL DEFAULT current_timestamp,

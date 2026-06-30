@@ -18,3 +18,16 @@ func TestPushCatalogCommandShape(t *testing.T) {
 		}
 	}
 }
+
+func TestDumpCatalogCommandShape(t *testing.T) {
+	cmd := newDumpCatalogCmd()
+	if cmd.Use != "dump-merchant-catalog --slug <merchant>" {
+		t.Fatalf("Use = %q", cmd.Use)
+	}
+	if len(cmd.Aliases) != 1 || cmd.Aliases[0] != "dump-catalog" {
+		t.Fatalf("Aliases = %#v", cmd.Aliases)
+	}
+	if cmd.Flags().Lookup("slug") == nil {
+		t.Fatal("missing slug flag")
+	}
+}

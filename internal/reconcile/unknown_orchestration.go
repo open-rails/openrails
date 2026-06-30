@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -229,8 +230,19 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			status = "failed"
 		}
 		currency := t.Currency
+		if currency == "" && sub.Price != nil {
+			// #651: don't fabricate "usd". A decline/void carries no currency of its
+			// own; fall back to the subscription's real billing currency (truthful).
+			currency = sub.Price.Currency
+		}
 		if currency == "" {
-			currency = "usd"
+			// Genuinely unknown currency (transaction and subscription both lack one):
+			// skip + warn rather than guess.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"transaction_id":  t.TransactionID,
+				"subscription_id": sub.ID,
+			}).Warn("reconcile backfill: transaction and subscription both lack a currency; skipping row")
+			continue
 		}
 		subID := sub.ID
 		n, err := q.CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams{

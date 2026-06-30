@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -102,7 +103,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		}
 	}
 
-	// provider accounts (identity + role + secret references).
+	// provider accounts (identity + routing + secret references).
 	var accounts []gen.OpenrailsProviderAccount
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
@@ -127,7 +128,10 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			Name:         name,
 			Environment:  a.Environment,
 			AccountID:    a.AccountID,
-			Mode:         providerAccountModeFromRoleStatus(a.Role, a.Status),
+			Routing:      providerAccountRoutingFromStatus(a.Routing, a.Status),
+		}
+		if signer := providerAccountSignerFromEvidence(a.Evidence); signer != nil {
+			account.Signer = signer
 		}
 		if a.VaultSecretRef != nil {
 			account.VaultSecretRef = *a.VaultSecretRef
@@ -145,22 +149,42 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	return &MerchantManifest{Version: BootstrapManifestVersion, Merchants: []ManifestMerchant{mt}}, nil
 }
 
+func providerAccountSignerFromEvidence(raw []byte) *ManifestProviderAccountSigner {
+	var evidence struct {
+		Signer struct {
+			Mode string `json:"mode"`
+			Key  string `json:"key"`
+		} `json:"signer"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
+		return nil
+	}
+	mode := strings.TrimSpace(evidence.Signer.Mode)
+	if mode == "" || mode == "keypair" {
+		return nil
+	}
+	return &ManifestProviderAccountSigner{
+		Mode: mode,
+		Key:  strings.TrimSpace(evidence.Signer.Key),
+	}
+}
+
 // MarshalMerchantManifest renders a manifest to YAML — the canonical dump output.
 func MarshalMerchantManifest(m *MerchantManifest) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-func providerAccountModeFromRoleStatus(role, status string) string {
+func providerAccountRoutingFromStatus(routing, status string) string {
 	if strings.EqualFold(status, "disabled") {
 		return "disabled"
 	}
-	switch strings.ToLower(role) {
-	case configRailRolePrimary:
-		return configRailRolePrimary
-	case configRailRoleLegacy:
-		return configRailRoleLegacy
+	switch strings.ToLower(routing) {
+	case providerAccountRoutingPrimary:
+		return providerAccountRoutingPrimary
+	case providerAccountRoutingLegacy:
+		return providerAccountRoutingLegacy
 	default:
-		return configRailRoleSecondary
+		return providerAccountRoutingSecondary
 	}
 }
 

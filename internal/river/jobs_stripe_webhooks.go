@@ -60,15 +60,17 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 		return nil
 	}
 
+	// #641: register a managed endpoint for EVERY enabled Stripe account, not just
+	// the primary — secondary (failover) and legacy (old subs/refunds) accounts
+	// also receive events, each at its own per-account URL.
 	rows, err := w.DB.Qx(ctx).Query(ctx, `
 		SELECT m.id::text, m.slug, pa.environment, pa.account_id
 		  FROM openrails.merchants m
 		  JOIN openrails.provider_accounts pa ON pa.merchant_id = m.id
 		 WHERE m.deleted_at IS NULL
 		   AND pa.provider_type = 'stripe'
-		   AND pa.role = 'primary'
 		   AND pa.status = 'enabled'
-		 ORDER BY m.slug
+		 ORDER BY m.slug, pa.account_id
 	`)
 	if err != nil {
 		return fmt.Errorf("stripe webhook reconcile: list merchants: %w", err)

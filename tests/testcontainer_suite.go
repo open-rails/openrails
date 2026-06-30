@@ -235,7 +235,8 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	// state, not infrastructure config.yaml state.
 	suite.Rails = config.ProviderAccountSet{
 		"ccbill": {
-			Rail: models.RailCCBill,
+			Rail:      models.RailCCBill,
+			AccountID: "945280/0000",
 			CCBill: &config.CCBillRailConfig{
 				ClientAccNum: "945280",
 				ClientSubAcc: "0000",
@@ -243,14 +244,16 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			},
 		},
 		"solana": {
-			Rail: models.RailSolana,
+			Rail:      models.RailSolana,
+			AccountID: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 			Solana: &config.SolanaRailConfig{
 				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 				Tokens:          solanatokens.DefaultDevnetTokens(),
 			},
 		},
 		"mobius": {
-			Rail: models.RailNMI,
+			Rail:      models.RailNMI,
+			AccountID: envOrDefault("RAILS_MOBIUS_GATEWAY_ID", "579145"),
 			NMI: &config.NMIRailConfig{
 				SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
 				TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
@@ -444,24 +447,24 @@ func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, provid
 
 	_, err = tx.Exec(ctx, `
 		UPDATE openrails.provider_accounts
-		   SET role = 'legacy',
+		   SET routing = 'legacy',
 		       replaced_at = COALESCE(replaced_at, now()),
 		       updated_at = now()
 		 WHERE merchant_id = $1::uuid
 		   AND provider_type = $2
 		   AND environment = 'live'
 		   AND account_id <> $3
-		   AND role = 'primary'
+		   AND routing = 'primary'
 		   AND status = 'enabled'
 	`, dbtest.TestMerchantID.UUID(), providerType, accountID)
 	require.NoError(suite.t, err)
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO openrails.provider_accounts
-		    (merchant_id, provider_type, environment, account_id, role, status, evidence, last_verified_at)
+		    (merchant_id, provider_type, environment, account_id, routing, status, evidence, last_verified_at)
 		VALUES ($1::uuid, $2, 'live', $3, 'primary', 'enabled', '{"source":"test_fixture"}'::jsonb, now())
 		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE
-		   SET role = 'primary',
+		   SET routing = 'primary',
 		       status = 'enabled',
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
@@ -598,8 +601,8 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		return
 	}
 	clients := make(map[string]*nmi.NMIClient)
-	for name, proc := range suite.Rails.ByRail(models.RailNMI) {
-		accountID := proc.EffectiveAccountID(name)
+	for _, proc := range suite.Rails.ByRail(models.RailNMI) {
+		accountID := proc.EffectiveAccountID()
 		settings := proc.ToNMIProviderSettings(accountID)
 		client, err := nmi.NewClient(accountID, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
@@ -608,13 +611,13 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		// "nmi" below (matching createNMIClients).
 		clients[accountID] = client
 	}
-	if name, primary, err := suite.Rails.PrimaryRailByType(models.RailNMI); err == nil && primary != nil {
-		if c, ok := clients[primary.EffectiveAccountID(name)]; ok {
+	if _, primary, err := suite.Rails.PrimaryRailByType(models.RailNMI); err == nil && primary != nil {
+		if c, ok := clients[primary.EffectiveAccountID()]; ok {
 			clients[string(models.RailNMI)] = c
 		}
 	} else if keys := suite.Rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
 		first := suite.Rails.ByRail(models.RailNMI)[keys[0]]
-		clients[string(models.RailNMI)] = clients[first.EffectiveAccountID(keys[0])]
+		clients[string(models.RailNMI)] = clients[first.EffectiveAccountID()]
 	}
 
 	rt := suite.App.Runtime

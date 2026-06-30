@@ -14,14 +14,14 @@ import (
 
 const demoteOtherPrimaryProviderAccounts = `-- name: DemoteOtherPrimaryProviderAccounts :exec
 UPDATE openrails.provider_accounts
-SET role = 'legacy',
+SET routing = 'legacy',
     replaced_at = COALESCE(replaced_at, now()),
     updated_at = now()
 WHERE merchant_id = $1::uuid
   AND provider_type = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
   AND id <> $4::uuid
-  AND role = 'primary'
+  AND routing = 'primary'
   AND status = 'enabled'
 `
 
@@ -43,10 +43,10 @@ func (q *Queries) DemoteOtherPrimaryProviderAccounts(ctx context.Context, arg De
 }
 
 const getPrimaryProviderAccount = `-- name: GetPrimaryProviderAccount :one
-SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
+SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
 WHERE merchant_id = $1::uuid
   AND provider_type = lower($2::text)
-  AND role = 'primary'
+  AND routing = 'primary'
   AND status = 'enabled'
 ORDER BY created_at, id
 LIMIT 1
@@ -57,8 +57,8 @@ type GetPrimaryProviderAccountParams struct {
 	ProviderType string
 }
 
-// The merchant's primary enabled account on a rail (#641), used to stamp new
-// records with provider_account_id. Environment is not filtered: a deployment is
+// The merchant's primary enabled account on a rail (#641), used for default
+// provider selection, not historical provenance. Environment is not filtered: a deployment is
 // all-live OR all-test (test_mode guards mixing), so there is one primary per rail.
 func (q *Queries) GetPrimaryProviderAccount(ctx context.Context, arg GetPrimaryProviderAccountParams) (OpenrailsProviderAccount, error) {
 	row := q.db.QueryRow(ctx, getPrimaryProviderAccount, arg.MerchantID, arg.ProviderType)
@@ -71,7 +71,7 @@ func (q *Queries) GetPrimaryProviderAccount(ctx context.Context, arg GetPrimaryP
 		&i.AccountID,
 		&i.DisplayName,
 		&i.VaultSecretRef,
-		&i.Role,
+		&i.Routing,
 		&i.Status,
 		&i.Evidence,
 		&i.FirstSeenAt,
@@ -85,7 +85,7 @@ func (q *Queries) GetPrimaryProviderAccount(ctx context.Context, arg GetPrimaryP
 }
 
 const getProviderAccount = `-- name: GetProviderAccount :one
-SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
+SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
 WHERE id = $1
 `
 
@@ -100,7 +100,7 @@ func (q *Queries) GetProviderAccount(ctx context.Context, id uuid.UUID) (Openrai
 		&i.AccountID,
 		&i.DisplayName,
 		&i.VaultSecretRef,
-		&i.Role,
+		&i.Routing,
 		&i.Status,
 		&i.Evidence,
 		&i.FirstSeenAt,
@@ -114,7 +114,7 @@ func (q *Queries) GetProviderAccount(ctx context.Context, id uuid.UUID) (Openrai
 }
 
 const getProviderAccountByIdentity = `-- name: GetProviderAccountByIdentity :one
-SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
+SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
 WHERE merchant_id = $1::uuid
   AND provider_type = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -145,7 +145,7 @@ func (q *Queries) GetProviderAccountByIdentity(ctx context.Context, arg GetProvi
 		&i.AccountID,
 		&i.DisplayName,
 		&i.VaultSecretRef,
-		&i.Role,
+		&i.Routing,
 		&i.Status,
 		&i.Evidence,
 		&i.FirstSeenAt,
@@ -159,10 +159,10 @@ func (q *Queries) GetProviderAccountByIdentity(ctx context.Context, arg GetProvi
 }
 
 const listProviderAccountsForMerchant = `-- name: ListProviderAccountsForMerchant :many
-SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
+SELECT id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner FROM openrails.provider_accounts
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR provider_type = lower($2::text))
-ORDER BY provider_type, environment, role, created_at, id
+ORDER BY provider_type, environment, routing, created_at, id
 `
 
 type ListProviderAccountsForMerchantParams struct {
@@ -187,7 +187,7 @@ func (q *Queries) ListProviderAccountsForMerchant(ctx context.Context, arg ListP
 			&i.AccountID,
 			&i.DisplayName,
 			&i.VaultSecretRef,
-			&i.Role,
+			&i.Routing,
 			&i.Status,
 			&i.Evidence,
 			&i.FirstSeenAt,
@@ -209,7 +209,7 @@ func (q *Queries) ListProviderAccountsForMerchant(ctx context.Context, arg ListP
 
 const promoteProviderAccountToPrimary = `-- name: PromoteProviderAccountToPrimary :one
 UPDATE openrails.provider_accounts
-SET role = 'primary',
+SET routing = 'primary',
     status = 'enabled',
     replaced_at = NULL,
     updated_at = now()
@@ -217,7 +217,7 @@ WHERE id = $1::uuid
   AND merchant_id = $2::uuid
   AND provider_type = lower($3::text)
   AND environment = COALESCE($4::text, 'live')
-RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner
+RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner
 `
 
 type PromoteProviderAccountToPrimaryParams struct {
@@ -243,7 +243,7 @@ func (q *Queries) PromoteProviderAccountToPrimary(ctx context.Context, arg Promo
 		&i.AccountID,
 		&i.DisplayName,
 		&i.VaultSecretRef,
-		&i.Role,
+		&i.Routing,
 		&i.Status,
 		&i.Evidence,
 		&i.FirstSeenAt,
@@ -260,7 +260,7 @@ const upsertProviderAccount = `-- name: UpsertProviderAccount :one
 
 INSERT INTO openrails.provider_accounts (
     merchant_id, provider_type, environment, account_id, display_name,
-    vault_secret_ref, role, status, evidence, last_verified_at
+    vault_secret_ref, routing, status, evidence, last_verified_at
 ) VALUES (
     $1::uuid,
     lower($2::text),
@@ -277,7 +277,7 @@ INSERT INTO openrails.provider_accounts (
                 WHERE existing.merchant_id = $1::uuid
                   AND existing.provider_type = lower($2::text)
                   AND existing.environment = COALESCE($3::text, 'live')
-                  AND existing.role = 'primary'
+                  AND existing.routing = 'primary'
                   AND existing.status = 'enabled'
             ) THEN 'secondary'
             ELSE 'primary'
@@ -293,7 +293,7 @@ ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE SET
     evidence = COALESCE(EXCLUDED.evidence, openrails.provider_accounts.evidence),
     last_verified_at = EXCLUDED.last_verified_at,
     updated_at = now()
-RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner
+RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner
 `
 
 type UpsertProviderAccountParams struct {
@@ -303,7 +303,7 @@ type UpsertProviderAccountParams struct {
 	AccountID      string
 	DisplayName    *string
 	VaultSecretRef *string
-	Role           *string
+	Routing        *string
 	Status         *string
 	Evidence       []byte
 	LastVerifiedAt *time.Time
@@ -318,7 +318,7 @@ func (q *Queries) UpsertProviderAccount(ctx context.Context, arg UpsertProviderA
 		arg.AccountID,
 		arg.DisplayName,
 		arg.VaultSecretRef,
-		arg.Role,
+		arg.Routing,
 		arg.Status,
 		arg.Evidence,
 		arg.LastVerifiedAt,
@@ -332,7 +332,7 @@ func (q *Queries) UpsertProviderAccount(ctx context.Context, arg UpsertProviderA
 		&i.AccountID,
 		&i.DisplayName,
 		&i.VaultSecretRef,
-		&i.Role,
+		&i.Routing,
 		&i.Status,
 		&i.Evidence,
 		&i.FirstSeenAt,

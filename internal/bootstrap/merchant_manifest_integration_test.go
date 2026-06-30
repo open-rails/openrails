@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
     account_id text NOT NULL,
     display_name text,
     vault_secret_ref text,
-    role text DEFAULT 'primary' NOT NULL,
+    routing text DEFAULT 'primary' NOT NULL,
     status text DEFAULT 'enabled' NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -115,14 +115,14 @@ CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
     CONSTRAINT provider_accounts_pkey PRIMARY KEY (id),
     CONSTRAINT provider_accounts_nonempty CHECK (btrim(provider_type) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
     CONSTRAINT provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT provider_accounts_role_check CHECK (role = ANY (ARRAY['primary','secondary','legacy'])),
+    CONSTRAINT provider_accounts_routing_check CHECK (routing = ANY (ARRAY['primary','secondary','legacy'])),
     CONSTRAINT provider_accounts_status_check CHECK (status = ANY (ARRAY['enabled','disabled'])),
     CONSTRAINT provider_accounts_owner_check CHECK (owner = ANY (ARRAY['merchant','platform'])),
     CONSTRAINT provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
 ALTER TABLE ONLY openrails.provider_accounts FORCE ROW LEVEL SECURITY;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_identity ON openrails.provider_accounts (merchant_id, provider_type, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_enabled_primary ON openrails.provider_accounts (merchant_id, provider_type, environment) WHERE (role = 'primary' AND status = 'enabled');
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_enabled_primary ON openrails.provider_accounts (merchant_id, provider_type, environment) WHERE (routing = 'primary' AND status = 'enabled');
 ALTER TABLE openrails.provider_accounts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS merchant_isolation ON openrails.provider_accounts;
 CREATE POLICY merchant_isolation ON openrails.provider_accounts
@@ -173,7 +173,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 		ProviderType: "stripe",
 		Environment:  "test",
 		AccountID:    "acct_test_123",
-		Mode:         "primary",
+		Routing:      "primary",
 		Secrets: map[string]ManifestSecretSource{
 			"secret_key": {Value: "sk_test_bootstrap"},
 		},
@@ -209,16 +209,16 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	`, merchantID, secretName).Scan(&secretValue))
 	require.Equal(t, "sk_test_bootstrap", secretValue)
 
-	var providerType, environment, accountID, role, status string
+	var providerType, environment, accountID, routing, status string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT provider_type, environment, account_id, role, status
+		SELECT provider_type, environment, account_id, routing, status
 		FROM openrails.provider_accounts
 		WHERE merchant_id = $1::uuid
-	`, merchantID).Scan(&providerType, &environment, &accountID, &role, &status))
+	`, merchantID).Scan(&providerType, &environment, &accountID, &routing, &status))
 	require.Equal(t, "stripe", providerType)
 	require.Equal(t, "test", environment)
 	require.Equal(t, "acct_test_123", accountID)
-	require.Equal(t, "primary", role)
+	require.Equal(t, "primary", routing)
 	require.Equal(t, "enabled", status)
 }
 
@@ -230,7 +230,7 @@ func TestReconcileMerchantManifestDiscoversProviderAccountIdentityFromSecrets(t 
 	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
 		ProviderType: "ccbill",
 		Environment:  "live",
-		Mode:         "primary",
+		Routing:      "primary",
 		Secrets: map[string]ManifestSecretSource{
 			"account_config": {Value: `{"client_acc_num":"900000","client_sub_acc":"0000","salt":"secret"}`},
 		},
@@ -285,12 +285,12 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	}
 	// NMI gateway "mobius": a live primary and its sandbox, side by side (#646).
 	mt.ProviderAccounts = []ManifestProviderAccount{
-		{ProviderType: "nmi", Name: "mobius", Environment: "live", AccountID: "579145", Mode: "primary",
+		{ProviderType: "nmi", Name: "mobius", Environment: "live", AccountID: "579145", Routing: "primary",
 			Secrets: map[string]ManifestSecretSource{
 				"security_key":     {Value: "live-security"},
 				"tokenization_key": {Value: "live-token"},
 			}},
-		{ProviderType: "nmi", Name: "mobius", Environment: "test", AccountID: "579145-sandbox", Mode: "secondary",
+		{ProviderType: "nmi", Name: "mobius", Environment: "test", AccountID: "579145-sandbox", Routing: "secondary",
 			Secrets: map[string]ManifestSecretSource{
 				"security_key": {Value: "test-security"},
 			}},
@@ -355,8 +355,8 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	}
 	require.Equal(t, "mobius", byEnv["live"].Name)
 	require.Equal(t, "579145", byEnv["live"].AccountID)
-	require.Equal(t, "primary", byEnv["live"].Mode)
-	require.Equal(t, "secondary", byEnv["test"].Mode)
+	require.Equal(t, "primary", byEnv["live"].Routing)
+	require.Equal(t, "secondary", byEnv["test"].Routing)
 	// Secret VALUES are never dumped — only env references. NMI's security_key
 	// canonicalizes to production_key on storage, so the dump emits that key.
 	require.NotEmpty(t, byEnv["live"].Secrets["production_key"].Env, "secret emitted as env reference")
@@ -390,7 +390,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 		ProviderType: "stripe",
 		Environment:  "test",
 		AccountID:    "acct_vault_123",
-		Mode:         "primary",
+		Routing:      "primary",
 		Secrets: map[string]ManifestSecretSource{
 			"secret_key": {Value: "sk_test_vault_bootstrap"},
 		},
@@ -439,7 +439,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 		ProviderType: "stripe",
 		Environment:  "test",
 		AccountID:    "acct_db_123",
-		Mode:         "primary",
+		Routing:      "primary",
 		Secrets: map[string]ManifestSecretSource{
 			"secret_key": {Value: "sk_test_db_bootstrap"},
 		},

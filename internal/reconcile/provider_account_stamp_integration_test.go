@@ -17,10 +17,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TestRepoCreateStampsPrimaryProviderAccount proves the #641 stamping chokepoint:
-// a payment created via the repo with no explicit provider account is stamped
-// with the merchant's PRIMARY enabled account for its rail.
-func TestRepoCreateStampsPrimaryProviderAccount(t *testing.T) {
+// TestRepoCreateStampsOnlyExplicitProviderAccount proves provider_account_id is
+// provenance: repo writes do not invent it from primary routing.
+func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbtest.EnsureTestMerchant(context.Background(), t, appDB.Pool())
@@ -29,23 +28,13 @@ func TestRepoCreateStampsPrimaryProviderAccount(t *testing.T) {
 		now := time.Now().UTC()
 		suffix := uuid.NewString()[:8]
 
-		// A secondary account exists too, to prove the resolver picks PRIMARY.
-		primary, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		account, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			ProviderType:   "nmi",
-			AccountID:      "nmi-primary-" + suffix,
+			AccountID:      "nmi-account-" + suffix,
 			LastVerifiedAt: &now,
 		})
 		require.NoError(t, err)
-		require.Equal(t, "primary", primary.Role)
-		secondary, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
-			MerchantID:     dbtest.TestMerchantID.UUID(),
-			ProviderType:   "nmi",
-			AccountID:      "nmi-secondary-" + suffix,
-			LastVerifiedAt: &now,
-		})
-		require.NoError(t, err)
-		require.Equal(t, "secondary", secondary.Role)
 
 		customerID := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		productID := uuid.New()
@@ -79,8 +68,21 @@ func TestRepoCreateStampsPrimaryProviderAccount(t *testing.T) {
 
 		got, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
 		require.NoError(t, err)
-		require.NotNil(t, got.ProviderAccountID, "payment must be stamped with the primary provider account (#641)")
-		require.Equal(t, primary.ID, *got.ProviderAccountID)
+		require.Nil(t, got.ProviderAccountID, "payment must not invent provider_account_id from primary routing")
+
+		// #641: a context-pinned account (the per-account inbound webhook path)
+		// records observed external-account provenance.
+		pinnedCtx := repo.WithProviderAccountID(ctx, account.ID)
+		pmt2 := &models.Payment{
+			ID: uuid.New(), CustomerID: customerID, PriceID: priceID, Rail: models.RailNMI,
+			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "usd",
+			Status: "completed", PurchasedAt: now, CreatedAt: now,
+		}
+		require.NoError(t, repo.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))
+		got2, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt2.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got2.ProviderAccountID)
+		require.Equal(t, account.ID, *got2.ProviderAccountID, "pinned account is observed provenance")
 		return nil
 	}))
 }

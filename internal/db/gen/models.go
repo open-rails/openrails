@@ -796,7 +796,7 @@ type OpenrailsProviderAccount struct {
 	DisplayName    *string
 	VaultSecretRef *string
 	// primary routes new work by default; secondary is enabled but explicit/manual; legacy is for old rows/rebills/refunds/webhooks only.
-	Role string
+	Routing string
 	// enabled participates in routing/reconcile; disabled is retained for history but should not receive new routine work.
 	Status         string
 	Evidence       []byte

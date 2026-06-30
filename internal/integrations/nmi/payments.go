@@ -45,9 +45,10 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	}
 
 	amountStr := moneyutil.FormatCentsDecimal(params.Amount)
-	currency := params.Currency
+	currency := strings.TrimSpace(params.Currency)
 	if currency == "" {
-		currency = "usd"
+		// #651: a money path must not silently default the currency.
+		return nil, errors.New("currency is required")
 	}
 	orderDesc := params.OrderDescription
 	if orderDesc == "" {

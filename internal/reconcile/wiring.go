@@ -31,7 +31,7 @@ type FetcherOptions struct {
 }
 
 // BuildFetchersWithOptions is the strict builder used by operator commands.
-// It respects rail role selection and returns config errors instead of
+// It respects rail routing selection and returns config errors instead of
 // silently picking an arbitrary account.
 func BuildFetchersWithOptions(cfg *config.Config, rails config.ProviderAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
 	fetchers := map[Provider]RailFetcher{}

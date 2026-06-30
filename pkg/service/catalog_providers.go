@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -150,6 +151,10 @@ type autoCreateContext struct {
 	// missing object inside Attach, AutoCreate) and still perform read-only
 	// verification normally.
 	RemoteWritesDisabled bool
+
+	// TargetAccountID (#641) pins AutoCreate to a specific account by account_id
+	// instead of the rail's primary (set when syncing secondaries); empty = primary.
+	TargetAccountID string
 }
 
 // providerAdapters returns the dispatch table keyed by canonical provider name.
@@ -370,7 +375,38 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 		}
 	}
+	// #641: keep secondary accounts in sync too (best-effort); legacy is skipped.
+	if !remoteWritesDisabled {
+		for _, name := range names {
+			if adapter, ok := adapters[name]; ok {
+				s.syncSecondaryCatalogAccounts(ctx, name, pctx, adapter)
+			}
+		}
+	}
 	return rails, states, pending, nil
+}
+
+// syncSecondaryCatalogAccounts best-effort find-or-creates the price in each
+// SECONDARY account on a rail (#641 failover sync). No links stored (checkout uses
+// the primary; find-or-create re-discovers by content key); failures are logged.
+func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
+	if s.rt == nil {
+		return
+	}
+	for _, key := range s.rt.Rails.SecondaryRailKeysByType(models.Rail(rail)) {
+		acct := s.rt.Rails[key]
+		if acct == nil {
+			continue
+		}
+		sctx := pctx
+		sctx.TargetAccountID = acct.EffectiveAccountID()
+		if _, err := adapter.AutoCreate(ctx, sctx); err != nil && !errors.Is(err, errPendingManualLink) {
+			log.WithContext(ctx).WithError(err).
+				WithField("rail", rail).
+				WithField("provider_account_id", sctx.TargetAccountID).
+				Warn("secondary catalog sync failed (best-effort); drift surfaces on reconcile")
+		}
+	}
 }
 
 // priceLinkContext builds the substance context (product key + immutable money terms)

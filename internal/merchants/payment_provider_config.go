@@ -28,7 +28,7 @@ type PaymentProviderConfig struct {
 	ProviderType   string                                     `json:"provider_type"`
 	Environment    string                                     `json:"environment"`
 	AccountID      string                                     `json:"account_id"`
-	Role           string                                     `json:"role"`
+	Routing        string                                     `json:"routing"`
 	Status         string                                     `json:"status"`
 	PublicConfig   map[string]string                          `json:"public_config,omitempty"`
 	Credentials    map[string]PaymentProviderCredentialStatus `json:"credentials"`
@@ -106,7 +106,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 		return PaymentProviderConfig{}, err
 	}
 	for _, item := range items {
-		if item.Role == "primary" {
+		if item.Routing == "primary" {
 			return item, nil
 		}
 	}
@@ -197,28 +197,28 @@ func (s *Service) upsertPaymentProviderAccount(ctx context.Context, id merchant.
 		return gen.OpenrailsProviderAccount{}, err
 	}
 	status := "disabled"
-	role := "legacy"
+	routing := "legacy"
 	if enabled {
 		status = "enabled"
-		role = "secondary"
+		routing = "secondary"
 	}
 	var row gen.OpenrailsProviderAccount
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
-			INSERT INTO openrails.provider_accounts (
-			    merchant_id, provider_type, environment, account_id, role, status, evidence, last_verified_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-			ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE SET
-			    role = EXCLUDED.role,
-			    status = EXCLUDED.status,
-			    evidence = EXCLUDED.evidence,
-			    last_verified_at = EXCLUDED.last_verified_at,
-			    replaced_at = CASE WHEN EXCLUDED.status = 'disabled' THEN COALESCE(openrails.provider_accounts.replaced_at, now()) ELSE NULL END,
-			    updated_at = now()
-			RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at
-		`, id.UUID(), provider, environment, accountID, role, status, evidence).Scan(
+				INSERT INTO openrails.provider_accounts (
+				    merchant_id, provider_type, environment, account_id, routing, status, evidence, last_verified_at
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+				ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE SET
+				    routing = EXCLUDED.routing,
+				    status = EXCLUDED.status,
+				    evidence = EXCLUDED.evidence,
+				    last_verified_at = EXCLUDED.last_verified_at,
+				    replaced_at = CASE WHEN EXCLUDED.status = 'disabled' THEN COALESCE(openrails.provider_accounts.replaced_at, now()) ELSE NULL END,
+				    updated_at = now()
+				RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at
+			`, id.UUID(), provider, environment, accountID, routing, status, evidence).Scan(
 			&row.ID, &row.MerchantID, &row.ProviderType, &row.Environment, &row.AccountID,
-			&row.DisplayName, &row.VaultSecretRef, &row.Role, &row.Status, &row.Evidence,
+			&row.DisplayName, &row.VaultSecretRef, &row.Routing, &row.Status, &row.Evidence,
 			&row.FirstSeenAt, &row.LastVerifiedAt, &row.ReplacedAt, &row.CreatedAt, &row.UpdatedAt,
 		)
 		if err != nil {
@@ -251,16 +251,16 @@ func (s *Service) disablePaymentProviderAccount(ctx context.Context, id merchant
 	var row gen.OpenrailsProviderAccount
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			UPDATE openrails.provider_accounts
-			   SET status = 'disabled',
-			       role = 'legacy',
-			       replaced_at = COALESCE(replaced_at, now()),
-			       updated_at = now()
-			 WHERE id = $1 AND merchant_id = $2
-			RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, role, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at
-		`, accountID, id.UUID()).Scan(
+				UPDATE openrails.provider_accounts
+				   SET status = 'disabled',
+				       routing = 'legacy',
+				       replaced_at = COALESCE(replaced_at, now()),
+				       updated_at = now()
+				 WHERE id = $1 AND merchant_id = $2
+				RETURNING id, merchant_id, provider_type, environment, account_id, display_name, vault_secret_ref, routing, status, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at
+			`, accountID, id.UUID()).Scan(
 			&row.ID, &row.MerchantID, &row.ProviderType, &row.Environment, &row.AccountID,
-			&row.DisplayName, &row.VaultSecretRef, &row.Role, &row.Status, &row.Evidence,
+			&row.DisplayName, &row.VaultSecretRef, &row.Routing, &row.Status, &row.Evidence,
 			&row.FirstSeenAt, &row.LastVerifiedAt, &row.ReplacedAt, &row.CreatedAt, &row.UpdatedAt,
 		)
 	})
@@ -291,7 +291,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsProviderAccount, statuses []M
 		ProviderType:   row.ProviderType,
 		Environment:    row.Environment,
 		AccountID:      row.AccountID,
-		Role:           row.Role,
+		Routing:        row.Routing,
 		Status:         row.Status,
 		PublicConfig:   unmarshalProviderEvidence(row.Evidence).PublicConfig,
 		Credentials:    credentials,

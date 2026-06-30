@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -128,6 +129,32 @@ func (a *stripeAdapter) stripeConfigured() bool {
 	return stripeProc != nil && stripeProc.Stripe != nil && strings.TrimSpace(stripeProc.Stripe.SecretKey) != ""
 }
 
+// stripeServiceFor builds the StripeCatalogService for a target account (#641):
+// empty → the rail's primary; an account_id → a service keyed to THAT account's
+// secret. ok=false when no usable Stripe credentials for the target.
+func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.StripeCatalogService, bool) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		return nil, false
+	}
+	if strings.TrimSpace(targetAccountID) == "" {
+		proc := a.svc.rt.Rails.GetStripeRail()
+		if proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
+			return nil, false
+		}
+		return &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}, true
+	}
+	proc, ok := a.svc.rt.Rails.FindByAccountID(models.RailStripe, targetAccountID)
+	if !ok || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
+		return nil, false
+	}
+	// Single-entry rail set with the target as the (implicit) primary, so the
+	// StripeCatalogService resolves THAT account's secret key.
+	return &catalog.StripeCatalogService{
+		Config: a.svc.rt.Config,
+		Rails:  config.ProviderAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
+	}, true
+}
+
 // AutoCreate implements the find-or-create flow for Stripe. Identity is
 // CONTENT-based (catalog product keys), so it is wipe-safe — re-syncing after a DB
 // rebuild finds the same Stripe objects rather than duplicating them. The
@@ -148,16 +175,12 @@ func (a *stripeAdapter) stripeConfigured() bool {
 //
 // Returns the canonical ids to persist on rails["stripe"].
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+	stripeSvc, ok := a.stripeServiceFor(in.TargetAccountID)
+	if !ok {
 		// Same error string used by stripe_catalog.go so callers can detect
 		// the "not configured" case via substring (Verify, etc).
 		return nil, errPendingManualLink
 	}
-	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
-		return nil, errPendingManualLink
-	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
 
 	productKey := strings.TrimSpace(in.ProductKey)
 	priceContentKey := openRailsPriceContentKey(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)

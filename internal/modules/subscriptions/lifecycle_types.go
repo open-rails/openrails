@@ -21,18 +21,24 @@ type CreateMembershipParams struct {
 	Amount                int64
 	AmountProvided        bool
 	Currency              string
-	PaymentMetadata       map[string]any
+	// PurchasedAt is the provider's transaction time (#651). nil => the payment
+	// row records now() (provider supplied no timestamp).
+	PurchasedAt     *time.Time
+	PaymentMetadata map[string]any
 }
 
 type RenewMembershipParams struct {
-	Rail                      models.Rail
-	RailSubscriptionID        string
-	CurrentPeriodStartsAt     *time.Time
-	CurrentPeriodEndsAt       *time.Time
-	TransactionID             string
-	Amount                    int64
-	AmountProvided            bool
-	Currency                  string
+	Rail                  models.Rail
+	RailSubscriptionID    string
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	TransactionID         string
+	Amount                int64
+	AmountProvided        bool
+	Currency              string
+	// PurchasedAt is the provider's transaction time (#651). nil => the payment
+	// row records now() (provider supplied no timestamp).
+	PurchasedAt               *time.Time
 	PaymentMetadata           map[string]any
 	AllowTerminalReactivation bool
 }

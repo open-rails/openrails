@@ -21,6 +21,9 @@ import (
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
+
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func liveClient(t *testing.T) *vaultapi.Client {
@@ -106,5 +109,26 @@ func TestVaultTransitEd25519SignVerify(t *testing.T) {
 	}
 	if !ed25519.Verify(ed25519.PublicKey(pub), msg, sig) {
 		t.Fatal("Vault Transit Ed25519 signature did not verify — encoding mismatch")
+	}
+
+	signer := solanaint.NewTransitSigner(transit, func(merchant.ID) string { return name }, 0)
+	signerPub, err := signer.PublicKey(ctx, merchant.ID{})
+	if err == nil {
+		t.Fatalf("zero merchant PublicKey err = nil, pub=%s", signerPub)
+	}
+	tid := merchant.ID([16]byte{1})
+	signerPub, err = signer.PublicKey(ctx, tid)
+	if err != nil {
+		t.Fatalf("solana transit signer public key: %v", err)
+	}
+	if string(signerPub.Bytes()) != string(pub) {
+		t.Fatalf("solana transit signer public key mismatch")
+	}
+	signerSig, err := signer.SignMessage(ctx, tid, msg)
+	if err != nil {
+		t.Fatalf("solana transit signer sign: %v", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), msg, signerSig[:]) {
+		t.Fatal("Solana signer over Vault Transit produced an unverifiable signature")
 	}
 }

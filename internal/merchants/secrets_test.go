@@ -190,8 +190,8 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	// #630/#641: the loader resolves the rail's primary provider account, so it
-	// takes the RAIL ("nmi"), not a provider-account name like "mobius".
+	// #630/#641: the loader takes the RAIL ("nmi"), not a provider-account name
+	// like "mobius".
 	cfg, err := svc.LoadNMITokenizationConfig(ctx, id, "nmi")
 	if err != nil {
 		t.Fatalf("load missing tokenization config: %v", err)

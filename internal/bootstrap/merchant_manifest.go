@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -139,8 +141,14 @@ type ManifestProviderAccount struct {
 	Environment    string                          `yaml:"environment,omitempty"`
 	AccountID      string                          `yaml:"account_id,omitempty"`
 	VaultSecretRef string                          `yaml:"vault_secret_ref,omitempty"`
-	Mode           string                          `yaml:"mode,omitempty"`
+	Routing        string                          `yaml:"routing,omitempty"`
+	Signer         *ManifestProviderAccountSigner  `yaml:"signer,omitempty"`
 	Secrets        map[string]ManifestSecretSource `yaml:"secrets,omitempty"`
+}
+
+type ManifestProviderAccountSigner struct {
+	Mode string `yaml:"mode,omitempty"`
+	Key  string `yaml:"key,omitempty"`
 }
 
 type ManifestSecretSource struct {
@@ -195,12 +203,13 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // ownerless merchant row and applies the same profile/provider-account
 // configuration path without touching AuthKit or startup bootstrap markers.
 type ProvisionMerchantRequest struct {
-	Config       *config.Config
-	ControlPlane *controlplane.ControlPlane
-	Database     *db.DB
-	SecretStore  merchants.MerchantSecretStore
-	Merchant     ManifestMerchant
-	Options      MerchantManifestReconcileOptions
+	Config        *config.Config
+	ControlPlane  *controlplane.ControlPlane
+	Database      *db.DB
+	SecretStore   merchants.MerchantSecretStore
+	SolanaTransit solana.TransitClient
+	Merchant      ManifestMerchant
+	Options       MerchantManifestReconcileOptions
 }
 
 // ReconcileMerchantManifestData provisions merchants and issuer ownership
@@ -240,12 +249,13 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 
 	for _, mt := range manifest.Merchants {
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{
-			Config:       cfg,
-			ControlPlane: cp,
-			Database:     database,
-			SecretStore:  secretStore,
-			Merchant:     mt,
-			Options:      opts,
+			Config:        cfg,
+			ControlPlane:  cp,
+			Database:      database,
+			SecretStore:   secretStore,
+			SolanaTransit: secretBackend.SolanaTransit,
+			Merchant:      mt,
+			Options:       opts,
 		})
 		if err != nil {
 			return err
@@ -302,7 +312,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
-	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, mt, req.SecretStore, req.Options); err != nil {
+	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, mt, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", mt.Slug, err)
 	}
 	return tn, nil
@@ -388,7 +398,7 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (
 	}, true, nil
 }
 
-func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
+func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
 	// Apply the merchant_configurations payload (#646): profile, invoice/collection
 	// policy, and delegated-invoker abuse windows. Load once, mutate only the
@@ -446,7 +456,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
 		}
-		if err := reconcileManifestProviderAccount(ctx, cfg, database, merchantID, mt.Slug, account, secretStore, opts); err != nil {
+		if err := reconcileManifestProviderAccount(ctx, cfg, database, merchantID, mt.Slug, account, secretStore, transit, opts); err != nil {
 			return err
 		}
 	}
@@ -507,7 +517,7 @@ func hasManifestProfile(p ManifestMerchantProfile) bool {
 		strings.TrimSpace(p.SupportURL) != ""
 }
 
-func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug string, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
+func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug string, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	providerType := normalizeManifestProviderType(account.ProviderType)
 	if providerType == "" {
 		return fmt.Errorf("provider account provider_type is required")
@@ -531,6 +541,10 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	accountID := strings.TrimSpace(identity.AccountID)
 	if accountID == "" {
 		return fmt.Errorf("provider account %q identity resolution returned an empty account id", providerType)
+	}
+	signerEvidence, err := manifestProviderSignerEvidence(ctx, providerType, accountID, account, secrets, transit)
+	if err != nil {
+		return err
 	}
 	for key, source := range account.Secrets {
 		name, err := merchants.ProviderAccountSecretName(providerType, environment, accountID, key)
@@ -557,12 +571,12 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		}
 	}
 	vaultSecretRef := stringPtrIfNotEmpty(account.VaultSecretRef)
-	role, status, err := manifestProviderAccountMode(account.Mode)
+	routing, status, err := manifestProviderAccountRouting(account.Routing)
 	if err != nil {
 		return err
 	}
-	if cfg != nil && !cfg.IsDev() && environment == "test" && role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
-		return fmt.Errorf("provider account %q cannot be mode=primary with environment=test outside development", providerType)
+	if cfg != nil && !cfg.IsDev() && environment == "test" && routing != nil && *routing == providerAccountRoutingPrimary && (status == nil || *status == "enabled") {
+		return fmt.Errorf("provider account %q cannot be routing=primary with environment=test outside development", providerType)
 	}
 	reconcileStripeWebhook := func() error {
 		if providerType != string(models.RailStripe) || (status != nil && *status == "disabled") {
@@ -629,6 +643,9 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	if evidence == nil {
 		evidence = map[string]any{"source": "merchant_config_manifest"}
 	}
+	if signerEvidence != nil {
+		evidence["signer"] = signerEvidence
+	}
 	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
 		return fmt.Errorf("encode provider account evidence: %w", err)
@@ -644,14 +661,14 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			AccountID:      accountID,
 			DisplayName:    displayName,
 			VaultSecretRef: vaultSecretRef,
-			Role:           role,
+			Routing:        routing,
 			Status:         status,
 			Evidence:       evidenceJSON,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert provider account %s:%s: %w", providerType, accountID, err)
 		}
-		if role != nil && *role == configRailRolePrimary && (status == nil || *status == "enabled") {
+		if routing != nil && *routing == providerAccountRoutingPrimary && (status == nil || *status == "enabled") {
 			if err := database.Gen(ctx).DemoteOtherPrimaryProviderAccounts(ctx, gen.DemoteOtherPrimaryProviderAccountsParams{
 				MerchantID:   merchantID.UUID(),
 				ProviderType: providerType,
@@ -670,22 +687,22 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			}
 			return nil
 		}
-		if role != nil || status != nil {
+		if routing != nil || status != nil {
 			if _, err := database.Qx(ctx).Exec(ctx, `
-				UPDATE openrails.provider_accounts
-				   SET role = COALESCE($1, role),
-				       status = COALESCE($2, status),
-				       replaced_at = CASE
-				           WHEN COALESCE($1, role) = 'legacy' THEN COALESCE(replaced_at, now())
-				           WHEN COALESCE($1, role) = 'primary' THEN NULL
-				           ELSE replaced_at
-				       END,
-				       updated_at = now()
+					UPDATE openrails.provider_accounts
+					   SET routing = COALESCE($1, routing),
+					       status = COALESCE($2, status),
+					       replaced_at = CASE
+					           WHEN COALESCE($1, routing) = 'legacy' THEN COALESCE(replaced_at, now())
+					           WHEN COALESCE($1, routing) = 'primary' THEN NULL
+					           ELSE replaced_at
+					       END,
+					       updated_at = now()
 				 WHERE id = $3
-				   AND merchant_id = $4::uuid
-				   AND provider_type = $5
-			`, role, status, row.ID, merchantID.UUID(), providerType); err != nil {
-				return fmt.Errorf("update provider account role/status: %w", err)
+					   AND merchant_id = $4::uuid
+					   AND provider_type = $5
+				`, routing, status, row.ID, merchantID.UUID(), providerType); err != nil {
+				return fmt.Errorf("update provider account routing/status: %w", err)
 			}
 		}
 		return nil
@@ -693,6 +710,54 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		return err
 	}
 	return reconcileStripeWebhook()
+}
+
+func manifestProviderSignerEvidence(ctx context.Context, providerType, accountID string, account ManifestProviderAccount, secrets manifestSecretValues, transit solana.TransitClient) (map[string]string, error) {
+	if account.Signer == nil {
+		if _, ok := secrets.sources["private_key"]; ok && providerType == string(models.RailSolana) {
+			return map[string]string{"mode": "keypair"}, nil
+		}
+		return nil, nil
+	}
+	if providerType != string(models.RailSolana) {
+		return nil, fmt.Errorf("provider account signer is only supported for solana")
+	}
+	mode := strings.ToLower(strings.TrimSpace(account.Signer.Mode))
+	switch mode {
+	case "keypair":
+		if _, ok := secrets.sources["private_key"]; !ok {
+			return nil, fmt.Errorf("solana signer mode keypair requires secrets.private_key")
+		}
+		if strings.TrimSpace(account.Signer.Key) != "" {
+			return nil, fmt.Errorf("solana signer mode keypair must not set key")
+		}
+		return map[string]string{"mode": "keypair"}, nil
+	case "vault_transit":
+		if _, ok := secrets.sources["private_key"]; ok {
+			return nil, fmt.Errorf("solana signer mode vault_transit cannot also set secrets.private_key")
+		}
+		key := strings.TrimSpace(account.Signer.Key)
+		if key == "" {
+			return nil, fmt.Errorf("solana signer mode vault_transit requires key")
+		}
+		if transit == nil {
+			return nil, fmt.Errorf("solana signer mode vault_transit requires vault.enabled")
+		}
+		raw, err := transit.PublicKey(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("solana vault transit signer %q public key: %w", key, err)
+		}
+		if len(raw) != 32 {
+			return nil, fmt.Errorf("solana vault transit signer %q public key is %d bytes, want 32", key, len(raw))
+		}
+		pub := solanago.PublicKeyFromBytes(raw)
+		if pub.String() != strings.TrimSpace(accountID) {
+			return nil, fmt.Errorf("solana vault transit signer %q public key %s does not match account_id %s", key, pub.String(), accountID)
+		}
+		return map[string]string{"mode": "vault_transit", "key": key}, nil
+	default:
+		return nil, fmt.Errorf("solana signer mode must be keypair or vault_transit")
+	}
 }
 
 func normalizeProviderEnvironment(raw string) (string, error) {
@@ -710,20 +775,20 @@ func normalizeManifestProviderType(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
 }
 
-func manifestProviderAccountMode(raw string) (*string, *string, error) {
+func manifestProviderAccountRouting(raw string) (*string, *string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
 		return nil, nil, nil
-	case configRailRolePrimary:
-		return stringPtrIfNotEmpty(configRailRolePrimary), stringPtrIfNotEmpty("enabled"), nil
-	case configRailRoleSecondary:
-		return stringPtrIfNotEmpty(configRailRoleSecondary), stringPtrIfNotEmpty("enabled"), nil
-	case configRailRoleLegacy:
-		return stringPtrIfNotEmpty(configRailRoleLegacy), stringPtrIfNotEmpty("enabled"), nil
+	case providerAccountRoutingPrimary:
+		return stringPtrIfNotEmpty(providerAccountRoutingPrimary), stringPtrIfNotEmpty("enabled"), nil
+	case providerAccountRoutingSecondary:
+		return stringPtrIfNotEmpty(providerAccountRoutingSecondary), stringPtrIfNotEmpty("enabled"), nil
+	case providerAccountRoutingLegacy:
+		return stringPtrIfNotEmpty(providerAccountRoutingLegacy), stringPtrIfNotEmpty("enabled"), nil
 	case "disabled":
-		return stringPtrIfNotEmpty(configRailRoleSecondary), stringPtrIfNotEmpty("disabled"), nil
+		return stringPtrIfNotEmpty(providerAccountRoutingSecondary), stringPtrIfNotEmpty("disabled"), nil
 	default:
-		return nil, nil, fmt.Errorf("provider account mode must be primary, secondary, legacy, or disabled")
+		return nil, nil, fmt.Errorf("provider account routing must be primary, secondary, legacy, or disabled")
 	}
 }
 
