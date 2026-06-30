@@ -1405,7 +1405,7 @@ the migrated wallet cohort is covered by the narrower, unambiguous derive.wallet
 
 # #632: subscription `unknown` status + provider-truth reconciliation state machine
 
-**Completed:** no
+**Completed:** yes (commits 65a7a7a4 / db4f45ed)
 
 Migrated (and live missed-webhook) subscriptions can be locally "active" while current_period_ends_at is in the past with no confirming payment (19,029 such after migration). Convergence must not guess — flip these to a new `unknown` status ("needs provider verification") and reconcile against provider truth. Extends the #367 liveness "silent-active" notion into an explicit state.
 
@@ -1430,7 +1430,7 @@ Acceptance: post-migration the lapsed-active cohort moves to `unknown` then reso
 
 # #633: batched/windowed provider-pull reconciliation + exponential backoff
 
-**Completed:** no
+**Completed:** yes (commits 65a7a7a4 / db4f45ed)
 
 Reconciling thousands of `unknown` subs must NOT fan out per-user provider calls. Pull provider truth in batches by time-window and match locally; back off when the provider is unreachable. Feasibility confirmed: NMI query.php (QueryRecurringSubscriptions / SearchTransactions) supports date-range reporting; CCBill DataLink ACTIVEMEMBERS roster + FetchTransactionExport (date range) are inherently batch CSV pulls.
 
@@ -1449,7 +1449,7 @@ Acceptance: reconciling N-thousand unknown subs uses O(time-windows) provider ca
 
 # #634: historical payment backfill via provider-pull (missing CCBill + Mobius payments)
 
-**Completed:** no
+**Completed:** yes (commits 65a7a7a4 / db4f45ed)
 
 The legacy dump has no per-charge CCBill payments (the `billings` table holds only access windows) and Mobius "void"/cancelled subs lost their original charge (the subscriptions row kept only the void transaction) — so openrails.payments is missing real historical charges (CCBill 0; ~7.1k Mobius void subs). Recover them from the provider.
 
