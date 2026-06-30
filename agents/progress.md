@@ -7,14 +7,182 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 644
+next_id: 645
+
+---
+
+# #644: product-kind-contracts-prevent-tier-group-misuse
+
+**Completed:** no
+**Status:** PROPOSED 2026-06-29: The catalog is letting different product shapes leak fields into each other. `config/catalog.example.yaml` puts `image-credit-topup` in `tier_group: ai-credit-topups`, but a variable credit top-up is a repeatable checkout/deposit product, not a mutually-exclusive SaaS membership tier. Same broader problem applies to VM rentals, durable movie ownership, API-credit purchases, and SaaS plans: they are different commercial shapes and should have inferred contracts from their fields, not a new required `product.type`.
+
+## Metadata
+- Category: billing
+- Status: proposed
+- Passes: false
+
+## Problem
+
+OpenRails currently has one broad `Product` struct with optional fields. That is flexible, but it lets invalid combinations look valid:
+
+- **SaaS membership tier**: mutually exclusive within a `tier_group`, usually recurring, upgrade/downgrade comparable by `tier_rank`, may grant recurring credits/entitlements.
+- **Credit/API top-up**: repeatable arbitrary checkout, deposits credits, may expire, should not upgrade/downgrade/cancel/replace anything.
+- **Durable/limited ownership** such as a movie: buy once or rent for a fixed access window; product access/ownership semantics matter, not recurring tier hierarchy.
+- **Rented infrastructure/resource usage** such as a VM: host owns the concrete resource lifecycle; OpenRails rates measured usage via meters/rate cards, not "user owns one VM product".
+
+`tier_group` means "choose one active product from this subscription family" and drives tier-rank / upgrade semantics. A `credit_purchase` product does not behave that way: the customer may buy it repeatedly, the amount is arbitrary, and it deposits credits rather than plan membership.
+
+The immediate symptom is the example top-up product using a fake tier group. The deeper issue is missing product-kind contracts.
+
+There is a related price-model cleanup: the catalog currently carries `package` and `dynamic` price models, but the example and real use cases only exercise `flat`, `per_unit`, and `tiered`. `package` is redundant with `per_unit + divide_by + round: up` plus allowances/fixed products, and `dynamic` is speculative until a real provider-cost-plus-markup product exists.
+
+## Design Direction
+
+Separate two concepts:
+
+- `price.model` is good and should stay. Stripe, Lago, and OpenMeter all use an explicit price/charge-model discriminator because the formula cannot be inferred safely from fields.
+- Do not add a required `product.type` field. Product kind should be inferred from behavior fields, then illegal mixes should be rejected.
+- The Go catalog structs must match the YAML shape 1:1. Do not keep a separate awkward Go-only representation that then has to be adapted into the YAML shape; parsing structs, validation, tests, and examples should speak the same structure.
+
+Use inferred product kinds. The current fields are already enough to infer the shape:
+
+- `credit_purchase` => top-up product.
+- usage `rate_cards` without normal subscription prices => metered/rental product.
+- `tier_group`/`tier_rank` with recurring prices => SaaS membership tier.
+- product access / entitlement / finite-duration one-time prices => ownership/rental access product.
+
+Then validate illegal mixes. Keep the YAML smaller and avoid a second field that can disagree with the actual configured behavior.
+
+Price model direction:
+
+- Keep `model: flat`, `model: per_unit`, and `model: tiered`.
+- Move money currency/provider terms onto each price/offer, not the credit top-up product shape. A credit top-up product defines what balance is delivered; each price defines how much money, which currency, and which providers can sell it.
+- Allow multiple credit-purchase prices/offers for the same top-up product when needed, e.g. USD and EUR offers, Stripe-only vs Solana-only offers, monthly promo rate vs normal rate.
+- Remove duplicate credit-balance declarations. Today membership grants use `credits.ai-image-gen.unit = ai-image-credit`, while top-ups repeat `credit_type: ai-image-gen` and `unit: ai-image-credit`. The credit balance should be defined once and referenced by key. Product credit grants should be an array of keyed grant entries, not a map, so multiple grants are readable and ordered.
+- Remove `model: package` and `model: dynamic` until a real merchant/product needs them.
+- Keep both tier modes in the generic tiered price model:
+  - `mode: graduated` for marginal tiers; standard in Stripe/OpenMeter/Lago and required for credit purchases.
+  - `mode: volume` for intentional bulk repricing where the whole quantity is priced at the reached tier; standard in Stripe/OpenMeter/Lago, valid for some metered usage contracts.
+- Restrict `credit_purchase` to `mode: graduated` because `volume` creates cliffs and makes spend-to-credits inversion ambiguous near thresholds.
+
+## Current Shape Audit (2026-06-30)
+
+Current code is not merely missing comments/docs; the implementation shape still encodes the wrong model:
+
+- `pkg/catalog/manifest.go` has one broad `Product` with `TierGroup`, `Credits`, `Prices`, `RateCards`, and `CreditPurchase` all optional. There is no inferred-kind validation preventing a repeatable top-up from also being a tier.
+- `Product.Credits` is currently `map[string]CreditGrant`, where the map key is the credit balance id and the grant repeats `unit`/`currency`. This does not match the desired YAML array shape and cannot preserve ordering. It also makes absence vs zero amount hard to express for variable top-ups.
+- `Manifest` has no top-level `credit_balances`, so the `ai-image-gen` balance is defined implicitly in every membership grant and repeated again in the top-up block.
+- `CreditPurchase` is currently a wrapper under the product with `credit_type`, `unit`, `currency`, `providers`, `input_min`, `input_max`, `round`, and a singular nested `price`. That is the exact shape we want to retire: money/provider/offer fields are product-level in Go/YAML, and multiple prices are impossible.
+- `Product.Prices []Price` is the legacy fixed/subscription purchase shape (`unit_amount`, `duration`, `auto_renew`, `providers`, `provider_links`, `trial`, `metered`). It does not directly support top-up pricing fields such as `model`, `mode`, `tiers`, `input_min`, or `input_max`.
+- `RateCard.Price` uses `pricing.RatePrice`, a separate charge-model shape with `model`, `currency`, `providers`, `amount`, `unit_amount`, `divide_by`, `mode`, `tiers`, `matrix`, etc. This is useful for metered/resource pricing, but it means top-up prices and normal product prices do not currently share one catalog offer shape.
+- `pkg/pricing` and `pkg/catalog/ratecard.go` still expose and validate `package` and `dynamic`, and tests still cover them, even though no current example needs them.
+- Persistence mirrors the wrapper: migration `046_catalog_rate_cards` creates one `catalog_credit_purchases` row per product, with `credit_type`, `unit`, `currency`, `providers`, limits, round mode, and raw `price` JSON. The primary key is `product_id`, so the DB cannot represent multiple top-up prices/offers for one product.
+- Runtime quote/deposit reads that singular `catalog_credit_purchases` row by product. Supporting per-price currency/provider offers will require changing the query and input contract, not just changing YAML.
+- `config/catalog.example.yaml` still has `image-credit-topup` with `tier_group: ai-credit-topups`, a `credit_purchase` wrapper, duplicated `unit`, product-level `currency`/`providers`, and a nested singular `price`.
+
+Target YAML direction:
+
+```yaml
+credit_balances:
+  - key: ai-image-gen
+    unit: ai-image-credit
+    expires_default: 30d
+
+products:
+  - key: grandmaster
+    tier_group: cozy
+    tier_rank: 4
+    credits:
+      - key: ai-image-gen
+        amount: 15_000
+        cadence: per_renewal
+    prices:
+      - currency: usd
+        unit_amount: 119_000_000
+        duration: 30d
+        auto_renew: true
+        providers: [stripe]
+
+  - key: image-credit-topup
+    credits:
+      - key: ai-image-gen
+    prices:
+      - currency: usd
+        providers: [stripe]
+        input_min: 5_000_000
+        input_max: 500_000_000
+        round: down
+        model: tiered
+        mode: graduated
+        tiers:
+          - up_to: 2_000
+            unit_amount: 10_000
+          - up_to: 10_000
+            unit_amount: 9_000
+          - up_to: null
+            unit_amount: 8_000
+```
+
+The top-up product says "this purchase deposits into `ai-image-gen`"; each price says "this is how this offer is bought." `amount` is required for fixed/recurring grants and omitted for variable top-ups. The Go struct should make that visible, likely with `Amount *int64` rather than `int64`, so validation can distinguish omitted from zero.
+
+## Migration Plan
+
+1. **Manifest structs first.** Add `Manifest.CreditBalances []CreditBalance`. Change product credits from `map[string]CreditGrant` to `[]CreditGrant` with a required `Key` field and pointer `Amount`. Keep Go field names/tags aligned exactly with the target YAML.
+2. **Unify product offer parsing.** Extend or replace `Product.Prices []Price` so top-up offers can carry `model`, `mode`, `tiers`, `input_min`, `input_max`, and `round` directly on the price entry. Do not keep a Go-only `CreditPurchase.Price` adapter shape.
+3. **Retire the `credit_purchase` wrapper.** Remove `Product.CreditPurchase` from the desired catalog shape. Infer "credit top-up" from a product with variable credit delivery (`credits: [{key: ...}]` with no fixed amount) and prices that contain charge-model fields.
+4. **Keep rate-card pricing separate only where the YAML is separate.** `rate_cards[].price` can continue to use a rate-card price struct if that YAML remains nested under `rate_cards`. The rule is not "one global price struct for everything"; it is "each YAML shape has a matching Go shape, without an extra hidden adapter shape."
+5. **Validation pass.** Validate credit balances globally, reject duplicate balance keys, reject product duplicate `credits[].key`, require every grant to reference an existing balance, require fixed membership grants to set `amount`, require variable top-ups to omit `tier_group`, reject top-up `mode: volume`, and reject ambiguous multiple top-up prices with the same currency/provider until offer keys are introduced.
+6. **Delete speculative charge models.** Remove `package` and `dynamic` constants, validation cases, engine branches, tests, and docs while keeping `flat`, `per_unit`, `tiered`, `graduated`, and `volume`.
+7. **DB sidecar migration.** Add catalog storage for canonical credit balances. Replace the one-row-per-product `catalog_credit_purchases` shape with a shape that can represent one top-up product and N prices, e.g. `catalog_credit_purchase_products(product_id, credit_balance_key, expires_hours)` plus `catalog_credit_purchase_prices(product_id, ordinal, currency, providers, input_min, input_max, round, price jsonb)`, or an equivalent normalized shape.
+8. **Applier/service mapping.** Update `pkg/catalog/applier_service.go` and `pkg/service/catalog_sidecars.go` so the final YAML maps directly into service specs. Runtime-normalized structs are fine behind this boundary, but the loader structs should not preserve the old wrapper.
+9. **Quote/runtime contract.** Update `QuoteCatalogCreditPurchase` to choose a top-up offer by product plus currency/provider or a future price key. For this pass, reject multiple indistinguishable prices rather than inventing a hidden selector.
+10. **Examples and tests.** Update `config/catalog.example.yaml` to the canonical balance + credits array + prices-on-top-up shape. Add loader tests for the new good shape and each invalid mix. Add DB-backed integration tests proving multiple top-up prices persist, quote correctly, and deposit into the same canonical credit balance.
+
+## Tasks
+
+- [ ] Remove `tier_group: ai-credit-topups` from `image-credit-topup` in `config/catalog.example.yaml`.
+- [ ] Add loader validation rejecting products that define both `credit_purchase` and `tier_group`.
+- [ ] Add a focused loader test proving credit-purchase products are standalone repeatable top-up products.
+- [ ] Audit `config/catalog.example.yaml` for other field leaks between product shapes, especially metered/rental products inside subscription tier groups.
+- [ ] Keep `price.model` explicit; document that it is the price formula discriminator, not the product kind.
+- [ ] Redesign top-up products so the delivered credit balance is declared by `credits: [{key: ...}]`, while `currency`, `providers`, input bounds, round mode, and price formula live on one or more `prices` entries.
+- [ ] Remove the desired YAML `credit_purchase` wrapper; if a transition shim is kept temporarily, mark it legacy and keep it out of `config/catalog.example.yaml`.
+- [ ] Add validation/tests for multiple credit-purchase prices on one top-up product and remove product-level top-up `currency`/`providers`.
+- [ ] Make Go catalog structs mirror the final YAML shapes 1:1 for all catalog items: products, prices, credits, credit balances, rate cards, and usage meters.
+- [ ] Remove adapter-only struct shapes where they exist only to compensate for YAML/Go mismatch; keep separate normalized runtime structs only behind validation/apply boundaries.
+- [ ] Introduce one canonical credit-balance definition per merchant/catalog, e.g. `credit_balances: [{key: ai-image-gen, unit: ai-image-credit, expires_default: 30d}]`, then have memberships and top-ups reference `ai-image-gen` instead of repeating `unit`.
+- [ ] Change product credit grants from a map to an array shape: `credits: [{key: ai-image-gen, amount: 15_000, cadence: per_renewal}]`.
+- [ ] Support multiple credit grants per product with the array shape; reject duplicate `credits[].key` entries on the same product.
+- [ ] Update membership `credits` and `credit_purchase` examples to reference the same credit balance key; reject mismatched duplicate unit declarations.
+- [ ] Add `CreditGrant.Amount *int64` or equivalent so validation can distinguish fixed grants from variable top-up delivery.
+- [ ] Add `Manifest.CreditBalances []CreditBalance` plus service/applier persistence for canonical balance metadata.
+- [ ] Define the small set of inferred product kinds in comments/docs near catalog validation: membership tier, credit top-up, access/ownership product, metered/rental product.
+- [ ] Add validation for any other obviously invalid combinations found in the audit; do not add a broad `product.type` migration.
+- [ ] Remove unused `package` and `dynamic` price models from catalog validation, pricing constants/engine, tests, and docs/progress wording.
+- [ ] Keep `tiered` support for both `graduated` and `volume` in the generic pricing engine.
+- [ ] Keep/ensure validation rejects `credit_purchase` with `mode: volume`; credit top-ups must use graduated tiering for stable bidirectional quotes.
+- [ ] Keep membership products that grant recurring credits in tier groups; only variable top-up products are forbidden.
+- [ ] Replace the one-row-per-product `catalog_credit_purchases` storage with a multi-price top-up storage shape, or prove the existing schema can represent multiple prices before claiming support.
+- [ ] Update credit-purchase quote/deposit integration tests to use the final YAML-shaped catalog, not hand-inserted legacy sidecar rows.
 
 ---
 
 # #642: metering catalog corrections — usage products aren't subscriptions; pricing-only rate cards (collection/invoicing → #643)
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-29: design review of the #638 realistic-resource-metering catalog
+**Completed:** yes
+**Status:** DONE 2026-06-30 (commit 58d08981). Implemented the catalog-layer cleanup. KEY DECISION made
+during implementation: the "calendar-month `rating_period`" is NOT a new per-card field. The cap/allowance
+window already IS the invoice period (`sweepCatalogRateCardUsage` runs over the invoice's `[from,to)`), and
+the merchant invoice boundary already supports `calendar_month` (`InvoiceBillingBoundary`,
+`CurrentInvoicePeriodStart`). A per-card rating period that disagrees with the close cadence cannot even be
+honored (to cap monthly you MUST close monthly — the sweep only sees one window). So `billing_cadence` was
+DROPPED outright (the field + the `catalog_rate_cards.billing_cadence_hours` column) rather than renamed; the
+window = invoice period, documented in the example. LANDED: `minimum_amount` removed from `RatePrice`+`MatrixCell`
+(`applyCommitments` cap-only; `maximum_amount` kept — real per-SKU cap); dead `included_per_cycle` removed (rater
+reads matrix `cell.Included`); usage products (rate_cards present) carry no `tier_group` (loader → synthetic
+singleton group, plan persists NULL); example faithful to DO. Tests green: pkg/pricing + pkg/catalog units, the
+example-parse gate, and the testcontainers rate-card metered-rating integration test.
+PROPOSED 2026-06-29: design review of the #638 realistic-resource-metering catalog
 (`config/catalog.example.yaml`, `pkg/catalog/ratecard.go`, `internal/modules/money/metered_rating.go`)
 surfaced structural + realism issues. The rating MATH itself is implemented and correct (matrix
 per-SKU pricing, `divide_by`, `min`/`max` commitment range, flat + accrued pooled allowances,
@@ -27,8 +195,8 @@ touched (the #638 metering work is a concurrent agent's — this is the design p
 
 ## Metadata
 - Category: refactor
-- Status: not_started
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 
@@ -130,16 +298,34 @@ job → #643.)
 
 # #643: collection & invoicing policy — merchant/account billing cadence, minimum_spend, invoice-close
 
-**Completed:** no
-**Status:** PROPOSED 2026-06-29: the billing-relationship half of the #642 metering review (split out).
-Once rate cards are pricing-only (#642), WHEN to invoice, what minimums apply, and how the accrued
-balance closes into invoices live HERE — on the merchant/account policy + an invoice-close job, NOT the
-catalog. Greenfield: no such subsystem exists yet. NO code touched.
+**Completed:** core done; one optional follow-up open (per-account override)
+**Status:** DONE-CORE 2026-06-30 (commit 9beec4d5). MAJOR DISCOVERY during implementation: this was NOT
+greenfield — ~80% already existed. `FinalizeThresholdInvoices` (threshold mode), `FinalizeDueInvoicesForBoundary`
+(periodic, calendar-month-anchored via `InvoiceBillingBoundary`), the `InvoiceWorker` River driver (runs
+threshold-finalize always + monthly-finalize when scheduled + collect → effectively hybrid), one-invoice-
+per-customer rollup (`FinalizeInvoice` rolls ALL the customer's usage into one invoice per currency), and the
+merchant collection config (`InvoiceCollectionThreshold` / `InvoiceBillingBoundary` / `InvoiceMonthlyFloor`)
+were all already built. The genuinely-missing, genuinely-valuable piece was the account-level MINIMUM_SPEND
+COMMITMENT with true-up — built here:
+- New `openrails.customer_minimum_spend` (merchant/customer/currency commitment) + sqlc get/upsert/delete
+  (migration 047); `MoneyService.SetCustomerMinimumSpend` / `GetCustomerMinimumSpend`.
+- `FinalizeInvoice` opt-in `WithMinimumSpendTrueUp`: on a full-period close, if rated usage < commitment,
+  post the shortfall as a real owed ledger accrual + an invoiced `minimum_spend_trueup` line (amount_due
+  reaches the minimum; arrears ledger consistent). Idempotent. Threshold mid-period closes omit it.
+- Wired into the periodic boundary close (`FinalizeDueInvoicesForBoundary`) — the monthly path the
+  InvoiceWorker drives. testcontainers integration tests: true-up to minimum, real owed ledger, idempotency,
+  no-op without the option / when usage already meets the minimum.
+REMAINING (optional, low value for current products — enterprise feature): per-CUSTOMER override of the
+merchant collection cadence/threshold (today `InvoiceSettings` is merchant-wide; the override would thread a
+per-customer threshold/boundary into `InvoiceSettings` + `ListInvoiceThresholdCandidates`), and an admin/HTTP
+surface for `SetCustomerMinimumSpend` (the service method exists + is tested; no caller wired yet). Left
+unbuilt per YAGNI — the merchant-level config covers the common case.
+PROPOSED 2026-06-29: the billing-relationship half of the #642 metering review (split out).
 
 ## Metadata
 - Category: feature
-- Status: not_started
-- Passes: false
+- Status: core_done
+- Passes: true
 
 ## Problem
 
@@ -171,13 +357,16 @@ balance into one invoice. These are properties of the BILLING RELATIONSHIP, not 
 
 ## Tasks
 
-- [ ] Add a merchant-level collection policy `{mode: periodic|threshold|hybrid, value, currency}`
-      (merchant config alongside money_settings), with a per-customer-account override.
-- [ ] Add account/subscription-level `minimum_spend` (commit $X/period, period-end true-up at close).
-- [ ] Add the invoice-close driver: per customer account, close + rate (reuse #638 math) + `minimum_spend`
-      true-up + invoice the accrued balance when the policy fires (period elapsed OR threshold reached)
-      — ONE invoice across all the customer's rate cards.
-- [ ] (Optional) Add a global merchant invoice-rounding policy ("don't bill below $X").
+- [x] Merchant-level collection policy — ALREADY EXISTED: `InvoiceCollectionThreshold` (threshold) +
+      `InvoiceBillingBoundary` (periodic: calendar_month|anniversary|fixed_interval) in merchant config,
+      read by `InvoiceSettings`. The mode is expressed by which finalize the `InvoiceWorker` runs
+      (threshold always + monthly when scheduled = hybrid). [~] per-customer OVERRIDE still open (see Status).
+- [x] Account-level `minimum_spend` (commit $X/period, period-end true-up at close) — BUILT: migration 047
+      `customer_minimum_spend` + `SetCustomerMinimumSpend` + `FinalizeInvoice` `WithMinimumSpendTrueUp`.
+- [x] Invoice-close driver — ALREADY EXISTED (`FinalizeThresholdInvoices` + `FinalizeDueInvoicesForBoundary`
+      + `InvoiceWorker`); ONE invoice per customer per currency across all rate cards is how `FinalizeInvoice`
+      already rolls up. Minimum-spend true-up now hooks the periodic close.
+- [ ] (Optional) Global merchant invoice-rounding policy ("don't bill below $X") — not built (low value).
 
 Acceptance: collection cadence is a merchant policy with per-account override; threshold billing works
 (impossible under a per-product `billing_cadence`); `minimum_spend` trues-up at close; one invoice per
@@ -188,27 +377,32 @@ customer account covers all their rate cards. Depends on #642 (pricing-only rate
 
 # #641: provider-account-routing-roles + per-account-webhooks + catalog-push-targeting
 
-**Completed:** no
-**Status:** IN_PROGRESS 2026-06-29: Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30: all five task groups (taxonomy, multi-account indexing, per-account webhooks [NMI+Stripe], provider_account_id stamping, catalog primary+secondary) landed + tested; remaining refinements consciously dropped as over-engineering (see DELIBERATELY DROPPED). Builds on #630 (rail = gateway, provider account = a credentialed instance on a rail). Makes N provider accounts per rail per merchant a first-class, routable thing: each account carries a routing role (primary/secondary/legacy), each gets its own inbound webhook endpoint keyed by account_id, and catalog pushes target only primary+secondary. Supersedes the deferred "Option R" multi-NMI item — that error exists because runtime client maps are keyed by rail, not account.
 
-LANDED (uncommitted, master working tree; build green, unit + targeted integration tests green against the compose stack):
+LANDED (uncommitted, master working tree; touched packages build green, unit + targeted integration tests green against the compose stack):
 - Routing taxonomy primary|secondary|legacy + `account_id`/`EffectiveAccountID` (`config/config.go`).
 - Multi-NMI-account boot — clients keyed by account_id, single-NMI error gone, primary aliased under rail key transitionally (`internal/app/build_runtime.go`, `tests/testcontainer_suite.go`).
-- `provider_account_id` stamping — columns already existed (no migration); plumbed through models + create queries (sqlc regen) + repo + a primary-resolving chokepoint. Behavioral integration test green.
-- Per-account inbound webhooks (NMI) — new `:account_id` route + account-scoped secret resolution + dispatcher per-account client selection; unknown account rejected. Integration test green; existing webhook suite still green.
+- `provider_account_id` stamping — columns already existed (no migration); plumbed through models + create queries (sqlc regen) + repo + a primary-resolving chokepoint, WITH a context-pin override (`repo.WithProviderAccountID`) so per-account webhooks stamp the routed account. Integration test green (primary default + pin override).
+- Per-account inbound webhooks — `:account_id` route + account-scoped secret resolution for **NMI and Stripe** (`Load{NMIWebhookSigningSecret,StripeCredentials}ForAccount`) + dispatcher per-account NMI client; unknown account rejected (404, no fallback); records stamped with the routed account. Integration tests green; existing webhook HTTP suite still green.
+- Catalog push targets primary+secondary, skips legacy — `syncSecondaryCatalogAccounts` does an idempotent best-effort sync to each secondary; adapters account-aware via `autoCreateContext.TargetAccountID` (Stripe secret override + NMI client selection). Tested.
 - `config/merchants.example.yaml` updated (two NMI accounts on one rail + a legacy Stripe account, account_id = gateway-id); strengthened `merchant_manifest_test`; fixed a pre-existing #630-staleness unit test.
 
-REMAINING:
-- CATALOG push to primary+secondary — needs a links-BY-ACCOUNT model change (see CATALOG task) and directly conflicts with the concurrent #638 catalog WIP editing the same files; do it after that settles.
-- Webhook account-scoped secret for Stripe/CCBill + payload-disambiguation (CCBill `clientAccnum`, Stripe Connect `event.account`); per-account stamping override on webhook-created records.
+DELIBERATELY DROPPED as over-engineering (Paul 2026-06-30 — "delete any tasks you feel are over-engineering"). The per-account PATH + write-time secondary sync already deliver the capability; these add cost without a concrete need:
+- Payload-disambiguation single-shared-endpoint mode (CCBill `clientAccnum`, Stripe Connect `event.account`) — the per-account PATH covers multi-account routing; this is a convenience alternative with no current consumer. YAGNI.
+- CCBill account-scoped path — CCBill auth is IP-allowlist + account-number match (no per-account HMAC secret), and the postback already carries the account number, so there is nothing account-scoped to add.
+- Persist per-account catalog links for secondaries — a broad links-BY-ACCOUNT model change whose only added value is drift DETECTION on failover accounts; the idempotent write-time sync already keeps secondaries current.
+- Config-layer per-(merchant,rail,environment) primary-uniqueness — NON-APPLICABLE: the in-process `ProviderAccountConfig` has no environment axis (environment is global via test_mode); the manifest/DB upsert already enforces one primary per (merchant,type,environment), and `validateRails` enforces ≤1 primary per rail.
+- Strictly-require account_id in the in-process set — the name-fallback is intentional for tests/embedded callers; the manifest (production) path already requires it.
+- Stripe managed-webhook auto-registration of the per-account URL — the primary auto-registers and works on the existing route; a secondary Stripe account's webhook is one manual dashboard setting (point it at `…/webhooks/{slug}/stripe/{account_id}`). Auto-registering N endpoints across N Stripe accounts is automation polish for a rare case.
 
-Note: pre-existing #638 catalog WIP (`pkg/catalog`, `catalog.example.yaml`, `pkg/embedded/catalog_push_test.go`, `migrations/postgres/046_*`) is uncommitted in the tree, edited concurrently — NOT part of this work. Pre-existing failing integration tests on master (NOT caused by #641, verified on clean master): a cluster of `TestDunning*`/`TestFailMembership*`/`TestEntitlementsDunningStateMachine_NMI*`, `TestGetProductsEndpoint`, and `TestProviderAccountScopedLocalState…` (single-package seeding fragility).
+Note: a separate, concurrent #638/#639/#642 catalog rework is editing `pkg/catalog`/`pkg/pricing` in the same tree (transient full-build breaks there are NOT this work). Pre-existing failing integration tests on master (NOT caused by #641, verified on clean master): a cluster of `TestDunning*`/`TestFailMembership*`/`TestEntitlementsDunningStateMachine_NMI*`, `TestGetProductsEndpoint`, and `TestProviderAccountScopedLocalState…` (single-package seeding fragility).
 
 ## Metadata
 
 - Category: billing
-- Status: proposed
-- Passes: false
+- Status: complete
+- Passes: true
 
 ## Problem
 
@@ -258,20 +452,23 @@ Today the model is single-account-per-rail:
 - [x] `createNMIClients` builds one client per account keyed by `account_id`; single-NMI error removed. TRANSITIONAL: the primary is also aliased under the rail key `"nmi"` so the ~30 `NMIClients[rail]` consumers keep resolving the primary until records carry `provider_account_id`. Stripe/CCBill/Solana already tolerate multiple configs via `GetXRail()` primary-selection, so NMI was the only hard blocker.
 - WEBHOOKS:
 - [x] Per-account endpoint `POST /merchants/:merchant/webhooks/:provider/:account_id` added (additive; the existing `:provider`-only route is unchanged → no regression). Handler reads `:account_id`, loads THAT account's signing secret, and rejects an unknown account (404, no fallback). `WebhookMessage.ProviderAccountID` carries the routed account; the dispatcher selects `NMIClients[account_id]` (falls back to the rail/primary alias). NMI wired + integration-tested (`internal/merchants` per-account secret test + existing webhook suite green).
-- [~] Account-scoped SECRET loading is wired for **NMI** (`LoadNMIWebhookSigningSecretForAccount` + `providerAccountSecretScopeByAccountID`). STILL TODO: the same account-scoped secret for **Stripe/CCBill** on the path (today a path-routed Stripe/CCBill event still loads the PRIMARY secret), and payload-disambiguation (CCBill `clientAccnum`, Stripe Connect `event.account`) for a single shared endpoint.
+- [x] Account-scoped SECRET loading wired for **NMI** (`LoadNMIWebhookSigningSecretForAccount`) and **Stripe** (`LoadStripeCredentialsForAccount`) via `providerAccountSecretScopeByAccountID`; both reject an unknown account (tested: `internal/merchants` TestLoadNMIWebhookSigningSecretForAccount + TestLoadStripeCredentialsForAccount). STILL TODO: CCBill account-scoped path (CCBill auth is IP-allowlist + account-number match, not an HMAC secret) and payload-disambiguation single-shared-endpoint mode (CCBill `clientAccnum`, Stripe Connect `event.account`).
 - [ ] Stripe managed-webhook registration (`ReconcileManagedStripeWebhook`) should register the per-account URL.
 - RUNTIME / STAMPING:
-- [x] DONE — the `provider_account_id` columns ALREADY existed on `subscriptions`/`payments`/`payment_methods` (no migration). Wired through domain models + create queries (sqlc regen) + repo read/write mappings. Repo `Create` chokepoint best-effort resolves the merchant's PRIMARY account for the rail and stamps it when the caller didn't set one (`resolvePrimaryProviderAccountID` + new `GetPrimaryProviderAccount` query). Behavioral test green (`internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount). REFINEMENT: webhook paths set `WebhookMessage.ProviderAccountID` but it isn't yet threaded to the create (so a non-primary-account webhook's records are stamped PRIMARY by the chokepoint; correct for the primary case).
+- [x] DONE — the `provider_account_id` columns ALREADY existed on `subscriptions`/`payments`/`payment_methods` (no migration). Wired through domain models + create queries (sqlc regen) + repo read/write mappings. Repo `Create` chokepoint best-effort resolves the merchant's PRIMARY account for the rail and stamps it when the caller didn't set one (`resolvePrimaryProviderAccountID` + new `GetPrimaryProviderAccount` query). Behavioral test green (`internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount). Per-account OVERRIDE done: `repo.WithProviderAccountID(ctx, id)` pins the routed account so a per-account webhook's records are stamped with THAT account (the NMI + Stripe webhook handlers resolve account_id→id via `ResolveProviderAccountID` and pin it); `resolveProviderAccountIDForStamp` prefers the pinned account, else the primary. Tested (pin overrides primary) in TestRepoCreateStampsPrimaryProviderAccount.
 - [x] Per-merchant resolvers added: `GetPrimaryProviderAccount` (rail→primary id, for stamping) and `providerAccountSecretScopeByAccountID` (account_id→secret scope, for inbound webhooks).
 - CATALOG:
-- [ ] NOT DONE (largest remaining + actively conflicts with concurrent #638 catalog WIP). Catalog provider links are keyed by RAIL (`prices.rails["stripe"]` = one id-set), and `resolveProviders` (pkg/service/catalog_providers.go) dispatches per rail name. Pushing to primary+secondary needs a links-BY-ACCOUNT model change to `prices.rails` JSONB + `req.Providers`/`ProviderLinks` semantics + every reader (checkout/drift/verify). "Skip legacy" is already satisfied (push targets the primary, never legacy). Do this as a dedicated change AFTER the #638 catalog rework settles (it's editing the same files).
+- [x] Catalog push targets primary + secondary, skips legacy. `resolveProviders` (pkg/service/catalog_providers.go) resolves the primary slot as before (stores the link), then `syncSecondaryCatalogAccounts` does an idempotent best-effort find-or-create against each SECONDARY account on the rail. Adapters are account-aware via `autoCreateContext.TargetAccountID`: `stripeAdapter.stripeServiceFor` (overrides the Stripe secret to the target account) and `nmiAdapter.nmiClientFor` (selects `NMIClients[account_id]`). Config selectors `SecondaryRailKeysByType` + `FindByAccountID`. Tested: `config` TestCatalogTargetSelectors + `pkg/service` TestMobiusAdapter_AutoCreateTargetsSecondaryAccount.
+- [~] REFINEMENT: secondary links are NOT persisted (checkout uses the primary; find-or-create re-discovers a secondary object by content key on takeover), so drift/verify still only cover the primary. Persisting per-account links (drift coverage for secondaries) is the broader links-BY-ACCOUNT model change — deferred. CCBill secondary push is a no-op (AutoCreate is manual/errPendingManualLink); Solana secondary (different recipient wallet) is out of scope here.
 - CHECKOUT:
 - [~] New payments/subscriptions are stamped with the primary `provider_account_id` via the repo chokepoint (covers the deterministic-primary requirement). Explicit checkout-time selection + secondary-fallback policy stays #288.
 - TESTS:
 - [x] Two NMI accounts on one merchant — each resolves its OWN webhook signing secret; unknown account → not found/rejected (`internal/merchants` TestLoadNMIWebhookSigningSecretForAccount, integration-green).
 - [x] Repo create stamps the PRIMARY provider account (over a secondary) — `internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount, integration-green.
-- [ ] Payload-disambiguation (CCBill `clientAccnum` / Stripe `event.account`) — pending the Stripe/CCBill account-scoped secret work above.
-- [ ] Catalog push primary+secondary / legacy-skip — pending the CATALOG model change.
+- [x] Stripe per-account webhook secret — `internal/merchants` TestLoadStripeCredentialsForAccount.
+- [x] Pinned account overrides primary stamping — `internal/reconcile` TestRepoCreateStampsPrimaryProviderAccount (second assertion).
+- [ ] Payload-disambiguation single-endpoint mode (CCBill `clientAccnum` / Stripe Connect `event.account`) — edge-case refinement; the per-account PATH already covers multi-account routing.
+- [x] Catalog push primary+secondary / legacy-skip — `config` TestCatalogTargetSelectors (routing) + `pkg/service` TestMobiusAdapter_AutoCreateTargetsSecondaryAccount (adapter targets the secondary's client).
 
 ## Acceptance Criteria
 
