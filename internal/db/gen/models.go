@@ -117,6 +117,23 @@ type OpenrailsBootstrapState struct {
 	AppliedAt time.Time
 }
 
+// #639/#640 variable prepaid credit-purchase sidecars using the shared charge-model JSON.
+type OpenrailsCatalogCreditPurchase struct {
+	ProductID    uuid.UUID
+	MerchantID   uuid.UUID
+	CreditType   string
+	Unit         string
+	Currency     string
+	ExpiresHours *int32
+	Providers    []string
+	InputMin     int64
+	InputMax     int64
+	Round        *string
+	Price        []byte
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
@@ -138,9 +155,18 @@ type OpenrailsCatalogMeter struct {
 	MerchantID uuid.UUID
 	Key        string
 	// counter = summed events; gauge = time-integrated level samples.
-	Kind      string
+	Kind      *string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// #638 usage event type for rate-card meters; defaults to key when omitted.
+	EventType *string
+	// #638 JSON/dimension property carrying the numeric quantity to aggregate.
+	ValueProperty *string
+	// #638 aggregation mode for rate-card meters.
+	Aggregation *string
+	Unit        *string
+	// #638 dimension name -> event metadata/dimension property mapping for matrix pricing.
+	GroupBy []byte
 }
 
 // #599 optional rating sidecar for OpenRails-native metered prices. cost = aggregate * rate_micros / (per_units * per_seconds for gauges), rounded once.
@@ -154,6 +180,21 @@ type OpenrailsCatalogPriceMetered struct {
 	PerSeconds *int64
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// #638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON.
+type OpenrailsCatalogRateCard struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	ProductID   uuid.UUID
+	Ordinal     int32
+	MeterKey    *string
+	PaymentTerm string
+	Filter      []byte
+	Allowance   []byte
+	Price       []byte
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // #594 catalog usage-limit registry. Durable config only; Redis/Garnet owns request-time counters.
@@ -222,6 +263,16 @@ type OpenrailsCustomerAnchor struct {
 	PermissionGroupID string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// #643 per-customer per-currency minimum-spend commitment; trues-up at periodic invoice close.
+type OpenrailsCustomerMinimumSpend struct {
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	Currency     string
+	AmountMicros int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type OpenrailsEntitlement struct {
