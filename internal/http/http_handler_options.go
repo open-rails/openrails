@@ -1,6 +1,9 @@
 package server
 
-import "github.com/open-rails/openrails/internal/http/embedhttp"
+import (
+	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/http/routesurface"
+)
 
 type RouteSet = embedhttp.RouteSet
 
@@ -26,5 +29,6 @@ var (
 // Note: health/debug endpoints are intentionally not part of embedded handler options.
 // Standalone mode owns service-level health routes.
 type HTTPHandlerOptions struct {
-	RouteSets []RouteSet
+	RouteSets      []RouteSet
+	ProviderRoutes *routesurface.ProviderRoutes
 }

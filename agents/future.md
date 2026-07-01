@@ -9,6 +9,104 @@
 
 ---
 
+# #663: adopt NMI's modern JSON API (v4/v5) to replace the classic Direct Post rail
+
+**Completed:** no — future modernization. NOT urgent: NMI keeps the classic Direct Post
+(`transact.php`) + Query (`query.php`) APIs alive, so there is no forcing function. This is an
+ergonomics/capability upgrade to do deliberately, incrementally, behind config.
+
+## Why
+The NMI rail codes against NMI's CLASSIC surface today:
+- `internal/integrations/nmi/client.go`: `DefaultDirectPostURL = …/api/transact.php` (flat form fields,
+  `type=<op>`, `security_key` in the request body) for every mutation (sale, Customer Vault, recurring
+  add/delete), and `DefaultQueryAPIURL = …/api/query.php` (XML) for reads / the reconcile pull. Collect.js
+  does client-side tokenization.
+- That is NMI's ORIGINAL API — form-encoded, mid-2000s vintage (NMI founded 2001; Direct Post docs exist from
+  2010). It works, but it's flat form fields + XML, `security_key`-in-body auth, one endpoint keyed by `type`.
+
+NMI's MODERN surface is JSON/REST and more complete:
+- **v5 payments** — `POST /api/v5/payments/sale`, `/api/v5/payments/{id}/capture`, … JSON bodies,
+  per-operation REST paths, `Authorization: <private-api-key>` header. Per NMI's own "Classic API Migration
+  Playbook" this is a SERVER-SIDE-ONLY change; the Collect.js / Payment Component client flow is unchanged.
+- **v4** — the broad "complete" API (partner-portal parity): onboarding / merchant management, account &
+  processor config, and richer JSON reporting than `query.php` exposes.
+
+Payoff: cleaner integration (JSON, not form + XML), richer reporting for the reconcile pull, and a path to
+programmatic onboarding if that ever becomes scope.
+
+## v4 vs v5 — for openrails this is an ALL-v5 migration (researched from NMI's endpoint index)
+The modern surface splits by concern, and only ONE half is ours:
+- **v4 = gateway/partner + merchant-account infrastructure** — NOT openrails' concern. Merchant onboarding
+  (`POST /api/v4/merchants`), processor/value-added-service config (`/api/v4/processors`), fee schedules +
+  settlement timing (`/api/v4/fee-schedules`, `…/settlement-time`), merchant API-key + user management,
+  Apple Pay MERCHANT setup, partner commission/billing reporting. openrails processes against an
+  ALREADY-provisioned gateway, so it touches none of this (unless it ever takes on onboarding — Out of scope).
+- **v5 = modern processing + commerce objects** — THIS is the whole migration. Every classic call openrails
+  makes maps to a v5 JSON endpoint:
+
+  | openrails op (classic transact.php) | v5 endpoint |
+  |---|---|
+  | sale / auth / capture / refund / void / validate | `POST /api/v5/payments/{sale,auth,capture,refund,void,validate}` |
+  | get one transaction | `GET /api/v5/payments/{id}` |
+  | Customer Vault add / update / delete | `POST` / `PATCH` / `DELETE /api/v5/customers[/{id}]` |
+  | recurring add / update / delete | `POST` / `PATCH` / `DELETE /api/v5/plans` + `/api/v5/subscriptions` |
+  | recurring roster (reconcile pull) | `GET /api/v5/subscriptions` |
+
+  So drop the earlier "v4 reporting" framing — v4 is irrelevant to us. Sources: NMI llms.txt endpoint index
+  (docs.nmi.com/llms.txt), Classic API Migration Playbook (docs.nmi.com/docs/payment-migration-playbook).
+
+## Open question the spike MUST close: bulk transaction reporting
+`query.php`'s real job is BULK transaction reporting (all transactions for an account in a window) — the
+reconcile pull's transaction side. v5 exposes `GET /api/v5/payments/{id}` (single) and LIST endpoints for
+subscriptions/customers, but a v5 BULK transaction-search/report endpoint is NOT confirmed in the index. So
+`query.php` may have to STAY as the bulk-reporting read even after everything else moves to v5. Confirm
+whether v5 has a transaction-search/report endpoint; if not, migrate the roster + single-record reads to v5
+and KEEP `query.php` for bulk transaction pulls.
+
+## Target
+Replace the classic calls with the modern JSON API, incrementally and behind config, COEXISTING with the
+classic client as a fallback until parity is proven:
+- Processing / mutations → **v5 payments** JSON endpoints.
+- Reads / reconcile pull → **v5** GET (`/api/v5/subscriptions` roster, `/api/v5/payments/{id}`,
+  `/api/v5/customers`); keep `query.php` ONLY if v5 lacks a bulk transaction-report endpoint (Open question).
+- Auth → `Authorization` header (private API key), not `security_key` in the body.
+- Keep Collect.js / Payment Component client tokenization AS-IS (NMI: server-side change only).
+
+## Tasks
+- [ ] Spec: map every classic call openrails makes today (sale, auth/capture, refund/void, Customer Vault
+      add/update/delete, recurring add/update/delete, `query.php` reads) to its **v5** JSON endpoint +
+      request/response shape (the table above is the starting map). Note any gaps (classic-only or v5-only
+      behaviour), especially bulk transaction reporting.
+- [ ] Extend `internal/integrations/nmi/client.go` with a JSON transport: v4/v5 base URLs,
+      `Authorization`-header auth, JSON encode/decode, error mapping (modern error shape ≠ classic
+      `response`/`responsetext`), reusing the existing timeout + read-only guards.
+- [ ] Config: add modern base URLs + the private API key to `NMIRailConfig`; a per-account
+      `api_version: classic|modern` toggle so migration is opt-in per provider account and reversible.
+- [ ] Port READS first (lower risk): move the reconcile pull's roster + single-record reads to v5
+      (`GET /api/v5/subscriptions`, `GET /api/v5/payments/{id}`) behind the toggle; resolve the bulk
+      transaction-report question (v5 endpoint vs keep `query.php`); validate parity against classic.
+- [ ] Port MUTATIONS: sale → vault → recurring, each behind the toggle, with the classic path retained as
+      fallback until parity is proven in production for one account.
+- [ ] Tests: request/response fixtures per modern endpoint + a parity test that runs the same logical op
+      through classic and modern against the sandbox and asserts equivalent LOCAL effects.
+- [ ] Webhooks: verify whether modern adoption changes NMI webhook payloads/signing; adjust
+      `internal/modules/webhooks/nmi.go` if so (likely independent — confirm).
+
+## Out of scope
+- The ENTIRE **v4** surface — merchant onboarding/provisioning, processor/fee/settlement config, Apple Pay
+  merchant setup, partner commission reporting. openrails processes against an already-provisioned gateway;
+  v4 only becomes relevant if openrails ever takes on merchant onboarding (separate issue).
+- Client-side changes: Collect.js / Payment Component flow stays as-is.
+- Deprecating the classic client — keep it as a reversible fallback; NMI is not sunsetting classic.
+
+Acceptance: the NMI rail runs on **v5** (payments + Customer Vault + plans/subscriptions; `Authorization`-header
+auth; JSON) for a provider account via the `api_version` toggle, with the classic Direct Post path retained as a
+reversible fallback; `query.php` is retired UNLESS the spike proves v5 lacks bulk transaction reporting (then it
+stays for bulk reads only); reconcile + processing parity proven against sandbox and one live account before the
+toggle defaults on.
+
+---
+
 # #657: per-user archived provider-account cutover on card re-entry
 
 **Completed:** no — future follow-up to #655.

@@ -102,7 +102,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.Contains(t, responseBody(t, resp), "delegated_origin_not_allowed")
 }
 
-func TestStandaloneCORSUsesEnabledMerchantIssuerOriginUnion(t *testing.T) {
+func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	srv := &Server{

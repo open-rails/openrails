@@ -229,10 +229,9 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("failed to generate reference: %w", err)
 	}
 
-	// Get merchant recipient wallet
-	recipient := solanaProc.Solana.RecipientWallet
-	if recipient == "" {
-		return nil, fmt.Errorf("merchant wallet not configured")
+	recipient, err := ResolveRecipientWallet(ctx, s.db, s.cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get token mint

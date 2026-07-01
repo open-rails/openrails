@@ -41,8 +41,11 @@ type RPCFallbackConfig struct {
 	// CustomEndpoint bypasses the fallback chain entirely if set.
 	CustomEndpoint string
 
-	// HeliusAPIKey enables Helius as the primary RPC provider.
-	HeliusAPIKey string
+	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to "helius".
+	RPCProvider string
+
+	// RPCAPIKey is the key for RPCProvider.
+	RPCAPIKey string
 
 	// Network determines which endpoints to use (mainnet, devnet).
 	Network string
@@ -106,6 +109,11 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 	if network == "" {
 		network = "mainnet"
 	}
+	rpcProvider := strings.ToLower(strings.TrimSpace(cfg.RPCProvider))
+	if rpcProvider == "" {
+		rpcProvider = "helius"
+	}
+	rpcAPIKey := strings.TrimSpace(cfg.RPCAPIKey)
 
 	var endpoints []RPCEndpoint
 
@@ -124,9 +132,9 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 		// Build fallback chain based on network
 		switch network {
 		case "devnet":
-			endpoints = DefaultDevnetEndpoints(cfg.HeliusAPIKey)
+			endpoints = DefaultDevnetEndpoints(rpcProviderAPIKey(rpcProvider, rpcAPIKey, "helius"))
 		case "mainnet", "mainnet-beta":
-			endpoints = DefaultMainnetEndpoints(cfg.HeliusAPIKey)
+			endpoints = DefaultMainnetEndpoints(rpcProviderAPIKey(rpcProvider, rpcAPIKey, "helius"))
 		default:
 			// Testnet uses Solana public only
 			endpoints = []RPCEndpoint{{
@@ -160,6 +168,13 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 		network:   network,
 		failures:  make(map[int]time.Time),
 	}
+}
+
+func rpcProviderAPIKey(rpcProvider, rpcAPIKey, want string) string {
+	if rpcProvider == want {
+		return rpcAPIKey
+	}
+	return ""
 }
 
 // failureCooldown is how long we wait before retrying a failed endpoint.

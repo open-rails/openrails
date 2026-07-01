@@ -15,7 +15,7 @@ Covers issues **#253** (merchant signer + tx builder) and **#251** (Vault KV ada
 ```
                      solana.Signer  (one interface, two impls)
                      ├── keypairSigner   "give me the key"  — works EVERYWHERE
-                     │     loads solana/private_key from merchants.MerchantSecretStore
+                     │     loads the provider-account scoped private_key from merchants.MerchantSecretStore
                      │     (DB+envelope self-hosted, or Vault KV managed), signs in-proc
                      └── transitSigner   "sign this"        — RECOMMENDED in prod
                            calls Vault transit/sign/<merchant-key>; key never leaves Vault
@@ -99,10 +99,10 @@ func signAndSubmit(ctx context.Context, tid merchant.ID, s Signer, rpc *RPCClien
 
 ## 2. `keypairSigner` — the everywhere path (`signer_keypair.go`)
 
-Loads `solana/private_key` from the **existing** `merchants.MerchantSecretStore`
-(whatever backend is wired — DB+envelope, or Vault KV), parses the Ed25519 key,
-signs locally. Caches the parsed key per merchant with a short TTL so we don't hit
-the store per signature.
+Loads the active Solana provider account's scoped `private_key` from the
+**existing** `merchants.MerchantSecretStore` (whatever backend is wired —
+DB+envelope, or Vault KV), parses the Ed25519 key, signs locally. Caches the
+parsed key per merchant with a short TTL so we don't hit the store per signature.
 
 ```go
 type keypairSigner struct {
@@ -114,7 +114,7 @@ func (k *keypairSigner) load(ctx context.Context, tid merchant.ID) (solanago.Pri
     if pk, ok := k.cache.Get(tid); ok {
         return pk, nil
     }
-    sec, err := k.secrets.Get(ctx, tid, "solana/private_key")
+    sec, err := k.secrets.Get(ctx, tid, "provider_accounts/solana/<environment>/<derived-account-id>/private_key")
     if err != nil {
         return nil, err // ErrSecretNotFound (terminal) vs backend error (retry) — see §6
     }
@@ -187,7 +187,7 @@ func (t *transitSigner) SignMessage(ctx context.Context, tid merchant.ID, msg []
 ### Vault-side Transit details (the gotchas)
 
 - **Key type:** `vault write transit/keys/openrails-merchant-<id> type=ed25519 exportable=false`. `exportable=false` is the whole point — the key can never be read out.
-- **Solana curve == Ed25519.** A Solana address *is* the base58 of the 32-byte Ed25519 public key, so the Transit key's public key is directly the merchant address. **No separate address storage needed** — derive it from Vault.
+- **Solana curve == Ed25519.** A Solana address is the base58 of the 32-byte Ed25519 public key; the stored provider-account identity is derived from the Vault Transit public key.
 - **Sign request:** `POST transit/sign/<name>` with `input = base64(message)`, **`prehashed=false`** (default). For Ed25519 Vault signs the raw message (PureEdDSA, hashes internally) and **ignores `hash_algorithm`**. Do **not** prehash — Solana verifies over the raw message.
 - **Response parsing:** signature comes back as `"vault:v1:<base64>"`. Strip the `vault:v<n>:` prefix, base64-decode → 64 bytes. (The `TransitClient.Sign` adapter does this so callers get raw bytes.)
 - **Key versioning:** rotating the Transit key version changes the public key → new Solana address → forces plan re-publish + re-enroll (plan PDA derives from the merchant address). So pin a key version per merchant and treat rotation as the heavy operation it is (runbook in #258).
@@ -196,11 +196,11 @@ func (t *transitSigner) SignMessage(ctx context.Context, tid merchant.ID, msg []
 
 ## 4. Self-hosted DB-encryption recap (no Vault)
 
-When no Vault is configured, `keypairSigner` reads `solana/private_key` from
-`dbSecretStore` wrapped by `encryptedSecretStore` — the private key is
-envelope-encrypted at rest (master key wraps per-merchant DEK; `internal/crypto`,
-issue #227). Same `Signer` interface, same callers. This is the default and
-needs no new infra.
+When no Vault is configured, `keypairSigner` reads the Solana provider account's
+scoped `private_key` from `dbSecretStore` wrapped by `encryptedSecretStore` —
+the private key is envelope-encrypted at rest (master key wraps per-merchant DEK;
+`internal/crypto`, issue #227). Same `Signer` interface, same callers. This is
+the default and needs no new infra.
 
 ---
 

@@ -150,8 +150,8 @@ func (f fixedSubReader) GetBySubscriptionID(context.Context, uuid.UUID) (*models
 	return f.row, nil
 }
 
-// memSecretGetter serves the merchant (cranker) key as the merchant's
-// solana/private_key so the production keypair signer / Submitter resolve it.
+// memSecretGetter serves the merchant (cranker) key to the production keypair
+// signer / Submitter.
 type memSecretGetter struct{ key string }
 
 func (m memSecretGetter) GetSecret(_ context.Context, _ merchant.ID, name string) (string, error) {

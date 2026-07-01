@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
+	jwtkit "github.com/open-rails/authkit/jwt"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -65,22 +68,19 @@ func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingC
 			return nil, fmt.Errorf("load merchant config manifest %s: %w", p, err)
 		}
 	}
-	var manifest BillingConfig
-	if err := k.Unmarshal("", &manifest); err != nil {
-		return nil, fmt.Errorf("unmarshal merchant config manifest: %w", err)
-	}
 	for _, key := range []string{"auth", "users", "groups", "roles", "permissions", "catalogs", "products"} {
 		if k.Exists(key) {
 			return nil, fmt.Errorf("merchant config manifest does not accept %q; use the matching push command", key)
 		}
 	}
-	if len(manifest.Merchants) == 0 {
-		return nil, fmt.Errorf("merchant config manifest must declare at least one merchant")
+	// Strict-parse the merged tree: koanf's Unmarshal silently ignores unknown
+	// fields, so route the file/overlay path through the same DisallowUnknownField
+	// parser as the embedded bytes path — a typo'd field is rejected, not dropped.
+	merged, err := k.Marshal(koanfyaml.Parser())
+	if err != nil {
+		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
 	}
-	if err := validateMerchantManifestShape(&manifest); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
+	return ParseMerchantConfigManifest(merged)
 }
 
 func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
@@ -146,8 +146,8 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
-	if src.Issuer != nil {
-		dst.Issuer = src.Issuer
+	if src.RemoteApplication != nil {
+		dst.RemoteApplication = src.RemoteApplication
 	}
 	mergeMerchantProfileConfig(&dst.Profile, src.Profile)
 	if src.Invoice != nil {
@@ -212,9 +212,6 @@ func mergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src Provider
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
 	}
-	if strings.TrimSpace(src.VaultSecretRef) != "" {
-		dst.VaultSecretRef = src.VaultSecretRef
-	}
 	if src.Archived {
 		dst.Archived = true
 	}
@@ -241,14 +238,12 @@ func mergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src Provider
 
 type MerchantConfig struct {
 	DisplayName string `yaml:"display_name" koanf:"display_name"`
-	// Issuer is the host application's JWKS/public-key trust for THIS merchant
-	// (#527). When set, it is registered as a remote_application and made the
-	// `owner` of the merchant's permission-group, so the host app's delegated tokens
-	// fully administer this merchant — and only this merchant. Optional: a
-	// merchant with no issuer (e.g. embedded mode, where the host authenticates
-	// in-process) is still provisioned with its permission-group.
-	Issuer  *IssuerConfig         `yaml:"issuer,omitempty" koanf:"issuer"`
-	Profile MerchantProfileConfig `yaml:"profile,omitempty" koanf:"profile"`
+	// RemoteApplication is the host application's AuthKit remote_application trust
+	// for THIS merchant (#527). When set, it is registered as owner of the
+	// merchant's permission-group, so host-app delegated tokens administer this
+	// merchant — and only this merchant.
+	RemoteApplication *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
+	Profile           MerchantProfileConfig    `yaml:"profile,omitempty" koanf:"profile"`
 	// Invoice is the merchant's billing/collection policy (#643/#646): when/how the
 	// accrued balance is invoiced. Omitted leaves all values at the service default;
 	// an omitted field within the block leaves that field as-is.
@@ -282,20 +277,43 @@ type BudgetWindowConfig struct {
 	Currency string `yaml:"currency,omitempty" koanf:"currency"`
 }
 
-// IssuerConfig declares the host-app issuer trusted for a merchant. Provide
-// exactly one trust source: jwks_uri (preferred — AuthKit auto-refetches on
-// key rotation) or public_keys (static PEMs, manual rotation).
-type IssuerConfig struct {
-	// URI is the issuer's `iss` value (the host app's token issuer URL).
-	URI string `yaml:"uri" koanf:"uri"`
-	// JWKSURI is the issuer's JWKS endpoint. Mutually exclusive with PublicKeys.
+// RemoteApplicationConfig declares the host-app remote_application trusted for a
+// merchant. Provide exactly one trust source: jwks_uri (auto-rotating), jwks
+// (static JSON Web Key Set), or public_keys (static PEMs).
+type RemoteApplicationConfig struct {
+	// Issuer is the token `iss` value.
+	Issuer string `yaml:"issuer" koanf:"issuer"`
+	// JWKSURI is the remote JWKS endpoint. Mutually exclusive with JWKS/PublicKeys.
 	JWKSURI string `yaml:"jwks_uri,omitempty" koanf:"jwks_uri"`
-	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI.
+	// JWKS is a static JWKS document. Mutually exclusive with JWKSURI/PublicKeys.
+	JWKS StaticJWKSConfig `yaml:"jwks,omitempty" koanf:"jwks"`
+	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI/JWKS.
 	PublicKeys []authkit.RemoteAppKey `yaml:"public_keys,omitempty" koanf:"public_keys"`
-	// AllowedOrigins is the browser Origin allow-list for delegated requests.
-	AllowedOrigins []string `yaml:"allowed_origins,omitempty" koanf:"allowed_origins"`
 	// Slug overrides the remote_application slug (defaults to "<merchant>-app").
 	Slug string `yaml:"slug,omitempty" koanf:"slug"`
+}
+
+type StaticJWKSConfig struct {
+	Keys []StaticJWKConfig `yaml:"keys,omitempty" koanf:"keys"`
+}
+
+type StaticJWKConfig struct {
+	Kty string `yaml:"kty" koanf:"kty"`
+	Use string `yaml:"use,omitempty" koanf:"use"`
+	Kid string `yaml:"kid,omitempty" koanf:"kid"`
+	Alg string `yaml:"alg,omitempty" koanf:"alg"`
+	N   string `yaml:"n,omitempty" koanf:"n"`
+	E   string `yaml:"e,omitempty" koanf:"e"`
+	Crv string `yaml:"crv,omitempty" koanf:"crv"`
+	X   string `yaml:"x,omitempty" koanf:"x"`
+	Y   string `yaml:"y,omitempty" koanf:"y"`
+}
+
+func (j StaticJWKConfig) authkitJWK() jwtkit.JWK {
+	return jwtkit.JWK{
+		Kty: j.Kty, Use: j.Use, Kid: j.Kid, Alg: j.Alg,
+		N: j.N, E: j.E, Crv: j.Crv, X: j.X, Y: j.Y,
+	}
 }
 
 type MerchantProfileConfig struct {
@@ -308,13 +326,12 @@ type MerchantProfileConfig struct {
 type ProviderAccountConfig map[string]ProviderRailAccountConfig
 
 type ProviderRailAccountConfig struct {
-	Environment    string                       `yaml:"environment,omitempty" koanf:"environment"`
-	AccountID      string                       `yaml:"account_id,omitempty" koanf:"account_id"`
-	VaultSecretRef string                       `yaml:"vault_secret_ref,omitempty" koanf:"vault_secret_ref"`
-	Archived       bool                         `yaml:"archived,omitempty" koanf:"archived"`
-	Signer         *ProviderAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
-	Secrets        map[string]string            `yaml:"secrets,omitempty" koanf:"secrets"`
-	Settings       map[string]any               `yaml:"settings,omitempty" koanf:"settings"`
+	Environment string                       `yaml:"environment,omitempty" koanf:"environment"`
+	AccountID   string                       `yaml:"account_id,omitempty" koanf:"account_id"`
+	Archived    bool                         `yaml:"archived,omitempty" koanf:"archived"`
+	Signer      *ProviderAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
+	Secrets     map[string]string            `yaml:"secrets,omitempty" koanf:"secrets"`
+	Settings    map[string]any               `yaml:"settings,omitempty" koanf:"settings"`
 }
 
 type ProviderAccountSignerConfig struct {
@@ -465,9 +482,9 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		if err != nil {
 			return nil, err
 		}
-	} else if req.ControlPlane != nil && mt.Issuer != nil && req.Options.Overwrite {
+	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
 		if _, err := provisionMerchantGroup(ctx, req.ControlPlane, slug, mt); err != nil {
-			return nil, fmt.Errorf("merchant bootstrap: update merchant group/issuer for %q: %w", slug, err)
+			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
 		}
 	}
 
@@ -508,12 +525,12 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 	}
 
 	// #567: the merchant IS a top-level permission-group (child of root). When
-	// the merchant declares an issuer, AuthKit registers it as a
-	// remote_application nested under the merchant group with the `owner` role so
-	// host-app delegated tokens administer this merchant only.
+	// the merchant declares a remote_application, AuthKit nests it under the
+	// merchant group with the `owner` role so host-app delegated tokens
+	// administer this merchant only.
 	groupID, err := provisionMerchantGroup(ctx, cp, slug, mt)
 	if err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: provision merchant group/issuer for %q: %w", slug, err)
+		return nil, fmt.Errorf("merchant bootstrap: provision merchant group/remote_application for %q: %w", slug, err)
 	}
 	svc, err := merchants.NewService(cp.Pool(), nil)
 	if err != nil {
@@ -687,7 +704,23 @@ func pruneManifestSecrets(ctx context.Context, merchantID merchant.ID, mt Mercha
 		}
 		accountID := strings.TrimSpace(entry.config.AccountID)
 		if accountID == "" {
-			return fmt.Errorf("provider account %q account_id is required before pruning secrets", rail)
+			if rail != string(models.RailSolana) {
+				return fmt.Errorf("provider account %q account_id is required before pruning secrets", rail)
+			}
+			if len(entry.config.Secrets) == 0 {
+				continue
+			}
+			secrets, err := newManifestSecretValues(rail, entry.config.Secrets)
+			if err != nil {
+				return err
+			}
+			if _, ok := secrets.sources["private_key"]; !ok {
+				return fmt.Errorf("provider account %q private_key is required before pruning secrets without account_id", rail)
+			}
+			accountID, err = solanaLocalKeypairPublicKey(secrets)
+			if err != nil {
+				return err
+			}
 		}
 		for key := range entry.config.Secrets {
 			name, err := merchants.ProviderAccountSecretName(rail, environment, accountID, key)
@@ -742,12 +775,17 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		return err
 	}
 	accountID := strings.TrimSpace(identity.AccountID)
-	if accountID == "" {
-		return fmt.Errorf("provider account %q identity resolution returned an empty account id", rail)
-	}
-	signerEvidence, err := manifestProviderSignerEvidence(ctx, rail, accountID, account, secrets, transit)
+	// For Solana, manifestProviderSignerEvidence derives the stored provider-account
+	// identity from the signer key; a declared account_id is ignored (warned).
+	signerEvidence, accountID, err := manifestProviderSignerEvidence(ctx, rail, accountID, account, secrets, transit)
 	if err != nil {
 		return err
+	}
+	if accountID == "" {
+		if rail == string(models.RailSolana) {
+			return fmt.Errorf("provider account %q requires signer-derived identity", rail)
+		}
+		return fmt.Errorf("provider account %q requires account_id", rail)
 	}
 	for key, value := range account.Secrets {
 		name, err := merchants.ProviderAccountSecretName(rail, environment, accountID, key)
@@ -773,7 +811,6 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			return fmt.Errorf("store secret %s: %w", name, err)
 		}
 	}
-	vaultSecretRef := stringPtrIfNotEmpty(account.VaultSecretRef)
 	reconcileStripeWebhook := func() error {
 		if rail != string(models.RailStripe) {
 			return nil
@@ -854,14 +891,13 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	mctx := merchant.WithID(ctx, merchantID)
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		_, err := database.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
-			MerchantID:     merchantID.UUID(),
-			Rail:           rail,
-			Environment:    stringPtrIfNotEmpty(environment),
-			AccountID:      accountID,
-			DisplayName:    displayName,
-			VaultSecretRef: vaultSecretRef,
-			Archived:       &account.Archived,
-			Evidence:       evidenceJSON,
+			MerchantID:  merchantID.UUID(),
+			Rail:        rail,
+			Environment: stringPtrIfNotEmpty(environment),
+			AccountID:   accountID,
+			DisplayName: displayName,
+			Archived:    &account.Archived,
+			Evidence:    evidenceJSON,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert provider account %s:%s: %w", rail, accountID, err)
@@ -873,52 +909,91 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	return reconcileStripeWebhook()
 }
 
-func manifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account ProviderRailAccountConfig, secrets manifestSecretValues, transit solana.TransitClient) (map[string]string, error) {
+// manifestProviderSignerEvidence validates the Solana signer and returns signer
+// evidence plus the derived provider-account identity. Solana never needs
+// account_id — the stored DB identity is always the signer public key; a declared
+// value is ignored (warned).
+func manifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account ProviderRailAccountConfig, secrets manifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
+	if rail == string(models.RailSolana) && strings.TrimSpace(accountID) != "" {
+		log.Warnf("solana provider account: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
+		accountID = ""
+	}
 	if account.Signer == nil {
 		if _, ok := secrets.sources["private_key"]; ok && rail == string(models.RailSolana) {
-			return map[string]string{"mode": "keypair"}, nil
+			pub, err := solanaLocalKeypairPublicKey(secrets)
+			if err != nil {
+				return nil, "", err
+			}
+			return map[string]string{"mode": "local_keypair"}, pub, nil
 		}
-		return nil, nil
+		return nil, accountID, nil
 	}
 	if rail != string(models.RailSolana) {
-		return nil, fmt.Errorf("provider account signer is only supported for solana")
+		return nil, "", fmt.Errorf("provider account signer is only supported for solana")
 	}
 	mode := strings.ToLower(strings.TrimSpace(account.Signer.Mode))
 	switch mode {
-	case "keypair":
+	case "local_keypair":
 		if _, ok := secrets.sources["private_key"]; !ok {
-			return nil, fmt.Errorf("solana signer mode keypair requires secrets.private_key")
+			return nil, "", fmt.Errorf("solana signer mode local_keypair requires secrets.private_key")
 		}
 		if strings.TrimSpace(account.Signer.Key) != "" {
-			return nil, fmt.Errorf("solana signer mode keypair must not set key")
+			return nil, "", fmt.Errorf("solana signer mode local_keypair must not set key")
 		}
-		return map[string]string{"mode": "keypair"}, nil
+		pub, err := solanaLocalKeypairPublicKey(secrets)
+		if err != nil {
+			return nil, "", err
+		}
+		return map[string]string{"mode": "local_keypair"}, pub, nil
 	case "vault_transit":
 		if _, ok := secrets.sources["private_key"]; ok {
-			return nil, fmt.Errorf("solana signer mode vault_transit cannot also set secrets.private_key")
+			return nil, "", fmt.Errorf("solana signer mode vault_transit cannot also set secrets.private_key")
 		}
 		key := strings.TrimSpace(account.Signer.Key)
 		if key == "" {
-			return nil, fmt.Errorf("solana signer mode vault_transit requires key")
+			return nil, "", fmt.Errorf("solana signer mode vault_transit requires key")
 		}
 		if transit == nil {
-			return nil, fmt.Errorf("solana signer mode vault_transit requires vault.enabled")
+			return nil, "", fmt.Errorf("solana signer mode vault_transit requires a Vault connection (vault.enabled with reachable Transit)")
 		}
-		raw, err := transit.PublicKey(ctx, key)
+		pub, err := solanaTransitPublicKey(ctx, transit, key)
 		if err != nil {
-			return nil, fmt.Errorf("solana vault transit signer %q public key: %w", key, err)
+			return nil, "", err
 		}
-		if len(raw) != 32 {
-			return nil, fmt.Errorf("solana vault transit signer %q public key is %d bytes, want 32", key, len(raw))
-		}
-		pub := solanago.PublicKeyFromBytes(raw)
-		if pub.String() != strings.TrimSpace(accountID) {
-			return nil, fmt.Errorf("solana vault transit signer %q public key %s does not match account_id %s", key, pub.String(), accountID)
-		}
-		return map[string]string{"mode": "vault_transit", "key": key}, nil
+		return map[string]string{"mode": "vault_transit", "key": key}, pub, nil
 	default:
-		return nil, fmt.Errorf("solana signer mode must be keypair or vault_transit")
+		return nil, "", fmt.Errorf("solana signer mode must be local_keypair or vault_transit")
 	}
+}
+
+// solanaLocalKeypairPublicKey parses the base58 private_key secret and returns its
+// Solana address (base58 public key).
+func solanaLocalKeypairPublicKey(secrets manifestSecretValues) (string, error) {
+	raw, ok, err := secrets.ResolveIfPresent("private_key")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("solana signer mode local_keypair requires secrets.private_key")
+	}
+	key, err := solanago.PrivateKeyFromBase58(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("solana signer mode local_keypair private_key: %w", err)
+	}
+	return key.PublicKey().String(), nil
+}
+
+// solanaTransitPublicKey reads the Vault Transit Ed25519 key's public key and
+// returns its Solana address (base58). The private key never leaves Vault.
+func solanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, key string) (string, error) {
+	raw, err := transit.PublicKey(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("solana vault transit signer %q public key: %w", key, err)
+	}
+	if len(raw) != 32 {
+		return "", fmt.Errorf("solana vault transit signer %q public key is %d bytes, want 32", key, len(raw))
+	}
+	return solanago.PublicKeyFromBytes(raw).String(), nil
 }
 
 func normalizeProviderEnvironment(raw string) (string, error) {
@@ -1010,8 +1085,13 @@ func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ct
 			Evidence:  map[string]any{"source": "merchant_config_manifest.account_id"},
 		}, nil
 	}
-	// Auto-discovery via live credentials was removed (#592): account_id must be
-	// declared in the manifest.
+	if rail == string(models.RailSolana) {
+		return manifestProviderIdentity{
+			Evidence: map[string]any{"source": "merchant_config_manifest.signer"},
+		}, nil
+	}
+	// Auto-discovery via live credentials was removed (#592): every rail must
+	// declare account_id in the manifest.
 	return manifestProviderIdentity{}, fmt.Errorf("provider account_id is required for %s (auto-discovery removed; declare account_id in the manifest)", rail)
 }
 
@@ -1023,13 +1103,36 @@ func stringPtrIfNotEmpty(v string) *string {
 	return &v
 }
 
+func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) ([]authkit.RemoteAppKey, error) {
+	if app == nil || len(app.JWKS.Keys) == 0 {
+		return nil, nil
+	}
+	keys := make([]authkit.RemoteAppKey, 0, len(app.JWKS.Keys))
+	for _, raw := range app.JWKS.Keys {
+		jwk := raw.authkitJWK()
+		pub, err := jwtkit.JWKToPublicKey(jwk)
+		if err != nil {
+			return nil, fmt.Errorf("key %q: %w", strings.TrimSpace(jwk.Kid), err)
+		}
+		der, err := x509.MarshalPKIXPublicKey(pub)
+		if err != nil {
+			return nil, fmt.Errorf("key %q: marshal public key: %w", strings.TrimSpace(jwk.Kid), err)
+		}
+		keys = append(keys, authkit.RemoteAppKey{
+			KID:          strings.TrimSpace(jwk.Kid),
+			PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
+		})
+	}
+	return keys, nil
+}
+
 // provisionMerchantGroup ensures the merchant's top-level permission-group exists
 // (`type=merchant`, `resourceRef=slug`, child of `root` — #567) and,
-// when the merchant declares an issuer, registers that issuer as a
+// when the merchant declares a remote_application, registers it as a
 // remote_application nested under the merchant group and grants it the merchant
 // `owner` role (full `merchant:*` authority, scoped to this merchant alone since
 // federated authority claims are stripped). Idempotent: re-applying converges the
-// group + issuer state. Returns the merchant group's internal id.
+// group + remote_application state. Returns the merchant group's internal id.
 func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (string, error) {
 	slug = merchant.NormalizeSlug(slug)
 	if slug == "" {
@@ -1069,40 +1172,51 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 
 	// Register the merchant's federated issuer as a remote_application nested
 	// under the merchant group, then grant it the merchant `owner` role.
-	if mt.Issuer != nil {
-		ra := manifestIssuerToRemoteApplication(slug, groupID, mt.Issuer)
+	if mt.RemoteApplication != nil {
+		ra, err := manifestRemoteApplicationToAuthKit(slug, groupID, mt.RemoteApplication)
+		if err != nil {
+			return "", fmt.Errorf("merchant bootstrap: remote_application for %q: %w", slug, err)
+		}
 		stored, err := core.UpsertRemoteApplication(ctx, ra)
 		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: register issuer for %q: %w", slug, err)
+			return "", fmt.Errorf("merchant bootstrap: register remote_application for %q: %w", slug, err)
 		}
 		if err := core.AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
-			return "", fmt.Errorf("merchant bootstrap: grant issuer owner role for %q: %w", slug, err)
+			return "", fmt.Errorf("merchant bootstrap: grant remote_application owner role for %q: %w", slug, err)
 		}
 	}
 
 	return groupID, nil
 }
 
-// manifestIssuerToRemoteApplication maps a merchant's manifest issuer onto an
-// AuthKit remote_application registration nested under the merchant group.
-func manifestIssuerToRemoteApplication(merchantSlug, groupID string, iss *IssuerConfig) authkit.RemoteApplication {
-	appSlug := strings.TrimSpace(iss.Slug)
+// manifestRemoteApplicationToAuthKit maps a merchant's manifest remote_application
+// onto an AuthKit remote_application registration nested under the merchant group.
+func manifestRemoteApplicationToAuthKit(merchantSlug, groupID string, app *RemoteApplicationConfig) (authkit.RemoteApplication, error) {
+	appSlug := strings.TrimSpace(app.Slug)
 	if appSlug == "" {
 		appSlug = merchantSlug + "-app"
 	}
 	mode := authkit.RemoteAppModeJWKS
-	if len(iss.PublicKeys) > 0 {
+	publicKeys := app.PublicKeys
+	if len(app.JWKS.Keys) > 0 {
+		keys, err := remoteApplicationStaticPublicKeys(app)
+		if err != nil {
+			return authkit.RemoteApplication{}, err
+		}
+		publicKeys = keys
+	}
+	if len(publicKeys) > 0 {
 		mode = authkit.RemoteAppModeStatic
 	}
 	return authkit.RemoteApplication{
 		Slug:              appSlug,
 		PermissionGroupID: groupID,
-		Issuer:            strings.TrimSpace(iss.URI),
-		JWKSURI:           strings.TrimSpace(iss.JWKSURI),
+		Issuer:            strings.TrimSpace(app.Issuer),
+		JWKSURI:           strings.TrimSpace(app.JWKSURI),
 		Mode:              mode,
-		PublicKeys:        iss.PublicKeys,
+		PublicKeys:        publicKeys,
 		Enabled:           true,
-	}
+	}, nil
 }
 
 func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {

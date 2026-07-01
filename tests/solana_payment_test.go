@@ -68,8 +68,7 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 	suite.Rails["solana"] = &config.ProviderAccountConfig{
 		Rail: models.RailSolana,
 		Solana: &config.SolanaRailConfig{
-			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-			Tokens:          solanatokens.DefaultDevnetTokens(),
+			Tokens: solanatokens.DefaultDevnetTokens(),
 		},
 		// RPCEndpoint and Network are derived from test_mode
 	}

@@ -19,6 +19,10 @@ type CrankService struct {
 	submitter Submitter
 }
 
+type merchantAddressSubmitter interface {
+	SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
+}
+
 // NewCrankService builds a CrankService over a per-merchant Submitter.
 func NewCrankService(submitter Submitter) *CrankService {
 	return &CrankService{submitter: submitter}
@@ -89,7 +93,13 @@ func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *mod
 		Delegator:             subscriber,
 	})
 
-	sig, err := s.submitter.Submit(ctx, tenantID, []solanago.Instruction{ix})
+	instructions := []solanago.Instruction{ix}
+	var sig solanago.Signature
+	if submitter, ok := s.submitter.(merchantAddressSubmitter); ok {
+		sig, err = submitter.SubmitForMerchantAddress(ctx, tenantID, merchant, instructions)
+	} else {
+		sig, err = s.submitter.Submit(ctx, tenantID, instructions)
+	}
 	if err != nil {
 		return "", err
 	}

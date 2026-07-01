@@ -38,8 +38,8 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
 		}
-		if t.Issuer != nil {
-			if err := validateManifestIssuer(slug, t.Issuer); err != nil {
+		if t.RemoteApplication != nil {
+			if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {
 				return err
 			}
 		}
@@ -58,33 +58,39 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 	return nil
 }
 
-// validateManifestIssuer checks the per-merchant host-app issuer (#527). The
-// issuer is registered as the OWNER of the merchant's permission-group, so its
-// delegated tokens administer that one merchant. Exactly one trust source —
-// jwks_uri (preferred, auto-rotating) XOR public_keys (static, manual) — must
-// be declared.
-func validateManifestIssuer(merchantSlug string, iss *IssuerConfig) error {
-	uri := strings.TrimSpace(iss.URI)
-	if uri == "" {
-		return fmt.Errorf("merchant %q issuer.uri is required", merchantSlug)
+// validateManifestRemoteApplication checks the per-merchant host-app
+// remote_application (#527). It is registered as OWNER of the merchant's
+// permission-group, so its delegated tokens administer that one merchant.
+func validateManifestRemoteApplication(merchantSlug string, app *RemoteApplicationConfig) error {
+	issuer := strings.TrimSpace(app.Issuer)
+	if issuer == "" {
+		return fmt.Errorf("merchant %q remote_application.issuer is required", merchantSlug)
 	}
-	if !validHTTPURL(uri) {
-		return fmt.Errorf("merchant %q issuer.uri must be an http or https URL", merchantSlug)
+	if !validHTTPURL(issuer) {
+		return fmt.Errorf("merchant %q remote_application.issuer must be an http or https URL", merchantSlug)
 	}
-	jwks := strings.TrimSpace(iss.JWKSURI)
-	hasStatic := len(iss.PublicKeys) > 0
-	switch {
-	case jwks == "" && !hasStatic:
-		return fmt.Errorf("merchant %q issuer must set jwks_uri or public_keys", merchantSlug)
-	case jwks != "" && hasStatic:
-		return fmt.Errorf("merchant %q issuer must set exactly one of jwks_uri or public_keys, not both", merchantSlug)
-	case jwks != "" && !validHTTPURL(jwks):
-		return fmt.Errorf("merchant %q issuer.jwks_uri must be an http or https URL", merchantSlug)
+
+	sources := 0
+	if strings.TrimSpace(app.JWKSURI) != "" {
+		sources++
 	}
-	for _, origin := range iss.AllowedOrigins {
-		if o := strings.TrimSpace(origin); o != "" && !validHTTPURL(o) {
-			return fmt.Errorf("merchant %q issuer.allowed_origins entry %q must be an http or https URL", merchantSlug, origin)
-		}
+	if len(app.JWKS.Keys) > 0 {
+		sources++
+	}
+	if len(app.PublicKeys) > 0 {
+		sources++
+	}
+	if sources == 0 {
+		return fmt.Errorf("merchant %q remote_application must set jwks_uri, jwks, or public_keys", merchantSlug)
+	}
+	if sources > 1 {
+		return fmt.Errorf("merchant %q remote_application must set exactly one of jwks_uri, jwks, or public_keys", merchantSlug)
+	}
+	if jwks := strings.TrimSpace(app.JWKSURI); jwks != "" && !validHTTPURL(jwks) {
+		return fmt.Errorf("merchant %q remote_application.jwks_uri must be an http or https URL", merchantSlug)
+	}
+	if _, err := remoteApplicationStaticPublicKeys(app); err != nil {
+		return fmt.Errorf("merchant %q remote_application.jwks: %w", merchantSlug, err)
 	}
 	return nil
 }
@@ -155,11 +161,32 @@ func validateManifestProviderAccount(slug string, key string, account ProviderAc
 				return fmt.Errorf("merchant %q provider_accounts.%s.%s: %w", slug, key, rail, err)
 			}
 		}
+		if rail == "solana" {
+			// Solana never needs account_id — it is always derived from the signer's
+			// public key, and a declared value is ignored (warned at apply). A signer
+			// is required so there is a key to derive from.
+			if !solanaSignerConfigured(cfg) {
+				return fmt.Errorf("merchant %q provider_accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
+			}
+			continue
+		}
 		if strings.TrimSpace(cfg.AccountID) == "" {
 			return fmt.Errorf("merchant %q provider_accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
 		}
 	}
 	return nil
+}
+
+func solanaSignerConfigured(cfg ProviderRailAccountConfig) bool {
+	if cfg.Signer != nil {
+		return true
+	}
+	for k := range cfg.Secrets {
+		if strings.EqualFold(strings.TrimSpace(k), "private_key") {
+			return true
+		}
+	}
+	return false
 }
 
 func validHTTPURL(raw string) bool {

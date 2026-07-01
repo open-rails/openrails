@@ -29,6 +29,10 @@ type Submitter interface {
 	Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
+type publicKeySigner interface {
+	SignMessageForPublicKey(ctx context.Context, tenantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error)
+}
+
 // signerSubmitter is the production Submitter: a per-merchant solana.Signer + RPC,
 // wired through solana.BuildSignSubmit (the verified build/sign/submit path).
 type signerSubmitter struct {
@@ -47,6 +51,22 @@ func (s *signerSubmitter) MerchantAddress(ctx context.Context, tenantID merchant
 
 func (s *signerSubmitter) Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error) {
 	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, s.rpc, instructions)
+}
+
+func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
+	if signer, ok := s.signer.(publicKeySigner); ok {
+		return solanaint.BuildSignSubmitWithPayer(ctx, s.rpc, merchantAddress, instructions, func(message []byte) (solanago.Signature, error) {
+			return signer.SignMessageForPublicKey(ctx, tenantID, merchantAddress, message)
+		})
+	}
+	active, err := s.signer.PublicKey(ctx, tenantID)
+	if err != nil {
+		return solanago.Signature{}, err
+	}
+	if !active.Equals(merchantAddress) {
+		return solanago.Signature{}, fmt.Errorf("solana: active signer %s does not match subscription merchant address %s", active.String(), merchantAddress.String())
+	}
+	return s.Submit(ctx, tenantID, instructions)
 }
 
 // planReader is the minimal RPC read surface PublishPlan needs for its idempotent

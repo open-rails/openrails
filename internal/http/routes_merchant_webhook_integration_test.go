@@ -246,7 +246,6 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			environment text NOT NULL DEFAULT 'live',
 			account_id text NOT NULL,
 			display_name text,
-			vault_secret_ref text,
 			archived boolean NOT NULL DEFAULT false,
 			evidence jsonb,
 			first_seen_at timestamptz NOT NULL DEFAULT current_timestamp,

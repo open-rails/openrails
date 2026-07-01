@@ -52,7 +52,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana signer (secret solana/private_key) and set this price's currency to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
+		Hint:     "Configure the merchant's Solana provider-account signer and set this price's currency to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
 	}
 }
 

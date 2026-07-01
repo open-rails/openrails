@@ -713,27 +713,27 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaTransactionService == nil {
 			return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 		}
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, session.Amount, session.Currency, s.fxProvider, s.priceProvider)
+		if err != nil {
+			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
+		}
 		session.Status = models.CheckoutSessionStatusRequiresAction
 		expiresAt := s.now().Add(defaultCheckoutSessionTTL)
 		session.ExpiresAt = &expiresAt
-		recipient := strings.TrimSpace(solanaProc.Solana.RecipientWallet)
-		if recipient == "" {
-			return fmt.Errorf("%w: recipient wallet not configured", ErrCheckoutSessionValidation)
-		}
 		if session.RailState == nil {
 			session.RailState = map[string]any{}
 		}
 		session.RailState["flow"] = flow
 		session.RailState["token_symbol"] = tokenSymbol
 		session.RailState["token_mint"] = tokenMint
-		session.RailState["recipient"] = recipient
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, session.Amount, session.Currency, s.fxProvider, s.priceProvider)
-		if err != nil {
-			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
-		}
 		if err := setSolanaQuoteState(session.RailState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
 			return err
 		}
+		recipient, err := solanamodule.ResolveRecipientWallet(ctx, s.db, s.config)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
+		session.RailState["recipient"] = recipient
 	default:
 		return fmt.Errorf("%w: unsupported solana flow", ErrCheckoutSessionValidation)
 	}

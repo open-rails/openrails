@@ -546,9 +546,26 @@ func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
 	require.ErrorContains(t, err, "type stripe must use stripe block")
 }
 
-// TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret (and,
-// for Solana, a missing recipient_wallet) is a hard boot error in production but
-// only a warning in development.
+func TestSolanaRPCProviderValidation(t *testing.T) {
+	cfg := GetDefaultBillingConfig()
+	cfg.Env = "production"
+	base := func(solana *SolanaRailConfig) ProviderAccountSet {
+		return ProviderAccountSet{"solana": {Rail: models.RailSolana, Solana: solana}}
+	}
+
+	require.NoError(t, ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "helius", RPCAPIKey: "key"})))
+	require.NoError(t, ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "", RPCAPIKey: "key"})))
+	require.NoError(t, ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "public"})))
+
+	err := ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "quicknode", RPCAPIKey: "key"}))
+	require.ErrorContains(t, err, "rpc_provider must be helius or public")
+
+	err = ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "public", RPCAPIKey: "key"}))
+	require.ErrorContains(t, err, "rpc_provider public cannot use rpc_api_key")
+}
+
+// TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret is a
+// hard boot error in production but only a warning in development.
 func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 	prodCfg := func() *Config {
 		cfg := GetDefaultBillingConfig()
@@ -582,25 +599,6 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 			name:      "stripe/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
 			rail:      &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"}},
-			wantError: false,
-		},
-		// Solana: missing recipient_wallet
-		{
-			name:      "solana/missing recipient_wallet in dev → no error",
-			cfg:       devCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailSolana, Solana: &SolanaRailConfig{RecipientWallet: ""}},
-			wantError: false,
-		},
-		{
-			name:      "solana/missing recipient_wallet in prod → error",
-			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailSolana, Solana: &SolanaRailConfig{RecipientWallet: ""}},
-			wantError: true,
-		},
-		{
-			name:      "solana/present recipient_wallet in prod → no error",
-			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailSolana, Solana: &SolanaRailConfig{RecipientWallet: "wallet_test_dummy"}},
 			wantError: false,
 		},
 		// NMI: missing webhook_secret (security_key also required outside dev)

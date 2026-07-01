@@ -9,27 +9,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Canonical per-merchant Solana secret names. These mirror the merchant secret
-// namespacing convention (e.g. "stripe/secret_key") so the SAME
-// MerchantSecretStore that holds Stripe/NMI credentials also holds Solana ones.
-// Only solana/private_key is sensitive; the addresses are public on-chain but
-// are stored alongside for cohesion. A managed (Vault) deployment ideally keeps
-// the private key in Vault Transit (non-extractable) instead — see RemoteSigner.
-const (
-	// SecretSolanaPrivateKey is the merchant's cranking signing keypair
-	// (base58). It is the only sensitive Solana secret. Prefer Vault Transit in
-	// production so this is never fetched in plaintext.
-	SecretSolanaPrivateKey = "solana/private_key"
-	// SecretSolanaMerchantAddress is the merchant's on-chain merchant address (the
-	// plan owner; public). Derivable from the keypair, stored for convenience.
-	SecretSolanaMerchantAddress = "solana/merchant_address"
-	// SecretSolanaFeeWalletAddress is the merchant's gas (SOL) wallet address (public).
-	SecretSolanaFeeWalletAddress = "solana/fee_wallet_address"
-	// SecretSolanaRPCEndpoint is the merchant's RPC endpoint override (optional).
-	SecretSolanaRPCEndpoint = "solana/rpc_endpoint"
-	// SecretSolanaHeliusAPIKey is the merchant's Helius API key (optional).
-	SecretSolanaHeliusAPIKey = "solana/helius_api_key"
-)
+const privateKeySecretName = "private_key"
 
 // MerchantSecretGetter is the minimal per-merchant secret-read surface the signer
 // needs. It is declared HERE (dependency inversion) rather than importing the
@@ -48,9 +28,10 @@ type MerchantSecretGetter interface {
 // the private key to callers. It is resolved PER MERCHANT (via merchant.ID); there
 // is no process-global signer. Two implementations exist:
 //
-//   - keypairSigner: loads solana/private_key from a MerchantSecretGetter and signs
-//     in-process. Works with any secret backend; the key briefly lives in memory.
-//   - (planned) RemoteSigner: Vault Transit — the key never leaves Vault.
+//   - keypairSigner: loads the provider-account scoped private_key secret and
+//     signs in-process. Works with any secret backend; the key briefly lives in
+//     memory.
+//   - transitSigner: signs through Vault Transit — the key never leaves Vault.
 //
 // The interface is message-level (PublicKey + SignMessage) rather than
 // Sign(tx) precisely so a remote signer can satisfy it: you can hand Vault the
@@ -101,7 +82,27 @@ func BuildSignSubmit(
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: resolve merchant signer public key: %w", err)
 	}
+	return BuildSignSubmitWithPayer(ctx, rpc, payer, instructions, func(message []byte) (solanago.Signature, error) {
+		return signer.SignMessage(ctx, merchantID, message)
+	})
+}
 
+func BuildSignSubmitWithPayer(
+	ctx context.Context,
+	rpc blockhashProvider,
+	payer solanago.PublicKey,
+	instructions []solanago.Instruction,
+	signMessage func([]byte) (solanago.Signature, error),
+) (solanago.Signature, error) {
+	if signMessage == nil {
+		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
+	}
+	if rpc == nil {
+		return solanago.Signature{}, fmt.Errorf("solana: rpc client is required")
+	}
+	if len(instructions) == 0 {
+		return solanago.Signature{}, fmt.Errorf("solana: at least one instruction is required")
+	}
 	blockhash, err := rpc.GetLatestBlockhash(ctx)
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: get recent blockhash: %w", err)
@@ -117,7 +118,7 @@ func BuildSignSubmit(
 		return solanago.Signature{}, fmt.Errorf("solana: serialize transaction message: %w", err)
 	}
 
-	sig, err := signer.SignMessage(ctx, merchantID, msg)
+	sig, err := signMessage(msg)
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: sign transaction: %w", err)
 	}

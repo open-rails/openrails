@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
 	boot "github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -17,7 +19,9 @@ type MerchantProfileConfig = boot.MerchantProfileConfig
 type ProviderAccountConfig = boot.ProviderAccountConfig
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type ProviderAccountSignerConfig = boot.ProviderAccountSignerConfig
-type IssuerConfig = boot.IssuerConfig
+type RemoteApplicationConfig = boot.RemoteApplicationConfig
+type StaticJWKSConfig = boot.StaticJWKSConfig
+type StaticJWKConfig = boot.StaticJWKConfig
 
 // UpsertMerchantConfig idempotently creates or updates a billing merchant and its
 // provider accounts from the embedded engine. Run it as many times as you like —
@@ -57,11 +61,25 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 			return merchant.ID{}, fmt.Errorf("openrails embed: build secret store: %w", err)
 		}
 		req.SecretStore = backend.Secrets
+		// #661: gate the embedded route surface on what OpenRails can actually do
+		// (same process-global Vault token). Advisory — hides/degrades, not authz.
+		if a.Runtime != nil {
+			a.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
+				SolanaCanSign: backend.SolanaCanSign,
+				SecretWrite:   backend.SecretWrite,
+			}
+			if !backend.SolanaCanSign && a.Runtime.Rails.GetSolanaRail() != nil {
+				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault Transit capability and no local key); Solana signing routes are disabled")
+			}
+		}
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: upsert merchant config: %w", err)
+	}
+	if a.Runtime.ConfiguredMerchant.IsZero() {
+		a.Runtime.ConfiguredMerchant = tn.ID
 	}
 	return tn.ID, nil
 }

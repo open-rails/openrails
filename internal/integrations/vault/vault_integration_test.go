@@ -47,8 +47,8 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	kv := NewKVv2Adapter(liveClient(t), "secret")
 
-	pathA := "secret/openrails/merchants/tenant-a/solana/private_key"
-	pathB := "secret/openrails/merchants/tenant-b/solana/private_key"
+	pathA := "secret/openrails/merchants/tenant-a/provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
+	pathB := "secret/openrails/merchants/tenant-b/provider_accounts/solana/live/9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu/private_key"
 
 	if err := kv.WriteSecret(ctx, pathA, map[string]string{"value": "keyA"}); err != nil {
 		t.Fatalf("write A: %v", err)

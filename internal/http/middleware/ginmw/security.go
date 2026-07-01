@@ -33,8 +33,7 @@ func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	}
 }
 
-// CORSOriginSource returns the browser Origin allow-list for the current
-// request. Standalone wires this to AuthKit remote_application.allowed_origins.
+// CORSOriginSource returns the browser Origin allow-list for the current request.
 type CORSOriginSource func(context.Context) ([]string, error)
 
 // CORS middleware with billing service specific settings.

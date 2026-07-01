@@ -21,8 +21,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-const RedactedSecretValue = "<redacted>"
-
 type DumpMerchantConfigOptions struct {
 	IncludeSecrets bool
 }
@@ -30,8 +28,9 @@ type DumpMerchantConfigOptions struct {
 // DumpMerchantConfig reads a merchant's OpenRails-owned configuration (identity,
 // profile, invoice/collection policy, delegated-invoker windows, and provider
 // accounts) and returns it in the push-merchant-config YAML shape (#646/#653).
-// Secret values are redacted by default; IncludeSecrets emits plaintext from the
-// configured secret backend for operator-controlled exports.
+// Secret fields are omitted entirely by default (so a redacted dump can be
+// re-applied without a placeholder overwriting real secrets); IncludeSecrets
+// emits plaintext from the configured secret backend for operator-controlled exports.
 func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, slug string, opts DumpMerchantConfigOptions) (*BillingConfig, error) {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
@@ -136,9 +135,6 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if signer := providerAccountSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
 		}
-		if a.VaultSecretRef != nil {
-			account.VaultSecretRef = *a.VaultSecretRef
-		}
 		if settings := providerAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
 			account.Settings = settings
 		}
@@ -163,7 +159,7 @@ func providerAccountSignerFromEvidence(raw []byte) *ProviderAccountSignerConfig 
 		return nil
 	}
 	mode := strings.TrimSpace(evidence.Signer.Mode)
-	if mode == "" || mode == "keypair" {
+	if mode == "" || mode == "local_keypair" {
 		return nil
 	}
 	return &ProviderAccountSignerConfig{
@@ -187,10 +183,12 @@ func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-// providerAccountSecrets lists the merchant's provider-account secrets grouped
-// by (rail, environment, account_id). Values are redacted unless includeValues is set.
+// providerAccountSecrets lists the merchant's provider-account secret VALUES
+// grouped by (rail, environment, account_id). It returns nothing unless
+// includeValues is set: a redacted dump omits secret fields entirely rather than
+// emitting a placeholder that a re-apply (--overwrite) could store as the real value.
 func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
-	if secretStore == nil {
+	if secretStore == nil || !includeValues {
 		return nil, nil
 	}
 	names, err := secretStore.List(ctx, mid)
@@ -203,19 +201,15 @@ func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantS
 		if perr != nil || !ok {
 			continue
 		}
+		secret, err := secretStore.Get(ctx, mid, name)
+		if err != nil {
+			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
+		}
 		gk := providerAccountSecretGroupKey(rail, environment, accountID)
 		if out[gk] == nil {
 			out[gk] = map[string]string{}
 		}
-		value := RedactedSecretValue
-		if includeValues {
-			secret, err := secretStore.Get(ctx, mid, name)
-			if err != nil {
-				return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
-			}
-			value = secret.Value
-		}
-		out[gk][key] = value
+		out[gk][key] = secret.Value
 	}
 	return out, nil
 }

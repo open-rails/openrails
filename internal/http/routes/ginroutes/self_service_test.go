@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	merchantpkg "github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -69,12 +70,30 @@ func newSelfRouterWithResolver(t *testing.T, resolver ginmw.DelegatedResolver) *
 	return e
 }
 
+func newSelfRouterWithProviderRoutes(t *testing.T, providerRoutes routesurface.ProviderRoutes) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	group := e.Group("/v1/me")
+	RegisterSelfServiceRoutesWithProviderRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{}), providerRoutes)
+	return e
+}
+
 func newCustomerTreasuryRouter(t *testing.T, perms []string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/customers")
 	RegisterCustomerTreasuryRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	return e
+}
+
+func newCustomerTreasuryRouterWithProviderRoutes(t *testing.T, providerRoutes routesurface.ProviderRoutes, perms []string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	group := e.Group("/v1/customers")
+	RegisterCustomerTreasuryRoutesWithProviderRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}), providerRoutes)
 	return e
 }
 
@@ -131,6 +150,47 @@ func TestSelfService_PermissionlessPrincipalReachesMountedSelfRoutes(t *testing.
 			}()
 		})
 	}
+}
+
+func TestSelfServiceProviderRoutesAreConditional(t *testing.T) {
+	none := newSelfRouterWithProviderRoutes(t, routesurface.ProviderRoutes{})
+	require.Equal(t, http.StatusNotFound, doSelf(none, http.MethodPost, "/v1/me/billing-portal", true).Code)
+	require.Equal(t, http.StatusNotFound, doSelf(none, http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel-tx", true).Code)
+	require.Equal(t, http.StatusNotFound, doSelf(none, http.MethodPost, "/v1/me/stripe/portal", true).Code)
+
+	stripe := newSelfRouterWithProviderRoutes(t, routesurface.ProviderRoutes{StripePortal: true})
+	func() {
+		defer func() { _ = recover() }()
+		w := doSelf(stripe, http.MethodPost, "/v1/me/billing-portal", true)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
+	}()
+
+	// Solana SIGNING routes (cancel/tier) gate on SolanaSigning, not Solana (#661):
+	// one-off config alone does not mount them.
+	solanaConfigOnly := newSelfRouterWithProviderRoutes(t, routesurface.ProviderRoutes{Solana: true})
+	require.Equal(t, http.StatusNotFound, doSelf(solanaConfigOnly, http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel-tx", true).Code)
+
+	solana := newSelfRouterWithProviderRoutes(t, routesurface.ProviderRoutes{Solana: true, SolanaSigning: true})
+	func() {
+		defer func() { _ = recover() }()
+		w := doSelf(solana, http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel-tx", true)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
+	}()
+}
+
+func TestCustomerTreasuryBillingPortalRouteIsConditional(t *testing.T) {
+	perms := []string{controlplane.PermCustomerPaymentMethodsUpdate}
+
+	none := newCustomerTreasuryRouterWithProviderRoutes(t, routesurface.ProviderRoutes{}, perms)
+	require.Equal(t, http.StatusNotFound, doSelf(none, http.MethodPost, "/v1/customers/cus_123/billing-portal", true).Code)
+	require.Equal(t, http.StatusNotFound, doSelf(none, http.MethodPost, "/v1/customers/cus_123/stripe/portal", true).Code)
+
+	stripe := newCustomerTreasuryRouterWithProviderRoutes(t, routesurface.ProviderRoutes{StripePortal: true}, perms)
+	func() {
+		defer func() { _ = recover() }()
+		w := doSelf(stripe, http.MethodPost, "/v1/customers/cus_123/billing-portal", true)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
+	}()
 }
 
 // No token at all is rejected by the delegated auth middleware before any gate.

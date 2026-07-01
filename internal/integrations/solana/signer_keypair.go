@@ -17,11 +17,11 @@ import (
 // early on a rotation (a changed secret value resolves on the next miss).
 const DefaultSignerCacheTTL = 60 * time.Second
 
-// keypairSigner is the "give me the key" Signer: it loads solana/private_key
-// from a MerchantSecretGetter, parses it, and signs in-process. Works with any
-// secret backend (DB+envelope self-hosted, or Vault KV managed). The plaintext
-// key briefly lives in memory (cached up to ttl); for stronger custody of the
-// money-signing key, prefer a Vault Transit RemoteSigner where the key never
+// keypairSigner is the "give me the key" Signer: it loads the provider-account
+// private_key from a MerchantSecretGetter, parses it, and signs in-process.
+// Works with any secret backend (DB+envelope self-hosted, or Vault KV managed).
+// The plaintext key briefly lives in memory (cached up to ttl); for stronger
+// custody of the money-signing key, prefer Vault Transit where the key never
 // leaves Vault.
 type keypairSigner struct {
 	secrets MerchantSecretGetter
@@ -71,7 +71,7 @@ func (k *keypairSigner) load(ctx context.Context, merchantID merchant.ID) (solan
 	}
 	k.mu.Unlock()
 
-	raw, err := k.secrets.GetSecret(ctx, merchantID, SecretSolanaPrivateKey)
+	raw, err := k.secrets.GetSecret(ctx, merchantID, privateKeySecretName)
 	if err != nil {
 		return nil, fmt.Errorf("solana: load merchant signing key: %w", err)
 	}

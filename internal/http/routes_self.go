@@ -6,6 +6,7 @@ import (
 
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 // registerSelfServiceRoutes mounts the browser-direct self-service billing
@@ -25,12 +26,20 @@ import (
 // one system, one credential.
 func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	delegatedMW := s.delegatedMiddleware()
+	providerRoutes := routesurface.AllProviderRoutes()
+	if s.runtime != nil && (len(s.runtime.Rails) > 0 || !s.runtime.ConfiguredMerchant.IsZero()) {
+		if caps := s.runtime.RouteCapabilities; caps != nil {
+			providerRoutes = routesurface.ProviderRoutesFromRailsWithCapabilities(s.runtime.Rails, *caps)
+		} else {
+			providerRoutes = routesurface.ProviderRoutesFromRails(s.runtime.Rails)
+		}
+	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
-	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
+	httproutes.RegisterSelfServiceRoutesWithProviderRoutes(group, s.runtime, delegatedMW, providerRoutes)
 
 	customerGroup := e.Group(StandaloneV1Prefix + httproutes.CustomerRoutePrefix)
-	httproutes.RegisterCustomerTreasuryRoutes(customerGroup, s.runtime, delegatedMW, ginmw.EnsureCustomerPermissionGroup(s.controlPlane))
+	httproutes.RegisterCustomerTreasuryRoutesWithProviderRoutes(customerGroup, s.runtime, delegatedMW, providerRoutes, ginmw.EnsureCustomerPermissionGroup(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")

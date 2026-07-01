@@ -330,18 +330,21 @@ func pullProviderSolanaRPC(cfg *config.Config, rails config.ProviderAccountSet) 
 	if proc == nil {
 		return nil, nil
 	}
-	heliusAPIKey := ""
+	rpcProvider := ""
+	rpcAPIKey := ""
 	if proc.Solana != nil {
-		heliusAPIKey = proc.Solana.HeliusAPIKey
+		rpcProvider = proc.Solana.RPCProvider
+		rpcAPIKey = proc.Solana.RPCAPIKey
 	}
 	network := "mainnet"
 	if cfg.IsTestMode() {
 		network = "devnet"
 	}
 	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-		HeliusAPIKey: heliusAPIKey,
-		Network:      network,
-		ReadOnly:     true,
+		RPCProvider: rpcProvider,
+		RPCAPIKey:   rpcAPIKey,
+		Network:     network,
+		ReadOnly:    true,
 	}), nil
 }
 

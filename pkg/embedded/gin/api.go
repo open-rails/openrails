@@ -2,6 +2,7 @@ package gin
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -36,6 +37,11 @@ func WithDelegatedAuthenticator(d billingauth.DelegatedAuthenticator) Option {
 	return func(o *MountOptions) { o.DelegatedAuthenticator = d }
 }
 
+// WithProviderRoutes selects provider-specific public routes for this mount.
+func WithProviderRoutes(routes ProviderRoutes) Option {
+	return func(o *MountOptions) { o.ProviderRoutes = &routes }
+}
+
 // RegisterAPI mounts the selected OpenRails billing surface onto a dedicated gin
 // route group, AuthKit-style. The mount prefix is inferred from the group's
 // BasePath(), so the host does not repeat it. The group should be dedicated to
@@ -43,7 +49,7 @@ func WithDelegatedAuthenticator(d billingauth.DelegatedAuthenticator) Option {
 //
 // MountHandler remains the lower-level net/http escape hatch.
 //
-//	api := router.Group("/api/openrails")
+//	api := router.Group("/billing")
 //	openrailsgin.RegisterAPI(api, rt.Embedded(),
 //	    openrailsgin.WithGroups(embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks),
 //	    openrailsgin.WithAuthenticator(hostAuthn),          // checkout/customer
@@ -70,6 +76,18 @@ func RegisterAPI(group *gin.RouterGroup, e *embedded.Embedded, opts ...Option) e
 	if err != nil {
 		return err
 	}
-	group.Any("/*openrails", gin.WrapH(h))
+	for _, method := range billingMethods {
+		group.Handle(method, "/*openrails", gin.WrapH(h))
+	}
 	return nil
+}
+
+var billingMethods = []string{
+	http.MethodGet,
+	http.MethodPost,
+	http.MethodPut,
+	http.MethodPatch,
+	http.MethodDelete,
+	http.MethodOptions,
+	http.MethodHead,
 }

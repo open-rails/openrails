@@ -1,17 +1,27 @@
 version: 1
 
-# In a typical production setup, you'd store the secrets in Hashicorp Vault
-# and then overlay this file with the actual values.
+# Store real secrets in Hashicorp Vault and overlay them into this manifest.
+# Solana runtime rail config lives in normal OpenRails runtime config, for example:
+# provider_accounts:
+#   solana:
+#     rail: solana
+#     environment: live
+#     solana:
+#       rpc_provider: helius          # helius | public; empty defaults to helius
+#       rpc_api_key: replace-with-helius-api-key
+#       solana_pay_recurring_subscriptions: true
+#       tokens:
+#         SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
+#         USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
+# Solana provider account identity is derived from the signer public key.
 
 merchants:
   local-stack:
     display_name: Local Stack
 
-    issuer:
-      uri: https://local-stack.example
+    remote_application:
+      issuer: https://local-stack.example
       jwks_uri: https://local-stack.example/.well-known/jwks.json
-      allowed_origins:
-        - https://local-stack.example
 
     profile:
       display_name: Local Stack Billing
@@ -67,6 +77,7 @@ merchants:
         ccbill:
           environment: live
           account_id: "945280/0000"
+          # Omit allowed_cidrs to use built-in defaults; supplying it replaces the allowlist.
           settings:
             allowed_cidrs:
               - 64.38.240.0/24
@@ -97,7 +108,30 @@ merchants:
       solana:
         solana:
           environment: live
-          account_id: 11111111111111111111111111111111
-          signer: { mode: keypair }
+          archived: false
+          signer: { mode: local_keypair }
+          settings:
+            # Optional destination wallet; defaults to the signer public key when omitted.
+            recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
           secrets:
-            private_key: replace-with-solana-keypair-json
+            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT
+
+      # Alternative Solana signer using Hashicorp Vault Transit.
+      solana-vault:
+        solana:
+          environment: live
+          archived: false
+          signer: { mode: vault_transit, key: openrails-solana-local-stack }
+
+  static-jwks-stack:
+    display_name: Static JWKS Stack
+
+    remote_application:
+      issuer: https://static-jwks.example
+      jwks:
+        keys:
+          - kty: OKP
+            kid: static-ed25519-1
+            alg: EdDSA
+            crv: Ed25519
+            x: 11qYAYKxCrfVS_3rUnkx7ZyC4aHc4zlYwD9KLGdT6I4

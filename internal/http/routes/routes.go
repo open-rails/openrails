@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -25,6 +26,11 @@ type Options struct {
 	// Gate protects merchant routes. AuthKit/control-plane and embedded host auth
 	// are adapters behind this one interface.
 	Gate billingauth.Gate
+
+	// ProviderRoutes controls provider-specific public routes. Nil preserves the
+	// broad standalone surface; embedded single-merchant mounts pass an explicit
+	// value derived from configured provider accounts.
+	ProviderRoutes *routesurface.ProviderRoutes
 }
 
 type GateOptions struct {
@@ -121,6 +127,10 @@ func h(fn func(r *httprequest.Request)) router.Handler {
 func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	required := opts.requiredMW()
 	optional := opts.optionalMW()
+	providerRoutes := routesurface.AllProviderRoutes()
+	if opts.ProviderRoutes != nil {
+		providerRoutes = *opts.ProviderRoutes
+	}
 
 	// Pin a merchant-scoped DB connection for the request (merchant resolved by the
 	// global ResolveMerchant middleware) so RLS constrains merchant-owned queries
@@ -132,20 +142,27 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
 	group.Handle(http.MethodGet, "/prices", h(httphandlers.GetPrices), optional)
-	group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
-	group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
+	if providerRoutes.Solana {
+		group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
+		group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
+	}
 
 	checkout := group.Group("/checkout", required)
 	checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
 	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
 	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
 
-	group.Handle(http.MethodGet, "/checkout/:id/solana-pay", h(httphandlers.GetSolanaPay))
-	group.Handle(http.MethodPost, "/checkout/:id/solana-pay", h(httphandlers.PostSolanaPay))
-
-	// Solana recurring enrollment (#255): the wallet signs subscribe client-side,
-	// then confirms here to charge the first cycle + create the membership.
-	group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
+	if providerRoutes.Solana {
+		// One-off Solana Pay: the BUYER signs and pushes funds, so this needs only a
+		// configured recipient — not an OpenRails signer.
+		group.Handle(http.MethodGet, "/checkout/:id/solana-pay", h(httphandlers.GetSolanaPay))
+		group.Handle(http.MethodPost, "/checkout/:id/solana-pay", h(httphandlers.PostSolanaPay))
+	}
+	if providerRoutes.SolanaSigning {
+		// Solana recurring enrollment (#255): confirms after the wallet signs subscribe,
+		// then OpenRails charges the first cycle — so it needs a signer (#661).
+		group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
+	}
 }
 
 // RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
@@ -496,8 +513,12 @@ func registerPaymentProviderActionRoutes(providers router.Router, opts Options, 
 
 	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
-	providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
-	providers.Handle(http.MethodDelete, "/:provider", h(httphandlers.MerchantDeletePaymentProvider), writeMW...)
+	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
+	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).
+	if opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite {
+		providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
+		providers.Handle(http.MethodDelete, "/:provider", h(httphandlers.MerchantDeletePaymentProvider), writeMW...)
+	}
 }
 
 func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {

@@ -45,11 +45,10 @@ func main() {
     }
     defer openrails.Close(context.Background())
 
-    // Mount OpenRails on a dedicated gin group, AuthKit-style. The mount prefix is
-    // inferred from the group — you don't repeat "/api/openrails". Select only the
-    // route groups this host needs.
+    // Mount OpenRails on its canonical billing namespace. The mount prefix is
+    // inferred from the group; select only the route groups this host needs.
     router := gin.Default()
-    api := router.Group("/api/openrails")
+    api := router.Group("/billing")
     if err := embgin.RegisterAPI(api, openrails,
         embgin.WithGroups(
             embedded.RouteSetCheckout,
@@ -73,8 +72,8 @@ already have a single mount point.
 Which groups a deployment serves is config-dependent, so OpenRails advertises it
 two ways over one source of truth:
 
-- **HTTP** (browsers, the remote SDK, other services): `GET /api/openrails/v1/capabilities`
-  returns `{"route_groups": {"checkout": true, "customer": true, "payment_providers": false, ...}}`
+- **HTTP** (browsers, the remote SDK, other services): `GET /billing/v1/capabilities`
+  returns `{"route_groups": {"checkout": true, "customer": true, "payment_providers": false, ...}, "routes": {"billing_portal": true, "solana": false}}`
   — public, cached, hand-written (not OpenAPI; nothing is generated).
 - **Go** (in-process host code): `rt.ActiveRouteSets()` returns the same selection.
 

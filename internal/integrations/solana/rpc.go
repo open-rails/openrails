@@ -23,8 +23,11 @@ type RPCClientConfig struct {
 	// Endpoint is a custom RPC endpoint. If set, bypasses the fallback chain.
 	Endpoint string
 
-	// HeliusAPIKey enables Helius as the primary RPC provider.
-	HeliusAPIKey string
+	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to "helius".
+	RPCProvider string
+
+	// RPCAPIKey is the key for RPCProvider.
+	RPCAPIKey string
 
 	// Network determines which endpoints to use (mainnet, devnet, testnet).
 	Network string
@@ -42,7 +45,8 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	fallback := NewRPCFallbackClient(RPCFallbackConfig{
 		ReadOnly:       cfg.ReadOnly,
 		CustomEndpoint: cfg.Endpoint,
-		HeliusAPIKey:   cfg.HeliusAPIKey,
+		RPCProvider:    cfg.RPCProvider,
+		RPCAPIKey:      cfg.RPCAPIKey,
 		Network:        network,
 	})
 

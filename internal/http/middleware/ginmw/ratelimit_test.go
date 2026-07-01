@@ -148,9 +148,9 @@ func TestRateLimitCaptchaChallengeAppliesToDefaultAPIBucket(t *testing.T) {
 
 	r := gin.New()
 	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), challengeStore, &stubCaptchaVerifier{validToken: "valid-token"}))
-	r.POST("/v1/stripe/portal", func(c *gin.Context) { c.String(http.StatusOK, "portal") })
+	r.POST("/v1/me/billing-portal", func(c *gin.Context) { c.String(http.StatusOK, "portal") })
 
-	challenged := performCaptchaTestRequest(r, "", "/v1/stripe/portal")
+	challenged := performCaptchaTestRequest(r, "", "/v1/me/billing-portal")
 	require.Equal(t, http.StatusForbidden, challenged.Code)
 	require.Contains(t, challenged.Body.String(), "captcha_required")
 }

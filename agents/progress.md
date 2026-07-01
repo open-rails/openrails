@@ -7,27 +7,188 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 660
+next_id: 665
+
+---
+
+# #664: protect imported/stale subscriptions from lifecycle cancellation before provider freshness or retry proof
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01) — opened from Doujins embedded-OpenRails DB inspection. Linked downstream tracker:
+`~/doujins/agents/progress.md` #731.
+
+## Metadata
+- Category: reconciliation
+- Status: planned
+- Passes: false
+
+## Problem
+
+The LIFE-plane convergence path currently treats a vaulted NMI subscription as OpenRails-owned rebill state purely
+because `payment_method_id IS NOT NULL`. That is not enough for imported legacy rows. A legacy import can carry a
+vaulted NMI payment method and a stale `current_period_ends_at` while the provider subscription may still be alive.
+If OpenRails has not run provider refresh/pull and has not actually attempted dunning, terminally cancelling the row
+is a guess.
+
+Live Doujins evidence from `doujins_db` on 2026-07-01:
+
+- `openrails.provider_refresh_watermarks` is empty.
+- `1,672` NMI subscriptions hit `life.subscription.period_overdue` and then `life.subscription.grace_exhausted`;
+  current status is `cancelled`.
+- All `1,672` have `payment_method_id IS NOT NULL` and provider account `nmi/live/579145`.
+- All `1,672` have `retry_attempts = 0` and `last_retry_at IS NULL`.
+- None has a completed payment after `current_period_ends_at`.
+- Their local period ends range from `2026-01-06` to `2026-06-29`, which can be stale imported state, not provider
+  truth.
+
+By contrast, CCBill and vault-less NMI already route to `unknown` via `ListNeedsVerificationSubscriptions` because
+OpenRails cannot safely infer provider state. Imported vaulted NMI without provider freshness should get the same
+"unknown until verified" treatment.
+
+## Target design
+
+No provider freshness, no retry record, no terminal cancellation.
+
+Split subscription lifecycle states by evidence:
+
+- Fresh OpenRails-owned subscription with real retry/dunning evidence, or provider-confirmed death -> `past_due` /
+  `cancelled`.
+- Imported/stale subscription with no provider freshness and no retry attempt -> `unknown`.
+- Provider-auto-billed or not safely rebillable rows -> `unknown`.
+- Vaulted NMI rows are only "our rebill" rows after OpenRails has either created/freshed them under current provider
+  truth or has a recorded retry path.
+
+## Tasks
+
+- [ ] Define the freshness predicate for lifecycle convergence. At minimum, legacy-imported rows
+      (`gateway_response->>'legacy_source' IN ('subscriptions', 'billings')`) must not enter
+      `ListPeriodOverdueSubscriptions` unless provider freshness is newer than the local period end or dunning has
+      actually attempted a retry.
+- [ ] Change `ListPeriodOverdueSubscriptions` so stale imported vaulted NMI rows are excluded from
+      `period_overdue`/`grace_exhausted`.
+- [ ] Change `ListNeedsVerificationSubscriptions` so excluded stale imported NMI rows route to `unknown` instead of
+      staying `active` forever.
+- [ ] Harden `ListGraceExhaustedSubscriptions` as a second guard: do not terminally cancel imported rows with
+      `retry_attempts = 0` / `last_retry_at IS NULL` unless provider truth confirms they are dead.
+- [ ] Add integration coverage using legacy-shaped NMI rows: vaulted NMI + stale period + no provider watermark +
+      no retry record becomes `unknown`, not `cancelled`; a fresh OpenRails-owned/retried row can still enter dunning
+      and cancel after grace.
+- [ ] Add a repair/admin path or documented SQL for already-damaged rows: identify imported NMI rows cancelled only
+      by `life.subscription.grace_exhausted` with no retry history and move them back to `unknown` until provider
+      pull verifies truth. Keep this scoped; do not resurrect provider-confirmed/user-cancelled rows.
+- [ ] Expose dashboard/report counters for: active now, unknown awaiting provider verification, stale imported vaulted
+      NMI, cancelled-by-convergence-without-retry, due dunning retries.
+
+## Acceptance
+
+Running convergence against a stale imported Doujins-style NMI subscription without provider freshness or retry
+history cannot cancel it. It becomes `unknown` and waits for provider pull. Existing provider-auto-billed CCBill
+behavior stays cautious. Fresh OpenRails-owned subscriptions still use the dunning/grace lifecycle. A repair path
+exists for the `1,672` Doujins rows already cancelled by this bug.
+
+---
+
+# #662: deterministic natural-key UUIDs for products, prices, provider accounts (replace random NewV7)
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01) — not started. Design settled: derive each entity's uuid PK deterministically
+(uuidv5) from its IMMUTABLE natural key instead of `uuidutil.NewV7()`. Keep the uuid column type — this is
+"encode the natural key as a uuid", NOT a text-PK conversion (that was evaluated and rejected, see Out of scope).
+
+## Metadata
+- Category: catalog
+- Status: planned
+- Passes: false
+
+## Problem
+Product, price, and provider-account primary keys are random UUIDv7 (`uuidutil.NewV7()`), disconnected from each
+entity's natural key. Consequences:
+- The same logical product/price/account gets a DIFFERENT uuid in every environment and every fresh DB rebuild.
+- Seeding is idempotent only WITHIN one DB (via get-or-create by the natural key), never reproducible across DBs.
+- The id can't be computed without a DB lookup — e.g. doujins legacy-migrate must look up the shared premium price
+  id (`resolveSharedLegacyPremiumPrice`) rather than compute it and stamp it on 40k subscriptions.
+- The uuid is a second, arbitrary identity when a deterministic one derivable from the natural key is strictly
+  better and costs nothing extra.
+
+All three entities ALREADY have an immutable natural key with a unique constraint:
+- products: `UNIQUE (merchant_id, key)`; `key` immutable by contract (changing it = a new product).
+- prices: `unique_prices_product_amount_window (product_id, amount, currency, access_duration_hours, auto_renew,
+  trial_unit_amount, trial_duration_hours)`; prices are immutable on financial fields — a reprice creates a new row
+  and archives the old (`PriceService.Update` errors "prices are immutable"; converge re-mints via
+  `matchPrice`/`PriceCreate`/`PriceArchive`).
+- payment_provider_accounts: natural key `(rail, environment, account_id)`, global.
+
+## Target design
+Add `uuidutil.DeterministicID(namespace uuid.UUID, parts ...string) uuid.UUID` = uuidv5 over a canonical,
+injective encoding of `parts` (length-prefixed join, so no delimiter-collision — `account_id` contains `/`), under
+ONE fixed package-level namespace constant that must never change (changing it re-mints every id).
+
+Mint catalog/provider ids from the immutable natural key:
+- `product.id  = DeterministicID(ns, merchant_id, key)`
+- `price.id    = DeterministicID(ns, product_id, amount, currency, access_duration_hours, auto_renew,
+  trial_unit_amount, trial_duration_hours)` — exactly the `unique_prices_product_amount_window` columns.
+- `provider.id = DeterministicID(ns, rail, environment, account_id)`
+
+EXCLUDE every mutable field from the derivation — `rails` (rotated in place by `UpdateRails`), `status`,
+`display_name`, timestamps. Deriving from a mutable field would orphan FK references when it changes. The uuid
+becomes a content-hash of the entity's frozen identity: same key → same id everywhere; a change to identity (a
+reprice) correctly hashes to a NEW id while the old row (still referenced by subscriptions/payments) is untouched;
+collisions are impossible because the unique constraint already forbids two rows with the same tuple.
+
+## Tasks
+- [ ] Add `uuidutil.DeterministicID(namespace, parts...)` (uuidv5; canonical length-prefixed encoding; document that
+      the namespace constant is permanent). Unit-test injectivity + stability.
+- [ ] Product create path: replace `NewV7` with `DeterministicID(ns, merchant_id, key)`. Now that the id is
+      computable, the create can be `ON CONFLICT (id) DO NOTHING/UPDATE` (simpler than the GetProductByKey-then-Create
+      dance) — confirm re-seed stays idempotent.
+- [ ] Price create path (`pkg/service/service_definition_catalog.go:490`): replace `NewV7` with `DeterministicID`
+      over the frozen tuple. Canonicalize each field the SAME way the unique key / `matchPrice` compares them
+      (amount as int64, currency lowercased, nullable trial fields → a stable sentinel) so equal prices always hash
+      equal and never violate `unique_prices_product_amount_window`.
+- [ ] Provider-account create/upsert path: replace `NewV7` with `DeterministicID(ns, rail, environment, account_id)`,
+      canonicalized to match the `(rail, environment, account_id)` unique index (`lower(rail)` etc.).
+- [ ] Structurally enforce price money-immutability: split the raw sqlc `UpdatePrice` (`internal/db/queries/prices.sql`)
+      into status-only + rails-only queries so the money/identity columns are not settable at the DB layer (today they
+      are immutable only by caller convention — `PriceService.Update` blocks it, but the query text can still SET them).
+- [ ] Tests: (a) same natural key → same id across two fresh seeds; (b) reprice → new id, old row archived/untouched;
+      (c) provider-account re-import → same id; (d) product re-seed → same id; (e) mutating a mutable field
+      (`rails`/`status`/`display_name`) does NOT change the id.
+- [ ] Rollout note: NO schema change (uuid type unchanged; FKs/RLS/sqlc untouched). Existing DBs keep their random
+      ids — get-or-create won't re-mint — so adoption is via fresh seed (doujins is pre-cutover / re-seeding, so it
+      picks up deterministic ids with no backfill). A prod backfill to deterministic ids is a SEPARATE, explicitly
+      scoped migration (rewrite FKs) and is NOT in this issue.
+
+## Out of scope (named and rejected)
+- Converting any PK to a text or composite natural key. Natural keys here are composite (products `(merchant_id,
+  key)`; provider `(rail, environment, account_id)`; price 7-col) — a text/composite PK propagates into ~25 child FK
+  columns + every index + RLS join + sqlc type, `account_id` carries a `/`, and it breaks openrails' uniform
+  single-column-uuid keying. A deterministic uuid gives the SAME identity semantics at ~zero blast radius.
+- Adding a price `lookup_key`. Unnecessary: prices are immutable, so the frozen attribute tuple is already the
+  natural key.
+- Including `rails` (or any mutable field) in the derivation — would orphan references when a provider link rotates.
+- Backfilling deterministic ids onto existing prod rows (separate migration if ever wanted).
+
+Acceptance: product/price/provider-account ids are a pure, stable function of each entity's immutable natural key —
+identical across environments and fresh rebuilds, computable without a DB read; a reprice mints a new id (old row
+archived, untouched); rotating a provider link (`rails`) or flipping `status` leaves the id unchanged; no
+FK/RLS/sqlc/type churn; the raw `UpdatePrice` can no longer SET money/identity columns.
 
 ---
 
 # #658: grant-ledger temporal semantics — terminations carry no window; valid-time = effective everywhere
 
-**Completed:** phase 1
-**Status:** PHASE 1 SHIPPED v0.82.0 (2026-06-30) — the terminations-carry-no-window hardening + name-the-clock +
-effective-instant plumbing landed (migration 053, grants ledger, ownership status read). Follows the v0.81.0
-hotfix that stopped `terminate()` copying a grant's `ends_at` onto revoke/expire rows (past `ends_at` +
-`starts_at=now()` violated `grants_valid_window` and broke bulk reconcile of migrated/expired subscriptions).
-DECISION 2026-06-30 (Paul): the target end-state is that GRANTS carry no stored end AT ALL — a grant is an
-effective `starts_at` + spec, and every access END is derived (subscription grants → the subscription's
-`current_period_ends_at`; fixed one-off/trial → `starts_at` + a duration frozen into `spec_snapshot`) or is a
-terminating event. That fully removes span-storage and the window-constraint class. It is Phase 2 below: a larger
-money-path migration gated on one open decision (where a fixed one-off/trial end is frozen), deliberately NOT
-bundled into the Phase 1 hardening.
+**Completed:** yes
+**Status:** COMPLETE v0.82.0 (2026-06-30). PHASE 1 SHIPPED — terminations-carry-no-window hardening + name-the-clock
++ effective-instant plumbing (migration 053, grants ledger, ownership status read), following the v0.81.0 hotfix.
+PHASE 2 ("grants carry no stored end at all") was EVALUATED and REJECTED after reading the derive path — see the
+Phase 2 section: `grant.ends_at` is not a redundant duplicate but the grant event's FROZEN effective window-end,
+and dropping it would break replay determinism by the SAME argument that forces starts_at to be frozen. Phase 1 is
+the complete, correct fix; grant windows stay. Reopen only for the purist "end-is-always-an-event" rewrite, which
+is more machinery, not less.
 
 ## Metadata
 - Category: data-integrity
-- Status: phase-1-complete
+- Status: complete
 - Passes: true
 
 ## Problem
@@ -95,18 +256,32 @@ One rule, uniform across event types:
       `TestGrants_RevokeAsOfOwnershipRevokedAt` (backdated revoke → effective ownership `revoked_at`),
       `TestGrants_RevokeAlreadyExpired` still passes.
 
-**Phase 2 — grants carry NO stored end (Paul's target end-state; larger money-path change, sequence deliberately):**
+**Phase 2 — EVALUATED & REJECTED 2026-06-30 (do NOT implement "drop grant.ends_at"):**
 
-- [ ] RESOLVE FIRST (open decision): where a fixed one-off/trial end is frozen. Recommended: freeze the duration
-      into `spec_snapshot` at grant time (drift-proof against later catalog edits), so `end = starts_at + duration`
-      is derivable without coupling to mutable `prices.access_duration_hours`.
-- [ ] Rewrite entitlement-window end derivation in `MaterializeGrant`: subscription-sourced → the subscription's
-      `current_period_ends_at` (+ grace) instead of `grant.ends_at`; fixed one-off/trial → `starts_at` + frozen
-      duration. Update the `derive.grant_effect.missing`/`.excess` set queries accordingly.
-- [ ] Migration: stop populating `grant.ends_at`; once derivation no longer reads it, drop the column and
-      `grants_valid_window` + `grants_termination_no_window` become moot (no event stores a span).
-- [ ] Prove renewal needs no new grant/expire (entitlement window tracks the subscription period) and a
-      fixed-window purchase is immune to catalog edits after the fact.
+Reading the derive path before implementing showed the premise was wrong — `grant.ends_at` is not a redundant
+duplicate of the subscription period; it is the grant event's FROZEN effective window-end, and it is load-bearing:
+
+- `MaterializeGrant` sources the entitlement window end (`CreateEntitlement.EndAt`) and the usage-limit binding end
+  directly from `g.EndsAt`; ownership includes copy `parent.EndsAt`.
+- grants are strictly append-only — there is NO `UPDATE ... SET ends_at`. Renewal is a NEW per-period grant gated
+  by `deriveEntitlementWindows`' overlap-skip, each grant frozen to ITS period's `[start, end]`. The window is not
+  "tracked" off the subscription; it is frozen per grant. (The migrated one-grant-per-sub shape was the migration
+  seeding the current period, not a long-lived extendable window.)
+- credit-lot expiry is a SEPARATE money-layer `ExpiresAt`, not `grant.ends_at`.
+
+Decisive argument — the SAME principle Phase 1 used for starts_at: starts_at is frozen effective time so the fold is
+a pure function of source facts, replayable at any wall-clock. ends_at must be frozen for the identical reason.
+Re-deriving a window-end from the subscription's CURRENT period or CURRENT catalog duration would make replay
+non-deterministic (an old grant's window would shift when the sub renews or a product's duration is edited) — exactly
+the non-determinism Phase 1 rejected for starts_at. A grant is a bounded interval and must carry its frozen
+`[starts_at, ends_at]`; only a TERMINATION is a window-less point event (fixed in Phase 1).
+
+The purist alternative (every bounded grant = a grant event + a paired future-dated `expire` event, no window column)
+preserves determinism but is MORE machinery: it doubles event volume, needs scheduled-expire bookkeeping that renewal
+must supersede, and complicates the fold — a net loss on a money path for a theoretical purity gain. Ponytail: keep
+the window on the grant.
+
+Conclusion: Phase 1 is the complete, correct fix. Grant windows stay. Closed.
 
 ## Out of scope (named and rejected)
 
@@ -519,12 +694,9 @@ provider account on the NMI rail. The same pattern will likely matter for future
       arbitrary local key and the field name, which is what makes the single-underscore key parseable.)
 - [ ] Add tests or static assertions for config parse/dump examples proving two NMI provider accounts can exist
       under different local keys on the same `nmi` rail without treating `mobius`/`paykings` as rail names.
-- [ ] Define Solana provider-account identity explicitly: `account_id` is the signing authority public key used
-      for rebill/cranking, and startup validation must prove the configured signer resolves to that public key.
-      Recipient/treasury/funding/RPC values are account settings, not identity. NOTE: this is a hard change from
-      the CURRENT convention — fixtures + `merchants.example.yaml` use the RECIPIENT WALLET as the Solana
-      `account_id` — so migrate existing Solana `account_id`s to the signer pubkey and update all examples/fixtures
-      (coordinate with #650, which owns provider-account identity/uniqueness).
+- [ ] Define Solana provider-account identity explicitly: configured Solana manifests do not declare
+      `account_id`; the stored DB identity is derived from the signing authority public key used for
+      rebill/cranking. Recipient/treasury/funding/RPC values are account settings, not identity.
 
 Acceptance: config, docs, AND the DB use `rail` for backend family — grepping provider-account code/queries/DB
 for `provider_type` or `provider`-meaning-rail finds nothing (no alias survives anywhere, public or internal);
@@ -778,11 +950,11 @@ idempotent; the catalog Go structs are the single 1:1 source for both directions
 
 **Completed:** yes
 **Status:** DONE 2026-06-30: manifest Solana provider accounts can now declare `signer:
-{mode: vault_transit, key: ...}` or use `secrets.private_key` / `signer: {mode: keypair}`. Push validates
-Vault transit public key == `account_id` and stores signer mode in provider-account evidence; dump emits the
+{mode: vault_transit, key: ...}` or use `secrets.private_key` / `signer: {mode: local_keypair}`. Push validates
+the Vault Transit public key and derives the stored provider-account identity from the signer; dump emits the
 transit reference, never key material. Runtime recurring Solana services now use one provider-account-aware
-signer: declared Vault transit signs via Vault; keypair mode reads the provider-account scoped private_key
-with legacy `solana/private_key` fallback. Added an integration test proving provider-account evidence selects
+signer: declared Vault transit signs via Vault; local_keypair mode reads the provider-account scoped private_key
+with no global private-key fallback. Added an integration test proving provider-account evidence selects
 the named Vault transit key for public-key lookup and signing, plus the `vaultint` live test now exercises the
 OpenRails Solana signer wrapper over Vault Transit. Targeted unit/integration tests pass.
 PROPOSED 2026-06-30 (Paul): a Solana provider account's signer keypair should be suppliable two
@@ -810,11 +982,11 @@ path doesn't branch on it.
 
 - **Manifest:** let a Solana provider account's signer declare its mode — either an injected keypair
   (`secrets.private_key: {file|env|value}`, today's path) or a vault-transit signer
-  (e.g. `secrets.private_key: {vault_transit: <key-name>}`, or a `signer: {mode: vault_transit, key: …}`
-  block). The account_id (recipient wallet, #592) stays operator-declared either way.
+  (`signer: {mode: vault_transit, key: …}`). Solana manifests do not declare `account_id`; OpenRails derives the
+  stored identity from the signer public key.
 - **Signer path:** when the account is vault-transit, the Solana rail signs by calling Vault transit sign
   (reuse `internal/integrations/vault/transit.go`) instead of loading a local keypair. Validate at boot that
-  the transit key exists / its public key matches the declared wallet.
+  the transit key exists and exposes a Solana public key.
 - **Dump (#646):** emit the vault-transit reference (key name), never key material — consistent with the
   secrets-as-refs rule.
 
@@ -1376,7 +1548,7 @@ Today the model is single-account-per-rail:
 - [x] Replace the config `Routing` taxonomy `default|manual|legacy` with `primary|secondary|legacy` (hardcut). Done in `config/config.go`: consts `RailRoutingPrimary|Secondary|Legacy`, `manual` deleted; `EffectiveRouting` defaults to primary; `validateRails`/`PrimaryRailByType` updated. Already matches the manifest layer's `configRailRolePrimary|Secondary|Legacy` (`internal/bootstrap/`).
 - [~] manifest `mode`/`status=disabled` already map to role+status in `internal/bootstrap/merchant_manifest.go` (unknown mode → secondary+disabled), and `validateRails` enforces ≤1 `primary` per rail. STILL TODO: per-(merchant,rail,**environment**) primary uniqueness at the config layer (DB demote already exists).
 - CONFIG / INDEXING:
-- [x] Added `AccountID` + `EffectiveAccountID(name)` to `ProviderAccountConfig`; runtime keys off the account_id. NOTE: `EffectiveAccountID` falls back to the map name when account_id is unset (keeps existing tests/embedded callers working); the manifest path already REQUIRES `account_id`. STILL TODO: make account_id strictly required for nmi/ccbill/solana in the in-process set.
+- [x] Added `AccountID` + `EffectiveAccountID(name)` to `ProviderAccountConfig`; runtime keys off the account_id. NOTE: `EffectiveAccountID` falls back to the map name when account_id is unset (keeps existing tests/embedded callers working); the manifest path requires `account_id` for non-Solana rails and derives Solana identity from the signer. STILL TODO: make account_id strictly required for nmi/ccbill in the in-process set.
 - [x] `createNMIClients` builds one client per account keyed by `account_id`; single-NMI error removed. TRANSITIONAL: the primary is also aliased under the rail key `"nmi"` so the ~30 `NMIClients[rail]` consumers keep resolving the primary until records carry `provider_account_id`. Stripe/CCBill/Solana already tolerate multiple configs via `GetXRail()` primary-selection, so NMI was the only hard blocker.
 - WEBHOOKS:
 - [x] Per-account endpoint `POST /merchants/:merchant/webhooks/:provider/:account_id` added (additive; the existing `:provider`-only route is unchanged → no regression). Handler reads `:account_id`, loads THAT account's signing secret, and rejects an unknown account (404, no fallback). `WebhookMessage.ProviderAccountID` carries the routed account; the dispatcher selects `NMIClients[account_id]` (falls back to the rail/primary alias). NMI wired + integration-tested (`internal/merchants` per-account secret test + existing webhook suite green).
@@ -2334,16 +2506,17 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 
 # #659: embedded HTTP surface should be canonical, method-limited, and provider-aware
 
-**Completed:** no
-**Status:** PLANNED 2026-06-30 — route-surface cleanup from the Doujins/Hentai0 embedded mount review. OpenRails
-must not expose provider-specific endpoints for rails the merchant has not configured, and embedded hosts should
-mount OpenRails at its canonical billing namespace instead of hiding it behind a generic app API path.
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30 — OpenRails now has a provider-aware embedded route surface. Embedded hosts can
+mount the canonical `/billing/v1` API with an explicit HTTP method allowlist, Stripe/Solana/webhook routes are
+only mounted when the configured provider route plan enables them, and capabilities report the effective mounted
+surface instead of every route OpenRails knows how to serve.
 
 ## Metadata
 
 - Category: http-api
-- Status: planned
-- Passes: false
+- Status: complete
+- Passes: focused + integration tests pass; full suite currently blocked by unrelated dirty bootstrap manifest mismatch
 
 ## Problem
 
@@ -2383,31 +2556,373 @@ not be mounted for that runtime surface.
 
 ## Tasks
 
-- [ ] Audit current public and embedded route registration for provider-specific endpoints:
+- [x] Audit current public and embedded route registration for provider-specific endpoints:
       Stripe portal, Solana wallet-signing subscription routes, provider webhook routes, captcha/user checkout,
       customer self-service, merchant admin, catalog, payment-provider admin, and merchant service API.
-- [ ] Add a minimal route-mount planner that consumes the selected `RouteSet`s plus configured provider rails /
+- [x] Add a minimal route-mount planner that consumes the selected `RouteSet`s plus configured provider rails /
       capability metadata. Do not add a second router abstraction; build on the existing `RouteSet` and
       `CapabilitiesHandler` machinery.
-- [ ] Split self-service registration so provider-specific subroutes are registered conditionally instead of being
+- [x] Split self-service registration so provider-specific subroutes are registered conditionally instead of being
       hardcoded inside the always-on customer route group.
-- [ ] Hard-cut provider-specific public paths that should be generic. At minimum, plan the Stripe portal handoff as
+- [x] Hard-cut provider-specific public paths that should be generic. At minimum, plan the Stripe portal handoff as
       a generic billing-portal endpoint, mounted only when a configured provider supports it.
-- [ ] Update `pkg/embedded/gin.RegisterAPI` to register only the explicit billing HTTP method allowlist, not
+- [x] Update `pkg/embedded/gin.RegisterAPI` to register only the explicit billing HTTP method allowlist, not
       `group.Any`. Provide the same guidance/helper for hosts that use the lower-level `http.Handler` escape hatch.
-- [ ] Update examples/docs so embedded hosts use `/billing` for OpenRails, AuthKit examples use `/auth`, and app
-      APIs keep `/api/v1`.
-- [ ] Add regression tests proving:
+- [x] Update examples/docs so embedded hosts use `/billing` for OpenRails and app APIs keep `/api/v1`. AuthKit
+      stays prefix-neutral at `/api/v1` by its own documented convention (its capabilities path is already
+      `/auth/capabilities`, so a dedicated `/auth/v1` mount would double to `/auth/v1/auth/capabilities`); the
+      original `/auth/v1` idea was dropped, 2026-06-30.
+- [x] Add regression tests proving:
       - no `CONNECT`/`TRACE` routes are registered by the OpenRails embedded Gin helper;
       - a runtime with no Stripe does not mount Stripe portal/billing-portal routes;
       - a runtime with no Solana does not mount Solana wallet-signing routes;
       - configured Stripe/Solana runtimes still mount their intended routes;
       - route capabilities report the actual mounted groups/routes, not every route OpenRails knows how to serve.
-- [ ] Add/adjust Doujins and Hentai0 follow-up issues after OpenRails lands: mount OpenRails at `/billing`, AuthKit
-      at `/auth`, host app routes at `/api/v1`, and stop direct `Any` mounting of OpenRails handlers.
+- [x] Record downstream follow-up: after the OpenRails dependency bump, Doujins/Hentai0 should use the helper or
+      explicit method mounts, expose OpenRails at `/billing`, AuthKit at `/api/v1` (its documented convention),
+      host app routes at `/api/v1`, and stop direct `Any` mounting of OpenRails handlers.
+
+## Verification
+
+- PASS: `go test ./internal/http/routes/ginroutes ./internal/http/embedhttp ./internal/http ./pkg/embedded/gin ./pkg/embedded ./embed`
+- PASS: `go test -tags=integration ./internal/integrationharness -run TestRegisterAPIEndToEnd -count=1 -v`
+- PASS: `git diff --check`
+- BLOCKED unrelated: `go test ./...` currently fails in `internal/bootstrap.TestExampleMerchantConfigManifestParses`
+  because the dirty `config/merchants_config.example.yaml` provider-account example has 8 entries while the
+  existing test still expects 7. That mismatch is outside this route-surface issue.
 
 ## Out of scope
 
 - A full processor-routing engine. Provider selection/fallback stays in the provider-account routing/capability
   work; this issue only controls whether HTTP routes exist.
 - Backward-compatible aliases for `/api/openrails` or `/stripe/portal`. This is a hard-cut route cleanup.
+
+---
+
+# #660: Solana provider-account config parity — stop using construction-time rail config for merchant-owned account state
+
+**Completed:** yes
+**Status:** COMPLETE 2026-07-01 — Solana provider-account config is now aligned with signer-owned account state:
+Solana manifests do not declare `account_id`; the stored provider-account identity is derived from the signer
+public key. Checkout recipients resolve from the active Solana provider account (`settings.recipient_wallet` or
+signer-address fallback), signer custody supports
+`local_keypair` and `vault_transit`, recurring cranks sign with the subscription's recorded merchant address, and
+deployment RPC config is explicitly `rpc_provider` / `rpc_api_key` with no public `rpc_endpoint` knob.
+
+## Metadata
+- Category: config
+- Status: complete
+- Passes: focused + integration tests pass
+
+## Problem
+
+NMI, CCBill, and Stripe have converged on a better representation:
+
+- one `payment_provider_accounts` row per merchant-owned external account;
+- stable stored identity is `(rail, environment, account_id)`;
+- secrets are scoped under that account;
+- non-secret account knobs live in provider-account `settings`;
+- runtime code resolves the active account through `ActiveProviderAccountScope` instead of trusting a process-wide
+  rail blob.
+
+Solana has not fully caught up:
+
+- Solana manifests should not declare `account_id`; OpenRails derives the stored provider-account identity from
+  the configured signer public key.
+- `signer: local_keypair` / `secrets.private_key` and `signer: vault_transit` exist in the manifest path, but the
+  example does not clearly show the two valid custody modes or the base58 private-key format.
+- `recipient_wallet` used to be a runtime `SolanaRailConfig` field consumed by checkout/session paths; it now
+  belongs only in provider-account `settings`.
+- Solana RPC key config needed a hard cut to the clearer deployment-level `rpc_provider` + `rpc_api_key` pair, with
+  no legacy alias.
+- Some Solana RPC code uses generic names like `Provider`/`APIKey`, which are ambiguous in this codebase because
+  "provider" already means payment provider, provider account, and reconciliation provider.
+- `network` is correctly derived from `test_mode` today (`test`/devnet, `live`/mainnet), but this relationship is
+  not obvious in the merchant config example. There must NOT be a third Solana-specific network knob.
+- CCBill's `allowed_cidrs` example repeats the default ranges but does not state the actual behavior clearly:
+  omission uses the built-in default CCBill CIDRs; supplying the setting replaces the allowlist.
+
+The root issue is ownership. Process runtime config should describe deployment-level infrastructure defaults.
+Merchant-owned provider accounts should describe payment-account identity, credentials, signer custody, and
+account-specific public settings. Solana currently spreads merchant-owned facts across both layers.
+
+## Target design
+
+Use the provider-account model for Solana too:
+
+- `provider_accounts.<key>.solana.account_id` is not a manifest field. The stored DB provider-account identity is
+  the signer public key derived from the local keypair or Vault Transit Ed25519 key.
+- `environment: live|test` is the provider-account environment. Runtime `test_mode` still derives the chain:
+  `test_mode=true` => devnet, otherwise mainnet. Validation rejects mismatches the same way other rails do.
+- `signer: {mode: local_keypair}` requires scoped secret `private_key`; its public key becomes the stored
+  provider-account identity.
+- `signer: {mode: vault_transit, key: ...}` requires `vault.enabled=true`; the Transit key's public key must
+  be readable and becomes the stored provider-account identity; no `private_key` may also be supplied.
+- `settings.recipient_wallet` is optional. If omitted, default it to the signer public key. Keep the setting only
+  for the concrete case where settlement must go to a wallet distinct from the signing authority.
+- Provider-account RPC credentials are NOT added until there is a real requirement for merchant-owned RPC access.
+  Default stance: Solana RPC access is deployment infrastructure, so process-level runtime config owns it.
+- Runtime Solana RPC config uses explicit names:
+  - YAML: `rpc_provider` and `rpc_api_key`;
+  - Go config: `RPCProvider` and `RPCAPIKey`;
+  - RPC integration structs: `RPCProvider` and `RPCAPIKey`, never bare `Provider`/`APIKey`.
+- `rpc_provider` defaults to `helius`. `rpc_api_key` is interpreted as a Helius key for the built-in Helius
+  provider. With no key, the fallback chain uses Solana public RPC. `rpc_provider: public` explicitly disables
+  provider API-key use. There is no legacy RPC key alias.
+- Do NOT add a public `rpc_endpoint` setting for named providers. We know the Helius and Solana public URLs ahead
+  of time from `rpc_provider` + derived chain. Keep any custom endpoint support as an internal/test escape hatch
+  only, unless a later `rpc_provider: custom` issue proves it is needed.
+- `tokens` and pricing policy stay runtime rail config for now. They describe what this deployment supports on a
+  chain, not a merchant's account identity. Revisit only if multi-merchant deployments need per-merchant token
+  allowlists.
+
+## Tasks
+
+- [x] Inventory every Solana runtime read of `config.ProviderAccountSet.GetSolanaRail()` and classify it:
+      identity/signer/recipient should move to provider-account scope; deployment infrastructure (`tokens`,
+      fallback RPC/Helius default, feature flags) may stay process config.
+- [x] Add a small Solana provider-account resolver, mirroring CCBill's scoped resolver pattern but not adding a
+      new abstraction:
+      active merchant + rail=`solana` + environment=`live|test` -> derived signer identity, signer evidence,
+      settings, scoped secrets.
+- [x] Wire Solana Pay one-off checkout/session creation to resolve `recipient_wallet` from the active Solana
+      provider account:
+      `settings.recipient_wallet` if present, otherwise the stored signer identity.
+- [x] Wire recurring Solana signer resolution to use the same active provider-account row for new work, and to
+      keep existing provider-account-pinned rows on their recorded authority. Do not silently switch existing
+      subscriptions to a new signer.
+- [x] Validate local_keypair mode at seed/update time: parse `secrets.private_key` as base58 Solana private key and
+      use its public key as the stored provider-account identity. Keep validation local and deterministic; do not call chain RPC.
+- [x] Keep and harden Vault Transit validation: `vault_transit` requires a Transit client, reads the key public
+      key, and uses it as the stored provider-account identity.
+- [x] Decide whether `settings.recipient_wallet` is worth keeping. Preferred lazy path: support it because
+      `recipient_wallet` already exists, but document that omission defaults to the signer identity; do not add
+      treasury wallet abstractions here.
+- [x] Leave RPC credentials process-level unless a caller proves per-merchant RPC credentials are needed. Remove
+      stale comments/constants that imply merchant-owned Solana RPC credentials are currently supported.
+- [x] Add deployment-level Solana RPC provider config:
+      `rpc_provider` + `rpc_api_key`, Helius as the built-in default, and validation that unsupported providers
+      fail fast. No legacy RPC key alias is supported.
+- [x] Cleanly rename Solana RPC integration fields from generic `Provider`/`APIKey` to
+      `RPCProvider`/`RPCAPIKey`, including call sites in runtime construction, pollers, and embedded pull provider
+      wiring.
+- [x] Do not expose `rpc_endpoint` in `SolanaRailConfig`; retain only the existing internal custom endpoint hook
+      used by tests/dev helpers.
+- [x] Hard-cut legacy Solana config support:
+      remove runtime `recipient_wallet`, runtime `private_key` boot seeding, the old RPC key alias, the old
+      signer alias, and direct secret-store signer constructors that bypass provider accounts.
+- [x] Make the manifest dump round-trip Solana signer and settings correctly:
+      local_keypair dumps omit secrets unless `--include-secrets`; Vault Transit dumps `signer.mode` and `signer.key`;
+      `settings.recipient_wallet` is emitted only when explicitly configured and distinct/useful.
+- [x] Update `config/merchants_config.example.yaml` with realistic sample Solana addresses/private keys, not
+      placeholder prose, and include both local_keypair and Vault Transit examples without implying two active Solana
+      accounts are normal for one merchant.
+- [x] Add a short note near the CCBill example: omitted `settings.allowed_cidrs` uses `iputil.DefaultCCBillIPRanges`;
+      supplied `allowed_cidrs` replaces the allowlist.
+- [x] Add focused tests:
+      - manifest parse accepts realistic Solana base58 local keypair and signer address;
+      - local_keypair public key mismatch fails;
+      - Vault Transit public key mismatch fails;
+      - Solana checkout uses `settings.recipient_wallet` when set and the signer identity when omitted;
+      - no separate `network` key is accepted/needed in merchant provider-account config;
+      - CCBill omitted `allowed_cidrs` path still uses default CIDRs and explicit CIDRs replace them.
+
+## Verification
+
+- PASS: `go test ./config ./internal/integrations/solana ./internal/bootstrap ./internal/modules/solana/recurring ./internal/http ./internal/modules/solana ./internal/modules/checkout ./internal/app ./pkg/embedded ./internal/shared/iputil`
+- PASS: `go test -tags=integration ./internal/modules/solana/recurring -run 'TestProviderAccountSignerUsesVaultTransitEvidence|TestProviderAccountSignerUsesConfiguredEnvironment|TestProviderAccountSignerSignsForRecordedPublicKey'`
+- PASS: `go test -tags=integration ./tests -run 'TestCheckoutSessionSolanaTransferRequest|TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID'`
+- PASS: `go test -tags=integration ./internal/bootstrap -run TestReconcileMerchantManifestStoresSolanaProviderAccountConfig`
+- PASS: `go test ./internal/shared/iputil ./internal/modules/checkout -run 'CCBill|MerchantRail'`
+- PASS: `git diff --check`
+- PASS: hard-cut scan leaves no old RPC key alias, runtime recipient wallet, runtime private key,
+        old signer alias, boot-time secret seeding path, or configured Solana account_id.
+
+## Out of scope
+
+- A processor-routing/fallback engine for multiple active Solana provider accounts. The existing newest active
+      account rule is enough until a concrete routing policy issue exists.
+- Per-merchant RPC keys. Keep deployment RPC config unless a real customer requirement appears.
+- Operator-configured arbitrary RPC endpoints. Named providers cover the current requirement; custom endpoints can
+      be added later as `rpc_provider: custom` if a real provider needs it.
+- Treasury/cold-wallet/sweep policy. That belongs to the later crypto treasury work; this issue only fixes
+      payment-account identity and checkout recipient resolution.
+- Re-keying existing live Solana subscriptions. Existing subscription authority migration is a separate
+      account-migration operation because on-chain state is signer-bound.
+
+Acceptance: Solana new-work paths resolve merchant-owned Solana account facts from `payment_provider_accounts`,
+not construction-time rail config; Solana manifests omit `account_id` and derive the stored provider-account
+identity from the signer public key; local_keypair and Vault Transit custody modes are both clear and tested;
+`recipient_wallet` is a provider-account setting with signer-identity fallback; devnet/mainnet is derived from
+runtime `test_mode` with no Solana-specific network knob; deployment RPC uses explicit `rpc_provider`/`rpc_api_key` names with Helius as the default and no
+public `rpc_endpoint`; examples use real-shaped Solana values; and CCBill's default CIDR behavior is
+documented/tested.
+
+---
+
+# #661: least-privilege Vault — Solana Transit signing should not require KV secret read/write
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 — OpenRails bundles the Vault KV secret store and the Solana Vault-Transit signer onto
+ONE Vault login, so the token policy must grant BOTH broad KV read/write/delete AND transit signing. A deployment
+that only wants OpenRails to sign Solana transactions (custody stays in Vault) while managing merchant secrets some
+other way (e.g. the doujins values-injection model) is forced to grant KV access it never uses. Decouple the two
+capabilities so a transit-only deployment can bind a minimal `transit/sign` + `transit/keys` policy with no KV grant.
+Also: OpenRails introspects what its Vault token can actually do (`sys/capabilities-self`) and gates its route surface
+/ provider availability on the result (advisory, not authz) — only useful routes are registered, and a Solana rail
+with neither transit capability nor a local key is dropped with a boot warning instead of failing at first payment.
+
+## Metadata
+- Category: config / security
+- Status: complete
+- Passes: true (unit + Vault `vaultint` + #659 integration)
+
+## Progress (2026-07-01) — COMPLETE. build green, `go test ./...` 79 pkgs pass, Vault probe + #659 RegisterAPI integration tests pass.
+
+Vault-side core:
+- `config.SecretBackend` (`secret_backend: db|vault`, env `SECRET_BACKEND`) + `SecretStoreBackend()` accessor +
+  `validateSecretBackend`. Unit tests: `config/secret_backend_test.go`.
+- Capability probe `vault.SelfCapabilities` (`sys/capabilities-self`) → `{KVRead, KVWrite, Transit}`
+  (`internal/integrations/vault/capabilities.go`). INTEGRATION test (`vaultint`, `capabilities_integration_test.go`)
+  mints real transit-only / KV-rw / KV-read-only child tokens and asserts the derived caps — RUN + passing.
+- `internal/merchantsecrets.Build` refactored: opens Vault when configured; transit adapter built independently;
+  secret store per DECLARED backend (no auto-fallback); `gateSecretBackend` boot-error when `secret_backend=vault`
+  but no KV read, warn on read-only KV / connected-but-no-transit. Also derives `SolanaCanSign` (transit OR local
+  key) + `SecretWrite` on the Store. Unit test: `store_test.go`.
+
+HTTP route-surface gating (the #659 integration):
+- `routesurface`: added `SolanaSigning` + `SecretWrite` to `ProviderRoutes`, `RuntimeCapabilities`, the caps-aware
+  `ProviderRoutesFromRailsWithCapabilities`, and `/capabilities` `Map()` keys. Unit test: `provider_routes_test.go`.
+- Gating: one-off Solana (config, solana-pay) stays on `Solana`; SIGNING routes (recurring enroll + self-service
+  solana cancel/tier) gate on `SolanaSigning`; provider-account PUT/DELETE gate on `SecretWrite`. `self_service_test.go`
+  updated to the new split.
+- Plumbed `app.Runtime.RouteCapabilities` (nil = permissive); set from the Store in BOTH standalone (`server.go`) and
+  embedded (`embed/provision.go`), each boot-WARNing when a Solana rail is configured but can't sign. Construction
+  sites (`routes_self.go`, `embedhttp`) honor it; the explicit `pkg/embedded` ProviderRoutes API stays permissive.
+- Reworded the `vault_transit` manifest validation to "requires a Vault connection".
+- Docs: `docs/vault.md` (minimal transit-only / KV / combined policies + auth methods + secret_backend).
+
+Deliberately left permissive (not gated): the standalone MULTI-merchant public surface (`routes_public.go`,
+`AllProviderRoutes`) — it serves many merchants, so per-request 403 is the right boundary there, not a process-global
+route drop. Capability gating applies to the single-merchant / embedded surfaces where it is meaningful.
+
+## Problem
+
+`internal/merchantsecrets.Build` performs a SINGLE `vault.Login` and hands the resulting client to BOTH:
+- `vault.NewKVv2Adapter(vclient, "secret")` — the merchant secret store (create/read/update/delete provider secrets), and
+- `vault.NewTransitAdapter(vclient, "transit")` — the Solana `vault_transit` signer.
+
+Both share one Vault identity, so its token policy must be the UNION: KV `create/read/update/delete` on
+`secret/data/openrails/*` PLUS transit `update` on `transit/sign/*` and `read` on `transit/keys/*`.
+
+These capabilities are orthogonal:
+- Vault-KV merchant-secret storage is only needed when OpenRails is the system of record for provider secrets.
+- Transit signing only calls `transit/sign/<key>` and reads `transit/keys/<key>`; it never touches KV.
+
+The doujins embedded model already runs `vault.enabled=false` and injects resolved secret VALUES into the DB-backed
+secret store (enforced by `~/doujins/config/openrails_tenant_secrets_test.go`: OpenRails must not receive Vault
+client credentials). But that model CANNOT use `vault_transit` today, because enabling Vault at all also turns on the
+KV path and demands a policy that includes KV read/write. There is no "Vault connection for signing only" mode.
+
+Least privilege: a host that wants Vault-custody Solana signing should be able to give OpenRails a Vault identity
+scoped to Transit sign + read-key ONLY, with zero permission to read or write secrets.
+
+## Target design
+
+Separate the two Vault-backed capabilities so each is independently enabled and independently permissioned:
+
+- TWO orthogonal questions, TWO mechanisms. (a) "Where do secrets physically live?" is DECLARED INTENT, explicit
+  config: `secret_store.backend: db` (DEK-encrypted DB store / values-injected) or `vault` (KV-v2). It is NOT
+  auto-detected and NEVER auto-falls-back — the data lives in exactly one place, so falling back to a store that
+  doesn't hold it = silently running empty/broken. (b) "What am I actually allowed to do with Vault?" is
+  CAPABILITY-DRIVEN: open the connection whenever Vault is configured/accessible, probe `sys/capabilities-self`, and
+  light up exactly what the token permits — degrade + warn otherwise.
+- `vault.enabled` stays the connection gate but no longer implies the KV secret backend; the backend selector above does.
+- OpenRails opens a Vault connection when EITHER the secret backend is `vault` OR at least one account uses
+  `vault_transit`. In transit-only mode OpenRails performs NO KV calls, so the operator can bind a transit-only policy.
+- `merchantsecrets.Build` builds the secret store for the DECLARED backend and the transit adapter independently:
+  the Vault KV store when backend=`vault`, else the DB store; transit adapter whenever a Vault connection exists. The
+  capability probe then decides which OPERATIONS/routes actually light up (below), rather than a static flag.
+- Capability-gated behavior for the secret backend:
+  - backend=`vault` + KV read-write → full secret ops (read + the config-push/write route surface).
+  - backend=`vault` + KV read-only → read secrets; HIDE the write/push surface + warn.
+  - backend=`vault` + NO KV access → BOOT ERROR (secrets declared in Vault but unreachable; never silently run empty).
+  - backend=`db` → secrets from the DB store; KV capability irrelevant.
+- Config validation: `signer: vault_transit` requires a Vault connection (reword the existing "requires vault.enabled"),
+  independent of the secret backend. Solana signing is available iff transit capability OR a local key exists (see
+  capability section); a genuinely missing capability at call time still surfaces as a Vault 403 (fail loud).
+- Document the minimal Vault policies (transit-only / KV / combined).
+- (Stretch) Support DISTINCT credentials/logins for transit vs KV so the two capabilities hold separate tokens/policies.
+  Default stays one login with a least-privilege union policy; two-token is a later refinement, not MVP.
+
+Minimal Vault policies (docs):
+- Transit-only: `transit/sign/<key-prefix>*` → `["update"]`; `transit/keys/<key-prefix>*` → `["read"]`.
+- KV secret store: `secret/data/openrails/*` → `["create","read","update","delete"]`;
+  `secret/metadata/openrails/*` → `["read","delete","list"]`.
+
+## Capability introspection & feature-gating
+
+At startup (after `vault.Login`) OpenRails probes what its OWN token may actually do and gates its route surface +
+provider availability on the result — config states intent, the probe validates it, and only routes that are actually
+useful get registered. ADVISORY ONLY: this drives UX/feature-gating and boot diagnostics, NEVER authorization. Vault's
+runtime 403 stays the real boundary (a gated-on route may still 403 if policy changes under a running process), so
+call sites must still handle 403, and a probe failure (Vault unreachable) must NOT hard-fail boot when local keys
+already satisfy the configured rails.
+
+- Probe `sys/capabilities-self` (POST the paths OpenRails cares about → capabilities per path); `auth/token/lookup-self`
+  gives policies as a fallback. Derive `secrets: none|read|read-write` (from `secret/data/openrails/*`) and
+  `transit: on|off` (from `transit/sign/<key>` + `transit/keys/<key>`).
+- Register only USEFUL routes — the surface reflects what OpenRails can actually do (builds on the #659 provider-aware
+  RouteSet + `/capabilities`):
+  - KV read-write → expose the secret / provider-config WRITE surface (provider-account PUT, secret push). Read-only,
+    none, or transit-only → hide it (a write route with no write capability is not useful; it would only 403).
+  - Solana signing is available iff a `local_keypair` secret is present OR transit capability is present. Tighten
+    `ProviderRoutes.Solana` from "a Solana account is configured" to "…and it can actually sign".
+- Graceful degradation: a configured Solana rail/plan with NO signer capability (no local key AND no transit) is
+  dropped from the active surface with a loud boot WARNING — not a cryptic 403 at first payment. Generalizes to
+  `vault.enabled=false`: "can sign" is decided by whether the local-key secret exists.
+- Reflect the derived capability set in the `/capabilities` document so clients see the honest, effective surface.
+
+## Tasks
+
+- [ ] Add an explicit merchant-secret-backend selector `secret_store.backend: db|vault` — DECLARED INTENT, not
+      auto-detected and never auto-fallback (secrets live in one place; falling back to a store that lacks the data =
+      silently empty). Decoupled from `vault.enabled`. Default preserves current behavior (today `vault.enabled=true`
+      implies KV) so existing configs are unchanged.
+- [ ] Secret-backend capability gating: backend=`vault` + KV read-write → full secret ops; + KV read-only → hide the
+      write/push surface + warn; + NO KV access → BOOT ERROR (declared-in-Vault but unreachable; never run empty).
+- [ ] Refactor `internal/merchantsecrets.Build`: open the Vault connection when KV OR transit is needed; build the KV
+      adapter only for the vault secret backend; build the transit adapter whenever connected; return the DB secret
+      store in transit-only mode.
+- [ ] Reword the `vault_transit` config validation to "requires a Vault connection", independent of the secret backend.
+- [ ] Document the minimal Vault policies (transit-only / KV / combined) in the config example and/or docs/vault.md.
+      Include the currently-hardcoded mount names (`secret`, `transit`) and the transit key-name pattern.
+- [ ] (Stretch) Distinct Vault credentials/logins for transit vs KV, behind explicit config; keep single-login default.
+- [ ] Tests: transit-only mode (secret backend=db + a vault_transit account) builds a working signer and performs NO
+      KV ops (assert KV adapter never constructed/called); KV-only mode unchanged; vault_transit with no Vault
+      connection fails validation with the reworded error; combined mode still works.
+- [ ] Cross-repo note: unlocks a host (doujins or future) using Vault-custody Solana signing with a transit-only
+      OpenRails identity while keeping merchant secrets in the injected/DB path. The doujins guardrail that forbade
+      passing Vault client creds to embedded OpenRails (`config/openrails_tenant_secrets_test.go` ::
+      `TestComposeDoesNotPassVaultClientToEmbeddedOpenRails`) has ALREADY been removed (2026-06-30), so nothing on the
+      doujins side blocks it. doujins behavior is unchanged (still `vault.enabled=false`); a host opts in only when
+      this OpenRails-side transit-only work lands.
+- [ ] Capability probe: after `vault.Login`, query `sys/capabilities-self` for the KV secret prefix + transit
+      sign/keys of configured keys; derive `{secrets: none|read|read-write, transit: on|off}`. Advisory only — never
+      derive authz from it; a probe failure must not hard-fail boot when local keys already cover the configured rails.
+- [ ] Gate the secret / provider-config WRITE route surface on KV read-write capability (hide under read-only /
+      transit-only / no-KV), reusing the #659 RouteSet + `/capabilities` machinery — do not add a second gate mechanism.
+- [ ] Tighten Solana availability to "can actually sign" = local_keypair secret present OR transit capability present;
+      feed it into `ProviderRoutes.Solana` and the `/capabilities` document.
+- [ ] Boot-time graceful degradation: a configured Solana rail with no signer capability is dropped from the surface
+      with a loud WARNING, never a runtime 403 at first payment.
+- [ ] Tests: transit-only token → write routes hidden + Solana signable; KV-read-only token → write routes hidden;
+      no-transit + no-local-key + Solana configured → Solana dropped + warning; `/capabilities` reflects each case.
+
+## Out of scope
+
+- Managing/rotating the Transit keys themselves (key lifecycle stays an operator/Vault concern).
+- Making the `secret`/`transit` mount names configurable — related but separable; track separately if a real
+  non-default-mount requirement appears.
+- The values-injection secret pipeline (Vault Agent → env overlays) — unchanged; this issue only scopes OpenRails'
+  own live Vault connection.

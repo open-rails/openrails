@@ -41,10 +41,6 @@ const (
 	// SecretNMIWebhookSigning is the merchant's NMI webhook signing
 	// secret, used to verify inbound webhooks after merchant/provider resolution.
 	SecretNMIWebhookSigning = "nmi/mobius/webhook_signing_secret"
-	// SecretSolanaPrivateKey is the merchant's Solana signing keypair. This is
-	// OpenRails-owned and intentionally not merchant-writable through self-service
-	// APIs.
-	SecretSolanaPrivateKey = "solana/private_key"
 )
 
 // SecretDefinition describes one OpenRails-owned merchant secret. It is the
@@ -67,7 +63,6 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretNMISecurityKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
 	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretSolanaPrivateKey, Rail: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }
 
 // ProviderAccountSecretName returns the canonical secret-store name for a

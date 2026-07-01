@@ -15,6 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -53,6 +54,11 @@ type Runtime struct {
 	// Rails is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
 	Rails config.ProviderAccountSet
+
+	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
+	// actually do (#661), used to gate the provider route surface. Nil means
+	// unprobed → the surface stays permissive (no capability gating).
+	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock            clockwork.Clock
 	HealthManager    *health.ServiceHealthManager

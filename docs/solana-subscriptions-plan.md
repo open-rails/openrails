@@ -150,18 +150,19 @@ existing subscription lifecycle.
 
 OpenRails is merchant-aware at the data layer today (migration `039_merchant_aware_core`:
 `billing.merchants` control-plane table, `merchant_id` on merchant-owned tables,
-`pkg/merchant` context, `middleware.ResolveMerchant`), but **rail credentials are
-still a single global config** (`cfg.GetSolanaRail()` → one `RecipientWallet`,
-one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
+`pkg/merchant` context, `middleware.ResolveMerchant`), and Solana account identity
+now follows the provider-account model. Runtime rail config is deployment
+infrastructure (`rpc_provider`, `rpc_api_key`, token policy), not merchant-owned
+signer or recipient state.
 
 - **Each merchant brings its own provider connection.** Stripe = its own API key +
-  account; Solana = **its own keypair + on-chain merchant address**. The global
-  config-file rail becomes the **`default` merchant's** credentials, so
-  single-merchant self-hosted installs keep working unchanged.
+  account; Solana = **its own provider account with a signing public address and
+  signer custody mode**.
 - **Credentials use the EXISTING `tenancy.MerchantSecretStore`** (issues #225/#227),
-  not a new store. The Solana keypair is the secret `solana/private_key`, resolved
-  per request via `merchant.FromContext(ctx)`. Backend is DB+envelope (self-hosted)
-  or Vault (managed) — same addressing either way. See §8 for the Vault design.
+  not a new store. A local Solana keypair uses the provider-account scoped
+  `private_key` secret; Vault Transit signs without exposing a private key.
+  Backend is DB+envelope (self-hosted) or Vault (managed) — same addressing
+  either way. See §8 for the Vault design.
 - **Plans are inherently per-merchant.** A Plan PDA is `["plan", merchant_address,
   plan_id]` — derived from *that merchant's* merchant address — so two merchants
   selling "$10/mo" get distinct on-chain plans automatically. The `Price` row is
@@ -181,11 +182,13 @@ one `HeliusAPIKey`). Per-merchant billing requires generalizing that:
 - **Recurring stablecoin allowlist** — a small constant set, **`{USDC}` at launch**, with `PYUSD` gated behind devnet verification (see §2 warning; its mint extensions likely disqualify it). Resolved to mainnet/devnet mints via `config.TokensForNetwork`. `create_plan` / publish-recurring-price **rejects any mint not in this set** (notably USDT and SOL). One-off purchase paths keep using the full `DefaultSupportedTokens()` set and are unaffected.
 - **`subscriptions` table:** reuse `Rail=solana`, `RailSubscriptionID` = the **Subscription PDA** address (natural unique key for `GetByRailSubscriptionID`, which lifecycle renewal already keys on). No new columns on this table.
 - **New table `billing.solana_subscriptions`** (decided — a dedicated table, **not** subscription metadata; on-chain state is load-bearing and the due-worker queries it, so it must be first-class and indexable). Merchant-scoped (`merchant_id`), with FK to `subscriptions.id`. Columns: `subscriber_wallet`, `authority_pda`, `subscription_pda` (unique), `plan_pda`, `mint`, `last_pulled_period_start`, `last_signature`, `plan_created_at_fingerprint` (detects ghost-plan recreation), `next_pull_at`, timestamps. Indexes on `(merchant_id, next_pull_at)` for the due-query and `subscription_pda` for idempotent upserts.
-- **Merchant credentials reuse the EXISTING `MerchantSecretStore`** (`internal/merchants`, issues #225/#227) — **do NOT build a bespoke Solana credential table.** That abstraction already provides `(merchant_id, name)`-addressed, per-merchant-isolated, envelope-encrypted secrets with a DB backend (self-hosted) and a Vault backend (managed) behind one interface. Add canonical Solana secret names alongside the existing `stripe/*` ones:
-  - `solana/private_key` — the merchant's signing keypair (the sensitive bit; ideally never extracted — see §8 Transit).
-  - `solana/merchant_address`, `solana/fee_wallet_address` — non-secret but stored together for cohesion (or keep addresses in a small non-secret merchant-config row; they're public on-chain).
-  - `solana/rpc_endpoint`, `solana/helius_api_key` — per-merchant RPC config.
-  The global config `GetSolanaRail()` seeds the **`default` merchant's** secrets so existing single-merchant installs are unchanged. **Only the non-secret on-chain merchant address needs to be queryable** for plan-PDA derivation — keep it in a tiny non-secret `billing.merchant_solana_config` row (or on `billing.solana_subscriptions`), never the private key.
+- **Merchant credentials reuse the EXISTING `MerchantSecretStore`** (`internal/merchants`, issues #225/#227) — **do NOT build a bespoke Solana credential table.** That abstraction already provides `(merchant_id, name)`-addressed, per-merchant-isolated, envelope-encrypted secrets with a DB backend (self-hosted) and a Vault backend (managed) behind one interface. Solana provider accounts carry:
+  - stored account identity — derived from the signing public address.
+  - `signer.mode` — `local_keypair` with scoped secret `private_key`, or `vault_transit` with a Transit key name.
+  - `settings.recipient_wallet` — optional destination wallet; defaults to the signer identity.
+  - Solana RPC is deployment infrastructure, configured by runtime `rpc_provider` / `rpc_api_key` (Helius by
+    default). It is not a per-merchant secret unless a later scoped-RPC requirement is implemented.
+  No global Solana private-key seed path is supported.
 - **Pending-enroll record:** mirror the existing Redis pending-payment pattern for the `subscribe` confirmation (detect the user's on-chain `subscribe` tx before activating).
 
 ## 7. Flows
@@ -245,9 +248,9 @@ master-key-wraps-per-merchant-DEK), and the `server.go` wiring that selects them
 Stripe per-merchant keys already flow through it (`stripe/secret_key`). **Solana
 plugs into the same pipe; we do not invent a parallel one.**
 
-- **`Signer` interface** in `integrations/solana/signer.go` — `Sign(ctx, tx)`, **resolved per merchant** via `merchant.FromContext(ctx)`. It loads `solana/private_key` from the injected `MerchantSecretStore` (whatever backend is wired). **No process-global signer** — every signing call is merchant-scoped, mirroring how Stripe credentials resolve.
+- **`Signer` interface** in `integrations/solana/signer.go` — `Sign(ctx, tx)`, **resolved per merchant** via `merchant.FromContext(ctx)`. Local keypair mode loads the active provider account's scoped `private_key` from the injected `MerchantSecretStore` (whatever backend is wired). **No process-global signer** — every signing call is merchant-scoped, mirroring how Stripe credentials resolve.
 - **Two `Signer` impls (the §11-Q4 decision), both behind one interface:**
-  1. **KV-fetch-then-sign-locally** — `store.Get(merchant, "solana/private_key")` → decrypt → sign in-process. Works with *any* backend (DB+envelope self-hosted, or Vault KV managed). Simplest; the key briefly lives in container memory.
+  1. **KV-fetch-then-sign-locally** — fetch the provider-account scoped `private_key` → decrypt → sign in-process. Works with *any* backend (DB+envelope self-hosted, or Vault KV managed). Simplest; the key briefly lives in container memory.
   2. **Vault Transit remote-sign (recommended for production)** — the private key is a non-extractable Ed25519 key inside Vault's **Transit** engine; OpenRails sends the tx message to `transit/sign/<merchant-key>` and gets back a signature. **The key never leaves Vault / never enters the container.** This is the right custody level for a key that moves money, and it's strictly stronger than KV-fetch. Add it as a third `MerchantSecretStore`-sibling or a dedicated `RemoteSigner` — it's a "sign this," not a "give me the secret," operation, so it's a separate method, not `Get`.
 - **How Vault fetch works in a single-container multi-merchant prod (the question):**
   - **App-level Vault auth, not per-merchant.** The OpenRails container authenticates to Vault *once as itself* (AppRole `role_id`/`secret_id`, or Kubernetes auth via its service-account JWT), receives a Vault token, and **renews it on a schedule**. Merchant isolation is enforced in code by the `(merchant_id, name)` addressing — the app is the trusted broker. Per-merchant Vault *policies* only matter if merchant operators get direct Vault access (BYO-key self-service), which can come later.
@@ -261,7 +264,7 @@ plugs into the same pipe; we do not invent a parallel one.**
   - **Receiving wallet (cold/treasury):** **public key only** in OpenRails; set as the plan's whitelisted `destination`. **Receives the USDC**, never signs.
   - **Containment:** with `destinations = [cold_receiving_wallet]`, the program rejects any pull to another address (`UnauthorizedDestination`). So a fully compromised hot cranking key **cannot redirect subscriber funds to an attacker** — it can only trigger already-authorized pulls into your cold treasury, capped at each subscriber's per-period amount. This is the main reason to split the wallets.
 - **Fee (SOL) management:** monitor **each merchant's** cranking-wallet SOL balance and **alert** when low (NO auto-top-up, NO gasless relayer / fee-payer delegation — too complex). Each pull costs ~5,000 lamports base + priority fee; N due subs = N txns/cycle. A pull that fails for lack of SOL is *operational* (retry), not subscriber dunning — distinguish from insufficient *USDC*. Per-merchant fee wallets isolate one merchant running dry.
-- **Rate / RPC:** reuse `RPCClient` + per-merchant Helius config; batch/throttle pulls (the dunning worker's lease + backoff patterns apply).
+- **Rate / RPC:** reuse deployment-level `RPCClient` config (`rpc_provider`/`rpc_api_key`); batch/throttle pulls (the dunning worker's lease + backoff patterns apply).
 
 ## 9. Risks & edge cases
 
@@ -276,7 +279,7 @@ plugs into the same pipe; we do not invent a parallel one.**
 ## 10. Phased delivery (suggested issues — next_id 251 in agents/progress.json)
 
 0. **PYUSD compatibility spike** — on devnet, attempt `create_plan` + `subscribe` against the PYUSD mint and confirm whether the program rejects it (PermanentDelegate/TransferFee). Outcome decides whether the launch allowlist is `{USDC}` or `{USDC, PYUSD}`. *(cheap, do first)*
-1. **Merchant Solana signer over the existing secret store** — add `solana/*` secret names; `Signer` (KV-fetch impl) resolving `solana/private_key` from `tenancy.MerchantSecretStore`; seed the `default` merchant from existing global config; in-process cache with TTL. **No new credentials table** — reuse #225/#227. *(foundation; everything else depends on it)*
+1. **Merchant Solana signer over provider accounts and the existing secret store** — provider-account evidence selects `local_keypair` or `vault_transit`; local keypair mode resolves the scoped `private_key` from `tenancy.MerchantSecretStore`; in-process cache with TTL. **No new credentials table** — reuse #225/#227. *(foundation; everything else depends on it)*
 2. **Signer + tx-builder foundation** — build/sign helpers, devnet smoke test using a merchant signer. *(no user-facing change)*
    - *Managed-prod track (parallel, optional):* implement a live `VaultKV` adapter (`hashicorp/vault/api`) + Vault auth (AppRole/K8s) + select `vaultSecretStore`; and/or a Vault **Transit** `RemoteSigner` so the key never leaves Vault.
 3. **Plan publishing** — `create_plan`/`update_plan`/`delete_plan` signed by the merchant key; admin path to mark a USDC price Solana-recurring; persist plan handle in `Price.Rails["solana"]`.
@@ -295,7 +298,7 @@ plugs into the same pipe; we do not invent a parallel one.**
 1. **Fiat-equivalent reporting** — pin USD value at enroll, or mark-to-market for analytics only?
 2. **First charge timing** — pull immediately on enroll (recommended, matches card flows) vs. at first period boundary?
 3. **Whitelist destinations** on plans, or rely on `pullers` only?
-4. ✅ **RESOLVED — secret storage** — reuse the existing `tenancy.MerchantSecretStore` (#225/#227): DB+envelope self-hosted, Vault KV managed; key `solana/private_key`. *Remaining sub-choice:* KV-fetch-then-sign vs. **Vault Transit** remote-sign (recommended for the money-moving key). See §8.
+4. ✅ **RESOLVED — secret storage** — reuse the existing `tenancy.MerchantSecretStore` (#225/#227): DB+envelope self-hosted, Vault KV managed; local keypair mode uses the provider-account scoped `private_key`; Vault Transit remote-sign is recommended for the money-moving key. See §8.
 5. **Per-merchant fee-wallet funding model** — merchant funds their own SOL, or platform fronts gas and bills it back?
 ```
 

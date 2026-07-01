@@ -10,9 +10,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -20,81 +18,42 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SeedConfiguredMerchantSolanaSecret bridges a single-merchant install that
-// configures its Solana signing key via global config into the per-merchant
-// secret store the recurring Solana services read (issue #253). The
-// Submitter/signer always reads solana/private_key from the merchant secret store;
-// a global-config-only install would otherwise have an EMPTY store for its
-// merchant and could not sign without a manual secret write.
-//
-// merchantID is the engine's configured merchant (#336 — there is no default
-// merchant). It is idempotent and safe to call on every boot:
-//
-//   - merchantID zero        -> no-op (no configured merchant to seed for).
-//   - configKey empty        -> no-op (Solana not configured via global config).
-//   - secret already present -> no-op (NEVER overwrites a manual/rotated key).
-//   - secret absent          -> seed it from configKey and log once.
-//
-// A backend error (store unavailable) is returned so the caller can fail boot
-// loudly rather than start a signer that will never resolve a key.
-func SeedConfiguredMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, configKey string) error {
-	if merchantID.IsZero() {
-		return nil
-	}
-	return SeedMerchantSolanaSecret(ctx, store, merchantID, configKey)
-}
-
-func SeedMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, configKey string) error {
-	key := strings.TrimSpace(configKey)
-	if key == "" {
-		return nil // nothing configured via global config
-	}
-	if store == nil {
-		return fmt.Errorf("recurring: seed merchant solana secret: nil secret store")
-	}
-	_, err := store.Get(ctx, merchantID, solanaint.SecretSolanaPrivateKey)
-	switch {
-	case err == nil:
-		return nil // already present — never overwrite an existing secret
-	case errors.Is(err, merchants.ErrSecretNotFound):
-		// fall through to seed
-	default:
-		return fmt.Errorf("recurring: check merchant solana secret: %w", err)
-	}
-	if _, err := store.Put(ctx, merchantID, solanaint.SecretSolanaPrivateKey, key); err != nil {
-		return fmt.Errorf("recurring: seed merchant solana secret: %w", err)
-	}
-	log.WithField("merchant", merchantID.String()).
-		Info("seeded merchant Solana signing key from global config (solana/private_key)")
-	return nil
-}
-
 // secretStoreGetter adapts the per-merchant merchants.MerchantSecretStore to the
-// solana.MerchantSecretGetter the keypair signer needs. The Solana signing key is
-// the secret named solana/private_key; the store backend (DB+envelope or Vault)
-// is chosen at the composition root and is transparent here.
+// solana.MerchantSecretGetter the keypair signer needs.
 type secretStoreGetter struct {
-	store    merchants.MerchantSecretReader
-	database *db.DB
+	store       merchants.MerchantSecretReader
+	database    *db.DB
+	environment string
+	accountID   string
 }
 
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
-	if name == solanaint.SecretSolanaPrivateKey && g.database != nil {
-		if account, ok, err := primarySolanaProviderAccount(ctx, g.database, merchantID); err != nil {
-			return "", err
-		} else if ok {
-			secretName, err := merchants.ProviderAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
-			if err != nil {
-				return "", err
-			}
-			sec, err := g.store.Get(ctx, merchantID, secretName)
-			switch {
-			case err == nil:
-				return sec.Value, nil
-			case !errors.Is(err, merchants.ErrSecretNotFound):
-				return "", err
-			}
+	if name == "private_key" && g.database != nil {
+		var (
+			account gen.OpenrailsPaymentProviderAccount
+			ok      bool
+			err     error
+		)
+		if strings.TrimSpace(g.accountID) != "" {
+			account, ok, err = solanaProviderAccountByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
+		} else {
+			account, ok, err = primarySolanaProviderAccount(ctx, g.database, merchantID, g.environment)
 		}
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("solana: no active provider account for signing key")
+		}
+		secretName, err := merchants.ProviderAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
+		if err != nil {
+			return "", err
+		}
+		sec, err := g.store.Get(ctx, merchantID, secretName)
+		if err != nil {
+			return "", err
+		}
+		return sec.Value, nil
 	}
 	sec, err := g.store.Get(ctx, merchantID, name)
 	if err != nil {
@@ -103,67 +62,28 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 	return sec.Value, nil
 }
 
-// NewSignerFromStore builds the per-merchant keypair signer reading
-// solana/private_key from the merchant secret store. Exposed (alongside the
-// Submitter constructors) so the composition root can share the SAME signer
-// between the Submitter-backed services and the signer-backed
-// PrepareTierChangeService (#272), which co-signs with the merchant key directly.
-func NewSignerFromStore(store merchants.MerchantSecretReader, ttl time.Duration) solanaint.Signer {
-	return solanaint.NewKeypairSigner(secretStoreGetter{store: store}, ttl)
-}
-
-func NewSignerFromProviderAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration) solanaint.Signer {
+func NewSignerFromProviderAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment ...string) solanaint.Signer {
+	env := "live"
+	if len(environment) > 0 && strings.TrimSpace(environment[0]) != "" {
+		env = strings.TrimSpace(environment[0])
+	}
 	return providerAccountSigner{
-		keypair: solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database}, ttl),
-		transit: transit,
-		db:      database,
-		ttl:     ttl,
+		keypair:     solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database, environment: env}, ttl),
+		store:       store,
+		transit:     transit,
+		db:          database,
+		environment: env,
+		ttl:         ttl,
 	}
 }
 
-// NewSignerFromTransit builds the per-merchant signer whose key lives in Vault
-// Transit (non-extractable). Shared with PrepareTierChangeService (#272).
-func NewSignerFromTransit(transit solanaint.TransitClient, ttl time.Duration) solanaint.Signer {
-	return solanaint.NewTransitSigner(transit, nil, ttl)
-}
-
-// NewSignerSubmitterFromStore builds the production Submitter: a per-merchant
-// keypair signer reading solana/private_key from the merchant secret store, wired
-// to the Solana RPC. ttl 0 uses the default signer cache TTL.
-func NewSignerSubmitterFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
-	return NewSignerSubmitter(NewSignerFromStore(store, ttl), rpc)
-}
-
-// NewCrankServiceFromStore builds a CrankService backed by the merchant secret
-// store + RPC — the value the composition root injects into the cranker worker.
-func NewCrankServiceFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
-	return NewCrankService(NewSignerSubmitterFromStore(store, rpc, ttl))
-}
-
-// NewPlanServiceFromStore builds a PlanService backed by the merchant secret store
-// + RPC for the given network (mainnet/devnet). The same RPC client serves as the
-// plan reader, enabling the idempotent re-publish guard (#254).
-func NewPlanServiceFromStore(store merchants.MerchantSecretReader, rpc *solanaint.RPCClient, network string, tokens map[string]config.TokenConfig, ttl time.Duration) *PlanService {
-	return NewPlanServiceWithReader(NewSignerSubmitterFromStore(store, rpc, ttl), rpc, network, tokens)
-}
-
-// NewSignerSubmitterFromTransit builds a Submitter whose signing key lives in
-// Vault Transit (non-extractable) — the key never enters this process.
-func NewSignerSubmitterFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
-	return NewSignerSubmitter(NewSignerFromTransit(transit, ttl), rpc)
-}
-
-// NewCrankServiceFromTransit builds a CrankService whose per-merchant Solana key is
-// signed via Vault Transit.
-func NewCrankServiceFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
-	return NewCrankService(NewSignerSubmitterFromTransit(transit, rpc, ttl))
-}
-
 type providerAccountSigner struct {
-	keypair solanaint.Signer
-	transit solanaint.TransitClient
-	db      *db.DB
-	ttl     time.Duration
+	keypair     solanaint.Signer
+	store       merchants.MerchantSecretReader
+	transit     solanaint.TransitClient
+	db          *db.DB
+	environment string
+	ttl         time.Duration
 }
 
 func (s providerAccountSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
@@ -182,15 +102,23 @@ func (s providerAccountSigner) SignMessage(ctx context.Context, merchantID merch
 	return signer.SignMessage(ctx, merchantID, message)
 }
 
+func (s providerAccountSigner) SignMessageForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error) {
+	signer, err := s.resolveForPublicKey(ctx, merchantID, publicKey.String())
+	if err != nil {
+		return solanago.Signature{}, err
+	}
+	return signer.SignMessage(ctx, merchantID, message)
+}
+
 func (s providerAccountSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
-	account, ok, err := primarySolanaProviderAccount(ctx, s.db, merchantID)
+	account, ok, err := primarySolanaProviderAccount(ctx, s.db, merchantID, s.environment)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
 		cfg := signerConfigFromEvidence(account.Evidence)
 		switch cfg.Mode {
-		case "", "keypair":
+		case "local_keypair":
 			return s.keypair, nil
 		case "vault_transit":
 			if s.transit == nil {
@@ -201,10 +129,34 @@ func (s providerAccountSigner) resolve(ctx context.Context, merchantID merchant.
 			return nil, fmt.Errorf("solana: unknown signer mode %q", cfg.Mode)
 		}
 	}
-	if s.transit != nil {
-		return solanaint.NewTransitSigner(s.transit, nil, s.ttl), nil
+	return nil, fmt.Errorf("solana: no active provider account for signer")
+}
+
+func (s providerAccountSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey string) (solanaint.Signer, error) {
+	account, ok, err := solanaProviderAccountByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
+	if err != nil {
+		return nil, err
 	}
-	return s.keypair, nil
+	if !ok {
+		return nil, fmt.Errorf("solana: no provider account for merchant address %s", publicKey)
+	}
+	cfg := signerConfigFromEvidence(account.Evidence)
+	switch cfg.Mode {
+	case "local_keypair":
+		return solanaint.NewKeypairSigner(secretStoreGetter{
+			store:       s.store,
+			database:    s.db,
+			environment: account.Environment,
+			accountID:   account.AccountID,
+		}, s.ttl), nil
+	case "vault_transit":
+		if s.transit == nil {
+			return nil, fmt.Errorf("solana: provider account %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
+		}
+		return solanaint.NewTransitSigner(s.transit, func(merchant.ID) string { return cfg.Key }, s.ttl), nil
+	default:
+		return nil, fmt.Errorf("solana: unknown signer mode %q", cfg.Mode)
+	}
 }
 
 type solanaSignerConfig struct {
@@ -222,14 +174,17 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID) (gen.OpenrailsPaymentProviderAccount, bool, error) {
+func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPaymentProviderAccount, bool, error) {
 	if database == nil || merchantID.IsZero() {
 		return gen.OpenrailsPaymentProviderAccount{}, false, nil
+	}
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		environment = "live"
 	}
 	var row gen.OpenrailsPaymentProviderAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		environment := "live"
 		row, err = database.Gen(ctx).GetActiveProviderAccountForNewWork(ctx, gen.GetActiveProviderAccountForNewWorkParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        "solana",
@@ -241,6 +196,33 @@ func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchant
 			return gen.OpenrailsPaymentProviderAccount{}, false, nil
 		}
 		return gen.OpenrailsPaymentProviderAccount{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
+	}
+	return row, true, nil
+}
+
+func solanaProviderAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPaymentProviderAccount, bool, error) {
+	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
+		return gen.OpenrailsPaymentProviderAccount{}, false, nil
+	}
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		environment = "live"
+	}
+	var row gen.OpenrailsPaymentProviderAccount
+	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		var err error
+		row, err = database.Gen(ctx).GetProviderAccountByIdentity(ctx, gen.GetProviderAccountByIdentityParams{
+			MerchantID:  merchantID.UUID(),
+			Rail:        "solana",
+			Environment: &environment,
+			AccountID:   strings.TrimSpace(accountID),
+		})
+		return err
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.OpenrailsPaymentProviderAccount{}, false, nil
+		}
+		return gen.OpenrailsPaymentProviderAccount{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
 	}
 	return row, true, nil
 }

@@ -309,8 +309,7 @@ func testSolanaCheckoutRails() config.ProviderAccountSet {
 		"solana": {
 			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{
-				Network:         "devnet",
-				RecipientWallet: testRecipientWallet,
+				Network: "devnet",
 				Tokens: map[string]config.TokenConfig{
 					"USDC": {
 						Mint:     devnetUSDCMint,

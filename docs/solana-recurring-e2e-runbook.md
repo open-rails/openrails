@@ -59,8 +59,9 @@ is the billing DB; the integration notes flag it as flaky — recreate the volum
 if connections reset).
 
 ### 3. Provision the merchant cranker key + a USDC recurring price
-- Seed the merchant secret `solana/private_key` (the cranker wallet) — DB-backed
-  store (self-hosted) or Vault. The cranker pays gas + signs `transfer_subscription`.
+- Configure a Solana provider account with `signer.mode: local_keypair` plus scoped
+  `secrets.private_key`, or `signer.mode: vault_transit`. The signing wallet pays
+  gas + signs `transfer_subscription`.
 - Obsolete: the old `POST /v1/admin/solana/recurring/plans` route was removed
   with the admin-surface hard cut. Do not use this runbook as the source of
   truth for publishing Solana recurring plans until the flow is redesigned.
@@ -108,7 +109,7 @@ Identical to the full-stack steps above:
 2. `~/openrails-host/docker-compose.override.yaml` pinning `image: openrails:local` +
    `SOLANA_NETWORK: devnet` / `SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
    then `docker compose up -d postgres openrails`.
-3. Seed the merchant cranker secret `solana/private_key`. The old
+3. Configure the merchant Solana provider-account signer. The old
    `POST /v1/admin/solana/recurring/plans` publishing step is obsolete until
    the Solana recurring plan flow is redesigned.
 4. Bring up the host-app frontend pointed at the local OpenRails

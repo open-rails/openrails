@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 func TestCapabilitiesHandler(t *testing.T) {
 	// Advertise checkout+customer+webhooks; everything else must read false.
-	h := CapabilitiesHandler([]RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks})
+	h := CapabilitiesHandler([]RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true})
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil))
@@ -49,6 +51,15 @@ func TestCapabilitiesHandler(t *testing.T) {
 		if caps.RouteGroups[rs] != w {
 			t.Errorf("route_groups[%s] = %v, want %v", rs, caps.RouteGroups[rs], w)
 		}
+	}
+	if caps.Routes["solana"] != true {
+		t.Errorf("routes.solana = %v, want true", caps.Routes["solana"])
+	}
+	if caps.Routes["billing_portal"] != false {
+		t.Errorf("routes.billing_portal = %v, want false", caps.Routes["billing_portal"])
+	}
+	if caps.Routes["webhooks"] != false {
+		t.Errorf("routes.webhooks = %v, want false", caps.Routes["webhooks"])
 	}
 }
 

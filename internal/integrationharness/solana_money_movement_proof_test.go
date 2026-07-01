@@ -46,6 +46,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -70,10 +71,9 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	// --- Merchant Solana key lives as a per-merchant SECRET, not on-chain. ----
-	// The private key is the merchant signing secret (solana/private_key). It is
-	// injected into the SAME merchant secret store that holds Stripe/NMI creds and
-	// is resolved through the PRODUCTION keypair signer — proving the money-signing
+	// --- Merchant Solana key lives as a provider-account SECRET, not on-chain. ----
+	// The private key is scoped to the Solana provider account and resolved
+	// through the production provider-account signer — proving the money-signing
 	// authority is internal OpenRails state, never carried in any Solana payload.
 	priv := solanago.MustPrivateKeyFromBase58(base58Key)
 	merchantPub := priv.PublicKey()
@@ -82,12 +82,27 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 
 	secretStore, err := merchants.NewDBSecretStore(db.WrapPool(h.Pool(), ""))
 	require.NoError(t, err)
-	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, solanaint.SecretSolanaPrivateKey, base58Key)
-	require.NoError(t, err, "inject merchant solana/private_key secret")
+	environment := "test"
+	now := time.Now().UTC()
+	require.NoError(t, surface.app.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, dbtest.TestMerchantID), func(ctx context.Context) error {
+		_, err := surface.app.Runtime.DB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+			MerchantID:     dbtest.TestMerchantID.UUID(),
+			Rail:           "solana",
+			Environment:    &environment,
+			AccountID:      merchantPub.String(),
+			Evidence:       []byte(`{"signer":{"mode":"local_keypair"}}`),
+			LastVerifiedAt: &now,
+		})
+		return err
+	}))
+	secretName, err := merchants.ProviderAccountSecretName("solana", environment, merchantPub.String(), "private_key")
+	require.NoError(t, err)
+	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, base58Key)
+	require.NoError(t, err, "inject provider-account private_key secret")
 
-	signer := recurring.NewSignerFromStore(secretStore, 0)
+	signer := recurring.NewSignerFromProviderAccounts(secretStore, nil, surface.app.Runtime.DB, 0, environment)
 	signerPub, err := signer.PublicKey(ctx, dbtest.TestMerchantID)
-	require.NoError(t, err, "production signer must resolve the merchant key from the secret store")
+	require.NoError(t, err, "production signer must resolve the provider-account key from the secret store")
 	require.Equal(t, merchantPub, signerPub, "secret-store-backed signer derives the merchant wallet")
 
 	// --- (b) DB is the source of truth: publish a Solana-priced catalog product.

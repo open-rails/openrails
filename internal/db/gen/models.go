@@ -719,7 +719,6 @@ type OpenrailsPaymentProviderAccount struct {
 	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
 	AccountID      string
 	DisplayName    *string
-	VaultSecretRef *string
 	Evidence       []byte
 	FirstSeenAt    time.Time
 	LastVerifiedAt *time.Time

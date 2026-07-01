@@ -24,3 +24,23 @@ func TestReadOnlyBlocksTransactionSubmission(t *testing.T) {
 		t.Fatalf("SendTransactionSkipPreflight: expected ErrProviderReadOnly, got %v", err)
 	}
 }
+
+func TestRPCProviderKeySelectsHeliusEndpoint(t *testing.T) {
+	c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", RPCProvider: "helius", RPCAPIKey: "rpc-key"})
+	if len(c.endpoints) < 2 {
+		t.Fatalf("expected helius plus public fallback, got %#v", c.endpoints)
+	}
+	if got := c.endpoints[0].URL; got != "https://devnet.helius-rpc.com/?api-key=rpc-key" {
+		t.Fatalf("expected helius devnet endpoint, got %q", got)
+	}
+}
+
+func TestRPCProviderPublicIgnoresAPIKey(t *testing.T) {
+	c := NewRPCFallbackClient(RPCFallbackConfig{Network: "mainnet", RPCProvider: "public", RPCAPIKey: "ignored"})
+	if len(c.endpoints) != 1 {
+		t.Fatalf("expected only public endpoint, got %#v", c.endpoints)
+	}
+	if got := c.endpoints[0].URL; got != "https://api.mainnet-beta.solana.com" {
+		t.Fatalf("expected public endpoint, got %q", got)
+	}
+}

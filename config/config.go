@@ -106,6 +106,39 @@ type Config struct {
 	Captcha    *CaptchaConfig    `koanf:"captcha,omitempty"`
 	Encryption *EncryptionConfig `koanf:"encryption,omitempty"`
 	Vault      *VaultConfig      `koanf:"vault,omitempty"`
+
+	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
+	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
+	// It is declared intent, never auto-detected and never auto-fallback — the data
+	// lives in exactly one place (#661). Empty derives from vault.enabled for
+	// backward-compat (historically vault.enabled=true implied Vault KV). Env:
+	// SECRET_BACKEND / BILLING_SECRET_BACKEND.
+	SecretBackend string `koanf:"secret_backend,omitempty"`
+}
+
+const (
+	SecretBackendDB    = "db"
+	SecretBackendVault = "vault"
+)
+
+// SecretStoreBackend returns where merchant secrets live: "vault" or "db".
+// Explicit secret_backend wins; empty derives from vault.enabled (back-compat).
+// Vault Transit signing is orthogonal to this — it can be used with either backend
+// (#661); this only selects the KV secret store.
+func (cfg *Config) SecretStoreBackend() string {
+	if cfg == nil {
+		return SecretBackendDB
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
+	case SecretBackendVault:
+		return SecretBackendVault
+	case SecretBackendDB:
+		return SecretBackendDB
+	}
+	if cfg.Vault != nil && cfg.Vault.Enabled {
+		return SecretBackendVault
+	}
+	return SecretBackendDB
 }
 
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
@@ -375,16 +408,13 @@ type StripeRailConfig struct {
 }
 
 type SolanaRailConfig struct {
-	// HeliusAPIKey: with a key Helius is the primary RPC + public endpoints the
-	// fallback; without one the public chain alone serves (#352).
-	HeliusAPIKey                    string                 `koanf:"helius_api_key"`
-	RecipientWallet                 string                 `koanf:"recipient_wallet"`
+	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to
+	// "helius"; without rpc_api_key the client uses public RPC fallback.
+	RPCProvider string `koanf:"rpc_provider"`
+	// RPCAPIKey is the API key for the selected RPC provider (currently helius).
+	RPCAPIKey                       string                 `koanf:"rpc_api_key"`
 	Tokens                          map[string]TokenConfig `koanf:"tokens"`
 	SolanaPayRecurringSubscriptions bool                   `koanf:"solana_pay_recurring_subscriptions"`
-	// PrivateKey is the merchant/cranker signing keypair (base58) for a
-	// SINGLE-TENANT install; seeded into the default merchant's secret store at
-	// boot (#253). Empty in multi-merchant / Vault deployments.
-	PrivateKey string `koanf:"private_key"`
 	// Network is DERIVED from test_mode at startup (devnet under test_mode,
 	// mainnet otherwise) — not configurable (#349).
 	Network string `koanf:"-"`
@@ -798,6 +828,24 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
+	if err := validateSecretBackend(cfg); err != nil {
+		return fmt.Errorf("secret_backend config validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateSecretBackend checks the declared secret backend is valid and reachable.
+// secret_backend=vault needs a Vault connection to serve the KV store (#661).
+func validateSecretBackend(cfg *Config) error {
+	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
+	case "", SecretBackendDB, SecretBackendVault:
+	default:
+		return fmt.Errorf("secret_backend must be %q or %q", SecretBackendDB, SecretBackendVault)
+	}
+	if cfg.SecretStoreBackend() == SecretBackendVault && (cfg.Vault == nil || !cfg.Vault.Enabled) {
+		return fmt.Errorf("secret_backend=vault requires vault.enabled (secrets declared in Vault KV need a Vault connection)")
+	}
 	return nil
 }
 
@@ -924,8 +972,10 @@ func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
 
 		effectiveType := proc.EffectiveRail(name)
 		// #641: with multiple accounts on a rail, the made-up map name can't serve
-		// as the provider identity — each must declare its real account_id.
-		if countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
+		// as the provider identity — each must declare its real account_id. Solana is
+		// exempt: its identity is derived from the signer, so account_id is ignored
+		// there and never a required disambiguator.
+		if effectiveType != models.RailSolana && countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
 			return fmt.Errorf("rail '%s' shares rail %q with another account, so it must declare account_id (the rail-native id; no name fallback)", name, effectiveType)
 		}
 		switch effectiveType {
@@ -1028,11 +1078,15 @@ func validateSolanaRail(name string, proc *ProviderAccountConfig, isDev bool) er
 	if solana == nil {
 		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
 	}
-	if strings.TrimSpace(solana.RecipientWallet) == "" {
-		if !isDev {
-			return fmt.Errorf("rail '%s' (solana): recipient_wallet is required outside development (Solana payments cannot be processed without it)", name)
-		}
-		log.Warnf("rail '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
+	rpcProvider := strings.ToLower(strings.TrimSpace(solana.RPCProvider))
+	switch rpcProvider {
+	case "", "helius", "public":
+	default:
+		return fmt.Errorf("rail '%s' (solana): rpc_provider must be helius or public", name)
+	}
+	rpcAPIKey := strings.TrimSpace(solana.RPCAPIKey)
+	if rpcProvider == "public" && rpcAPIKey != "" {
+		return fmt.Errorf("rail '%s' (solana): rpc_provider public cannot use rpc_api_key", name)
 	}
 
 	return nil
@@ -1477,7 +1531,7 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
 	}
 	if k.Exists("merchant_cors") {
-		return nil, fmt.Errorf("merchant_cors was removed (#519): configure browser origins on AuthKit remote_application.allowed_origins")
+		return nil, fmt.Errorf("merchant_cors was removed (#519): browser CORS belongs to the host app, not OpenRails merchant config")
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
@@ -1515,13 +1569,13 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired merchant config (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant")
 	}
 	if ignoredCORSConfig {
-		log.Warn("ignoring retired cors_origins config (#519): browser CORS origins come from AuthKit remote_application.allowed_origins")
+		log.Warn("ignoring retired cors_origins config (#519): browser CORS belongs to the host app, not OpenRails")
 	}
 	if ignoredDBRequireRLS {
 		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")
 	}
 	if ignoredAuthIssuers {
-		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app issuer inline under merchants[].issuer in the merchant config manifest")
+		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest")
 	}
 	if ignoredRails {
 		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")

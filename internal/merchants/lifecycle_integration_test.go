@@ -78,7 +78,6 @@ CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
     display_name text,
-    vault_secret_ref text,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT current_timestamp NOT NULL,

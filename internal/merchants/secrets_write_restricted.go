@@ -3,6 +3,7 @@ package merchants
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -40,7 +41,15 @@ func (s *writeRestrictedSecretStore) Get(ctx context.Context, merchantID merchan
 }
 
 func (s *writeRestrictedSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
-	if reason, ok := s.reasons[strings.TrimSpace(name)]; ok {
+	name = strings.TrimSpace(name)
+	for pattern, reason := range s.reasons {
+		matched, err := path.Match(pattern, name)
+		if err != nil {
+			matched = pattern == name
+		}
+		if !matched {
+			continue
+		}
 		if reason == "" {
 			reason = "write is restricted"
 		}

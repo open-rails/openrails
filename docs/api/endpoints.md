@@ -282,8 +282,9 @@ Returns `{ unread_count: <int> }`.
 ### POST /v1/me/notifications/{id}/read
 Marks the notification as read. Response `{ message: "notification marked as read" }`.
 
-### POST /v1/me/stripe/portal
-Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
+### POST /v1/me/billing-portal
+Creates a billing portal session when the merchant has a provider that supports portal handoff.
+Response `{ "url": "https://..." }`.
 
 ## Merchant API (`/v1/merchant/*`)
 

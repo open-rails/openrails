@@ -91,8 +91,7 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 
 // configureSolanaRail normalizes the Solana token set and applies the
 // pricing policy (#360). It NEVER fails the boot over token configuration —
-// tokens that cannot function are dropped with a loud warning, mirroring the
-// "recipient_wallet not configured; Solana payments disabled" pattern:
+// tokens that cannot function are dropped with a loud warning:
 //
 //   - devnet (test_mode): NO pricing requirements at all — devnet money is fake.
 //   - mainnet, Pyth feed exists for the symbol: feed pricing (for stablecoins
@@ -764,9 +763,10 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 	if solanaProc := railSet.GetSolanaRail(); solanaProc != nil && solanaProc.Solana != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
-			HeliusAPIKey: solanaProc.Solana.HeliusAPIKey,
-			Network:      solanaNetwork,
-			ReadOnly:     cfg.IsProviderReadOnly(),
+			RPCProvider: solanaProc.Solana.RPCProvider,
+			RPCAPIKey:   solanaProc.Solana.RPCAPIKey,
+			Network:     solanaNetwork,
+			ReadOnly:    cfg.IsProviderReadOnly(),
 		})
 	}
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider, clock)

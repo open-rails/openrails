@@ -22,15 +22,15 @@ func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)    { ret
 
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
-	// host-app issuer (registered as owner of its permission-group), provider
-	// accounts + secrets, and profile. No auth/users/groups section.
+	// host-app remote_application (registered as owner of its permission-group),
+	// provider accounts + secrets, and profile. No auth/users/groups section.
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
   cozy-art:
     display_name: Cozy Art
-    issuer:
-      uri: https://auth.cozy.art
+    remote_application:
+      issuer: https://auth.cozy.art
       jwks_uri: https://auth.cozy.art/.well-known/jwks.json
     profile:
       display_name: Cozy Art Billing
@@ -58,9 +58,9 @@ merchants:
 	require.Len(t, manifest.Merchants, 1)
 	m := manifest.Merchants["cozy-art"]
 	require.Equal(t, "Cozy Art Billing", m.Profile.DisplayName)
-	require.NotNil(t, m.Issuer)
-	require.Equal(t, "https://auth.cozy.art", m.Issuer.URI)
-	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.Issuer.JWKSURI)
+	require.NotNil(t, m.RemoteApplication)
+	require.Equal(t, "https://auth.cozy.art", m.RemoteApplication.Issuer)
+	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
 	require.Len(t, m.ProviderAccounts, 2)
 	require.Equal(t, "acct_test_123", m.ProviderAccounts["stripe"]["stripe"].AccountID)
 }
@@ -71,10 +71,17 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 
 	manifest, err := ParseMerchantConfigManifest(raw)
 	require.NoError(t, err)
-	require.Len(t, manifest.Merchants, 1)
+	require.Len(t, manifest.Merchants, 2)
 	m := manifest.Merchants["local-stack"]
-	require.NotNil(t, m.Issuer)
-	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", m.Issuer.JWKSURI)
+	require.NotNil(t, m.RemoteApplication)
+	require.Equal(t, "https://local-stack.example", m.RemoteApplication.Issuer)
+	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
+
+	staticMerchant := manifest.Merchants["static-jwks-stack"]
+	require.NotNil(t, staticMerchant.RemoteApplication)
+	require.Equal(t, "https://static-jwks.example", staticMerchant.RemoteApplication.Issuer)
+	require.Len(t, staticMerchant.RemoteApplication.JWKS.Keys, 1)
+	require.Equal(t, "static-ed25519-1", staticMerchant.RemoteApplication.JWKS.Keys[0].Kid)
 
 	// #646: the example carries the COMPLETE merchant_configurations payload.
 	require.NotNil(t, m.Invoice)
@@ -89,11 +96,11 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "15m", m.DelegatedInvokerWastedSpendWindows[0].Window)
 	require.Equal(t, int64(5_000_000), m.DelegatedInvokerWastedSpendWindows[0].Limit)
 
-	// #641/#646/#655: multiple accounts per rail, each with a human name,
-	// account_id identity, lifecycle, and a live+test environment pair for NMI
-	// and Stripe.
+	// #641/#646/#655/#660: multiple accounts per rail, each with a human name,
+	// account_id identity, lifecycle, and explicit signer/destination split for
+	// Solana.
 	accts := m.ProviderAccounts
-	require.Len(t, accts, 7)
+	require.Len(t, accts, 8)
 	type key struct{ name, env string }
 	byName := map[key]ProviderRailAccountConfig{}
 	byRail := map[string]string{}
@@ -128,16 +135,26 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	accountID := solanago.PublicKeyFromBytes(pub).String()
+	exampleAccountID := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
+	examplePrivateKey := "2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT"
 	secrets, err := newManifestSecretValues("solana", map[string]string{
-		"private_key": "keypair",
+		"private_key": examplePrivateKey,
 	})
 	require.NoError(t, err)
 
-	got, err := manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{}, secrets, nil)
+	got, gotAccountID, err := manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{}, secrets, nil)
 	require.NoError(t, err)
-	require.Equal(t, map[string]string{"mode": "keypair"}, got)
+	require.Equal(t, map[string]string{"mode": "local_keypair"}, got)
+	require.Equal(t, exampleAccountID, gotAccountID)
 
-	_, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
+	// A declared account_id is IGNORED (warned), never an error — derived from the key.
+	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", exampleAccountID, ProviderRailAccountConfig{
+		Signer: &ProviderAccountSignerConfig{Mode: "local_keypair"},
+	}, secrets, nil)
+	require.NoError(t, err)
+	require.Equal(t, exampleAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
+
+	_, _, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
 		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, secrets, fakeTransit{pub: pub})
 	require.Error(t, err)
@@ -145,11 +162,24 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 
 	emptySecrets, err := newManifestSecretValues("solana", nil)
 	require.NoError(t, err)
-	got, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
+	// vault_transit with a declared account_id: ignored (warned); derives from the Transit key.
+	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
+		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+	}, emptySecrets, fakeTransit{pub: pub})
+	require.NoError(t, err)
+	require.Equal(t, accountID, gotAccountID, "declared account_id ignored; derived from the Transit key")
+
+	got, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
 		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
+	require.Equal(t, accountID, gotAccountID)
+
+	// Missing signer/key remains empty here; manifest validation rejects it earlier.
+	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{}, emptySecrets, nil)
+	require.NoError(t, err)
+	require.Empty(t, gotAccountID, "receive-only account has no account_id")
 }
 
 func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
@@ -202,19 +232,29 @@ merchants:
 			want: "support_email",
 		},
 		{
-			name: "issuer missing uri",
-			body: base("    issuer:\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
-			want: "issuer.uri is required",
+			name: "issuer section removed",
+			body: base("    issuer:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
+			want: "issuer",
 		},
 		{
-			name: "issuer both trust sources",
-			body: base("    issuer:\n      uri: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      public_keys:\n        - public_key_pem: x\n"),
-			want: "exactly one of jwks_uri or public_keys",
+			name: "remote application missing issuer",
+			body: base("    remote_application:\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
+			want: "remote_application.issuer is required",
 		},
 		{
-			name: "issuer no trust source",
-			body: base("    issuer:\n      uri: https://auth.cozy.art\n"),
-			want: "must set jwks_uri or public_keys",
+			name: "remote application both trust sources",
+			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      public_keys:\n        - public_key_pem: x\n"),
+			want: "exactly one of jwks_uri, jwks, or public_keys",
+		},
+		{
+			name: "remote application no trust source",
+			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n"),
+			want: "must set jwks_uri, jwks, or public_keys",
+		},
+		{
+			name: "remote application allowed origins removed",
+			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      allowed_origins:\n        - https://auth.cozy.art\n"),
+			want: "allowed_origins",
 		},
 		{
 			name: "catalogs belong to push-merchant-catalog",
@@ -247,6 +287,11 @@ merchants:
 			want: "environment must be live or test",
 		},
 		{
+			name: "solana network is not a provider-account knob",
+			body: base("    provider_accounts:\n      solana:\n        solana:\n          network: devnet\n"),
+			want: "unknown field \"network\"",
+		},
+		{
 			name: "invalid provider secret alias",
 			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
 			want: "unknown provider account secret",
@@ -263,4 +308,20 @@ merchants:
 			require.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+// A declared Solana account_id is IGNORED, not rejected: parsing succeeds (it is
+// derived from the signer at apply, with a warning). A Solana account with no
+// signer to derive from is the only Solana parse error.
+func TestParseMerchantConfigManifestSolanaAccountIDIgnored(t *testing.T) {
+	base := func(fragment string) string {
+		return "version: 1\nmerchants:\n  cozy-art:\n    display_name: Cozy Art\n" + fragment
+	}
+	withAccountID := base("    provider_accounts:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
+	_, err := ParseMerchantConfigManifest([]byte(withAccountID))
+	require.NoError(t, err, "declared solana account_id is ignored, not a parse error")
+
+	noSigner := base("    provider_accounts:\n      solana:\n        solana:\n          environment: live\n")
+	_, err = ParseMerchantConfigManifest([]byte(noSigner))
+	require.ErrorContains(t, err, "requires a signer", "solana with no signer has no key to derive account_id from")
 }

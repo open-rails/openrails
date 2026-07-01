@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -189,6 +190,14 @@ func New(deps Dependencies) (*Server, error) {
 		s.merchants = tsvc
 		if deps.Runtime != nil {
 			deps.Runtime.Merchants = tsvc
+			// #661: gate the provider route surface on what OpenRails can actually do.
+			deps.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
+				SolanaCanSign: secretBackend.SolanaCanSign,
+				SecretWrite:   secretBackend.SecretWrite,
+			}
+			if !secretBackend.SolanaCanSign && deps.Runtime.Rails.GetSolanaRail() != nil {
+				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault Transit capability and no local key); Solana signing routes are disabled — configure vault_transit or a local keypair")
+			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
 				deps.Runtime.CheckoutService.SetProviderAccountSecretResolver(tsvc)
@@ -196,19 +205,6 @@ func New(deps Dependencies) (*Server, error) {
 			if deps.Runtime.VaultService != nil {
 				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
 				deps.Runtime.VaultService.SetProviderAccountSecretResolver(tsvc)
-			}
-		}
-
-		// Single-install bridge (#253): an in-memory Solana private key is seeded
-		// only into the CONFIGURED merchant's secret store as solana/private_key
-		// (#336: no default merchant — the seed no-ops when no merchant is configured).
-		// Named tenants must be configured explicitly by an operator credential
-		// rotation. Idempotent; never overwrites an existing secret. No-op when
-		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
-		// global private key is set).
-		if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
-			if err := recurring.SeedConfiguredMerchantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.Solana.PrivateKey); err != nil {
-				return nil, fmt.Errorf("seed configured merchant solana secret: %w", err)
 			}
 		}
 
@@ -221,7 +217,7 @@ func New(deps Dependencies) (*Server, error) {
 			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
-			solanaSigner := recurring.NewSignerFromProviderAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0)
+			solanaSigner := recurring.NewSignerFromProviderAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
 			submitter := recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
 			network := "mainnet"
 			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {
@@ -358,10 +354,9 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	}))
 	e.Use(ginmw.SecurityHeaders())
 	// CORS is browser transport policy, not API authorization. Preflight has no
-	// JWT issuer, so standalone uses the union of enabled AuthKit
-	// remote_application.allowed_origins and fails closed when the registry cannot
-	// be read. JWT signature/issuer/audience/permissions and merchant ownership
-	// remain the real request security boundary.
+	// JWT issuer. JWT signature/issuer/audience/permissions and merchant ownership
+	// remain the real request security boundary; hosts that need browser CORS wire
+	// an explicit origin source.
 	e.Use(ginmw.CORSFromSource(s.browserCORSOrigins))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the merchant / billing namespace before authorization and before any
@@ -414,6 +409,7 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 	return asm.NewHTTPHandler(embedhttp.Options{
 		RouteSets:          opts.RouteSets,
 		AdvertiseRouteSets: opts.RouteSets,
+		ProviderRoutes:     opts.ProviderRoutes,
 	})
 }
 

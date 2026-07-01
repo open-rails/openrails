@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
@@ -21,9 +22,32 @@ type MountOptions struct {
 	// DelegatedAuthenticator protects /v1/me and /v1/customers routes.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// MountPrefix is the host path the whole surface is mounted under (e.g.
-	// "/api/openrails"); incoming paths are MountPrefix + "/v1/...". Empty means
+	// "/billing"); incoming paths are MountPrefix + "/v1/...". Empty means
 	// paths already arrive canonical ("/v1/...").
 	MountPrefix string
+	// ProviderRoutes selects provider-specific public routes. Nil derives from
+	// the embedded runtime where possible.
+	ProviderRoutes *ProviderRoutes
+}
+
+// ProviderRoutes selects provider-specific public routes for a Gin embedded
+// mount.
+type ProviderRoutes struct {
+	StripePortal bool
+	Solana       bool
+	Webhooks     bool
+}
+
+func (p ProviderRoutes) internal() routesurface.ProviderRoutes {
+	// An explicit host selection is authoritative — enabling Solana enables its
+	// signing routes, and the write surface stays on (no capability second-guess).
+	return routesurface.ProviderRoutes{
+		StripePortal:  p.StripePortal,
+		Solana:        p.Solana,
+		SolanaSigning: p.Solana,
+		Webhooks:      p.Webhooks,
+		SecretWrite:   true,
+	}
 }
 
 // MountHandler returns the selected embedded billing surfaces as ONE handler.
@@ -33,9 +57,10 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	// serves customer via the self handler, so it is part of the advertised set.
 	active := e.MountRouteSets(opts.RouteSets)
 	var self http.Handler
+	providerRoutes := providerRoutesFromMountOptions(opts.ProviderRoutes)
 	if routeSetSelected(active, embedded.RouteSetCustomer) {
 		var err error
-		self, err = SelfHandler(e, opts.DelegatedAuthenticator)
+		self, err = selfHandler(e, opts.DelegatedAuthenticator, providerRoutes)
 		if err != nil {
 			return nil, err
 		}
@@ -52,6 +77,7 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 		user = asm.NewHTTPHandler(embedhttp.Options{
 			RouteSets:          userRouteSets,
 			AdvertiseRouteSets: active,
+			ProviderRoutes:     providerRoutes,
 		})
 	}
 
@@ -59,6 +85,14 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	// base + "/v1/...".
 	base := strings.TrimSuffix(embedhttp.EmbeddedV1Prefix, "/v1")
 	return combinedMount(opts.MountPrefix, base, self, user), nil
+}
+
+func providerRoutesFromMountOptions(opt *ProviderRoutes) *routesurface.ProviderRoutes {
+	if opt == nil {
+		return nil
+	}
+	v := opt.internal()
+	return &v
 }
 
 func routeSetSelected(routeSets []embedded.RouteSet, want embedded.RouteSet) bool {

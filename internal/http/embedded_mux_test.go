@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -87,6 +88,49 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 
 	// Security headers applied by the base middleware stack.
 	require.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+}
+
+func TestEmbeddedMuxProviderRoutesAreConditional(t *testing.T) {
+	s := &Server{
+		cfg:           &config.Config{Captcha: &config.CaptchaConfig{}},
+		runtime:       &app.Runtime{},
+		authenticator: stubAuthenticator{},
+	}
+	none := routesurface.ProviderRoutes{}
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{
+		RouteSets:      []RouteSet{RouteSetCheckout, RouteSetWebhooks},
+		ProviderRoutes: &none,
+	})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/solana/tokens", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchants/acme/webhooks/stripe", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil))
+	require.Contains(t, rec.Body.String(), `"webhooks":false`)
+
+	solana := routesurface.ProviderRoutes{Solana: true}
+	h = s.newHTTPHandlerMux(HTTPHandlerOptions{
+		RouteSets:      []RouteSet{RouteSetCheckout},
+		ProviderRoutes: &solana,
+	})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/solana/tokens", nil))
+	require.NotEqual(t, http.StatusNotFound, rec.Code)
+
+	webhooks := routesurface.ProviderRoutes{Webhooks: true}
+	h = s.newHTTPHandlerMux(HTTPHandlerOptions{
+		RouteSets:      []RouteSet{RouteSetWebhooks},
+		ProviderRoutes: &webhooks,
+	})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchants/acme/webhooks/stripe", nil))
+	require.NotEqual(t, http.StatusNotFound, rec.Code)
 }
 
 // TestEmbeddedMuxAdminAssembles ensures the admin group's ~47 routes register on

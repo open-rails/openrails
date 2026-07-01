@@ -247,8 +247,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			Rail:      models.RailSolana,
 			AccountID: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 			Solana: &config.SolanaRailConfig{
-				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-				Tokens:          solanatokens.DefaultDevnetTokens(),
+				Tokens: solanatokens.DefaultDevnetTokens(),
 			},
 		},
 		"mobius": {
@@ -437,10 +436,19 @@ func (suite *TestContainerSuite) seedProviderAccountFixtures() {
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
+
+	suite.seedProviderAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
 }
 
 func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, rail, accountID string) {
+	suite.seedProviderAccountWithEvidence(ctx, rail, "live", accountID, `{"source":"test_fixture"}`)
+}
+
+func (suite *TestContainerSuite) seedProviderAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
 	suite.t.Helper()
+	if evidence == "" {
+		evidence = `{"source":"test_fixture"}`
+	}
 	tx, err := suite.Pool.Begin(ctx)
 	require.NoError(suite.t, err)
 	defer tx.Rollback(ctx)
@@ -448,14 +456,14 @@ func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, rail, 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO openrails.payment_provider_accounts
 		    (merchant_id, rail, environment, account_id, archived, evidence, last_verified_at)
-		VALUES ($1::uuid, $2, 'live', $3, false, '{"source":"test_fixture"}'::jsonb, now())
+		VALUES ($1::uuid, $2, $3, $4, false, $5::jsonb, now())
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
 		   SET archived = false,
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
 		       updated_at = now()
 		 WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
-	`, dbtest.TestMerchantID.UUID(), rail, accountID)
+	`, dbtest.TestMerchantID.UUID(), rail, environment, accountID, evidence)
 	require.NoError(suite.t, err)
 	require.NoError(suite.t, tx.Commit(ctx))
 }

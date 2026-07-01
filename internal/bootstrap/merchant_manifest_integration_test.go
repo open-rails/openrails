@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
     display_name text,
-    vault_secret_ref text,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -274,6 +273,67 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	}
 }
 
+func TestReconcileMerchantManifestStoresSolanaProviderAccountConfig(t *testing.T) {
+	ctx := context.Background()
+	pool := newMerchantManifestTestPool(t)
+	cp := newMerchantManifestControlPlane(t, pool)
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	cfg := &config.Config{Encryption: &config.EncryptionConfig{
+		MasterKey: base64.StdEncoding.EncodeToString(key),
+	}}
+	manifest := cozyArtMerchantManifest()
+	mt := manifest.Merchants["cozy-art"]
+	const (
+		accountID       = "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
+		recipientWallet = "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu"
+		privateKey      = "2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT"
+	)
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"solana": {
+			"solana": {
+				Environment: "live",
+				Signer:      &ProviderAccountSignerConfig{Mode: "local_keypair"},
+				Settings: map[string]any{
+					"recipient_wallet": recipientWallet,
+				},
+				Secrets: map[string]string{
+					"private_key": privateKey,
+				},
+			},
+		},
+	}
+	manifest.Merchants["cozy-art"] = mt
+
+	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+
+	var merchantID string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+
+	var evidenceBytes []byte
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT evidence
+		FROM openrails.payment_provider_accounts
+		WHERE merchant_id = $1::uuid AND rail = 'solana' AND environment = 'live' AND account_id = $2
+	`, merchantID, accountID).Scan(&evidenceBytes))
+	var evidence map[string]any
+	require.NoError(t, json.Unmarshal(evidenceBytes, &evidence))
+	require.Equal(t, map[string]any{"mode": "local_keypair"}, evidence["signer"])
+	require.Equal(t, map[string]any{"recipient_wallet": recipientWallet}, evidence["settings"])
+
+	secretName, err := merchants.ProviderAccountSecretName("solana", "live", accountID, "private_key")
+	require.NoError(t, err)
+	backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
+	require.NoError(t, err)
+	tid, err := merchant.ParseID(merchantID)
+	require.NoError(t, err)
+	sec, err := backend.Secrets.Get(ctx, tid, secretName)
+	require.NoError(t, err)
+	require.Equal(t, privateKey, sec.Value)
+}
+
 // #646: the merchant config round-trips — push the complete payload (profile +
 // invoice + delegated-invoker windows + named test/live provider accounts), then
 // dump it back into the same struct shape, with secret VALUES never emitted.
@@ -396,7 +456,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, "579145", byEnv["live"].AccountID)
 	require.False(t, byEnv["live"].Archived)
 	require.False(t, byEnv["test"].Archived)
-	require.Equal(t, RedactedSecretValue, byEnv["live"].Secrets["security_key"])
+	require.Empty(t, byEnv["live"].Secrets, "redacted dump omits secret values entirely")
 	require.NotContains(t, byEnv["live"].Secrets, "tokenization_key")
 	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byEnv["live"].Settings["tokenization_url"])
 	require.Equal(t, "live-token", byEnv["live"].Settings["tokenization_key"])

@@ -86,12 +86,11 @@ KV-v2 field `value`:
 | CCBill FlexForm salt | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/salt` | yes |
 | CCBill DataLink username | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_username` | yes |
 | CCBill DataLink password | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_password` | yes |
-| Solana signing keypair | `secret/openrails/merchants/default/solana/private_key` | no |
+| Solana signing keypair | `secret/openrails/merchants/local-stack/provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key` | no |
 
-`solana/private_key` remains an OpenRails internal/platform-admin secret for
-signing compatibility. It is in the canonical registry so platform tools and
-startup seed paths can still address it, but delegated admin APIs do not
-expose it as a writable dashboard secret.
+Solana local keypairs are provider-account scoped `private_key` secrets. There is
+no broad startup seed path. Delegated admin APIs do not expose Solana private
+keys as writable dashboard secrets.
 
 ## Manual placement examples
 
@@ -171,8 +170,8 @@ managed Vault:
 - A rotation through an OpenRails node refreshes that node's cache immediately;
   other nodes pick it up within one cache TTL (default 15m). For an instant
   cluster-wide cutover, roll the nodes.
-- **Solana signing key:** rotating `solana/private_key` changes the merchant's
-  on-chain merchant/signer identity. It **forces a plan re-publish and re-enroll**
-  — existing on-chain subscription authorizations are bound to the old key and do
-  not transfer. Vault-backed deployments use **Transit** so the key never leaves
-  Vault and rotation is a Transit key-version bump.
+- **Solana signing key:** rotating a provider-account scoped `private_key` changes
+  the merchant's on-chain merchant/signer identity. It **forces a plan re-publish
+  and re-enroll** — existing on-chain subscription authorizations are bound to the
+  old key and do not transfer. Vault-backed deployments should use **Transit** so
+  the key never leaves Vault and rotation is a Transit key-version bump.

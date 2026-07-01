@@ -54,7 +54,7 @@ func (q *Queries) CountProviderAccountsForRailEnvironment(ctx context.Context, a
 }
 
 const getActiveProviderAccountForNewWork = `-- name: GetActiveProviderAccountForNewWork :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -81,7 +81,6 @@ func (q *Queries) GetActiveProviderAccountForNewWork(ctx context.Context, arg Ge
 		&i.Environment,
 		&i.AccountID,
 		&i.DisplayName,
-		&i.VaultSecretRef,
 		&i.Evidence,
 		&i.FirstSeenAt,
 		&i.LastVerifiedAt,
@@ -95,7 +94,7 @@ func (q *Queries) GetActiveProviderAccountForNewWork(ctx context.Context, arg Ge
 }
 
 const getProviderAccount = `-- name: GetProviderAccount :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
 WHERE id = $1
 `
 
@@ -109,7 +108,6 @@ func (q *Queries) GetProviderAccount(ctx context.Context, id uuid.UUID) (Openrai
 		&i.Environment,
 		&i.AccountID,
 		&i.DisplayName,
-		&i.VaultSecretRef,
 		&i.Evidence,
 		&i.FirstSeenAt,
 		&i.LastVerifiedAt,
@@ -123,7 +121,7 @@ func (q *Queries) GetProviderAccount(ctx context.Context, id uuid.UUID) (Openrai
 }
 
 const getProviderAccountByIdentity = `-- name: GetProviderAccountByIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -153,7 +151,6 @@ func (q *Queries) GetProviderAccountByIdentity(ctx context.Context, arg GetProvi
 		&i.Environment,
 		&i.AccountID,
 		&i.DisplayName,
-		&i.VaultSecretRef,
 		&i.Evidence,
 		&i.FirstSeenAt,
 		&i.LastVerifiedAt,
@@ -167,7 +164,7 @@ func (q *Queries) GetProviderAccountByIdentity(ctx context.Context, arg GetProvi
 }
 
 const getProviderAccountByRailIdentity = `-- name: GetProviderAccountByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
 WHERE rail = lower($1::text)
   AND environment = COALESCE($2::text, 'live')
   AND account_id = $3::text
@@ -190,7 +187,6 @@ func (q *Queries) GetProviderAccountByRailIdentity(ctx context.Context, arg GetP
 		&i.Environment,
 		&i.AccountID,
 		&i.DisplayName,
-		&i.VaultSecretRef,
 		&i.Evidence,
 		&i.FirstSeenAt,
 		&i.LastVerifiedAt,
@@ -204,7 +200,7 @@ func (q *Queries) GetProviderAccountByRailIdentity(ctx context.Context, arg GetP
 }
 
 const listProviderAccountsForMerchant = `-- name: ListProviderAccountsForMerchant :many
-SELECT id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.payment_provider_accounts
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = lower($2::text))
 ORDER BY rail, environment, archived, created_at, id
@@ -231,7 +227,6 @@ func (q *Queries) ListProviderAccountsForMerchant(ctx context.Context, arg ListP
 			&i.Environment,
 			&i.AccountID,
 			&i.DisplayName,
-			&i.VaultSecretRef,
 			&i.Evidence,
 			&i.FirstSeenAt,
 			&i.LastVerifiedAt,
@@ -255,21 +250,19 @@ const upsertProviderAccount = `-- name: UpsertProviderAccount :one
 
 INSERT INTO openrails.payment_provider_accounts (
     merchant_id, rail, environment, account_id, display_name,
-    vault_secret_ref, archived, evidence, last_verified_at
+    archived, evidence, last_verified_at
 ) VALUES (
     $1::uuid,
     lower($2::text),
     COALESCE($3::text, 'live'),
     $4::text,
     $5,
-    $6,
-    COALESCE($7::boolean, false),
-    $8,
-    COALESCE($9::timestamptz, now())
+    COALESCE($6::boolean, false),
+    $7,
+    COALESCE($8::timestamptz, now())
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.payment_provider_accounts.display_name),
-    vault_secret_ref = COALESCE(EXCLUDED.vault_secret_ref, openrails.payment_provider_accounts.vault_secret_ref),
     archived = EXCLUDED.archived,
     replaced_at = CASE
         WHEN EXCLUDED.archived THEN COALESCE(openrails.payment_provider_accounts.replaced_at, now())
@@ -279,7 +272,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     last_verified_at = EXCLUDED.last_verified_at,
     updated_at = now()
 WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, rail, environment, account_id, display_name, vault_secret_ref, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived
+RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived
 `
 
 type UpsertProviderAccountParams struct {
@@ -288,7 +281,6 @@ type UpsertProviderAccountParams struct {
 	Environment    *string
 	AccountID      string
 	DisplayName    *string
-	VaultSecretRef *string
 	Archived       *bool
 	Evidence       []byte
 	LastVerifiedAt *time.Time
@@ -302,7 +294,6 @@ func (q *Queries) UpsertProviderAccount(ctx context.Context, arg UpsertProviderA
 		arg.Environment,
 		arg.AccountID,
 		arg.DisplayName,
-		arg.VaultSecretRef,
 		arg.Archived,
 		arg.Evidence,
 		arg.LastVerifiedAt,
@@ -315,7 +306,6 @@ func (q *Queries) UpsertProviderAccount(ctx context.Context, arg UpsertProviderA
 		&i.Environment,
 		&i.AccountID,
 		&i.DisplayName,
-		&i.VaultSecretRef,
 		&i.Evidence,
 		&i.FirstSeenAt,
 		&i.LastVerifiedAt,

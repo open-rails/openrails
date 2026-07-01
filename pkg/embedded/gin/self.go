@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -42,6 +43,10 @@ import (
 // stays gin-free. Errors when the app graph is not initialized or no identity
 // source can be derived — the surface is never mounted without authentication.
 func SelfHandler(e *embedded.Embedded, authn billingauth.DelegatedAuthenticator) (http.Handler, error) {
+	return selfHandler(e, authn, nil)
+}
+
+func selfHandler(e *embedded.Embedded, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) (http.Handler, error) {
 	if e == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
@@ -56,21 +61,22 @@ func SelfHandler(e *embedded.Embedded, authn billingauth.DelegatedAuthenticator)
 	if a.Runtime != nil {
 		configured = a.Runtime.ConfiguredMerchant
 	}
-	return newSelfHandler(a.Runtime, authn, configured), nil
+	return newSelfHandler(a.Runtime, authn, configured, providerRouteOverride), nil
 }
 
 // newSelfHandler assembles the self-service gin engine and wraps it in
 // the neutral net/http base middleware stack (the gin-free analogue embedhttp
 // uses). Split from SelfHandler so the routing/auth behavior is unit-testable
 // without a live app graph.
-func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID) http.Handler {
+func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
 	engine := gingonic.New()
 	engine.Use(gingonic.Recovery())
 
 	delegatedMW := ginmw.DelegatedPrincipalRequired(authn)
 	base := engine.Group(embedhttp.EmbeddedV1Prefix)
-	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
-	ginroutes.RegisterCustomerTreasuryRoutes(base.Group(ginroutes.CustomerRoutePrefix), rt, delegatedMW)
+	providerRoutes := providerRoutesForRuntime(rt, providerRouteOverride)
+	ginroutes.RegisterSelfServiceRoutesWithProviderRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW, providerRoutes)
+	ginroutes.RegisterCustomerTreasuryRoutesWithProviderRoutes(base.Group(ginroutes.CustomerRoutePrefix), rt, delegatedMW, providerRoutes)
 
 	// OpenRails-native rate-limiting + captcha on the embedded self-service
 	// surface, matching the base NewHTTPHandler chain so an embedded
@@ -96,4 +102,16 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 		middleware.ResolveMerchantHTTP(configured),
 		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb)),
 	)
+}
+
+func providerRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
+	if override != nil {
+		return *override
+	}
+	if rt != nil {
+		if len(rt.Rails) > 0 || !rt.ConfiguredMerchant.IsZero() {
+			return routesurface.ProviderRoutesFromRails(rt.Rails)
+		}
+	}
+	return routesurface.AllProviderRoutes()
 }

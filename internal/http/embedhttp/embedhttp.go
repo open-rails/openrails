@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -46,6 +47,7 @@ type Options struct {
 	// separate self handler) but still advertises it here so discovery is honest.
 	// Empty → falls back to RouteSets.
 	AdvertiseRouteSets []RouteSet
+	ProviderRoutes     *routesurface.ProviderRoutes
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -130,6 +132,10 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if err := s.validateAuthBoundary(routeSets); err != nil {
 		panic(err)
 	}
+	providerRoutes := s.providerRoutes(opts.ProviderRoutes)
+	if !providerRoutes.Webhooks {
+		delete(routeSets, RouteSetWebhooks)
+	}
 	mux := http.NewServeMux()
 
 	// Capability discovery (#623): always-on, public, independent of selection so
@@ -139,14 +145,18 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if len(advertise) == 0 {
 		advertise = ResolveRouteSets(opts.RouteSets)
 	}
-	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", CapabilitiesHandler(advertise))
+	if !providerRoutes.Webhooks {
+		advertise = withoutRouteSet(advertise, RouteSetWebhooks)
+	}
+	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", CapabilitiesHandler(advertise, providerRoutes))
 
 	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
 		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
-			Authenticator: s.Authenticator,
+			Authenticator:  s.Authenticator,
+			ProviderRoutes: &providerRoutes,
 		})
 	}
 	if routeSets[RouteSetMerchantAdmin] {
@@ -196,6 +206,34 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		// OpenRails-native rate-limiting + captcha for embedded hosts.
 		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore),
 	)
+}
+
+func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
+	if override != nil {
+		return *override
+	}
+	if s != nil && s.Runtime != nil {
+		if len(s.Runtime.Rails) > 0 || !s.Runtime.ConfiguredMerchant.IsZero() {
+			if caps := s.Runtime.RouteCapabilities; caps != nil {
+				return routesurface.ProviderRoutesFromRailsWithCapabilities(s.Runtime.Rails, *caps)
+			}
+			return routesurface.ProviderRoutesFromRails(s.Runtime.Rails)
+		}
+	}
+	return routesurface.AllProviderRoutes()
+}
+
+func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
+	if len(routeSets) == 0 {
+		return routeSets
+	}
+	out := make([]RouteSet, 0, len(routeSets))
+	for _, routeSet := range routeSets {
+		if routeSet != remove {
+			out = append(out, routeSet)
+		}
+	}
+	return out
 }
 
 func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {

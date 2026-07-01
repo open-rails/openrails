@@ -1388,7 +1388,6 @@ CREATE TABLE openrails.provider_accounts (
     environment text DEFAULT 'live'::text NOT NULL,
     account_id text NOT NULL,
     display_name text,
-    vault_secret_ref text,
     role text DEFAULT 'primary'::text NOT NULL,
     status text DEFAULT 'enabled'::text NOT NULL,
     evidence jsonb,

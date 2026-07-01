@@ -4,10 +4,15 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -88,6 +93,14 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 
 func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
+	recipientWallet := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
+	suite.seedProviderAccountWithEvidence(
+		dbtest.WithTestMerchant(context.Background()),
+		"solana",
+		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
+		"DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+		`{"source":"test","settings":{"recipient_wallet":"`+recipientWallet+`"}}`,
+	)
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID
 
@@ -120,7 +133,51 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	require.True(t, ok, "payment should be an object")
 	assert.Equal(t, "solana", payment["rail"], "Rail should be solana")
 	assert.NotEmpty(t, payment["reference"], "Should include reference")
-	assert.NotEmpty(t, payment["transaction_url"], "Should include transaction_url")
+	transactionURL, ok := payment["transaction_url"].(string)
+	require.True(t, ok, "Should include transaction_url")
+	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+recipientWallet+"?"), "transaction_url should use provider-account recipient_wallet")
+}
+
+func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *testing.T) {
+	suite, token, _ := setupTestSuiteWithSolana(t)
+	accountID := "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
+	suite.seedProviderAccountWithEvidence(
+		dbtest.WithTestMerchant(context.Background()),
+		"solana",
+		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
+		accountID,
+		`{"source":"test"}`,
+	)
+	products := suite.SeedProducts()
+	priceID := products[2].Prices[0].ID
+
+	body := map[string]any{
+		"price_id": priceID.String(),
+		"payment": map[string]any{
+			"rail":         "solana",
+			"token_symbol": "USDC",
+			"flow":         "transfer_request",
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/checkout", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	suite.Server.Handler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK, got body: %s", w.Body.String())
+
+	var resp map[string]any
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	payment, ok := resp["payment"].(map[string]any)
+	require.True(t, ok, "payment should be an object")
+	transactionURL, ok := payment["transaction_url"].(string)
+	require.True(t, ok, "Should include transaction_url")
+	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+accountID+"?"), "transaction_url should default recipient to provider account_id")
 }
 
 func TestCheckoutSessionCCBillRedirect(t *testing.T) {

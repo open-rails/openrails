@@ -100,9 +100,10 @@ func NewSolanaPayPoller(
 			}
 		}
 		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-			HeliusAPIKey: solanaProc.Solana.HeliusAPIKey,
-			Network:      solanaNetwork,
-			ReadOnly:     cfg.IsProviderReadOnly(),
+			RPCProvider: solanaProc.Solana.RPCProvider,
+			RPCAPIKey:   solanaProc.Solana.RPCAPIKey,
+			Network:     solanaNetwork,
+			ReadOnly:    cfg.IsProviderReadOnly(),
 		})
 	}
 

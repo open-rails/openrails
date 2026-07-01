@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -98,7 +99,28 @@ func (e *Embedded) App() *app.App {
 // Note: billing health endpoints are not exposed in embedded mode.
 // If a host wants billing readiness, call IsBillingReady and include it in the host's /readyz.
 type HTTPHandlerOptions struct {
-	RouteSets []RouteSet
+	RouteSets      []RouteSet
+	ProviderRoutes *ProviderRoutes
+}
+
+// ProviderRoutes selects provider-specific public routes for an embedded mount.
+// Leave nil to derive from configured provider accounts when possible.
+type ProviderRoutes struct {
+	StripePortal bool
+	Solana       bool
+	Webhooks     bool
+}
+
+func (p ProviderRoutes) internal() routesurface.ProviderRoutes {
+	// An explicit host selection is authoritative — enabling Solana enables its
+	// signing routes, and the write surface stays on (no capability second-guess).
+	return routesurface.ProviderRoutes{
+		StripePortal:  p.StripePortal,
+		Solana:        p.Solana,
+		SolanaSigning: p.Solana,
+		Webhooks:      p.Webhooks,
+		SecretWrite:   true,
+	}
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
@@ -109,9 +131,15 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 		return nil
 	}
 	active := e.MountRouteSets(opts.RouteSets)
+	var providerRoutes *routesurface.ProviderRoutes
+	if opts.ProviderRoutes != nil {
+		v := opts.ProviderRoutes.internal()
+		providerRoutes = &v
+	}
 	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
 		RouteSets:          active,
 		AdvertiseRouteSets: active,
+		ProviderRoutes:     providerRoutes,
 	})
 }
 

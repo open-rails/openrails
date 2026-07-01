@@ -9,6 +9,7 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 // SelfRoutePrefix is the canonical browser self-service billing surface. The
@@ -43,6 +44,10 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 // self-permissions onto the context that the per-route RequirePermission gates
 // and the handlers read.
 func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+	RegisterSelfServiceRoutesWithProviderRoutes(group, rt, delegatedMW, routesurface.AllProviderRoutes())
+}
+
+func RegisterSelfServiceRoutesWithProviderRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, providerRoutes routesurface.ProviderRoutes) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -91,20 +96,16 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	subs.POST("/:id/change-tier", wrap(httphandlers.ChangeTier))
 	subs.POST("/:id/change-tier/preview", wrap(httphandlers.ChangeTierPreview))
 	subs.PUT("/:id/payment-method", wrap(httphandlers.UpdateSubscriptionPaymentMethod))
-	// App-driven on-chain cancel/revoke (#266/#271): the full prepare -> sign ->
-	// confirm -> mirror loop. solana-cancel-tx builds the unsigned cancel tx the
-	// wallet signs+sends; solana-cancel confirms the signature landed on-chain and
-	// then mirrors the cancel into the DB (stops the cranker). Solana is the source
-	// of truth — there is no DB-only "soft cancel".
-	subs.POST("/:id/solana-cancel-tx", wrap(httphandlers.PrepareSolanaCancelTx))
-	subs.POST("/:id/solana-cancel", wrap(httphandlers.ConfirmSolanaCancel))
-	// App-driven on-chain tier change (#272): the prepare -> sign -> confirm ->
-	// mirror loop for changing tier on an existing Solana subscription. prepare
-	// returns the SINGLE ATOMIC cancel-old+subscribe-new tx (co-signed for an
-	// upgrade's prorated transfer); confirm verifies it landed on-chain and mirrors
-	// the switch into the DB (old cancelled, new active, next_pull_at per kind).
-	subs.POST("/:id/solana-tier-change", wrap(httphandlers.PrepareSolanaTierChange))
-	subs.POST("/:id/solana-tier-change/confirm", wrap(httphandlers.ConfirmSolanaTierChange))
+	if providerRoutes.SolanaSigning {
+		// App-driven on-chain cancel/revoke (#266/#271): the full prepare -> sign ->
+		// confirm -> mirror loop. Needs an OpenRails signer, so gate on SolanaSigning (#661).
+		subs.POST("/:id/solana-cancel-tx", wrap(httphandlers.PrepareSolanaCancelTx))
+		subs.POST("/:id/solana-cancel", wrap(httphandlers.ConfirmSolanaCancel))
+		// App-driven on-chain tier change (#272): the prepare -> sign -> confirm ->
+		// mirror loop for changing tier on an existing Solana subscription.
+		subs.POST("/:id/solana-tier-change", wrap(httphandlers.PrepareSolanaTierChange))
+		subs.POST("/:id/solana-tier-change/confirm", wrap(httphandlers.ConfirmSolanaTierChange))
+	}
 
 	// Payment methods.
 	pm := group.Group("/payment-methods")
@@ -119,9 +120,9 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	checkout.GET("/:id", wrap(httphandlers.GetCheckoutSession))
 	checkout.POST("/:id/confirm", wrap(httphandlers.ConfirmCheckoutSession))
 
-	// Stripe customer portal handoff, moved from the old `/stripe/portal` raw
-	// user route to the canonical self surface.
-	group.POST("/stripe/portal", wrap(httphandlers.CreatePortalSession))
+	if providerRoutes.StripePortal {
+		group.POST("/billing-portal", wrap(httphandlers.CreatePortalSession))
+	}
 }
 
 // RegisterCustomerTreasuryRoutes mounts the customer-as-PAYER treasury surface
@@ -146,6 +147,14 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 // `/v1/me`, which is authenticated-self and needs no grant). Every customer can
 // delegate spend of its balance.
 func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, writeMW ...gin.HandlerFunc) {
+	registerCustomerTreasuryRoutes(group, rt, delegatedMW, routesurface.AllProviderRoutes(), writeMW...)
+}
+
+func RegisterCustomerTreasuryRoutesWithProviderRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, providerRoutes routesurface.ProviderRoutes, writeMW ...gin.HandlerFunc) {
+	registerCustomerTreasuryRoutes(group, rt, delegatedMW, providerRoutes, writeMW...)
+}
+
+func registerCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc, providerRoutes routesurface.ProviderRoutes, writeMW ...gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -191,13 +200,15 @@ func RegisterCustomerTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, del
 		wrap(httphandlers.SetMyCreditAccountSettings),
 	)
 
-	// Manage the payer's saved payment methods and Stripe billing portal.
+	// Manage the payer's saved payment methods and optional provider portal.
 	pmPerm := ginmw.RequirePermission(controlplane.PermCustomerPaymentMethodsUpdate)
 	group.GET("/:customer_id/payment-methods", pmPerm, wrap(httphandlers.ListPaymentMethods))
 	group.POST("/:customer_id/payment-methods", pmPerm, wrap(httphandlers.CreatePaymentMethod))
 	group.PUT("/:customer_id/payment-methods/:id", pmPerm, wrap(httphandlers.UpdatePaymentMethod))
 	group.DELETE("/:customer_id/payment-methods/:id", pmPerm, wrap(httphandlers.DeletePaymentMethod))
-	group.POST("/:customer_id/stripe/portal", pmPerm, wrap(httphandlers.CreatePortalSession))
+	if providerRoutes.StripePortal {
+		group.POST("/:customer_id/billing-portal", pmPerm, wrap(httphandlers.CreatePortalSession))
+	}
 
 	// Pre-pay / load credits onto the customer balance via checkout.
 	checkoutPerm := ginmw.RequirePermission(controlplane.PermCustomerCheckoutCreate)

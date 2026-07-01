@@ -36,6 +36,9 @@ type Options struct {
 // pkg/embedded.HTTPHandlerOptions; zero value uses EmbeddedDefaultRouteSets.
 type HandlerOptions = embedded.HTTPHandlerOptions
 
+// ProviderRoutes selects provider-specific public routes for HandlerOptions.
+type ProviderRoutes = embedded.ProviderRoutes
+
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet = embedded.RouteSet
 

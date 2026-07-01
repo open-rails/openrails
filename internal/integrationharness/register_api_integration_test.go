@@ -62,50 +62,59 @@ func TestRegisterAPIEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	// Case 1: customer omitted → /v1/me is not mounted, capabilities.customer=false.
+	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
 	eng1 := gin.New()
-	grp1 := eng1.Group("/api/openrails")
+	grp1 := eng1.Group("/billing")
 	require.NoError(t, embgin.RegisterAPI(grp1, rt.Embedded(),
 		embgin.WithGroups(embedded.RouteSetCheckout, embedded.RouteSetWebhooks),
 		embgin.WithAuthenticator(authn),
+		embgin.WithProviderRoutes(embgin.ProviderRoutes{}),
 	))
 	require.ElementsMatch(t,
 		[]embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
 		rt.ActiveRouteSets())
 
-	w := doMounted(eng1, http.MethodGet, "/api/openrails/v1/me/balance?currency=USD", nil)
-	require.Equal(t, http.StatusNotFound, w.Code, "customer omitted → /v1/me must 404")
+	w := doMounted(eng1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
+	require.Equal(t, http.StatusNotFound, w.Code, "customer omitted -> /v1/me must 404")
 
-	caps1 := getRouteGroups(t, eng1)
-	require.True(t, caps1["checkout"])
-	require.True(t, caps1["webhooks"])
-	require.False(t, caps1["customer"])
-	require.False(t, caps1["payment_providers"])
+	caps1 := getCapabilities(t, eng1)
+	require.True(t, caps1.RouteGroups["checkout"])
+	require.False(t, caps1.RouteGroups["webhooks"])
+	require.False(t, caps1.RouteGroups["customer"])
+	require.False(t, caps1.RouteGroups["payment_providers"])
+	require.False(t, caps1.Routes["billing_portal"])
+	require.False(t, caps1.Routes["solana"])
+	require.False(t, caps1.Routes["webhooks"])
 
-	// Case 2: customer included → /v1/me mounted, capabilities.customer=true.
+	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
 	eng2 := gin.New()
-	grp2 := eng2.Group("/api/openrails")
+	grp2 := eng2.Group("/billing")
 	require.NoError(t, embgin.RegisterAPI(grp2, rt.Embedded(),
 		embgin.WithGroups(embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks),
 		embgin.WithAuthenticator(authn),
 		embgin.WithDelegatedAuthenticator(delegated),
+		embgin.WithProviderRoutes(embgin.ProviderRoutes{}),
 	))
 	require.Contains(t, rt.ActiveRouteSets(), embedded.RouteSetCustomer)
 
-	caps2 := getRouteGroups(t, eng2)
-	require.True(t, caps2["customer"], "customer selected → advertised true even though the user handler strips it")
+	caps2 := getCapabilities(t, eng2)
+	require.True(t, caps2.RouteGroups["customer"], "customer selected -> advertised true even though the user handler strips it")
 
-	w = doMounted(eng2, http.MethodGet, "/api/openrails/v1/me/balance?currency=USD", nil)
+	w = doMounted(eng2, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
-func getRouteGroups(t *testing.T, h http.Handler) map[string]bool {
+func getCapabilities(t *testing.T, h http.Handler) struct {
+	RouteGroups map[string]bool `json:"route_groups"`
+	Routes      map[string]bool `json:"routes"`
+} {
 	t.Helper()
-	w := doMounted(h, http.MethodGet, "/api/openrails/v1/capabilities", nil)
+	w := doMounted(h, http.MethodGet, "/billing/v1/capabilities", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var caps struct {
 		RouteGroups map[string]bool `json:"route_groups"`
+		Routes      map[string]bool `json:"routes"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps), w.Body.String())
-	return caps.RouteGroups
+	return caps
 }
