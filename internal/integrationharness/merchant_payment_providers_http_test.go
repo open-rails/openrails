@@ -60,7 +60,7 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 		PaymentProvider merchants.PaymentProviderConfig `json:"payment_provider"`
 	}
 	require.NoError(t, json.Unmarshal(body, &putResp))
-	require.Equal(t, "stripe", putResp.PaymentProvider.ProviderType)
+	require.Equal(t, "stripe", putResp.PaymentProvider.Rail)
 	require.Equal(t, accountID, putResp.PaymentProvider.AccountID)
 	require.True(t, putResp.PaymentProvider.Credentials["webhook_signing_secret"].Configured)
 
@@ -102,8 +102,21 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 		PaymentProvider merchants.PaymentProviderConfig `json:"payment_provider"`
 	}
 	require.NoError(t, json.Unmarshal(deleteBody, &deleteResp))
-	require.Equal(t, "disabled", deleteResp.PaymentProvider.Status)
+	require.True(t, deleteResp.PaymentProvider.Archived)
+	require.True(t, deleteResp.PaymentProvider.Drained, string(deleteBody))
+	require.Equal(t, int64(0), deleteResp.PaymentProvider.OpenObligations)
 
 	afterDeleteStatus, afterDeleteBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment=live", readToken, nil)
 	require.Equal(t, http.StatusNotFound, afterDeleteStatus, string(afterDeleteBody))
+
+	archivedStatus, archivedBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment=live&status=archived", readToken, nil)
+	require.Equal(t, http.StatusOK, archivedStatus, string(archivedBody))
+	var archivedResp struct {
+		Data []merchants.PaymentProviderConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(archivedBody, &archivedResp))
+	require.Len(t, archivedResp.Data, 1)
+	require.Equal(t, accountID, archivedResp.Data[0].AccountID)
+	require.True(t, archivedResp.Data[0].Archived)
+	require.True(t, archivedResp.Data[0].Drained)
 }

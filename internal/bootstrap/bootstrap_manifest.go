@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -17,19 +16,18 @@ const (
 	BootstrapManifestVersion     = 1
 )
 
-func validateMerchantManifestShape(m *MerchantManifest) error {
+func validateMerchantManifestShape(m *BillingConfig) error {
 	if m == nil {
 		return fmt.Errorf("merchant manifest is required")
 	}
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
-	seen := map[string]struct{}{}
-	for i := range m.Merchants {
-		t := &m.Merchants[i]
-		slug := strings.ToLower(strings.TrimSpace(t.Slug))
+	for _, rawSlug := range sortedMerchantKeys(m.Merchants) {
+		t := m.Merchants[rawSlug]
+		slug := strings.ToLower(strings.TrimSpace(rawSlug))
 		if slug == "" {
-			return fmt.Errorf("merchant #%d slug is required", i+1)
+			return fmt.Errorf("merchant key is required")
 		}
 		if strings.TrimSpace(t.DisplayName) == "" {
 			return fmt.Errorf("merchant %q display_name is required", slug)
@@ -51,15 +49,11 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
 			return err
 		}
-		for j := range t.ProviderAccounts {
-			if err := validateManifestProviderAccount(slug, j, t.ProviderAccounts[j]); err != nil {
+		for key, account := range t.ProviderAccounts {
+			if err := validateManifestProviderAccount(slug, key, account); err != nil {
 				return err
 			}
 		}
-		if _, ok := seen[slug]; ok {
-			return fmt.Errorf("duplicate merchant slug %q", slug)
-		}
-		seen[slug] = struct{}{}
 	}
 	return nil
 }
@@ -69,7 +63,7 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 // delegated tokens administer that one merchant. Exactly one trust source —
 // jwks_uri (preferred, auto-rotating) XOR public_keys (static, manual) — must
 // be declared.
-func validateManifestIssuer(merchantSlug string, iss *ManifestIssuer) error {
+func validateManifestIssuer(merchantSlug string, iss *IssuerConfig) error {
 	uri := strings.TrimSpace(iss.URI)
 	if uri == "" {
 		return fmt.Errorf("merchant %q issuer.uri is required", merchantSlug)
@@ -101,7 +95,7 @@ var validInvoiceBoundaries = map[string]struct{}{
 	"calendar_month": {}, "anniversary": {}, "fixed_interval": {},
 }
 
-func validateManifestInvoice(slug string, inv *ManifestInvoiceConfig) error {
+func validateManifestInvoice(slug string, inv *InvoiceConfig) error {
 	if inv == nil {
 		return nil
 	}
@@ -119,7 +113,7 @@ func validateManifestInvoice(slug string, inv *ManifestInvoiceConfig) error {
 	return nil
 }
 
-func validateManifestWastedWindows(slug string, windows []ManifestBudgetWindow) error {
+func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) error {
 	seen := map[string]struct{}{}
 	for i, w := range windows {
 		key := strings.TrimSpace(w.Key)
@@ -140,52 +134,33 @@ func validateManifestWastedWindows(slug string, windows []ManifestBudgetWindow) 
 	return nil
 }
 
-func validateManifestProviderAccount(slug string, idx int, account ManifestProviderAccount) error {
-	providerType := strings.ToLower(strings.TrimSpace(account.ProviderType))
-	if providerType == "" {
-		return fmt.Errorf("merchant %q provider_accounts[%d].provider_type is required", slug, idx)
+func validateManifestProviderAccount(slug string, key string, account ProviderAccountConfig) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("merchant %q provider_accounts key is required", slug)
 	}
-	if _, err := normalizeProviderEnvironment(account.Environment); err != nil {
-		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
+	if len(account) != 1 {
+		return fmt.Errorf("merchant %q provider_accounts.%s must set exactly one rail block", slug, key)
 	}
-	if _, _, err := manifestProviderAccountRouting(account.Routing); err != nil {
-		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
-	}
-	for key, source := range account.Secrets {
-		if _, err := merchants.NormalizeProviderAccountSecretKey(providerType, key); err != nil {
-			return fmt.Errorf("merchant %q provider_accounts[%d]: %w", slug, idx, err)
+	for rail, cfg := range account {
+		rail = strings.ToLower(strings.TrimSpace(rail))
+		if rail == "" {
+			return fmt.Errorf("merchant %q provider_accounts.%s rail is required", slug, key)
 		}
-		if source.RefCount() != 1 {
-			return fmt.Errorf("merchant %q provider_accounts[%d].secrets.%s must set exactly one of value, env, file, vault", slug, idx, key)
+		if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
+			return fmt.Errorf("merchant %q provider_accounts.%s.%s.%w", slug, key, rail, err)
 		}
-	}
-	if strings.TrimSpace(account.AccountID) == "" && !manifestProviderAccountHasDiscoverableIdentity(providerType, account.Secrets) {
-		return fmt.Errorf("merchant %q provider_accounts[%d].account_id is required (auto-discovery removed; declare account_id, or for ccbill provide secrets.account_config)", slug, idx)
+		for secretKey := range cfg.Secrets {
+			if _, err := merchants.NormalizeProviderAccountSecretKey(rail, secretKey); err != nil {
+				return fmt.Errorf("merchant %q provider_accounts.%s.%s: %w", slug, key, rail, err)
+			}
+		}
+		if strings.TrimSpace(cfg.AccountID) == "" {
+			return fmt.Errorf("merchant %q provider_accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
+		}
 	}
 	return nil
 }
-
-// manifestProviderAccountHasDiscoverableIdentity reports whether the account_id
-// can be derived without a declared value. Live-credential auto-discovery
-// (stripe/nmi whoami) was removed (#592); only CCBill's account_id is derivable
-// from DECLARATIVE config (account_config).
-func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets map[string]ManifestSecretSource) bool {
-	if normalizeManifestProviderType(providerType) != string(models.RailCCBill) {
-		return false
-	}
-	values, err := newManifestSecretValues(string(models.RailCCBill), secrets)
-	if err != nil {
-		return false
-	}
-	_, ok := values.sources["account_config"]
-	return ok
-}
-
-const (
-	providerAccountRoutingPrimary   = "primary"
-	providerAccountRoutingSecondary = "secondary"
-	providerAccountRoutingLegacy    = "legacy"
-)
 
 func validHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))

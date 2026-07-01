@@ -30,7 +30,7 @@ func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 
 		account, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
-			ProviderType:   "nmi",
+			Rail:           "nmi",
 			AccountID:      "nmi-account-" + suffix,
 			LastVerifiedAt: &now,
 		})

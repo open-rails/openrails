@@ -31,15 +31,15 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 
 	display := "CCBill Test"
 	account, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
-		MerchantID:   merchantID,
-		ProviderType: "ccbill",
-		Environment:  strptr("test"),
-		AccountID:    "acct_" + subscriptionID.String(),
-		DisplayName:  &display,
-		Evidence:     []byte(`{"source":"query-contract"}`),
+		MerchantID:  merchantID,
+		Rail:        "ccbill",
+		Environment: strptr("test"),
+		AccountID:   "acct_" + subscriptionID.String(),
+		DisplayName: &display,
+		Evidence:    []byte(`{"source":"query-contract"}`),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "primary", account.Routing)
+	require.False(t, account.Archived)
 
 	_, err = q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         customerID,
@@ -383,6 +383,54 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, stalled)
+}
+
+func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.SharedPGXPool(t)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	q := gen.New(pool)
+
+	otherMerchantID := uuid.New()
+	_, err := pool.Exec(ctx,
+		`INSERT INTO openrails.merchants (id, slug, status)
+		 VALUES ($1, $2, 'active')`,
+		otherMerchantID, "other-"+otherMerchantID.String()[:8])
+	require.NoError(t, err)
+
+	accountID := "acct-global-" + uuid.NewString()
+	first, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
+		Rail:        "stripe",
+		Environment: strptr("test"),
+		AccountID:   accountID,
+	})
+	require.NoError(t, err)
+
+	same, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
+		Rail:        "stripe",
+		Environment: strptr("test"),
+		AccountID:   accountID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, first.ID, same.ID)
+
+	_, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		MerchantID:  otherMerchantID,
+		Rail:        "stripe",
+		Environment: strptr("test"),
+		AccountID:   accountID,
+	})
+	require.Error(t, err)
+
+	byIdentity, err := q.GetProviderAccountByRailIdentity(ctx, gen.GetProviderAccountByRailIdentityParams{
+		Rail:        "stripe",
+		Environment: strptr("test"),
+		AccountID:   accountID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, dbtest.TestMerchantID.UUID(), byIdentity.MerchantID)
 }
 
 func strptr(s string) *string { return &s }

@@ -310,7 +310,7 @@ func newPullProviderRuntime(cfg *config.Config) (*pullProviderRuntime, func(), e
 }
 
 func pullProviderCCBillDataLink(cfg *config.Config, rails config.ProviderAccountSet) (*ccbill.DataLinkClient, error) {
-	_, proc, err := rails.PrimaryRailByType(models.RailCCBill)
+	_, proc, err := rails.ActiveRailByType(models.RailCCBill)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func pullProviderCCBillDataLink(cfg *config.Config, rails config.ProviderAccount
 }
 
 func pullProviderSolanaRPC(cfg *config.Config, rails config.ProviderAccountSet) (*solanaint.RPCClient, error) {
-	_, proc, err := rails.PrimaryRailByType(models.RailSolana)
+	_, proc, err := rails.ActiveRailByType(models.RailSolana)
 	if err != nil {
 		return nil, err
 	}
@@ -369,17 +369,17 @@ func resolvePullProviderAccountTarget(ctx context.Context, rt *pullProviderRunti
 	if err != nil {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
-	provider := reconcile.Provider(account.ProviderType)
-	providerKey := account.ProviderType
+	provider := reconcile.Provider(account.Rail)
+	providerKey := account.Rail
 	if rt.Rails != nil {
-		if key, _, err := rt.Rails.PrimaryRailByType(models.Rail(account.ProviderType)); err == nil && key != "" {
+		if key, _, err := rt.Rails.ActiveRailByType(models.Rail(account.Rail)); err == nil && key != "" {
 			providerKey = key
 		}
 	}
 	return provider, providerKey, reconcile.ProviderAccountBinding{
-		ID:           account.ID,
-		ProviderType: account.ProviderType,
-		AccountID:    account.AccountID,
+		ID:        account.ID,
+		Rail:      account.Rail,
+		AccountID: account.AccountID,
 	}, nil
 }
 

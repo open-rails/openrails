@@ -426,50 +426,36 @@ func (suite *TestContainerSuite) seedProviderAccountFixtures() {
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	suite.seedProviderAccount(ctx, "nmi", testNMIProviderAccountID)
-	nmiSecret, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "production_key")
+	nmiSecret, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "security_key")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
 	require.NoError(suite.t, err)
 
 	ccbillAccountID := "945280/0000"
 	suite.seedProviderAccount(ctx, "ccbill", ccbillAccountID)
-	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", "live", ccbillAccountID, "account_config")
+	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", "live", ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
-	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, `{"client_acc_num":"945280","client_sub_acc":"0000","salt":"test-salt"}`)
+	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
 }
 
-func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, providerType, accountID string) {
+func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, rail, accountID string) {
 	suite.t.Helper()
 	tx, err := suite.Pool.Begin(ctx)
 	require.NoError(suite.t, err)
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-		UPDATE openrails.provider_accounts
-		   SET routing = 'legacy',
-		       replaced_at = COALESCE(replaced_at, now()),
-		       updated_at = now()
-		 WHERE merchant_id = $1::uuid
-		   AND provider_type = $2
-		   AND environment = 'live'
-		   AND account_id <> $3
-		   AND routing = 'primary'
-		   AND status = 'enabled'
-	`, dbtest.TestMerchantID.UUID(), providerType, accountID)
-	require.NoError(suite.t, err)
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.provider_accounts
-		    (merchant_id, provider_type, environment, account_id, routing, status, evidence, last_verified_at)
-		VALUES ($1::uuid, $2, 'live', $3, 'primary', 'enabled', '{"source":"test_fixture"}'::jsonb, now())
-		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE
-		   SET routing = 'primary',
-		       status = 'enabled',
+		INSERT INTO openrails.payment_provider_accounts
+		    (merchant_id, rail, environment, account_id, archived, evidence, last_verified_at)
+		VALUES ($1::uuid, $2, 'live', $3, false, '{"source":"test_fixture"}'::jsonb, now())
+		ON CONFLICT (rail, environment, account_id) DO UPDATE
+		   SET archived = false,
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
 		       updated_at = now()
-	`, dbtest.TestMerchantID.UUID(), providerType, accountID)
+		 WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
+	`, dbtest.TestMerchantID.UUID(), rail, accountID)
 	require.NoError(suite.t, err)
 	require.NoError(suite.t, tx.Commit(ctx))
 }
@@ -607,17 +593,14 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		client, err := nmi.NewClient(accountID, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
 		client.ReadOnly = suite.Config.IsProviderReadOnly()
-		// #641: keyed by account_id, with the primary aliased under the rail key
+		// Keyed by account_id, with the active account aliased under the rail key
 		// "nmi" below (matching createNMIClients).
 		clients[accountID] = client
 	}
-	if _, primary, err := suite.Rails.PrimaryRailByType(models.RailNMI); err == nil && primary != nil {
-		if c, ok := clients[primary.EffectiveAccountID()]; ok {
+	if _, active, err := suite.Rails.ActiveRailByType(models.RailNMI); err == nil && active != nil {
+		if c, ok := clients[active.EffectiveAccountID()]; ok {
 			clients[string(models.RailNMI)] = c
 		}
-	} else if keys := suite.Rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
-		first := suite.Rails.ByRail(models.RailNMI)[keys[0]]
-		clients[string(models.RailNMI)] = clients[first.EffectiveAccountID()]
 	}
 
 	rt := suite.App.Runtime

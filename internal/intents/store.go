@@ -27,18 +27,19 @@ func NewStore(d *db.DB) *Store { return &Store{db: d} }
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
-	MerchantID     uuid.UUID
-	Provider       string
-	IntentType     string
-	SubscriptionID *uuid.UUID
-	PaymentID      *uuid.UUID
-	PriceID        *uuid.UUID
-	Payload        any
-	IdempotencyKey string
-	NextAttemptAt  time.Time
-	Origin         Origin
-	OriginReason   string
-	ExpiresAt      *time.Time
+	MerchantID        uuid.UUID
+	Provider          string
+	IntentType        string
+	SubscriptionID    *uuid.UUID
+	PaymentID         *uuid.UUID
+	PriceID           *uuid.UUID
+	ProviderAccountID *uuid.UUID
+	Payload           any
+	IdempotencyKey    string
+	NextAttemptAt     time.Time
+	Origin            Origin
+	OriginReason      string
+	ExpiresAt         *time.Time
 }
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
@@ -59,8 +60,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
-	// provider_account_id is no longer resolved at runtime (#592): provider
-	// accounts are an operator-declared catalog, intents enqueue unbound.
+	// provider_account_id is stamped only when the producer already has observed
+	// provenance (for example an existing subscription pinned to an account).
 	return s.db.Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
 		MerchantID:        p.MerchantID,
 		Provider:          p.Provider,
@@ -74,7 +75,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 		Origin:            string(p.Origin),
 		OriginReason:      originReason,
 		ExpiresAt:         p.ExpiresAt,
-		ProviderAccountID: nil,
+		ProviderAccountID: p.ProviderAccountID,
 	})
 }
 

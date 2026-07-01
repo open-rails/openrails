@@ -7,21 +7,194 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 655
+next_id: 658
+
+---
+
+# #655: provider-account archive lifecycle, no routing role
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30: replaced provider-account `routing`/primary/secondary/legacy semantics with
+one lifecycle flag, `archived: true|false` (`false` by default). There is no longer a primary/secondary provider
+account role: every non-archived account is available for new one-off purchases, new subscriptions, and other new
+payment work. An archived payment-provider account is still operational for existing obligations, but is not
+eligible for new checkout creation. Stripe's product/dashboard language uses "archive" for "no longer sell this
+going forward while retaining historical records"; OpenRails should use the same operator-facing concept for
+provider accounts.
+REVIEW 2026-06-30 (Claude): direction endorsed — collapsing primary/secondary/legacy + enabled/disabled to one
+drain-only flag is a real YAGNI win for a 1:1 org↔merchant world that usually runs ONE account per
+(rail, environment); it lets us DELETE the primary-election machinery, not just rename it. Three things the plan
+must fix (now folded into Open decisions + Tasks): (a) this is the 4th forward-only migration on this money-path
+table in days (049 role→routing, 050 table rename, 051 global identity, now 052) and it REVERTS #649's
+just-shipped `routing` — make #655 THE consolidation and freeze provider-account schema afterward; (b) `legacy`
+ALREADY means "archived" (drain-only: old rows/rebills/refunds/webhooks), and there is a SEPARATE `status`
+(enabled/disabled) column — #655 must resolve the fate of BOTH columns, not just `routing`; (c) dropping
+`primary` removes the `uq_..._enabled_primary` ≤1 guarantee, so multi-account selection needs a deterministic
+interim rule now, scoped to (rail, environment) — not wholly deferred to #288.
+
+## Metadata
+- Category: config
+- Status: planned
+- Passes: false
+
+## Problem
+
+`routing` is doing too much. `primary`/`secondary`/`legacy` mixes provider-account lifecycle with future processor
+selection policy, and it is unclear which values still receive webhooks, rebills, dunning, catalog sync, checkout,
+or subscription creation. The replacement is not another selection scheme: non-archived accounts are all eligible
+for new work, and archived accounts are drain-only.
+
+The actual lifecycle state needed here is simpler:
+
+- **not archived**: usable for new one-off purchases, new subscriptions, saved-payment-method creation, and normal
+  existing-subscription operations. If a merchant has multiple non-archived accounts on a rail, routing/fallback
+  policy can choose among them later; the account lifecycle flag does not pick a "primary".
+- **archived**: retained for existing users and historical/provider continuity. OpenRails still verifies webhooks,
+  processes rebills, runs dunning, handles cancellation, reconciles provider state, lets users view/access saved
+  payment methods, and allows safe existing-subscription operations. OpenRails must not route brand-new one-off
+  purchases or brand-new subscriptions to this account.
+
+Processor selection/fallback, if needed, belongs in #288 as an explicit routing policy over non-archived provider
+accounts. It should not be embedded as per-account `primary`/`secondary` metadata.
+
+The value of retaining archived accounts is migration safety. Existing subscriptions and saved payment methods can
+be pinned to a provider account: provider subscription ids, customer vault ids, and stored-card tokens are not
+generic OpenRails values. Stripe has formal data migration/export/import/copy tooling, but it is a migration
+process with limits rather than simple object portability; Stripe also explicitly excludes Link credentials from
+card exports. NMI docs expose Customer Vault, recurring, and transaction export/reporting surfaces, but do not
+document a general export of vaulted payment credentials or subscriptions that OpenRails should depend on.
+Therefore OpenRails should keep provider-account identity on subscriptions/payment methods and drive migration
+gradually: create new work on non-archived accounts, keep old account-bound obligations running, and move users
+only through explicit update/re-tokenization/import flows.
+
+## Why an archived account keeps running — the drain model, and what's in/out of scope
+
+Root cause: **payment credentials are not portable.** A subscriber on account A is bound to A by values only A
+understands — the customer vault id / card token, the provider subscription id, the rebill schedule. You cannot
+move that token to account B; the card was tokenized to A. So a merchant switching processors (relationship
+ended, better rates, a high-risk account flagged, a banking change) cannot move its whole subscriber book at
+once.
+
+The model is a strangler/drain, and the ONLY migration path is gradual and per-user: **all NEW work goes to the
+active account; the archived account keeps billing its EXISTING obligations until each subscriber's card
+naturally lapses on A.** OpenRails never holds the card (it stays out of PCI scope — cards tokenize straight to
+the provider), so it CANNOT move a subscriber to the active account on its own. A subscriber moves off A only
+when their card lapses on A — it **expires, the rebill fails, or they cancel** — at which point they re-enter
+their card, OpenRails captures it on the ACTIVE account, and bills forward from there. There is no proactive,
+customer-silent mass move. (Stripe does offer a PCI account-to-account card-copy that would migrate cards
+silently — but **by decision OpenRails does NOT use or build on it**: it's an offline Stripe-operated process,
+often unavailable exactly when you're migrating off a terminated high-risk account. Migration is per-user card
+re-entry, full stop.)
+
+Why this is the ceiling: migration capability tracks WHO HOLDS THE CARD CREDENTIAL. When the provider owns the
+vault + drives recurring (Stripe `pm_…`/subscriptions, NMI Customer-Vault id — gateway-scoped, CCBill recurring),
+OpenRails is only a mirror, limited to lapse-then-recapture. Only when OpenRails holds the credential itself (its
+own vault, or self-custody rails like Solana) could it re-point the processor proactively — not the case for
+cards. The recapture always lands on "the active account on the same rail + environment", which is why Open
+decision 2 (one deterministic active account) matters for migration, not just new checkout.
+
+A's book drains over MONTHS–YEARS — you don't set the pace, card churn does (note Stripe's automatic card-updater
+on A *slows* it by refreshing expiries; disable it on A to drain faster). When an archived account reaches ZERO
+active subscriptions and no open obligations (no pending refunds, all dispute/chargeback windows closed) it is
+fully drained and can be truly closed — `archived` has a TERMINAL state, it is not a roach-motel.
+
+SCOPE BOUNDARY: #655 ships the lifecycle FLAG + PASSIVE DRAIN — the `archived` boolean, routing new work AND card
+re-entry to the active account, keeping archived accounts live for existing obligations/inbound events, deleting
+the primary-election machinery, and detecting the fully-drained terminal state. The only remaining migration
+piece is a SMALL per-user hook (a SEPARATE follow-up, NOT an "engine"): when a subscriber re-enters their card at
+a lapse point, capture it on the active account and run the cutover back-half — create the new rail subscription
+anchored to the current period end, cancel the old one, re-point the OpenRails subscription's
+`provider_account_id`. The data model already supports it (pinned per #641/#650). NO bulk import, NO silent mass
+migration — ever.
+
+## Open decisions (resolve before implementing)
+
+1. **Fate of `status` (enabled/disabled) + the hard-off case.** The table has TWO lifecycle axes today: `routing`
+   (primary/secondary/legacy) and `status` (enabled/disabled), and `legacy` already encodes exactly the
+   "archived" (drain-only) meaning. RECOMMEND: collapse BOTH into the single `archived` boolean —
+   `legacy`/`disabled` → `archived=true`; `primary`/`secondary` + `enabled` → `archived=false`. Do NOT keep a
+   separate hard-off state: you never want to fully disable an account that still has bound obligations (its
+   vault tokens / provider subscription ids live there); a compromised or provider-closed account is archived
+   (drain-only) and its rebills fail naturally / lapse via dunning + credential revocation. Confirm this, or
+   keep a distinct `disabled` and adopt a 3-state `active|archived|disabled` enum instead of a boolean.
+2. **Selection when >1 non-archived account on the same (rail, environment).** Removing `primary` drops the
+   unique index that guaranteed ≤1 eligible account. The common case stays unambiguous (one account per
+   rail+environment; test vs live separated by `environment` + `test_mode`). For the >1 case, pick a
+   DETERMINISTIC rule — recommend the NEWEST active account (the cutover target a migration points at) — and
+   WARN, since >1 active on one (rail, environment) is normally a transient cutover window or a misconfig;
+   never silently pick (same no-silent-default ethos as #651). A real multi-processor routing policy is #288.
+
+## Tasks
+
+- [x] Replace merchant config `routing` with `archived: true|false`, defaulting to `false`. Remove
+      `primary`/`secondary`/`legacy` from examples, parser, dump, env overlays, docs, and tests.
+- [x] Rename/replace DB lifecycle fields so provider accounts have a clear archived state. If keeping a physical
+      `status` column internally is cheaper, expose only `archived` in config/API and document the DB mapping.
+- [x] Update provider-account selection for new one-off purchases, new subscriptions, saved-payment-method
+      creation, and catalog/new-sale targeting to require `archived=false`; do not select one "primary" account
+      merely because it is first.
+- [x] Preserve existing-obligation paths for archived accounts: webhook routing/verification, rebills,
+      subscription renewal, dunning, cancellation, refunds/voids/chargebacks, reconciliation, and provider-origin
+      backfills must still resolve and use archived accounts.
+- [x] Ensure existing subscriptions/payment methods that already reference an archived provider account keep using
+      that account unless an explicit user/admin migration changes them.
+- [x] Audit all existing `provider_account_id` use on subscriptions, payments, payment methods, checkout sessions,
+      vault records, webhook handlers, reconciliation, and dunning so archived accounts remain addressable wherever
+      provider-bound objects already exist.
+- [x] Add explicit checkout/subscription errors when the caller requests only archived provider accounts and no
+      non-archived eligible account exists.
+- [x] Update `dump-merchant-config` round-trip tests to emit `archived: true` only when true and omit it by default.
+- [x] Add regression tests proving archived accounts reject new one-off/subscription creation but still accept
+      inbound webhooks and existing-subscription rebill/dunning/cancel paths.
+- [x] Update #288 wording, if needed, so processor routing/fallback chooses from non-archived accounts and never
+      depends on old provider-account `routing` values.
+- [x] DELETE the primary-election machinery: drop the `uq_payment_provider_accounts_enabled_primary` unique index
+      and remove `PromoteProviderAccountToPrimary`, `DemoteOtherPrimaryProviderAccounts`, and the
+      demote-on-insert logic — there is no "primary" anymore (this is a net deletion, not a rename).
+- [x] Resolve the `status`/`disabled` column per Open decision 1 (recommended: fold into `archived`): retire or
+      remap it in the same migration; do not leave two overlapping lifecycle columns on the table.
+- [x] Implement the deterministic interim selection for >1 non-archived account on one (rail, environment) per
+      Open decision 2; cross-reference #650 so archived accounts stay globally resolvable for inbound events.
+- [x] Make #655 the consolidating change: do it as migration 052 (the last provider-account schema churn after
+      049/050/051), and note in the issue that it supersedes #649's short-lived `routing` config surface.
+- [x] Distinguish NEW payment-method creation (a new relationship → active account) from RE-TOKENIZATION / card
+      update on an EXISTING archived-account obligation. The latter is allowed on the archived account to keep
+      the drain alive (and is the migrate-on-touch trigger point) — "archived blocks saved-method creation" must
+      NOT block an existing subscriber from fixing the card their archived subscription bills.
+- [x] Detect + surface the fully-drained TERMINAL state: an archived account with zero active subscriptions and
+      no open obligations (pending refunds, open disputes/chargeback windows) is safe to fully delete/close.
+- [x] Follow-up issue (small, NOT an "engine"): the per-user cutover that runs when a subscriber re-enters their
+      card at a lapse point (expiry / failed rebill / re-subscribe) — capture on the active account, create the
+      new rail sub anchored to the current period end, cancel the old, re-point `provider_account_id`. NO bulk
+      import, NO Stripe account-to-account card copy, NO proactive/silent mass migration — by decision. Keep #655
+      to the flag + passive drain.
+
+Acceptance: no public/operator config uses provider-account `routing`; `archived` is the only provider-account
+lifecycle flag (the `status` enabled/disabled column is retired or folded in — no two overlapping lifecycle
+columns); archived accounts remain live for existing obligations and inbound provider events; new purchases and
+newly created subscriptions only choose non-archived accounts; the primary-election unique index +
+Promote/Demote code are deleted and selecting among multiple non-archived accounts on a (rail, environment) is
+deterministic; tests cover both sides of that boundary.
 
 ---
 
 # #654: rename provider_accounts table to payment_provider_accounts
 
-**Completed:** no
-**Status:** PLANNED 2026-06-30 (Paul): `payment_provider_accounts` is the clearer table name. The table is not a
+**Completed:** yes
+**Status:** COMPLETE/SUPERSEDED into #652 (2026-06-30) — do NOT work this separately. The table rename
+`provider_accounts` → `payment_provider_accounts` is the SAME DB surgery as #652's `provider_type` → `rail`
+column rename (same table, same constraints/indexes/FKs/RLS, same sqlc/gen/repo churn). Splitting them into two
+forward-only migrations + two code-churn passes over a money-path table is wasteful and riskier, so #652 now
+does both in one migration. The naming rationale below still holds (it's the account REGISTRY, not a rail
+catalog; never `payment_providers`); it just executes inside #652.
+PLANNED 2026-06-30 (Paul): `payment_provider_accounts` is the clearer table name. The table is not a
 catalog of rails/providers (`stripe`, `nmi`, `ccbill`, `solana`); it is the merchant-owned account registry for
 payment providers on rails. Do not rename it to `payment_providers`.
 
 ## Metadata
 - Category: data-integrity
-- Status: not_started
-- Passes: false
+- Status: superseded
+- Passes: true
 
 ## Problem
 
@@ -58,8 +231,11 @@ and tests prove migration from `provider_accounts` preserves rows and references
 
 # #653: merchant billing-config mechanics — koanf map-shaped config, plain-value secrets, symmetric redacted dump
 
-**Completed:** no
-**Status:** PLANNED 2026-06-30 (split out of #649, which over-grew past its "rename" title). Treat the
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30: merchant billing config is now map-shaped and koanf-loadable, provider
+secrets are plain strings with one canonical key per rail, provider account settings are separate from secrets,
+and dump emits the same typed config shape with secrets redacted by default (`--include-secrets` is explicit).
+PLANNED 2026-06-30 (split out of #649, which over-grew past its "rename" title). Treat the
 merchant/provider-account manifest as ordinary koanf-loaded runtime config: map-shaped (not arrays), secrets as
 plain resolved values with koanf owning source precedence, one canonical key per secret, non-secret config
 under `settings`, and a dump that is the exact reverse of the typed config (redacted by default). Depends on
@@ -67,8 +243,8 @@ under `settings`, and a dump that is the exact reverse of the typed config (reda
 
 ## Metadata
 - Category: config
-- Status: not_started
-- Passes: false
+- Status: complete
+- Passes: true
 
 ## Problem
 
@@ -80,32 +256,40 @@ position-coupled, risks leaking secrets on dump, and accepts multiple spellings 
 
 ## Tasks
 
-- [ ] One canonical key per provider secret; reject aliases — NMI `security_key` only (not `production_key`/
+- [x] One canonical key per provider secret; reject aliases — NMI `security_key` only (not `production_key`/
       `secret_key`); Stripe `secret_key`/`webhook_signing_secret`/`webhook_signing_secret_thin`; CCBill
-      `account_config`; Solana `private_key`. (NMI research: `security_key` is NMI's own wire/API term; test
-      accounts also use a security key, so lifecycle names like `production_key` are wrong.)
-- [ ] Replace `ManifestSecretSource` with `Secrets map[string]string`; koanf/provider loading owns source
+      `salt`/`datalink_username`/`datalink_password`; Solana `private_key`. (NMI research: `security_key` is
+      NMI's own wire/API term; test accounts also use a security key, so lifecycle names like
+      `production_key` are wrong.)
+- [x] Replace `ManifestSecretSource` with `Secrets map[string]string`; koanf/provider loading owns source
       precedence BEFORE manifest validation. No `{value|env|file|vault}` descriptors in YAML.
-- [ ] Arrays → maps: `merchants.<slug>` + `provider_accounts.<key>`; drop redundant `slug`/`name` fields (the
+- [x] Arrays → maps: `merchants.<slug>` + `provider_accounts.<key>`; drop redundant `slug`/`name` fields (the
       map key is the handle). Map-shaped typed blocks `provider_accounts.<key>.<rail>` (e.g. `…mobius.nmi`).
       (Names `key`/`rail` per #652.)
-- [ ] Rename koanf-loaded structs `Manifest*` → `*Config` (`BillingConfig`, `MerchantConfig`, …); keep
+- [x] Rename koanf-loaded structs `Manifest*` → `*Config` (`BillingConfig`, `MerchantConfig`, …); keep
       `Manifest` only for a standalone CLI envelope if one remains. (See "ProviderAccountConfig collision" below.)
-- [ ] `settings` map beside `secrets` for non-secret account config (NMI `tokenization_url`; CCBill
-      `datalink_username`/`allowed_cidrs`), validated per rail. CCBill FlexForm/RBO stay catalog provider-links
-      (per-price), never account settings.
-- [ ] Dedicated single-underscore `BILLING_` env mapper (schema-aware), exported as a reusable helper for
+- [x] `settings` map beside `secrets` for non-secret account config (NMI `tokenization_url` +
+      `tokenization_key`; CCBill `allowed_cidrs`), with CCBill `account_id` carrying
+      `client_acc_num/client_sub_acc` and CCBill `salt`/DataLink credentials as typed secrets. CCBill
+      FlexForm/RBO stay catalog provider-links (per-price), never account settings.
+- [x] Dedicated single-underscore `BILLING_` env mapper (schema-aware), exported as a reusable helper for
       embedded hosts (doujins/hentai0/cozy) to attach to their own koanf env callback. (See ambiguity below.)
-- [ ] Mounted Vault/secret files as structured YAML/JSON overlays with the same `billing.*` shape, merged after
+- [x] Mounted Vault/secret files as structured YAML/JSON overlays with the same `billing.*` shape, merged after
       the public config (which may leave secret leaves blank). Choose an explicit koanf provider
       (`k8smount`/Vault) or a documented+tested filename→key mapping — don't assume a koanf convention.
-- [ ] Symmetric dump: `dump-merchant-config` emits the SAME typed map-shaped `*Config` structs as input (no
+- [x] Symmetric dump: `dump-merchant-config` emits the SAME typed map-shaped `*Config` structs as input (no
       arrays, no `provider_type`/`name`, no `{env:…}` placeholders); secrets redacted by default; plaintext only
       via an explicit `--include-secrets` flag, with regression coverage that a normal dump can't leak secrets.
-- [ ] Round-trip tests: load → apply → dump → load, asserting stable non-secret shape + account identities
+- [x] Round-trip tests: load → apply → dump → load, asserting stable non-secret shape + account identities
       (sorted map keys — see below).
-- [ ] Route merchant-config loading through the same koanf pipeline as runtime config; no `os.Getenv`/secret-file
+- [x] Route merchant-config loading through the same koanf pipeline as runtime config; no `os.Getenv`/secret-file
       reads inside the manifest parser.
+
+## Validation
+
+- `task sqlc`
+- `go test ./...`
+- `go test -tags integration ./internal/bootstrap ./embed ./internal/db/querytest ./internal/http -run 'TestMerchantConfig|TestReconcileMerchantManifest|TestUpsertMerchantConfig|TestPaymentProviderAccountIdentityIsGlobal|TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe' -count=1`
 
 ## Open design questions (resolve before building)
 
@@ -121,8 +305,20 @@ position-coupled, risks leaking secrets on dump, and accepts multiple spellings 
   same-named structs for the same concept is exactly the confusion this issue removes.
 - **Dump symmetry vs map order.** Go map iteration is unordered — dump must sort merchant/account keys for
   stable, diffable, round-trippable output.
+- **DO NOT regress multi-merchant secret isolation — this is the load-bearing decision.** Today the STANDALONE
+  multi-merchant runtime loads each merchant's secrets PER-REQUEST from an encrypted store (per-merchant DEK,
+  #227; `LoadStripeCredentials` is explicitly "loaded by merchant id at request time, NOT injected
+  process-wide"). The `{env|file|vault}` manifest descriptors are SEED-time instructions — push-merchant-config
+  resolves them and stores the value encrypted — not the runtime source. So this koanf model must be scoped to:
+  (a) SEED-time value resolution for push-merchant-config (koanf reads env/file/Vault → store encrypted), and
+  (b) the runtime secret source for EMBEDDED single-merchant hosts (one merchant — config/env is fine and
+  simpler). It must NOT become "load every merchant's plaintext secret into the process config tree at boot"
+  for the standalone SaaS — those stay in the per-merchant encrypted store, fetched per-request. Decide and
+  document which path koanf feeds before touching the loader.
 
-Acceptance: secret values are plain strings loaded by koanf providers (no `{env|file|value|vault}` objects);
+Acceptance: in the manifest/seed surface and the embedded single-merchant runtime, secret values are plain
+strings resolved by koanf providers (no `{env|file|value|vault}` descriptor objects) — and the standalone
+multi-merchant runtime still loads secrets per-merchant from the encrypted store, never the process config tree;
 exactly one canonical key per provider secret (aliases fail validation); merchant/provider-account identity is
 map-keyed (no numeric array indexes); non-secret account config lives under `settings`; the `BILLING_` mapper is
 a documented, exported, tested helper that unambiguously parses map keys; dump uses the same typed structs as
@@ -132,8 +328,12 @@ input, redacted by default with opt-in plaintext; and load⇄dump round-trips st
 
 # #652: normalize payment naming — rail vs provider account
 
-**Completed:** no
-**Status:** PLANNED 2026-06-30 (Paul): OpenRails should use one naming model consistently. A `rail` is the
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30 (uncommitted): implemented the hard DB/query/code naming cut for
+`provider_accounts` -> `payment_provider_accounts` and `provider_type` -> `rail` in one migration (#654 folded
+here), regenerated sqlc, updated merchant config/examples/tests, and tightened credential helper naming around
+rail/account identity. `#650` then builds on this table/column shape.
+PLANNED 2026-06-30 (Paul): OpenRails should use one naming model consistently. A `rail` is the
 integration/backend/protocol OpenRails speaks (`stripe`, `nmi`, `ccbill`, `solana`, future
 `authorize_net`). A merchant payment provider is a configured provider account on that rail: usually the same
 name as the rail for single-account providers, but distinct for multi-processor rails such as NMI
@@ -145,8 +345,8 @@ names; it should land FIRST in the cluster (#650 identity and #653 config-mechan
 
 ## Metadata
 - Category: config
-- Status: not_started
-- Passes: false
+- Status: complete
+- Passes: true
 
 ## Problem
 
@@ -188,10 +388,15 @@ provider account on the NMI rail. The same pattern will likely matter for future
       railSet entry, #641). Either UNIFY it with the koanf merchant-config provider-account struct (one type, one
       source of truth — preferred) or give them distinct names. Two same-named structs for the same concept is
       exactly the confusion this issue removes.
-- [ ] HARD-RENAME the DB column `provider_accounts.provider_type` → `rail` (forward-only migration + sqlc query
-      names + generated structs + fixtures + the `ProviderAccountSecretName(rail, …)` scheme + query comments).
-      No legacy column, no compatibility view — the same hard cut as #649's `role`→`routing`. The durable logical
-      identity is `(rail, environment, account_id)`, never the local `key` and never a random external UUID.
+- [ ] HARD-RENAME the provider-accounts table+column in ONE migration (folds in #654): table
+      `openrails.provider_accounts` → `openrails.payment_provider_accounts` AND column `provider_type` → `rail`,
+      together with their constraints/indexes/FK names/RLS comments + sqlc query names + generated structs +
+      fixtures + the `ProviderAccountSecretName(rail, …)` scheme + query comments. ONE forward-only migration and
+      ONE code-churn pass over the table — not two (renaming the same table's column and the table itself in
+      separate passes doubles the FK/query churn on a money table). No legacy column/table, no compatibility view
+      — same hard cut as #649's `role`→`routing`. The durable logical identity is `(rail, environment,
+      account_id)`, never the local `key` and never a random external UUID. (An integration test must prove
+      existing rows + all FK-backed reads survive the rename — see #654.)
 - [ ] Make the planned map-shaped config use rail as the typed block key:
       `provider_accounts.<local_key>.<rail>`, e.g. `provider_accounts.mobius.nmi`.
 - [ ] Update env mapper planning/tests so rail and provider-account keys are parsed separately:
@@ -215,151 +420,27 @@ pubkey, NOT recipient wallet), with rail-qualified strings like `nmi:579145` pre
 carries both a rail discriminator and a typed rail block; exactly one struct per concept (no duplicate
 `ProviderAccountConfig`); and future multi-account rails follow the same shape without a new naming layer.
 
----
+## Implementation Progress (2026-06-30)
 
-# #651: stop fabricating provider data — record source truthfully, derive downstream deterministically
-
-**Completed:** no
-**Status:** IMPLEMENTED 2026-06-30 (uncommitted; whole repo `go build ./...` clean, full non-integration
-`go test ./...` GREEN, integration test files compile under `-tags integration`). Landed:
-(1) dropped the `"premium"` fallback in CreateMembership + Reactivate → warn + grant only what's declared
-(none); (2) Stripe `charge.refunded` empty refund status → non-retryable error (no `"succeeded"` assumption);
-(3) reconcile backfill currency → fall back to the subscription's REAL billing currency (`sub.Price.Currency`,
-which GetByID populates), skip+warn only if both unknown — never `"usd"`; the decline-backfill integration test
-stays green because the sub's price currency is truthful; (4) missing cadence → derive the period from
-`price.AccessDurationHours` (truthful; also fixes one-off/durable prices that `RecurringCycleHours` —
-AutoRenew-gated — wrongly 30d'd), warn+30d ONLY when no duration exists at all. DECISION: warn-not-error here —
-a hard error would break legitimate one-off prices; a loud warning satisfies the policy without breakage;
-(5) `nmi.RunSale` empty currency → error; (6) amount fallback (create+renew) warns when substituting catalog
-list price for an unsupplied charged amount; (7) timestamps — added `PurchasedAt *time.Time` to both lifecycle
-params (`RegisterPurchaseRequest` already had it), consumed in both inserts; threaded STRIPE from the invoice's
-own `created` (added to `stripeInvoice`) on invoice-paid create/renew + the failed-payment row. NMI/CCBill/Solana
-left on now() — DECISION: their webhook/poller fires ~at event time so now() is an HONEST approximation, and no
-distinct provider timestamp is parsed at those sites; guessing a field would be the fabrication we're fighting.
-Clean follow-ups: CCBill `timestamp` (parseCCBillTimestamp), an NMI body txn-time field, Solana block time via
-`GetBlock(slot)`; Stripe dispute-recovery + non-scheduled-cancel `canceled_at` also deferred (edge paths);
-(8) Status set explicitly (`completed`) on both lifecycle inserts. DECISION: KEEP the SQL
-`COALESCE(NULLIF(status,''),'completed')` fallback rather than removing it — removal needs sqlc regen + touching
-~5 semantically-correct callers for a purely LATENT risk (the nmi-failure path self-corrects via MarkFailed);
-explicit status at the flagged sites removes the reliance. REMAINING: run the full testcontainers integration
-suite; commit (Paul does commits).
-PLANNED 2026-06-30 (Paul, from a fabrication audit of the ingestion + lifecycle layer):
-the money core is clean (double-entry + grant ledgers record truthfully; catalog PULL is alert-only;
-provider-account identity is operator-declared per #592/#641). The fabrication lives in the
-SUBSCRIPTION-LIFECYCLE and WEBHOOK-INGESTION layer, where fields that should come from the provider are
-defaulted/coalesced/synthesized to satisfy the schema. POLICY (Paul 2026-06-30): record source data from the
-payment provider verbatim, then create downstream effects (entitlements, grants, periods) deterministically
-from it. When a REQUIRED value is missing, THROW an error — or at minimum LOG A WARNING — never silently fall
-back onto a made-up value or incorrect default behavior. That is the standing rule, not just for these sites.
-DECLARED CONFIG DEFAULTS ARE FINE — a documented default for a config knob is intentional and explicit; the
-target is SILENT runtime fallbacks buried in error-handling / ingestion code that invent provider data.
-Sibling to #649 (which already bans inventing `provider_account_id` from `routing=primary`).
-
-## Metadata
-- Category: billing
-- Status: in_progress
-- Passes: false
-
-## Problem
-
-A repo-wide audit hunted one anti-pattern: a field that should come from the provider being defaulted to a
-literal, coalesced from nil, replaced with `time.Now()`, or synthesized to satisfy a NOT NULL column. Verified
-findings, ranked:
-
-**Tier 1 — active fabrication (records something the provider never said):**
-1. **Hardcoded `"premium"` entitlement** — `internal/modules/subscriptions/lifecycle_service.go:462-464`
-   (and the Reactivate path ~`:1058`). When both the subscription snapshot AND `product.EntitlementsSpec`
-   are empty, the code grants a `"premium"` entitlement nobody declared. Worst finding: a downstream effect
-   invented from nothing. An unmapped/empty product must grant NOTHING (the loop already runs zero times) or
-   fail loudly — never conjure access.
-2. **Stripe refund status forced to `"succeeded"`** — `internal/modules/webhooks/stripe.go:1263-1264`. Stripe
-   always sends a refund status; empty = malformed input. Assuming `"succeeded"` records a refund outcome we
-   never confirmed. (Sibling lines 1266-1271 inheriting `Charge`/`PaymentIntent` from the parent charge are
-   LEGITIMATE cross-linking — leave them.)
-3. **Reconcile backfill currency → `"usd"`** — `internal/reconcile/unknown_orchestration.go:232-233`. The
-   function's own docstring says it records "the true attempt history, so dunning/analytics see reality", then
-   invents missing currency. (Same path's `status` from `t.Success` and `PurchasedAt: t.OccurredAt` are CORRECT
-   — this path otherwise does it right; it's the model for the others.)
-
-**Tier 2 — invented period / amount boundaries (downstream effect not derived from source):**
-4. **30-day billing period fabricated when the price has no cadence** — `lifecycle_service.go:357` and
-   `:767-768` (`periodEndsAt = now.Add(30*24*time.Hour)` / `cycleHours = 30*24`). A recurring price with no
-   cadence is a misconfiguration; inventing 30 days grants a wrong access window. Fail instead. (When the
-   provider supplies `CurrentPeriodEndsAt` it's used correctly — fabrication only on the missing-data branch.)
-5. **Charged amount falls back to catalog list price** — `lifecycle_service.go:551-552` and `:708-709`
-   (`if !params.AmountProvided && amount == 0 { amount = price.Amount }`). Substitutes the EXPECTED catalog
-   price for the ACTUAL charged amount — wrong under proration/discount/tax. Narrow (guarded by
-   `AmountProvided`) but it's catalog data masquerading as transaction truth.
-
-**Tier 3 — timestamp truth (processing-time recorded as transaction-time):** `PurchasedAt`/`CreatedAt` set to
-`s.now()` instead of the provider's timestamp, in `lifecycle_service.go:572` & `:731`; `webhooks/stripe.go:1152`
-(failed payment — invoice has `created`), `:1494` (dispute recovery), `:1076` (cancel — Stripe sends
-`canceled_at`); `webhooks/nmi.go:1206`; and Solana `internal/modules/solana/poller.go` `RegisterPurchase`
-(no `PurchasedAt` → defaults to now, instead of on-chain block time). Provider timestamps exist but aren't
-threaded through `CreateMembershipParams`/`RenewMembershipParams`/`RegisterPurchaseRequest`. No money value is
-fabricated, but audit/dunning/period math keys off these. The #634 backfill (`PurchasedAt: t.OccurredAt`)
-proves the threading is feasible.
-
-**Tier 4 — latent schema-default trap (not firing today):** `payments.status` carries DB
-`DEFAULT 'completed'` (`migrations/postgres/001_*`), and the lifecycle inserts at `:559` and `:718` omit
-`Status` entirely. Today only success paths reach them, so no false data YET — but any future caller that
-forgets `status` silently records a SUCCESSFUL payment. Exactly the "default value to satisfy the schema"
-pattern. The codebase already has the right shape elsewhere (`payments/payment.go:201` `ReserveProviderAttempt`
-sets `pending` explicitly).
-
-## Out of scope — verified CLEAN, do NOT re-audit
-- Double-entry ledger + grant ledger: no fabricated amounts/currency, no plug entries, no FX;
-  `COALESCE(SUM(...),0)` is mathematically correct; grant amount/currency validated as required.
-- Catalog PULL reconciliation (`jobs_catalog_reconciliation.go`): correctly alert-only, never mutates.
-- Provider-account identity (#592/#641): operator-declared, no runtime guessing; manifest rejects empty
-  `account_id`; Stripe self-discovers via `/v1/account`; webhook-secret routing rejects unknown accounts;
-  `provider_account_stamp` leaves `nil` rather than inventing provenance.
-- Card fields (last4/brand/exp): correctly nullable — `NormalizeStripeCard` returns nil, no `"0000"`.
-- `nmi.RunSale` currency→usd default (`integrations/nmi/payments.go:48`): unreachable defensive code (call
-  sites always pass DB-sourced currency) — still convert to an error on the money path (task below).
-
-## Tasks
-
-Standing policy for every task: missing REQUIRED source value ⇒ throw (or at minimum log a warning) — never a
-silent made-up fallback.
-
-Unambiguous (clear fix):
-- [x] Drop the `"premium"` entitlement fallback (CreateMembership + Reactivate): now warns + grants only the
-      declared spec (none) instead of conjuring `"premium"`.
-- [x] Stop assuming Stripe refund `status`: empty status → `MarkWebhookErrorNonRetryable`, no `"succeeded"`.
-      Charge/PaymentIntent inherit kept.
-- [x] Stop defaulting reconcile backfill currency to `"usd"`: falls back to the subscription's real billing
-      currency (`sub.Price.Currency`), skip+warn only when both are unknown.
-- [x] Missing billing cadence: derive period from `price.AccessDurationHours` (also fixes one-off prices),
-      warn+30d only when truly absent. DECISION changed error→warn (a hard error breaks legitimate one-off
-      prices; AutoRenew-gated `RecurringCycleHours` was the trap).
-- [x] Convert `nmi.RunSale` empty-currency default to an error.
-
-Needs a small decision (thread provider data through params):
-- [x] Charged amount fallback now WARNS (create+renew) when substituting catalog list price for an unsupplied
-      amount (kept the fallback, removed the silence).
-- [x] Threaded the provider timestamp into `PurchasedAt` via a new `PurchasedAt` param consumed by both
-      lifecycle inserts; STRIPE wired from the invoice's own `created`. NMI/CCBill/Solana intentionally left on
-      now() (honest event-time approximation; no distinct provider timestamp is parsed there — guessing would
-      be fabrication). Follow-ups in Status (CCBill timestamp / NMI body time / Solana GetBlock; Stripe
-      dispute+cancel edge paths).
-- [x] Set `Status` explicitly (`completed`) on both lifecycle inserts. DECISION: KEEP the SQL
-      `COALESCE(NULLIF(status,''),'completed')` fallback (removal = sqlc regen + many semantically-correct
-      callers for a latent-only risk; nmi-failure path self-corrects via MarkFailed).
-
-Acceptance: the subscription-lifecycle and webhook-ingestion paths record provider-supplied status, currency,
-amount, and timestamps verbatim; entitlements/grants/periods derive only from recorded source data; a missing
-required source value throws or warns at the boundary instead of defaulting to a made-up value; grepping these
-paths for hardcoded `"premium"`/`"usd"`/`"succeeded"`/`30*24`/`s.now()`-as-purchase-time finds no
-truth-recording use; the `payments.status` schema can no longer silently record a successful payment from an
-omitted field.
+- [x] Added `050_payment_provider_accounts_rail.up.sql`: table rename, `rail` column rename, constraints/indexes/FK
+      names, and comments in one forward-only migration.
+- [x] Replaced provider-account sqlc query/gen files with `payment_provider_accounts` / `Rail`.
+- [x] Updated runtime/reconcile/bootstrap/embedded tests and examples to use `rail` and the renamed table.
+- [x] Kept the config collection name `provider_accounts` because it names configured accounts, not the DB table.
+- [x] Validation: `task sqlc`; `go test ./...`; focused integration below under #650.
 
 ---
 
 # #650: globally unique provider-account identity, route merchant from provider account
 
-**Completed:** no
-**Status:** PLANNED 2026-06-30 (Paul): a payment-provider account must belong to exactly one merchant. If an
+**Completed:** yes
+**Status:** COMPLETE 2026-06-30 (uncommitted): added global `(rail, environment, account_id)` uniqueness with
+preflight duplicate detection, updated upserts to reject cross-merchant ownership conflicts, added global account
+lookup, and made standalone canonical webhooks derive merchant/account routing from provider account identity:
+NMI by `event_body.merchant.id`, CCBill by `clientAccnum/clientSubacc`, and direct Stripe by
+`/webhooks/stripe/:account_id`. Merchant-scoped routes remain transition aliases and still reject mismatched
+accounts by failing local account lookup. Added real Postgres integration coverage for duplicate account
+ownership and account-derived webhook routing. PLANNED 2026-06-30 (Paul): a payment-provider account must belong to exactly one merchant. If an
 inbound webhook or provider callback carries a provider-native account id, OpenRails should resolve the provider
 account first and derive the merchant from that row, instead of requiring both merchant and provider-account in
 the route. Every provider interaction must make the payment-provider account explicit from the route, request
@@ -371,8 +452,8 @@ This also prevents ambiguous cross-merchant ownership of the same Stripe/NMI/CCB
 
 ## Metadata
 - Category: data-integrity
-- Status: not_started
-- Passes: false
+- Status: complete
+- Passes: true
 
 ## Problem
 
@@ -404,50 +485,78 @@ the request/event contains it, and only derive/check merchant after that.
 
 ## Tasks
 
-- [ ] Add a forward-only Postgres migration replacing `uq_provider_accounts_identity` with a global uniqueness
-      constraint/index on `(provider_type, environment, account_id)`.
-- [ ] Add a preflight duplicate check before the constraint is created, with a clear error listing duplicated
-      `(provider_type, environment, account_id)` values and their merchant ids.
-- [ ] Update `UpsertProviderAccount` conflict handling to use `(provider_type, environment, account_id)` and reject
+- [x] Add a forward-only Postgres migration replacing `uq_payment_provider_accounts_identity` with a global
+      uniqueness constraint/index on `(rail, environment, account_id)`.
+- [x] Add a preflight duplicate check before the constraint is created, with a clear error listing duplicated
+      `(rail, environment, account_id)` values and their merchant ids.
+- [x] Update `UpsertProviderAccount` conflict handling to use `(rail, environment, account_id)` and reject
       cross-merchant upserts instead of silently moving or merging ownership.
-- [ ] Treat the provider-account natural key as `(rail/provider_type, environment, account_id)` in APIs and
+- [x] Treat the provider-account natural key as `(rail, environment, account_id)` in APIs and
       provenance. Do not expose a random UUID as the preferred external identifier; if a compact string is needed,
       use a rail-qualified account id such as `nmi:579145` (plus environment where ambiguous).
-- [ ] For Solana, validate that the configured signer public key equals `account_id`. Store recipient/treasury
+- [x] For Solana, validate that the configured signer public key equals `account_id`. Store recipient/treasury
       wallets separately as settings; do not use them for provider-account identity or uniqueness.
-- [ ] Add a lookup query for provider account by provider-native identity without merchant id, returning the row
+- [x] Add a lookup query for provider account by provider-native identity without merchant id, returning the row
       and owning `merchant_id`.
-- [ ] Audit all provider-touching HTTP/worker/CLI boundaries and classify how provider-account identity is made
+- [x] Audit all provider-touching HTTP/worker/CLI boundaries and classify how provider-account identity is made
       explicit: route parameter, request payload, provider webhook payload/header, or routing-policy output.
       Fix any boundary that only has merchant + rail/provider type.
-- [ ] Make the canonical NMI and CCBill webhook routes provider-only (`/webhooks/nmi`, `/webhooks/ccbill`), with
+- [x] Make the canonical NMI and CCBill webhook routes provider-only (`/webhooks/nmi`, `/webhooks/ccbill`), with
       no merchant slug and no provider-account id in the path.
-- [ ] Keep canonical direct Stripe webhooks account-scoped (`/webhooks/stripe/:account_id`) because ordinary
+- [x] Keep canonical direct Stripe webhooks account-scoped (`/webhooks/stripe/:account_id`) because ordinary
       Stripe direct-account events do not include `acct_...` in the event body. Stripe Connect/org webhooks may
       use provider-only routing when account/context is present in the payload.
-- [ ] Use account-derived webhook routing before dispatch: CCBill by `clientAccnum/clientSubacc`, NMI by
+- [x] Use account-derived webhook routing before dispatch: CCBill by `clientAccnum/clientSubacc`, NMI by
       merchant/gateway id, direct Stripe by route `:account_id`, and Stripe Connect/org by payload account/context.
-- [ ] For merchant-scoped account routes, verify the provider account owner matches the path merchant; reject
+- [x] For merchant-scoped account routes, verify the provider account owner matches the path merchant; reject
       mismatches instead of treating the path merchant as authoritative.
-- [ ] Keep merchant/account-id webhook URL forms only as transition aliases or for a provider event class that
+- [x] Keep merchant/account-id webhook URL forms only as transition aliases or for a provider event class that
       cannot be safely resolved by payload identity. Do not identify Stripe accounts by trying configured webhook
       secrets until one verifies; direct Stripe account identity must come from the route.
-- [ ] Checkout and saved-payment-method creation must resolve one concrete provider account before calling a
+- [x] Checkout and saved-payment-method creation must resolve one concrete provider account before calling a
       provider. `payment.rail`/`provider` names the rail; it is not enough when a merchant has multiple accounts
       on that rail. If routing policy chooses an account, record that chosen account; do not call NMI/Stripe/etc.
       through a primary-account fallback and leave `provider_account_id` blank.
-- [ ] Make saved-payment-method creation validate provider/rail at the handler boundary, and require either a
+- [x] Make saved-payment-method creation validate provider/rail at the handler boundary, and require either a
       concrete provider account or enough routing context to select one. Do not accept an optional `provider`
       field only to let vault creation fail later.
-- [ ] Add integration tests proving duplicate provider accounts across two merchants fail, same provider account
+- [x] Add integration tests proving duplicate provider accounts across two merchants fail, same provider account
       under the same merchant still upserts, and account-derived webhook routing resolves the merchant correctly.
+- [x] Make fixtures/examples use DISTINCT `account_id`s per merchant. Global uniqueness will reject the same
+      `(rail, environment, account_id)` under two merchants, and current test fixtures/example manifests REUSE
+      placeholder ids (e.g. the integration suite's NMI `579145`, `merchants.example.yaml`'s ids); seeding two
+      merchants with a shared id would now fail. Sweep them before the constraint lands.
+- [x] This issue REPLACES the #641 webhook routing: the merchant-scoped per-account path
+      (`/merchants/:merchant/webhooks/:provider/:account_id`) becomes a transition alias, and canonical routing
+      becomes provider-only for NMI/CCBill + account-scoped for direct Stripe (per the tasks above). Migrate the
+      #641 handler + `LoadNMIWebhookSigningSecretForAccount`/`LoadStripeCredentialsForAccount` paths onto
+      account→merchant resolution rather than leaving two parallel routing models.
+- [x] SEQUENCE after #652 (+ its folded #654 rename): this issue's migration and the account-lookup query name
+      `rail`/`payment_provider_accounts` — build on the
+      renamed names, don't write the old ones and re-migrate.
 
-Acceptance: the same `(provider_type, environment, account_id)` cannot exist under two merchants; provider-account
+Acceptance: the same `(rail, environment, account_id)` cannot exist under two merchants; provider-account
 lookups can derive merchant ownership directly from provider-native account identity; canonical NMI/CCBill
 webhooks are one endpoint per provider/rail and derive provider account→merchant from payload; canonical direct
 Stripe webhooks use `/webhooks/stripe/:account_id`; merchant-scoped webhook URL forms, if retained, are transition
 aliases that reject mismatches; checkout/vault creation records the provider account it actually uses; and
 provenance stamping uses the resolved provider-account row, never a separate merchant guess.
+
+## Implementation Progress (2026-06-30)
+
+- [x] Added `051_payment_provider_account_global_identity.up.sql` with duplicate preflight and global unique
+      `(rail, environment, account_id)`.
+- [x] Updated generated `UpsertProviderAccount` and the hand-written merchant admin upsert to conflict on the
+      global natural key and no-op/error on cross-merchant collisions.
+- [x] Added `GetProviderAccountByRailIdentity` and `Service.ResolvePaymentProviderAccountByIdentity`.
+- [x] Added canonical `/webhooks/:provider/:account_id` route for direct Stripe account webhooks.
+- [x] Added no-merchant global webhook resolution for NMI, CCBill, and Stripe, pinning both merchant id and
+      internal provider-account id into request context before dispatch.
+- [x] Added real Postgres integration tests:
+      `go test -tags integration ./internal/db/querytest -run 'TestPaymentProviderAccountIdentityIsGlobal|TestQueryContractsHighValueBillingDomains' -count=1`
+      and
+      `go test -tags integration ./internal/http -run 'TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe' -count=1`.
+- [x] Full non-integration validation: `go test ./...`.
 
 ---
 
@@ -1961,13 +2070,13 @@ Add deterministic processor selection and fallback policy so checkout can choose
 
 **Tasks:**
 - DESIGN:
-- [ ] Define routing inputs: tenant_id, product_id, price_id, tier_group, amount, currency, billing cycle, user country/state when known, processor availability, processor capability metadata (#291), and explicit client preference.
+- [ ] Define routing inputs: tenant_id, product_id, price_id, tier_group, amount, currency, billing cycle, user country/state when known, non-archived provider-account eligibility, processor availability, processor capability metadata (#291), and explicit client preference.
 - [ ] Define routing outputs: selected processor, fallback candidates, reason, and policy version.
 - [ ] Decide precedence: explicit price/provider config > merchant policy > product/tier_group policy > global default.
 - [ ] Decide failure classes that can trigger fallback before checkout finalization: processor unavailable, unsupported capability, credential missing, sandbox/live mismatch, hard validation failure. Do not fallback after a successful charge.
 -
 - DATA MODEL / CONFIG:
-- [ ] Add routing policy representation in DB or catalog manifest: allowed processors, preferred order, disabled processors, and optional per-tier overrides.
+- [ ] Add routing policy representation in DB or catalog manifest: allowed processors, preferred order, archived-account exclusion, and optional per-tier overrides.
 - [ ] Extend catalog-as-code manifest only if needed; prefer using existing provider lists as the first version.
 - [ ] Record selected processor and routing reason on checkout_sessions for auditability.
 -

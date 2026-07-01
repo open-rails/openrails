@@ -31,7 +31,7 @@ type FetcherOptions struct {
 }
 
 // BuildFetchersWithOptions is the strict builder used by operator commands.
-// It respects rail routing selection and returns config errors instead of
+// It respects active rail selection and returns config errors instead of
 // silently picking an arbitrary account.
 func BuildFetchersWithOptions(cfg *config.Config, rails config.ProviderAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
 	fetchers := map[Provider]RailFetcher{}
@@ -90,7 +90,7 @@ func selectRailByType(rails config.ProviderAccountSet, rail models.Rail, explici
 		}
 		return explicitKey, proc, nil
 	}
-	return rails.PrimaryRailByType(rail)
+	return rails.ActiveRailByType(rail)
 }
 
 func selectNMIClient(rails config.ProviderAccountSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
@@ -101,14 +101,14 @@ func selectNMIClient(rails config.ProviderAccountSet, clients map[string]*nmi.NM
 		}
 		return explicitKey, c, nil
 	}
-	key, proc, err := rails.PrimaryRailByType(models.RailNMI)
+	key, proc, err := rails.ActiveRailByType(models.RailNMI)
 	if err != nil {
 		return "", nil, err
 	}
 	if proc != nil {
 		c := clients[key]
 		if c == nil {
-			return "", nil, fmt.Errorf("primary nmi rail %q is not configured for reconciliation", key)
+			return "", nil, fmt.Errorf("active nmi rail %q is not configured for reconciliation", key)
 		}
 		return key, c, nil
 	}

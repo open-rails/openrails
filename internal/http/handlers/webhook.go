@@ -84,9 +84,15 @@ func Webhook(r *httprequest.Request) {
 	// to the per-merchant surface rather than letting a downstream merchant.Require
 	// surface a generic error (audit OR-API-C2).
 	if _, err := merchant.Require(r.Request.Context()); err != nil {
+		if handled, accepted := processProviderAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
+			if accepted {
+				r.SuccessJSON(map[string]string{"status": "accepted"})
+			}
+			return
+		}
 		log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).
-			Warn("global webhook surface hit with no configured merchant; deliver to /v1/merchants/{merchant}/webhooks/{provider}")
-		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface; deliver this event to /v1/merchants/{merchant}/webhooks/{provider}")
+			Warn("global webhook surface hit with no configured merchant and no resolvable provider account")
+		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no provider account could be resolved from the webhook")
 		return
 	}
 	isTestMode := r.State.Config.IsTestMode()
@@ -271,11 +277,90 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
+func processProviderAccountWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
+	if r.State == nil || r.State.Merchants == nil {
+		return false, false
+	}
+	environment := webhookProviderEnvironment(r)
+	switch {
+	case rails.IsNMI(models.Rail(rail)):
+		body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
+		if !ok {
+			return true, false
+		}
+		accountID := nmiWebhookAccountID(body)
+		if accountID == "" {
+			r.ErrorJSON(http.StatusBadRequest, "NMI webhook payload is missing merchant account identity")
+			return true, false
+		}
+		account, ok := resolveWebhookPaymentProviderAccount(r, string(models.RailNMI), environment, accountID)
+		if !ok {
+			return true, false
+		}
+		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
+	case rail == subscriptions.RailCCBill:
+		if r.State.Config != nil && !r.State.Config.IsTestMode() && !iputil.IsValidCCBillIP(clientIP) {
+			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
+			return true, false
+		}
+		body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
+		if !ok {
+			return true, false
+		}
+		prepared, accountID, ok := prepareCCBillWebhookWithAccountID(r, body)
+		if !ok {
+			return true, false
+		}
+		account, ok := resolveWebhookPaymentProviderAccount(r, subscriptions.RailCCBill, environment, accountID)
+		if !ok {
+			return true, false
+		}
+		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
+	case rail == subscriptions.RailStripe && routeAccountID != "":
+		account, ok := resolveWebhookPaymentProviderAccount(r, subscriptions.RailStripe, environment, routeAccountID)
+		if !ok {
+			return true, false
+		}
+		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
+		return true, true
+	default:
+		return false, false
+	}
+}
+
+func webhookProviderEnvironment(r *httprequest.Request) string {
+	if r != nil && r.State != nil && r.State.Config != nil && r.State.Config.IsTestMode() {
+		return "test"
+	}
+	return "live"
+}
+
+func resolveWebhookPaymentProviderAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.PaymentProviderAccountIdentity, bool) {
+	account, ok, err := r.State.Merchants.ResolvePaymentProviderAccountByIdentity(r.Request.Context(), rail, environment, accountID)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")
+		return merchants.PaymentProviderAccountIdentity{}, false
+	}
+	if !ok {
+		r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+		return merchants.PaymentProviderAccountIdentity{}, false
+	}
+	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
+	ctx = repo.WithProviderAccountID(ctx, account.ID)
+	r.Request = r.Request.WithContext(ctx)
+	return account, true
+}
+
 func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) bool {
 	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
 	if !ok {
 		return false
 	}
+	return processMerchantNMIWebhookBody(r, provider, merchantID, accountID, body)
+}
+
+func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string, body []byte) bool {
 	var signingKey string
 	var err error
 	if accountID != "" {
@@ -356,6 +441,14 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 	if !ok {
 		return false
 	}
+	prepared, _, ok := prepareCCBillWebhookWithAccountID(r, body)
+	if !ok {
+		return false
+	}
+	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, "")
+}
+
+func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
 	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
 	if err != nil {
 		switch {
@@ -368,8 +461,17 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 		default:
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		}
-		return false
+		return webhookutil.Prepared{}, "", false
 	}
+	accountID := ccbillWebhookAccountID(prepared.Body)
+	if accountID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "CCBill webhook payload is missing client account identity")
+		return webhookutil.Prepared{}, "", false
+	}
+	return prepared, accountID, true
+}
+
+func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP string, prepared webhookutil.Prepared, accountID string) bool {
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
@@ -384,6 +486,9 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 		Signature:      prepared.Signature,
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
+	}
+	if accountID != "" {
+		msg.ProviderAccountID = accountID
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
@@ -810,6 +915,40 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 		return false
 	}
 	return true
+}
+
+func nmiWebhookAccountID(body []byte) string {
+	var envelope struct {
+		EventBody json.RawMessage `json:"event_body"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.EventBody) == 0 {
+		return ""
+	}
+	var payload struct {
+		Merchant *struct {
+			ID webhooks.Stringish `json:"id"`
+		} `json:"merchant"`
+	}
+	if err := json.Unmarshal(envelope.EventBody, &payload); err != nil || payload.Merchant == nil {
+		return ""
+	}
+	return payload.Merchant.ID.Trimmed()
+}
+
+func ccbillWebhookAccountID(body []byte) string {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	clientAccnum := strings.TrimSpace(fmt.Sprint(payload["clientAccnum"]))
+	clientSubacc := strings.TrimSpace(fmt.Sprint(payload["clientSubacc"]))
+	if clientAccnum == "" || clientAccnum == "<nil>" {
+		return ""
+	}
+	if clientSubacc == "" || clientSubacc == "<nil>" {
+		return clientAccnum
+	}
+	return clientAccnum + "/" + clientSubacc
 }
 
 func firstPresentHeader(header http.Header, names ...string) string {

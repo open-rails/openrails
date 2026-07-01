@@ -604,23 +604,16 @@ func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, datab
 		}
 	}
 
-	// #641: also expose the primary under the rail key "nmi" so existing
+	// Also expose the active account under the rail key "nmi" so existing
 	// NMIClients["nmi"] consumers keep resolving it. Provider-account-specific
 	// callers should use observed provider identity instead.
 	railKey := string(models.RailNMI)
-	_, primary, err := rails.PrimaryRailByType(models.RailNMI)
+	_, active, err := rails.ActiveRailByType(models.RailNMI)
 	if err != nil {
-		return nil, err // multiple primaries: a configuration error
+		return nil, err
 	}
-	if primary == nil {
-		// No primary (legacy/secondary-only): alias the lexicographically-first
-		// account (RailKeysByType is sorted) so refunds/rebills still resolve.
-		if keys := rails.RailKeysByType(models.RailNMI); len(keys) > 0 {
-			primary = nmiRails[keys[0]]
-		}
-	}
-	if primary != nil {
-		clients[railKey] = clients[primary.EffectiveAccountID()]
+	if active != nil {
+		clients[railKey] = clients[active.EffectiveAccountID()]
 	}
 
 	return clients, nil

@@ -163,16 +163,16 @@ func TestIdentityAnchorsAndProviderOwner_Integration(t *testing.T) {
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.provider_accounts
-			 (merchant_id, provider_type, environment, account_id, routing, status, owner)
-			 VALUES ($1, 'stripe', 'test', $2, 'secondary', 'enabled', 'platform')`,
+			`INSERT INTO openrails.payment_provider_accounts
+			 (merchant_id, rail, environment, account_id, archived, owner)
+			 VALUES ($1, 'stripe', 'test', $2, false, 'platform')`,
 			tid.UUID(), accountID,
 		)
 		require.NoError(t, err)
 
 		var owner string
 		require.NoError(t, tx.QueryRow(ctx,
-			`SELECT owner FROM openrails.provider_accounts WHERE merchant_id = $1 AND account_id = $2`,
+			`SELECT owner FROM openrails.payment_provider_accounts WHERE merchant_id = $1 AND account_id = $2`,
 			tid.UUID(), accountID,
 		).Scan(&owner))
 		require.Equal(t, "platform", owner)
@@ -181,9 +181,9 @@ func TestIdentityAnchorsAndProviderOwner_Integration(t *testing.T) {
 
 	err = appDB.MerchantTx(ctxTenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.provider_accounts
-			 (merchant_id, provider_type, environment, account_id, routing, status, owner)
-			 VALUES ($1, 'stripe', 'test', $2, 'secondary', 'enabled', 'customer')`,
+			`INSERT INTO openrails.payment_provider_accounts
+			 (merchant_id, rail, environment, account_id, archived, owner)
+			 VALUES ($1, 'stripe', 'test', $2, false, 'customer')`,
 			tid.UUID(), "acct_bad_"+uuid.NewString()[:8],
 		)
 		return err

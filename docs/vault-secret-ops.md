@@ -82,8 +82,10 @@ KV-v2 field `value`:
 | Stripe API key | `secret/openrails/merchants/cozy-art/stripe/secret_key` | yes |
 | Stripe webhook signing secret | `secret/openrails/merchants/cozy-art/stripe/webhook_signing_secret` | yes |
 | Stripe thin-event signing secret | `secret/openrails/merchants/cozy-art/stripe/webhook_signing_secret_thin` | yes |
-| NMI security key | `secret/openrails/merchants/doujins/nmi/mobius/production_key` | yes |
-| CCBill account config JSON | `secret/openrails/merchants/doujins/ccbill/account_config` | yes |
+| NMI security key | `secret/openrails/merchants/doujins/provider_accounts/nmi/live/mobius/security_key` | yes |
+| CCBill FlexForm salt | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/salt` | yes |
+| CCBill DataLink username | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_username` | yes |
+| CCBill DataLink password | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_password` | yes |
 | Solana signing keypair | `secret/openrails/merchants/default/solana/private_key` | no |
 
 `solana/private_key` remains an OpenRails internal/platform-admin secret for
@@ -97,8 +99,10 @@ An operator can preprovision provider credentials before a merchant ever opens a
 dashboard:
 
 ```sh
-vault kv put secret/openrails/merchants/doujins/nmi/mobius/production_key value="$NMI_SECURITY_KEY"
-vault kv put secret/openrails/merchants/doujins/ccbill/account_config value='{"client_acc_num":"...","client_sub_acc":"...","salt":"..."}'
+vault kv put secret/openrails/merchants/doujins/provider_accounts/nmi/live/mobius/security_key value="$NMI_SECURITY_KEY"
+vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/salt value="$CCBILL_SALT"
+vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_username value="$CCBILL_DATALINK_USERNAME"
+vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_password value="$CCBILL_DATALINK_PASSWORD"
 vault kv put secret/openrails/merchants/tensorhub/stripe/secret_key value="$STRIPE_SECRET_KEY"
 vault kv put secret/openrails/merchants/tensorhub/stripe/webhook_signing_secret value="$STRIPE_WEBHOOK_SECRET"
 ```

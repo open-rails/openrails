@@ -102,10 +102,10 @@ merchants:
   - slug: local-stack
     display_name: Local Stack
     provider_accounts:
-      - provider_type: nmi
+      - rail: nmi
         environment: live
         account_id: mobius-profile-id
-        mode: primary
+        archived: false
         secrets:
           security_key: {env: NMI_SANDBOX_SECURITY_KEY}
           webhook_signing_secret: {env: NMI_WEBHOOK_SIGNING_SECRET}
@@ -134,7 +134,7 @@ In a second terminal:
 task tunnel-webhooks
 ```
 
-Verify routing:
+Verify provider-account identity:
 
 ```bash
 task verify-webhook-tunnel

@@ -54,17 +54,17 @@ payment rails.
 
 Merchant provider secrets in `push-merchant-config` are seed material, not the
 runtime source of truth. The command resolves each declared provider account
-identity `(merchant, provider_type, environment, account_id)` and imports its
+identity `(merchant, rail, environment, account_id)` and imports its
 secret values into the same backend the server will read:
 
-- `vault.enabled: true`: `secret/openrails/merchants/<merchant-slug>/provider_accounts/<provider_type>/<environment>/<account_id>/<secret_key>`
+- `vault.enabled: true`: `secret/openrails/merchants/<merchant-slug>/provider_accounts/<rail>/<environment>/<account_id>/<secret_key>`
 - Vault disabled: `openrails.merchant_secrets` with the same secret name,
   envelope-encrypted when `encryption.master_key` is configured
 
 After import, runtime checkout, webhook, vault/tokenization, provider intent,
 and provider-pull paths use the `provider_accounts` row and scoped secret name;
 they do not read a broad merchant-wide `stripe/secret_key` or
-`nmi/mobius/production_key` when a DB-backed merchant service is running.
+`nmi/mobius/security_key` when a DB-backed merchant service is running.
 
 ## Private Standalone First Run
 
@@ -171,13 +171,13 @@ dunning-forensics evidence imported from legacy) and never applies failure
 policy. `readonly` is unchanged: pure dry-run observer.
 
 **Provider account guard / credential rotation (#518).** Provider-owned work is
-bound to a merchant-scoped `provider_accounts` row. The row stores the account's
+bound to a merchant-scoped `payment_provider_accounts` row. The row stores the account's
 own identity, never the credential or local config key: NMI uses the merchant
 identity from the gateway's profile report (query.php `report_type=profile`),
 Stripe uses the `acct_...` id from GET /v1/account, CCBill uses the configured
 account/subaccount identity, and Solana uses the configured recipient/authority
 identity where account-binding is useful. Local config keys such as
-`stripe_primary` are disposable selectors only.
+`stripe_live` are disposable selectors only.
 
 Every provider intent is stamped at enqueue with the `provider_account_id` row
 for the provider account the producer was configured against. The executor and
@@ -186,16 +186,16 @@ current credential resolves to the same account — a queue built against one
 account is never executed against another (NMI ids are small numerics that
 collide across accounts: the wrong account's subscription would be deleted, the
 wrong customer's card charged). Checkout session creation also resolves the
-current primary provider account and stamps `checkout_sessions.provider_account_id`
+current non-archived provider account and stamps `checkout_sessions.provider_account_id`
 before creating the provider checkout row.
 Operational rules:
 
 - Key rotation within the SAME account: no effect — the provider account identity
   is refetched under the new key and matches.
 - Pointing a provider key at a DIFFERENT account for default work is an account
-  rotation: OpenRails binds/promotes the new account as primary and leaves old
+  rotation: OpenRails binds the new account as non-archived and leaves old
   provider-owned rows attributed to the old account. New default checkout/pull
-  work uses the new primary.
+  work uses a non-archived account; old accounts can remain archived for drain.
 - Pending intents that were stamped with the OLD account do not follow that
   default rotation automatically. Restore credentials for the old account so they
   can drain, let stale intents expire/supersede, or — if deliberately adopting
@@ -239,7 +239,7 @@ changes are fully reconstructable from the log or the findings table.
 
 Before a provider's data is treated as authoritative, `check` / `fix` resolves
 the configured provider key to a provider account identity and verifies it
-against the merchant's enabled primary `provider_accounts` row. A changed
+against the targeted `payment_provider_accounts` row. A changed
 credential that points at a different Stripe/NMI/CCBill/Solana account
 aborts the provider run before local mirror rows are inserted or overwritten.
 The run summary and provider fetch params carry the local `provider_account_id`;

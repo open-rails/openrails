@@ -9,6 +9,103 @@
 
 ---
 
+# #657: per-user archived provider-account cutover on card re-entry
+
+**Completed:** no — future follow-up to #655.
+
+When a subscriber on an archived provider account reaches a natural lapse point
+(expiry, failed rebill, cancelled/re-subscribe, or explicit card update), move
+that single subscriber to the active account on the same rail/environment. This
+is the normal passive-drain cutover, not the emergency migration campaign in
+#656.
+
+## Tasks
+
+- [ ] Detect the existing subscription/payment method's archived
+      `provider_account_id` at card re-entry time.
+- [ ] Capture/tokenize the replacement card on a non-archived provider account.
+- [ ] Create the replacement provider subscription anchored to the current
+      period end when preserving paid-through access.
+- [ ] Cancel or mark the old provider subscription according to the old rail's
+      capability.
+- [ ] Re-point the OpenRails subscription/payment-method rows to the new
+      `provider_account_id` only after the new provider obligation is confirmed.
+- [ ] Add idempotency and rollback behavior so retries do not double-subscribe.
+
+Acceptance: one subscriber can migrate from archived A to active B by re-entering
+their card, with no bulk import, no silent card copy, and no proactive mass move.
+
+---
+
+# #656: emergency payment-provider migration (A→B in weeks, not months)
+
+**Completed:** no — future direction only. Not important now; plan when a real termination risk is imminent.
+
+The DISASTER version of #655. Normal case (#655): a merchant chooses to switch processors and the old account
+`archived` drains gradually over months–years as cards naturally lapse. This issue is the opposite: **provider A
+suddenly TERMINATES the merchant** (common for high-risk/adult — doujins/hentai0), AND A owns the vaulted cards +
+recurring logic. There is no time to drain — you must move the active book A→B in **≤1 month**, or lose it.
+
+## The hard constraint (unchanged)
+
+Same ceiling as [[provider-account-migration-vault-ownership]]: OpenRails never holds the card, and a terminated
+provider will NOT release its vault. So emergency migration is NOT a silent move — it is a **mass, proactive,
+time-boxed re-tokenization campaign**: get every active subscriber to re-enter their card on B before A goes dark
+or their next bill misses. Everything else is about doing that fast and losing as few subscribers as possible.
+
+## Target model
+
+- **Warm standby is the #1 accelerator.** The whole thing is far faster if B is already provisioned and ready
+  BEFORE the emergency. Recommend keeping a backup processor account warm (identity declared, secrets loaded,
+  catalog synced) so "flip B active + archive A" is instant. Emergency-migration speed is mostly a
+  preparedness problem.
+- **Operator-declared emergency mode** on top of #655: archive A immediately (no new work) AND mark it
+  emergency-draining (drives the outreach + grace behavior below), targeting the active account B.
+- **Proactive mass outreach:** enumerate all active subscriptions on A; notify each subscriber with a time-boxed
+  "re-enter your card to keep your subscription" flow → SetupIntent/Checkout on B; reminders on a schedule.
+- **Aggressive migrate-on-any-touch:** any login/app interaction shows an interstitial to re-enter the card on B
+  (not just at natural lapse, as in #655). Reuse the #655 per-user cutover back-half once a card lands on B.
+- **Bounded grace extension:** keep entitlements/access alive through the migration window even when A can no
+  longer rebill, so users don't lose access and churn out of frustration mid-migration. Bounded, so it isn't
+  indefinite free service.
+- **Graceful degradation when A goes fully dark:** rebills stop, `sub_A` may not be cleanly cancellable, and
+  refunds/chargebacks on A's historical charges may be unmanageable (dead account). Plan for the revenue cliff
+  on the un-migrated cohort, mark them explicitly, and decide how in-flight refunds/disputes are handled (may
+  have to eat them or work them via the bank directly). Accept involuntary churn for non-responders.
+- **Anti-phishing / trust:** "re-enter your credit card" emails look exactly like phishing and tank response
+  rates. Design for trust — official in-app prompts, verified channels, support comms — or the 1-month window
+  is unreachable.
+
+## Non-goals
+
+- No silent/bulk card move (impossible per the vault-ownership constraint; Stripe's account-copy is explicitly
+  out per #655's decision).
+- Not the normal gradual drain — that is #655.
+
+## Tasks (planning-level; flesh out when prioritized)
+
+- [ ] Define the operator-declared emergency-migration mode atop #655's `archived` flag (archive A + emergency
+      drain + target B).
+- [ ] Write the warm-standby runbook: pre-provision + keep a backup processor account ready so B can go active
+      instantly; document what must be in place before an emergency.
+- [ ] Design the mass outreach campaign: enumerate active A subscriptions, notify, time-box, remind, track
+      per-subscriber state.
+- [ ] Aggressive migrate-on-touch (interstitial at every login/interaction), reusing the #655 per-user cutover.
+- [ ] Bounded grace-window extension so access survives an un-rebillable migration period.
+- [ ] A-goes-dark handling: stop expecting A rebills, mark the un-migrated cohort, handle in-flight
+      refunds/chargebacks, accept the revenue cliff.
+- [ ] Anti-phishing/trust comms design for the re-entry ask.
+- [ ] Migration progress reporting: % of active subs and % of MRR migrated, un-migrated cohort, churn.
+
+## Acceptance
+
+- A documented, runnable emergency playbook that moves the active subscriber book A→B via mass re-tokenization
+  within a bounded window (target ≤1 month), preserves access during the window, tracks progress, and degrades
+  gracefully (bounded grace + accepted involuntary churn) when the source provider goes dark. Builds on #655
+  (archived flag + per-user cutover); does not attempt any silent card move.
+
+---
+
 # #118: merchant-admin-dashboard-and-metrics
 
 **Completed:** no — future direction only.

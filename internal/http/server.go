@@ -334,9 +334,16 @@ func New(deps Dependencies) (*Server, error) {
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(s.publicHandler)
 
+	// Canonical provider-only webhook surface (#650): /v1/webhooks/:provider for NMI/CCBill
+	// (their payloads carry account identity) and /v1/webhooks/:provider/:account_id for
+	// direct Stripe. The handler resolves the provider account from the payload/route, derives
+	// the owning merchant from that globally-unique account row, and verifies the signature
+	// with THAT account's secret. This is the canonical multi-merchant shape.
+	s.registerWebhookRoutes(s.publicHandler)
 	// Merchant-scoped webhook routing (issue #529): /v1/merchants/:merchant/webhooks/:provider
 	// resolves the merchant from the path slug, then loads THAT merchant's signing
-	// secret and verifies the signature AFTER merchant resolution.
+	// secret and verifies the signature AFTER merchant resolution. Kept as a transition alias
+	// alongside the canonical provider-only surface above (#650).
 	s.registerMerchantWebhookRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")

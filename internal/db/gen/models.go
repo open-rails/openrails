@@ -117,6 +117,15 @@ type OpenrailsBootstrapState struct {
 	AppliedAt time.Time
 }
 
+type OpenrailsCatalogCreditBalance struct {
+	MerchantID   uuid.UUID
+	Key          string
+	Unit         string
+	ExpiresHours *int32
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 // #639/#640 variable prepaid credit-purchase sidecars using the shared charge-model JSON.
 type OpenrailsCatalogCreditPurchase struct {
 	ProductID    uuid.UUID
@@ -132,6 +141,22 @@ type OpenrailsCatalogCreditPurchase struct {
 	Price        []byte
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type OpenrailsCatalogCreditPurchasePrice struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	Ordinal    int32
+	CreditKey  string
+	Currency   string
+	Providers  []string
+	InputMin   int64
+	InputMax   int64
+	Round      *string
+	Price      []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
@@ -683,6 +708,30 @@ type OpenrailsPaymentMethod struct {
 	RailMethodRef string
 }
 
+// Merchant payment-provider account registry. A row is one merchant-owned account on one rail.
+type OpenrailsPaymentProviderAccount struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
+	Rail string
+	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
+	Environment string
+	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
+	AccountID      string
+	DisplayName    *string
+	VaultSecretRef *string
+	Evidence       []byte
+	FirstSeenAt    time.Time
+	LastVerifiedAt *time.Time
+	ReplacedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
+	Owner string
+	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
+	Archived bool
+}
+
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
 	ID        uuid.UUID
@@ -781,32 +830,6 @@ type OpenrailsProductUsageLimitBinding struct {
 	PolicyVersion int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
-}
-
-// Merchant external account registry (#591; historical table name provider_accounts). A row is one merchant x provider account; owner distinguishes merchant-owned rails from future platform-owned rails.
-type OpenrailsProviderAccount struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// Provider rail/type such as stripe, nmi, ccbill, solana, or a future provider type.
-	ProviderType string
-	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
-	Environment string
-	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
-	AccountID      string
-	DisplayName    *string
-	VaultSecretRef *string
-	// primary routes new work by default; secondary is enabled but explicit/manual; legacy is for old rows/rebills/refunds/webhooks only.
-	Routing string
-	// enabled participates in routing/reconcile; disabled is retained for history but should not receive new routine work.
-	Status         string
-	Evidence       []byte
-	FirstSeenAt    time.Time
-	LastVerifiedAt *time.Time
-	ReplacedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
-	Owner string
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.

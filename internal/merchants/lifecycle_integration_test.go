@@ -71,16 +71,45 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_credential_audit (
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
-CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
+CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
-    provider_type text NOT NULL,
+    rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
-    routing text DEFAULT 'primary' NOT NULL,
-    status text DEFAULT 'enabled' NOT NULL,
+    display_name text,
+    vault_secret_ref text,
+    archived boolean DEFAULT false NOT NULL,
+    evidence jsonb,
+    first_seen_at timestamptz DEFAULT current_timestamp NOT NULL,
+    last_verified_at timestamptz,
+    replaced_at timestamptz,
+    created_at timestamptz DEFAULT current_timestamp NOT NULL,
+    updated_at timestamptz DEFAULT current_timestamp NOT NULL,
+    owner text DEFAULT 'merchant' NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE (merchant_id, provider_type, environment, account_id)
+    UNIQUE (rail, environment, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS openrails.subscriptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id uuid NOT NULL,
+    provider_account_id uuid,
+    status text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS openrails.payments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id uuid NOT NULL,
+    provider_account_id uuid,
+    status text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS openrails.provider_intents (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id uuid NOT NULL,
+    provider_account_id uuid,
+    status text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
@@ -162,14 +191,76 @@ func newSvc(t *testing.T) *Service {
 	return svc
 }
 
-func seedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, providerType, environment, accountID string) {
+func seedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, routing, status)
-		VALUES ($1::uuid, lower($2), $3, $4, 'primary', 'enabled')
-		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO NOTHING
-	`, merchantID.String(), providerType, environment, accountID)
+		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		VALUES ($1::uuid, lower($2), $3, $4, false)
+		ON CONFLICT (rail, environment, account_id) DO NOTHING
+	`, merchantID.String(), rail, environment, accountID)
 	require.NoError(t, err)
+}
+
+func seedArchivedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+	t.Helper()
+	_, err := svc.pool.Exec(context.Background(), `
+		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		VALUES ($1::uuid, lower($2), $3, $4, true)
+		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = true
+	`, merchantID.String(), rail, environment, accountID)
+	require.NoError(t, err)
+}
+
+func TestArchivedProviderAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
+	ctx := context.Background()
+	svc := newSvc(t)
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
+	require.NoError(t, err)
+
+	const accountID = "archived-nmi-account"
+	seedArchivedProviderAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	secretName, err := ProviderAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
+	require.NoError(t, err)
+
+	_, ok, err := svc.ActiveProviderAccountSecretName(ctx, tn.ID, "nmi", "live", "security_key")
+	require.ErrorIs(t, err, ErrNoActiveProviderAccount)
+	require.False(t, ok)
+
+	got, ok, err := svc.LoadNMIWebhookSigningSecretForAccount(ctx, tn.ID, accountID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "archived-webhook-secret", got)
+}
+
+func TestArchivedProviderAccountDrainState(t *testing.T) {
+	ctx := context.Background()
+	svc := newSvc(t)
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
+	require.NoError(t, err)
+
+	const accountID = "draining-nmi-account"
+	seedArchivedProviderAccount(t, svc, tn.ID, "nmi", "live", accountID)
+
+	items, err := svc.ListPaymentProviderConfigs(ctx, tn.ID, "nmi", "live", "archived")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.True(t, items[0].Archived)
+	require.True(t, items[0].Drained)
+	require.Equal(t, int64(0), items[0].OpenObligations)
+
+	_, err = svc.pool.Exec(ctx, `
+		INSERT INTO openrails.subscriptions (merchant_id, provider_account_id, status)
+		VALUES ($1::uuid, $2::uuid, 'active')
+	`, tn.ID.String(), items[0].ID)
+	require.NoError(t, err)
+
+	items, err = svc.ListPaymentProviderConfigs(ctx, tn.ID, "nmi", "live", "archived")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.False(t, items[0].Drained)
+	require.Equal(t, int64(1), items[0].OpenObligations)
 }
 
 func TestProvision_Idempotent(t *testing.T) {

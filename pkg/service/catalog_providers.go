@@ -375,7 +375,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 		}
 	}
-	// #641: keep secondary accounts in sync too (best-effort); legacy is skipped.
+	// Keep every non-archived account in sync (best-effort); archived is skipped.
 	if !remoteWritesDisabled {
 		for _, name := range names {
 			if adapter, ok := adapters[name]; ok {
@@ -387,13 +387,13 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 }
 
 // syncSecondaryCatalogAccounts best-effort find-or-creates the price in each
-// SECONDARY account on a rail (#641 failover sync). No links stored (checkout uses
-// the primary; find-or-create re-discovers by content key); failures are logged.
+// active account on a rail. No links stored; find-or-create re-discovers by
+// content key and failures are logged.
 func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
 	if s.rt == nil {
 		return
 	}
-	for _, key := range s.rt.Rails.SecondaryRailKeysByType(models.Rail(rail)) {
+	for _, key := range s.rt.Rails.ActiveRailKeysByType(models.Rail(rail)) {
 		acct := s.rt.Rails[key]
 		if acct == nil {
 			continue

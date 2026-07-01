@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -22,16 +21,18 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+const RedactedSecretValue = "<redacted>"
+
+type DumpMerchantConfigOptions struct {
+	IncludeSecrets bool
+}
+
 // DumpMerchantConfig reads a merchant's OpenRails-owned configuration (identity,
 // profile, invoice/collection policy, delegated-invoker windows, and provider
-// accounts with secrets as REFERENCES) and returns it in the push-merchant-config
-// manifest shape (#646). The Go struct family is the single source of truth for the
-// YAML shape, so push and dump are symmetric. Secret VALUES are never emitted —
-// only `env:` placeholder references derived from the canonical secret name — so a
-// dump is safe to commit/version and is re-pushable once the operator supplies the
-// referenced env values. Issuer trust lives in AuthKit's remote_application
-// registry (#480/#481), not an OpenRails table, so it is not part of the dump.
-func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, slug string) (*MerchantManifest, error) {
+// accounts) and returns it in the push-merchant-config YAML shape (#646/#653).
+// Secret values are redacted by default; IncludeSecrets emits plaintext from the
+// configured secret backend for operator-controlled exports.
+func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, slug string, opts DumpMerchantConfigOptions) (*BillingConfig, error) {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
 	}
@@ -65,8 +66,8 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 	mctx := merchant.WithID(ctx, mid)
 
-	// merchants.display_name is the canonical merchant name (#041), NULL → slug.
-	mt := ManifestMerchant{Slug: slug, DisplayName: slug}
+	// merchants.display_name is the canonical merchant name (#041), NULL -> slug.
+	mt := MerchantConfig{DisplayName: slug}
 	if displayName != nil && strings.TrimSpace(*displayName) != "" {
 		mt.DisplayName = *displayName
 	}
@@ -77,14 +78,14 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		return nil, fmt.Errorf("load merchant configuration: %w", err)
 	}
 	if found {
-		mt.Profile = ManifestMerchantProfile{
+		mt.Profile = MerchantProfileConfig{
 			DisplayName: conf.Profile.DisplayName,
 			LogoURL:     conf.Profile.LogoURL,
 			FromEmail:   conf.Profile.FromEmail,
 			SupportURL:  conf.Profile.SupportURL,
 		}
 		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil || strings.TrimSpace(conf.InvoiceBillingBoundary) != "" {
-			mt.Invoice = &ManifestInvoiceConfig{
+			mt.Invoice = &InvoiceConfig{
 				CollectionThreshold:   conf.InvoiceCollectionThreshold,
 				MonthlyFloor:          conf.InvoiceMonthlyFloor,
 				BillingPeriodBoundary: strings.TrimSpace(conf.InvoiceBillingBoundary),
@@ -94,7 +95,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			if w.WindowSeconds <= 0 {
 				continue
 			}
-			mt.DelegatedInvokerWastedSpendWindows = append(mt.DelegatedInvokerWastedSpendWindows, ManifestBudgetWindow{
+			mt.DelegatedInvokerWastedSpendWindows = append(mt.DelegatedInvokerWastedSpendWindows, BudgetWindowConfig{
 				Key:      w.Key,
 				Window:   formatWindowSeconds(w.WindowSeconds),
 				Limit:    w.Limit,
@@ -103,8 +104,8 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		}
 	}
 
-	// provider accounts (identity + routing + secret references).
-	var accounts []gen.OpenrailsProviderAccount
+	// provider accounts (identity + lifecycle + secret references).
+	var accounts []gen.OpenrailsPaymentProviderAccount
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
 		accounts, lerr = database.Gen(ctx).ListProviderAccountsForMerchant(ctx, gen.ListProviderAccountsForMerchantParams{
@@ -114,21 +115,23 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}); err != nil {
 		return nil, fmt.Errorf("list provider accounts: %w", err)
 	}
-	secretKeysByAccount, err := providerAccountSecretKeys(ctx, secretStore, mid)
+	secretValuesByAccount, err := providerAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
 	if err != nil {
 		return nil, err
 	}
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{}
 	for _, a := range accounts {
-		name := ""
+		localKey := ""
 		if a.DisplayName != nil {
-			name = *a.DisplayName
+			localKey = strings.TrimSpace(*a.DisplayName)
 		}
-		account := ManifestProviderAccount{
-			ProviderType: a.ProviderType,
-			Name:         name,
-			Environment:  a.Environment,
-			AccountID:    a.AccountID,
-			Routing:      providerAccountRoutingFromStatus(a.Routing, a.Status),
+		if localKey == "" {
+			localKey = providerAccountDumpKey(a.Rail, a.Environment, a.AccountID)
+		}
+		account := ProviderRailAccountConfig{
+			Environment: a.Environment,
+			AccountID:   a.AccountID,
+			Archived:    a.Archived,
 		}
 		if signer := providerAccountSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
@@ -136,20 +139,20 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if a.VaultSecretRef != nil {
 			account.VaultSecretRef = *a.VaultSecretRef
 		}
-		key := providerAccountSecretGroupKey(a.ProviderType, a.Environment, a.AccountID)
-		if keys := secretKeysByAccount[key]; len(keys) > 0 {
-			account.Secrets = map[string]ManifestSecretSource{}
-			for _, k := range keys {
-				account.Secrets[k] = ManifestSecretSource{Env: secretEnvPlaceholder(slug, a.ProviderType, a.Environment, a.AccountID, k)}
-			}
+		if settings := providerAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
+			account.Settings = settings
 		}
-		mt.ProviderAccounts = append(mt.ProviderAccounts, account)
+		key := providerAccountSecretGroupKey(a.Rail, a.Environment, a.AccountID)
+		if values := secretValuesByAccount[key]; len(values) > 0 {
+			account.Secrets = values
+		}
+		mt.ProviderAccounts[localKey] = ProviderAccountConfig{a.Rail: account}
 	}
 
-	return &MerchantManifest{Version: BootstrapManifestVersion, Merchants: []ManifestMerchant{mt}}, nil
+	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
 }
 
-func providerAccountSignerFromEvidence(raw []byte) *ManifestProviderAccountSigner {
+func providerAccountSignerFromEvidence(raw []byte) *ProviderAccountSignerConfig {
 	var evidence struct {
 		Signer struct {
 			Mode string `json:"mode"`
@@ -163,34 +166,30 @@ func providerAccountSignerFromEvidence(raw []byte) *ManifestProviderAccountSigne
 	if mode == "" || mode == "keypair" {
 		return nil
 	}
-	return &ManifestProviderAccountSigner{
+	return &ProviderAccountSignerConfig{
 		Mode: mode,
 		Key:  strings.TrimSpace(evidence.Signer.Key),
 	}
 }
 
-// MarshalMerchantManifest renders a manifest to YAML — the canonical dump output.
-func MarshalMerchantManifest(m *MerchantManifest) ([]byte, error) {
+func providerAccountSettingsFromEvidence(raw []byte) map[string]any {
+	var evidence struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil || len(evidence.Settings) == 0 {
+		return nil
+	}
+	return evidence.Settings
+}
+
+// MarshalMerchantManifest renders a config manifest to YAML, the canonical dump output.
+func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-func providerAccountRoutingFromStatus(routing, status string) string {
-	if strings.EqualFold(status, "disabled") {
-		return "disabled"
-	}
-	switch strings.ToLower(routing) {
-	case providerAccountRoutingPrimary:
-		return providerAccountRoutingPrimary
-	case providerAccountRoutingLegacy:
-		return providerAccountRoutingLegacy
-	default:
-		return providerAccountRoutingSecondary
-	}
-}
-
-// providerAccountSecretKeys lists the merchant's secrets and groups the
-// provider-account secret KEYS by (provider, environment, account_id).
-func providerAccountSecretKeys(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID) (map[string][]string, error) {
+// providerAccountSecrets lists the merchant's provider-account secrets grouped
+// by (rail, environment, account_id). Values are redacted unless includeValues is set.
+func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil {
 		return nil, nil
 	}
@@ -198,43 +197,49 @@ func providerAccountSecretKeys(ctx context.Context, secretStore merchants.Mercha
 	if err != nil {
 		return nil, fmt.Errorf("list merchant secrets: %w", err)
 	}
-	out := map[string][]string{}
+	out := map[string]map[string]string{}
 	for _, name := range names {
-		providerType, environment, accountID, key, ok, perr := merchants.ParseProviderAccountSecretName(name)
+		rail, environment, accountID, key, ok, perr := merchants.ParseProviderAccountSecretName(name)
 		if perr != nil || !ok {
 			continue
 		}
-		gk := providerAccountSecretGroupKey(providerType, environment, accountID)
-		out[gk] = append(out[gk], key)
-	}
-	for k := range out {
-		sort.Strings(out[k])
+		gk := providerAccountSecretGroupKey(rail, environment, accountID)
+		if out[gk] == nil {
+			out[gk] = map[string]string{}
+		}
+		value := RedactedSecretValue
+		if includeValues {
+			secret, err := secretStore.Get(ctx, mid, name)
+			if err != nil {
+				return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
+			}
+			value = secret.Value
+		}
+		out[gk][key] = value
 	}
 	return out, nil
 }
 
-func providerAccountSecretGroupKey(providerType, environment, accountID string) string {
-	return strings.ToLower(providerType) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
+func providerAccountSecretGroupKey(rail, environment, accountID string) string {
+	return strings.ToLower(rail) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
-// secretEnvPlaceholder derives a stable, legible env-var name for a dumped secret
-// reference (the value is never dumped). Operators wire the env var, then re-push.
-func secretEnvPlaceholder(slug, providerType, environment, accountID, key string) string {
-	parts := []string{slug, providerType, environment, accountID, key}
+func providerAccountDumpKey(rail, environment, accountID string) string {
+	parts := []string{rail, environment, accountID}
 	var b strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			b.WriteByte('_')
+			b.WriteByte('-')
 		}
-		for _, r := range strings.ToUpper(p) {
-			if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+		for _, r := range strings.ToLower(p) {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 				b.WriteRune(r)
 			} else {
-				b.WriteByte('_')
+				b.WriteByte('-')
 			}
 		}
 	}
-	return b.String()
+	return strings.Trim(b.String(), "-")
 }
 
 // formatWindowSeconds renders a window duration as the shortest clean unit string.

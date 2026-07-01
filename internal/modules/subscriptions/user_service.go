@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -490,8 +489,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	}
 
 	now := s.now()
-	provider := strings.ToLower(string(subscription.Rail))
-
 	// Issue 216: when there is a genuine future undo window, DEFER the
 	// rail-side delete instead of doing it inline. We keep the NMI
 	// subscription alive (so a resume is a no-op rail-side) and schedule
@@ -507,8 +504,12 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	} else {
 		// Immediate delete with NMI (no scheduled job).
 		subscription.DeletionScheduledAt = nil
-		if s.NMIClients != nil {
-			if client, ok := s.NMIClients[provider]; ok && subscription.RailSubscriptionID != "" {
+		if subscription.RailSubscriptionID != "" {
+			client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
+			if err != nil {
+				return fmt.Errorf("resolve subscription provider account: %w", err)
+			}
+			if ok {
 				if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
 					return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
 				}

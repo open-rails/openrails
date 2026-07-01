@@ -29,6 +29,7 @@ type VaultService struct {
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchants.MerchantSecretReader
 	ProviderSecrets      merchants.ProviderAccountSecretResolver
+	ProviderScopes       merchants.ProviderAccountScopeResolver
 	Config               *config.Config
 	Rails                config.ProviderAccountSet
 	DB                   *db.DB
@@ -67,6 +68,9 @@ func (s *VaultService) SetProviderAccountSecretResolver(resolver merchants.Provi
 		return
 	}
 	s.ProviderSecrets = resolver
+	if scopes, ok := resolver.(merchants.ProviderAccountScopeResolver); ok {
+		s.ProviderScopes = scopes
+	}
 }
 
 func (s *VaultService) SetClock(c clockwork.Clock) {
@@ -158,7 +162,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		return nil, errors.New("provider is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, rail)
+	client, providerAccountID, err := s.resolveNMIClient(ctx, rail)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -206,6 +210,9 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		CardType:             stringPtrOrNil(sanitizeCardType(req.CardType)),
 		Metadata:             req.Metadata,
 	}
+	if providerAccountID != nil {
+		pm.ProviderAccountID = providerAccountID
+	}
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store vault locally")
@@ -218,56 +225,119 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	return pm, nil
 }
 
-func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
+func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, providerAccountID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
-		return nil, errors.New("rail is required")
+		return nil, nil, errors.New("rail is required")
 	}
 
-	if rails.IsNMI(models.Rail(provider)) && s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil {
+	if len(providerAccountID) > 0 && providerAccountID[0] != nil {
+		if s == nil || s.DB == nil {
+			return nil, nil, errors.New("provider account lookup unavailable")
+		}
+		row, err := s.DB.Gen(ctx).GetProviderAccount(ctx, *providerAccountID[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
+			return nil, nil, fmt.Errorf("provider account %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
+		}
+		client, err := s.resolveNMIClientForScope(ctx, merchants.ProviderAccountScope{
+			ID:          row.ID,
+			Rail:        row.Rail,
+			Environment: row.Environment,
+			AccountID:   row.AccountID,
+		})
+		return client, &row.ID, err
+	}
+
+	var scopeResolver merchants.ProviderAccountScopeResolver
+	if s != nil {
+		scopeResolver = s.ProviderScopes
+		if scopeResolver == nil {
+			if resolver, ok := s.ProviderSecrets.(merchants.ProviderAccountScopeResolver); ok {
+				scopeResolver = resolver
+			}
+		}
+	}
+	if rails.IsNMI(models.Rail(provider)) && s != nil && s.MerchantSecrets != nil && scopeResolver != nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, string(models.RailNMI), "live", "production_key")
+		scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailNMI), "live")
 		if err != nil {
-			return nil, fmt.Errorf("resolve merchant NMI secret: %w", err)
+			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
 		if !ok {
-			return nil, errors.New("missing scoped merchant NMI secret for provider account")
+			return nil, nil, errors.New("missing scoped merchant NMI provider account")
 		}
-		sec, err := s.MerchantSecrets.Get(ctx, tid, secretName)
+		client, err := s.resolveNMIClientForScope(ctx, scope)
 		if err != nil {
-			if !errors.Is(err, merchants.ErrSecretNotFound) {
-				return nil, fmt.Errorf("load merchant NMI secret: %w", err)
-			}
-			return nil, errors.New("missing scoped merchant NMI secret for provider account")
-		} else if value := strings.TrimSpace(sec.Value); value != "" {
-			proc := cloneRailConfig(s.primaryNMIConfig())
-			if proc == nil {
-				proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
-			}
-			proc.Rail = models.RailNMI
-			if proc.NMI == nil {
-				proc.NMI = &config.NMIRailConfig{}
-			}
-			proc.NMI.SecurityKey = value
-			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+			return nil, nil, err
 		}
-		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+		return client, &scope.ID, nil
 	}
 
+	if s != nil && s.NMIClients != nil {
+		if client := s.NMIClients[provider]; client != nil {
+			return client, nil, nil
+		}
+	}
+	if rails.IsNMI(models.Rail(provider)) {
+		if proc := s.activeNMIConfig(); proc != nil {
+			client, err := s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+			return client, nil, err
+		}
+	}
+	return nil, nil, errors.New("missing client")
+}
+
+func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.ProviderAccountScope) (*nmi.NMIClient, error) {
+	provider := strings.TrimSpace(scope.AccountID)
+	if provider == "" {
+		return nil, errors.New("provider account_id required")
+	}
 	if s != nil && s.NMIClients != nil {
 		if client := s.NMIClients[provider]; client != nil {
 			return client, nil
 		}
 	}
-	if rails.IsNMI(models.Rail(provider)) {
-		if proc := s.primaryNMIConfig(); proc != nil {
-			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
-		}
+	if s == nil || s.MerchantSecrets == nil {
+		return nil, errors.New("missing scoped merchant NMI secret for provider account")
 	}
-	return nil, errors.New("missing client")
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	secretName, err := merchants.ProviderAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
+	if err != nil {
+		return nil, err
+	}
+	sec, err := s.MerchantSecrets.Get(ctx, tid, secretName)
+	if err != nil {
+		if !errors.Is(err, merchants.ErrSecretNotFound) {
+			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
+		}
+		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+	}
+	value := strings.TrimSpace(sec.Value)
+	if value == "" {
+		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+	}
+	proc := cloneRailConfig(s.railConfig(scope.AccountID))
+	if proc == nil {
+		proc = cloneRailConfig(s.activeNMIConfig())
+	}
+	if proc == nil {
+		proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
+	}
+	proc.Rail = models.RailNMI
+	if proc.NMI == nil {
+		proc.NMI = &config.NMIRailConfig{}
+	}
+	proc.NMI.SecurityKey = value
+	return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
 }
 
 func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
@@ -285,12 +355,12 @@ func (s *VaultService) railConfig(name string) *config.ProviderAccountConfig {
 	return s.Rails.GetRail(name)
 }
 
-// primaryNMIConfig returns the configured primary NMI provider account, if any.
-func (s *VaultService) primaryNMIConfig() *config.ProviderAccountConfig {
+// activeNMIConfig returns the configured active NMI provider account, if any.
+func (s *VaultService) activeNMIConfig() *config.ProviderAccountConfig {
 	if s == nil {
 		return nil
 	}
-	_, proc, _ := s.Rails.PrimaryRailByType(models.RailNMI)
+	_, proc, _ := s.Rails.ActiveRailByType(models.RailNMI)
 	return proc
 }
 
@@ -384,7 +454,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, errors.New("payment method rail is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, rail)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.ProviderAccountID)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -493,7 +563,7 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return errors.New("payment method rail is required")
 	}
 
-	client, err := s.resolveNMIClient(ctx, rail)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.ProviderAccountID)
 	if err != nil {
 		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}

@@ -77,7 +77,7 @@ func TestProviderAccountSignerUsesVaultTransitEvidence(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
 		_, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     merchantUUID,
-			ProviderType:   "solana",
+			Rail:           "solana",
 			AccountID:      key.PublicKey().String(),
 			Evidence:       []byte(`{"signer":{"mode":"vault_transit","key":"` + vaultKey + `"}}`),
 			LastVerifiedAt: &now,

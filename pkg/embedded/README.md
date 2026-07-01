@@ -23,18 +23,19 @@ func main() {
         Redis:   yourRedis,    // Share your existing Redis client
         PaymentProviders: []embedded.PaymentProvider{
             {
-                Config: config.RailConfig{
-                    Type:      config.RailTypeStripe,
-                    Routing:   config.RailRoutingDefault,
-                    SecretKey: hostSecrets.StripePrimaryKey,
+                Config: config.ProviderAccountConfig{
+                    Rail:      models.RailStripe,
+                    AccountID: "acct_1M9QZULkdIwHu7ix",
+                    Stripe:    &config.StripeRailConfig{SecretKey: hostSecrets.StripeKey},
                 },
             },
             {
-                Name: "stripe_legacy",
-                Config: config.RailConfig{
-                    Type:      config.RailTypeStripe,
-                    Routing:   config.RailRoutingLegacy,
-                    SecretKey: hostSecrets.StripeLegacyKey,
+                Name: "stripe_old",
+                Config: config.ProviderAccountConfig{
+                    Rail:      models.RailStripe,
+                    AccountID: "acct_1N2YbMLkdIwHu7ix",
+                    Archived:  true,
+                    Stripe:    &config.StripeRailConfig{SecretKey: hostSecrets.StripeOldKey},
                 },
             },
         },
@@ -87,26 +88,27 @@ openrails, err := embedded.New(embedded.Options{
     Config: cfg,
     PaymentProviders: []embedded.PaymentProvider{
         {
-            Config: config.RailConfig{
-                Type:      config.RailTypeStripe,
-                Routing:   config.RailRoutingDefault,
-                SecretKey: stripePrimarySecret,
+            Config: config.ProviderAccountConfig{
+                Rail:      models.RailStripe,
+                AccountID: "acct_1M9QZULkdIwHu7ix",
+                Stripe:    &config.StripeRailConfig{SecretKey: stripeSecret},
             },
         },
         {
-            Name: "stripe_legacy",
-            Config: config.RailConfig{
-                Type:      config.RailTypeStripe,
-                Routing:   config.RailRoutingLegacy,
-                SecretKey: stripeLegacySecret,
+            Name: "stripe_old",
+            Config: config.ProviderAccountConfig{
+                Rail:      models.RailStripe,
+                AccountID: "acct_1N2YbMLkdIwHu7ix",
+                Archived:  true,
+                Stripe:    &config.StripeRailConfig{SecretKey: stripeOldSecret},
             },
         },
         {
             Name: "mobius",
-            Config: config.RailConfig{
-                Type:        config.RailTypeNMI,
-                Routing:     config.RailRoutingDefault,
-                SecurityKey: mobiusSecurityKey,
+            Config: config.ProviderAccountConfig{
+                Rail:      models.RailNMI,
+                AccountID: "579145",
+                NMI:       &config.NMIRailConfig{SecurityKey: mobiusSecurityKey},
             },
         },
     },
@@ -118,19 +120,15 @@ not durable identity. OpenRails resolves durable provider-account identity from
 the provider itself, such as Stripe `/v1/account` or the NMI profile report, and
 stores provider-owned rows against that provider account id.
 
-`Role` controls default routing:
+`Archived` controls provider-account lifecycle. Omit it, or set it false, for
+accounts eligible for new checkout/subscription work. Set `Archived: true` for
+old accounts that must still handle existing provider-bound obligations,
+historical pulls, refunds, webhooks, or subscriptions that still rebill there.
 
-- `primary` or empty: default account for new work of that provider type.
-- `secondary`: configured and available for explicit/manual targeting.
-- `legacy`: retained for old provider objects, historical pulls, refunds, or
-  subscriptions that still rebill on an old account.
-
-Most embedded applications should configure exactly one `primary` account per
-provider type: one Stripe account, one NMI/Mobius account, one CCBill account,
-and so on. Extra accounts are mainly for account rotation: keep the old account
-as `legacy` so existing historical charges/subscriptions remain attributable
-and repairable, while new work routes to the new `primary` account. OpenRails
-does not automatically fail over from primary to secondary.
+Most embedded applications should configure one non-archived account per rail:
+one Stripe account, one NMI/Mobius account, one CCBill account, and so on. Extra
+accounts are mainly for account rotation: keep the old account archived while
+new work uses a non-archived account.
 
 If `Name` is omitted, OpenRails generates a local selector like `stripe`,
 `stripe_2`, or `nmi`. If a host needs to target a credential set by name, provide

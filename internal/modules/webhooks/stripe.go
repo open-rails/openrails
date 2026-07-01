@@ -958,6 +958,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 
 	if data.CancelAtPeriodEnd {
 		applyStripeScheduledCancellation(sub, data.Status, data.CanceledAt, s.now().UTC())
+		_ = data.CanceledAt
 	} else {
 		// Not scheduled to cancel. If Stripe now reports it active/trialing while
 		// the local record is still cancelled, this is a resume — clear the prior
@@ -966,7 +967,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 			sub.CancelledAt = nil
 			sub.EndedAt = nil
 		}
-		applyStripeSubscriptionStatus(sub, data.Status, s.now().UTC())
+		applyStripeSubscriptionStatus(sub, data.Status, data.CanceledAt, s.now().UTC())
 	}
 
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
@@ -990,7 +991,7 @@ func applyStripeScheduledCancellation(sub *models.Subscription, rawStatus string
 	if periodEndsInFuture && incoming != "canceled" && incoming != "incomplete_expired" {
 		// Keep paid-through scheduled cancellations as lifecycle owners so
 		// duplicate-checkout guards and the tier-group unique index still apply.
-		applyStripeSubscriptionStatus(sub, rawStatus, now)
+		applyStripeSubscriptionStatus(sub, rawStatus, canceledAt, now)
 	} else {
 		sub.Status = models.StatusCancelled
 		sub.ClearRetrySchedule()
@@ -1069,13 +1070,12 @@ func stripeEntitlementSet(spec map[string]*int) map[string]bool {
 			out[name] = true
 		}
 	}
-	if len(out) == 0 {
-		out["premium"] = true
-	}
+	// #651: do NOT fabricate a "premium" entitlement when the spec is empty — grant
+	// only what the product declares (possibly nothing).
 	return out
 }
 
-func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, now time.Time) {
+func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, canceledAt int64, now time.Time) {
 	if sub == nil {
 		return
 	}
@@ -1090,7 +1090,11 @@ func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, n
 		sub.Status = models.StatusCancelled
 		sub.ClearRetrySchedule()
 		if sub.CancelledAt == nil {
+			// #651: use Stripe's own canceled_at when present; now() as fallback.
 			timestamp := now
+			if canceledAt > 0 {
+				timestamp = time.Unix(canceledAt, 0).UTC()
+			}
 			sub.CancelledAt = &timestamp
 		}
 		if sub.EndedAt == nil {

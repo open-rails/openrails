@@ -152,3 +152,13 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		ProcessedNotAfter: processedNotAfter,
 	})
 }
+
+// TransactionBlockTime returns the on-chain block time of a confirmed signature
+// (#651), or nil when the RPC reports none — the truthful settlement time used to
+// stamp the recorded Solana payment instead of poller-observation time.
+func (s *SolanaTransactionService) TransactionBlockTime(ctx context.Context, signature string) (*time.Time, error) {
+	if s.rpc == nil {
+		return nil, fmt.Errorf("solana rpc client unavailable")
+	}
+	return s.rpc.GetConfirmedBlockTime(ctx, signature)
+}

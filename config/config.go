@@ -295,17 +295,6 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// Provider-account routing roles (independent of the rail/gateway). #641: one
-// account per rail is the primary; others are secondary (redundancy) or legacy.
-const (
-	// RailRoutingPrimary receives new work AND catalog push; exactly one per (merchant, rail).
-	RailRoutingPrimary = "primary"
-	// RailRoutingSecondary is a fallback: catalog push keeps it synced; new work only if primary is down (#288).
-	RailRoutingSecondary = "secondary"
-	// RailRoutingLegacy serves old subs/rebills/refunds/webhooks only — no new work, no catalog push.
-	RailRoutingLegacy = "legacy"
-)
-
 // Provider-account environments (#641): the credentials' nature. A deployment is
 // all-test OR all-live; test_mode is the switch.
 const (
@@ -340,7 +329,7 @@ type ProviderAccountConfig struct {
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail `koanf:"rail"`
-	// AccountID is this account's rail-native identity (#641 routing key): NMI
+	// AccountID is this account's rail-native identity (#641/#655): NMI
 	// gateway-id, Stripe acct_…, CCBill client_acc_num[/sub], or Solana wallet
 	// (#592: operator-declared). REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string `koanf:"account_id"`
@@ -348,9 +337,9 @@ type ProviderAccountConfig struct {
 	// rejects any account whose environment contradicts test_mode (#641). Empty →
 	// derived from test_mode.
 	Environment string `koanf:"environment"`
-	// Routing is primary|secondary|legacy (empty = primary). See the RailRouting*
-	// consts.
-	Routing string `koanf:"routing"`
+	// Archived keeps an account addressable for existing obligations and inbound
+	// provider events, but excludes it from new checkout/subscription work.
+	Archived bool `koanf:"archived"`
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
 	// the typed block — there is no flat fallback.
@@ -418,18 +407,6 @@ func (p *ProviderAccountConfig) EffectiveRail(name string) models.Rail {
 		return rail
 	}
 	return ""
-}
-
-// EffectiveRouting returns primary when routing is omitted (#641): a lone account
-// with no routing value is the primary.
-func (p *ProviderAccountConfig) EffectiveRouting() string {
-	if p == nil {
-		return ""
-	}
-	if routing := strings.ToLower(strings.TrimSpace(p.Routing)); routing != "" {
-		return routing
-	}
-	return RailRoutingPrimary
 }
 
 // EffectiveAccountID is the account's operator-declared rail-native identity
@@ -918,25 +895,19 @@ func validateStripeKeyForTestMode(cfg *Config, rails ProviderAccountSet) error {
 // validateRails validates all rails in the new Rails map
 func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
 	// Count accounts per rail: with more than one, each must declare account_id
-	// (the made-up map name can't be the routing key, #641).
+	// (the made-up map name can't be the provider identity, #641).
 	countByRail := map[models.Rail]int{}
 	for name, proc := range rails {
 		if proc != nil {
 			countByRail[proc.EffectiveRail(name)]++
 		}
 	}
-	primaryByType := map[models.Rail]string{}
 	for name, proc := range rails {
 		if proc == nil {
 			continue
 		}
 		if err := proc.normalizeTypedBlock(name); err != nil {
 			return err
-		}
-		switch routing := proc.EffectiveRouting(); routing {
-		case RailRoutingPrimary, RailRoutingSecondary, RailRoutingLegacy:
-		default:
-			return fmt.Errorf("rail '%s' has unknown routing '%s' (want primary|secondary|legacy)", name, proc.EffectiveRouting())
 		}
 
 		// #641: all-test or all-live — a declared environment must match test_mode
@@ -953,15 +924,9 @@ func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
 
 		effectiveType := proc.EffectiveRail(name)
 		// #641: with multiple accounts on a rail, the made-up map name can't serve
-		// as the routing key — each must declare its real account_id.
+		// as the provider identity — each must declare its real account_id.
 		if countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
 			return fmt.Errorf("rail '%s' shares rail %q with another account, so it must declare account_id (the rail-native id; no name fallback)", name, effectiveType)
-		}
-		if proc.EffectiveRouting() == RailRoutingPrimary {
-			if existing := primaryByType[effectiveType]; existing != "" {
-				return fmt.Errorf("multiple primary provider accounts configured for rail %q: %q and %q (exactly one primary per rail; mark others secondary|legacy)", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
-			}
-			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
 		}
 		switch effectiveType {
 		case models.RailNMI:
@@ -1107,33 +1072,27 @@ func (set ProviderAccountSet) RailKeysByType(rail models.Rail) []string {
 	return keys
 }
 
-// PrimaryRailByType returns the primary provider account for a rail (#641);
-// empty routing counts as primary. Multiple primaries are a configuration error.
-func (set ProviderAccountSet) PrimaryRailByType(rail models.Rail) (string, *ProviderAccountConfig, error) {
+// ActiveRailByType returns a deterministic non-archived provider account for a
+// rail. Database-backed new-work selection uses created_at to pick the newest
+// active account; config-only callers do not have that timestamp, so they use
+// sorted config keys.
+func (set ProviderAccountSet) ActiveRailByType(rail models.Rail) (string, *ProviderAccountConfig, error) {
 	keys := set.RailKeysByType(rail)
-	var (
-		primaryKey string
-		primary    *ProviderAccountConfig
-	)
 	for _, key := range keys {
 		proc := set[key]
-		if proc.EffectiveRouting() != RailRoutingPrimary {
+		if proc == nil || proc.Archived {
 			continue
 		}
-		if primary != nil {
-			return "", nil, fmt.Errorf("multiple primary provider accounts configured for rail %q: %q and %q", rail, primaryKey, key)
-		}
-		primaryKey, primary = key, proc
+		return key, proc, nil
 	}
-	return primaryKey, primary, nil
+	return "", nil, nil
 }
 
-// SecondaryRailKeysByType returns the sorted names of the rail's secondary accounts
-// (#641 catalog-push targets, alongside the primary; legacy excluded).
-func (set ProviderAccountSet) SecondaryRailKeysByType(rail models.Rail) []string {
+// ActiveRailKeysByType returns the sorted names of non-archived accounts on a rail.
+func (set ProviderAccountSet) ActiveRailKeysByType(rail models.Rail) []string {
 	var out []string
 	for _, key := range set.RailKeysByType(rail) {
-		if set[key].EffectiveRouting() == RailRoutingSecondary {
+		if !set[key].Archived {
 			out = append(out, key)
 		}
 	}
@@ -1155,21 +1114,21 @@ func (set ProviderAccountSet) FindByAccountID(rail models.Rail, accountID string
 	return nil, false
 }
 
-// GetCCBillRail returns the configured primary CCBill rail.
+// GetCCBillRail returns the configured active CCBill rail.
 func (set ProviderAccountSet) GetCCBillRail() *ProviderAccountConfig {
-	_, proc, _ := set.PrimaryRailByType(models.RailCCBill)
+	_, proc, _ := set.ActiveRailByType(models.RailCCBill)
 	return proc
 }
 
-// GetStripeRail returns the configured primary Stripe rail.
+// GetStripeRail returns the configured active Stripe rail.
 func (set ProviderAccountSet) GetStripeRail() *ProviderAccountConfig {
-	_, proc, _ := set.PrimaryRailByType(models.RailStripe)
+	_, proc, _ := set.ActiveRailByType(models.RailStripe)
 	return proc
 }
 
-// GetSolanaRail returns the configured primary Solana rail.
+// GetSolanaRail returns the configured active Solana rail.
 func (set ProviderAccountSet) GetSolanaRail() *ProviderAccountConfig {
-	_, proc, _ := set.PrimaryRailByType(models.RailSolana)
+	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
 }
 

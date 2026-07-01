@@ -184,6 +184,12 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	}
 }
 
+func TestProviderAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
+	if _, err := ProviderAccountSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
+		t.Fatal("NMI tokenization_key is public provider settings, not a secret")
+	}
+}
+
 func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	ctx := context.Background()
 	id := dbtest.TestMerchantID
@@ -201,8 +207,8 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	}
 
 	// Broad merchant-level NMI secrets are no longer runtime credential sources;
-	// the loader needs a provider_accounts row so it can read the account-scoped
-	// secret path.
+	// the loader needs a payment_provider_accounts row so it can read provider
+	// settings.
 }
 
 // fakeVaultKV is an in-memory VaultKV for unit-testing the Vault adapter WITHOUT

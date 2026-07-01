@@ -62,15 +62,17 @@ Merchant credentials are addressed by `(merchant_id, name)`. Provider credential
 use provider-account-scoped names:
 
 ```text
-provider_accounts/<provider_type>/<environment>/<provider_account_id>/<secret_key>
+provider_accounts/<rail>/<environment>/<provider_account_id>/<secret_key>
 ```
 
 Examples:
 
 - `provider_accounts/stripe/live/acct_123/secret_key`
 - `provider_accounts/stripe/live/acct_123/webhook_signing_secret`
-- `provider_accounts/nmi/live/mobius-profile-id/security_key` (manifest key; legacy storage may still normalize this to `production_key`)
-- `provider_accounts/ccbill/live/900000-0000/account_config`
+- `provider_accounts/nmi/live/mobius-profile-id/security_key`
+- `provider_accounts/ccbill/live/900000%2F0000/salt`
+- `provider_accounts/ccbill/live/900000%2F0000/datalink_username`
+- `provider_accounts/ccbill/live/900000%2F0000/datalink_password`
 
 Secret stores:
 
@@ -134,13 +136,14 @@ merchants:
       from_email: billing@doujins.example
       support_url: https://doujins.example/support
     provider_accounts:
-      - provider_type: nmi
+      - rail: nmi
         environment: live
         account_id: mobius-profile-id
-        mode: primary
+        archived: false
+        settings:
+          tokenization_key: {env: DOUJINS_NMI_TOKENIZATION_KEY}
         secrets:
           security_key: {env: DOUJINS_NMI_SECURITY_KEY}
-          tokenization_key: {env: DOUJINS_NMI_TOKENIZATION_KEY}
           webhook_signing_secret: {env: DOUJINS_NMI_WEBHOOK_SECRET}
 ```
 

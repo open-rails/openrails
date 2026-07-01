@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -176,7 +175,7 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 }
 
 // cancelWithNMI cancels a subscription with NMI if applicable
-func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscription) error {
+func (s *AdminSubscriptionService) cancelWithNMI(ctx context.Context, subscription *models.Subscription) error {
 	if !rails.IsNMI(subscription.Rail) {
 		return nil // Not an NMI-backed subscription, nothing to do
 	}
@@ -185,10 +184,10 @@ func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscripti
 		return nil // No NMI clients configured or no subscription ID
 	}
 
-	// Use rail name to look up NMI client
-	provider := strings.ToLower(string(subscription.Rail))
-
-	client, ok := s.NMIClients[provider]
+	client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
+	if err != nil {
+		return fmt.Errorf("resolve subscription provider account: %w", err)
+	}
 	if !ok {
 		log.WithFields(log.Fields{
 			"subscription_id": subscription.ID,
@@ -222,7 +221,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	// Cancel with payment rail first.
 	switch {
 	case rails.IsNMI(subscription.Rail):
-		if err := s.cancelWithNMI(subscription); err != nil {
+		if err := s.cancelWithNMI(ctx, subscription); err != nil {
 			return err
 		}
 	case subscription.Rail == models.RailStripe:

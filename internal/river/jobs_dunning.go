@@ -235,8 +235,18 @@ func (w *DunningWorker) processSubscription(
 ) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
-	provider := resolveSubscriptionRail(sub)
-	client := w.NMIClients[provider] // may be nil; only required for charging
+	railName := resolveSubscriptionRail(sub)
+	client, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, w.DB, w.NMIClients, sub)
+	if err != nil {
+		logEntry.WithError(err).Warn("Dunning: failed to resolve subscription provider account")
+		return dunningOutcomeFailed
+	}
+	if providerKey == "" {
+		providerKey = railName
+	}
+	if !ok {
+		client = nil // may be nil; only required for charging
+	}
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
@@ -244,22 +254,9 @@ func (w *DunningWorker) processSubscription(
 	}
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
-	rail := models.Rail(provider)
+	rail := models.Rail(railName)
 
-	// #635: a provider-auto-billed subscription is charged by the provider itself,
-	// not by us — a vault-less NMI recurring sub auto-charges keyed on the remote
-	// subscription id (we hold no card to rebill). OpenRails must NOT manual-rebill
-	// it, nor expire/fail it when the local period lapses: that would revoke access
-	// the provider is still billing for (the ~19k migrated vault-less Mobius subs).
-	// They are reconciled against provider truth via provider-pull (#632/#633), not
-	// dunning. (CCBill never reaches here — ListDueDunningSubscriptions is NMI-only.)
-	// Returning Failed is a benign no-op skip: it only bumps the run's fail counter,
-	// changes no state, and the inline converge after this call still runs.
-	if subscriptionProviderAutoBilled(provider, sub.PaymentMethod) {
-		logEntry.WithField("rail", provider).
-			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill/expiry, awaiting provider-pull reconciliation (#632/#633)")
-		return dunningOutcomeFailed
-	}
+	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub.PaymentMethod)
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
@@ -284,8 +281,17 @@ func (w *DunningWorker) processSubscription(
 		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, rail, periodEnd, window)
 	}
 
+	// #635: a provider-auto-billed subscription is charged by the provider itself,
+	// not by us. Still let the stale-window check above close truly stale rows,
+	// but never manual-rebill a vault-less provider-billed subscription.
+	if providerAutoBilled {
+		logEntry.WithField("rail", railName).
+			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation (#632/#633)")
+		return dunningOutcomeFailed
+	}
+
 	if client == nil {
-		logEntry.WithField("rail", provider).Warn("NMI client not configured for provider; skipping")
+		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI client not configured for provider; skipping")
 		return dunningOutcomeFailed
 	}
 
@@ -314,18 +320,19 @@ func (w *DunningWorker) processSubscription(
 		}
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
-			MerchantID:     genSub.MerchantID,
-			Provider:       provider,
-			IntentType:     intents.TypeManualRebill,
-			SubscriptionID: &sub.ID,
+			MerchantID:        genSub.MerchantID,
+			Provider:          providerKey,
+			IntentType:        intents.TypeManualRebill,
+			SubscriptionID:    &sub.ID,
+			ProviderAccountID: sub.ProviderAccountID,
 			Payload: intents.ManualRebillPayload{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
-				Rail:           provider,
+				Rail:           railName,
 				OrderReference: orderReference,
 				Attempt:        attemptOrdinal,
 			},
-			IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, provider, orderReference, attemptOrdinal),
+			IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, attemptOrdinal),
 			NextAttemptAt:  w.now().UTC(),
 			Origin:         intents.OriginSystem,
 			OriginReason:   "dunning rebill attempt (materialized under mode=limited)",
@@ -386,18 +393,19 @@ func (w *DunningWorker) processSubscription(
 	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:     genSub.MerchantID,
-		Provider:       provider,
-		IntentType:     intents.TypeManualRebill,
-		SubscriptionID: &sub.ID,
+		MerchantID:        genSub.MerchantID,
+		Provider:          providerKey,
+		IntentType:        intents.TypeManualRebill,
+		SubscriptionID:    &sub.ID,
+		ProviderAccountID: sub.ProviderAccountID,
 		Payload: intents.ManualRebillPayload{
 			SubscriptionID: sub.ID,
 			PeriodEnd:      periodEnd,
-			Rail:           provider,
+			Rail:           railName,
 			OrderReference: orderReference,
 			Attempt:        attemptOrdinal,
 		},
-		IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, provider, orderReference, attemptOrdinal),
+		IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, attemptOrdinal),
 		NextAttemptAt:  w.now().UTC(),
 		Origin:         intents.OriginSystem,
 		OriginReason:   "dunning rebill attempt",

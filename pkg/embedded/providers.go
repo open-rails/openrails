@@ -17,7 +17,7 @@ type PaymentProvider struct {
 	// account by name; OpenRails will generate a process-local selector.
 	Name string
 	// Config is the provider-account credential/config payload. Set Config.Rail
-	// for non-reserved names and for generated names. Config.Routing defaults to default.
+	// for non-reserved names and for generated names.
 	Config config.ProviderAccountConfig
 }
 

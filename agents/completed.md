@@ -9,6 +9,85 @@
 
 ---
 
+# #651: stop fabricating provider data — record source truthfully, derive downstream deterministically
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-30 (Claude; uncommitted at archive time — verified in an ISOLATED worktree from
+commit d32cc436 because the live tree was briefly mid-rename by a concurrent agent: `go build ./...` clean,
+unit + webhooks-integration (testcontainers) GREEN; the reconcile/subscriptions/webhooks integration suites
+passed). Every recorded field now traces to provider data or a deterministic function of it; a missing REQUIRED
+value errors or warns — never a silent made-up value.
+ROUND 1 (core, committed in d32cc436): (1) dropped the `"premium"` fallback in CreateMembership + Reactivate →
+warn + grant only the declared spec; (2) Stripe `charge.refunded` empty refund status → non-retryable error;
+(3) reconcile backfill currency → the subscription's REAL billing currency (`sub.Price.Currency`), skip+warn if
+both unknown — never `"usd"`; (4) period from `price.AccessDurationHours`, warn+30d only when truly absent
+(warn-not-error: AutoRenew-gated `RecurringCycleHours` would break legitimate one-off prices); (5) `nmi.RunSale`
+empty currency → error; (6) amount fallback warns when substituting catalog list price; (7) `PurchasedAt` param
+threaded into both lifecycle inserts, STRIPE wired from the invoice's own `created`; (8) explicit payment
+`status` on lifecycle inserts (kept the SQL `COALESCE(NULLIF(status,''),'completed')` — latent-only risk; the
+nmi-failure path self-corrects via MarkFailed).
+ROUND 2 (the deferred timestamp rails, finished on Paul's request): CCBill create/renew/upgrade now record the
+event `timestamp` (`ccbillEventPurchasedAt`, "YYYY-MM-DD HH:MM:SS"→UTC); Solana records the on-chain BLOCK TIME
+(new `RPCClient.GetConfirmedBlockTime` + `SolanaTransactionService.TransactionBlockTime`, used by the poller;
+nil→now() fallback) — the poller can lag the block, so this is materially more truthful; Stripe non-scheduled
+cancel uses the real `canceled_at` (`applyStripeSubscriptionStatus` gained a `canceledAt` param). Also fixed a
+MISSED `"premium"` fabrication the original audit didn't catch: `stripeEntitlementSet` defaulted an empty spec
+to `{"premium"}` in the Stripe entitlement-reconcile path — now grants only the declared spec.
+DELIBERATELY LEFT on now() (honest — no truthful source, or wrong source): NMI lifecycle/failed payments (the
+NMI postback body carries no transaction-time field — guessing one would be the very fabrication we removed);
+Stripe dispute-WON recovery (the dispute object's own `created` is the OPEN time = wrong; `charge.dispute.closed`
+webhooks aren't delayed like renewals, so now()≈won-time is honest). NMI sandbox E2E (live network) not run —
+the `RunSale` currency change is unit-covered.
+Money core (double-entry + grant ledgers), catalog PULL (alert-only), and provider-account identity
+(operator-declared, #592/#641) were audited CLEAN.
+
+## Metadata
+- Category: billing
+- Status: done
+- Passes: true
+
+## Problem
+
+A repo-wide audit hunted one anti-pattern: a field that should come from the provider being defaulted to a
+literal, coalesced from nil, replaced with `time.Now()`, or synthesized to satisfy a NOT NULL column.
+
+**Tier 1 — active fabrication:** hardcoded `"premium"` entitlement when the spec is empty
+(`lifecycle_service.go` CreateMembership + Reactivate, AND the missed `stripeEntitlementSet` in `stripe.go`);
+Stripe refund status forced to `"succeeded"`; reconcile backfill currency → `"usd"`.
+**Tier 2 — invented boundaries:** 30-day period when the price has no cadence; charged amount falling back to
+the catalog list price.
+**Tier 3 — timestamp truth:** `PurchasedAt` set to `s.now()` instead of the provider's time (Stripe invoice
+`created`, CCBill event `timestamp`, Solana block time, Stripe `canceled_at`).
+**Tier 4 — latent schema trap:** `payments.status` SQL `COALESCE(NULLIF(status,''),'completed')` silently
+records a successful payment for any caller that omits status.
+
+POLICY (Paul): record provider data verbatim, derive downstream effects deterministically; a missing required
+value throws or at minimum warns — never a silent made-up fallback. Declared CONFIG defaults are fine; the
+target is SILENT runtime fallbacks in ingestion/error paths. Sibling to #649.
+
+## Out of scope — verified CLEAN
+- Double-entry + grant ledgers: no fabricated amounts/currency, no plug entries, no FX.
+- Catalog PULL reconciliation: alert-only, never mutates.
+- Provider-account identity (#592/#641): operator-declared, no runtime guessing.
+- Card fields (last4/brand/exp): correctly nullable — `NormalizeStripeCard` returns nil.
+
+## Tasks
+- [x] Drop the `"premium"` entitlement fallback (CreateMembership + Reactivate + the missed `stripeEntitlementSet`).
+- [x] Stripe refund empty status → `MarkWebhookErrorNonRetryable` (no `"succeeded"`).
+- [x] Reconcile backfill currency → subscription's real billing currency; skip+warn when unknown.
+- [x] Missing cadence → derive from `price.AccessDurationHours`; warn+30d only when truly absent.
+- [x] `nmi.RunSale` empty currency → error.
+- [x] Amount fallback warns when substituting catalog list price.
+- [x] Thread provider timestamp into `PurchasedAt`: Stripe invoice `created`; CCBill event `timestamp`; Solana
+      on-chain block time; Stripe `canceled_at`. NMI + Stripe dispute-recovery left on now() (no truthful source).
+- [x] Explicit payment `status` on lifecycle inserts (kept the SQL coalesce — latent-only risk).
+
+Acceptance: ingestion/lifecycle paths record provider-supplied status/currency/amount/timestamps verbatim;
+entitlements/grants/periods derive only from recorded source data; a missing required value throws or warns
+instead of defaulting to a made-up value.
+
+---
+
 # #623: authkit-style embedded route groups
 
 **Completed:** yes

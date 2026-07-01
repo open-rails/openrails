@@ -138,7 +138,7 @@ type ApplyAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// ProviderAccountID is openrails.provider_accounts.id for account-bound
+	// ProviderAccountID is openrails.payment_provider_accounts.id for account-bound
 	// provider-pull materialization.
 	ProviderAccountID *uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —

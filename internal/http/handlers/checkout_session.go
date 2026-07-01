@@ -140,7 +140,7 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if !ok {
 		return false
 	}
-	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
+	_, ok, err := r.State.Merchants.ActiveProviderAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {

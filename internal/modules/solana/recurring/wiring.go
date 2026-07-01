@@ -83,7 +83,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 		if account, ok, err := primarySolanaProviderAccount(ctx, g.database, merchantID); err != nil {
 			return "", err
 		} else if ok {
-			secretName, err := merchants.ProviderAccountSecretName(account.ProviderType, account.Environment, account.AccountID, "private_key")
+			secretName, err := merchants.ProviderAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
 			if err != nil {
 				return "", err
 			}
@@ -222,23 +222,25 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID) (gen.OpenrailsProviderAccount, bool, error) {
+func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID) (gen.OpenrailsPaymentProviderAccount, bool, error) {
 	if database == nil || merchantID.IsZero() {
-		return gen.OpenrailsProviderAccount{}, false, nil
+		return gen.OpenrailsPaymentProviderAccount{}, false, nil
 	}
-	var row gen.OpenrailsProviderAccount
+	var row gen.OpenrailsPaymentProviderAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		row, err = database.Gen(ctx).GetPrimaryProviderAccount(ctx, gen.GetPrimaryProviderAccountParams{
-			MerchantID:   merchantID.UUID(),
-			ProviderType: "solana",
+		environment := "live"
+		row, err = database.Gen(ctx).GetActiveProviderAccountForNewWork(ctx, gen.GetActiveProviderAccountForNewWorkParams{
+			MerchantID:  merchantID.UUID(),
+			Rail:        "solana",
+			Environment: &environment,
 		})
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsProviderAccount{}, false, nil
+			return gen.OpenrailsPaymentProviderAccount{}, false, nil
 		}
-		return gen.OpenrailsProviderAccount{}, false, fmt.Errorf("solana: lookup primary provider account: %w", err)
+		return gen.OpenrailsPaymentProviderAccount{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
 	}
 	return row, true, nil
 }

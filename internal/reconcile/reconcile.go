@@ -185,11 +185,11 @@ type FetchParams struct {
 	Until          time.Time
 	SubscriptionID string
 	CustomerID     string
-	// ProviderAccountID is the OpenRails provider_accounts.id being pulled.
+	// ProviderAccountID is the OpenRails payment_provider_accounts.id being pulled.
 	// Fetchers do not usually need it for API calls, but it is carried for
 	// evidence and for account-bound provider-pull wiring.
 	ProviderAccountID string
-	ProviderType      string
+	Rail              string
 	AccountID         string
 }
 

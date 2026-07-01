@@ -95,16 +95,15 @@ CREATE POLICY merchant_isolation ON openrails.merchant_deks
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
-CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
+CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
-    provider_type text NOT NULL,
+    rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
     display_name text,
     vault_secret_ref text,
-    routing text DEFAULT 'primary' NOT NULL,
-    status text DEFAULT 'enabled' NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_verified_at timestamptz,
@@ -112,20 +111,19 @@ CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     owner text DEFAULT 'merchant' NOT NULL,
-    CONSTRAINT provider_accounts_pkey PRIMARY KEY (id),
-    CONSTRAINT provider_accounts_nonempty CHECK (btrim(provider_type) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
-    CONSTRAINT provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT provider_accounts_routing_check CHECK (routing = ANY (ARRAY['primary','secondary','legacy'])),
-    CONSTRAINT provider_accounts_status_check CHECK (status = ANY (ARRAY['enabled','disabled'])),
-    CONSTRAINT provider_accounts_owner_check CHECK (owner = ANY (ARRAY['merchant','platform'])),
-    CONSTRAINT provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
+    CONSTRAINT payment_provider_accounts_pkey PRIMARY KEY (id),
+    CONSTRAINT payment_provider_accounts_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
+    CONSTRAINT payment_provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
+    CONSTRAINT payment_provider_accounts_owner_check CHECK (owner = ANY (ARRAY['merchant','platform'])),
+    CONSTRAINT payment_provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
-ALTER TABLE ONLY openrails.provider_accounts FORCE ROW LEVEL SECURITY;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_identity ON openrails.provider_accounts (merchant_id, provider_type, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_enabled_primary ON openrails.provider_accounts (merchant_id, provider_type, environment) WHERE (routing = 'primary' AND status = 'enabled');
-ALTER TABLE openrails.provider_accounts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.provider_accounts;
-CREATE POLICY merchant_isolation ON openrails.provider_accounts
+ALTER TABLE ONLY openrails.payment_provider_accounts FORCE ROW LEVEL SECURITY;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_identity ON openrails.payment_provider_accounts (merchant_id, rail, environment, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_global_identity ON openrails.payment_provider_accounts (rail, environment, account_id);
+CREATE INDEX IF NOT EXISTS idx_payment_provider_accounts_new_work ON openrails.payment_provider_accounts (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
+ALTER TABLE openrails.payment_provider_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.payment_provider_accounts;
+CREATE POLICY merchant_isolation ON openrails.payment_provider_accounts
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 `
@@ -163,21 +161,25 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	manifest := cozyArtMerchantManifest()
-	manifest.Merchants[0].Profile = ManifestMerchantProfile{
+	mt := manifest.Merchants["cozy-art"]
+	mt.Profile = MerchantProfileConfig{
 		DisplayName: "Cozy Art Billing",
 		LogoURL:     "https://cdn.example/logo.png",
 		FromEmail:   "billing@example.com",
 		SupportURL:  "https://example.com/support",
 	}
-	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
-		ProviderType: "stripe",
-		Environment:  "test",
-		AccountID:    "acct_test_123",
-		Routing:      "primary",
-		Secrets: map[string]ManifestSecretSource{
-			"secret_key": {Value: "sk_test_bootstrap"},
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"stripe": {
+			"stripe": {
+				Environment: "test",
+				AccountID:   "acct_test_123",
+				Secrets: map[string]string{
+					"secret_key": "sk_test_bootstrap",
+				},
+			},
 		},
-	}}
+	}
+	manifest.Merchants["cozy-art"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
@@ -209,32 +211,39 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	`, merchantID, secretName).Scan(&secretValue))
 	require.Equal(t, "sk_test_bootstrap", secretValue)
 
-	var providerType, environment, accountID, routing, status string
+	var rail, environment, accountID string
+	var archived bool
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT provider_type, environment, account_id, routing, status
-		FROM openrails.provider_accounts
+		SELECT rail, environment, account_id, archived
+		FROM openrails.payment_provider_accounts
 		WHERE merchant_id = $1::uuid
-	`, merchantID).Scan(&providerType, &environment, &accountID, &routing, &status))
-	require.Equal(t, "stripe", providerType)
+	`, merchantID).Scan(&rail, &environment, &accountID, &archived))
+	require.Equal(t, "stripe", rail)
 	require.Equal(t, "test", environment)
 	require.Equal(t, "acct_test_123", accountID)
-	require.Equal(t, "primary", routing)
-	require.Equal(t, "enabled", status)
+	require.False(t, archived)
 }
 
-func TestReconcileMerchantManifestDiscoversProviderAccountIdentityFromSecrets(t *testing.T) {
+func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	manifest := cozyArtMerchantManifest()
-	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
-		ProviderType: "ccbill",
-		Environment:  "live",
-		Routing:      "primary",
-		Secrets: map[string]ManifestSecretSource{
-			"account_config": {Value: `{"client_acc_num":"900000","client_sub_acc":"0000","salt":"secret"}`},
+	mt := manifest.Merchants["cozy-art"]
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"ccbill": {
+			"ccbill": {
+				Environment: "live",
+				AccountID:   "900000/0000",
+				Secrets: map[string]string{
+					"salt":              "secret",
+					"datalink_username": "merchant-user",
+					"datalink_password": "merchant-pass",
+				},
+			},
 		},
-	}}
+	}
+	manifest.Merchants["cozy-art"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
@@ -243,20 +252,26 @@ func TestReconcileMerchantManifestDiscoversProviderAccountIdentityFromSecrets(t 
 	var accountID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT account_id
-		FROM openrails.provider_accounts
-		WHERE merchant_id = $1::uuid AND provider_type = 'ccbill'
+		FROM openrails.payment_provider_accounts
+		WHERE merchant_id = $1::uuid AND rail = 'ccbill'
 	`, merchantID).Scan(&accountID))
 	require.Equal(t, "900000/0000", accountID)
 
-	secretName, err := merchants.ProviderAccountSecretName("ccbill", "live", "900000/0000", "account_config")
-	require.NoError(t, err)
-	var secretValue string
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT value
-		FROM openrails.merchant_secrets
-		WHERE merchant_id = $1::uuid AND name = $2
-	`, merchantID, secretName).Scan(&secretValue))
-	require.JSONEq(t, `{"client_acc_num":"900000","client_sub_acc":"0000","salt":"secret"}`, secretValue)
+	for key, want := range map[string]string{
+		"salt":              "secret",
+		"datalink_username": "merchant-user",
+		"datalink_password": "merchant-pass",
+	} {
+		secretName, err := merchants.ProviderAccountSecretName("ccbill", "live", "900000/0000", key)
+		require.NoError(t, err)
+		var secretValue string
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT value
+			FROM openrails.merchant_secrets
+			WHERE merchant_id = $1::uuid AND name = $2
+		`, merchantID, secretName).Scan(&secretValue))
+		require.Equal(t, want, secretValue)
+	}
 }
 
 // #646: the merchant config round-trips — push the complete payload (profile +
@@ -271,30 +286,44 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	threshold := int64(75_000_000)
 	floor := int64(2_000_000)
 	manifest := cozyArtMerchantManifest()
-	mt := &manifest.Merchants[0]
+	mt := manifest.Merchants["cozy-art"]
 	mt.DisplayName = "Cozy Art"
-	mt.Profile = ManifestMerchantProfile{DisplayName: "Cozy Art Billing", FromEmail: "billing@example.com"}
-	mt.Invoice = &ManifestInvoiceConfig{
+	mt.Profile = MerchantProfileConfig{DisplayName: "Cozy Art Billing", FromEmail: "billing@example.com"}
+	mt.Invoice = &InvoiceConfig{
 		CollectionThreshold:   &threshold,
 		MonthlyFloor:          &floor,
 		BillingPeriodBoundary: "calendar_month",
 	}
-	mt.DelegatedInvokerWastedSpendWindows = []ManifestBudgetWindow{
+	mt.DelegatedInvokerWastedSpendWindows = []BudgetWindowConfig{
 		{Key: "burst", Window: "15m", Limit: 5_000_000},
 		{Key: "sustained", Window: "5h", Limit: 20_000_000},
 	}
-	// NMI gateway "mobius": a live primary and its sandbox, side by side (#646).
-	mt.ProviderAccounts = []ManifestProviderAccount{
-		{ProviderType: "nmi", Name: "mobius", Environment: "live", AccountID: "579145", Routing: "primary",
-			Secrets: map[string]ManifestSecretSource{
-				"security_key":     {Value: "live-security"},
-				"tokenization_key": {Value: "live-token"},
-			}},
-		{ProviderType: "nmi", Name: "mobius", Environment: "test", AccountID: "579145-sandbox", Routing: "secondary",
-			Secrets: map[string]ManifestSecretSource{
-				"security_key": {Value: "test-security"},
-			}},
+	// NMI gateway "mobius": live and sandbox accounts side by side (#646).
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"mobius": {
+			"nmi": {
+				Environment: "live",
+				AccountID:   "579145",
+				Settings: map[string]any{
+					"tokenization_url": "https://secure.networkmerchants.com/token/Collect.js",
+					"tokenization_key": "live-token",
+				},
+				Secrets: map[string]string{
+					"security_key": "live-security",
+				},
+			},
+		},
+		"mobius-sandbox": {
+			"nmi": {
+				Environment: "test",
+				AccountID:   "681902",
+				Secrets: map[string]string{
+					"security_key": "test-security",
+				},
+			},
+		},
 	}
+	manifest.Merchants["cozy-art"] = mt
 
 	// First push creates the merchant; second push syncs the display name onto the
 	// existing merchant row (the `found` path) — mirrors a real re-apply.
@@ -304,6 +333,8 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	// merchant_configurations carries the invoice policy.
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	parsedMerchantID, err := merchant.ParseID(merchantID)
+	require.NoError(t, err)
 	var boundary string
 	var gotThreshold, gotFloor int64
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -319,17 +350,23 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	// the manifest `name` persisted as the provider account display_name.
 	var liveDisplayName string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT display_name FROM openrails.provider_accounts
-		WHERE merchant_id = $1::uuid AND provider_type = 'nmi' AND environment = 'live'
+		SELECT display_name FROM openrails.payment_provider_accounts
+		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND environment = 'live'
 	`, merchantID).Scan(&liveDisplayName))
 	require.Equal(t, "mobius", liveDisplayName)
 
+	merchantSvc, err := merchants.NewService(cp.Pool(), nil)
+	require.NoError(t, err)
+	tokenization, err := merchantSvc.LoadNMITokenizationConfig(ctx, parsedMerchantID, "nmi")
+	require.NoError(t, err)
+	require.Equal(t, "live-token", tokenization.TokenizationKey)
+	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", tokenization.CollectJSURL)
+
 	// dump the merchant back into the manifest shape.
-	dumped, err := DumpMerchantConfig(ctx, cfg, cp, "cozy-art")
+	dumped, err := DumpMerchantConfig(ctx, cfg, cp, "cozy-art", DumpMerchantConfigOptions{})
 	require.NoError(t, err)
 	require.Len(t, dumped.Merchants, 1)
-	d := dumped.Merchants[0]
-	require.Equal(t, "cozy-art", d.Slug)
+	d := dumped.Merchants["cozy-art"]
 	require.Equal(t, "Cozy Art", d.DisplayName)
 	require.Equal(t, "Cozy Art Billing", d.Profile.DisplayName)
 	require.Equal(t, "billing@example.com", d.Profile.FromEmail)
@@ -340,7 +377,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, floor, *d.Invoice.MonthlyFloor)
 
 	require.Len(t, d.DelegatedInvokerWastedSpendWindows, 2)
-	gotWindows := map[string]ManifestBudgetWindow{}
+	gotWindows := map[string]BudgetWindowConfig{}
 	for _, w := range d.DelegatedInvokerWastedSpendWindows {
 		gotWindows[w.Key] = w
 	}
@@ -349,28 +386,28 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, "5h", gotWindows["sustained"].Window)
 
 	require.Len(t, d.ProviderAccounts, 2)
-	byEnv := map[string]ManifestProviderAccount{}
-	for _, a := range d.ProviderAccounts {
-		byEnv[a.Environment] = a
+	byEnv := map[string]ProviderRailAccountConfig{}
+	for _, account := range d.ProviderAccounts {
+		require.Len(t, account, 1)
+		for _, a := range account {
+			byEnv[a.Environment] = a
+		}
 	}
-	require.Equal(t, "mobius", byEnv["live"].Name)
 	require.Equal(t, "579145", byEnv["live"].AccountID)
-	require.Equal(t, "primary", byEnv["live"].Routing)
-	require.Equal(t, "secondary", byEnv["test"].Routing)
-	// Secret VALUES are never dumped — only env references. NMI's security_key
-	// canonicalizes to production_key on storage, so the dump emits that key.
-	require.NotEmpty(t, byEnv["live"].Secrets["production_key"].Env, "secret emitted as env reference")
-	require.Empty(t, byEnv["live"].Secrets["production_key"].Value, "secret value must never be dumped")
-	require.NotEmpty(t, byEnv["live"].Secrets["tokenization_key"].Env)
+	require.False(t, byEnv["live"].Archived)
+	require.False(t, byEnv["test"].Archived)
+	require.Equal(t, RedactedSecretValue, byEnv["live"].Secrets["security_key"])
+	require.NotContains(t, byEnv["live"].Secrets, "tokenization_key")
+	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byEnv["live"].Settings["tokenization_url"])
+	require.Equal(t, "live-token", byEnv["live"].Settings["tokenization_key"])
 
 	// the dump re-marshals to valid YAML that re-parses (round-trip closure).
 	encoded, err := MarshalMerchantManifest(dumped)
 	require.NoError(t, err)
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
-	require.Equal(t, "cozy-art", reparsed.Merchants[0].Slug)
-	require.NotNil(t, reparsed.Merchants[0].Invoice)
-	require.Len(t, reparsed.Merchants[0].ProviderAccounts, 2)
+	require.NotNil(t, reparsed.Merchants["cozy-art"].Invoice)
+	require.Len(t, reparsed.Merchants["cozy-art"].ProviderAccounts, 2)
 }
 
 func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T) {
@@ -386,15 +423,19 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	}}
 
 	manifest := cozyArtMerchantManifest()
-	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
-		ProviderType: "stripe",
-		Environment:  "test",
-		AccountID:    "acct_vault_123",
-		Routing:      "primary",
-		Secrets: map[string]ManifestSecretSource{
-			"secret_key": {Value: "sk_test_vault_bootstrap"},
+	mt := manifest.Merchants["cozy-art"]
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"stripe": {
+			"stripe": {
+				Environment: "test",
+				AccountID:   "acct_vault_123",
+				Secrets: map[string]string{
+					"secret_key": "sk_test_vault_bootstrap",
+				},
+			},
 		},
-	}}
+	}
+	manifest.Merchants["cozy-art"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
@@ -435,15 +476,19 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	}}
 
 	manifest := cozyArtMerchantManifest()
-	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
-		ProviderType: "stripe",
-		Environment:  "test",
-		AccountID:    "acct_db_123",
-		Routing:      "primary",
-		Secrets: map[string]ManifestSecretSource{
-			"secret_key": {Value: "sk_test_db_bootstrap"},
+	mt := manifest.Merchants["cozy-art"]
+	mt.ProviderAccounts = map[string]ProviderAccountConfig{
+		"stripe": {
+			"stripe": {
+				Environment: "test",
+				AccountID:   "acct_db_123",
+				Secrets: map[string]string{
+					"secret_key": "sk_test_db_bootstrap",
+				},
+			},
 		},
-	}}
+	}
+	manifest.Merchants["cozy-art"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
@@ -646,12 +691,13 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 	return cp
 }
 
-func cozyArtMerchantManifest() *MerchantManifest {
-	return &MerchantManifest{
+func cozyArtMerchantManifest() *BillingConfig {
+	return &BillingConfig{
 		Version: BootstrapManifestVersion,
-		Merchants: []ManifestMerchant{{
-			Slug:        "cozy-art",
-			DisplayName: "Cozy Art",
-		}},
+		Merchants: map[string]MerchantConfig{
+			"cozy-art": {
+				DisplayName: "Cozy Art",
+			},
+		},
 	}
 }

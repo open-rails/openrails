@@ -35,18 +35,22 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	m := embed.ManifestMerchant{
-		Slug: slug,
-		ProviderAccounts: []embed.ManifestProviderAccount{
-			{ProviderType: "nmi", Environment: "live", AccountID: "579145"},
-			{ProviderType: "ccbill", Environment: "live", AccountID: "945280/0000"},
+	m := embed.MerchantConfig{
+		DisplayName: slug,
+		ProviderAccounts: map[string]embed.ProviderAccountConfig{
+			"mobius": {
+				"nmi": {Environment: "live", AccountID: "579145"},
+			},
+			"ccbill": {
+				"ccbill": {Environment: "live", AccountID: "945280/0000"},
+			},
 		},
 	}
-	id, err := rt.UpsertMerchantConfig(ctx, m)
+	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 
-	// provider_accounts is RLS-scoped: read it on a connection pinned to the
+	// payment_provider_accounts is RLS-scoped: read it on a connection pinned to the
 	// merchant so the policy admits its rows.
 	countProviderAccounts := func() int {
 		t.Helper()
@@ -57,14 +61,14 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, conn.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.provider_accounts WHERE provider_type = ANY($1)`,
+			`SELECT count(*) FROM openrails.payment_provider_accounts WHERE rail = ANY($1)`,
 			[]string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}
 	require.Equal(t, 2, countProviderAccounts(), "both declared provider accounts are seeded")
 
 	// Re-running is idempotent — no error, no duplicate rows.
-	_, err = rt.UpsertMerchantConfig(ctx, m)
+	_, err = rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
 	require.Equal(t, 2, countProviderAccounts(), "re-run does not duplicate provider accounts")
 }

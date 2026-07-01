@@ -86,7 +86,7 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-account", "production_key")
+	secretName, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-account", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	svc := &VaultService{
 		PaymentMethodService: pms,
 		MerchantSecrets:      store,
-		ProviderSecrets:      vaultStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"},
+		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:               vaultTestConfig(true),
 		Rails:                vaultTestRails(""),
 		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
@@ -149,7 +149,7 @@ func TestVaultFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.
 		Rails:  vaultTestRails("static-mobius-key"),
 	}
 
-	client, err := svc.resolveNMIClient(ctx, "nmi")
+	client, _, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "static-mobius-key", client.SecurityKey)
 }
@@ -163,9 +163,9 @@ func TestVaultProviderAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t
 		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "nmi")
+	_, _, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing scoped merchant NMI secret")
+	require.Contains(t, err.Error(), "missing scoped merchant NMI provider account")
 }
 
 func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *testing.T) {
@@ -174,7 +174,7 @@ func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *test
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "nmi")
+	_, _, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing client")
 }
@@ -183,12 +183,12 @@ func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &VaultService{
 		MerchantSecrets: vaultUnavailableSecretStore{},
-		ProviderSecrets: vaultStaticProviderSecretResolver{providerType: "nmi", environment: "live", accountID: "mobius-account"},
+		ProviderSecrets: vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:          vaultTestConfig(true),
 		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
-	_, err := svc.resolveNMIClient(ctx, "nmi")
+	_, _, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merchants.ErrSecretBackendUnavailable), "err = %v", err)
 }
@@ -197,11 +197,11 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 	merchantA := merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
 	merchantB := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 	store := merchants.NewMemorySecretStore()
-	nameA, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-a", "production_key")
+	nameA, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-a", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(context.Background(), merchantA, nameA, "merchant-a-key")
 	require.NoError(t, err)
-	nameB, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-b", "production_key")
+	nameB, err := merchants.ProviderAccountSecretName("nmi", "live", "mobius-b", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(context.Background(), merchantB, nameB, "merchant-b-key")
 	require.NoError(t, err)
@@ -216,40 +216,60 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 		Rails:  vaultTestRails(""),
 	}
 
-	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "nmi")
+	clientA, _, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "nmi")
 	require.NoError(t, err)
-	clientB, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantB), "nmi")
+	clientB, _, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantB), "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "merchant-a-key", clientA.SecurityKey)
 	require.Equal(t, "merchant-b-key", clientB.SecurityKey)
 }
 
 type vaultStaticProviderSecretResolver struct {
-	providerType string
-	environment  string
-	accountID    string
+	rail        string
+	environment string
+	accountID   string
 }
 
-func (r vaultStaticProviderSecretResolver) PrimaryProviderAccountSecretName(_ context.Context, _ merchant.ID, _, _, key string) (string, bool, error) {
-	name, err := merchants.ProviderAccountSecretName(r.providerType, r.environment, r.accountID, key)
+func (r vaultStaticProviderSecretResolver) ActiveProviderAccountSecretName(_ context.Context, _ merchant.ID, _, _, key string) (string, bool, error) {
+	name, err := merchants.ProviderAccountSecretName(r.rail, r.environment, r.accountID, key)
 	return name, err == nil, err
+}
+
+func (r vaultStaticProviderSecretResolver) ActiveProviderAccountScope(context.Context, merchant.ID, string, string) (merchants.ProviderAccountScope, bool, error) {
+	return merchants.ProviderAccountScope{
+		Rail:        r.rail,
+		Environment: r.environment,
+		AccountID:   r.accountID,
+	}, true, nil
 }
 
 type vaultMissingProviderSecretResolver struct{}
 
-func (vaultMissingProviderSecretResolver) PrimaryProviderAccountSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+func (vaultMissingProviderSecretResolver) ActiveProviderAccountSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
 	return "", false, nil
+}
+
+func (vaultMissingProviderSecretResolver) ActiveProviderAccountScope(context.Context, merchant.ID, string, string) (merchants.ProviderAccountScope, bool, error) {
+	return merchants.ProviderAccountScope{}, false, nil
 }
 
 type vaultPerMerchantProviderSecretResolver map[merchant.ID]string
 
-func (r vaultPerMerchantProviderSecretResolver) PrimaryProviderAccountSecretName(_ context.Context, id merchant.ID, _, _, key string) (string, bool, error) {
+func (r vaultPerMerchantProviderSecretResolver) ActiveProviderAccountSecretName(_ context.Context, id merchant.ID, _, _, key string) (string, bool, error) {
 	accountID := r[id]
 	if accountID == "" {
 		return "", false, nil
 	}
 	name, err := merchants.ProviderAccountSecretName("nmi", "live", accountID, key)
 	return name, err == nil, err
+}
+
+func (r vaultPerMerchantProviderSecretResolver) ActiveProviderAccountScope(_ context.Context, id merchant.ID, _, _ string) (merchants.ProviderAccountScope, bool, error) {
+	accountID := r[id]
+	if accountID == "" {
+		return merchants.ProviderAccountScope{}, false, nil
+	}
+	return merchants.ProviderAccountScope{Rail: "nmi", Environment: "live", AccountID: accountID}, true, nil
 }
 
 func vaultTestConfig(testMode bool) *config.Config {

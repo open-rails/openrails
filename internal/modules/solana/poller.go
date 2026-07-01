@@ -679,6 +679,18 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		return nil
 	}
 
+	// #651: stamp the payment with the on-chain block time (truthful settlement
+	// time) — the poller can lag the block by its interval, so now() would be wrong.
+	// nil on error/absent => the payment records now() as an honest fallback.
+	var purchasedAt *time.Time
+	if p.solanaTransactionSvc != nil {
+		if bt, btErr := p.solanaTransactionSvc.TransactionBlockTime(ctx, signature); btErr != nil {
+			log.WithError(btErr).WithField("signature", signature).Warn("could not fetch solana block time; payment will record processing time")
+		} else {
+			purchasedAt = bt
+		}
+	}
+
 	// Use the unified RegisterPurchase to record payment and grant entitlements
 	result, err := p.purchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         pending.UserID,
@@ -687,6 +699,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		TransactionID:  signature,
 		Amount:         pending.Amount,
 		Currency:       pending.Currency,
+		PurchasedAt:    purchasedAt,
 		WalletPurchase: true,
 		Metadata: map[string]any{
 			"solana_reference":    reference,

@@ -394,60 +394,61 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	t.Run("validates every stripe rail", func(t *testing.T) {
 		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
 		rails := ProviderAccountSet{
-			"stripe_primary": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
-			"stripe_legacy":  {Rail: models.RailStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
+			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
+			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
 		}
 		require.NoError(t, validateStripeKeyForTestMode(cfg, rails))
 		require.Equal(t, "sk_live_primary", rails["stripe_primary"].Stripe.SecretKey)
-		require.Empty(t, rails["stripe_legacy"].Stripe.SecretKey)
+		require.Empty(t, rails["stripe_archived"].Stripe.SecretKey)
 	})
 }
 
-func TestPrimaryRailByType(t *testing.T) {
+func TestActiveRailByType(t *testing.T) {
 	rails := ProviderAccountSet{
-		"stripe_old": {Rail: models.RailStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_live_old"}},
+		"stripe_old": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_old"}},
 		"stripe_new": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_new"}},
 		"mobius":     {Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec"}},
 	}
-	key, proc, err := rails.PrimaryRailByType(models.RailStripe)
+	key, proc, err := rails.ActiveRailByType(models.RailStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
 	require.Equal(t, proc, rails.GetStripeRail())
 
 	rails["stripe_other"] = &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
-	_, _, err = rails.PrimaryRailByType(models.RailStripe)
-	require.ErrorContains(t, err, "multiple primary provider accounts")
-	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
+	key, proc, err = rails.ActiveRailByType(models.RailStripe)
+	require.NoError(t, err)
+	require.Equal(t, "stripe_new", key)
+	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
+	require.NoError(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
 		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
-	}), "multiple primary provider accounts")
+	}))
 
 	// Two accounts on a rail without account_id is rejected: the made-up map name
-	// can't be the routing key (#641).
+	// can't be the provider identity (#641).
 	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
-		"stripe_a": {Rail: models.RailStripe, Routing: RailRoutingLegacy, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
+		"stripe_a": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}), "must declare account_id")
 }
 
-// TestCatalogTargetSelectors covers the #641 routing the catalog push uses:
-// PrimaryRailByType + SecondaryRailKeysByType (primary+secondary are sync targets;
-// legacy is skipped) and FindByAccountID (resolve a specific account by gateway-id).
+// TestCatalogTargetSelectors covers active account selection plus
+// FindByAccountID (resolve a specific account by gateway-id).
 func TestCatalogTargetSelectors(t *testing.T) {
 	rails := ProviderAccountSet{
-		"mobius":   {Rail: models.RailNMI, AccountID: "100001", NMI: &NMIRailConfig{SecurityKey: "a"}}, // no routing -> primary
-		"paykings": {Rail: models.RailNMI, AccountID: "100002", Routing: RailRoutingSecondary, NMI: &NMIRailConfig{SecurityKey: "b"}},
-		"old-nmi":  {Rail: models.RailNMI, AccountID: "100003", Routing: RailRoutingLegacy, NMI: &NMIRailConfig{SecurityKey: "c"}},
+		"mobius":   {Rail: models.RailNMI, AccountID: "100001", NMI: &NMIRailConfig{SecurityKey: "a"}},
+		"paykings": {Rail: models.RailNMI, AccountID: "100002", NMI: &NMIRailConfig{SecurityKey: "b"}},
+		"old-nmi":  {Rail: models.RailNMI, AccountID: "100003", Archived: true, NMI: &NMIRailConfig{SecurityKey: "c"}},
 	}
 
-	pk, primary, err := rails.PrimaryRailByType(models.RailNMI)
+	pk, primary, err := rails.ActiveRailByType(models.RailNMI)
 	require.NoError(t, err)
 	require.Equal(t, "mobius", pk)
 	require.Equal(t, "100001", primary.AccountID)
 
-	// Only the secondary is a catalog-sync target — legacy is excluded.
-	require.Equal(t, []string{"paykings"}, rails.SecondaryRailKeysByType(models.RailNMI))
+	// Non-archived accounts are catalog-sync targets; archived is excluded.
+	require.Equal(t, []string{"mobius", "paykings"}, rails.ActiveRailKeysByType(models.RailNMI))
 
 	// FindByAccountID resolves by operator-declared gateway-id.
 	got, ok := rails.FindByAccountID(models.RailNMI, "100002")
@@ -514,12 +515,11 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	require.Equal(t, "", rails2["stripe"].Stripe.SecretKey)
 }
 
-func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
+func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 	cfg := &Config{}
 	rails := ProviderAccountSet{
 		"mobius": {
-			Rail:    models.RailNMI,
-			Routing: RailRoutingPrimary,
+			Rail: models.RailNMI,
 			NMI: &NMIRailConfig{
 				SecurityKey:     "sec",
 				TokenizationKey: "tok",
@@ -527,16 +527,16 @@ func TestRailConfigTypedBlocksAndRouting(t *testing.T) {
 			},
 		},
 		"stripe_old": {
-			Rail:    models.RailStripe,
-			Routing: RailRoutingLegacy,
-			Stripe:  &StripeRailConfig{SecretKey: "sk_live_old"},
+			Rail:     models.RailStripe,
+			Archived: true,
+			Stripe:   &StripeRailConfig{SecretKey: "sk_live_old"},
 		},
 	}
 	require.NoError(t, ValidateRailSet(cfg, rails))
 	require.Equal(t, "sec", rails["mobius"].NMI.SecurityKey)
 	require.Equal(t, "tok", rails["mobius"].NMI.TokenizationKey)
 	require.Equal(t, "sk_live_old", rails["stripe_old"].Stripe.SecretKey)
-	require.Equal(t, RailRoutingLegacy, rails["stripe_old"].EffectiveRouting())
+	require.True(t, rails["stripe_old"].Archived)
 }
 
 func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {

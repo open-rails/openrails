@@ -27,7 +27,7 @@ func TestParseMerchantConfigManifest(t *testing.T) {
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
-  - slug: cozy-art
+  cozy-art:
     display_name: Cozy Art
     issuer:
       uri: https://auth.cozy.art
@@ -38,40 +38,41 @@ merchants:
       from_email: billing@example.com
       support_url: https://example.com/support
     provider_accounts:
-      - provider_type: stripe
-        environment: test
-        account_id: acct_test_123
-        routing: primary
-        secrets:
-          secret_key:
-            env: STRIPE_SECRET_KEY
-      - provider_type: nmi
-        environment: live
-        account_id: mobius-profile-id
-        secrets:
-          webhook_signing_secret:
-            env: MOBIUS_WEBHOOK_SIGNING_SECRET
+      stripe:
+        stripe:
+          environment: test
+          account_id: acct_test_123
+          secrets:
+            secret_key: sk_test_123
+      mobius:
+        nmi:
+          environment: live
+          account_id: mobius-profile-id
+          settings:
+            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+            tokenization_key: public-tokenization-key
+          secrets:
+            webhook_signing_secret: mobius-webhook-secret
 `))
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 1)
-	m := manifest.Merchants[0]
+	m := manifest.Merchants["cozy-art"]
 	require.Equal(t, "Cozy Art Billing", m.Profile.DisplayName)
 	require.NotNil(t, m.Issuer)
 	require.Equal(t, "https://auth.cozy.art", m.Issuer.URI)
 	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.Issuer.JWKSURI)
 	require.Len(t, m.ProviderAccounts, 2)
-	require.Equal(t, "acct_test_123", m.ProviderAccounts[0].AccountID)
+	require.Equal(t, "acct_test_123", m.ProviderAccounts["stripe"]["stripe"].AccountID)
 }
 
 func TestExampleMerchantConfigManifestParses(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants.example.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants_config.example.yaml"))
 	require.NoError(t, err)
 
 	manifest, err := ParseMerchantConfigManifest(raw)
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 1)
-	m := manifest.Merchants[0]
-	require.Equal(t, "local-stack", m.Slug)
+	m := manifest.Merchants["local-stack"]
 	require.NotNil(t, m.Issuer)
 	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", m.Issuer.JWKSURI)
 
@@ -88,26 +89,32 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "15m", m.DelegatedInvokerWastedSpendWindows[0].Window)
 	require.Equal(t, int64(5_000_000), m.DelegatedInvokerWastedSpendWindows[0].Limit)
 
-	// #641/#646: multiple accounts per rail, each with a human name, account_id
-	// routing identity, and a live+test environment pair for NMI and Stripe.
+	// #641/#646/#655: multiple accounts per rail, each with a human name,
+	// account_id identity, lifecycle, and a live+test environment pair for NMI
+	// and Stripe.
 	accts := m.ProviderAccounts
 	require.Len(t, accts, 7)
-	type key struct{ name, env string } // name disambiguates two accounts on one rail
-	byName := map[key]ManifestProviderAccount{}
-	for _, a := range accts {
-		require.NotEmpty(t, a.Name, "every provider account has a human name (#646)")
-		byName[key{a.Name, a.Environment}] = a
+	type key struct{ name, env string }
+	byName := map[key]ProviderRailAccountConfig{}
+	byRail := map[string]string{}
+	for name, account := range accts {
+		require.Len(t, account, 1)
+		for rail, cfg := range account {
+			byName[key{name, cfg.Environment}] = cfg
+			byRail[name] = rail
+		}
 	}
-	// NMI gateway "mobius": live (primary, legacy gateway-id) + its sandbox.
-	require.Equal(t, "nmi", byName[key{"mobius", "live"}].ProviderType)
+	// NMI gateway "mobius": live gateway-id + its sandbox.
+	require.Equal(t, "nmi", byRail["mobius"])
 	require.Equal(t, "579145", byName[key{"mobius", "live"}].AccountID)
-	require.Equal(t, "primary", byName[key{"mobius", "live"}].Routing)
-	require.Equal(t, "579145-sandbox", byName[key{"mobius", "test"}].AccountID)
-	// A second NMI gateway (paykings) — secondary.
-	require.Equal(t, "secondary", byName[key{"paykings", "live"}].Routing)
+	require.False(t, byName[key{"mobius", "live"}].Archived)
+	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName[key{"mobius", "live"}].Settings["tokenization_key"])
+	require.Equal(t, "681902", byName[key{"mobius-sandbox", "test"}].AccountID)
+	// A second NMI gateway (paykings) is archived/drain-only in the example.
+	require.True(t, byName[key{"paykings", "live"}].Archived)
 	// Stripe live + test side by side.
-	require.Equal(t, "acct_localstack_live", byName[key{"stripe", "live"}].AccountID)
-	require.Equal(t, "acct_localstack_test", byName[key{"stripe", "test"}].AccountID)
+	require.Equal(t, "acct_1M9QZULkdIwHu7ix", byName[key{"stripe", "live"}].AccountID)
+	require.Equal(t, "acct_1N2YbMLkdIwHu7ix", byName[key{"stripe-sandbox", "test"}].AccountID)
 	// CCBill — one account.
 	require.Equal(t, "945280/0000", byName[key{"ccbill", "live"}].AccountID)
 }
@@ -121,25 +128,25 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	accountID := solanago.PublicKeyFromBytes(pub).String()
-	secrets, err := newManifestSecretValues("solana", map[string]ManifestSecretSource{
-		"private_key": {Value: "keypair"},
+	secrets, err := newManifestSecretValues("solana", map[string]string{
+		"private_key": "keypair",
 	})
 	require.NoError(t, err)
 
-	got, err := manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{}, secrets, nil)
+	got, err := manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{}, secrets, nil)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "keypair"}, got)
 
-	_, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{
-		Signer: &ManifestProviderAccountSigner{Mode: "vault_transit", Key: "openrails-solana-local"},
+	_, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
+		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, secrets, fakeTransit{pub: pub})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot also set secrets.private_key")
 
 	emptySecrets, err := newManifestSecretValues("solana", nil)
 	require.NoError(t, err)
-	got, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ManifestProviderAccount{
-		Signer: &ManifestProviderAccountSigner{Mode: "vault_transit", Key: "openrails-solana-local"},
+	got, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
+		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
@@ -150,7 +157,7 @@ func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
 		return `
 version: 1
 merchants:
-  - slug: cozy-art
+  cozy-art:
     display_name: Cozy Art
 ` + fragment
 	}
@@ -166,7 +173,7 @@ merchants:
 		},
 		{
 			name: "auth section removed (hard cut)",
-			body: "version: 1\nauth:\n  users: []\nmerchants:\n  - slug: x\n    display_name: X\n",
+			body: "version: 1\nauth:\n  users: []\nmerchants:\n  x:\n    display_name: X\n",
 			want: "auth",
 		},
 		{
@@ -181,12 +188,12 @@ merchants:
 		},
 		{
 			name: "missing merchant display name",
-			body: "version: 1\nmerchants:\n  - slug: cozy-art\n",
+			body: "version: 1\nmerchants:\n  cozy-art: {}\n",
 			want: `merchant "cozy-art" display_name is required`,
 		},
 		{
 			name: "merchant name removed",
-			body: "version: 1\nmerchants:\n  - slug: cozy-art\n    name: Cozy Art\n",
+			body: "version: 1\nmerchants:\n  cozy-art:\n    name: Cozy Art\n",
 			want: "unknown field \"name\"",
 		},
 		{
@@ -220,29 +227,34 @@ merchants:
 			want: "profile.logo_url",
 		},
 		{
-			name: "invalid provider account routing",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        routing: standby\n"),
-			want: "routing must be primary, secondary, legacy, or disabled",
+			name: "provider account routing removed",
+			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
+			want: "unknown field \"routing\"",
 		},
 		{
 			name: "provider account mode removed",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        mode: primary\n"),
+			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
 			want: "unknown field \"mode\"",
 		},
 		{
 			name: "provider account role removed",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        role: primary\n"),
+			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
 			want: "unknown field \"role\"",
 		},
 		{
 			name: "invalid provider account environment",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        environment: moon\n        account_id: acct_test_123\n"),
+			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
 			want: "environment must be live or test",
 		},
 		{
-			name: "invalid provider secret source",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        secrets:\n          secret_key:\n            value: one\n            env: STRIPE_SECRET_KEY\n"),
-			want: "must set exactly one",
+			name: "invalid provider secret alias",
+			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
+			want: "unknown provider account secret",
+		},
+		{
+			name: "nmi tokenization key is a setting",
+			body: base("    provider_accounts:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
+			want: "unknown provider account secret",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

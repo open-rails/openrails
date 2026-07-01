@@ -18,8 +18,8 @@ no principled axis.
    provider-owned facts (charges, refunds, remote liveness, vault). The pull does
    not reason about entitlements or credits — it just makes the local ledger a
    faithful mirror. A pull is authoritative only for the provider account it
-   actually queried: `(merchant, provider_type, provider_account_id)`, where
-   `provider_account_id` is a local FK to `provider_accounts.id`.
+   actually queried: `(merchant, rail, provider_account_id)`, where
+   `provider_account_id` is a local FK to `payment_provider_accounts.id`.
 2. **The Convergence Engine.** Given a truthful ledger, drive every *grant effect*
    (entitlements, credits, product access) and every standing *external decision*
    to a consistent state with the source events — repairing internal and external
@@ -284,7 +284,7 @@ polymorphic/non-FK references. They are the Convergence Engine/runtime surface.
 | Surface / tables | Invariant application must enforce | Plane/check |
 |---|---|---|
 | Soft or polymorphic references | A declared `source_type/source_id`, ledger reference, or provider-intent reference must resolve to the intended row in the same merchant/scope. Prefer future DB constraints when the relationship can be expressed without blocking valid imports. | `consistency.reference.*` only for references that cannot be constrained |
-| Provider mirror: `payments`, `subscriptions`, `payment_methods`, disputes/refunds | Provider-owned facts are reflected locally: successful charges, refunds, chargebacks/disputes, subscription status/period/next bill, and vault metadata. The pull upserts and overwrites provider-owned mirror fields only inside the same `(merchant, provider_type, provider_account_id)` binding, where `provider_account_id` points to `provider_accounts.id`. Active #511 intentionally ignores local-only provider mirror rows rather than emitting `pull.*.excess`; provider absence is too often ambiguous due to retention/reporting windows, incomplete attribution, partial pulls, or wrong provider/account lookup. The pull does not rewrite local intent or catalog definitions. | `pull.*` |
+| Provider mirror: `payments`, `subscriptions`, `payment_methods`, disputes/refunds | Provider-owned facts are reflected locally: successful charges, refunds, chargebacks/disputes, subscription status/period/next bill, and vault metadata. The pull upserts and overwrites provider-owned mirror fields only inside the same `(merchant, rail, provider_account_id)` binding, where `provider_account_id` points to `payment_provider_accounts.id`. Active #511 intentionally ignores local-only provider mirror rows rather than emitting `pull.*.excess`; provider absence is too often ambiguous due to retention/reporting windows, incomplete attribution, partial pulls, or wrong provider/account lookup. The pull does not rewrite local intent or catalog definitions. | `pull.*` |
 | Provider charges and local payments | Every successful provider charge has exactly one local payment row after pull. Same provider transaction duplicates are schema-blocked; distinct charge IDs for the same customer/product/period are only valid when explained by invoice/proration/operator intent. Local-only charge mirrors are not deleted until the payment domain is confirmed complete. | `pull.charge.*`, `consistency.duplicate.provider_charge` |
 | Refunds / chargebacks | Every provider refund/chargeback is mirrored; every mirrored refund links to a real original payment; `sum(refunds) <= original charge` after the charge/refund domain is fully pulled. | `pull.refund.*`, `pull.dispute.*`, `consistency.amount_mismatch.refund_math` |
 | Payment amount explanation | A provider-observed payment amount must be explained by the checkout session, invoice, discount, tax, proration, historical price snapshot, or explicit operator/off-channel record. It is not compared to the current live catalog price. | `consistency.amount_mismatch.payment_amount` |
@@ -299,7 +299,7 @@ polymorphic/non-FK references. They are the Convergence Engine/runtime surface.
 | Ledger sign / credit limits | Customer balance may not go below the allowed arrears floor. `credit_limit_amount` / billing mode are admission and applier policy inputs, not a separate stored balance. | applier check + #512/#513 diagnostic |
 | Invoices: `invoices`, `invoice_items`, `invoice_payments`, `usage_events` | Invoice amounts must match their source rows: `subtotal/total = sum(non-void items)`, `amount_paid = sum(settled invoice payments)`, `amount_due = total - amount_paid`, paid invoices have zero due, and closed-period billable usage is invoiced exactly once. | `consistency.duplicate.*` for duplicate coverage; `consistency.amount_mismatch.*` for amount mismatches |
 | Admission windows and Redis spendgate | Admission compares `sum(captured + active holds)` against the effective policy. Redis is the hot-path source for in-flight holds; Postgres rows here are legacy/transitional unless still wired. | #513 admission checks |
-| Provider/customer configuration | `provider_accounts` records a merchant-scoped provider account: merchant id, provider type, provider-returned `account_id`, display metadata, vault secret reference, and role (`primary`, `secondary`, `legacy`). Each merchant may bind multiple provider accounts per provider rail, but provider-owned rows must be tied to the exact `provider_account_id` FK that produced them, and only one enabled row per provider type is primary for new default checkout/catalog work. Provider credentials must resolve through the provider's account/profile/whoami endpoint to the `account_id` used by the targeted row. A mismatch is configuration drift and aborts the pull before any mirror write for that row; it is not a normal data inconsistency. Probe verdicts are credential-cache state, not merchant consistency state. | startup/runtime validation |
+| Provider/customer configuration | `payment_provider_accounts` records a merchant-owned provider account: merchant id, rail, provider-native `account_id`, display metadata, vault secret reference, and `archived`. Each merchant may bind multiple provider accounts per rail, but provider-owned rows must be tied to the exact `provider_account_id` FK that produced them. New checkout/catalog work selects non-archived accounts; archived accounts remain addressable for existing obligations and inbound provider events. Provider credentials must resolve through the provider's account/profile/whoami endpoint to the `account_id` used by the targeted row. A mismatch is configuration drift and aborts the pull before any mirror write for that row; it is not a normal data inconsistency. Probe verdicts are credential-cache state, not merchant consistency state. | startup/runtime validation |
 | Operational workflows | Merchant delete is gated by completed export; notification and credential-audit ledgers remain append/log hygiene unless a billing workflow consumes them. | app policy; outside #511 by default |
 
 If an application-enforced row can be moved into a DB constraint without blocking
@@ -329,8 +329,8 @@ the targeted `provider_accounts.account_id`. Stripe uses the account id
 from `/v1/account` (for example `acct_...`); NMI uses the gateway
 merchant/account identity returned by the profile endpoint; CCBill should use its
 account/subaccount identity once implemented. A merchant may have multiple
-bindings for the same provider type, such as Stripe-A for legacy rebills and
-Stripe-B as primary for new checkout. A pull writes only inside the targeted
+bindings for the same provider type, such as Stripe-A for archived rebills and
+Stripe-B for new checkout. A pull writes only inside the targeted
 provider account row. If current credentials resolve to a different account than
 the targeted row, the pull aborts as a configuration error. It must not insert `missing`
 rows, overwrite `mismatch` fields, or mark a source domain fully reconciled from

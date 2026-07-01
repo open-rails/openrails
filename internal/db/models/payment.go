@@ -31,7 +31,7 @@ type Payment struct {
 	Currency   string `json:"currency"`
 	Status     string `json:"status"`
 
-	// ProviderAccountID is the provider account (openrails.provider_accounts.id)
+	// ProviderAccountID is the provider account (openrails.payment_provider_accounts.id)
 	// that processed this charge (#641). Nil for legacy rows / unresolved accounts.
 	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
 

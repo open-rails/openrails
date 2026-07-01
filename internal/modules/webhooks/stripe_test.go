@@ -281,7 +281,7 @@ func TestApplyStripeSubscriptionStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sub := &models.Subscription{Status: models.StatusActive, CurrentPeriodEndsAt: tt.currentPeriodEnds}
-			applyStripeSubscriptionStatus(sub, tt.status, now)
+			applyStripeSubscriptionStatus(sub, tt.status, 0, now)
 
 			if sub.Status != tt.expectedStatus {
 				t.Fatalf("expected status %s, got %s", tt.expectedStatus, sub.Status)
@@ -366,7 +366,7 @@ func TestApplyStripeSubscriptionStatus_CancelledClearsRetrySchedule(t *testing.T
 		GraceEndsAt:   &now,
 	}
 
-	applyStripeSubscriptionStatus(sub, "canceled", now)
+	applyStripeSubscriptionStatus(sub, "canceled", 0, now)
 
 	if sub.Status != models.StatusCancelled {
 		t.Fatalf("expected cancelled, got %s", sub.Status)

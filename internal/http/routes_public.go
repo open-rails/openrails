@@ -119,9 +119,10 @@ func (s *Server) registerUserRoutes(e *gin.Engine) {
 	s.registerUserRoutesAt(e, StandaloneV1Prefix)
 }
 
-// registerWebhookRoutesAt mounts the legacy configured-merchant webhook surface.
-// It is intentionally not called by default; private standalone uses the
-// merchant-scoped surface, and hosted products mount host-resolved webhooks.
+// registerWebhookRoutesAt mounts the canonical provider-only webhook surface (#650):
+// /webhooks/:provider (NMI/CCBill, merchant derived from payload account identity) and
+// /webhooks/:provider/:account_id (direct Stripe). Standalone mounts this; embedded hosts
+// use the merchant-scoped surface because they pin one merchant in context.
 func (s *Server) registerWebhookRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	webhooks := api.Group("/webhooks")

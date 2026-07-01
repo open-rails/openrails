@@ -25,7 +25,7 @@ func providerAccountIDFromContext(ctx context.Context) *uuid.UUID {
 }
 
 // resolveProviderAccountIDForStamp returns only explicitly observed provenance.
-// ponytail: nil is better than inventing provenance from primary routing.
+// ponytail: nil is better than inventing provider-account provenance.
 func resolveProviderAccountIDForStamp(ctx context.Context) *uuid.UUID {
 	return providerAccountIDFromContext(ctx)
 }

@@ -505,6 +505,23 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 	return process(ctx)
 }
 
+// ccbillEventPurchasedAt parses a CCBill event `timestamp` ("YYYY-MM-DD HH:MM:SS",
+// no tz → UTC) into the provider's transaction time (#651); nil when absent or
+// unparseable so the payment row records now() rather than a guessed time. CCBill
+// webhooks can be delayed/retried, so this is more truthful than processing time.
+func ccbillEventPurchasedAt(ts string) *time.Time {
+	ts = strings.TrimSpace(ts)
+	if ts == "" {
+		return nil
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", ts, time.UTC)
+	if err != nil {
+		return nil
+	}
+	p := parsed.UTC()
+	return &p
+}
+
 func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context, data *CCBillNewSaleSuccessEvent) error {
 	email := data.Email
 	formID := data.FlexID
@@ -597,6 +614,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		Amount:              moneyutil.CentsToMicros(billedAmountCents),
 		AmountProvided:      true,
 		Currency:            currencyValue,
+		PurchasedAt:         ccbillEventPurchasedAt(data.Timestamp),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create membership: %w", err)
@@ -953,6 +971,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		}
 
 		now := s.now().UTC()
+		// #651: record CCBill's own event time when present; now() as fallback.
+		purchasedAt := now
+		if t := ccbillEventPurchasedAt(data.Timestamp); t != nil {
+			purchasedAt = *t
+		}
 		payment := &models.Payment{
 			ID:             uuidutil.NewV7(),
 			CustomerID:     subscription.CustomerID,
@@ -963,7 +986,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			Amount:         moneyutil.CentsToMicros(billedAmountCents),
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
-			PurchasedAt:    now,
+			PurchasedAt:    purchasedAt,
 			CreatedAt:      now,
 		}
 
@@ -2393,6 +2416,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		Amount:              moneyutil.CentsToMicros(billedAmountCents),
 		AmountProvided:      true,
 		Currency:            currencyValue,
+		PurchasedAt:         ccbillEventPurchasedAt(data.Timestamp),
 	}); err != nil {
 		if subscriptions.IsTerminalTransitionBlocked(err) {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{

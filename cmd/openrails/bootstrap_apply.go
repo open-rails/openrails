@@ -176,21 +176,23 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 }
 
 type dumpMerchantConfigOptions struct {
-	slug string
-	out  string
+	slug           string
+	out            string
+	includeSecrets bool
 }
 
 func newDumpMerchantConfigCmd() *cobra.Command {
 	opts := dumpMerchantConfigOptions{}
 	cmd := &cobra.Command{
 		Use:   "dump-merchant-config",
-		Short: "Dump a merchant's OpenRails configuration (identity + profile + invoice + provider accounts) as push-merchant-config YAML; secrets are emitted as env references, never values",
+		Short: "Dump a merchant's OpenRails configuration as push-merchant-config YAML; secrets are redacted unless --include-secrets is set",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpMerchantConfig(cmd, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.slug, "slug", "", "merchant slug to dump (required)")
 	cmd.Flags().StringVarP(&opts.out, "out", "o", "", "write YAML to this file (default: stdout)")
+	cmd.Flags().BoolVar(&opts.includeSecrets, "include-secrets", false, "include plaintext merchant secret values in the dumped YAML")
 	_ = cmd.MarkFlagRequired("slug")
 	return cmd
 }
@@ -212,7 +214,9 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, embcp.Get(application), opts.slug)
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, embcp.Get(application), opts.slug, bootstrap.DumpMerchantConfigOptions{
+		IncludeSecrets: opts.includeSecrets,
+	})
 	if err != nil {
 		return err
 	}
@@ -287,7 +291,7 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest aut
 // merchant config manifest: permission-group + optional host-app issuer-as-owner,
 // merchant row, provider secrets, and profile (#527). It intentionally does not
 // touch catalog/provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.MerchantManifest, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}

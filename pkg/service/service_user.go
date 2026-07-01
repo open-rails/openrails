@@ -411,7 +411,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 
 // UpdateSubscriptionPaymentMethod updates the payment method for a subscription.
 func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID string, req UpdateSubscriptionPaymentMethodRequest) (*UpdateSubscriptionPaymentMethodResult, error) {
-	subscriptions, paymentMethods, err := s.requireSubscriptionAndPaymentMethodServices()
+	subscriptionService, paymentMethods, err := s.requireSubscriptionAndPaymentMethodServices()
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +437,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	}
 
 	// Verify ownership and update
-	sub, err := subscriptions.GetByID(ctx, subID)
+	sub, err := subscriptionService.GetByID(ctx, subID)
 	if err != nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
@@ -464,8 +464,13 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if !rails.SameRail(pm.Rail, sub.Rail) {
 		return nil, fmt.Errorf("payment method belongs to a different payment provider")
 	}
-	railName := strings.ToLower(string(sub.Rail))
-	nmiClient, ok := s.rt.NMIClients[railName]
+	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
+		return nil, fmt.Errorf("payment method belongs to a different payment provider account")
+	}
+	nmiClient, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.DB, s.rt.NMIClients, sub)
+	if err != nil {
+		return nil, fmt.Errorf("resolve subscription provider account: %w", err)
+	}
 	if !ok {
 		return nil, fmt.Errorf("payment rail not available")
 	}
@@ -475,7 +480,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 
 	// Update subscription payment method
 	sub.PaymentMethodID = &pmID
-	if err := subscriptions.Update(ctx, sub); err != nil {
+	if err := subscriptionService.Update(ctx, sub); err != nil {
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}
 

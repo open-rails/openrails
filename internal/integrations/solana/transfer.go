@@ -192,6 +192,26 @@ func (c *RPCClient) fetchConfirmedTransaction(ctx context.Context, signature str
 	return txResult, nil
 }
 
+// GetConfirmedBlockTime returns the on-chain block time of a transaction (#651) —
+// its truthful settlement time. Returns (nil, nil) when the node reports no block
+// time. Used to stamp a recorded payment with when it actually landed on-chain
+// rather than when the poller happened to observe it.
+func (c *RPCClient) GetConfirmedBlockTime(ctx context.Context, signature string) (*time.Time, error) {
+	sig, err := solanago.SignatureFromBase58(strings.TrimSpace(signature))
+	if err != nil {
+		return nil, fmt.Errorf("invalid signature format: %w", err)
+	}
+	txResult, err := c.GetTransactionWithRetry(ctx, sig, 5, 1*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction: %w", err)
+	}
+	if txResult == nil || txResult.BlockTime == nil {
+		return nil, nil
+	}
+	t := txResult.BlockTime.Time().UTC()
+	return &t, nil
+}
+
 func validateTransferProcessedNotAfter(txResult *rpc.GetTransactionResult, notAfter *time.Time) error {
 	if notAfter == nil || notAfter.IsZero() {
 		return nil

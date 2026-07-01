@@ -540,6 +540,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 // Standalone and embedded defaults do not call this; hosts should prefer
 // RegisterMerchantWebhookRoutes or RegisterHostWebhookRoutes.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
+	rr.Handle(http.MethodPost, "/:provider/:account_id", h(httphandlers.Webhook))
 	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
 

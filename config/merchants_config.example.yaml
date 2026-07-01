@@ -1,0 +1,103 @@
+version: 1
+
+# In a typical production setup, you'd store the secrets in Hashicorp Vault
+# and then overlay this file with the actual values.
+
+merchants:
+  local-stack:
+    display_name: Local Stack
+
+    issuer:
+      uri: https://local-stack.example
+      jwks_uri: https://local-stack.example/.well-known/jwks.json
+      allowed_origins:
+        - https://local-stack.example
+
+    profile:
+      display_name: Local Stack Billing
+      logo_url: https://local-stack.example/assets/logo.png
+      from_email: billing@local-stack.example
+      support_url: https://local-stack.example/support
+
+    invoice:
+      billing_period_boundary: calendar_month
+      collection_threshold: 50_000_000
+      monthly_floor: 1_000_000
+
+    delegated_invoker_wasted_spend_windows:
+      - { key: burst, window: 15m, limit: 5_000_000 }
+      - { key: sustained, window: 5h, limit: 20_000_000 }
+
+    provider_accounts:
+      mobius:
+        nmi:
+          environment: live
+          account_id: "579145"
+          settings:
+            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+            tokenization_key: replace-with-live-nmi-tokenization-key
+          secrets:
+            security_key: replace-with-live-nmi-security-key
+            webhook_signing_secret: replace-with-live-nmi-webhook-secret
+
+      mobius-sandbox:
+        nmi:
+          environment: test
+          account_id: "681902"
+          settings:
+            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+            tokenization_key: replace-with-test-nmi-tokenization-key
+          secrets:
+            security_key: replace-with-test-nmi-security-key
+            webhook_signing_secret: replace-with-test-nmi-webhook-secret
+
+      paykings:
+        nmi:
+          environment: live
+          account_id: "884512"
+          archived: true
+          settings:
+            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+            tokenization_key: replace-with-paykings-nmi-tokenization-key
+          secrets:
+            security_key: replace-with-paykings-nmi-security-key
+            webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
+
+      ccbill:
+        ccbill:
+          environment: live
+          account_id: "945280/0000"
+          settings:
+            allowed_cidrs:
+              - 64.38.240.0/24
+              - 64.38.241.0/24
+              - 64.38.212.0/24
+              - 64.38.215.0/24
+          secrets:
+            salt: replace-with-ccbill-flexform-salt
+            datalink_username: replace-with-ccbill-datalink-username
+            datalink_password: replace-with-ccbill-datalink-password
+
+      stripe:
+        stripe:
+          environment: live
+          account_id: acct_1M9QZULkdIwHu7ix
+          secrets:
+            secret_key: replace-with-live-stripe-secret-key
+            webhook_signing_secret: replace-with-live-stripe-webhook-secret
+
+      stripe-sandbox:
+        stripe:
+          environment: test
+          account_id: acct_1N2YbMLkdIwHu7ix
+          secrets:
+            secret_key: replace-with-test-stripe-secret-key
+            webhook_signing_secret: replace-with-test-stripe-webhook-secret
+
+      solana:
+        solana:
+          environment: live
+          account_id: 11111111111111111111111111111111
+          signer: { mode: keypair }
+          secrets:
+            private_key: replace-with-solana-keypair-json

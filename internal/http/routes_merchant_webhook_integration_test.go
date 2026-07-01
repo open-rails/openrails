@@ -24,6 +24,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -49,13 +50,24 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	seedProviderAccount(t, pool, evil.ID.String(), "stripe", "acct_evil")
 	seedProviderAccount(t, pool, acme.ID.String(), "nmi", "nmi_acme_account")
 	seedProviderAccount(t, pool, evil.ID.String(), "nmi", "nmi_evil_account")
+	seedArchivedProviderAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_archived")
+	seedProviderAccount(t, pool, acme.ID.String(), "ccbill", "945280/0000")
+	seedProviderAccount(t, pool, evil.ID.String(), "ccbill", "945281/0000")
+	seedProviderAccountEnv(t, pool, acme.ID.String(), "stripe", "test", "acct_acme_test")
+	seedProviderAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_test")
+	seedProviderAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282/0000")
 	putProviderSecret(t, ctx, secrets, acme.ID, "stripe", "acct_acme", "webhook_signing_secret", "whsec_acme")
 	putProviderSecret(t, ctx, secrets, evil.ID, "stripe", "acct_evil", "webhook_signing_secret", "whsec_evil")
 	putProviderSecret(t, ctx, secrets, acme.ID, "nmi", "nmi_acme_account", "webhook_signing_secret", "nmi_acme")
 	putProviderSecret(t, ctx, secrets, evil.ID, "nmi", "nmi_evil_account", "webhook_signing_secret", "nmi_evil")
+	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", "nmi_acme_archived", "webhook_signing_secret", "nmi_archived")
+	putProviderSecretEnv(t, ctx, secrets, acme.ID, "stripe", "test", "acct_acme_test", "webhook_signing_secret", "whsec_acme_test")
+	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", "nmi_acme_test", "webhook_signing_secret", "nmi_acme_test")
 
 	rt := &app.Runtime{Merchants: svc}
+	globalRT := &app.Runtime{Config: &config.Config{TestMode: true}, Merchants: svc}
 	mux := http.NewServeMux()
+	httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/global", globalRT), globalRT)
 	httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, "/v1", rt), rt)
 	hostGroup := router.NewMux(mux, "/host-webhooks", rt).Group("", func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
@@ -76,12 +88,22 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/host-webhooks/stripe", body, stripeSig("whsec_evil", ts, body)))
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/host-webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
 
-	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{}}`)
+	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_account"},"transaction_id":"txn_1"}}`)
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
 
-	ccbillBody := []byte(`{"eventType":"RenewalSuccess"}`)
+	ccbillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945280","clientSubacc":"0000","subscriptionId":"ccs_1","transactionId":"cct_1"}`)
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/ccbill?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
+
+	globalNMIBody := []byte(`{"event_id":"evt_nmi_2","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_test"},"transaction_id":"txn_2"}}`)
+	archivedNMIBody := []byte(`{"event_id":"evt_nmi_3","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_archived"},"transaction_id":"txn_3"}}`)
+	globalCCBillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945282","clientSubacc":"0000","subscriptionId":"ccs_2","transactionId":"cct_2"}`)
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/global/stripe/acct_acme_test", body, stripeSig("whsec_evil", ts, body)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/global/stripe/acct_acme_test", body, stripeSig("whsec_acme_test", ts, body)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", globalNMIBody, "Webhook-Signature", nmiSig("nmi_evil", ts, globalNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", globalNMIBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, globalNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", archivedNMIBody, "Webhook-Signature", nmiSig("nmi_archived", ts, archivedNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/ccbill?eventType=RenewalSuccess", globalCCBillBody, "X-Unused", "unused"))
 }
 
 func postMerchantWebhook(t *testing.T, url string, body []byte, sig string) int {
@@ -100,17 +122,38 @@ func postMerchantWebhookWithHeader(t *testing.T, url string, body []byte, header
 }
 
 func seedProviderAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedProviderAccountEnv(t, pool, merchantID, provider, "live", accountID)
+}
+
+func seedArchivedProviderAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedArchivedProviderAccountEnv(t, pool, merchantID, provider, "live", accountID)
+}
+
+func seedArchivedProviderAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, routing, status)
-		VALUES ($1::uuid, $2, 'live', $3, 'primary', 'enabled')
-	`, merchantID, provider, accountID)
+		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		VALUES ($1::uuid, $2, $3, $4, true)
+	`, merchantID, provider, environment, accountID)
+	require.NoError(t, err)
+}
+
+func seedProviderAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		VALUES ($1::uuid, $2, $3, $4, false)
+	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
 }
 
 func putProviderSecret(t *testing.T, ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, provider, accountID, key, value string) {
+	putProviderSecretEnv(t, ctx, store, merchantID, provider, "live", accountID, key, value)
+}
+
+func putProviderSecretEnv(t *testing.T, ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, provider, environment, accountID, key, value string) {
 	t.Helper()
-	name, err := merchants.ProviderAccountSecretName(provider, "live", accountID, key)
+	name, err := merchants.ProviderAccountSecretName(provider, environment, accountID, key)
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, name, value)
 	require.NoError(t, err)
@@ -196,23 +239,24 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
 			deleted_at timestamptz
 		);
-		CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
+		CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE CASCADE,
-			provider_type text NOT NULL,
+			rail text NOT NULL,
 			environment text NOT NULL DEFAULT 'live',
 			account_id text NOT NULL,
 			display_name text,
 			vault_secret_ref text,
-			routing text NOT NULL DEFAULT 'primary',
-			status text NOT NULL DEFAULT 'enabled',
+			archived boolean NOT NULL DEFAULT false,
 			evidence jsonb,
 			first_seen_at timestamptz NOT NULL DEFAULT current_timestamp,
 			last_verified_at timestamptz,
 			replaced_at timestamptz,
 			created_at timestamptz NOT NULL DEFAULT current_timestamp,
-			updated_at timestamptz NOT NULL DEFAULT current_timestamp
+			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
+			owner text NOT NULL DEFAULT 'merchant'
 		);
+		CREATE UNIQUE INDEX uq_payment_provider_accounts_identity ON openrails.payment_provider_accounts (rail, environment, account_id);
 	`)
 	require.NoError(t, err)
 }

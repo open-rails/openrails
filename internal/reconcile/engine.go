@@ -95,12 +95,12 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 }
 
 // ProviderAccountBinding is the account row a provider-pull is authorized to
-// treat as authoritative. ID is openrails.provider_accounts.id; AccountID is
+// treat as authoritative. ID is openrails.payment_provider_accounts.id; AccountID is
 // the raw provider-returned account identifier.
 type ProviderAccountBinding struct {
-	ID           uuid.UUID `json:"id"`
-	ProviderType string    `json:"provider_type"`
-	AccountID    string    `json:"account_id"`
+	ID        uuid.UUID `json:"id"`
+	Rail      string    `json:"rail"`
+	AccountID string    `json:"account_id"`
 }
 
 // ProviderReport is one provider's section of the run summary.
@@ -336,7 +336,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		Since:             params.Since,
 		Until:             params.Until,
 		ProviderAccountID: binding.ID.String(),
-		ProviderType:      binding.ProviderType,
+		Rail:              binding.Rail,
 		AccountID:         binding.AccountID,
 	})
 	if err != nil {

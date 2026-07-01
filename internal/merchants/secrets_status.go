@@ -46,16 +46,16 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		if _, ok := SecretDefinitionFor(name); ok {
 			continue
 		}
-		providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+		rail, _, _, key, ok, err := ParseProviderAccountSecretName(name)
 		if !ok || err != nil {
 			continue
 		}
 		st := MerchantSecretStatus{
 			SecretDefinition: SecretDefinition{
 				Name:             name,
-				Rail:             providerType,
+				Rail:             rail,
 				Purpose:          key,
-				DisplayLabel:     providerType + " " + key,
+				DisplayLabel:     rail + " " + key,
 				ManualVault:      true,
 				MerchantWritable: true,
 				Validation:       "presence",
@@ -128,14 +128,14 @@ func isStripeSecretKeyName(name string) bool {
 	if cleanSecretName(name) == SecretStripeSecretKey {
 		return true
 	}
-	providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
-	return ok && err == nil && providerType == "stripe" && key == "secret_key"
+	rail, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+	return ok && err == nil && rail == "stripe" && key == "secret_key"
 }
 
 func validateSecretValueLocal(name, value string) error {
 	name = cleanSecretName(name)
 	value = strings.TrimSpace(value)
-	providerType, _, _, key, scoped, err := ParseProviderAccountSecretName(name)
+	rail, _, _, key, scoped, err := ParseProviderAccountSecretName(name)
 	if err != nil {
 		return err
 	}
@@ -144,13 +144,13 @@ func validateSecretValueLocal(name, value string) error {
 	}
 	if scoped {
 		switch {
-		case providerType == "stripe" && key == "secret_key":
+		case rail == "stripe" && key == "secret_key":
 			name = SecretStripeSecretKey
-		case providerType == "stripe" && key == "webhook_signing_secret":
+		case rail == "stripe" && key == "webhook_signing_secret":
 			name = SecretStripeWebhookSigning
-		case providerType == "stripe" && key == "webhook_signing_secret_thin":
+		case rail == "stripe" && key == "webhook_signing_secret_thin":
 			name = SecretStripeWebhookSigningThin
-		case providerType == "nmi" && key == "tokenization_url":
+		case rail == "nmi" && key == "tokenization_url":
 			name = SecretNMITokenizationURL
 		}
 	}

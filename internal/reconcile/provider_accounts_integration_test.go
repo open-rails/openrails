@@ -20,8 +20,8 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
-	var accountA gen.OpenrailsProviderAccount
-	var accountB gen.OpenrailsProviderAccount
+	var accountA gen.OpenrailsPaymentProviderAccount
+	var accountB gen.OpenrailsPaymentProviderAccount
 	var customerA uuid.UUID
 	var customerB uuid.UUID
 
@@ -31,31 +31,22 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 		q := appDB.Gen(ctx)
 		now := time.Now().UTC()
 		var err error
-		_, err = appDB.Qx(ctx).Exec(ctx, `
-			UPDATE openrails.provider_accounts
-			   SET routing = 'legacy',
-			       updated_at = now()
-			 WHERE merchant_id = $1::uuid
-			   AND provider_type = 'nmi'
-			   AND routing = 'primary'
-		`, dbtest.TestMerchantID.UUID())
-		require.NoError(t, err)
 		accountA, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
-			ProviderType:   "nmi",
+			Rail:           "nmi",
 			AccountID:      "nmi-account-a",
 			LastVerifiedAt: &now,
 		})
 		require.NoError(t, err)
 		accountB, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
-			ProviderType:   "nmi",
+			Rail:           "nmi",
 			AccountID:      "nmi-account-b",
 			LastVerifiedAt: &now,
 		})
 		require.NoError(t, err)
-		require.Equal(t, "primary", accountA.Routing)
-		require.Equal(t, "secondary", accountB.Routing)
+		require.False(t, accountA.Archived)
+		require.False(t, accountB.Archived)
 
 		customerA = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		customerB = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
@@ -74,7 +65,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
-		seedMirrorRows := func(account gen.OpenrailsProviderAccount, customerID uuid.UUID, marker string) {
+		seedMirrorRows := func(account gen.OpenrailsPaymentProviderAccount, customerID uuid.UUID, marker string) {
 			t.Helper()
 			pmID := uuid.New()
 			subID := uuid.New()

@@ -149,9 +149,14 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "po-prod-"+suffix, "po-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,'{}'::jsonb,$7,$8)`,
-			subID, priceID, productID, "po-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
+		// #632: only OUR-rebill subs (NMI with a vaulted payment method) enter period_overdue
+		// dunning; a vault-less NMI sub routes to `unknown` instead. Seed a payment method so
+		// this overdue sub is in the rebillable cohort.
+		pmID := uuid.New()
+		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx')`, pmID, merchantID, customer)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
+			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
 		return nil
 	}))
 	t.Cleanup(func() {

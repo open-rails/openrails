@@ -39,7 +39,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, routing, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
+		exec(`INSERT INTO openrails.payment_provider_accounts (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-"+suffix)
 		// One product+price per sub (uq_subscriptions_customer_product_lifecycle
 		// forbids multiple live subs per customer/product).
@@ -66,7 +66,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subKeep, subGone, subGrant})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceKeep, priceGone, priceGrant})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodKeep, prodGone, prodGrant})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.provider_accounts WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_provider_accounts WHERE id=$1`, paID)
 			return nil
 		})
 	})
@@ -82,7 +82,7 @@ func TestPruneProviderAccountExcess(t *testing.T) {
 		},
 	}
 	fetcher := &fakeFetcher{provider: ProviderNMI, snap: snap}
-	binding := ProviderAccountBinding{ID: paID, ProviderType: "nmi", AccountID: "acct-" + suffix}
+	binding := ProviderAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-" + suffix}
 
 	subExists := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
@@ -160,7 +160,7 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.provider_accounts (id, merchant_id, provider_type, account_id, routing, status) VALUES ($1,$2,'nmi',$3,'secondary','enabled')`,
+		exec(`INSERT INTO openrails.payment_provider_accounts (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-pay-"+suffix)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)
@@ -179,7 +179,7 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payKeep, payGone})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.provider_accounts WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_provider_accounts WHERE id=$1`, paID)
 			return nil
 		})
 	})
@@ -189,7 +189,7 @@ func TestPruneProviderAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) 
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1`, id).Scan(&n))
 		return n == 1
 	}
-	binding := ProviderAccountBinding{ID: paID, ProviderType: "nmi", AccountID: "acct-pay-" + suffix}
+	binding := ProviderAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-pay-" + suffix}
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
 		FetchedAt:    time.Now().UTC(),

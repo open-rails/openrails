@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -60,7 +59,7 @@ func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (stri
 	return value, true, nil
 }
 
-func (s *CheckoutService) merchantProviderSecret(ctx context.Context, providerType, environment, key string) (string, bool, error) {
+func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, environment, key string) (string, bool, error) {
 	if s == nil || s.MerchantSecrets == nil || s.ProviderSecrets == nil {
 		return "", false, nil
 	}
@@ -68,7 +67,7 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, providerTy
 	if err != nil {
 		return "", false, err
 	}
-	name, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, providerType, environment, key)
+	name, ok, err := s.ProviderSecrets.ActiveProviderAccountSecretName(ctx, tid, rail, environment, key)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -85,12 +84,11 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		return nil, errors.New("rail is required")
 	}
 
-	// The NMI security key is addressed under the rail's "production_key" secret.
 	if rails.IsNMI(models.Rail(provider)) {
-		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), "live", "production_key"); err != nil {
+		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), "live", "security_key"); err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		} else if ok {
-			proc := cloneRailConfig(s.primaryNMIConfig())
+			proc := cloneRailConfig(s.activeNMIConfig())
 			if proc == nil {
 				proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
 			}
@@ -111,7 +109,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		}
 	}
 	if rails.IsNMI(models.Rail(provider)) {
-		if proc := s.primaryNMIConfig(); proc != nil {
+		if proc := s.activeNMIConfig(); proc != nil {
 			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
 		}
 	}
@@ -135,25 +133,100 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 		base = &config.CCBillConfig{}
 	}
 
-	value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), "live", "account_config")
-	if err != nil {
-		return nil, fmt.Errorf("load merchant CCBill secret: %w", err)
-	}
-	if ok {
-		cfg, err := parseMerchantCCBillConfig(value, base)
+	if s.scopedProviderSecretsEnabled() {
+		cfg, err := s.resolveScopedCCBillConfig(ctx, base)
 		if err != nil {
 			return nil, err
 		}
 		return cfg, nil
-	}
-	if s.scopedProviderSecretsEnabled() {
-		return nil, errors.New("missing scoped merchant CCBill account_config secret for provider account")
 	}
 
 	if baseProc == nil {
 		return nil, errors.New("ccbill rail config is required")
 	}
 	return base, nil
+}
+
+func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
+	scopeResolver, ok := s.ProviderSecrets.(merchants.ProviderAccountScopeResolver)
+	if !ok {
+		return nil, errors.New("missing scoped merchant CCBill provider account resolver")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailCCBill), "live")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("missing scoped merchant CCBill provider account")
+	}
+	cfg := &config.CCBillConfig{}
+	if base != nil {
+		*cfg = *base
+	}
+	acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "/")
+	if !ok || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
+		return nil, errors.New("CCBill provider account_id must be client_acc_num/client_sub_acc")
+	}
+	cfg.ClientAccNum = strings.TrimSpace(acc)
+	cfg.ClientSubAcc = strings.TrimSpace(sub)
+	cfg.AllowedCIDRs = providerSettingStrings(scope.Settings, "allowed_cidrs")
+
+	for _, item := range []struct {
+		key string
+		dst *string
+	}{
+		{key: "salt", dst: &cfg.Salt},
+		{key: "datalink_username", dst: &cfg.DataLinkUsername},
+		{key: "datalink_password", dst: &cfg.DataLinkPassword},
+	} {
+		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), "live", item.key)
+		if err != nil {
+			return nil, fmt.Errorf("load merchant CCBill %s: %w", item.key, err)
+		}
+		if ok {
+			*item.dst = value
+		}
+	}
+	if (strings.TrimSpace(cfg.DataLinkUsername) == "") != (strings.TrimSpace(cfg.DataLinkPassword) == "") {
+		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
+	}
+	return cfg, nil
+}
+
+func providerSettingStrings(settings map[string]any, key string) []string {
+	if len(settings) == 0 {
+		return nil
+	}
+	switch v := settings[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := strings.TrimSpace(fmt.Sprint(item)); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if s := strings.TrimSpace(part); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (s *CheckoutService) railConfig(name string) *config.ProviderAccountConfig {
@@ -163,12 +236,12 @@ func (s *CheckoutService) railConfig(name string) *config.ProviderAccountConfig 
 	return s.Rails.GetRail(name)
 }
 
-// primaryNMIConfig returns the configured primary NMI provider account, if any.
-func (s *CheckoutService) primaryNMIConfig() *config.ProviderAccountConfig {
+// activeNMIConfig returns the configured active NMI provider account, if any.
+func (s *CheckoutService) activeNMIConfig() *config.ProviderAccountConfig {
 	if s == nil || s.Rails == nil {
 		return nil
 	}
-	_, proc, _ := s.Rails.PrimaryRailByType(models.RailNMI)
+	_, proc, _ := s.Rails.ActiveRailByType(models.RailNMI)
 	return proc
 }
 
@@ -186,35 +259,4 @@ func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountCo
 		}
 	}
 	return &out
-}
-
-func parseMerchantCCBillConfig(raw string, base *config.CCBillConfig) (*config.CCBillConfig, error) {
-	cfg := &config.CCBillConfig{}
-	if base != nil {
-		*cfg = *base
-	}
-	var data map[string]any
-	if err := json.Unmarshal([]byte(raw), &data); err != nil {
-		return nil, fmt.Errorf("parse merchant CCBill account config: %w", err)
-	}
-	set := func(dst *string, keys ...string) {
-		for _, key := range keys {
-			if v, ok := data[key]; ok {
-				if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
-					*dst = s
-					return
-				}
-			}
-		}
-	}
-	set(&cfg.ClientAccNum, "client_acc_num", "clientAccNum", "ClientAccNum")
-	set(&cfg.ClientSubAcc, "client_sub_acc", "clientSubAcc", "ClientSubAcc")
-	set(&cfg.Salt, "salt", "Salt")
-	set(&cfg.DataLinkUsername, "datalink_username", "dataLinkUsername", "DataLinkUsername")
-	set(&cfg.DataLinkPassword, "datalink_password", "dataLinkPassword", "DataLinkPassword")
-
-	if strings.TrimSpace(cfg.ClientAccNum) == "" || strings.TrimSpace(cfg.ClientSubAcc) == "" {
-		return nil, errors.New("merchant CCBill account config requires client_acc_num and client_sub_acc")
-	}
-	return cfg, nil
 }

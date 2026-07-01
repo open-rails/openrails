@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -110,11 +111,19 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different payment provider")
 		return
 	}
+	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(paymentMethod, subscription) {
+		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different payment provider account")
+		return
+	}
 
-	railName := string(subscription.Rail)
-	nmiClient, ok := r.State.NMIClients[railName]
+	nmiClient, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.DB, r.State.NMIClients, subscription)
+	if err != nil {
+		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI provider account for subscription")
+		r.ErrorJSON(http.StatusInternalServerError, "Failed to resolve payment rail")
+		return
+	}
 	if !ok {
-		log.WithField("rail", railName).Error("NMI client not found for rail")
+		log.WithFields(log.Fields{"rail": subscription.Rail, "provider_account": providerKey}).Error("NMI client not found for subscription provider account")
 		r.ErrorJSON(http.StatusServiceUnavailable, "Payment rail not available")
 		return
 	}

@@ -16,6 +16,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -32,22 +33,14 @@ const (
 	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
 	// Destination signing secret (a single endpoint may receive both).
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
-	// SecretNMIProductionKey is the legacy broad NMI security-key secret.
-	SecretNMIProductionKey = "nmi/mobius/production_key"
-	// SecretNMITokenizationKey is the merchant's public Collect.js key.
-	// It is client-side configuration, but it is still merchant-scoped provider
-	// configuration and belongs with the merchant's NMI account setup.
-	SecretNMITokenizationKey = "nmi/mobius/tokenization_key"
+	// SecretNMISecurityKey is the legacy broad NMI security-key secret.
+	SecretNMISecurityKey = "nmi/mobius/security_key"
 	// SecretNMITokenizationURL overrides the Collect.js script URL for a
 	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
 	SecretNMITokenizationURL = "nmi/mobius/tokenization_url"
 	// SecretNMIWebhookSigning is the merchant's NMI webhook signing
 	// secret, used to verify inbound webhooks after merchant/provider resolution.
 	SecretNMIWebhookSigning = "nmi/mobius/webhook_signing_secret"
-	// SecretCCBillAccountConfig is the merchant's CCBill account/config payload.
-	// Store as an OpenRails-owned JSON string until the CCBill adapter grows a
-	// typed multi-field secret.
-	SecretCCBillAccountConfig = "ccbill/account_config"
 	// SecretSolanaPrivateKey is the merchant's Solana signing keypair. This is
 	// OpenRails-owned and intentionally not merchant-writable through self-service
 	// APIs.
@@ -71,11 +64,9 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretStripeSecretKey, Rail: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
 	{Name: SecretStripeWebhookSigning, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretStripeWebhookSigningThin, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretNMIProductionKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretNMITokenizationKey, Rail: "nmi", Purpose: "tokenization_key", DisplayLabel: "NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
+	{Name: SecretNMISecurityKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
 	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretCCBillAccountConfig, Rail: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretSolanaPrivateKey, Rail: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }
 
@@ -83,16 +74,16 @@ var merchantSecretRegistry = []SecretDefinition{
 // provider-account-owned credential. The merchant id still namespaces the store;
 // this path adds provider identity so one merchant can rotate or run multiple
 // accounts of the same provider without credential collisions.
-func ProviderAccountSecretName(providerType, environment, accountID, key string) (string, error) {
-	providerType = normalizeProviderSecretType(providerType)
+func ProviderAccountSecretName(rail, environment, accountID, key string) (string, error) {
+	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
-	key, err := NormalizeProviderAccountSecretKey(providerType, key)
+	key, err := NormalizeProviderAccountSecretKey(rail, key)
 	if err != nil {
 		return "", err
 	}
-	if providerType == "" {
-		return "", fmt.Errorf("provider account secret requires provider type")
+	if rail == "" {
+		return "", fmt.Errorf("provider account secret requires rail")
 	}
 	if environment == "" {
 		return "", fmt.Errorf("provider account secret environment must be live or test")
@@ -100,30 +91,30 @@ func ProviderAccountSecretName(providerType, environment, accountID, key string)
 	if accountID == "" {
 		return "", fmt.Errorf("provider account secret requires account id")
 	}
-	return path.Join("provider_accounts", providerType, environment, url.PathEscape(accountID), key), nil
+	return path.Join("provider_accounts", rail, environment, url.PathEscape(accountID), key), nil
 }
 
 // ParseProviderAccountSecretName parses a provider-account-scoped secret name.
-func ParseProviderAccountSecretName(name string) (providerType, environment, accountID, key string, ok bool, err error) {
+func ParseProviderAccountSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
 	name = cleanSecretName(name)
 	parts := strings.Split(name, "/")
 	if len(parts) != 5 || parts[0] != "provider_accounts" {
 		return "", "", "", "", false, nil
 	}
-	providerType = normalizeProviderSecretType(parts[1])
+	rail = normalizeProviderSecretType(parts[1])
 	environment = normalizeProviderSecretEnvironment(parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
 		return "", "", "", "", true, fmt.Errorf("invalid provider account id escape: %w", err)
 	}
-	key, err = NormalizeProviderAccountSecretKey(providerType, parts[4])
+	key, err = NormalizeProviderAccountSecretKey(rail, parts[4])
 	if err != nil {
 		return "", "", "", "", true, err
 	}
-	if providerType == "" || environment == "" || strings.TrimSpace(accountID) == "" {
+	if rail == "" || environment == "" || strings.TrimSpace(accountID) == "" {
 		return "", "", "", "", true, fmt.Errorf("invalid provider account secret name %q", name)
 	}
-	return providerType, environment, accountID, key, true, nil
+	return rail, environment, accountID, key, true, nil
 }
 
 // SecretWritable reports whether a merchant operator may write the secret name.
@@ -132,54 +123,55 @@ func SecretWritable(name string) bool {
 	if def, ok := SecretDefinitionFor(name); ok {
 		return def.MerchantWritable
 	}
-	providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+	rail, _, _, key, ok, err := ParseProviderAccountSecretName(name)
 	if !ok || err != nil {
 		return false
 	}
-	return !(providerType == "solana" && key == "private_key")
+	return !(rail == "solana" && key == "private_key")
 }
 
 // NormalizeProviderAccountSecretKey canonicalizes manifest/admin secret keys for
 // a provider account. It deliberately returns key fragments, not legacy broad
 // merchant secret names.
-func NormalizeProviderAccountSecretKey(providerType, key string) (string, error) {
-	providerType = normalizeProviderSecretType(providerType)
+func NormalizeProviderAccountSecretKey(rail, key string) (string, error) {
+	rail = normalizeProviderSecretType(rail)
 	key = strings.ToLower(strings.TrimSpace(key))
-	switch providerType {
+	switch rail {
 	case "stripe":
 		switch key {
 		case "secret_key":
 			return "secret_key", nil
-		case "webhook_signing_secret", "webhook_secret":
+		case "webhook_signing_secret":
 			return "webhook_signing_secret", nil
-		case "webhook_signing_secret_thin", "webhook_secret_thin":
+		case "webhook_signing_secret_thin":
 			return "webhook_signing_secret_thin", nil
 		}
 	case "nmi":
 		switch key {
-		case "production_key", "security_key", "secret_key":
-			return "production_key", nil
-		case "tokenization_key":
-			return "tokenization_key", nil
-		case "tokenization_url":
-			return "tokenization_url", nil
-		case "webhook_signing_secret", "webhook_secret":
+		case "security_key":
+			return "security_key", nil
+		case "webhook_signing_secret":
 			return "webhook_signing_secret", nil
 		}
 	case "ccbill":
-		if key == "account_config" {
-			return "account_config", nil
+		switch key {
+		case "salt":
+			return "salt", nil
+		case "datalink_username":
+			return "datalink_username", nil
+		case "datalink_password":
+			return "datalink_password", nil
 		}
 	case "solana":
 		if key == "private_key" {
 			return "private_key", nil
 		}
 	}
-	return "", fmt.Errorf("unknown provider account secret %s.%s", providerType, key)
+	return "", fmt.Errorf("unknown provider account secret %s.%s", rail, key)
 }
 
-func normalizeProviderSecretType(providerType string) string {
-	return strings.ToLower(strings.TrimSpace(providerType))
+func normalizeProviderSecretType(rail string) string {
+	return strings.ToLower(strings.TrimSpace(rail))
 }
 
 func normalizeProviderSecretEnvironment(environment string) string {
@@ -252,7 +244,23 @@ type MerchantSecretReader interface {
 // ProviderAccountSecretResolver resolves the canonical secret name for the
 // active provider account a merchant should use.
 type ProviderAccountSecretResolver interface {
-	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
+	ActiveProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
+}
+
+// ProviderAccountScope is the configured provider account selected for a
+// merchant rail/environment.
+type ProviderAccountScope struct {
+	ID          uuid.UUID
+	Rail        string
+	Environment string
+	AccountID   string
+	Settings    map[string]any
+}
+
+// ProviderAccountScopeResolver resolves the selected provider account without
+// requiring a particular secret key.
+type ProviderAccountScopeResolver interface {
+	ActiveProviderAccountScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (ProviderAccountScope, bool, error)
 }
 
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every

@@ -18,14 +18,13 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := paymentProviderConfigFromRow(gen.OpenrailsProviderAccount{
+	got := paymentProviderConfigFromRow(gen.OpenrailsPaymentProviderAccount{
 		ID:             uuid.New(),
 		MerchantID:     uuid.New(),
-		ProviderType:   "stripe",
+		Rail:           "stripe",
 		Environment:    "live",
 		AccountID:      "acct_123",
-		Routing:        "primary",
-		Status:         "enabled",
+		Archived:       false,
 		Evidence:       []byte(`{"public_config":{"publishable_key":"pk_live_123"}}`),
 		FirstSeenAt:    now,
 		LastVerifiedAt: &now,
