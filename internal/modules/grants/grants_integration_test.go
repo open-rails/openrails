@@ -133,6 +133,61 @@ func TestGrants_RevokeAlreadyExpired(t *testing.T) {
 	require.True(t, endsAtNull, "termination row leaves ends_at NULL")
 }
 
+// #658: the DB refuses a termination row that carries a window — the invariant
+// that makes the already-expired-revoke crash structurally impossible, not just a
+// code convention in terminate().
+func TestGrants_TerminationRejectsWindow(t *testing.T) {
+	l, pool, ctx, customer, product, merchantID := testGrants(t)
+	g, err := l.Grant(ctx, grants.GrantInput{
+		Customer: customer, Product: &product, Kind: grants.Entitlement,
+		Source: grants.Subscription, SourceID: uuid.NewString(),
+		Spec: &grants.Spec{Entitlements: []string{"premium"}},
+	})
+	require.NoError(t, err)
+
+	// Otherwise-valid revoke row (satisfies grants_valid_window with a future
+	// window) but carrying an ends_at — must be rejected by grants_termination_no_window.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.grants
+			(merchant_id, customer_id, kind, source_type, source_id, event, supersedes_id, starts_at, ends_at)
+		VALUES ($1, $2, 'entitlement', 'subscription', $3, 'revoke', $4, now(), now() + interval '1 hour')`,
+		merchantID, customer, g.SourceID, g.ID)
+	require.Error(t, err, "a termination row with a window must be rejected")
+	require.Contains(t, err.Error(), "grants_termination_no_window")
+}
+
+// #658: a backdated revoke records the EFFECTIVE instant (valid time) as the
+// ownership revoked_at, not the convergence wall-clock — the payoff of threading
+// asOf onto the termination's starts_at + reading it back for ownership status.
+func TestGrants_RevokeAsOfOwnershipRevokedAt(t *testing.T) {
+	l, pool, ctx, customer, product, merchantID := testGrants(t)
+	g, err := l.Grant(ctx, grants.GrantInput{
+		Customer: customer, Product: &product, Kind: grants.Ownership,
+		Source: grants.Purchase, SourceID: "pay_" + short(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MaterializeGrant(ctx, g))
+
+	asOf := time.Date(2025, 3, 4, 5, 6, 7, 0, time.UTC) // effective end, well in the past
+	_, err = l.RevokeAsOf(ctx, g.ID, "subscription source revoked", asOf)
+	require.NoError(t, err)
+
+	rows, err := gen.New(pool).ListOwnershipGrantsWithStatus(ctx, gen.ListOwnershipGrantsWithStatusParams{
+		MerchantID: merchantID, CustomerID: customer,
+	})
+	require.NoError(t, err)
+	var found bool
+	for _, r := range rows {
+		if r.ID != g.ID {
+			continue
+		}
+		found = true
+		require.NotNil(t, r.RevokedAt)
+		require.True(t, r.RevokedAt.Equal(asOf), "ownership revoked_at is the effective instant, got %s", r.RevokedAt)
+	}
+	require.True(t, found, "ownership grant should appear in status list")
+}
+
 // A credit grant materializes as a #512 ledger deposit; idempotent.
 func TestGrants_CreditDepositSeam(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)

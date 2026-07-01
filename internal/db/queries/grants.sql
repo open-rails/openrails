@@ -361,10 +361,13 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 -- derived status (the termination event, if any) — so the legacy
 -- ProductAccessGrant.{status,revoked_at,revoke_reason} shape can be reconstructed
 -- from the append-only ledger in one query.
+-- #658: revoked_at is the termination's EFFECTIVE instant (valid time on
+-- term.starts_at), not term.created_at (transaction time), so a backdated/grace
+-- revocation reports when access actually ended. Historically the two coincided.
 -- name: ListOwnershipGrantsWithStatus :many
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
        g.payment_id, g.starts_at, g.ends_at, g.created_at,
-       term.created_at AS revoked_at, term.reason AS revoke_reason
+       term.starts_at AS revoked_at, term.reason AS revoke_reason
 FROM openrails.grants g
 LEFT JOIN openrails.grants term
   ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')

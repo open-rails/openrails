@@ -7,7 +7,121 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 658
+next_id: 660
+
+---
+
+# #658: grant-ledger temporal semantics — terminations carry no window; valid-time = effective everywhere
+
+**Completed:** phase 1
+**Status:** PHASE 1 SHIPPED v0.82.0 (2026-06-30) — the terminations-carry-no-window hardening + name-the-clock +
+effective-instant plumbing landed (migration 053, grants ledger, ownership status read). Follows the v0.81.0
+hotfix that stopped `terminate()` copying a grant's `ends_at` onto revoke/expire rows (past `ends_at` +
+`starts_at=now()` violated `grants_valid_window` and broke bulk reconcile of migrated/expired subscriptions).
+DECISION 2026-06-30 (Paul): the target end-state is that GRANTS carry no stored end AT ALL — a grant is an
+effective `starts_at` + spec, and every access END is derived (subscription grants → the subscription's
+`current_period_ends_at`; fixed one-off/trial → `starts_at` + a duration frozen into `spec_snapshot`) or is a
+terminating event. That fully removes span-storage and the window-constraint class. It is Phase 2 below: a larger
+money-path migration gated on one open decision (where a fixed one-off/trial end is frozen), deliberately NOT
+bundled into the Phase 1 hardening.
+
+## Metadata
+- Category: data-integrity
+- Status: phase-1-complete
+- Passes: true
+
+## Problem
+
+`openrails.grants` is an append-only event ledger whose rows are two semantically different things sharing one
+shape:
+
+- **grant events** carry a real access window: `starts_at`/`ends_at` are *valid time* (effective/domain time,
+  deliberately backdatable — a 2023 subscription grant materialized today keeps `starts_at=2023`). This is
+  required for determinism: the fold must be a pure function of source facts, replayable at any wall-clock.
+- **termination events** (`revoke`/`expire`/`supersede`) are point-in-time supersession markers. They have no
+  window. `terminate()` sets `starts_at = l.now()` (transaction time, not effective time) and — pre-v0.81.0 —
+  copied `ends_at` from the grant. No query reads a termination row's window; the revocation instant is read off
+  `created_at` (`ListOwnershipGrantsWithStatus`: `term.created_at AS revoked_at`).
+
+Three problems fall out:
+
+1. **No enforced invariant.** Nothing stops a termination row from carrying a window. The v0.81.0 fix is a
+   code-side convention only; the next caller/refactor that copies `ends_at` back reintroduces the
+   `grants_valid_window` crash. One CHECK covers both event kinds — correct for grants, meaningless for
+   terminations.
+2. **The clock is unnamed, and the ambiguity is load-bearing.** `starts_at` means effective time on a grant and
+   record time on a termination; `created_at` is read as the business fact `revoked_at`. Three answers to "which
+   clock is this?" in one table. `RevokeSourcesForSubscriptionAsOf` already proves the team wants *effective*
+   revocation time — it threads `asOf` into the entitlement effect — but does NOT thread it to the grant
+   termination, which falls back to `l.now()`.
+3. **Ownership revocation dates are not trustworthy.** Entitlement gating/history is already correct: the
+   `entitlements` projection owns `end_at`/`revoked_at`, set via `asOf`. But **ownership** has no such projection —
+   its status is reconstructed straight off the termination event's `created_at`, so a backdated/grace revocation
+   records the wrong effective date for owned (one-off) products.
+
+Preserve the elegant part: entitlement gating never reads grants (it reads the derived `entitlements` window).
+Grants are the write-side source of truth — provenance, immutable audit, the convergence anchor for
+`derive.grant_effect.missing`/`.excess`, replayable rebuild. This issue does not touch the gating path; it only
+makes the ledger's own temporal semantics consistent.
+
+## Target design — name the clock, enforce it
+
+One rule, uniform across event types:
+
+- **valid time** = effective/domain time, lives in `starts_at` (+ `ends_at` for grants). A grant's window is
+  `[effective start, effective end]`. A termination's effective revocation instant is `starts_at`; it has NO
+  `ends_at`.
+- **transaction time** = `created_at` (when we recorded the row). Never used as a business fact.
+- **only grant events carry `ends_at`** — DB-enforced.
+
+## Tasks
+
+**Phase 1 — SHIPPED v0.82.0 (terminations carry no window + name-the-clock + effective instant):**
+
+- [x] Forward-only migration `053_grants_termination_no_window`: backfill `ends_at = NULL` on existing non-grant
+      rows, then add CHECK `event = 'grant' OR ends_at IS NULL`. Encodes "only grants carry a window";
+      `grants_valid_window` unchanged.
+- [x] Document the clock convention on the `grants.Ledger` type: valid-time (effective) in `starts_at`/`ends_at`,
+      grants own the window; terminations are window-less point events (effective instant on `starts_at`);
+      `created_at` = transaction time, never a business fact.
+- [x] Thread an effective as-of instant through the revoke path: `RevokeSourcesForSubscriptionAsOf` →
+      `revokeGrantsForSubscriptionSources` → `RevokeBySourceAsOf` → `RevokeAsOf`/`terminate`, which stamps the
+      termination's `starts_at` (zero-time falls back to `now()`, mirroring `Grant()`). `ends_at` stays NULL.
+      Non-AsOf wrappers (`Revoke`/`RevokeBySource`) preserved for now-effective callers.
+- [x] `ListOwnershipGrantsWithStatus` reads `term.starts_at AS revoked_at` (effective instant) instead of
+      `term.created_at`. Backward-compatible for historical rows (`starts_at ≈ created_at`); only improves new
+      backdated revocations.
+- [x] Regression tests: `TestGrants_TerminationRejectsWindow` (CHECK rejects a windowed termination),
+      `TestGrants_RevokeAsOfOwnershipRevokedAt` (backdated revoke → effective ownership `revoked_at`),
+      `TestGrants_RevokeAlreadyExpired` still passes.
+
+**Phase 2 — grants carry NO stored end (Paul's target end-state; larger money-path change, sequence deliberately):**
+
+- [ ] RESOLVE FIRST (open decision): where a fixed one-off/trial end is frozen. Recommended: freeze the duration
+      into `spec_snapshot` at grant time (drift-proof against later catalog edits), so `end = starts_at + duration`
+      is derivable without coupling to mutable `prices.access_duration_hours`.
+- [ ] Rewrite entitlement-window end derivation in `MaterializeGrant`: subscription-sourced → the subscription's
+      `current_period_ends_at` (+ grace) instead of `grant.ends_at`; fixed one-off/trial → `starts_at` + frozen
+      duration. Update the `derive.grant_effect.missing`/`.excess` set queries accordingly.
+- [ ] Migration: stop populating `grant.ends_at`; once derivation no longer reads it, drop the column and
+      `grants_valid_window` + `grants_termination_no_window` become moot (no event stores a span).
+- [ ] Prove renewal needs no new grant/expire (entitlement window tracks the subscription period) and a
+      fixed-window purchase is immune to catalog edits after the fact.
+
+## Out of scope (named and rejected)
+
+- **Splitting termination events into a separate table.** Rejected: fragments the single append-only fold source
+      that is the grant ledger's whole value. Once the per-event-type CHECK enforces "only grants have windows,"
+      the shared row shape is fine.
+- **Giving ownership its own window-projection table with `revoked_at`.** Heavier than needed; reading the
+      effective instant off the termination event closes the gap.
+- **A generic bitemporal / temporal-table framework.** YAGNI — two named columns and one CHECK cover every current
+      read.
+
+Acceptance: a termination row can never carry `ends_at` (DB-enforced); entitlement gating and the derive/converge
+invariants are unchanged; the grants module documents which column is which clock; and — if the scoped tasks are
+taken — a backdated/grace subscription revoke records its effective instant as valid time and ownership
+`revoked_at` reflects it, not the convergence wall-clock.
 
 ---
 
@@ -2215,3 +2329,85 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 - [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
 - [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
 - [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).
+
+---
+
+# #659: embedded HTTP surface should be canonical, method-limited, and provider-aware
+
+**Completed:** no
+**Status:** PLANNED 2026-06-30 — route-surface cleanup from the Doujins/Hentai0 embedded mount review. OpenRails
+must not expose provider-specific endpoints for rails the merchant has not configured, and embedded hosts should
+mount OpenRails at its canonical billing namespace instead of hiding it behind a generic app API path.
+
+## Metadata
+
+- Category: http-api
+- Status: planned
+- Passes: false
+
+## Problem
+
+The embedded OpenRails surface is too broad and too confusing:
+
+- Doujins/Hentai0 mount OpenRails through catch-all Gin `Any`, which registers `CONNECT` and `TRACE` even though
+  billing only needs normal API methods.
+- OpenRails internally logs `/billing/v1/...`, while embedded hosts commonly expose `/api/openrails/...`; that
+  makes startup route logs look wrong and blurs ownership with the host app API.
+- Self-service registers provider-specific routes unconditionally, including Stripe portal and Solana wallet
+  signing routes. A merchant with no Stripe account should not expose `/stripe/portal`; a merchant with no Solana
+  rail should not expose Solana subscription mutation routes.
+- AuthKit, OpenRails, and host app routes should have distinct default namespaces:
+  - OpenRails billing: `/billing/v1/...`
+  - AuthKit auth: `/auth/v1/...`
+  - host app API: `/api/v1/...`
+
+This is not about returning nicer "unsupported provider" errors. If a provider is not configured, the route should
+not be mounted for that runtime surface.
+
+## Target design
+
+- Keep OpenRails' canonical embedded prefix as `/billing/v1`.
+- Make OpenRails examples and embedded helpers steer hosts to mount at `/billing`, not `/api/openrails`.
+- Replace Gin `Any` helper mounts with an explicit method allowlist: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`,
+  `OPTIONS`, `HEAD`. Do not register `CONNECT` or `TRACE`.
+- Derive a provider route-mount plan from configured provider accounts and capabilities:
+  - Stripe portal route is mounted only when the active runtime has a configured Stripe account with portal support.
+  - Solana wallet-signing routes are mounted only when Solana is configured.
+  - Webhook route groups are mounted only when at least one configured provider supports webhooks; individual
+    provider webhook dispatch still validates merchant/provider identity.
+- Prefer generic public route names where the API is provider-independent:
+  - replace `/me/stripe/portal` and `/customers/:customer_id/stripe/portal` with generic billing-portal routes
+    if the product still needs a portal handoff.
+  - keep provider-specific wallet-signing flows under a provider namespace only when the provider protocol is
+    inherently provider-specific.
+
+## Tasks
+
+- [ ] Audit current public and embedded route registration for provider-specific endpoints:
+      Stripe portal, Solana wallet-signing subscription routes, provider webhook routes, captcha/user checkout,
+      customer self-service, merchant admin, catalog, payment-provider admin, and merchant service API.
+- [ ] Add a minimal route-mount planner that consumes the selected `RouteSet`s plus configured provider rails /
+      capability metadata. Do not add a second router abstraction; build on the existing `RouteSet` and
+      `CapabilitiesHandler` machinery.
+- [ ] Split self-service registration so provider-specific subroutes are registered conditionally instead of being
+      hardcoded inside the always-on customer route group.
+- [ ] Hard-cut provider-specific public paths that should be generic. At minimum, plan the Stripe portal handoff as
+      a generic billing-portal endpoint, mounted only when a configured provider supports it.
+- [ ] Update `pkg/embedded/gin.RegisterAPI` to register only the explicit billing HTTP method allowlist, not
+      `group.Any`. Provide the same guidance/helper for hosts that use the lower-level `http.Handler` escape hatch.
+- [ ] Update examples/docs so embedded hosts use `/billing` for OpenRails, AuthKit examples use `/auth`, and app
+      APIs keep `/api/v1`.
+- [ ] Add regression tests proving:
+      - no `CONNECT`/`TRACE` routes are registered by the OpenRails embedded Gin helper;
+      - a runtime with no Stripe does not mount Stripe portal/billing-portal routes;
+      - a runtime with no Solana does not mount Solana wallet-signing routes;
+      - configured Stripe/Solana runtimes still mount their intended routes;
+      - route capabilities report the actual mounted groups/routes, not every route OpenRails knows how to serve.
+- [ ] Add/adjust Doujins and Hentai0 follow-up issues after OpenRails lands: mount OpenRails at `/billing`, AuthKit
+      at `/auth`, host app routes at `/api/v1`, and stop direct `Any` mounting of OpenRails handlers.
+
+## Out of scope
+
+- A full processor-routing engine. Provider selection/fallback stays in the provider-account routing/capability
+  work; this issue only controls whether HTTP routes exist.
+- Backward-compatible aliases for `/api/openrails` or `/stripe/portal`. This is a hard-cut route cleanup.

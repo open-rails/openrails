@@ -56,6 +56,17 @@ type Spec struct {
 // Ledger is the append-only grant ledger for one merchant. It composes a #512
 // money ledger over the same query handle so a credit grant and its deposit
 // transfer commit together.
+//
+// Clock convention (#658 — name the clock):
+//   - VALID TIME (effective/domain time) lives in starts_at/ends_at. It is the
+//     time a fact is true in the domain, NOT when we recorded it — so it is
+//     backdatable and the fold is a pure function of source facts, replayable at
+//     any wall-clock. A grant event carries a real window [starts_at, ends_at];
+//     a termination event (revoke/expire/supersede) is a WINDOW-LESS point event
+//     whose effective instant is starts_at and whose ends_at is always NULL
+//     (enforced by grants_termination_no_window).
+//   - TRANSACTION TIME (when we wrote the row) lives in created_at. It is never
+//     read as a business fact.
 type Ledger struct {
 	q        *gen.Queries
 	merchant uuid.UUID
@@ -122,18 +133,32 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.OpenrailsGrant, 
 	})
 }
 
-// Revoke appends a 'revoke' event terminating the grant (derive-1). The grant row
-// is never edited. A grant may be terminated at most once (unique index).
+// Revoke appends a 'revoke' event terminating the grant (derive-1), effective now.
+// The grant row is never edited. A grant may be terminated at most once (unique index).
 func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (gen.OpenrailsGrant, error) {
-	return l.terminate(ctx, grantID, "revoke", reason)
+	return l.terminate(ctx, grantID, "revoke", reason, time.Time{})
+}
+
+// RevokeAsOf is Revoke with an explicit EFFECTIVE revocation instant (valid time)
+// recorded on the termination's starts_at — for converge-not-replay revocations
+// (e.g. grace lapsed last Tuesday), so the grant ledger agrees with the entitlement
+// effect instead of stamping convergence wall-clock. The zero Time means "now".
+func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.OpenrailsGrant, error) {
+	return l.terminate(ctx, grantID, "revoke", reason, asOf)
 }
 
 // Expire appends an 'expire' event terminating the grant (derive-1).
 func (l *Ledger) Expire(ctx context.Context, grantID uuid.UUID) (gen.OpenrailsGrant, error) {
-	return l.terminate(ctx, grantID, "expire", "expired")
+	return l.terminate(ctx, grantID, "expire", "expired", time.Time{})
 }
 
-func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string) (gen.OpenrailsGrant, error) {
+// terminate appends a termination event (revoke/expire) superseding the grant.
+// asOf is the effective revocation instant recorded on starts_at (valid time);
+// the zero Time falls back to now(), mirroring Grant()'s zero-StartsAt handling.
+// ends_at is ALWAYS NULL: a termination is a window-less point event (see the
+// clock convention on Ledger), so it never trips grants_valid_window even when the
+// grant it terminates already expired.
+func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.OpenrailsGrant, error) {
 	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
 	if err != nil {
 		return gen.OpenrailsGrant{}, fmt.Errorf("grants: load grant %s: %w", grantID, err)
@@ -141,19 +166,17 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	if g.Event != "grant" {
 		return gen.OpenrailsGrant{}, fmt.Errorf("grants: %s is a %q event, not a grant", grantID, g.Event)
 	}
+	effective := asOf
+	if effective.IsZero() {
+		effective = l.now()
+	}
 	sup := grantID
 	r := reason
-	// A termination event is a point-in-time marker (its revocation instant is
-	// read off created_at; no query reads a termination row's window). ends_at is
-	// left NULL rather than copied from the grant: with starts_at = now(), a grant
-	// whose window already closed (ends_at in the past — an expired subscription
-	// revoked on a later reconcile pass) would otherwise violate grants_valid_window
-	// (ends_at IS NULL OR starts_at < ends_at).
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
 		Kind: g.Kind, SourceType: g.SourceType, SourceID: g.SourceID, PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
-		StartsAt: l.now(), EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
+		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
 	})
 }
 
@@ -515,6 +538,12 @@ func (l *Ledger) LiveGrants(ctx context.Context, customer uuid.UUID) ([]gen.Open
 // `sourceID` is compared as the grant's free-text source_id (e.g. a subscription
 // or payment UUID string).
 func (l *Ledger) RevokeBySource(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string) error {
+	return l.RevokeBySourceAsOf(ctx, customer, kind, sourceTypes, sourceID, reason, time.Time{})
+}
+
+// RevokeBySourceAsOf is RevokeBySource with an explicit effective revocation instant
+// threaded onto each termination's starts_at (valid time). The zero Time means "now".
+func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string, asOf time.Time) error {
 	all, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
 	if err != nil {
 		return fmt.Errorf("grants: list grants for revoke-by-source: %w", err)
@@ -535,7 +564,7 @@ func (l *Ledger) RevokeBySource(ctx context.Context, customer uuid.UUID, kind Ki
 		if terminated {
 			continue
 		}
-		if _, err := l.Revoke(ctx, g.ID, reason); err != nil {
+		if _, err := l.RevokeAsOf(ctx, g.ID, reason, asOf); err != nil {
 			return fmt.Errorf("grants: revoke %s by source: %w", g.ID, err)
 		}
 	}

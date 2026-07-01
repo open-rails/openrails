@@ -840,7 +840,7 @@ func (q *Queries) ListLiveOwnershipGrantIDsByPayment(ctx context.Context, arg Li
 const listOwnershipGrantsWithStatus = `-- name: ListOwnershipGrantsWithStatus :many
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
        g.payment_id, g.starts_at, g.ends_at, g.created_at,
-       term.created_at AS revoked_at, term.reason AS revoke_reason
+       term.starts_at AS revoked_at, term.reason AS revoke_reason
 FROM openrails.grants g
 LEFT JOIN openrails.grants term
   ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
