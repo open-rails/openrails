@@ -106,6 +106,33 @@ func TestGrants_Revoke(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Revoking a grant whose window already closed (ends_at in the past) succeeds:
+// the termination row leaves ends_at NULL, so a now()-dated revoke of an
+// already-expired subscription grant does not violate grants_valid_window. This
+// is the bulk-reconcile-of-migrated-subscriptions case, and the natural
+// cancel-a-day-after-period-end case.
+func TestGrants_RevokeAlreadyExpired(t *testing.T) {
+	l, pool, ctx, customer, product, merchantID := testGrants(t)
+	start := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Now().UTC().Add(-48 * time.Hour) // window closed two days ago
+	g, err := l.Grant(ctx, grants.GrantInput{
+		Customer: customer, Product: &product, Kind: grants.Entitlement,
+		Source: grants.Subscription, SourceID: uuid.NewString(),
+		Spec: &grants.Spec{Entitlements: []string{"premium"}}, StartsAt: start, EndsAt: &end,
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MaterializeGrant(ctx, g))
+
+	_, err = l.Revoke(ctx, g.ID, "subscription source revoked")
+	require.NoError(t, err, "revoking a past-window grant must not violate grants_valid_window")
+
+	var endsAtNull bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT ends_at IS NULL FROM openrails.grants WHERE merchant_id=$1 AND supersedes_id=$2 AND event='revoke'`,
+		merchantID, g.ID).Scan(&endsAtNull))
+	require.True(t, endsAtNull, "termination row leaves ends_at NULL")
+}
+
 // A credit grant materializes as a #512 ledger deposit; idempotent.
 func TestGrants_CreditDepositSeam(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)

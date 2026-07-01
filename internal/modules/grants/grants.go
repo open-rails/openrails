@@ -143,11 +143,17 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	}
 	sup := grantID
 	r := reason
+	// A termination event is a point-in-time marker (its revocation instant is
+	// read off created_at; no query reads a termination row's window). ends_at is
+	// left NULL rather than copied from the grant: with starts_at = now(), a grant
+	// whose window already closed (ends_at in the past — an expired subscription
+	// revoked on a later reconcile pass) would otherwise violate grants_valid_window
+	// (ends_at IS NULL OR starts_at < ends_at).
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
 		Kind: g.Kind, SourceType: g.SourceType, SourceID: g.SourceID, PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
-		StartsAt: l.now(), EndsAt: g.EndsAt, Amount: g.Amount, Currency: g.Currency, Reason: &r,
+		StartsAt: l.now(), EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
 	})
 }
 
