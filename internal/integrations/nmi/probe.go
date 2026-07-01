@@ -3,8 +3,9 @@ package nmi
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"net/url"
+	"net/http"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -101,30 +102,33 @@ func probeOrderIDSuffix() string {
 }
 
 // probeAuth submits an authorization-only request with the documented test
-// card. Returns the approval verdict, the transaction id (for voiding), the
-// gateway error text when the gateway rejected the REQUEST itself
-// (response=3), and any transport error.
+// card via POST /v5/payments/auth. Returns the approval verdict, the
+// transaction id (for voiding), the gateway error text when the gateway
+// rejected the REQUEST itself (v5 error envelope or response=3), and any
+// transport error.
 func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatewayErr string, err error) {
-	values := url.Values{
-		"type":         {"auth"},
-		"security_key": {c.SecurityKey},
-		"ccnumber":     {probeTestCard},
-		"ccexp":        {probeTestExpiry},
-		"amount":       {amount},
-		"order_id":     {probeOrderIDPrefix + probeOrderIDSuffix()},
-	}
-	response, err := c.sendDirectRequest(values)
+	amountCents, err := v5AmountToCents(amount)
 	if err != nil {
-		return false, "", "", fmt.Errorf("nmi test-mode probe request failed: %w", err)
+		return false, "", "", fmt.Errorf("nmi test-mode probe amount %q: %w", amount, err)
 	}
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return false, "", "", fmt.Errorf("nmi test-mode probe response unparseable: %w", err)
+	req := v5PaymentRequest{
+		Amount:         centsJSONAmount(amountCents),
+		PaymentDetails: &v5PaymentDetails{CardNumber: probeTestCard, CardExp: probeTestExpiry},
+		OrderDetails:   &v5OrderDetails{ID: probeOrderIDPrefix + probeOrderIDSuffix()},
 	}
-	if output.Get("response") == "3" {
-		return false, "", responseText(output, response), nil
+	var txn v5Transaction
+	if v5Err := c.sendV5Request(http.MethodPost, "/payments/auth", req, &txn); v5Err != nil {
+		if errors.Is(v5Err, ErrProviderReadOnly) {
+			return false, "", "", v5Err
+		}
+		// A 4xx envelope (bad credentials, validation) is the v5 shape of the
+		// classic response=3: request-level rejection, verdict indeterminate.
+		return false, "", v5Err.Error(), nil
 	}
-	return isDirectResponseApproved(output), output.Get("transactionid"), "", nil
+	if strings.TrimSpace(txn.Response) == "3" {
+		return false, "", strings.TrimSpace(txn.ResponseText), nil
+	}
+	return txn.approved(), txn.ID, "", nil
 }
 
 // voidProbe best-effort voids an approved probe authorization. On a
@@ -134,12 +138,7 @@ func (c *NMIClient) voidProbe(txnID string) {
 	if strings.TrimSpace(txnID) == "" {
 		return
 	}
-	values := url.Values{
-		"type":          {"void"},
-		"security_key":  {c.SecurityKey},
-		"transactionid": {txnID},
-	}
-	if _, err := c.sendDirectRequest(values); err != nil {
+	if err := c.Void(txnID); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"provider":       c.providerName,
 			"transaction_id": txnID,

@@ -10,34 +10,37 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-// nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses. Every method
-// is backed by the NMI Query API (query.php via sendQueryRequest) — read-only
-// by construction; none of the direct-post mutation paths are reachable from
-// here.
+// nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses — read-only
+// by construction; none of the mutation paths are reachable from here.
+// Subscriptions and the vault roster read the v5 JSON API; the transaction
+// search stays on query.php (#663: v5 payments has no list/search).
 type nmiQueryClient interface {
-	QueryRecurringSubscriptions(params nmi.RecurringQueryParams) (string, error)
+	ListSubscriptionsPage(cursor int, perPage int) (nmi.SubscriptionPage, error)
+	GetSubscription(subscriptionID string) (nmi.V5Subscription, bool, error)
+	ListCustomersPage(cursor int, perPage int, id string) (nmi.CustomerPage, error)
 	SearchTransactions(filter nmi.QueryFilter) (string, error)
-	GetCustomerVaultData(customerVaultID string) (string, error)
 }
 
-// NMIFetcher pulls NMI state via the Query API:
-// report_type=recurring (all live recurring subscriptions),
-// report_type=transaction (date-ranged transaction search, declines included),
-// report_type=customer_vault (stored payment methods).
+// NMIFetcher pulls NMI state:
+// GET /v5/subscriptions (all live recurring subscriptions),
+// query.php report_type=transaction (date-ranged search, declines included),
+// GET /v5/customers (stored payment methods).
 //
 // Provider quirks (verified against the live sandbox 2026-06-11):
-//   - The recurring report has NO status field: NMI deletes cancelled
-//     subscriptions from the report entirely, so every listed subscription is
-//     live. Status is therefore inferred: next_charge_date today-or-later =>
-//     active; in the past => past_due (NMI stopped advancing the charge date);
-//     unparseable => unknown. RawStatus is left empty to record that NMI
-//     declared no status.
+//   - NMI deletes cancelled subscriptions entirely (v5 GET answers 404), so
+//     every listed subscription is live. Status is therefore inferred:
+//     next_billing_date today-or-later => active; in the past => past_due
+//     (NMI stopped advancing the charge date); unparseable => unknown.
+//     RawStatus is left empty to record that NMI declared no status.
+//   - The v5 subscription resource carries no email/name; identity fields are
+//     joined from the customer roster via customer_vault_id (the vault pull
+//     runs first for exactly this reason).
 //   - Transactions do not carry the NMI subscription_id. Recurring rebills
 //     inherit the subscription's order_id/ponumber (which OpenRails sets to a
 //     local identifier at signup), preserved in Raw for phase-2 correlation.
 //   - Declines surface as action_type=sale with success=0 (and condition
 //     "failed"); response_text carries the decline reason.
-//   - Chargebacks are NOT exposed by the Query API => Chargebacks=false.
+//   - Chargebacks are NOT exposed by either read API => Chargebacks=false.
 type NMIFetcher struct {
 	Client nmiQueryClient
 }
@@ -64,6 +67,9 @@ func (f *NMIFetcher) Capabilities() Capabilities {
 const nmiQueryTimeFormat = "20060102150405"
 const nmiQueryPageLimit = 1000
 
+// nmiV5PageLimit is the per_page for v5 cursor pagination.
+const nmiV5PageLimit = 100
+
 func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
@@ -71,9 +77,16 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		Capabilities: f.Capabilities(),
 	}
 
-	subs, err := f.fetchSubscriptions(ctx, params)
+	// Vault first: the subscription mapping joins email/name from it.
+	vault, identity, err := f.fetchVault(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("nmi recurring query: %w", err)
+		return nil, fmt.Errorf("nmi customer roster: %w", err)
+	}
+	snap.VaultEntries = vault
+
+	subs, err := f.fetchSubscriptions(ctx, params, identity)
+	if err != nil {
+		return nil, fmt.Errorf("nmi subscription roster: %w", err)
 	}
 	snap.Subscriptions = subs
 	if params.SubscriptionID == "" {
@@ -90,116 +103,79 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
 	snap.Coverage.TransactionWindowUntil = timePtrIfSet(params.Until)
 
-	vault, err := f.fetchVault(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("nmi customer_vault query: %w", err)
-	}
-	snap.VaultEntries = vault
-
 	return snap, nil
 }
 
-// --- report_type=recurring ---
+// --- GET /v5/subscriptions ---
 
-type nmiRecurringResponse struct {
-	XMLName       xml.Name             `xml:"nm_response"`
-	Subscriptions []nmiSubscriptionXML `xml:"subscription"`
-	ErrorResponse string               `xml:"error_response"`
+// nmiVaultIdentity is the email/name joined onto subscriptions by vault id.
+type nmiVaultIdentity struct {
+	Email    string
+	Username string
 }
 
-type nmiSubscriptionXML struct {
-	SubscriptionID    string     `xml:"subscription_id"`
-	Plan              nmiPlanXML `xml:"plan"`
-	NextChargeDate    string     `xml:"next_charge_date"`
-	CompletedPayments string     `xml:"completed_payments"`
-	AttemptedPayments string     `xml:"attempted_payments"`
-	RemainingPayments string     `xml:"remaining_payments"`
-	OrderID           string     `xml:"orderid"`
-	PONumber          string     `xml:"ponumber"`
-	FirstName         string     `xml:"first_name"`
-	LastName          string     `xml:"last_name"`
-	Email             string     `xml:"email"`
-	CustomerVaultID   string     `xml:"customer_vault_id"`
-	CCNumber          string     `xml:"cc_number"`
-	CCExp             string     `xml:"cc_exp"`
-	InnerXML          string     `xml:",innerxml" json:"-"`
-}
-
-type nmiPlanXML struct {
-	PlanID       string `xml:"plan_id"`
-	PlanName     string `xml:"plan_name"`
-	PlanAmount   string `xml:"plan_amount"`
-	DayFrequency string `xml:"day_frequency"`
-	PlanPayments string `xml:"plan_payments"`
-}
-
-func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams) ([]RemoteSubscription, error) {
+func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiVaultIdentity) ([]RemoteSubscription, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var pages []nmiSubscriptionXML
+	var subs []nmi.V5Subscription
 	if params.SubscriptionID != "" {
-		raw, err := f.Client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{
-			SubscriptionID: params.SubscriptionID,
-			// PageNumber -1 keeps the existing client from emitting page_number=0.
-			PageNumber: -1,
-		})
+		sub, found, err := f.Client.GetSubscription(params.SubscriptionID)
 		if err != nil {
 			return nil, err
 		}
-		parsed, err := parseNMIRecurringPage(raw)
-		if err != nil {
-			return nil, err
+		if found {
+			subs = append(subs, sub)
 		}
-		pages = parsed.Subscriptions
 	} else {
-		seenFirst := map[string]bool{}
-		for page := 1; ; page++ {
-			raw, err := f.Client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{
-				ResultLimit: nmiQueryPageLimit,
-				PageNumber:  page,
-				ResultOrder: "asc",
-			})
+		cursor := 0
+		seenCursor := map[int]bool{}
+		for {
+			page, err := f.Client.ListSubscriptionsPage(cursor, nmiV5PageLimit)
 			if err != nil {
 				return nil, err
 			}
-			parsed, err := parseNMIRecurringPage(raw)
-			if err != nil {
-				return nil, err
-			}
-			if len(parsed.Subscriptions) == 0 {
+			subs = append(subs, page.Subscriptions...)
+			if page.NextCursor == nil || len(page.Subscriptions) == 0 {
 				break
 			}
-			first := strings.TrimSpace(parsed.Subscriptions[0].SubscriptionID)
-			if seenFirst[first] {
-				return nil, fmt.Errorf("nmi recurring pagination repeated page starting at subscription_id=%s; refusing incomplete snapshot", first)
+			next := *page.NextCursor
+			if seenCursor[next] {
+				return nil, fmt.Errorf("nmi subscription pagination repeated cursor %d; refusing incomplete snapshot", next)
 			}
-			seenFirst[first] = true
-			pages = append(pages, parsed.Subscriptions...)
-			if len(parsed.Subscriptions) < nmiQueryPageLimit {
-				break
-			}
+			seenCursor[next] = true
+			cursor = next
 		}
 	}
+
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	out := make([]RemoteSubscription, 0, len(pages))
-	for _, s := range pages {
+	out := make([]RemoteSubscription, 0, len(subs))
+	for _, s := range subs {
+		vaultID := strings.TrimSpace(s.CustomerVaultID)
 		sub := RemoteSubscription{
-			RailSubscriptionID: strings.TrimSpace(s.SubscriptionID),
+			RailSubscriptionID: strings.TrimSpace(s.ID),
 			// NMI declares no per-subscription status (see fetcher doc);
 			// RawStatus stays empty on purpose.
 			Status:     SubscriptionStatusUnknown,
-			CustomerID: strings.TrimSpace(s.CustomerVaultID),
-			Email:      strings.TrimSpace(s.Email),
-			Username:   strings.TrimSpace(strings.TrimSpace(s.FirstName + " " + s.LastName)),
-			PlanID:     strings.TrimSpace(s.Plan.PlanID),
-			Currency:   "", // the recurring report does not echo currency
-			Raw:        rawJSON(map[string]string{"source": "nmi_recurring", "xml": s.InnerXML}),
+			CustomerID: vaultID,
+			Currency:   "", // the subscription resource does not echo currency
+			Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
 		}
-		if cents, err := parseAmountCents(s.Plan.PlanAmount); err == nil {
+		if who, ok := identity[vaultID]; ok {
+			sub.Email = who.Email
+			sub.Username = who.Username
+		}
+		if s.Plan != nil {
+			sub.PlanID = strings.TrimSpace(s.Plan.ID)
+		}
+		if cents, err := parseAmountCents(s.Amount); err == nil && cents > 0 {
 			sub.AmountCents = cents
+		} else if s.Plan != nil {
+			if cents, err := parseAmountCents(s.Plan.PlanAmount); err == nil {
+				sub.AmountCents = cents
+			}
 		}
-		if next, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(s.NextChargeDate), time.UTC); err == nil {
+		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
 			sub.NextBillingAt = &next
 			if next.Before(today) {
 				sub.Status = SubscriptionStatusPastDue
@@ -212,15 +188,19 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams)
 	return out, nil
 }
 
-func parseNMIRecurringPage(raw string) (nmiRecurringResponse, error) {
-	var parsed nmiRecurringResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return parsed, fmt.Errorf("parse recurring XML: %w", err)
+// parseNMIV5Date accepts the date shapes v5 emits (ISO 8601 timestamp or bare
+// date) and returns a UTC time.
+func parseNMIV5Date(raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, fmt.Errorf("empty date")
 	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return parsed, fmt.Errorf("nmi error_response: %s", msg)
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if ts, err := time.ParseInLocation(layout, trimmed, time.UTC); err == nil {
+			return ts.UTC(), nil
+		}
 	}
-	return parsed, nil
+	return time.Time{}, fmt.Errorf("unrecognized v5 date %q", raw)
 }
 
 // --- report_type=transaction ---
@@ -369,57 +349,51 @@ func normalizeNMIAction(actionType string) (TransactionType, bool) {
 	}
 }
 
-// --- report_type=customer_vault ---
+// --- GET /v5/customers ---
 
-type nmiVaultResponse struct {
-	XMLName       xml.Name      `xml:"nm_response"`
-	CustomerVault nmiVaultInner `xml:"customer_vault"`
-	ErrorResponse string        `xml:"error_response"`
-}
-
-type nmiVaultInner struct {
-	Customers []nmiVaultCustomerXML `xml:"customer"`
-}
-
-type nmiVaultCustomerXML struct {
-	CustomerVaultID string `xml:"customer_vault_id"`
-	Email           string `xml:"email"`
-	CCNumber        string `xml:"cc_number"`
-	CCExp           string `xml:"cc_exp"`
-	CCType          string `xml:"cc_type"`
-	Created         string `xml:"created"`
-	Updated         string `xml:"updated"`
-	InnerXML        string `xml:",innerxml" json:"-"`
-}
-
-func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]RemoteVaultEntry, error) {
+func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]RemoteVaultEntry, map[string]nmiVaultIdentity, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	raw, err := f.Client.GetCustomerVaultData(params.CustomerID)
-	if err != nil {
-		return nil, err
+	var customers []nmi.V5Customer
+	cursor := 0
+	seenCursor := map[int]bool{}
+	for {
+		page, err := f.Client.ListCustomersPage(cursor, nmiV5PageLimit, params.CustomerID)
+		if err != nil {
+			return nil, nil, err
+		}
+		customers = append(customers, page.Customers...)
+		if page.NextCursor == nil || len(page.Customers) == 0 {
+			break
+		}
+		next := *page.NextCursor
+		if seenCursor[next] {
+			return nil, nil, fmt.Errorf("nmi customer pagination repeated cursor %d; refusing incomplete snapshot", next)
+		}
+		seenCursor[next] = true
+		cursor = next
 	}
 
-	var parsed nmiVaultResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parse customer_vault XML: %w", err)
+	out := make([]RemoteVaultEntry, 0, len(customers))
+	identity := make(map[string]nmiVaultIdentity, len(customers))
+	for _, c := range customers {
+		entry := RemoteVaultEntry{
+			CustomerVaultID: strings.TrimSpace(c.ID),
+			Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),
+		}
+		if billing := c.PrimaryBilling(); billing != nil {
+			entry.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
+			entry.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
+			entry.Email = strings.TrimSpace(billing.Email)
+			identity[entry.CustomerVaultID] = nmiVaultIdentity{
+				Email:    entry.Email,
+				Username: strings.TrimSpace(strings.TrimSpace(billing.FirstName) + " " + strings.TrimSpace(billing.LastName)),
+			}
+		}
+		out = append(out, entry)
 	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return nil, fmt.Errorf("nmi error_response: %s", msg)
-	}
-
-	out := make([]RemoteVaultEntry, 0, len(parsed.CustomerVault.Customers))
-	for _, c := range parsed.CustomerVault.Customers {
-		out = append(out, RemoteVaultEntry{
-			CustomerVaultID: strings.TrimSpace(c.CustomerVaultID),
-			CardLast4:       cardLast4(c.CCNumber),
-			CardExpiry:      strings.TrimSpace(c.CCExp),
-			Email:           strings.TrimSpace(c.Email),
-			Raw:             rawJSON(map[string]string{"source": "nmi_customer_vault", "xml": c.InnerXML}),
-		})
-	}
-	return out, nil
+	return out, identity, nil
 }
 
 // cardLast4 extracts the trailing four digits from a masked PAN such as

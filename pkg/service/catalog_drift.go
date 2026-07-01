@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"strconv"
 	"strings"
@@ -49,9 +48,9 @@ type stripeProductLister interface {
 }
 
 // nmiPlanLister is the subset of the NMI client the loop needs. Defining it as
-// an interface lets unit tests inject fixture XML without a live NMI account.
+// an interface lets unit tests inject fixture plans without a live NMI account.
 type nmiPlanLister interface {
-	GetRecurringPlanData() (string, error)
+	ListRecurringPlans() ([]nmi.V5Plan, error)
 }
 
 // localCatalogSnapshot is the OpenRails-side view the diffs compare against.
@@ -278,36 +277,17 @@ type nmiPlan struct {
 	AmountCents int64
 }
 
-// nmiRecurringPlansXML mirrors the XML returned by the NMI Query API for the
-// recurring_plans report type. Only the fields the diff needs are mapped. (The
-// nmi package has an unexported equivalent; we re-declare here because the
-// public client method returns the raw XML string.)
-type nmiRecurringPlansXML struct {
-	XMLName xml.Name `xml:"nm_response"`
-	Plans   []struct {
-		PlanID     string `xml:"plan_id"`
-		PlanName   string `xml:"plan_name"`
-		PlanAmount string `xml:"plan_amount"`
-	} `xml:"plan"`
-}
-
-// parseNMIPlans parses the raw recurring_plans XML payload returned by
-// GetRecurringPlanData() into a slice of nmiPlan.
-func parseNMIPlans(raw string) ([]nmiPlan, error) {
-	var parsed nmiRecurringPlansXML
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parse nmi recurring plans: %w", err)
-	}
-	out := make([]nmiPlan, 0, len(parsed.Plans))
-	for _, p := range parsed.Plans {
-		cents := dollarStringToCents(p.PlanAmount)
+// mapNMIPlans converts the typed v5 plan list into the diff's nmiPlan shape.
+func mapNMIPlans(plans []nmi.V5Plan) []nmiPlan {
+	out := make([]nmiPlan, 0, len(plans))
+	for _, p := range plans {
 		out = append(out, nmiPlan{
-			PlanID:      strings.TrimSpace(p.PlanID),
+			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
-			AmountCents: cents,
+			AmountCents: dollarStringToCents(p.PlanAmount),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") into
@@ -575,13 +555,13 @@ func fetchStripeCatalog(ctx context.Context, lister stripeProductLister) ([]cata
 	return products, prices, nil
 }
 
-// fetchNMIPlans pulls and parses all NMI recurring plans.
+// fetchNMIPlans pulls all NMI recurring plans (GET /v5/plans).
 func fetchNMIPlans(lister nmiPlanLister) ([]nmiPlan, error) {
-	raw, err := lister.GetRecurringPlanData()
+	plans, err := lister.ListRecurringPlans()
 	if err != nil {
 		return nil, fmt.Errorf("list nmi recurring plans: %w", err)
 	}
-	return parseNMIPlans(raw)
+	return mapNMIPlans(plans), nil
 }
 
 // RunCatalogReconciliation performs one full pull-and-diff pass across both the

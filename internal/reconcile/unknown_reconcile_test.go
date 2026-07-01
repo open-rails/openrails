@@ -100,6 +100,16 @@ func TestResolveUnknownFromSnapshot(t *testing.T) {
 			}
 		})
 	}
+
+	// #664: a sub with NO provider handle can never be "absent from an exhaustive
+	// roster" — it is unmatchable, so it must stay unknown, never guess-cancelled.
+	t.Run("empty rail_subscription_id → unreachable even on exhaustive roster", func(t *testing.T) {
+		snap := &RemoteSnapshot{Subscriptions: []RemoteSubscription{}, Coverage: SnapshotCoverage{SubscriptionsExhaustive: true}}
+		v := ResolveUnknownFromSnapshot(UnknownSubject{RailSubscriptionID: "", PeriodEnd: periodEnd}, snap, now, dunningWindow)
+		if v.Outcome != UnknownOutcomeUnreachable {
+			t.Fatalf("outcome = %v, want unreachable (no handle = no evidence)", v.Outcome)
+		}
+	})
 }
 
 // Backfill only includes charges at/after the lapsed period end (older history is

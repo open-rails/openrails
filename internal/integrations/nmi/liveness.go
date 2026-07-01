@@ -129,57 +129,47 @@ func (c *NMIClient) FindSuccessfulSaleByOrderID(orderID string) (transactionID s
 	return result.SuccessTransactionID, result.SuccessFound, nil
 }
 
-// recurringLivenessResponse mirrors the slice of the Query API recurring
-// report the liveness probe reads. The recurring report has NO status field:
-// NMI deletes cancelled subscriptions from the report entirely, so every
-// listed subscription is live (see internal/reconcile/nmi.go for the verified
-// provider quirks).
-type recurringLivenessResponse struct {
-	XMLName       xml.Name `xml:"nm_response"`
-	Subscriptions []struct {
-		SubscriptionID string `xml:"subscription_id"`
-		NextChargeDate string `xml:"next_charge_date"`
-	} `xml:"subscription"`
-	ErrorResponse string `xml:"error_response"`
-}
-
 // RecurringLiveness is the parsed remote-truth view of one NMI recurring
-// subscription. Found=false means the recurring report no longer lists the
-// subscription — at NMI that IS terminal (cancelled records are deleted from
-// the report). NextChargeDate is zero when absent/unparseable.
+// subscription. Found=false means NMI no longer knows the subscription id —
+// at NMI that IS terminal (cancelled records are deleted, and the v5 GET
+// answers 404). NextChargeDate is zero when absent/unparseable.
 type RecurringLiveness struct {
 	Found          bool
 	NextChargeDate time.Time
 }
 
-// GetRecurringLiveness queries the recurring report for one subscription id
-// and reports whether the remote recurring record is still alive and when it
-// will next charge.
+// GetRecurringLiveness reads GET /v5/subscriptions/{id} and reports whether
+// the remote recurring record is still alive and when it will next charge.
 func (c *NMIClient) GetRecurringLiveness(subscriptionID string) (RecurringLiveness, error) {
 	var out RecurringLiveness
 	if strings.TrimSpace(subscriptionID) == "" {
 		return out, errors.New("subscriptionID is required")
 	}
-	raw, err := c.QueryRecurringSubscriptions(RecurringQueryParams{SubscriptionID: subscriptionID, PageNumber: -1})
+	sub, found, err := c.GetSubscription(subscriptionID)
 	if err != nil {
 		return out, err
 	}
-	var parsed recurringLivenessResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return out, fmt.Errorf("parse recurring query response: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return out, fmt.Errorf("recurring query error_response: %s", msg)
-	}
-	for _, sub := range parsed.Subscriptions {
-		if strings.TrimSpace(sub.SubscriptionID) != strings.TrimSpace(subscriptionID) {
-			continue
-		}
-		out.Found = true
-		if next, perr := time.ParseInLocation("2006-01-02", strings.TrimSpace(sub.NextChargeDate), time.UTC); perr == nil {
-			out.NextChargeDate = next
-		}
+	if !found {
 		return out, nil
 	}
+	out.Found = true
+	if next, perr := parseV5Date(sub.NextBillingDate); perr == nil {
+		out.NextChargeDate = next
+	}
 	return out, nil
+}
+
+// parseV5Date accepts the date shapes v5 emits (ISO 8601 timestamp or bare
+// date) and returns a UTC time.
+func parseV5Date(raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, errors.New("empty date")
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if ts, err := time.ParseInLocation(layout, trimmed, time.UTC); err == nil {
+			return ts.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized v5 date %q", raw)
 }

@@ -25,12 +25,16 @@ type NMIClient struct {
 	config        *config.NMIProviderSettings
 	SecurityKey   string
 	WebhookSecret string
+	// DirectPostURL survives #663 for the two classic-only recurring ops
+	// (add_subscription, rebill_subscription); everything else is v5 JSON.
 	DirectPostURL string
-	QueryURL      string
-	TestMode      bool
-	// ReadOnly blocks EVERY direct-post mutation (sales, vault writes, plan
-	// creates, deletes — all NMI writes flow through sendDirectRequest) with
-	// ErrProviderReadOnly; the query API stays available. Set when mode=readonly
+	// QueryURL survives #663 for transaction SEARCH only (v5 has no
+	// payments list/search; v4's report endpoint is partner-key-only).
+	QueryURL  string
+	V5BaseURL string
+	TestMode  bool
+	// ReadOnly blocks EVERY mutation — classic direct-post AND v5 non-GET —
+	// with ErrProviderReadOnly; reads stay available. Set when mode=readonly
 	// (#346) at client build.
 	ReadOnly bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
@@ -172,6 +176,7 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 	log.WithFields(log.Fields{
 		"provider":    provider,
 		"test_mode":   testMode,
+		"v5":          DefaultV5BaseURL,
 		"direct_post": DefaultDirectPostURL,
 		"query":       DefaultQueryAPIURL,
 	}).Info("NMI endpoint selection")
@@ -183,6 +188,7 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		WebhookSecret: webhookSecret,
 		DirectPostURL: DefaultDirectPostURL,
 		QueryURL:      DefaultQueryAPIURL,
+		V5BaseURL:     DefaultV5BaseURL,
 		TestMode:      testMode,
 		httpClient: &http.Client{
 			Timeout: nmiRequestTimeout,

@@ -875,6 +875,9 @@ type ListOwnershipGrantsWithStatusRow struct {
 // derived status (the termination event, if any) — so the legacy
 // ProductAccessGrant.{status,revoked_at,revoke_reason} shape can be reconstructed
 // from the append-only ledger in one query.
+// #658: revoked_at is the termination's EFFECTIVE instant (valid time on
+// term.starts_at), not term.created_at (transaction time), so a backdated/grace
+// revocation reports when access actually ended. Historically the two coincided.
 func (q *Queries) ListOwnershipGrantsWithStatus(ctx context.Context, arg ListOwnershipGrantsWithStatusParams) ([]ListOwnershipGrantsWithStatusRow, error) {
 	rows, err := q.db.Query(ctx, listOwnershipGrantsWithStatus, arg.MerchantID, arg.CustomerID)
 	if err != nil {

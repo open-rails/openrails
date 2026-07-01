@@ -5,7 +5,7 @@ OpenRails uses Vault for two **independent** things (#661). Grant only what you 
 | Capability | What it's for | Vault paths |
 |---|---|---|
 | **KV secrets** | store/read per-merchant provider secrets | `secret/data/openrails/*`, `secret/metadata/openrails/*` |
-| **Transit signing** | Solana `vault_transit` custody — Vault signs, the key never leaves | `transit/sign/openrails-*`, `transit/keys/openrails-*` |
+| **Transit signing** | Solana `vault_transit` custody — Vault signs, the key never leaves | `transit/sign/<your-key>`, `transit/keys/<your-key>` |
 
 They are decoupled: you can run **transit-only** (Vault signs Solana, secrets live in the DB), **KV-only**, or both.
 
@@ -42,11 +42,12 @@ OpenRails logs in at boot and holds the minted token in memory (renewed while it
 
 ## Minimal policies — grant only what the deployment uses
 
-**Transit-only** (Vault-custody Solana signing; secrets managed elsewhere, `secret_backend=db`):
+**Transit-only** (Vault-custody Solana signing; secrets managed elsewhere, `secret_backend=db`). Key names are
+yours — scope the policy to exactly the key(s) declared as `signer.key` in the merchant manifest:
 
 ```hcl
-path "transit/sign/openrails-*" { capabilities = ["update"] }   # sign
-path "transit/keys/openrails-*" { capabilities = ["read"] }     # read the pubkey
+path "transit/sign/my-mainnet-signer" { capabilities = ["update"] }   # sign
+path "transit/keys/my-mainnet-signer" { capabilities = ["read"] }     # read the pubkey
 # no secret/* access at all
 ```
 
@@ -65,11 +66,13 @@ entirely in the policy.
 
 ## Capability-aware behavior
 
-At boot OpenRails probes `sys/capabilities-self` and adapts (advisory only — Vault's runtime 403 is the real boundary):
+At boot OpenRails probes `sys/capabilities-self` for the KV paths and adapts (advisory only — Vault's runtime 403 is
+the real boundary):
 
-- transit capability present → Solana `vault_transit` signing works; absent → warned, and Solana falls back to a local
-  key if one exists (else Solana is unavailable).
 - `secret_backend=vault` + KV read-write → full secret ops; + read-only → writes/config-push disabled + warn; + **no
   KV** → **boot error** (declared-in-Vault but unreachable — never run empty).
+- Transit is NOT path-probed (key names are yours, so there is no path to guess). A Vault connection enables the
+  Solana signing surface; the actual grant is verified against the real key when the provider account is provisioned
+  (the pubkey is read via `transit/keys/<your-key>`), and a policy change afterwards surfaces as a runtime 403.
 
 Mounts are currently fixed: KV `secret`, Transit `transit`.

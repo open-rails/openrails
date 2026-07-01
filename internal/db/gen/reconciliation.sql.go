@@ -470,6 +470,7 @@ WHERE merchant_id = $1::uuid
   AND status = 'past_due'
   AND grace_ends_at IS NOT NULL
   AND grace_ends_at < $3::timestamptz
+  AND next_retry_at IS NULL
 ORDER BY grace_ends_at
 `
 
@@ -485,8 +486,11 @@ type ListGraceExhaustedSubscriptionsRow struct {
 	GraceEndsAt *time.Time
 }
 
-// #511 LIFE plane (life.subscription.grace_exhausted): past_due subscriptions
-// whose grace window has elapsed — they should be terminal. Scope-aware detection.
+// #511/#664 (life.subscription.grace_exhausted): past_due, grace elapsed, NO
+// retry scheduled — dunning stalled, outcome unknown. Parked as `unknown` for
+// provider verification; convergence never terminally cancels (FailMembership +
+// provider-confirmed outcomes own that). Pending-retry rows are dunning's;
+// in-grace no-schedule rows are dunning_overdue's.
 func (q *Queries) ListGraceExhaustedSubscriptions(ctx context.Context, arg ListGraceExhaustedSubscriptionsParams) ([]ListGraceExhaustedSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listGraceExhaustedSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -514,7 +518,24 @@ WHERE s.merchant_id = $1::uuid
   AND s.status = 'active'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < $3::timestamptz
-  AND (s.rail = 'ccbill' OR (s.rail = 'nmi' AND s.payment_method_id IS NULL))
+  AND NOT (
+        s.rail = 'nmi' AND s.payment_method_id IS NOT NULL
+        AND (
+              (s.current_period_starts_at IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM openrails.payments p
+                  WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+                    AND p.status = 'completed'
+                    AND p.purchased_at >= s.current_period_starts_at
+              ))
+              OR EXISTS (
+                  SELECT 1 FROM openrails.provider_refresh_watermarks w
+                  WHERE w.merchant_id = s.merchant_id
+                    AND w.provider = s.rail
+                    AND (w.provider_account_id IS NULL OR w.provider_account_id = s.provider_account_id)
+                    AND w.watermark_at > s.current_period_ends_at
+              )
+            )
+      )
   AND NOT EXISTS (
       SELECT 1 FROM openrails.payments p
       WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
@@ -535,12 +556,11 @@ type ListNeedsVerificationSubscriptionsRow struct {
 	CurrentPeriodEndsAt *time.Time
 }
 
-// #632: active subscriptions whose period elapsed (past a grace slack) with NO
-// confirming renewal payment, that we CANNOT rebill ourselves (provider-auto-billed:
-// CCBill, or vault-less NMI). Convergence must not GUESS whether the provider
-// billed them — the LIFE pass flips them to `unknown` and provider-pull (#633)
-// resolves them. A renewal payment landing at/after the period end means the provider
-// DID bill (advance, not unknown), so such subs are excluded here.
+// #632/#664: active, period-elapsed (past grace slack), no confirming renewal
+// payment, and not dunning-chargeable with evidence — the exact complement of
+// ListPeriodOverdueSubscriptions (edit together). Flipped to `unknown` (access
+// intact); provider-pull (#633) resolves. A completed payment at/after the
+// period end means billing DID happen — excluded.
 func (q *Queries) ListNeedsVerificationSubscriptions(ctx context.Context, arg ListNeedsVerificationSubscriptionsParams) ([]ListNeedsVerificationSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listNeedsVerificationSubscriptions, arg.MerchantID, arg.CustomerID, arg.Cutoff)
 	if err != nil {
@@ -562,14 +582,29 @@ func (q *Queries) ListNeedsVerificationSubscriptions(ctx context.Context, arg Li
 }
 
 const listPeriodOverdueSubscriptions = `-- name: ListPeriodOverdueSubscriptions :many
-SELECT id, current_period_ends_at FROM openrails.subscriptions
-WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
-  AND status = 'active'
-  AND current_period_ends_at IS NOT NULL
-  AND current_period_ends_at < $3::timestamptz
-  AND NOT (rail = 'ccbill' OR (rail = 'nmi' AND payment_method_id IS NULL))
-ORDER BY current_period_ends_at
+SELECT s.id, s.current_period_ends_at FROM openrails.subscriptions s
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.status = 'active'
+  AND s.current_period_ends_at IS NOT NULL
+  AND s.current_period_ends_at < $3::timestamptz
+  AND s.rail = 'nmi' AND s.payment_method_id IS NOT NULL
+  AND (
+        (s.current_period_starts_at IS NOT NULL AND EXISTS (
+            SELECT 1 FROM openrails.payments p
+            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.status = 'completed'
+              AND p.purchased_at >= s.current_period_starts_at
+        ))
+        OR EXISTS (
+            SELECT 1 FROM openrails.provider_refresh_watermarks w
+            WHERE w.merchant_id = s.merchant_id
+              AND w.provider = s.rail
+              AND (w.provider_account_id IS NULL OR w.provider_account_id = s.provider_account_id)
+              AND w.watermark_at > s.current_period_ends_at
+        )
+      )
+ORDER BY s.current_period_ends_at
 `
 
 type ListPeriodOverdueSubscriptionsParams struct {
@@ -585,9 +620,12 @@ type ListPeriodOverdueSubscriptionsRow struct {
 
 // #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
 // current_period_ends_at that never advanced (missed rebill/failure webhook).
-// #632: only OUR-rebill subs enter dunning here. Provider-auto-billed subs (CCBill
-// or vault-less NMI) we cannot rebill — they route to `unknown` via
-// ListNeedsVerificationSubscriptions instead, so the two cohorts stay disjoint.
+// #664 evidence-gated dunning entry: only vaulted NMI (the one cohort the
+// dunning worker charges) WITH ownership evidence — a completed payment opened
+// the current period, or the provider watermark is newer than the period end.
+// Everything else lapsed routes to `unknown` via
+// ListNeedsVerificationSubscriptions. INVARIANT: the two predicates are exact
+// complements — edit them together.
 func (q *Queries) ListPeriodOverdueSubscriptions(ctx context.Context, arg ListPeriodOverdueSubscriptionsParams) ([]ListPeriodOverdueSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listPeriodOverdueSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -1585,27 +1623,6 @@ type SetSubscriptionNextRetryParams struct {
 // worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
 func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscriptionNextRetryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setSubscriptionUnknown = `-- name: SetSubscriptionUnknown :execrows
-UPDATE openrails.subscriptions
-SET status = 'unknown', updated_at = now()
-WHERE id = $1::uuid AND merchant_id = $2::uuid AND status = 'active'
-`
-
-type SetSubscriptionUnknownParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-// #632 resolver: flip an active subscription to `unknown` (needs provider
-// verification). Idempotent — only an active row transitions.
-func (q *Queries) SetSubscriptionUnknown(ctx context.Context, arg SetSubscriptionUnknownParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setSubscriptionUnknown, arg.ID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}

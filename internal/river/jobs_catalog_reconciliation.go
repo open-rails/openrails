@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"strconv"
 	"strings"
@@ -97,14 +96,11 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 
 	// --- NMI pass (skipped if unconfigured) ---
 	if client, ok := w.NMIClients[string(models.RailNMI)]; ok && client != nil {
-		raw, err := client.GetRecurringPlanData()
+		v5Plans, err := client.ListRecurringPlans()
 		if err != nil {
 			return fmt.Errorf("catalog reconciliation: list nmi recurring plans: %w", err)
 		}
-		plans, err := parseNMIPlansJob(raw)
-		if err != nil {
-			return err
-		}
+		plans := mapNMIPlansJob(v5Plans)
 		scannedPlans = len(plans)
 		desired = append(desired, computeNMIDriftJob(plans, priceRows, now)...)
 	} else {
@@ -345,29 +341,17 @@ type nmiPlanJob struct {
 	AmountCents int64
 }
 
-type nmiRecurringPlansXMLJob struct {
-	XMLName xml.Name `xml:"nm_response"`
-	Plans   []struct {
-		PlanID     string `xml:"plan_id"`
-		PlanName   string `xml:"plan_name"`
-		PlanAmount string `xml:"plan_amount"`
-	} `xml:"plan"`
-}
-
-func parseNMIPlansJob(raw string) ([]nmiPlanJob, error) {
-	var parsed nmiRecurringPlansXMLJob
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("catalog reconciliation: parse nmi recurring plans: %w", err)
-	}
-	out := make([]nmiPlanJob, 0, len(parsed.Plans))
-	for _, p := range parsed.Plans {
+// mapNMIPlansJob converts the typed v5 plan list into the job's nmiPlanJob shape.
+func mapNMIPlansJob(plans []nmi.V5Plan) []nmiPlanJob {
+	out := make([]nmiPlanJob, 0, len(plans))
+	for _, p := range plans {
 		out = append(out, nmiPlanJob{
-			PlanID:      strings.TrimSpace(p.PlanID),
+			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
 			AmountCents: dollarStringToCentsJob(p.PlanAmount),
 		})
 	}
-	return out, nil
+	return out
 }
 
 func dollarStringToCentsJob(dollars string) int64 {

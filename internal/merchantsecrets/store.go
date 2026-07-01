@@ -29,18 +29,20 @@ type Store struct {
 	SolanaTransit solanaint.TransitClient
 	Capabilities  vault.Capabilities
 	// Derived route-gating signals (#661). Advisory only — they hide/degrade
-	// routes, never authorize. SolanaCanSign: Vault Transit OR a local Solana key
-	// is supported. SecretWrite: provider-secret writes / config-push are possible.
+	// routes, never authorize. SolanaCanSign: a Vault connection OR a local Solana
+	// key is supported. SecretWrite: provider-secret writes / config-push are possible.
 	SolanaCanSign bool
 	SecretWrite   bool
 }
 
-// deriveRouteGates computes the advisory route-gating signals from the declared
-// backend + probed capabilities. localKeys: the store can hold+serve a Solana
-// keypair (Vault KV read, or the DB store with encryption enabled).
-func deriveRouteGates(useVault, encryptionEnabled bool, caps vault.Capabilities) (solanaCanSign, secretWrite bool) {
+// deriveRouteGates computes the advisory route-gating signals. localKeys: the
+// store can hold+serve a Solana keypair (Vault KV read, or the DB store with
+// encryption enabled). A Vault connection counts as can-sign: transit key names
+// are operator-chosen so there is no path to probe — the real key is read at
+// provision time and runtime 403 stays the boundary.
+func deriveRouteGates(useVault, vaultConnected, encryptionEnabled bool, caps vault.Capabilities) (solanaCanSign, secretWrite bool) {
 	localKeys := (useVault && caps.KVRead) || (!useVault && encryptionEnabled)
-	solanaCanSign = caps.Transit || localKeys
+	solanaCanSign = vaultConnected || localKeys
 	secretWrite = (useVault && caps.KVWrite) || !useVault
 	return solanaCanSign, secretWrite
 }
@@ -81,15 +83,18 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		if err != nil {
 			return nil, fmt.Errorf("vault login: %w", err)
 		}
-		caps, err = vault.SelfCapabilities(ctx, client, vaultKVMount, vaultTransitMount)
+		caps, err = vault.SelfCapabilities(ctx, client, vaultKVMount)
 		if err != nil {
-			return nil, fmt.Errorf("vault capability probe: %w", err)
+			// Only fatal when secrets are declared to live in Vault: the KV store
+			// can't be verified. Otherwise degrade — transit signing doesn't need
+			// the probe (runtime 403 is the boundary).
+			if backend == config.SecretBackendVault {
+				return nil, fmt.Errorf("vault capability probe: %w", err)
+			}
+			log.WithError(err).Warn("vault: capability probe failed; continuing (secret_backend=db, Vault used for transit signing only)")
 		}
 		vclient = client
 		transit = vault.NewTransitAdapter(client, vaultTransitMount)
-		if !caps.Transit {
-			log.Warn("vault: connected but the token lacks transit sign capability; Solana vault_transit signing is unavailable")
-		}
 	}
 
 	// Secret store per DECLARED backend — never auto-fallback (the data lives in one
@@ -99,7 +104,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		return nil, err
 	}
 	encryptionEnabled := cfg != nil && cfg.Encryption != nil && cfg.Encryption.MasterKey != ""
-	solanaCanSign, secretWrite := deriveRouteGates(useVault, encryptionEnabled, caps)
+	solanaCanSign, secretWrite := deriveRouteGates(useVault, vclient != nil, encryptionEnabled, caps)
 	if useVault {
 		if !caps.KVWrite {
 			log.Warn("vault: secret_backend=vault with read-only KV capability; merchant-secret writes / config-push are disabled")

@@ -12,8 +12,8 @@ import (
 // probe itself is integration-tested (capabilities_integration_test.go); this pins
 // the decision matrix deterministically.
 func TestGateSecretBackend(t *testing.T) {
-	full := vault.Capabilities{KVRead: true, KVWrite: true, Transit: true}
-	transitOnly := vault.Capabilities{Transit: true}
+	full := vault.Capabilities{KVRead: true, KVWrite: true}
+	transitOnly := vault.Capabilities{} // transit-only policy: no KV caps
 	kvReadOnly := vault.Capabilities{KVRead: true}
 
 	cases := []struct {
@@ -46,6 +46,30 @@ func TestGateSecretBackend(t *testing.T) {
 			}
 			if useVault != tc.wantUseVault {
 				t.Fatalf("useVault=%v, want %v", useVault, tc.wantUseVault)
+			}
+		})
+	}
+}
+
+// deriveRouteGates decides the advisory SolanaCanSign/SecretWrite route gates (#661).
+func TestDeriveRouteGates(t *testing.T) {
+	cases := []struct {
+		name                               string
+		useVault, connected, encryption    bool
+		caps                               vault.Capabilities
+		wantSolanaCanSign, wantSecretWrite bool
+	}{
+		{"db + encryption, no vault: local keys sign, writes on", false, false, true, vault.Capabilities{}, true, true},
+		{"db, no encryption, no vault: cannot sign", false, false, false, vault.Capabilities{}, false, true},
+		{"db + transit-only vault: connection signs, writes on", false, true, false, vault.Capabilities{}, true, true},
+		{"vault backend + KV rw: signs via KV keys, writes on", true, true, false, vault.Capabilities{KVRead: true, KVWrite: true}, true, true},
+		{"vault backend + KV read-only: signs, writes OFF", true, true, false, vault.Capabilities{KVRead: true}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			canSign, secretWrite := deriveRouteGates(tc.useVault, tc.connected, tc.encryption, tc.caps)
+			if canSign != tc.wantSolanaCanSign || secretWrite != tc.wantSecretWrite {
+				t.Fatalf("got (canSign=%v, secretWrite=%v), want (%v, %v)", canSign, secretWrite, tc.wantSolanaCanSign, tc.wantSecretWrite)
 			}
 		})
 	}

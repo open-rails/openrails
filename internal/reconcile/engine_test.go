@@ -449,15 +449,16 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 		UserEmail:             a.UserEmail,
 		CurrentPeriodStartsAt: a.PeriodStartsAt,
 		CurrentPeriodEndsAt:   a.PeriodEndsAt,
-		StartedAt:             time.Now(),
+		StartedAt:             testNow,
 		EntitlementNames:      fakeMaterializeEntitlements,
 	}
 	w.local.state.Subscriptions = append(w.local.state.Subscriptions, sub)
 	w.local.mu.Unlock()
 
 	res := MaterializeResult{SubscriptionID: sub.ID, Created: true}
-	if a.PeriodEndsAt == nil || a.PeriodEndsAt.After(time.Now()) {
-		start := time.Now()
+	// testNow, not time.Now() — a real clock makes the fixture date-dependent.
+	if a.PeriodEndsAt == nil || a.PeriodEndsAt.After(testNow) {
+		start := testNow
 		if a.PeriodStartsAt != nil {
 			start = *a.PeriodStartsAt
 		}

@@ -3,6 +3,7 @@ package nmi
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -35,159 +36,85 @@ type CreateCustomerVaultResponse struct {
 	CustomerVaultID string
 }
 
+func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBillingRequest, error) {
+	billing := &v5CustomerBillingRequest{
+		FirstName: d.FirstName,
+		LastName:  d.LastName,
+		Company:   d.Company,
+		Address1:  d.Address1,
+		Address2:  d.Address2,
+		City:      d.City,
+		State:     d.State,
+		Zip:       d.Zip,
+		Country:   d.Country,
+		Phone:     d.Phone,
+		Email:     d.Email,
+	}
+	token := strings.TrimSpace(d.PaymentToken)
+	if token == "" && requireToken {
+		return nil, errors.New("payment token is required")
+	}
+	if token != "" {
+		billing.PaymentDetails = &v5PaymentDetails{PaymentToken: token}
+	}
+	return billing, nil
+}
+
+// CreateCustomerVault stores a Collect.js / Payment Component token as a new
+// vault customer via POST /v5/customers.
 func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCustomerVaultResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
-
-	values := url.Values{
-		"customer_vault": {"add_customer"},
-		"security_key":   {c.SecurityKey},
-	}
-	values.Set("payment_token", strings.TrimSpace(data.PaymentToken))
-
-	if data.FirstName != "" {
-		values.Set("first_name", data.FirstName)
-	}
-	if data.LastName != "" {
-		values.Set("last_name", data.LastName)
-	}
-	if data.Address1 != "" {
-		values.Set("address1", data.Address1)
-	}
-	if data.City != "" {
-		values.Set("city", data.City)
-	}
-	if data.State != "" {
-		values.Set("state", data.State)
-	}
-	if data.Zip != "" {
-		values.Set("zip", data.Zip)
-	}
-	if data.Country != "" {
-		values.Set("country", data.Country)
-	}
-	if data.Phone != "" {
-		values.Set("phone", data.Phone)
-	}
-	if data.Email != "" {
-		values.Set("email", data.Email)
-	}
-
-	response, err := c.sendDirectRequest(values)
+	billing, err := data.v5Billing(true)
 	if err != nil {
 		return nil, err
 	}
 
-	output, err := parseDirectResponse(response)
-	if err != nil {
+	var customer V5Customer
+	if err := c.sendV5Request(http.MethodPost, "/customers", map[string]any{"billing": billing}, &customer); err != nil {
 		return nil, err
 	}
-	if !isDirectResponseApproved(output) {
-		return nil, newCustomerVaultError(response, output)
+	if strings.TrimSpace(customer.ID) == "" {
+		return nil, fmt.Errorf("failed to create customer vault: response carried no customer id")
 	}
-
-	vaultID := output.Get("customer_vault_id")
-	if vaultID == "" {
-		return nil, fmt.Errorf("failed to create customer vault: %s", responseText(output, response))
-	}
-
-	return &CreateCustomerVaultResponse{CustomerVaultID: vaultID}, nil
+	return &CreateCustomerVaultResponse{CustomerVaultID: customer.ID}, nil
 }
 
+// UpdateCustomerVault updates the priority-1 billing record (payment token
+// and/or address fields) via PATCH /v5/customers/{id}.
 func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(data.CustomerVaultID) == "" {
+	vaultID := strings.TrimSpace(data.CustomerVaultID)
+	if vaultID == "" {
 		return errors.New("customer vault ID is required")
 	}
-
-	values := url.Values{
-		"customer_vault":    {"update_customer"},
-		"security_key":      {c.SecurityKey},
-		"customer_vault_id": {data.CustomerVaultID},
-	}
-
-	if strings.TrimSpace(data.PaymentToken) != "" {
-		values.Set("payment_token", strings.TrimSpace(data.PaymentToken))
-	}
-	if data.FirstName != "" {
-		values.Set("first_name", data.FirstName)
-	}
-	if data.LastName != "" {
-		values.Set("last_name", data.LastName)
-	}
-	if data.Address1 != "" {
-		values.Set("address1", data.Address1)
-	}
-	if data.City != "" {
-		values.Set("city", data.City)
-	}
-	if data.State != "" {
-		values.Set("state", data.State)
-	}
-	if data.Zip != "" {
-		values.Set("zip", data.Zip)
-	}
-	if data.Country != "" {
-		values.Set("country", data.Country)
-	}
-	if data.Phone != "" {
-		values.Set("phone", data.Phone)
-	}
-	if data.Email != "" {
-		values.Set("email", data.Email)
-	}
-	if data.Company != "" {
-		values.Set("company", data.Company)
-	}
-	if data.Address2 != "" {
-		values.Set("address2", data.Address2)
-	}
-
-	response, err := c.sendDirectRequest(values)
+	billing, err := data.v5Billing(false)
 	if err != nil {
 		return err
 	}
 
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
+	// billing is an array on update; omitting billing_id targets priority 1.
+	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
+	if err := c.sendV5Request(http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {
+		return fmt.Errorf("failed to update customer vault: %w", err)
 	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to update customer vault: %s", responseText(output, response))
-	}
-
 	return nil
 }
 
+// DeleteCustomerVault removes a vault customer via DELETE /v5/customers/{id}.
 func (c *NMIClient) DeleteCustomerVault(data DeleteCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(data.CustomerVaultID) == "" {
+	vaultID := strings.TrimSpace(data.CustomerVaultID)
+	if vaultID == "" {
 		return errors.New("customer vault ID is required")
 	}
-
-	values := url.Values{
-		"customer_vault":    {"delete_customer"},
-		"security_key":      {c.SecurityKey},
-		"customer_vault_id": {data.CustomerVaultID},
+	if err := c.sendV5Request(http.MethodDelete, "/customers/"+url.PathEscape(vaultID), nil, nil); err != nil {
+		return fmt.Errorf("failed to delete customer vault: %w", err)
 	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
-	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to delete customer vault: %s", responseText(output, response))
-	}
-
 	return nil
 }

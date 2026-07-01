@@ -3,7 +3,6 @@ package intents
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"strconv"
@@ -272,54 +271,29 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsProvi
 	return Succeeded(map[string]any{"provider_refund_id": refundTxnID, "verified_existing": true})
 }
 
-// nmiTransactionQueryResponse mirrors the slice of the Query API transaction
-// report the refund verifier reads. NMI surfaces refunds either as their own
-// <transaction> (with action_type=refund/credit) or as additional <action>
-// entries on the original — both shapes are scanned.
-type nmiTransactionQueryResponse struct {
-	XMLName      xml.Name `xml:"nm_response"`
-	Transactions []struct {
-		TransactionID string `xml:"transaction_id"`
-		Actions       []struct {
-			Amount     string `xml:"amount"`
-			ActionType string `xml:"action_type"`
-			Success    string `xml:"success"`
-		} `xml:"action"`
-	} `xml:"transaction"`
-	ErrorResponse string `xml:"error_response"`
-}
-
-// findRefund reads the original transaction's report and looks for a
-// successful refund/credit action matching the intent amount. The returned id
-// is the transaction carrying the refund action (the refund's own id when NMI
-// reports it as a separate transaction, else the original's).
+// findRefund reads the original transaction (GET /v5/payments/{id}) and looks
+// for a successful refund/credit action matching the intent amount. The
+// returned id is the action's own transaction id when NMI reports one, else
+// the original's.
 func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (refundTransactionID string, found bool, err error) {
-	raw, err := client.GetTransactionDetails(p.ProviderTarget)
+	actions, txnFound, err := client.GetPaymentActions(p.ProviderTarget)
 	if err != nil {
 		return "", false, err
 	}
-	var parsed nmiTransactionQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", false, fmt.Errorf("parse transaction query response: %w", err)
+	if !txnFound {
+		return "", false, fmt.Errorf("transaction %s not found at provider", p.ProviderTarget)
 	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return "", false, fmt.Errorf("transaction query error_response: %s", msg)
-	}
-	for _, txn := range parsed.Transactions {
-		for _, action := range txn.Actions {
-			actionType := strings.ToLower(strings.TrimSpace(action.ActionType))
-			if actionType != "refund" && actionType != "credit" {
-				continue
-			}
-			if strings.TrimSpace(action.Success) != "1" {
-				continue
-			}
-			cents, cerr := nmiAmountToCents(action.Amount)
-			if cerr != nil || cents != p.AmountCents {
-				continue
-			}
-			return strings.TrimSpace(txn.TransactionID), true, nil
+	for _, action := range actions {
+		if action.Type != "refund" && action.Type != "credit" {
+			continue
 		}
+		if !action.Success {
+			continue
+		}
+		if action.AmountCents != p.AmountCents {
+			continue
+		}
+		return action.TransactionID, true, nil
 	}
 	return "", false, nil
 }

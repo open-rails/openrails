@@ -196,7 +196,7 @@ func New(deps Dependencies) (*Server, error) {
 				SecretWrite:   secretBackend.SecretWrite,
 			}
 			if !secretBackend.SolanaCanSign && deps.Runtime.Rails.GetSolanaRail() != nil {
-				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault Transit capability and no local key); Solana signing routes are disabled — configure vault_transit or a local keypair")
+				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault connection and no local key); Solana signing routes are disabled — configure vault_transit or a local keypair")
 			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)

@@ -409,9 +409,10 @@ and should be handled conservatively.
 
 | Finding type | Invariant — must hold | Shape | Class |
 |---|---|---|---|
-| `life.subscription.period_overdue` | An `active` sub past `current_period_ends_at` is renewing or in dunning | MISMATCH | AUTO |
-| `life.subscription.dunning_overdue` | A `past_due` sub has a live, on-time retry schedule | MISSING | AUTO |
-| `life.subscription.grace_exhausted` | A `past_due` sub past grace/max-retries is terminal (converge: cancel now, revoke as-of grace end) | EXCESS | AUTO -> provider cancel action |
+| `life.subscription.period_overdue` | An `active` sub past `current_period_ends_at` with OWNERSHIP EVIDENCE (#664: vaulted NMI + a completed payment opened the current period, or a provider watermark newer than the period end) is in dunning; without evidence it routes to `unknown` via `needs_verification` | MISMATCH | AUTO |
+| `life.subscription.needs_verification` | An `active` sub past its period end that we cannot dunning-charge with evidence is `unknown` (access intact) awaiting provider verification (#632/#664) | MISMATCH | AUTO |
+| `life.subscription.dunning_overdue` | A `past_due` sub still in grace has a live, on-time retry schedule | MISSING | AUTO |
+| `life.subscription.grace_exhausted` | A `past_due` sub past grace with NO retry scheduled is parked `unknown` for provider verification (#664 certainty rule: convergence never terminally cancels — FailMembership's real attempts / hard declines / stale window and provider-confirmed outcomes own cancellation) | MISMATCH | AUTO |
 | `life.subscription.pending_stale` | A `pending` sub does not sit unconfirmed past threshold | EXCESS | AUTO |
 | `life.provider_intent.abandoned` | A desired provider action remains unapplied, but no automatic retry will happen (max attempts exhausted, expired, no retry scheduled, retry policy disabled, provider unavailable, or manual action required) | MISMATCH | OPERATOR / ADMIN |
 | `life.checkout_session.stale` | An expired `checkout_session` is cleaned up | EXCESS | AUTO |

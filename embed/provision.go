@@ -69,7 +69,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 				SecretWrite:   backend.SecretWrite,
 			}
 			if !backend.SolanaCanSign && a.Runtime.Rails.GetSolanaRail() != nil {
-				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault Transit capability and no local key); Solana signing routes are disabled")
+				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault connection and no local key); Solana signing routes are disabled")
 			}
 		}
 	}

@@ -1936,46 +1936,6 @@ COMMENT ON COLUMN openrails.usage_events.resource IS 'Caller-supplied free-form 
 
 
 --
--- Name: usdc_funding_sessions; Type: TABLE; Schema: openrails; Owner: -
---
-
-CREATE TABLE openrails.usdc_funding_sessions (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    checkout_session_id uuid,
-    provider text NOT NULL,
-    wallet_address text NOT NULL,
-    asset text NOT NULL,
-    network text NOT NULL,
-    requested_amount text NOT NULL,
-    provider_session_id text,
-    provider_url text NOT NULL,
-    status text NOT NULL,
-    return_url text,
-    idempotency_key text,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    last_checked_at timestamp with time zone,
-    expires_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT usdc_funding_sessions_asset_valid CHECK ((asset = 'USDC'::text)),
-    CONSTRAINT usdc_funding_sessions_nonempty CHECK (((btrim(wallet_address) <> ''::text) AND (btrim(network) <> ''::text) AND (btrim(requested_amount) <> ''::text) AND (btrim(provider_url) <> ''::text))),
-    CONSTRAINT usdc_funding_sessions_provider_valid CHECK ((provider = ANY (ARRAY['robinhood'::text, 'coinbase'::text]))),
-    CONSTRAINT usdc_funding_sessions_status_valid CHECK ((status = ANY (ARRAY['created'::text, 'opened'::text, 'pending_provider'::text, 'pending_settlement'::text, 'funded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])))
-);
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE usdc_funding_sessions; Type: COMMENT; Schema: openrails; Owner: -
---
-
-COMMENT ON TABLE openrails.usdc_funding_sessions IS 'External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.';
-
-
---
 -- Name: bootstrap_state bootstrap_state_pkey; Type: CONSTRAINT; Schema: openrails; Owner: -
 --
 
@@ -2389,14 +2349,6 @@ ALTER TABLE ONLY openrails.merchants
 
 ALTER TABLE ONLY openrails.usage_events
     ADD CONSTRAINT usage_events_pkey PRIMARY KEY (id);
-
-
---
--- Name: usdc_funding_sessions usdc_funding_sessions_pkey; Type: CONSTRAINT; Schema: openrails; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_pkey PRIMARY KEY (id);
 
 
 --
@@ -3097,34 +3049,6 @@ CREATE INDEX idx_usage_events_customer_time ON openrails.usage_events USING btre
 --
 
 CREATE INDEX idx_usage_events_invoker ON openrails.usage_events USING btree (merchant_id, invoker_id, occurred_at DESC);
-
-
---
--- Name: idx_usdc_funding_sessions_checkout; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE INDEX idx_usdc_funding_sessions_checkout ON openrails.usdc_funding_sessions USING btree (merchant_id, checkout_session_id) WHERE (checkout_session_id IS NOT NULL);
-
-
---
--- Name: idx_usdc_funding_sessions_customer; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE INDEX idx_usdc_funding_sessions_customer ON openrails.usdc_funding_sessions USING btree (merchant_id, customer_id, created_at DESC);
-
-
---
--- Name: idx_usdc_funding_sessions_idempotency; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE UNIQUE INDEX idx_usdc_funding_sessions_idempotency ON openrails.usdc_funding_sessions USING btree (merchant_id, customer_id, idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (btrim(idempotency_key) <> ''::text));
-
-
---
--- Name: idx_usdc_funding_sessions_provider_session; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE INDEX idx_usdc_funding_sessions_provider_session ON openrails.usdc_funding_sessions USING btree (provider, provider_session_id) WHERE (provider_session_id IS NOT NULL);
 
 
 --
@@ -3948,22 +3872,6 @@ ALTER TABLE ONLY openrails.usage_events
 
 
 --
--- Name: usdc_funding_sessions usdc_funding_sessions_checkout_session_id_fkey; Type: FK CONSTRAINT; Schema: openrails; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_checkout_session_id_fkey FOREIGN KEY (checkout_session_id) REFERENCES openrails.checkout_sessions(id) ON DELETE SET NULL;
-
-
---
--- Name: usdc_funding_sessions usdc_funding_sessions_customer_id_fkey; Type: FK CONSTRAINT; Schema: openrails; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE;
-
-
---
 -- Name: catalog_drift_events; Type: ROW SECURITY; Schema: openrails; Owner: -
 --
 
@@ -4345,13 +4253,6 @@ CREATE POLICY merchant_isolation ON openrails.usage_events USING ((merchant_id =
 
 
 --
--- Name: usdc_funding_sessions merchant_isolation; Type: POLICY; Schema: openrails; Owner: -
---
-
-CREATE POLICY merchant_isolation ON openrails.usdc_funding_sessions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
---
 -- Name: merchant_secrets; Type: ROW SECURITY; Schema: openrails; Owner: -
 --
 
@@ -4476,12 +4377,6 @@ ALTER TABLE openrails.tier_schedules ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
-
---
--- Name: usdc_funding_sessions; Type: ROW SECURITY; Schema: openrails; Owner: -
---
-
-ALTER TABLE openrails.usdc_funding_sessions ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: SCHEMA openrails; Type: ACL; Schema: -; Owner: -
@@ -4784,23 +4679,3 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_schedules TO openrails
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usage_events TO openrails_app;
 
 
---
--- Name: TABLE usdc_funding_sessions; Type: ACL; Schema: openrails; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usdc_funding_sessions TO openrails_app;
-
-
---
--- Default privileges for future objects. NO "FOR ROLE <name>": pg_dump hardcodes
--- the dump-source superuser (`admin`), but embedders run migrations as their own
--- role — an unqualified ALTER DEFAULT PRIVILEGES targets current_user, so later
--- migrations' sequences/tables auto-grant to openrails_app (RLS mode) regardless
--- of the host's DB role name. (#585)
---
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT,USAGE ON SEQUENCES TO openrails_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO openrails_app;
-
-
---

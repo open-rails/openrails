@@ -71,31 +71,30 @@ func tokenWithPolicy(t *testing.T, root *vaultapi.Client, name, hcl string) *vau
 func TestSelfCapabilitiesRootSeesEverything(t *testing.T) {
 	root := capRootClient(t)
 	ensureTransit(t, root)
-	caps, err := SelfCapabilities(context.Background(), root, "secret", "transit")
+	caps, err := SelfCapabilities(context.Background(), root, "secret")
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
-	if !caps.KVRead || !caps.KVWrite || !caps.Transit {
+	if !caps.KVRead || !caps.KVWrite {
 		t.Fatalf("root caps = %+v, want all true", caps)
 	}
 }
 
+// A transit-only policy (key names are operator-chosen — any name works) grants
+// zero KV capability: the #661 least-privilege deployment.
 func TestSelfCapabilitiesTransitOnly(t *testing.T) {
 	root := capRootClient(t)
 	ensureTransit(t, root)
 	cl := tokenWithPolicy(t, root, "openrails-transit-only", `
-path "transit/sign/openrails-*" { capabilities = ["update"] }
-path "transit/keys/openrails-*" { capabilities = ["read"] }
+path "transit/sign/my-mainnet-signer" { capabilities = ["update"] }
+path "transit/keys/my-mainnet-signer" { capabilities = ["read"] }
 `)
-	caps, err := SelfCapabilities(context.Background(), cl, "secret", "transit")
+	caps, err := SelfCapabilities(context.Background(), cl, "secret")
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
 	if caps.KVRead || caps.KVWrite {
 		t.Fatalf("transit-only token has KV caps: %+v", caps)
-	}
-	if !caps.Transit {
-		t.Fatalf("transit-only token missing Transit: %+v", caps)
 	}
 }
 
@@ -106,21 +105,18 @@ func TestSelfCapabilitiesKVReadWriteThenReadOnly(t *testing.T) {
 	rw := tokenWithPolicy(t, root, "openrails-kv-rw", `
 path "secret/data/openrails/*" { capabilities = ["create","read","update","delete"] }
 `)
-	caps, err := SelfCapabilities(context.Background(), rw, "secret", "transit")
+	caps, err := SelfCapabilities(context.Background(), rw, "secret")
 	if err != nil {
 		t.Fatalf("probe rw: %v", err)
 	}
 	if !caps.KVRead || !caps.KVWrite {
 		t.Fatalf("rw token missing KV caps: %+v", caps)
 	}
-	if caps.Transit {
-		t.Fatalf("kv-only token unexpectedly has Transit: %+v", caps)
-	}
 
 	ro := tokenWithPolicy(t, root, "openrails-kv-ro", `
 path "secret/data/openrails/*" { capabilities = ["read"] }
 `)
-	caps, err = SelfCapabilities(context.Background(), ro, "secret", "transit")
+	caps, err = SelfCapabilities(context.Background(), ro, "secret")
 	if err != nil {
 		t.Fatalf("probe ro: %v", err)
 	}

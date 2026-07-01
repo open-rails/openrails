@@ -1042,29 +1042,6 @@ type OpenrailsUsageEvent struct {
 	CreatedAt          time.Time
 }
 
-// External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.
-type OpenrailsUsdcFundingSession struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	CustomerID        uuid.UUID
-	CheckoutSessionID *uuid.UUID
-	Provider          string
-	WalletAddress     string
-	Asset             string
-	Network           string
-	RequestedAmount   string
-	ProviderSessionID *string
-	ProviderUrl       string
-	Status            string
-	ReturnUrl         *string
-	IdempotencyKey    *string
-	Metadata          []byte
-	LastCheckedAt     *time.Time
-	ExpiresAt         *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
 type ProfilesUser struct {
 	ID            uuid.UUID
 	Email         *string

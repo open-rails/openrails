@@ -2,7 +2,6 @@ package intents
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"strings"
@@ -203,35 +202,13 @@ func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsPro
 	return repo.NewSubscriptionRepo(h.DB).UpdateAt(ctx, sub, h.now())
 }
 
-// nmiRecurringQueryResponse mirrors the slice of the NMI Query API recurring
-// report needed to answer "does this subscription still exist?".
-type nmiRecurringQueryResponse struct {
-	XMLName       xml.Name `xml:"nm_response"`
-	Subscriptions []struct {
-		SubscriptionID string `xml:"subscription_id"`
-	} `xml:"subscription"`
-	ErrorResponse string `xml:"error_response"`
-}
-
-// subscriptionPresent reads the recurring report filtered by subscription_id.
-// NMI drops deleted/cancelled subscriptions from the report entirely, so "no
-// matching row" means deleted.
+// subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/
+// cancelled subscriptions entirely (the v5 GET answers 404), so "not found"
+// means deleted.
 func (h *NMIDeleteHandler) subscriptionPresent(client *nmi.NMIClient, railSubscriptionID string) (bool, error) {
-	raw, err := client.QueryRecurringSubscriptions(nmi.RecurringQueryParams{SubscriptionID: railSubscriptionID})
+	_, found, err := client.GetSubscription(railSubscriptionID)
 	if err != nil {
 		return false, err
 	}
-	var parsed nmiRecurringQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return false, fmt.Errorf("parse recurring query response: %w", err)
-	}
-	if parsed.ErrorResponse != "" {
-		return false, fmt.Errorf("recurring query error_response: %s", parsed.ErrorResponse)
-	}
-	for _, s := range parsed.Subscriptions {
-		if strings.TrimSpace(s.SubscriptionID) == strings.TrimSpace(railSubscriptionID) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return found, nil
 }

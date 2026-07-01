@@ -253,12 +253,10 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
-	// life.subscription.grace_exhausted — a past_due sub whose grace window has
-	// elapsed is terminal. Converge-NOT-replay: cancel NOW, but revoke the
-	// entitlements as-of when grace ended (the access truly lapsed then), never
-	// re-running the missed dunning charges. Time-driven EXCESS → AUTO, not gated.
-	// (A provider cancel action is the linked remediation; the provider-intent
-	// enqueue lands with the provider-action wiring.)
+	// life.subscription.grace_exhausted — past_due, grace elapsed, no retry
+	// scheduled: dunning stalled, outcome unknown. #664: park as `unknown`
+	// (access intact) for provider-pull; convergence never terminally cancels —
+	// FailMembership + provider-confirmed outcomes own that. MISMATCH → AUTO.
 	exhausted, err := q.ListGraceExhaustedSubscriptions(ctx, gen.ListGraceExhaustedSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -267,45 +265,32 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	}
 	for i := range exhausted {
 		subID := exhausted[i].ID
-		asOf := now
+		graceEnded := now
 		if exhausted[i].GraceEndsAt != nil {
-			asOf = *exhausted[i].GraceEndsAt
+			graceEnded = *exhausted[i].GraceEndsAt
 		}
 		out = append(out, ConvergeFinding{
 			Type:       "life.subscription.grace_exhausted",
-			Shape:      ShapeExcess,
+			Shape:      ShapeMismatch,
 			Class:      ClassAuto,
 			Severity:   "high",
 			SubjectKey: "subscription:" + subID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": subID.String(), "grace_ends_at": asOf},
+			Evidence:   map[string]any{"subscription_id": subID.String(), "grace_ends_at": graceEnded, "cause": "dunning_stalled_past_grace"},
 			Repair: func(ctx context.Context) error {
-				// Terminal cancel through the shared local-state core: status flip +
-				// Solana cranker cascade (#264) + revoke the sub's paid AND grace
-				// windows AS-OF grace end (converge-not-replay — access lapsed then,
-				// no missed dunning charges re-run). ended_at = now (>= cancelled_at,
-				// per chk_ended_not_before_cancelled). No side-effects fired.
 				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
 				if err != nil {
 					return fmt.Errorf("life: load grace-exhausted subscription %s: %w", subID, err)
 				}
-				fb := "grace exhausted (converged)"
-				return p.e.lifecycle.ApplyLocalCancellation(ctx, p.e.DB, sub, subscriptions.LocalCancellation{
-					EndedAt:       now,
-					CancelType:    models.CancelTypeExpired,
-					Feedback:      &fb,
-					RevokeReason:  models.EntitlementRevokeDunning,
-					RevokeAsOf:    asOf,
-					RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-				})
+				return p.e.lifecycle.ApplyLocalUnknown(ctx, p.e.DB, sub)
 			},
 		})
 	}
 
 	// life.subscription.period_overdue — an `active` sub past its period end that
-	// never advanced. Converge it into dunning (past_due) with a grace window
-	// dated to the period end; a long-overdue sub then terminates via
-	// grace_exhausted on the next pass. MISMATCH, time-driven → AUTO, not gated.
+	// never advanced. #664: the query admits only vaulted NMI with ownership
+	// evidence. Converge into dunning with grace dated to the period end;
+	// FailMembership owns the terminal decision. MISMATCH → AUTO.
 	overdue, err := q.ListPeriodOverdueSubscriptions(ctx, gen.ListPeriodOverdueSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -339,12 +324,10 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
-	// life.subscription.needs_verification (#632) — an active, period-elapsed,
-	// provider-auto-billed sub (CCBill / vault-less NMI) with NO confirming renewal
-	// payment. We cannot rebill it and must NOT guess whether the provider billed it:
-	// flip to `unknown`. Access stays intact (no revoke on a guess); provider-pull
-	// (#633) then resolves it. MISMATCH, AUTO. Disjoint from period_overdue (which now
-	// excludes the provider-auto-billed cohort).
+	// life.subscription.needs_verification (#632/#664) — active, period-elapsed,
+	// not dunning-chargeable with evidence (exact complement of period_overdue).
+	// Flip to `unknown`, access intact — no revoke on a guess; provider-pull
+	// (#633) resolves it. MISMATCH → AUTO.
 	needsVerify, err := q.ListNeedsVerificationSubscriptions(ctx, gen.ListNeedsVerificationSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-periodGrace),
 	})

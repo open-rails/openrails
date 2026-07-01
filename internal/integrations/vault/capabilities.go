@@ -11,29 +11,27 @@ import (
 // uses (#661). Derived from sys/capabilities-self at startup. ADVISORY ONLY — it
 // drives feature-gating and boot diagnostics, never authorization (Vault's runtime
 // 403 stays the real boundary; a gated-on feature may still 403 if policy changes).
+//
+// Only KV is probed: its paths are OpenRails-owned addressing (<mount>/data/openrails/*),
+// so the probe is exact. Transit key names are operator-chosen (no naming convention),
+// so transit access is verified against the REAL key at provision time
+// (solanaTransitPublicKey) and by the runtime 403 — never by path-probing here.
 type Capabilities struct {
 	KVRead  bool // can read merchant secrets from the KV mount
 	KVWrite bool // can create/update merchant secrets (config-push surface)
-	Transit bool // can sign + read the pubkey for Solana Vault Transit
 }
 
-// SelfCapabilities probes what the client's token may do on the KV and Transit
-// paths OpenRails uses. Transit is probed against the documented `openrails-*` key
-// convention; a policy scoped to that prefix (or wider) matches. Never derive
-// authorization from this — only hide/degrade features.
-func SelfCapabilities(ctx context.Context, client *vaultapi.Client, kvMount, transitMount string) (Capabilities, error) {
+// SelfCapabilities probes what the client's token may do on the KV paths OpenRails
+// uses. Never derive authorization from this — only hide/degrade features.
+func SelfCapabilities(ctx context.Context, client *vaultapi.Client, kvMount string) (Capabilities, error) {
 	kvPath := kvMount + "/data/openrails/probe"
-	transitSign := transitMount + "/sign/openrails-probe"
-	transitKeys := transitMount + "/keys/openrails-probe"
-
-	caps, err := selfCapabilitiesOnPaths(ctx, client, []string{kvPath, transitSign, transitKeys})
+	caps, err := selfCapabilitiesOnPaths(ctx, client, []string{kvPath})
 	if err != nil {
 		return Capabilities{}, err
 	}
 	return Capabilities{
 		KVRead:  hasCap(caps[kvPath], "read"),
 		KVWrite: hasCap(caps[kvPath], "create") || hasCap(caps[kvPath], "update"),
-		Transit: hasCap(caps[transitSign], "update") && hasCap(caps[transitKeys], "read"),
 	}, nil
 }
 

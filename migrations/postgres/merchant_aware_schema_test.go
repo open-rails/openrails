@@ -27,7 +27,6 @@ var merchantOwnedTables = []string{
 	"subscriptions",
 	"payments",
 	"checkout_sessions",
-	"usdc_funding_sessions",
 	"solana_subscriptions",
 	"entitlements",
 	"invoices",

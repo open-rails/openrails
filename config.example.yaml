@@ -76,24 +76,3 @@ captcha:
   site_key: ""
   secret_key: ""
 
-# Still a work in progress; TODO later
-usdc_funding:
-  providers:
-    robinhood:
-      enabled: false
-      supported_networks: [solana]
-      launch_url_template: ""
-      api_base_url: ""
-      api_key_id: ""
-      api_key_secret: ""
-      api_key: ""
-      webhook_secret: ""
-    coinbase:
-      enabled: false
-      supported_networks: [solana]
-      launch_url_template: ""
-      api_base_url: https://api.cdp.coinbase.com
-      api_key_id: ""
-      api_key_secret: ""
-      api_key: ""
-      webhook_secret: ""

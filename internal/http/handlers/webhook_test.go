@@ -1,16 +1,11 @@
 package handlers
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/stretchr/testify/require"
@@ -73,43 +68,4 @@ func TestReadRequestBodyDoesNotConstrainWebhookSize(t *testing.T) {
 	if string(body) != largeBody {
 		t.Fatalf("expected body to round-trip, got %d bytes", len(body))
 	}
-}
-
-func TestVerifyHook0Signature(t *testing.T) {
-	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-	body := []byte(`{"eventType":"onramp.transaction.success","partnerUserRef":"ufs_00000000-0000-0000-0000-000000000001"}`)
-	headers := http.Header{}
-	headers.Set("Content-Type", "application/json")
-	headers.Set("X-Custom", "abc")
-	signature := signHook0("whsec_coinbase", body, headers, "content-type x-custom", now)
-
-	require.NoError(t, verifyHook0Signature(body, signature, "whsec_coinbase", headers, now, 5*time.Minute))
-	require.ErrorIs(t, verifyHook0Signature(body, signature, "wrong", headers, now, 5*time.Minute), webhookutil.ErrWebhookSignatureInvalid)
-	require.ErrorIs(t, verifyHook0Signature(body, "", "whsec_coinbase", headers, now, 5*time.Minute), webhookutil.ErrWebhookSignatureMissing)
-	require.ErrorIs(t, verifyHook0Signature(body, signature, "whsec_coinbase", headers, now.Add(10*time.Minute), 5*time.Minute), webhookutil.ErrWebhookSignatureInvalid)
-}
-
-func TestCoinbaseFundingSessionID(t *testing.T) {
-	payload := map[string]any{
-		"data": map[string]any{
-			"session": map[string]any{
-				"partnerUserRef": "ufs_00000000-0000-0000-0000-000000000001",
-			},
-		},
-	}
-	got, ok := coinbaseFundingSessionID(payload)
-	require.True(t, ok)
-	require.Equal(t, "ufs_00000000-0000-0000-0000-000000000001", got)
-}
-
-func signHook0(secret string, body []byte, headers http.Header, headerNames string, now time.Time) string {
-	timestamp := fmt.Sprintf("%d", now.Unix())
-	values := make([]string, 0)
-	for _, name := range strings.Fields(headerNames) {
-		values = append(values, headers.Get(name))
-	}
-	signedPayload := timestamp + "." + headerNames + "." + strings.Join(values, ".") + "." + string(body)
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signedPayload))
-	return "t=" + timestamp + ",h=" + headerNames + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }

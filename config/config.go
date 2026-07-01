@@ -91,11 +91,6 @@ type Config struct {
 	// Formula: generated_url = APIURL + {version_path} + "/checkout/:id/solana-pay"
 	APIURL string `koanf:"api_url,omitempty"`
 
-	// USDCFunding configures external wallet-funding providers. These providers
-	// only move USDC into the user's self-custody wallet; OpenRails checkout still
-	// collects payment from that wallet afterwards.
-	USDCFunding *USDCFundingConfig `koanf:"usdc_funding,omitempty"`
-
 	DB         *DBConfig         `koanf:"db,omitempty"`
 	Redis      *RedisConfig      `koanf:"redis,omitempty"`
 	Auth       *AuthConfig       `koanf:"auth,omitempty"`
@@ -642,33 +637,6 @@ var ValidModes = ValidProviderWriteModes
 // metadata is merchant-scoped and loaded from merchant_configurations.
 type SendGridConfig struct {
 	APIKey string `koanf:"api_key"`
-}
-
-type USDCFundingConfig struct {
-	Providers map[string]*USDCFundingProviderConfig `koanf:"providers,omitempty"`
-}
-
-type USDCFundingProviderConfig struct {
-	Enabled           bool     `koanf:"enabled"`
-	SupportedNetworks []string `koanf:"supported_networks,omitempty"`
-
-	// LaunchURLTemplate is used for provider handoffs where the partner surface
-	// exposes a configured URL/widget rather than a public session-create API.
-	// Supported placeholders: {wallet}, {network}, {asset}, {amount},
-	// {session_id}, {return_url}.
-	LaunchURLTemplate string `koanf:"launch_url_template,omitempty"`
-
-	// Coinbase-hosted Onramp session API configuration. Prefer APIKeyID +
-	// APIKeySecret so OpenRails can generate the short-lived CDP JWT required for
-	// server-to-server calls. APIKey is retained as an escape hatch for tests or
-	// manually supplied short-lived bearer tokens; never expose these to host apps.
-	APIBaseURL   string `koanf:"api_base_url,omitempty"`
-	APIKeyID     string `koanf:"api_key_id,omitempty"`
-	APIKeySecret string `koanf:"api_key_secret,omitempty"`
-	APIKey       string `koanf:"api_key,omitempty"`
-	// WebhookSecret is the Coinbase webhook subscription secret returned when
-	// creating the Onramp webhook subscription. It verifies X-Hook0-Signature.
-	WebhookSecret string `koanf:"webhook_secret,omitempty"`
 }
 
 type ClickHouseConfig struct {
@@ -1472,15 +1440,6 @@ func Load(configPath string) (*Config, error) {
 		// split would yield vault.addr). VAULT_TOKEN already splits correctly.
 		if s == "vault_addr" {
 			return "vault.address"
-		}
-
-		// USDC_FUNDING_PROVIDERS_<NAME>_<FIELD> -> usdc_funding.providers.<name>.<field>
-		if strings.HasPrefix(s, "usdc_funding_providers_") {
-			rest := strings.TrimPrefix(s, "usdc_funding_providers_")
-			parts := strings.SplitN(rest, "_", 2)
-			if len(parts) == 2 {
-				return fmt.Sprintf("usdc_funding.providers.%s.%s", parts[0], parts[1])
-			}
 		}
 
 		// Replace only the first underscore for other nested config keys.

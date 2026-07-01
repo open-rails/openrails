@@ -149,19 +149,22 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "po-prod-"+suffix, "po-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
-		// #632: only OUR-rebill subs (NMI with a vaulted payment method) enter period_overdue
-		// dunning; a vault-less NMI sub routes to `unknown` instead. Seed a payment method so
-		// this overdue sub is in the rebillable cohort.
+		// #664: period_overdue needs vault + ownership evidence — seed a payment
+		// method and a completed payment that opened the current period.
 		pmID := uuid.New()
 		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx')`, pmID, merchantID, customer)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
+		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'usd','completed',$7)`,
+			uuid.New(), merchantID, customer, priceID, subID, "po-pay-"+suffix, periodEnd.Add(-30*24*time.Hour))
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, subID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)

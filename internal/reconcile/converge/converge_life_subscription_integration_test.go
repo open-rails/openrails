@@ -14,10 +14,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #511 Phase D (LIFE plane): a past_due subscription whose grace window has
-// elapsed is detected as `life.subscription.grace_exhausted` and converged to
-// terminal — cancelled NOW, with its entitlement revoked AS-OF grace end
-// (converge-not-replay: no missed dunning charges are re-run). Idempotent.
+// #511/#664 (LIFE): a past_due sub whose grace elapsed with no retry scheduled
+// is parked as `unknown` — never cancelled, entitlements intact. Idempotent.
 func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -64,7 +62,7 @@ func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 		})
 	})
 
-	// Converge → detect grace exhaustion → cancel + revoke as-of grace end.
+	// Converge → detect grace exhaustion → PARK as unknown, access intact.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
@@ -72,13 +70,15 @@ func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 		require.Equal(t, 1, res.AutoFixed)
 
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
-		require.Equal(t, "cancelled", status, "grace-exhausted sub is cancelled")
+		var grace, retry *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text, grace_ends_at, next_retry_at FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status, &grace, &retry))
+		require.Equal(t, "unknown", status, "#664: grace-exhausted sub is parked for verification, NEVER cancelled")
+		require.Nil(t, grace, "stale grace cleared so a future ResolvePastDue stamps fresh dunning state")
+		require.Nil(t, retry)
 
 		var revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
-		require.NotNil(t, revokedAt, "entitlement revoked")
-		require.WithinDuration(t, graceEnd, *revokedAt, time.Second, "revoked AS-OF grace end, not convergence time")
+		require.Nil(t, revokedAt, "#664: no revoke on a guess — entitlement intact while unknown")
 
 		var fstatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
@@ -88,11 +88,11 @@ func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 		return nil
 	}))
 
-	// Idempotent: cancelled → no longer past_due → no finding.
+	// Idempotent: unknown → no longer past_due → no finding.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
-		require.Equal(t, 0, res.Findings, "terminal → converged, no finding")
+		require.Equal(t, 0, res.Findings, "parked → converged, no finding")
 		return nil
 	}))
 }

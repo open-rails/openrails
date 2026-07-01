@@ -1,9 +1,9 @@
 package nmi
 
 import (
-	"encoding/xml"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -71,13 +71,12 @@ type ManualRebillResponse struct {
 	ResponseCode int
 }
 
-type RecurringQueryParams struct {
-	SubscriptionID string
-	ResultLimit    int
-	PageNumber     int
-	ResultOrder    string
-}
-
+// AddRecurringSubscription stays on classic Direct Post DELIBERATELY (#663):
+// type=sale + recurring=add_subscription is an ATOMIC first-charge + enroll
+// (+ delayed start via start_date) in one call. v5's POST /subscriptions has
+// no documented start_date for plan-linked subscriptions and returns no
+// first-charge transaction, so porting it would split one atomic money op
+// into two non-atomic ones.
 func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSubscriptionResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -149,69 +148,54 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	}, nil
 }
 
+// UpdateRecurringSubscription updates the money terms of a live subscription
+// via PATCH /v5/subscriptions/{id}. planAmount is a two-decimal dollar string
+// (unchanged classic signature).
 func (c *NMIClient) UpdateRecurringSubscription(subscriptionID, planAmount string, planPayments int) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(subscriptionID) == "" || strings.TrimSpace(planAmount) == "" {
+	subID := strings.TrimSpace(subscriptionID)
+	if subID == "" || strings.TrimSpace(planAmount) == "" {
 		return "", errors.New("missing required fields: subscriptionID, planAmount")
 	}
-
-	values := url.Values{
-		"recurring":       {"update_subscription"},
-		"security_key":    {c.SecurityKey},
-		"subscription_id": {subscriptionID},
-		"plan_amount":     {planAmount},
-		"plan_payments":   {fmt.Sprintf("%d", planPayments)},
-	}
-
-	response, err := c.sendDirectRequest(values)
+	amountCents, err := v5AmountToCents(planAmount)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid plan amount %q: %w", planAmount, err)
 	}
 
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return "", err
+	body := map[string]any{
+		"plan_amount":   centsJSONAmount(amountCents),
+		"plan_payments": planPayments,
 	}
-	if !isDirectResponseApproved(output) {
-		return "", fmt.Errorf("failed to update subscription: %s", responseText(output, response))
+	var sub V5Subscription
+	if err := c.sendV5Request(http.MethodPatch, "/subscriptions/"+url.PathEscape(subID), body, &sub); err != nil {
+		return "", fmt.Errorf("failed to update subscription: %w", err)
 	}
-
-	return response, nil
+	return sub.ID, nil
 }
 
+// UpdateSubscriptionPaymentSource repoints a subscription at a different vault
+// customer via PATCH /v5/subscriptions/{id} (payment_details.customer_vault_id).
 func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaultID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(subscriptionID) == "" {
+	subID := strings.TrimSpace(subscriptionID)
+	if subID == "" {
 		return errors.New("subscription ID is required")
 	}
-	if strings.TrimSpace(customerVaultID) == "" {
+	vaultID := strings.TrimSpace(customerVaultID)
+	if vaultID == "" {
 		return errors.New("customer vault ID is required")
 	}
 
-	values := url.Values{
-		"recurring":         {"update_subscription"},
-		"security_key":      {c.SecurityKey},
-		"subscription_id":   {subscriptionID},
-		"customer_vault_id": {customerVaultID},
+	body := map[string]any{
+		"payment_details": &v5PaymentDetails{CustomerVaultID: vaultID},
 	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
+	if err := c.sendV5Request(http.MethodPatch, "/subscriptions/"+url.PathEscape(subID), body, nil); err != nil {
+		return fmt.Errorf("failed to update subscription payment source: %w", err)
 	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to update subscription payment source: %s", responseText(output, response))
-	}
-
 	return nil
 }
 
@@ -220,36 +204,26 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaul
 // has genuinely failed and must surface as an error.
 var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (mode=readonly)")
 
+// DeleteRecurringSubscription cancels a subscription via
+// DELETE /v5/subscriptions/{id}. A 404 surfaces as ErrV5NotFound — callers on
+// the certainty path treat "already gone" explicitly, never silently.
 func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(subscriptionID) == "" {
+	subID := strings.TrimSpace(subscriptionID)
+	if subID == "" {
 		return errors.New("subscriptionID is required")
 	}
-
-	values := url.Values{
-		"recurring":       {"delete_subscription"},
-		"security_key":    {c.SecurityKey},
-		"subscription_id": {subscriptionID},
+	if err := c.sendV5Request(http.MethodDelete, "/subscriptions/"+url.PathEscape(subID), nil, nil); err != nil {
+		return fmt.Errorf("failed to delete subscription: %w", err)
 	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
-	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to delete subscription: %s", responseText(output, response))
-	}
-
 	return nil
 }
 
+// AttemptManualRebill stays on classic Direct Post DELIBERATELY (#663):
+// recurring=rebill_subscription (charge the subscription NOW, against its own
+// schedule state) has no v5 equivalent of any kind.
 func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebillResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
@@ -301,85 +275,11 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 	}, nil
 }
 
-func (c *NMIClient) GetTransactionDetails(transactionID string) (string, error) {
-	if err := c.checkConfiguration(); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(transactionID) == "" {
-		return "", errors.New("transactionID is required")
-	}
-
-	values := url.Values{
-		"report_type":    {"transaction"},
-		"security_key":   {c.SecurityKey},
-		"transaction_id": {transactionID},
-	}
-	return c.sendQueryRequest(values)
-}
-
-func (c *NMIClient) GetCustomerVaultData(customerVaultID string) (string, error) {
-	if err := c.checkConfiguration(); err != nil {
-		return "", err
-	}
-
-	values := url.Values{
-		"report_type":  {"customer_vault"},
-		"security_key": {c.SecurityKey},
-	}
-	if customerVaultID != "" {
-		values.Set("customer_vault_id", customerVaultID)
-	}
-
-	return c.sendQueryRequest(values)
-}
-
-func (c *NMIClient) GetSubscriptionData(subscriptionID string) (string, error) {
-	return c.QueryRecurringSubscriptions(RecurringQueryParams{SubscriptionID: subscriptionID})
-}
-
-func (c *NMIClient) GetRecurringPlanData() (string, error) {
-	if err := c.checkConfiguration(); err != nil {
-		return "", err
-	}
-
-	values := url.Values{
-		"report_type":  {"recurring_plans"},
-		"security_key": {c.SecurityKey},
-	}
-	return c.sendQueryRequest(values)
-}
-
-func (c *NMIClient) QueryRecurringSubscriptions(params RecurringQueryParams) (string, error) {
-	if err := c.checkConfiguration(); err != nil {
-		return "", err
-	}
-
-	values := url.Values{
-		"report_type":  {"recurring"},
-		"security_key": {c.SecurityKey},
-	}
-	if strings.TrimSpace(params.SubscriptionID) != "" {
-		values.Set("subscription_id", params.SubscriptionID)
-	}
-	if params.ResultLimit > 0 {
-		values.Set("result_limit", strconv.Itoa(params.ResultLimit))
-	}
-	if params.PageNumber >= 0 {
-		values.Set("page_number", strconv.Itoa(params.PageNumber))
-	}
-	if strings.TrimSpace(params.ResultOrder) != "" {
-		values.Set("result_order", params.ResultOrder)
-	}
-
-	return c.sendQueryRequest(values)
-}
-
-// AddRecurringPlan creates a new NMI Recurring Plan via the Direct Post API
-// (recurring=add_plan). NMI plan amounts are denominated in dollars, while
-// OpenRails stores money in integer cents, so planAmountCents is converted to a
-// dollar string here. dayFrequency is the billing interval in days (NMI's
-// day_frequency). planPayments is the total number of payments (0 = bill
-// forever). Frequency and payments are immutable once a plan is created.
+// AddRecurringPlan creates a new NMI Recurring Plan via POST /v5/plans. NMI
+// plan amounts are dollars; OpenRails stores integer cents, converted at this
+// wire boundary. dayFrequency is the billing interval in days; planPayments is
+// the total number of payments (0 = bill forever). Frequency and payments are
+// immutable once a plan is created.
 func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents int64, dayFrequency, planPayments int) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -394,36 +294,22 @@ func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents in
 		return errors.New("dayFrequency must be greater than zero")
 	}
 
-	values := url.Values{
-		"recurring":     {"add_plan"},
-		"security_key":  {c.SecurityKey},
-		"plan_id":       {planID},
-		"plan_name":     {planName},
-		"plan_amount":   {centsToDollarString(planAmountCents)},
-		"day_frequency": {strconv.Itoa(dayFrequency)},
-		"plan_payments": {strconv.Itoa(planPayments)},
+	body := v5PlanCreateRequest{
+		PlanID:       planID,
+		PlanName:     planName,
+		PlanAmount:   centsJSONAmount(planAmountCents),
+		PlanPayments: planPayments,
+		DayFrequency: dayFrequency,
 	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
+	if err := c.sendV5Request(http.MethodPost, "/plans", body, nil); err != nil {
+		return fmt.Errorf("failed to add recurring plan: %w", err)
 	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to add recurring plan: %s", responseText(output, response))
-	}
-
 	return nil
 }
 
-// EditRecurringPlan updates the mutable fields of an existing NMI Recurring Plan
-// (recurring=edit_plan). NMI only permits the plan name and amount to change;
-// frequency and payment count are immutable once a plan exists. planAmountCents
-// is converted from cents to a dollar string for NMI.
+// EditRecurringPlan updates the mutable fields of an existing NMI Recurring
+// Plan via PATCH /v5/plans/{id}. NMI only permits the plan name and amount to
+// change; frequency and payment count are immutable once a plan exists.
 func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents int64) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -432,50 +318,20 @@ func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents i
 		return errors.New("planID is required")
 	}
 
-	values := url.Values{
-		"recurring":    {"edit_plan"},
-		"security_key": {c.SecurityKey},
-		"plan_id":      {planID},
-		"plan_amount":  {centsToDollarString(planAmountCents)},
+	body := v5PlanUpdateRequest{
+		PlanName:   strings.TrimSpace(planName),
+		PlanAmount: centsJSONAmount(planAmountCents),
 	}
-	if name := strings.TrimSpace(planName); name != "" {
-		values.Set("plan_name", name)
+	if err := c.sendV5Request(http.MethodPatch, "/plans/"+url.PathEscape(strings.TrimSpace(planID)), body, nil); err != nil {
+		return fmt.Errorf("failed to edit recurring plan: %w", err)
 	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
-	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to edit recurring plan: %s", responseText(output, response))
-	}
-
 	return nil
 }
 
-// recurringPlanQueryResponse mirrors the XML returned by the NMI Query API for
-// the recurring_plans report type. Only the fields OpenRails needs are mapped.
-type recurringPlanQueryResponse struct {
-	XMLName xml.Name             `xml:"nm_response"`
-	Plans   []recurringPlanQuery `xml:"plan"`
-}
-
-type recurringPlanQuery struct {
-	PlanID       string `xml:"plan_id"`
-	PlanName     string `xml:"plan_name"`
-	PlanAmount   string `xml:"plan_amount"`
-	DayFrequency string `xml:"day_frequency"`
-}
-
-// RecurringPlanDetail is the parsed view of a single NMI recurring plan returned
-// by GetRecurringPlanDetailByID. Found=false means no plan matched the id.
-// DayFrequency is the billing interval in days; it is 0 when NMI reports a
-// month-based frequency (the query API does not return a day count for those).
+// RecurringPlanDetail is the parsed view of a single NMI recurring plan
+// returned by GetRecurringPlanDetailByID. Found=false means no plan matched
+// the id. DayFrequency is the billing interval in days; it is 0 when the plan
+// is month-based (parity with the classic recurring_plans report).
 type RecurringPlanDetail struct {
 	Found        bool
 	Name         string
@@ -484,10 +340,7 @@ type RecurringPlanDetail struct {
 }
 
 // GetRecurringPlanByID performs a strongly-consistent lookup of a single
-// recurring plan by its operator-chosen plan_id. It queries the NMI Query API
-// (recurring_plans report) filtered by plan_id and parses the XML response.
-// Returns found=false when no plan matches. amountCents is the plan amount
-// converted from NMI dollars back into integer cents to match OpenRails storage.
+// recurring plan by its operator-chosen plan_id.
 func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string, amountCents int64, err error) {
 	detail, err := c.GetRecurringPlanDetailByID(planID)
 	if err != nil {
@@ -496,72 +349,40 @@ func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string
 	return detail.Found, detail.Name, detail.AmountCents, nil
 }
 
-// GetRecurringPlanDetailByID is the richer sibling of GetRecurringPlanByID: it
-// returns the plan name, amount (cents), AND billing frequency (day_frequency)
-// so callers validating an operator-supplied link can confirm the linked plan
+// GetRecurringPlanDetailByID fetches one plan via GET /v5/plans/{id} so
+// callers validating an operator-supplied link can confirm the linked plan
 // matches the OpenRails price's money terms, not just that it exists.
 func (c *NMIClient) GetRecurringPlanDetailByID(planID string) (RecurringPlanDetail, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return RecurringPlanDetail{}, err
 	}
-	if strings.TrimSpace(planID) == "" {
+	trimmed := strings.TrimSpace(planID)
+	if trimmed == "" {
 		return RecurringPlanDetail{}, errors.New("planID is required")
 	}
 
-	values := url.Values{
-		"report_type":  {"recurring_plans"},
-		"security_key": {c.SecurityKey},
-		"plan_id":      {planID},
+	var plan V5Plan
+	err := c.sendV5Request(http.MethodGet, "/plans/"+url.PathEscape(trimmed), nil, &plan)
+	if errors.Is(err, ErrV5NotFound) {
+		return RecurringPlanDetail{}, nil
 	}
-
-	response, err := c.sendQueryRequest(values)
 	if err != nil {
 		return RecurringPlanDetail{}, err
 	}
 
-	var parsed recurringPlanQueryResponse
-	if err := xml.Unmarshal([]byte(response), &parsed); err != nil {
-		return RecurringPlanDetail{}, fmt.Errorf("failed to parse recurring plan query response: %w", err)
+	cents, convErr := v5AmountToCents(plan.PlanAmount)
+	if convErr != nil {
+		return RecurringPlanDetail{Found: true, Name: plan.PlanName}, fmt.Errorf("failed to parse plan amount %q: %w", plan.PlanAmount, convErr)
 	}
-
-	for _, p := range parsed.Plans {
-		if strings.TrimSpace(p.PlanID) == strings.TrimSpace(planID) {
-			cents, convErr := dollarStringToCents(p.PlanAmount)
-			if convErr != nil {
-				return RecurringPlanDetail{Found: true, Name: p.PlanName}, fmt.Errorf("failed to parse plan amount %q: %w", p.PlanAmount, convErr)
-			}
-			// day_frequency is optional in the query response (absent for
-			// month-based plans); a blank/invalid value leaves DayFrequency 0.
-			dayFreq, _ := strconv.Atoi(strings.TrimSpace(p.DayFrequency))
-			return RecurringPlanDetail{Found: true, Name: p.PlanName, AmountCents: cents, DayFrequency: dayFreq}, nil
-		}
-	}
-	return RecurringPlanDetail{}, nil
+	// day_frequency is "0"/empty for month-based plans; DayFrequency stays 0.
+	dayFreq, _ := strconv.Atoi(strings.TrimSpace(plan.DayFrequency))
+	return RecurringPlanDetail{Found: true, Name: plan.PlanName, AmountCents: cents, DayFrequency: dayFreq}, nil
 }
 
-// centsToDollarString converts integer cents into a fixed two-decimal dollar
-// string as required by NMI's plan_amount parameter.
-func centsToDollarString(cents int64) string {
-	return strconv.FormatFloat(float64(cents)/100.0, 'f', 2, 64)
-}
-
-// dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") back
-// into integer cents, rounding to the nearest cent.
-func dollarStringToCents(dollars string) (int64, error) {
-	trimmed := strings.TrimSpace(dollars)
-	if trimmed == "" {
-		return 0, nil
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0, err
-	}
-	if f < 0 {
-		return -int64(-f*100 + 0.5), nil
-	}
-	return int64(f*100 + 0.5), nil
-}
-
+// SearchTransactions stays on the classic Query API (query.php) DELIBERATELY
+// (#663): v5 payments has no list/search endpoint (only GET by known id), and
+// v4's transaction report requires a partner-portal key. This is the bulk
+// reconcile pull and the order-id evidence probes' read path.
 func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err

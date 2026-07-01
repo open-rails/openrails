@@ -242,13 +242,6 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.usdc_funding_sessions
-			(id, merchant_id, customer_id, provider, wallet_address, asset, network, requested_amount, provider_url, status)
-		VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'coinbase', $3, 'USDC', 'base', '10.00', 'https://example.test/session', 'created')
-	`, merchantID.String(), customerID.String(), "wallet-"+suffix)
-	require.NoError(t, err)
-
-	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.products (id, merchant_id, key, display_name)
 		VALUES ($1::uuid, $2::uuid, $3, $3)
 	`, productID.String(), merchantID.String(), "prod-"+suffix)
@@ -316,7 +309,6 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 
 	for _, table := range []string{
 		"customers",
-		"usdc_funding_sessions",
 		"solana_subscriptions",
 		"merchant_configurations",
 	} {
@@ -328,20 +320,6 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 		VALUES (gen_random_uuid(), $1::uuid)
 	`, tB.String())
 	require.Error(t, err, "customers must reject writes for another merchant")
-	require.NoError(t, tx.Rollback(ctx))
-
-	tx, err = appPool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
-	require.NoError(t, err)
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.usdc_funding_sessions
-			(id, merchant_id, customer_id, provider, wallet_address, asset, network, requested_amount, provider_url, status)
-		VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'coinbase', 'wallet-cross', 'USDC', 'base', '10.00', 'https://example.test/session', 'created')
-	`, tB.String(), seedB.customerID.String())
-	require.Error(t, err, "usdc_funding_sessions must reject writes for another merchant")
 	require.NoError(t, tx.Rollback(ctx))
 
 	tx, err = appPool.Begin(ctx)

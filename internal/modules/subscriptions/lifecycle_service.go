@@ -1416,15 +1416,12 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	return nil
 }
 
-// ApplyLocalPastDue performs the side-effect-free LOCAL-STATE transition of an
-// active subscription into dunning (past_due) with a grace window dated to the
-// supplied instant (the missed period end, not wall-clock — so a long-overdue
-// sub's grace is already exhausted and the grace_exhausted repair terminates it
-// on the next pass; converge-not-replay, no missed charges re-run). The grace
-// window is set only when none exists (COALESCE semantics). No-op unless the sub
-// is currently active. Like ApplyLocalCancellation, it runs on the supplied
-// `dbb` so the caller owns atomicity; the LIFE-plane period_overdue repair is
-// the sole caller today.
+// ApplyLocalPastDue is the side-effect-free LOCAL transition of an active sub
+// into dunning (past_due), grace dated to the supplied instant (the missed
+// period end). #664: an already-exhausted grace is later parked as `unknown` by
+// grace_exhausted, never terminated — FailMembership owns terminal
+// cancellation. Grace is set only when none exists. No-op unless active; runs
+// on the supplied `dbb` (caller owns atomicity).
 func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, dbb *db.DB, sub *models.Subscription, graceEndsAt time.Time) error {
 	if dbb == nil || sub == nil {
 		return fmt.Errorf("apply local past_due: db handle and subscription are required")
@@ -1443,21 +1440,22 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 	return nil
 }
 
-// ApplyLocalUnknown is the side-effect-free LOCAL transition of an active,
-// period-elapsed, provider-auto-billed subscription into `unknown` (#632): a
-// needs-provider-verification holding state. Convergence will NOT guess whether the
-// provider billed it — provider-pull (#633) resolves it via ResolveUnknownSubscription.
-// No-op unless the sub is currently active (idempotent). Access (the entitlement
-// window) is intentionally LEFT INTACT while unknown — we do not revoke on a guess;
-// only a confirmed provider outcome (cancel) revokes.
+// ApplyLocalUnknown parks a subscription as `unknown` (#632/#664): a
+// needs-provider-verification state resolved by provider-pull (#633). Entry
+// from `active` (period elapsed, no ownership evidence) or `past_due` (dunning
+// stalled past grace). Access stays intact — no revoke on a guess. Clears stale
+// grace/retry scheduling; keeps retry_attempts/last_retry_at as attempt
+// evidence.
 func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 	if dbb == nil || sub == nil {
 		return fmt.Errorf("apply local unknown: db handle and subscription are required")
 	}
-	if sub.Status != models.StatusActive {
-		return nil // idempotent: only an active sub enters verification limbo
+	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+		return nil // idempotent: only active/past_due rows enter verification limbo
 	}
 	sub.Status = models.StatusUnknown
+	sub.GraceEndsAt = nil
+	sub.NextRetryAt = nil
 	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
 		return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
 	}

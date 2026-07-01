@@ -2,15 +2,11 @@ package handlers
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,14 +15,12 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/funding"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -120,11 +114,6 @@ func Webhook(r *httprequest.Request) {
 		return
 	case subscriptions.RailStripe:
 		if enqueueStripeWebhook(r, clientIP) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
-		}
-		return
-	case funding.ProviderCoinbase, "coinbase-onramp", "coinbase_onramp":
-		if applyCoinbaseUSDCFundingWebhook(r) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
@@ -603,173 +592,6 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 		return false
 	}
 	return true
-}
-
-func applyCoinbaseUSDCFundingWebhook(r *httprequest.Request) bool {
-	if r.State == nil || r.State.DB == nil || r.State.Config == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
-		return false
-	}
-	body, err := readRequestBody(r.Request.Body)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
-		return false
-	}
-	cfg := r.State.Config.USDCFunding
-	var secret string
-	if cfg != nil && cfg.Providers != nil && cfg.Providers[funding.ProviderCoinbase] != nil {
-		secret = strings.TrimSpace(cfg.Providers[funding.ProviderCoinbase].WebhookSecret)
-	}
-	if secret == "" {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Coinbase webhook secret is not configured")
-		return false
-	}
-	signature := r.Header("X-Hook0-Signature")
-	if signature == "" {
-		signature = r.Header("Hook0-Signature")
-	}
-	if err := verifyHook0Signature(body, signature, secret, r.Request.Header, time.Now(), 5*time.Minute); err != nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
-		return false
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		return false
-	}
-	sessionID, ok := coinbaseFundingSessionID(payload)
-	if !ok {
-		r.ErrorJSON(http.StatusBadRequest, "Missing funding session reference")
-		return false
-	}
-	id, err := api.ParseUSDCFundingSessionID(sessionID)
-	if err != nil {
-		r.APIError(api.InvalidIDError("usdc_funding_session"))
-		return false
-	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config, r.State.Rails)
-	if r.State.SolanaRPC != nil {
-		svc.WithSolanaBalanceReader(r.State.SolanaRPC)
-	}
-	_, err = svc.ApplyProviderWebhook(r.Request.Context(), funding.ProviderWebhookEvent{
-		Provider:  funding.ProviderCoinbase,
-		SessionID: id,
-		EventType: stringField(payload, "eventType", "event_type", "type"),
-		Status:    stringField(payload, "status"),
-		Payload:   payload,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, funding.ErrSessionNotFound):
-			r.APIError(api.NotFoundError("usdc_funding_session"))
-		case errors.Is(err, funding.ErrInvalidRequest):
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-		default:
-			log.WithError(err).Error("coinbase usdc funding webhook failed")
-			r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
-		}
-		return false
-	}
-	return true
-}
-
-func coinbaseFundingSessionID(payload map[string]any) (string, bool) {
-	paths := [][]string{
-		{"partnerUserRef"},
-		{"partner_user_ref"},
-		{"data", "partnerUserRef"},
-		{"data", "partner_user_ref"},
-		{"data", "session", "partnerUserRef"},
-		{"data", "session", "partner_user_ref"},
-		{"session", "partnerUserRef"},
-		{"session", "partner_user_ref"},
-	}
-	for _, path := range paths {
-		if value, ok := nestedString(payload, path...); ok {
-			return value, true
-		}
-	}
-	return "", false
-}
-
-func stringField(payload map[string]any, names ...string) string {
-	for _, name := range names {
-		if value, ok := nestedString(payload, name); ok {
-			return value
-		}
-		if value, ok := nestedString(payload, "data", name); ok {
-			return value
-		}
-	}
-	return ""
-}
-
-func nestedString(payload map[string]any, path ...string) (string, bool) {
-	var current any = payload
-	for _, part := range path {
-		obj, ok := current.(map[string]any)
-		if !ok {
-			return "", false
-		}
-		current, ok = obj[part]
-		if !ok {
-			return "", false
-		}
-	}
-	value, ok := current.(string)
-	if !ok || strings.TrimSpace(value) == "" {
-		return "", false
-	}
-	return strings.TrimSpace(value), true
-}
-
-func verifyHook0Signature(body []byte, signatureHeader, secret string, headers http.Header, now time.Time, tolerance time.Duration) error {
-	if strings.TrimSpace(secret) == "" {
-		return webhookutil.ErrWebhookSignatureRequired
-	}
-	signatureHeader = strings.TrimSpace(signatureHeader)
-	if signatureHeader == "" {
-		return webhookutil.ErrWebhookSignatureMissing
-	}
-	parts := map[string]string{}
-	for _, element := range strings.Split(signatureHeader, ",") {
-		key, value, ok := strings.Cut(strings.TrimSpace(element), "=")
-		if ok {
-			parts[strings.TrimSpace(key)] = strings.TrimSpace(value)
-		}
-	}
-	timestamp := parts["t"]
-	headerNames := parts["h"]
-	provided := parts["v1"]
-	if timestamp == "" || headerNames == "" || provided == "" {
-		return webhookutil.ErrWebhookSignatureInvalid
-	}
-	issuedAt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return webhookutil.ErrWebhookSignatureInvalid
-	}
-	if tolerance > 0 {
-		age := now.Sub(time.Unix(issuedAt, 0))
-		if age < -tolerance || age > tolerance {
-			return webhookutil.ErrWebhookSignatureInvalid
-		}
-	}
-	headerValues := make([]string, 0)
-	for _, name := range strings.Fields(headerNames) {
-		headerValues = append(headerValues, headers.Get(name))
-	}
-	signedPayload := timestamp + "." + headerNames + "." + strings.Join(headerValues, ".") + "." + string(body)
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signedPayload))
-	expected := mac.Sum(nil)
-	actual, err := hex.DecodeString(provided)
-	if err != nil || len(actual) != len(expected) {
-		return webhookutil.ErrWebhookSignatureInvalid
-	}
-	if !hmac.Equal(actual, expected) {
-		return webhookutil.ErrWebhookSignatureInvalid
-	}
-	return nil
 }
 
 // prepareStripeMultiSecret verifies the Stripe signature against each configured

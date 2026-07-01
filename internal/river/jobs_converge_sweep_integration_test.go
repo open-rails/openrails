@@ -18,9 +18,10 @@ import (
 // of the Convergence Engine. This test seeds two unrelated kinds of internal-plane
 // drift under the test merchant — a stale checkout session and a grace-exhausted
 // subscription — runs the worker exactly as River would (no inline hook touches
-// either row), and asserts BOTH were converged. It proves the wired system works:
-// the periodic worker enumerates active merchants and drives reconcile.Converge
-// across them, remediating drift that no request path would have caught.
+// either row), and asserts BOTH were converged (#664: the sub is parked as
+// `unknown`, never cancelled). It proves the wired system works: the periodic
+// worker enumerates active merchants and drives reconcile.Converge across them,
+// remediating drift that no request path would have caught.
 func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -83,14 +84,14 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.checkout_sessions WHERE id=$1`, sessionID).Scan(&sessionStatus))
 		require.Equal(t, "expired", sessionStatus, "sweep converged the stale checkout session")
 
+		// #664: parked as unknown, never cancelled, access intact.
 		var subStatus string
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&subStatus))
-		require.Equal(t, "cancelled", subStatus, "sweep converged the grace-exhausted subscription")
+		require.Equal(t, "unknown", subStatus, "sweep parked the grace-exhausted subscription for verification")
 
 		var revokedAt *time.Time
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
-		require.NotNil(t, revokedAt, "entitlement revoked")
-		require.WithinDuration(t, graceEnd, *revokedAt, time.Second, "revoked AS-OF grace end (converge-not-replay)")
+		require.Nil(t, revokedAt, "entitlement NOT revoked on a guess")
 
 		// findings were recorded as auto_fixed
 		var n int

@@ -70,6 +70,11 @@ func resolveUnknownOutcome(sub UnknownSubject, snap *RemoteSnapshot, now time.Ti
 	if snap == nil {
 		return UnknownVerdict{Outcome: UnknownOutcomeUnreachable}
 	}
+	// #664: no provider handle = unmatchable; "absent from an exhaustive roster"
+	// would be vacuously true and guess-cancel it. Stay unknown.
+	if sub.RailSubscriptionID == "" {
+		return UnknownVerdict{Outcome: UnknownOutcomeUnreachable}
+	}
 
 	// This subscription's charge events + roster entry from the windowed pull.
 	var txns []RemoteTransaction
