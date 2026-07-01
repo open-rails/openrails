@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,6 +140,43 @@ func TestResolveDelegatedIgnoresBrowserOriginForAuthorization(t *testing.T) {
 	_, err = cp.ResolveDelegated(context.Background(), tok, "https://evil.example")
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrDelegatedOriginNotAllowed)
+}
+
+// TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS pins BND4-2: newDelegatedVerifier
+// MUST install AuthKit's SSRF-guarding dialer, so a JWKS-mode merchant issuer whose
+// jwks_uri resolves to a private/loopback address cannot drive an outbound fetch from
+// the control-plane host (cloud metadata / internal services). validateJWKSURI is only
+// a syntactic registration check (no DNS resolution), so this fetch-time guard is the
+// real defense against DNS-rebinding. httptest servers bind to 127.0.0.1, so the guard
+// must refuse the connection and the JWKS endpoint must never be reached. If someone
+// drops WithSSRFGuard(), the fetch succeeds, `served` flips true, and this test fails.
+func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
+	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
+	require.NoError(t, err)
+
+	var served atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		served.Store(true)
+		jwk := jwtkit.PublicToJWK(signer.PublicKey(), signer.KID(), signer.Algorithm())
+		jwtkit.ServeJWKS(w, r, jwtkit.JWKS{Keys: []jwtkit.JWK{jwk}})
+	})
+	jwks := httptest.NewServer(mux) // binds to 127.0.0.1 — a private/reserved address
+	defer jwks.Close()
+
+	v, err := newDelegatedVerifier(&authcore.Client{}, "")
+	require.NoError(t, err)
+	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
+		Slug:    "doujins",
+		Issuer:  testDelegatedIssuer,
+		JWKSURI: jwks.URL + "/.well-known/jwks.json",
+		Enabled: true,
+	}}, []string{canonicalAudience}))
+
+	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
+	_, _, err = v.VerifyDelegatedAccess(tok)
+	require.Error(t, err, "SSRF guard must block a loopback jwks_uri fetch, failing verification")
+	require.False(t, served.Load(), "the SSRF guard must refuse the connection before the JWKS endpoint is reached")
 }
 
 func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {
