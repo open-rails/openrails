@@ -172,8 +172,16 @@ func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*authhttp
 	// self-issuer seed — OpenRails never signs delegated tokens itself.
 	// #564: no OpenRails browser-safe allowlist. AuthKit bounds any permission
 	// claim against the signing remote-app's live stored authority.
+	//
+	// BND4-2: WithSSRFGuard installs AuthKit's DNS-resolving, private-range-rejecting
+	// dialer for JWKS fetches. Merchant-supplied jwks_uri values pass only a syntactic
+	// registration check (validateJWKSURI does NOT resolve DNS), so this fetch-time
+	// guard is the required second layer against DNS-rebinding SSRF from the
+	// control-plane host to cloud metadata / internal services. AuthKit's own server
+	// always installs it; a verify-only embedder must opt in explicitly.
 	v := authhttp.NewVerifier(
 		authhttp.WithAPIKeyPrefix(tokenPrefix),
+		authhttp.WithSSRFGuard(),
 	)
 	return v, nil
 }
