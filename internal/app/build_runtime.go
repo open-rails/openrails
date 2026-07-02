@@ -15,6 +15,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -398,6 +399,11 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 
 	runtime.WebhookDispatcher.EventLogService = runtime.EventLogService
 	runtime.SubscriptionLifecycleService.EventLogService = runtime.EventLogService
+
+	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
+	// whether the producer came from config or an embedded host's external
+	// River client (SetExternalRiverClient).
+	runtime.WebhookDispatcher.ConvergeEnqueuer = &runtimeConvergeEnqueuer{runtime: runtime}
 
 	if runtime.AdminSubscriptionService != nil {
 		runtime.AdminSubscriptionService.EventLogService = runtime.EventLogService
@@ -959,7 +965,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	}
 }
 
-func buildRiverClient(cfg *config.Config, workers *river.Workers) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
+func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River")
 	}
@@ -978,12 +984,27 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers) (*river.Client
 			river.QueueDefault:     {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
 			riverjobs.QueueBilling: {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
 		},
-		Schema:  standaloneRiverSchema(cfg),
-		Workers: workers,
+		Schema:     standaloneRiverSchema(cfg),
+		Workers:    workers,
+		Middleware: middleware,
 	})
 	if err != nil {
 		pool.Close()
 		return nil, nil, fmt.Errorf("failed creating River client: %w", err)
 	}
 	return client, pool, nil
+}
+
+// runtimeConvergeEnqueuer adapts the runtime's enqueue-only River producer to
+// webhooks.SubscriptionConvergeEnqueuer (#684), resolved at call time so a
+// producer injected after runtime construction (embedded hosts) still works.
+type runtimeConvergeEnqueuer struct {
+	runtime *Runtime
+}
+
+func (e *runtimeConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.Context, req webhooks.ConvergeRequest) error {
+	if e == nil || e.runtime == nil || e.runtime.RiverProducer == nil {
+		return fmt.Errorf("subscription converge enqueuer: river producer unavailable")
+	}
+	return riverjobs.NewSubscriptionConvergeEnqueuer(e.runtime.RiverProducer).EnqueueSubscriptionConverge(ctx, req)
 }

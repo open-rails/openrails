@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -140,7 +141,9 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if !ok {
 		return false
 	}
-	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
+	// Environment follows deployment posture (#681): test rows under test_mode.
+	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
+	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), env, "security_key")
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {

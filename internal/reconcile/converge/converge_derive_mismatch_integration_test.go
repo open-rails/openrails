@@ -51,8 +51,12 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 			subID, priceID, productID, "gd-sub-"+suffix,
 			now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour), now.Add(-40*24*time.Hour), feature, customer, merchantID)
 
-		// The sub HAS a grant — but only for a PAST period, fully materialized
-		// (so derive.subscription.missing and grant_effect.missing stay quiet).
+		// The sub HAS a grant — but only for a PAST period, with the LEGACY
+		// bounded projection (so derive.subscription.missing and
+		// grant_effect.missing stay quiet). Seeded directly: since #691,
+		// MaterializeGrant would ENSURE a standing window for this live
+		// auto-renew sub and the mismatch could never exist — this is the
+		// pre-inversion shape migration 063 skips (lapsed window).
 		gl := grants.New(appDB.Gen(ctx), merchantID)
 		oldEnd := now.Add(-10 * 24 * time.Hour)
 		g, err := gl.Grant(ctx, grants.GrantInput{
@@ -61,7 +65,9 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 			StartsAt: now.Add(-40 * 24 * time.Hour), EndsAt: &oldEnd,
 		})
 		require.NoError(t, err)
-		require.NoError(t, gl.MaterializeGrant(ctx, g))
+		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
+		      VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',$8)`,
+			uuid.New(), merchantID, customer, feature, now.Add(-40*24*time.Hour), oldEnd, subID, g.ID)
 		return nil
 	}))
 
@@ -151,14 +157,18 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		}
 		seedSub(deadSub, "cancelled", "rd-dead-"+suffix)
 		seedSub(unknownSub, "unknown", "rd-unknown-"+suffix)
-		// Legacy-shaped LIVE windows (no grants) sourced by each sub.
-		seedEnt := func(id, subID uuid.UUID, feature string) {
+		// Legacy-shaped LIVE windows (no grants) sourced by each sub. The dead
+		// sub's window is BOUNDED but overruns its entitled bound (#690: the
+		// standing-window shape belongs to derive.entitlement.orphan, ADMIN);
+		// the unknown sub keeps a standing window (access intact, #664/#691).
+		seedEnt := func(id, subID uuid.UUID, feature string, endAt *time.Time) {
 			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
-			      VALUES ($1,$2,$3,$4,NULL,$5,'subscription',$6)`,
-				id, customer, feature, now.Add(-40*24*time.Hour), subID, merchantID)
+			      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
+				id, customer, feature, now.Add(-40*24*time.Hour), endAt, subID, merchantID)
 		}
-		seedEnt(deadEnt, deadSub, "rd-feat-dead-"+suffix)
-		seedEnt(unknownEnt, unknownSub, "rd-feat-unk-"+suffix)
+		overrun := now.Add(20 * 24 * time.Hour)
+		seedEnt(deadEnt, deadSub, "rd-feat-dead-"+suffix, &overrun)
+		seedEnt(unknownEnt, unknownSub, "rd-feat-unk-"+suffix, nil)
 		return nil
 	}))
 
@@ -181,9 +191,13 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		require.Equal(t, 1, res.Findings, "only the terminally-dead sub is flagged")
 		require.Equal(t, 1, res.AutoFixed)
 
-		var revokedAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, deadEnt).Scan(&revokedAt))
-		require.NotNil(t, revokedAt, "dead sub's live window revoked")
+		// Repair = the missed #691 closure: the window is BOUNDED at the
+		// entitled bound (GREATEST(paid-through, ended_at)), not revoked.
+		var endAt, revokedAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at, revoked_at FROM openrails.entitlements WHERE id=$1`, deadEnt).Scan(&endAt, &revokedAt))
+		require.NotNil(t, endAt)
+		require.WithinDuration(t, now.Add(-10*24*time.Hour), *endAt, 2*time.Second, "dead sub's overrun window bounded at ended_at/paid-through")
+		require.Nil(t, revokedAt, "closure writes end_at, not a revoke")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, unknownEnt).Scan(&revokedAt))
 		require.Nil(t, revokedAt, "unknown sub keeps access (#664: no revoke on a guess)")
 		return nil

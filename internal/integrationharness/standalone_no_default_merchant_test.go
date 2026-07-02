@@ -41,15 +41,16 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	require.NoError(t, err)
 	const whsec = "whsec_no_default_merchant"
 	const accountID = "acct_no_default_merchant"
+	// The harness runs test_mode ⇒ posture resolves environment=test rows (#681).
 	_, err = fixturePool.Exec(ctx, `
 		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
-		VALUES ($1::uuid, 'stripe', 'live', $2, false)
+		VALUES ($1::uuid, 'stripe', 'test', $2, false)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
 		SET archived = false, updated_at = now()
 		WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.String(), accountID)
 	require.NoError(t, err)
-	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
+	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "test", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, whsec)
 	require.NoError(t, err)

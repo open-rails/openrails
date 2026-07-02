@@ -527,6 +527,14 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		subscription.CancelFeedback = &feedback
 	}
 
+	// #691 closure: a user cancel is PROOF — write the access end on disk NOW, at
+	// the known period end (resumable runway; a dead system cannot extend a
+	// cancelled sub). Immediate when no future paid period remains.
+	accessEnd := now
+	if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+		accessEnd = *subscription.CurrentPeriodEndsAt
+	}
+
 	// Persist the cancellation; when a deferred undo-window delete is involved,
 	// enqueue its intent IN THE SAME TRANSACTION. The DeletionScheduledAt marker
 	// and the nmi_delete_subscription intent commit or roll back together, so
@@ -541,12 +549,29 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			if err := txSubSvc.Update(ctx, subscription); err != nil {
 				return fmt.Errorf("failed to update subscription status: %w", err)
 			}
+			txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
+			if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+				return fmt.Errorf("failed to bound subscription access windows: %w", err)
+			}
 			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, runAt)
 		}); err != nil {
 			return fmt.Errorf("failed to persist cancellation with deferred delete intent: %w", err)
 		}
-	} else if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription status: %w", err)
+	} else {
+		if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := openrailsdb.NewWithPgxTx(tx)
+			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
+			if err := txSubSvc.Update(ctx, subscription); err != nil {
+				return fmt.Errorf("failed to update subscription status: %w", err)
+			}
+			txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
+			if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+				return fmt.Errorf("failed to bound subscription access windows: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	// Add notification

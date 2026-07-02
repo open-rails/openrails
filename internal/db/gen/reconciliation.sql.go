@@ -35,6 +35,182 @@ func (q *Queries) AckReconciliationFinding(ctx context.Context, arg AckReconcili
 	return result.RowsAffected(), nil
 }
 
+const adminIgnoreReconciliationFinding = `-- name: AdminIgnoreReconciliationFinding :execrows
+UPDATE openrails.reconciliation_findings
+SET status = 'ignored',
+    resolution = 'ignored',
+    operator_notes = $1,
+    resolved_by = $2,
+    resolved_at = now(),
+    updated_at = now()
+WHERE id = $3 AND status IN ('reconcile_required', 'requires_review')
+`
+
+type AdminIgnoreReconciliationFindingParams struct {
+	OperatorNotes *string
+	ResolvedBy    *string
+	ID            uuid.UUID
+}
+
+// Ignore: permanent silence for the subject (the upsert keeps ignored
+// identities ignored across re-runs — same semantics the breaker's dismiss
+// honors). Notes are REQUIRED (enforced at the handler).
+func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg AdminIgnoreReconciliationFindingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, adminIgnoreReconciliationFinding, arg.OperatorNotes, arg.ResolvedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
+
+SELECT f.id, f.merchant_id, f.finding_type, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, count(*) OVER () AS total_count
+FROM openrails.reconciliation_findings f
+WHERE f.merchant_id = $1::uuid
+  AND (CASE
+         WHEN $2::text IS NULL THEN f.status IN ('reconcile_required', 'requires_review')
+         ELSE f.status = $2::text
+       END)
+  AND ($3::text IS NULL OR f.severity = $3::text)
+  AND ($4::text IS NULL OR f.finding_type = $4::text)
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id
+LIMIT $6 OFFSET $5
+`
+
+type AdminListReconciliationFindingsParams struct {
+	MerchantID  uuid.UUID
+	Status      *string
+	Severity    *string
+	FindingType *string
+	PageOffset  int64
+	PageLimit   int64
+}
+
+type AdminListReconciliationFindingsRow struct {
+	OpenrailsReconciliationFinding OpenrailsReconciliationFinding
+	TotalCount                     int64
+}
+
+// ============================================================================
+// #692 operator findings queue (admin API)
+// ============================================================================
+// The operator work list. Default view = OPEN findings only; an explicit
+// status filter overrides it (e.g. status=ignored). Sort: severity desc
+// (critical first) then age desc (oldest first). total_count rides every row
+// for pagination. merchant_id stamped explicitly (multi-merchant pattern);
+// RLS double-checks on merchant-pinned connections.
+func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg AdminListReconciliationFindingsParams) ([]AdminListReconciliationFindingsRow, error) {
+	rows, err := q.db.Query(ctx, adminListReconciliationFindings,
+		arg.MerchantID,
+		arg.Status,
+		arg.Severity,
+		arg.FindingType,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminListReconciliationFindingsRow
+	for rows.Next() {
+		var i AdminListReconciliationFindingsRow
+		if err := rows.Scan(
+			&i.OpenrailsReconciliationFinding.ID,
+			&i.OpenrailsReconciliationFinding.MerchantID,
+			&i.OpenrailsReconciliationFinding.FindingType,
+			&i.OpenrailsReconciliationFinding.SubjectKey,
+			&i.OpenrailsReconciliationFinding.Severity,
+			&i.OpenrailsReconciliationFinding.Status,
+			&i.OpenrailsReconciliationFinding.RecommendedAction,
+			&i.OpenrailsReconciliationFinding.FirstSeenRun,
+			&i.OpenrailsReconciliationFinding.LastSeenRun,
+			&i.OpenrailsReconciliationFinding.LastSeenAt,
+			&i.OpenrailsReconciliationFinding.ResolvedAt,
+			&i.OpenrailsReconciliationFinding.Resolution,
+			&i.OpenrailsReconciliationFinding.OperatorNotes,
+			&i.OpenrailsReconciliationFinding.CreatedAt,
+			&i.OpenrailsReconciliationFinding.UpdatedAt,
+			&i.OpenrailsReconciliationFinding.Evidence,
+			&i.OpenrailsReconciliationFinding.ResolvedBy,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminResolveReconciliationFinding = `-- name: AdminResolveReconciliationFinding :execrows
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed',
+    resolution = 'admin_fixed',
+    operator_notes = $1,
+    resolved_by = $2,
+    evidence = CASE
+        WHEN $3::jsonb IS NULL THEN evidence
+        ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $3::jsonb, true)
+    END,
+    resolved_at = now(),
+    updated_at = now()
+WHERE id = $4 AND status IN ('reconcile_required', 'requires_review')
+`
+
+type AdminResolveReconciliationFindingParams struct {
+	OperatorNotes      *string
+	ResolvedBy         *string
+	ResolutionEvidence []byte
+	ID                 uuid.UUID
+}
+
+// Approve: the recommendation executed; mark fixed/admin_fixed with operator
+// notes + attribution, and record the execution evidence under
+// evidence.resolution. Only OPEN findings resolve — approve on an already-
+// resolved finding is a handler-level 409.
+func (q *Queries) AdminResolveReconciliationFinding(ctx context.Context, arg AdminResolveReconciliationFindingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, adminResolveReconciliationFinding,
+		arg.OperatorNotes,
+		arg.ResolvedBy,
+		arg.ResolutionEvidence,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const appendReconciliationFindingNotes = `-- name: AppendReconciliationFindingNotes :execrows
+UPDATE openrails.reconciliation_findings
+SET operator_notes = CASE
+        WHEN COALESCE(operator_notes, '') = '' THEN $1::text
+        ELSE operator_notes || E'\n' || $1::text
+    END,
+    updated_at = now()
+WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
+`
+
+type AppendReconciliationFindingNotesParams struct {
+	Note string
+	ID   uuid.UUID
+}
+
+// Partial failure: append the execution error to operator_notes; the finding
+// STAYS OPEN (never half-marked fixed).
+func (q *Queries) AppendReconciliationFindingNotes(ctx context.Context, arg AppendReconciliationFindingNotesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, appendReconciliationFindingNotes, arg.Note, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const autoResolveRecoveredStuckIntentFindings = `-- name: AutoResolveRecoveredStuckIntentFindings :execrows
 UPDATE openrails.reconciliation_findings f
 SET status = 'fixed',
@@ -97,6 +273,75 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const countOpenReconciliationFindingsByTypeSeverity = `-- name: CountOpenReconciliationFindingsByTypeSeverity :many
+SELECT finding_type, severity, count(*) AS open_count
+FROM openrails.reconciliation_findings
+WHERE merchant_id = $1::uuid
+  AND status IN ('reconcile_required', 'requires_review')
+GROUP BY finding_type, severity
+`
+
+type CountOpenReconciliationFindingsByTypeSeverityRow struct {
+	FindingType string
+	Severity    string
+	OpenCount   int64
+}
+
+// Gauge input (#690): open-finding counts per (type, severity). The Go layer
+// folds these into the named gauges (freeloaders, duplicate_coverage,
+// open-by-severity) — the findings ledger IS the metric store.
+func (q *Queries) CountOpenReconciliationFindingsByTypeSeverity(ctx context.Context, merchantID uuid.UUID) ([]CountOpenReconciliationFindingsByTypeSeverityRow, error) {
+	rows, err := q.db.Query(ctx, countOpenReconciliationFindingsByTypeSeverity, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountOpenReconciliationFindingsByTypeSeverityRow
+	for rows.Next() {
+		var i CountOpenReconciliationFindingsByTypeSeverityRow
+		if err := rows.Scan(&i.FindingType, &i.Severity, &i.OpenCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countUnknownSubsPastPaidThrough = `-- name: CountUnknownSubsPastPaidThrough :one
+SELECT COUNT(*)::bigint AS pressure_count,
+       COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
+FROM openrails.subscriptions s
+WHERE s.merchant_id = $2::uuid
+  AND s.status = 'unknown'
+  AND s.current_period_ends_at IS NOT NULL
+  AND s.current_period_ends_at < $1::timestamptz
+`
+
+type CountUnknownSubsPastPaidThroughParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+type CountUnknownSubsPastPaidThroughRow struct {
+	PressureCount int64
+	MaxAgeSeconds *int64
+}
+
+// #690/#691 `verification_pressure` gauge input: subscriptions parked (or
+// stuck) in `unknown` whose recorded paid-through has passed — standing access
+// awaiting provider verification. A pressure reading over the LIVE table, not
+// an error count: nonzero is allowed; max_age trending UP means the
+// verification machinery (pull/probe/converge) is down.
+func (q *Queries) CountUnknownSubsPastPaidThrough(ctx context.Context, arg CountUnknownSubsPastPaidThroughParams) (CountUnknownSubsPastPaidThroughRow, error) {
+	row := q.db.QueryRow(ctx, countUnknownSubsPastPaidThrough, arg.Now, arg.MerchantID)
+	var i CountUnknownSubsPastPaidThroughRow
+	err := row.Scan(&i.PressureCount, &i.MaxAgeSeconds)
+	return i, err
 }
 
 const createReconciliationRun = `-- name: CreateReconciliationRun :one
@@ -229,7 +474,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
@@ -252,6 +497,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Evidence,
+		&i.ResolvedBy,
 	)
 	return i, err
 }
@@ -355,7 +601,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 }
 
 const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
 WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key
 `
@@ -386,6 +632,7 @@ func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Con
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Evidence,
+			&i.ResolvedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -517,7 +764,7 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 }
 
 const listDeadSubsWithLiveEntitlements = `-- name: ListDeadSubsWithLiveEntitlements :many
-SELECT s.id, s.customer_id, s.status
+SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
@@ -527,7 +774,10 @@ WHERE s.merchant_id = $1::uuid
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-        AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
+        AND e.end_at IS NOT NULL
+        AND e.end_at > $3::timestamptz
+        AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
+             OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
 ORDER BY s.id
 `
@@ -539,17 +789,36 @@ type ListDeadSubsWithLiveEntitlementsParams struct {
 }
 
 type ListDeadSubsWithLiveEntitlementsRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Status     OpenrailsSubscriptionStatus
+	ID                  uuid.UUID
+	CustomerID          uuid.UUID
+	Status              OpenrailsSubscriptionStatus
+	CurrentPeriodEndsAt *time.Time
+	EndedAt             *time.Time
 }
 
 // #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
-// the legacy pull engine's PS-9. A terminally-dead sub still projecting LIVE
-// subscription-sourced windows: propagation of a recorded terminal decision,
-// AUTO (both facts present — NOT the confirmed-absence case). `unknown` is
-// deliberately excluded: access stays intact while provider verification is
-// pending (#664). customer_id nullable: NULL = merchant-wide sweep.
+// the legacy pull engine's PS-9. A terminally-dead sub still projecting a
+// BOUNDED live window past its entitled bound: propagation of a recorded
+// terminal decision, AUTO (both facts present — NOT the confirmed-absence
+// case). `unknown` is deliberately excluded: access stays intact while
+// provider verification is pending (#664).
+//
+// #690/#691 paid-through guard: the entitled bound is
+// GREATEST(current_period_ends_at, ended_at) — a user cancel leaves a PAID
+// RUNWAY window bounded to period end (BoundSubscriptionAccess), which is NOT
+// excess; only the part of a window extending past the bound is. Repair =
+// BoundSubscriptionAccess(sub, bound) — the missed/correct #691 closure.
+// Both timestamps NULL (imported oddity) => NULL bound, any live bounded
+// window counts and the repair bounds at `now`.
+//
+// Partition (#690, one condition = one finding type):
+//
+//	bounded window past the bound, sub row present  -> HERE (AUTO closure)
+//	STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.orphan (ADMIN)
+//	sub row missing entirely                        -> derive.entitlement.orphan (ADMIN)
+//	terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
+//
+// customer_id nullable: NULL = merchant-wide sweep.
 func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg ListDeadSubsWithLiveEntitlementsParams) ([]ListDeadSubsWithLiveEntitlementsRow, error) {
 	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -559,7 +828,13 @@ func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg List
 	var items []ListDeadSubsWithLiveEntitlementsRow
 	for rows.Next() {
 		var i ListDeadSubsWithLiveEntitlementsRow
-		if err := rows.Scan(&i.ID, &i.CustomerID, &i.Status); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.Status,
+			&i.CurrentPeriodEndsAt,
+			&i.EndedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -711,8 +986,156 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 	return items, nil
 }
 
+const listOrphanEntitlementWindows = `-- name: ListOrphanEntitlementWindows :many
+SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
+       e.source_type, e.source_id, e.start_at, e.end_at,
+       COALESCE(s.status::text, '') AS sub_status,
+       s.product_id AS sub_product_id,
+       s.current_period_ends_at AS sub_period_ends_at,
+       s.ended_at AS sub_ended_at,
+       pay.id AS payment_id,
+       pr.product_id AS payment_product_id,
+       CASE
+           WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
+           WHEN e.source_type = 'subscription' THEN 'terminal_subscription_standing'
+           ELSE 'refunded_payment'
+       END::text AS cause
+FROM openrails.entitlements e
+LEFT JOIN openrails.subscriptions s
+       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
+LEFT JOIN openrails.payments pay
+       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
+LEFT JOIN openrails.prices pr
+       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
+WHERE e.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
+  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+  AND e.start_at <= $3::timestamptz
+  AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
+  AND e.source_type IN ('subscription', 'one_off')
+  -- no live un-terminated entitlement grant covering now justifies the window
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = e.merchant_id
+        AND g.customer_id = e.customer_id
+        AND g.event = 'grant' AND g.kind = 'entitlement'
+        AND (g.id = e.grant_id
+             OR (g.source_id = e.source_id::text
+                 AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
+                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+        AND g.starts_at <= $3::timestamptz
+        AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
+        AND NOT EXISTS (
+            SELECT 1 FROM openrails.grants t
+            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+              AND t.event IN ('revoke', 'expire', 'supersede'))
+  )
+  -- a TERMINATED backing grant means derive.grant_effect.excess owns the retraction
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants tg
+      JOIN openrails.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
+                             AND t.event IN ('revoke', 'expire', 'supersede')
+      WHERE tg.merchant_id = e.merchant_id AND tg.id = e.grant_id
+  )
+  AND (
+      (e.source_type = 'subscription' AND s.id IS NULL)
+      OR (e.source_type = 'subscription'
+          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND e.end_at IS NULL)
+      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+  )
+ORDER BY e.id
+`
+
+type ListOrphanEntitlementWindowsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+type ListOrphanEntitlementWindowsRow struct {
+	EntitlementID    uuid.UUID
+	CustomerID       uuid.UUID
+	Entitlement      string
+	SourceType       string
+	SourceID         uuid.UUID
+	StartAt          time.Time
+	EndAt            *time.Time
+	SubStatus        *string
+	SubProductID     *uuid.UUID
+	SubPeriodEndsAt  *time.Time
+	SubEndedAt       *time.Time
+	PaymentID        *uuid.UUID
+	PaymentProductID *uuid.UUID
+	Cause            string
+}
+
+// #690 DERIVE `derive.entitlement.orphan` — the FREELOADER detector. A LIVE
+// window (not revoked/deleted, started, unbounded or ending in the future)
+// whose justification chain is PROVEN broken. Post-#691 fail-open, "live
+// window past paid-through" is NORMAL for a standing auto-renew projection
+// (stale ≠ freeloader) — a freeloader's SOURCE is proven dead or absent:
+//
+//	missing_subscription           - source_type=subscription, no sub row at all
+//	terminal_subscription_standing - STANDING (end_at NULL) window whose sub is
+//	                                 terminal: the #691 closure event should
+//	                                 have bounded it and never did
+//	refunded_payment               - one_off window whose payment was refunded,
+//	                                 with no live grant justifying the access
+//
+// Grant-justification guard: never fires when a live un-terminated entitlement
+// grant covers now (matches MaterializeGrant's standing-access projection:
+// per-period grants of a live sub lapse while the standing window persists —
+// that is verification pressure, not freeloading), and never when the window's
+// backing grant is TERMINATED (derive.grant_effect.excess owns that
+// retraction). Non-live windows with dangling sub sources stay with
+// consistency.reference.source_reference. ADMIN surface-only — revoking access
+// is an operator decision, never auto (policy, #690).
+//
+// Verification SQL (2026-07-01 doujins analysis, measured ZERO on the full
+// re-import): (1) grant-justification by source — live windows LEFT JOIN live
+// grants on (customer, source) counting NULLs per source_type; (2)
+// window-vs-paid-through by status — live windows joined to subscriptions
+// grouped by status comparing end_at against GREATEST(current_period_ends_at,
+// ended_at). This query is the union of both, restricted to proven-dead
+// sources. customer_id nullable: NULL = merchant-wide sweep.
+func (q *Queries) ListOrphanEntitlementWindows(ctx context.Context, arg ListOrphanEntitlementWindowsParams) ([]ListOrphanEntitlementWindowsRow, error) {
+	rows, err := q.db.Query(ctx, listOrphanEntitlementWindows, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrphanEntitlementWindowsRow
+	for rows.Next() {
+		var i ListOrphanEntitlementWindowsRow
+		if err := rows.Scan(
+			&i.EntitlementID,
+			&i.CustomerID,
+			&i.Entitlement,
+			&i.SourceType,
+			&i.SourceID,
+			&i.StartAt,
+			&i.EndAt,
+			&i.SubStatus,
+			&i.SubProductID,
+			&i.SubPeriodEndsAt,
+			&i.SubEndedAt,
+			&i.PaymentID,
+			&i.PaymentProductID,
+			&i.Cause,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR evidence->>'provider' = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
@@ -763,6 +1186,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Evidence,
+			&i.ResolvedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -1031,6 +1455,8 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 }
 
 const reconcileGrantSubscriptionEntitlement = `-- name: ReconcileGrantSubscriptionEntitlement :execrows
+
+
 INSERT INTO openrails.entitlements (
     merchant_id, customer_id, entitlement, start_at, end_at,
     source_id, source_type
@@ -1060,6 +1486,16 @@ type ReconcileGrantSubscriptionEntitlementParams struct {
 	Now            time.Time
 }
 
+// ============================================================================
+// Enforce appliers: idempotent LOCAL writes only (never a provider call)
+// ============================================================================
+// #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
+// state transitions route through the ONE decider (reconcile.Decide) applied
+// via the shared lifecycle chokepoints (reconcile.ApplyDecision).
+// DERIVE-plane derive.grant_effect.mismatch revoke
+// repair: revoke the LIVE subscription-sourced entitlements of one
+// subscription. Admin grants and grace windows are different source types and
+// are untouchable by construction.
 // PS-4/PS-1: grant one subscription-sourced entitlement window unless an
 // equivalent live window already exists (idempotent via NOT EXISTS; the
 // re-run inserts nothing).
@@ -1513,44 +1949,6 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 	return result.RowsAffected(), nil
 }
 
-const reconcileRevokeSubscriptionEntitlements = `-- name: ReconcileRevokeSubscriptionEntitlements :execrows
-
-
-UPDATE openrails.entitlements
-SET revoked_at = $1::timestamptz,
-    revoke_reason = $2::text,
-    updated_at = now()
-WHERE source_type = 'subscription'
-  AND source_id = $3
-  AND revoked_at IS NULL
-  AND deleted_at IS NULL
-  AND (end_at IS NULL OR end_at > $1::timestamptz)
-`
-
-type ReconcileRevokeSubscriptionEntitlementsParams struct {
-	Now            time.Time
-	Reason         string
-	SubscriptionID uuid.UUID
-}
-
-// ============================================================================
-// Enforce appliers: idempotent LOCAL writes only (never a provider call)
-// ============================================================================
-// #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
-// state transitions route through the ONE decider (reconcile.Decide) applied
-// via the shared lifecycle chokepoints (reconcile.ApplyDecision).
-// DERIVE-plane derive.grant_effect.mismatch revoke
-// repair: revoke the LIVE subscription-sourced entitlements of one
-// subscription. Admin grants and grace windows are different source types and
-// are untouchable by construction.
-func (q *Queries) ReconcileRevokeSubscriptionEntitlements(ctx context.Context, arg ReconcileRevokeSubscriptionEntitlementsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileRevokeSubscriptionEntitlements, arg.Now, arg.Reason, arg.SubscriptionID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
 UPDATE openrails.subscriptions
 SET next_retry_at = $1::timestamptz, updated_at = now()
@@ -1610,7 +2008,7 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     last_seen_run = EXCLUDED.last_seen_run,
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence
+RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by
 `
 
 type UpsertReconciliationFindingParams struct {
@@ -1660,6 +2058,7 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Evidence,
+		&i.ResolvedBy,
 	)
 	return i, err
 }

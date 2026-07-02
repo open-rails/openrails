@@ -552,10 +552,12 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{
+			// One-off purchases (no tier_group): membership tiers require a
+			// recurring price (pkg/catalog validation), and this test's subject
+			// is Includes propagation, not tiers.
 			{
 				Key:         childKey,
 				DisplayName: "Included Movie",
-				TierGroup:   "movies",
 				Prices: []catalog.Price{{
 					UnitAmount: 4_990_000,
 					Currency:   "usd",
@@ -566,7 +568,6 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 			{
 				Key:         bundleKey,
 				DisplayName: "Movie Bundle",
-				TierGroup:   "bundles",
 				Includes:    []string{childKey},
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,

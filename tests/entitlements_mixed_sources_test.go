@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
@@ -202,7 +201,7 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	require.NotNil(t, suite.App)
 	require.NotNil(t, suite.App.Runtime)
 	require.NotNil(t, suite.App.Runtime.DB)
-	r := repo.NewEntitlementRepo(suite.App.Runtime.DB)
+	r := entitlements.NewEntitlementService(suite.App.Runtime.DB)
 
 	ok, err := r.IsEntitled(ctx, userID, entName, now)
 	require.NoError(t, err)

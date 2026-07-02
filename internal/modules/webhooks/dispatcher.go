@@ -22,6 +22,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
+// CheckoutSessionStore is the exported alias of the checkout-session surface
+// webhook/converge paths use, so the River converge worker can inject the
+// runtime's checkout session service without importing the checkout package.
+type CheckoutSessionStore = webhookCheckoutSessionStore
+
 type webhookCheckoutSessionStore interface {
 	FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error)
 	FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error)
@@ -68,6 +73,9 @@ type WebhookDispatcher struct {
 	PurchaseRegistrar            stripePurchaseRegistrar
 	CheckoutSessionService       webhookCheckoutSessionStore
 	MoneyService                 *money.MoneyService
+	// ConvergeEnqueuer (#684): schedules the coalesced fetch-and-converge job
+	// the slimmed Stripe/NMI subscription-state handlers enqueue.
+	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 }
 
 // webhookRegistry resolves WebhookHandlers by rail. The dispatcher is fully
@@ -167,6 +175,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		DeduplicationService:         d.DeduplicationService,
 		NotificationService:          d.NotificationService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
+		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 	}
 	return service.HandleNMIWebhook(ctx)
 }
@@ -194,6 +203,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		RailCustomerService:          d.RailCustomerService,
 		CheckoutSessionService:       d.CheckoutSessionService,
 		Clock:                        d.Clock,
+		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

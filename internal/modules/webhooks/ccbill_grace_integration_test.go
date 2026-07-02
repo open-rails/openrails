@@ -19,7 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
+// #691: a CCBill RenewalFailure marks the sub past_due and dates the
+// grace_ends_at PACING marker from CCBill's retry schedule, but appends NO
+// grace entitlement windows — the auto-renew sub's STANDING window keeps
+// access intact through CCBill's dunning.
+func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
@@ -87,14 +91,14 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Paid subscription entitlement window [periodStart, paidEnd)
+	// #691 shape: the paid access window is STANDING (end_at NULL).
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
 		ID:          paidEntID,
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",
 		StartAt:     periodStart,
-		EndAt:       &paidEnd,
+		EndAt:       nil,
 		SourceType:  string(models.EntitlementSourceSubscription),
 		SourceID:    &subID,
 		CreatedAt:   now,
@@ -135,35 +139,35 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	require.NoError(t, svc.handleRenewalFailure(ctx))
 
-	// Subscription entitlement remains paid-through.
+	// The standing access window is UNTOUCHED — dunning never gates access.
 	gotPaid, err := q.GetEntitlementByID(ctx, paidEntID)
 	require.NoError(t, err)
-	require.NotNil(t, gotPaid.EndAt)
-	require.Equal(t, paidEnd.UTC(), gotPaid.EndAt.UTC())
+	require.Nil(t, gotPaid.EndAt, "standing window stays open through a renewal failure")
+	require.Nil(t, gotPaid.RevokedAt)
 
-	// Grace entitlement is appended [paidEnd, nextRetryAt)
-	var graceStartAt time.Time
-	var graceEndAt *time.Time
+	// NO grace entitlement windows are appended (#691 deleted them).
+	var graceCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT start_at, end_at FROM openrails.entitlements
-		 WHERE customer_id = $1 AND entitlement = $2
-		   AND source_type = $3
-		   AND source_id = $4
-		   AND revoked_at IS NULL
-		   AND deleted_at IS NULL
-		 LIMIT 1`,
-		tenantSubjectID, "premium", string(models.EntitlementSourceGrace), subID,
-	).Scan(&graceStartAt, &graceEndAt))
-	require.Equal(t, paidEnd.UTC(), graceStartAt.UTC())
-	require.NotNil(t, graceEndAt)
-	// Grace end mirrors capCCBillRetryAt: the parsed end-of-day retry date,
-	// clamped to paidTermEnd + ccbillGraceCap (72h). For these fixture dates
-	// the cap wins.
+		`SELECT count(*) FROM openrails.entitlements
+		 WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
+		tenantSubjectID, string(models.EntitlementSourceGrace), subID,
+	).Scan(&graceCount))
+	require.Zero(t, graceCount, "renewal failure must not mint grace windows")
+
+	// The sub is past_due with the PACING marker dated from CCBill's retry
+	// schedule (capped by ccbillGraceCap; for these fixture dates the cap wins).
+	var status string
+	var graceEndsAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status, grace_ends_at FROM openrails.subscriptions WHERE id = $1`, subID,
+	).Scan(&status, &graceEndsAt))
+	require.Equal(t, "past_due", status)
+	require.NotNil(t, graceEndsAt)
 	expectedGraceEnd := time.Date(nextRetryAt.Year(), nextRetryAt.Month(), nextRetryAt.Day(), 23, 59, 59, 0, time.UTC)
 	if maxGraceEnd := paidEnd.UTC().Add(ccbillGraceCap); expectedGraceEnd.After(maxGraceEnd) {
 		expectedGraceEnd = maxGraceEnd
 	}
-	require.Equal(t, expectedGraceEnd.UTC(), graceEndAt.UTC())
+	require.Equal(t, expectedGraceEnd.UTC(), graceEndsAt.UTC())
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {

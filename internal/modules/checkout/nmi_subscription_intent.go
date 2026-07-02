@@ -36,9 +36,12 @@ func NMISubscriptionCreateIdempotencyKey(checkoutIdempotencyKey string) string {
 // verifier need to create the remote subscription AND register it locally
 // without the originating HTTP request.
 type NMISubscriptionCreatePayload struct {
-	Provider            string     `json:"provider"`
-	PlanID              string     `json:"plan_id"`
-	CustomerVaultID     string     `json:"customer_vault_id"`
+	Provider        string `json:"provider"`
+	PlanID          string `json:"plan_id"`
+	CustomerVaultID string `json:"customer_vault_id"`
+	// BillingID binds the subscription to ONE stored card in the vault (#682
+	// shared-vault support); "" uses the vault's priority-1 entry.
+	BillingID           string     `json:"billing_id,omitempty"`
 	AmountMicros        int64      `json:"amount_micros"`
 	Currency            string     `json:"currency"`
 	Email               string     `json:"email,omitempty"`
@@ -143,6 +146,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 	}
 
 	resp, err := client.AddRecurringSubscription(nmi.RecurringPaymentData{
+		BillingID: p.BillingID,
 		CardUserData: nmi.CardUserData{
 			FirstName: p.FirstName,
 			LastName:  p.LastName,

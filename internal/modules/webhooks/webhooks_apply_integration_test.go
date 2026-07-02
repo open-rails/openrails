@@ -6,6 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,12 +27,111 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// #675 apply-layer integration tests: out-of-order/concurrent webhook delivery
-// must not revert committed state, and money-bearing events must never ACK
-// with zero durable effect.
+// #684 convergence tests, ported from the #675 apply-layer ordering tests.
+// Handlers no longer carry state: every subscription-state event collapses to
+// "fetch current provider truth, converge via the decider", so the old
+// ordering scenarios (stale updated(active) after payment_failed; invoice.paid
+// ∥ subscription.updated in either order; delayed events reverting state) are
+// trivially order-free — N converges against the same truth are idempotent.
+// The provider transport is a REAL httptest server speaking the Stripe wire
+// shape (a transport fake, not a logic mock); the decider is the real one.
+
+// fakeStripeAPI serves GET /v1/subscriptions/{id} with configurable truth and
+// counts requests (the coalescing/fetch-count assertions).
+type fakeStripeAPI struct {
+	mu       sync.Mutex
+	truth    map[string]string // railSubID -> subscription JSON; missing = 404
+	failWith int               // != 0: every request answers this status
+	requests atomic.Int64
+	srv      *httptest.Server
+}
+
+func newFakeStripeAPI(t *testing.T) *fakeStripeAPI {
+	t.Helper()
+	f := &fakeStripeAPI{truth: map[string]string{}}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.requests.Add(1)
+		f.mu.Lock()
+		failWith := f.failWith
+		var body string
+		var ok bool
+		if r.URL.Path != "" {
+			id := r.URL.Path[len("/v1/subscriptions/"):]
+			body, ok = f.truth[id]
+		}
+		f.mu.Unlock()
+		if failWith != 0 {
+			w.WriteHeader(failWith)
+			_, _ = w.Write([]byte(`{"error":{"message":"provider down"}}`))
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"No such subscription"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fakeStripeAPI) setTruth(railSubID, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if body == "" {
+		delete(f.truth, railSubID)
+	} else {
+		f.truth[railSubID] = body
+	}
+}
+
+func (f *fakeStripeAPI) setFailure(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failWith = status
+}
+
+// stripeSubscriptionTruth builds the Stripe subscription JSON (with expanded
+// latest_invoice) the converge fetch consumes.
+type stripeInvoiceTruth struct {
+	ID            string
+	Paid          bool
+	AmountPaid    int64
+	AmountDue     int64
+	Charge        string
+	PaymentIntent string
+	Created       time.Time
+}
+
+func (f *stripeApplyFixture) subscriptionTruth(status string, periodStart, periodEnd time.Time, inv *stripeInvoiceTruth) string {
+	m := map[string]any{
+		"id":                   f.railSubID,
+		"status":               status,
+		"cancel_at_period_end": false,
+		"current_period_start": periodStart.Unix(),
+		"current_period_end":   periodEnd.Unix(),
+		"customer":             f.railCustomerID,
+	}
+	if inv != nil {
+		m["latest_invoice"] = map[string]any{
+			"id":             inv.ID,
+			"paid":           inv.Paid,
+			"amount_paid":    inv.AmountPaid,
+			"amount_due":     inv.AmountDue,
+			"charge":         inv.Charge,
+			"payment_intent": inv.PaymentIntent,
+			"currency":       "usd",
+			"created":        inv.Created.Unix(),
+		}
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
 
 type stripeApplyFixture struct {
-	svc             *StripeWebhookService
+	svc             *StripeConvergeService
+	api             *fakeStripeAPI
 	dbi             *db.DB
 	pool            *pgxpool.Pool
 	userID          string
@@ -37,12 +140,12 @@ type stripeApplyFixture struct {
 	priceID         uuid.UUID
 	subID           uuid.UUID
 	railSubID       string
+	railCustomerID  string
 	subSvc          *subscriptions.SubscriptionService
 }
 
 // newStripeApplyFixture seeds product+price+subscription and builds a
-// StripeWebhookService wired to real services (no dedup layer — handlers are
-// exercised directly).
+// StripeConvergeService whose prober reads the fake Stripe transport.
 func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *pgxpool.Pool, subStatus models.SubscriptionStatus, cancelType *models.CancelType, periodEnd time.Time) *stripeApplyFixture {
 	t.Helper()
 	q := gen.New(pool)
@@ -51,12 +154,14 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 	f := &stripeApplyFixture{
 		dbi:       dbi,
 		pool:      pool,
+		api:       newFakeStripeAPI(t),
 		userID:    uuid.New().String(),
 		productID: uuid.New(),
 		priceID:   uuid.New(),
 		subID:     uuid.New(),
 		railSubID: "sub_apply_" + uuid.New().String(),
 	}
+	f.railCustomerID = "cus_apply_" + uuid.New().String()
 	f.tenantSubjectID = dbtest.EnsureCustomerIDPgx(ctx, t, pool, f.userID)
 
 	description := "Test"
@@ -114,7 +219,8 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE data->>'rail_subscription_id' = $1", f.railSubID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customer_accounts WHERE account_id = $1", f.railCustomerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subID)
@@ -130,14 +236,15 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	f.subSvc = subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
-	f.svc = &StripeWebhookService{
+	f.svc = &StripeConvergeService{
 		DB:                           dbi,
+		Prober:                       &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_fake", BaseURL: f.api.srv.URL},
 		PriceService:                 priceSvc,
 		ProductService:               productSvc,
 		SubscriptionService:          f.subSvc,
 		SubscriptionLifecycleService: lifecycle,
-		NotificationService:          notifSvc,
 		PaymentService:               paymentSvc,
+		NotificationService:          notifSvc,
 	}
 	return f
 }
@@ -149,103 +256,97 @@ func (f *stripeApplyFixture) reload(t *testing.T, ctx context.Context) *models.S
 	return sub
 }
 
-func (f *stripeApplyFixture) invoicePaidObj(txnSuffix string, periodStart, periodEnd time.Time) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{
-		"id": "in_%s",
-		"subscription": %q,
-		"customer": "cus_apply",
-		"amount_paid": 2999,
-		"currency": "usd",
-		"charge": "ch_%s",
-		"metadata": {"user_id": %q, "internal_price_id": %q},
-		"lines": {"data": [{"period": {"start": %d, "end": %d}, "price": {"id": "price_stripe_apply"}}]}
-	}`, txnSuffix, f.railSubID, txnSuffix, f.userID, f.priceID, periodStart.Unix(), periodEnd.Unix()))
+func (f *stripeApplyFixture) paymentCount(t *testing.T, ctx context.Context, status string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, f.pool.QueryRow(ctx,
+		"SELECT count(*) FROM openrails.payments WHERE customer_id = $1 AND status = $2",
+		f.tenantSubjectID, status).Scan(&n))
+	return n
 }
 
-func (f *stripeApplyFixture) subscriptionUpdatedObj(status string, periodEnd time.Time) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{
-		"id": %q,
-		"status": %q,
-		"current_period_end": %d
-	}`, f.railSubID, status, periodEnd.Unix()))
-}
-
-func (f *stripeApplyFixture) paymentFailedObj(suffix string) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{
-		"id": "in_%s",
-		"subscription": %q,
-		"amount_due": 2999,
-		"currency": "usd",
-		"payment_intent": "pi_%s"
-	}`, suffix, f.railSubID, suffix))
-}
-
-// A stale subscription.updated(active) delivered AFTER invoice.payment_failed
-// must not flip past_due back to active without payment.
-func TestStripeStaleUpdatedCannotRevertPastDue(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
-
-	periodEnd := time.Now().UTC().Add(5 * 24 * time.Hour).Truncate(time.Second)
-	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, periodEnd)
-
-	// payment_failed at event-created 2000.
-	require.NoError(t, f.svc.handleInvoicePaymentFailed(ctx, f.paymentFailedObj("fail1"), 2000))
-	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status)
-
-	// Stale updated(active) created 1000 — must be ignored.
-	require.NoError(t, f.svc.handleSubscriptionUpdated(ctx, f.subscriptionUpdatedObj("active", periodEnd), 1000))
-	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status, "stale subscription.updated(active) reactivated a past_due subscription")
-
-	// Newer updated(active) created 3000 — applies (recovery).
-	require.NoError(t, f.svc.handleSubscriptionUpdated(ctx, f.subscriptionUpdatedObj("active", periodEnd), 3000))
-	require.Equal(t, models.StatusActive, f.reload(t, ctx).Status)
-
-	// The failed attempt row is the durable trace of the failed payment.
-	var failedRows int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE customer_id = $1 AND status = 'failed'",
-		f.tenantSubjectID).Scan(&failedRows))
-	require.Equal(t, 1, failedRows)
-}
-
-// Renewal (invoice.paid) and a stale subscription.updated carrying the OLD
-// period must converge on the renewed period in either apply order.
-func TestStripeInvoicePaidVsStaleUpdatedBothOrders(t *testing.T) {
+// #675 scenario 1, converged: a failed renewal followed by ANY number of
+// duplicated/stale wake-ups cannot flip past_due back to active — every
+// converge re-fetches the SAME truth. Recovery happens only when provider
+// truth actually changes.
+func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
-	oldEnd := now.Add(5 * 24 * time.Hour)
-	newEnd := now.Add(35 * 24 * time.Hour)
+	periodEnd := now.Add(5 * 24 * time.Hour)
+	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, periodEnd)
 
-	t.Run("paid then stale updated", func(t *testing.T) {
-		f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, oldEnd)
-		require.NoError(t, f.svc.handleInvoicePaid(ctx, f.invoicePaidObj("a1", now, newEnd), 2000))
-		require.True(t, f.reload(t, ctx).CurrentPeriodEndsAt.Equal(newEnd), "renewal did not extend the period")
+	// Provider truth: renewal failed — subscription past_due with an unpaid
+	// latest invoice (the fetchable decline record).
+	f.api.setTruth(f.railSubID, f.subscriptionTruth("past_due", now.Add(-25*24*time.Hour), periodEnd, &stripeInvoiceTruth{
+		ID: "in_fail1", Paid: false, AmountDue: 2999, PaymentIntent: "pi_fail1", Created: now,
+	}))
 
-		require.NoError(t, f.svc.handleSubscriptionUpdated(ctx, f.subscriptionUpdatedObj("active", oldEnd), 1000))
-		sub := f.reload(t, ctx)
-		require.True(t, sub.CurrentPeriodEndsAt.Equal(newEnd), "stale subscription.updated reverted the renewed period end to %v", sub.CurrentPeriodEndsAt)
-		require.Equal(t, models.StatusActive, sub.Status)
-	})
+	_, err := f.svc.Converge(ctx, f.railSubID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status)
+	require.Equal(t, 1, f.paymentCount(t, ctx, "failed"), "fetched decline must land as the durable failed-attempt row")
 
-	t.Run("stale updated then paid", func(t *testing.T) {
-		f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, oldEnd)
-		require.NoError(t, f.svc.handleSubscriptionUpdated(ctx, f.subscriptionUpdatedObj("active", oldEnd), 1000))
-		require.NoError(t, f.svc.handleInvoicePaid(ctx, f.invoicePaidObj("b1", now, newEnd), 2000))
-		sub := f.reload(t, ctx)
-		require.True(t, sub.CurrentPeriodEndsAt.Equal(newEnd), "renewal after an older updated did not win: %v", sub.CurrentPeriodEndsAt)
-	})
+	// "Stale subscription.updated(active)" is now just another wake-up: it
+	// re-fetches the SAME truth. Any order, any count — state cannot revert.
+	for i := 0; i < 3; i++ {
+		_, err = f.svc.Converge(ctx, f.railSubID)
+		require.NoError(t, err)
+	}
+	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status, "duplicate/stale wake-ups reverted past_due")
+	require.Equal(t, 1, f.paymentCount(t, ctx, "failed"), "failed-attempt row must not duplicate")
+
+	// Provider truth changes: Stripe recovered the payment (the invoice is now
+	// paid, subscription active again). Convergence follows truth — a real
+	// recovery, not a stale payload.
+	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", now.Add(-25*24*time.Hour), periodEnd, &stripeInvoiceTruth{
+		ID: "in_rec1", Paid: true, AmountPaid: 2999, Charge: "ch_rec1", Created: now,
+	}))
+	_, err = f.svc.Converge(ctx, f.railSubID)
+	require.NoError(t, err)
+	sub := f.reload(t, ctx)
+	require.Equal(t, models.StatusActive, sub.Status)
+	require.True(t, sub.CurrentPeriodEndsAt.Equal(periodEnd), "recovery keeps the provider period end")
+	require.Equal(t, 1, f.paymentCount(t, ctx, "completed"), "recovered charge backfilled exactly once")
 }
 
-// A renewal charge blocked by a terminal local subscription must leave a
-// durable repair alert (customer WAS charged) instead of a silent ACK.
-func TestStripeTerminalBlockedRenewalWritesRepairAlert(t *testing.T) {
+// #675 scenario 2, converged: invoice.paid ∥ subscription.updated in either
+// order collapse to converges against the SAME renewed truth — the period end
+// is the provider's, exactly one payment row exists, in every order/count.
+func TestStripeConvergeRenewalIdempotentAnyOrder(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	oldEnd := now.Add(-1 * time.Hour) // the boundary just lapsed; Stripe billed it
+	newEnd := now.Add(30 * 24 * time.Hour)
+	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, oldEnd)
+
+	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", oldEnd, newEnd, &stripeInvoiceTruth{
+		ID: "in_b1", Paid: true, AmountPaid: 2999, Charge: "ch_b1", Created: oldEnd,
+	}))
+
+	// Both "orders" (and duplicates) are the same operation now.
+	for i := 0; i < 2; i++ {
+		_, err := f.svc.Converge(ctx, f.railSubID)
+		require.NoError(t, err)
+		sub := f.reload(t, ctx)
+		require.Equal(t, models.StatusActive, sub.Status)
+		require.True(t, sub.CurrentPeriodEndsAt.Equal(newEnd), "converge %d did not land the renewed period end: %v", i, sub.CurrentPeriodEndsAt)
+		require.Equal(t, 1, f.paymentCount(t, ctx, "completed"), "renewal payment must exist exactly once")
+	}
+	require.EqualValues(t, 2, f.api.requests.Load(), "each converge is exactly one provider fetch")
+}
+
+// #675 scenario 3, converged: a renewal charge against a terminal local
+// subscription cannot resurrect it (terminal rows take no transition), but the
+// charge IS money truth and must leave a durable payment row.
+func TestStripeConvergeTerminalRowKeepsMoneyTruth(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -255,21 +356,69 @@ func TestStripeTerminalBlockedRenewalWritesRepairAlert(t *testing.T) {
 	cancelType := models.CancelTypeChargeback
 	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusCancelled, &cancelType, now.Add(-24*time.Hour))
 
-	err := f.svc.handleInvoicePaid(ctx, f.invoicePaidObj("tb1", now, now.Add(30*24*time.Hour)), 2000)
-	require.NoError(t, err, "terminal-blocked renewal must ACK after recording the repair alert")
+	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", now.Add(-time.Hour), now.Add(30*24*time.Hour), &stripeInvoiceTruth{
+		ID: "in_tb1", Paid: true, AmountPaid: 2999, Charge: "ch_tb1", Created: now.Add(-time.Hour),
+	}))
+
+	_, err := f.svc.Converge(ctx, f.railSubID)
+	require.NoError(t, err)
 
 	require.Equal(t, models.StatusCancelled, f.reload(t, ctx).Status, "terminal subscription must stay cancelled")
-
-	var alerts int
+	var txn string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.notification_queue
-		 WHERE data->>'operation' = 'terminal_blocked_renewal_success'
-		   AND data->>'transaction_id' = 'ch_tb1'`).Scan(&alerts))
-	require.Equal(t, 1, alerts, "terminal-blocked renewal left no durable trace")
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE data->>'transaction_id' = 'ch_tb1'")
-	})
+		"SELECT transaction_id FROM openrails.payments WHERE customer_id = $1 AND status = 'completed'",
+		f.tenantSubjectID).Scan(&txn))
+	require.Equal(t, "ch_tb1", txn, "the charge against the terminal row is money truth and must be recorded")
 }
+
+// Fetch-404 IS evidence: Stripe answering "no such subscription" is
+// provider-confirmed-gone, and the REAL decider turns it into a terminal
+// cancel (#679 certainty ladder), never a guess.
+func TestStripeConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, now.Add(5*24*time.Hour))
+	// No truth registered: the fake answers 404.
+
+	_, err := f.svc.Converge(ctx, f.railSubID)
+	require.NoError(t, err)
+
+	sub := f.reload(t, ctx)
+	require.Equal(t, models.StatusCancelled, sub.Status, "provider-confirmed-gone must cancel through the decider")
+	require.NotNil(t, sub.CancelType)
+	require.Equal(t, models.CancelTypeExpired, *sub.CancelType)
+}
+
+// Provider API down: the converge attempt fails RETRYABLY — the dirty mark
+// parks (the job retries), local state and access stay intact, and a later
+// converge against healthy truth converges normally.
+func TestStripeConvergeProviderDownParksAndRecovers(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	periodEnd := now.Add(5 * 24 * time.Hour)
+	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, periodEnd)
+
+	f.api.setFailure(http.StatusInternalServerError)
+	_, err := f.svc.Converge(ctx, f.railSubID)
+	require.Error(t, err, "provider outage must fail the converge for retry")
+	require.Equal(t, models.StatusActive, f.reload(t, ctx).Status, "outage must not move local state; access intact")
+
+	f.api.setFailure(0)
+	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", now.Add(-25*24*time.Hour), periodEnd, nil))
+	_, err = f.svc.Converge(ctx, f.railSubID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, f.reload(t, ctx).Status)
+}
+
+var _ = fmt.Sprintf // keep fmt for the CCBill/NMI sections below
 
 // A CCBill void racing the sale must return a retryable error (redelivery
 // wins once the sale materializes), never a plain ACK.

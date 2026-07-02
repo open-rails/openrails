@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
@@ -71,6 +71,11 @@ type TestContainerSuite struct {
 
 	clock clockwork.Clock
 	port  int
+
+	// stripeSecretKey, when set (WithSuiteStripeRail), adds a Stripe rail to the
+	// suite's RailMerchantAccountSet before boot. Kept out of the default set so
+	// the shared suite never grows a Stripe surface other tests don't expect.
+	stripeSecretKey string
 }
 
 // TestSuiteOption customizes an integration test suite before it boots.
@@ -90,6 +95,16 @@ func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
 func WithSuitePort(port int) TestSuiteOption {
 	return func(suite *TestContainerSuite) {
 		suite.port = port
+	}
+}
+
+// WithSuiteStripeRail adds an active Stripe rail (construction-time config,
+// like the mobius/ccbill/solana defaults) so the hosted Stripe checkout path
+// is reachable. Pair with stripeapi.SetTestBaseTransport so no request ever
+// leaves the process.
+func WithSuiteStripeRail(secretKey string) TestSuiteOption {
+	return func(suite *TestContainerSuite) {
+		suite.stripeSecretKey = secretKey
 	}
 }
 
@@ -260,6 +275,15 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			},
 		},
 	}
+	if suite.stripeSecretKey != "" {
+		suite.Rails["stripe"] = &config.RailMerchantAccountConfig{
+			Rail:      models.RailStripe,
+			AccountID: "acct_openrails_test",
+			Stripe: &config.StripeRailConfig{
+				SecretKey: suite.stripeSecretKey,
+			},
+		}
+	}
 	if suite.port != 0 {
 		suite.Config.Port = config.FlexiblePort(suite.port)
 	}
@@ -424,8 +448,10 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	suite.seedRailMerchantAccount(ctx, "nmi", testNMIRailMerchantAccountID)
-	nmiSecret, err := merchants.RailMerchantAccountSecretName("nmi", "live", testNMIRailMerchantAccountID, "security_key")
+	// NMI follows deployment posture (#681): test_mode ⇒ environment=test rows.
+	nmiEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	suite.seedRailMerchantAccountWithEvidence(ctx, "nmi", nmiEnv, testNMIRailMerchantAccountID, `{"source":"test_fixture"}`)
+	nmiSecret, err := merchants.RailMerchantAccountSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID, "security_key")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
 	require.NoError(suite.t, err)
@@ -442,10 +468,6 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	require.NoError(suite.t, err)
 
 	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
-}
-
-func (suite *TestContainerSuite) seedRailMerchantAccount(ctx context.Context, rail, accountID string) {
-	suite.seedRailMerchantAccountWithEvidence(ctx, rail, "live", accountID, `{"source":"test_fixture"}`)
 }
 
 func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
@@ -768,7 +790,7 @@ func (suite *TestContainerSuite) ClearJobQueue() {
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price, err := dbrepo.NewPriceRepo(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
+	price, err := catalog.NewPriceService(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

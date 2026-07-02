@@ -50,6 +50,8 @@ GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods
 GET /v1/merchant/customers/{customer_id}/payments
 GET /v1/merchant/entitlements/{entitlement}/customers
+GET /v1/merchant/findings
+GET /v1/merchant/findings/{id}
 GET /v1/merchant/invokers/{invoker}/credits
 GET /v1/merchant/metrics
 GET /v1/merchant/payment-providers
@@ -61,6 +63,7 @@ GET /v1/merchant/settings
 GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
 GET /v1/merchant/trust-tier
+GET /v1/merchant/worker-health
 GET /v1/merchant/users/{user_id}/product-access
 GET /v1/prices
 GET /v1/products
@@ -105,6 +108,7 @@ POST /v1/merchant/customers/entitlements:batch
 POST /v1/merchant/customers/{customer_id}/entitlements
 POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
+POST /v1/merchant/findings/{id}/resolve
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/resume

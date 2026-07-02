@@ -288,6 +288,25 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 }
 
 func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
+	// #685: in-process host principal, attached to the request CONTEXT by the
+	// embed SDK's in-process transport. Trusted precisely because context values
+	// cannot arrive on a network request (no header is consulted); gated on
+	// permissions like every other credential.
+	if hp, ok := billingauth.HostPrincipalFromContext(ctx); ok {
+		if hp.MerchantID.IsZero() {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "host_principal_invalid"}
+		}
+		resolved := &controlplane.ResolvedServiceCredential{
+			OwnerGroupRef: "in-process-host",
+			MerchantID:    hp.MerchantID,
+			MerchantSlug:  hp.MerchantSlug,
+			Permissions:   hp.Permissions,
+		}
+		if !resolved.HasPermission(perm) {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		}
+		return billingauth.Principal{MerchantID: hp.MerchantID}, nil
+	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
 			switch {
@@ -555,6 +574,17 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 
 	rr.Handle(http.MethodGet, "/metrics", h(httphandlers.GetAdminMetrics), usageRead...)
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
+	// #689: worker-health dashboard — same operator repair surface/permission.
+	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetAdminWorkerHealth), repairRead...)
+
+	// #692 operator findings queue: reads share the repair surface permission;
+	// resolve executes recommendations (cancel/refund/revoke/grant) and is a
+	// distinct write grant. One item at a time — no bulk endpoint (#679).
+	findingsResolve := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantFindingsResolve)}, dbMW...)
+	findings := rr.Group("/findings")
+	findings.Handle(http.MethodGet, "", h(httphandlers.AdminListFindings), repairRead...)
+	findings.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetFinding), repairRead...)
+	findings.Handle(http.MethodPost, "/:id/resolve", h(httphandlers.AdminResolveFinding), findingsResolve...)
 }
 
 // RegisterWebhookRoutes mounts the legacy configured-merchant webhook surface.

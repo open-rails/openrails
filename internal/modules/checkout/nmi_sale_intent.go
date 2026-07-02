@@ -36,14 +36,17 @@ func NMISaleIdempotencyKey(checkoutIdempotencyKey string) string {
 // and the async verifier need to charge AND locally register the purchase
 // without the originating HTTP request.
 type NMISalePayload struct {
-	Provider        string    `json:"provider"`
-	CustomerVaultID string    `json:"customer_vault_id"`
-	AmountMicros    int64     `json:"amount_micros"`
-	Currency        string    `json:"currency"`
-	Description     string    `json:"description"`
-	UserID          string    `json:"user_id"`
-	PriceID         uuid.UUID `json:"price_id"`
-	E2ERunID        string    `json:"e2e_run_id,omitempty"`
+	Provider        string `json:"provider"`
+	CustomerVaultID string `json:"customer_vault_id"`
+	// BillingID targets the exact stored card in the vault (#682); "" charges
+	// the vault's priority-1 entry (always correct for one-card-per-vault).
+	BillingID    string    `json:"billing_id,omitempty"`
+	AmountMicros int64     `json:"amount_micros"`
+	Currency     string    `json:"currency"`
+	Description  string    `json:"description"`
+	UserID       string    `json:"user_id"`
+	PriceID      uuid.UUID `json:"price_id"`
+	E2ERunID     string    `json:"e2e_run_id,omitempty"`
 }
 
 // Evidence keys the producer reads back off a succeeded intent.
@@ -141,6 +144,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	}
 	saleResp, err := client.RunSale(nmi.SaleParams{
 		CustomerVaultID:  p.CustomerVaultID,
+		BillingID:        p.BillingID,
 		Amount:           moneyutil.Cents(amountCents),
 		Currency:         p.Currency,
 		OrderDescription: p.Description,

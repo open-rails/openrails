@@ -233,6 +233,13 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		if err := w.SubscriptionService.Update(ctx, sub); err != nil {
 			return err
 		}
+		// #691: undo the advance-written cancel closure — the resumed auto-renew
+		// sub's window goes back to STANDING (end_at NULL).
+		if w.EntitlementService != nil {
+			if err := w.EntitlementService.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
+				return fmt.Errorf("resume subscription access windows: %w", err)
+			}
+		}
 		return nil
 	}
 

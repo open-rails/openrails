@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -296,10 +297,7 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 }
 
 func webhookProviderEnvironment(r *httprequest.Request) string {
-	if r != nil && r.State != nil && r.State.Config != nil && r.State.Config.IsTestMode() {
-		return "test"
-	}
-	return "live"
+	return config.ExpectedProviderEnvironment(r != nil && r.State != nil && r.State.Config != nil && r.State.Config.IsTestMode())
 }
 
 // ccbillWebhookIPAllowed is the single gate for CCBill webhook source-IP

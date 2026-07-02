@@ -96,7 +96,7 @@ func TestRailMerchantAccountSignerUsesVaultTransitEvidence(t *testing.T) {
 	}))
 
 	transit := &signerTestTransit{key: key}
-	signer := NewSignerFromRailMerchantAccounts(signerTestSecrets{}, transit, appDB, 0)
+	signer := NewSignerFromRailMerchantAccounts(signerTestSecrets{}, transit, appDB, 0, "live")
 	pub, err := signer.PublicKey(ctx, tid)
 	require.NoError(t, err)
 	require.True(t, pub.Equals(key.PublicKey()))

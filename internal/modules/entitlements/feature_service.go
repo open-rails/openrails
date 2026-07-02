@@ -10,7 +10,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -23,16 +22,16 @@ import (
 // window's entitlement string to the feature's lookup_key.
 type FeatureService struct {
 	db    *db.DB
-	repo  *repo.EntitlementFeatureRepo
-	ents  *repo.EntitlementRepo
+	repo  *EntitlementFeatureRepo
+	ents  *EntitlementService
 	clock clockwork.Clock
 }
 
 func NewFeatureService(database *db.DB, clocks ...clockwork.Clock) *FeatureService {
 	return &FeatureService{
 		db:    database,
-		repo:  repo.NewEntitlementFeatureRepo(database),
-		ents:  repo.NewEntitlementRepo(database),
+		repo:  NewEntitlementFeatureRepo(database),
+		ents:  NewEntitlementService(database),
 		clock: timeutil.FirstClock(clocks...),
 	}
 }

@@ -25,9 +25,13 @@ type RecurringPaymentData struct {
 	CardUserData
 	PlanID          string
 	CustomerVaultID string
-	Email           string
-	Currency        string
-	PaymentToken    string
+	// BillingID binds the subscription to ONE stored card in the vault (#682
+	// shared-vault support); "" uses the vault's priority-1 entry — always
+	// correct under the one-vault-per-card minting policy.
+	BillingID    string
+	Email        string
+	Currency     string
+	PaymentToken string
 	// Amount is DECIMAL MAJOR UNITS (dollars, typed #671) — NMI classic
 	// recurring takes a decimal amount string.
 	Amount     moneyutil.MajorUnits
@@ -126,6 +130,9 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	}
 	if data.CustomerVaultID != "" {
 		values.Set("customer_vault_id", data.CustomerVaultID)
+	}
+	if trimmed := strings.TrimSpace(data.BillingID); trimmed != "" && data.CustomerVaultID != "" {
+		values.Set("billing_id", trimmed)
 	}
 	if trimmed := strings.TrimSpace(data.StartDate); trimmed != "" {
 		values.Set("start_date", trimmed)

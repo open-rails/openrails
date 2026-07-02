@@ -701,6 +701,114 @@ func (q *Queries) GetSubscriptionByRailSubIDForUpdate(ctx context.Context, arg G
 	return i, err
 }
 
+const getUnknownSubscriptionByCustomerAndProduct = `-- name: GetUnknownSubscriptionByCustomerAndProduct :one
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
+WHERE sub.customer_id = $1
+  AND sub.product_id = $2
+  AND sub.status = 'unknown'
+ORDER BY sub.current_period_ends_at DESC NULLS FIRST
+LIMIT 1
+`
+
+type GetUnknownSubscriptionByCustomerAndProductParams struct {
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+}
+
+// #691 checkout guard: an `unknown` sub does NOT hold the lifecycle slot, but it
+// may still be alive (and billing) at the provider — a re-purchase would
+// double-bill. These lookups back the subscribe-time rejection.
+func (q *Queries) GetUnknownSubscriptionByCustomerAndProduct(ctx context.Context, arg GetUnknownSubscriptionByCustomerAndProductParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getUnknownSubscriptionByCustomerAndProduct, arg.CustomerID, arg.ProductID)
+	var i OpenrailsSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.RailSubscriptionID,
+		&i.UserEmail,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CancelledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.CreditsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.RailMerchantAccountID,
+	)
+	return i, err
+}
+
+const getUnknownSubscriptionByCustomerAndTierGroup = `-- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.credits_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.rail_merchant_account_id FROM openrails.subscriptions sub
+JOIN openrails.products prod ON prod.id = sub.product_id
+WHERE sub.customer_id = $1
+  AND sub.status = 'unknown'
+  AND prod.tier_group = $2
+ORDER BY sub.current_period_ends_at DESC NULLS FIRST
+LIMIT 1
+`
+
+type GetUnknownSubscriptionByCustomerAndTierGroupParams struct {
+	CustomerID uuid.UUID
+	TierGroup  *string
+}
+
+func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Context, arg GetUnknownSubscriptionByCustomerAndTierGroupParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getUnknownSubscriptionByCustomerAndTierGroup, arg.CustomerID, arg.TierGroup)
+	var i OpenrailsSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.RailSubscriptionID,
+		&i.UserEmail,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CancelledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.CreditsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.RailMerchantAccountID,
+	)
+	return i, err
+}
+
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.status = 'active'
@@ -1311,6 +1419,33 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const subscriptionProjectsStandingAccess = `-- name: SubscriptionProjectsStandingAccess :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.subscriptions s
+    JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+    WHERE s.merchant_id = $1::uuid
+      AND s.id = $2::uuid
+      AND p.auto_renew
+      AND s.status IN ('pending', 'active', 'past_due', 'unknown')
+) AS standing
+`
+
+type SubscriptionProjectsStandingAccessParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #691 projection inversion: does this subscription project STANDING access
+// (open-ended entitlement window, closed only by proven events)? True for
+// auto-renew prices while the sub is non-terminal; terminal subs and bounded
+// (one-off/rental) prices keep bounded interval windows.
+func (q *Queries) SubscriptionProjectsStandingAccess(ctx context.Context, arg SubscriptionProjectsStandingAccessParams) (bool, error) {
+	row := q.db.QueryRow(ctx, subscriptionProjectsStandingAccess, arg.MerchantID, arg.ID)
+	var standing bool
+	err := row.Scan(&standing)
+	return standing, err
 }
 
 const updateSubscriptionAt = `-- name: UpdateSubscriptionAt :execrows

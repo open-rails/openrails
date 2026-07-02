@@ -116,8 +116,17 @@ type Surface struct {
 	h   *Harness
 	app *app.App
 
+	// rt is the embedded surface's runtime (nil for standalone): the source of
+	// the #685 unified in-process client (rt.Client()).
+	rt *embed.Runtime
+
 	currency string
 }
+
+// Runtime returns the embedded runtime backing the embedded surface (nil for
+// standalone). Runtime().Client() is the #685 unified client over the
+// in-process transport — the embedded side of the conformance contract.
+func (s *Surface) Runtime() *embed.Runtime { return s.rt }
 
 // Client returns a fresh openrails.Client (NewRemote) for this surface, carrying
 // its token + currency. opts append/override.
@@ -183,6 +192,10 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	})
 	require.NoError(h.t, err, "embed.New")
 	h.t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	// Bind the engine to the test merchant — what embed provisioning
+	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
+	// transport (#685) pins this merchant per request.
+	rt.Embedded().App().Runtime.ConfiguredMerchant = dbtest.TestMerchantID
 
 	mux := http.NewServeMux()
 	runtime := rt.Embedded().App().Runtime
@@ -203,6 +216,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 		Name:     "embedded",
 		BaseURL:  srv.URL,
 		Token:    "embedded-host-trusting-token", // any token works (trusting resolver)
+		rt:       rt,
 		currency: currency,
 	}
 }

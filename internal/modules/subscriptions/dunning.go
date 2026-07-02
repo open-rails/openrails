@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // Cadence-relative dunning (#359).
@@ -233,45 +232,6 @@ func BillingCycleHoursOf(price *models.Price) int {
 	return *cycleHours
 }
 
-// Renewal grace windows (#368).
-//
-// Silence at period end (no renewal webhook either way) no longer cuts access
-// at the period-end second: activation and every renewal pre-append a bounded,
-// revocable `grace` entitlement window trailing the paid window, so a missed
-// success webhook, a provider billing on its own day boundary, or a merely
-// late webhook never gates a paying user. Paid windows stay truthful (end_at
-// = period end, immutable); generosity is a SEPARATE window that any
-// renewal/terminal resolution (webhook, dunning, unknown-cohort reconcile)
-// revokes the moment truth arrives. NOT a config knob — cadence-derived and
-// hardcoded, like the dunning schedule.
-const (
-	// graceSlackCap bounds the trailing grace window: at most 48h of silence
-	// generosity (Paul, 2026-06-12). This grace exists for provider-side
-	// schedule rounding and late webhooks — NOT for dunning, which has its
-	// own rail-driven grace; anything a rounding error can't explain within
-	// two days is the unknown-cohort reconciler's and dunning's problem.
-	graceSlackCap = 48 * time.Hour
-)
-
-// GraceSlack returns the duration of the trailing renewal grace window for a
-// billing cycle expressed in HOURS: half the billing cycle, capped at 48h
-// (daily cycles get 12h, 3-day 36h, 4-day-and-longer incl. monthly 48h).
-// cycleHours <= 0 means the cycle is unknown (one-time price); the monthly cap
-// is returned defensively to match the Dunning* fallbacks.
-func GraceSlack(cycleHours int) time.Duration {
-	if cycleHours <= 0 {
-		return graceSlackCap
-	}
-	half := time.Duration(cycleHours) * time.Hour / 2
-	if half > graceSlackCap {
-		return graceSlackCap
-	}
-	return half
-}
-
-// RenewalGraceEligibleRail reports whether a rail's subscriptions get the
-// pre-appended renewal grace window (#368). Registry-backed (#669); see
-// rails.Descriptor.RenewalGraceEligible.
-func RenewalGraceEligibleRail(rail models.Rail) bool {
-	return rails.RenewalGraceEligible(rail)
-}
+// (#368 trailing renewal grace deleted by #691: an auto-renew subscription's
+// entitlement window is STANDING (open-ended) from creation and closes only on
+// proven events, so no grace window is needed to bridge silence at period end.)

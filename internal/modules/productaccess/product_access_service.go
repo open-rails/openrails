@@ -18,7 +18,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -26,14 +25,14 @@ import (
 // Service owns the product-access-grant lifecycle.
 type Service struct {
 	db    *db.DB
-	repo  *repo.ProductAccessGrantRepo
+	repo  *ProductAccessGrantRepo
 	clock clockwork.Clock
 }
 
 func NewService(database *db.DB, clocks ...clockwork.Clock) *Service {
 	return &Service{
 		db:    database,
-		repo:  repo.NewProductAccessGrantRepo(database),
+		repo:  NewProductAccessGrantRepo(database),
 		clock: timeutil.FirstClock(clocks...),
 	}
 }
@@ -52,12 +51,12 @@ func (s *Service) now() time.Time {
 // policy constrains every query to the request's merchant (MerchantTx pins the
 // app.merchant_id GUC as the first statement). repo calls inside fn use the
 // tx-scoped repo so they ride that GUC.
-func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *repo.ProductAccessGrantRepo) error) error {
+func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *ProductAccessGrantRepo) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("product access service not initialized")
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, repo.NewProductAccessGrantRepo(s.db.NewWithPgxTx(tx)))
+		return fn(ctx, NewProductAccessGrantRepo(s.db.NewWithPgxTx(tx)))
 	})
 }
 
@@ -92,7 +91,7 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 	var out *models.ProductAccessGrant
 	created := false
 
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		existing, err := r.GetBySource(ctx, params.UserID, params.ProductID, params.SourceID)
 		if err != nil {
 			return fmt.Errorf("check existing grant: %w", err)
@@ -151,7 +150,7 @@ const maxIncludeDepth = 64
 // (parent SourceID + ":incl:" + childID) so re-running is a no-op via GetBySource.
 // A visited set seeded with the parent makes nesting (A→B→C) work and cycles
 // (A→B→A) terminate; maxIncludeDepth is a backstop.
-func (s *Service) materializeIncludes(ctx context.Context, r *repo.ProductAccessGrantRepo, params GrantParams, now time.Time, endsAt *time.Time) error {
+func (s *Service) materializeIncludes(ctx context.Context, r *ProductAccessGrantRepo, params GrantParams, now time.Time, endsAt *time.Time) error {
 	visited := map[uuid.UUID]bool{params.ProductID: true}
 	type node struct {
 		id    uuid.UUID
@@ -208,7 +207,7 @@ func (s *Service) materializeIncludes(ctx context.Context, r *repo.ProductAccess
 // GetGrant returns a single grant by id (merchant-scoped), or nil if not found.
 func (s *Service) GetGrant(ctx context.Context, grantID uuid.UUID) (*models.ProductAccessGrant, error) {
 	var grant *models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		g, e := r.GetByID(ctx, grantID)
 		if e != nil {
 			return e
@@ -223,7 +222,7 @@ func (s *Service) GetGrant(ctx context.Context, grantID uuid.UUID) (*models.Prod
 // is reported via found=false (not an error) so callers can stay idempotent.
 func (s *Service) RevokeProductAccess(ctx context.Context, grantID uuid.UUID, reason models.ProductAccessRevokeReason) (found bool, err error) {
 	now := s.now().UTC()
-	err = s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err = s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		n, e := r.RevokeByID(ctx, grantID, now, reason)
 		if e != nil {
 			return e
@@ -239,7 +238,7 @@ func (s *Service) RevokeProductAccess(ctx context.Context, grantID uuid.UUID, re
 func (s *Service) RevokeProductAccessByPayment(ctx context.Context, paymentID uuid.UUID, reason models.ProductAccessRevokeReason) (int64, error) {
 	now := s.now().UTC()
 	var n int64
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		count, e := r.RevokeByPayment(ctx, paymentID, now, reason)
 		if e != nil {
 			return e
@@ -258,7 +257,7 @@ func (s *Service) HasProductAccess(ctx context.Context, userID string, productID
 	}
 	at := s.now().UTC()
 	var ok bool
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		has, e := r.HasActiveAccess(ctx, userID, productID, at)
 		if e != nil {
 			return e
@@ -274,7 +273,7 @@ func (s *Service) HasProductAccess(ctx context.Context, userID string, productID
 func (s *Service) ListAccessibleProducts(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
 	at := s.now().UTC()
 	var grants []models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		out, e := r.ListActiveByUser(ctx, userID, at)
 		if e != nil {
 			return e
@@ -289,7 +288,7 @@ func (s *Service) ListAccessibleProducts(ctx context.Context, userID string) ([]
 // recent first. Used by admin views.
 func (s *Service) ListAllGrantsByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
 	var grants []models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
 		out, e := r.ListByUser(ctx, userID)
 		if e != nil {
 			return e

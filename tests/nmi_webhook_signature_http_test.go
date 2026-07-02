@@ -1,0 +1,122 @@
+//go:build integration
+
+package tests
+
+// NMI merchant-webhook signature verification over real HTTP (#694 GAP 2).
+// Full stack: real Postgres-backed merchant resolution, the seeded
+// webhook-signing secret loaded through the merchant secret store, the
+// sigverify HMAC scheme (t=<unix>,s=hex(hmac-sha256(secret, ts+"."+body))),
+// and the real webhook dispatcher applying the event.
+//
+//	valid signature   ⇒ 202-path "accepted" AND the event's effect lands
+//	                    (recurring.subscription.delete cancels the local sub)
+//	tampered/foreign  ⇒ 401, no state change
+//	missing signature ⇒ 401, no state change
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchants"
+)
+
+// signNMIWebhook produces the Webhook-Signature header value NMI sends:
+// t=<unix>,s=<hex hmac-sha256(secret, ts + "." + body)>.
+func signNMIWebhook(secret string, body []byte) string {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(ts + "." + string(body)))
+	return fmt.Sprintf("t=%s,s=%s", ts, hex.EncodeToString(mac.Sum(nil)))
+}
+
+func postNMIMerchantWebhook(t *testing.T, suite *TestContainerSuite, body []byte, signature string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost,
+		"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/nmi", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	if signature != "" {
+		req.Header.Set("Webhook-Signature", signature)
+	}
+	suite.Server.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	// Seed the webhook signing secret for the suite's active NMI account — the
+	// exact secret LoadNMIWebhookSigningSecret resolves on the merchant surface.
+	const signingSecret = "nmi-e2e-webhook-signing-secret"
+	nmiEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	secretName, err := merchants.RailMerchantAccountSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID, "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, secretName, signingSecret)
+	require.NoError(t, err)
+
+	// A live NMI subscription the delete event should cancel.
+	products := suite.SeedProducts()
+	userID := uuid.New().String()
+	railSubID := "nmi-sig-e2e-" + uuid.New().String()[:8]
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:    userID,
+		PriceID:   products[0].Prices[0].ID,
+		Status:    models.StatusActive,
+		Rail:      models.RailNMI,
+		RailSubID: railSubID,
+	})
+
+	body := []byte(fmt.Sprintf(
+		`{"event_id":"evt_nmi_sig_%s","event_type":"recurring.subscription.delete","event_body":{"subscription_id":"%s"}}`,
+		uuid.New().String()[:8], railSubID))
+
+	t.Run("missing signature rejected", func(t *testing.T) {
+		w := postNMIMerchantWebhook(t, suite, body, "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("tampered signature rejected", func(t *testing.T) {
+		// Signed with the WRONG secret (equivalently: body tampered after signing).
+		w := postNMIMerchantWebhook(t, suite, body, signNMIWebhook("attacker-secret", body))
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("signed-then-modified body rejected", func(t *testing.T) {
+		sig := signNMIWebhook(signingSecret, body)
+		tampered := bytes.Replace(body, []byte(railSubID), []byte("some-other-sub"), 1)
+		w := postNMIMerchantWebhook(t, suite, tampered, sig)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "body: %s", w.Body.String())
+	})
+
+	// Nothing above may have touched the subscription.
+	require.Equal(t, models.StatusActive, suite.GetSubscription(sub.ID).Status,
+		"rejected webhooks must not change state")
+
+	t.Run("valid signature accepted and applied", func(t *testing.T) {
+		w := postNMIMerchantWebhook(t, suite, body, signNMIWebhook(signingSecret, body))
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "accepted")
+
+		got := suite.GetSubscription(sub.ID)
+		assert.Equal(t, models.StatusCancelled, got.Status,
+			"provider-initiated delete must cancel the local subscription")
+	})
+}

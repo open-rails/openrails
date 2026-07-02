@@ -18,6 +18,23 @@ type fakeSubscriptionAccess struct {
 	byPrice     map[uuid.UUID]*models.Subscription
 	byTierGroup map[string]*models.Subscription
 	byProduct   map[uuid.UUID]*models.Subscription
+	// #691: unknown-status subs (parked pending provider verification).
+	unknownByProduct   map[uuid.UUID]*models.Subscription
+	unknownByTierGroup map[string]*models.Subscription
+}
+
+func (f *fakeSubscriptionAccess) GetUnknownByUserIDAndProductID(_ context.Context, _ string, productID uuid.UUID) (*models.Subscription, error) {
+	if sub, ok := f.unknownByProduct[productID]; ok {
+		return sub, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *fakeSubscriptionAccess) GetUnknownByUserIDAndTierGroup(_ context.Context, _ string, tierGroup string) (*models.Subscription, error) {
+	if sub, ok := f.unknownByTierGroup[tierGroup]; ok {
+		return sub, nil
+	}
+	return nil, sql.ErrNoRows
 }
 
 func (f *fakeSubscriptionAccess) GetByUserIDAndPriceID(_ context.Context, _ string, priceID uuid.UUID) (*models.Subscription, error) {
@@ -130,6 +147,36 @@ func TestCheckSubscriptionConflict(t *testing.T) {
 		}
 		if got.Blocked {
 			t.Fatalf("expected first-time subscribe to be allowed, got %+v", got)
+		}
+	})
+
+	t.Run("an unknown sub for the same product blocks with the verification code (#691)", func(t *testing.T) {
+		svc := &CheckoutPurchaseService{SubscriptionService: &fakeSubscriptionAccess{
+			unknownByProduct: map[uuid.UUID]*models.Subscription{
+				existingProduct.ID: existingSubFor(models.StatusUnknown, existingProduct, existingPriceID),
+			},
+		}}
+		got, err := svc.CheckSubscriptionConflict(ctx, "user-1", existingPrice, existingProduct)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Blocked || got.Code != ConflictCodeMembershipPendingVerification {
+			t.Fatalf("expected pending-verification block, got %+v", got)
+		}
+	})
+
+	t.Run("an unknown sub in the tier-group blocks with the verification code (#691)", func(t *testing.T) {
+		svc := &CheckoutPurchaseService{SubscriptionService: &fakeSubscriptionAccess{
+			unknownByTierGroup: map[string]*models.Subscription{
+				groupID: existingSubFor(models.StatusUnknown, existingProduct, existingPriceID),
+			},
+		}}
+		got, err := svc.CheckSubscriptionConflict(ctx, "user-1", sameGroupHigherPrice, sameGroupHigher)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Blocked || got.Code != ConflictCodeMembershipPendingVerification {
+			t.Fatalf("expected pending-verification block, got %+v", got)
 		}
 	})
 

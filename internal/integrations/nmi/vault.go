@@ -34,6 +34,10 @@ type DeleteCustomerVaultData struct {
 
 type CreateCustomerVaultResponse struct {
 	CustomerVaultID string
+	// BillingID is the created billing entry's id (the instrument-scope handle
+	// inside the vault). Recorded verbatim (#682: safe to capture now that the
+	// rebill-driver mode has its own column and no longer keys off this).
+	BillingID string
 }
 
 func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBillingRequest, error) {
@@ -84,7 +88,11 @@ func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCu
 	if strings.TrimSpace(customer.ID) == "" {
 		return nil, fmt.Errorf("failed to create customer vault: response carried no customer id")
 	}
-	return &CreateCustomerVaultResponse{CustomerVaultID: customer.ID}, nil
+	resp := &CreateCustomerVaultResponse{CustomerVaultID: customer.ID}
+	if billing := customer.PrimaryBilling(); billing != nil {
+		resp.BillingID = strings.TrimSpace(billing.ID)
+	}
+	return resp, nil
 }
 
 // UpdateCustomerVault updates the primary billing record (payment token
@@ -124,6 +132,27 @@ func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
 	if err := c.sendV5Request(http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {
 		return fmt.Errorf("failed to update customer vault: %w", err)
+	}
+	return nil
+}
+
+// DeleteCustomerBillingEntry removes ONE stored card from a multi-entry vault
+// via DELETE /v5/customers/{vault}/billing/{billing_id} (live-verified
+// 2026-07-02; the DOCUMENTED /billing-addresses/{id} path answers
+// E_ROUTE_NOT_FOUND). NMI refuses to empty a vault ("Customer Vault must have
+// at least one billing", HTTP 400) — deleting the LAST entry means deleting
+// the whole vault customer instead (DeleteCustomerVault).
+func (c *NMIClient) DeleteCustomerBillingEntry(vaultID, billingID string) error {
+	if err := c.checkConfiguration(); err != nil {
+		return err
+	}
+	vaultID = strings.TrimSpace(vaultID)
+	billingID = strings.TrimSpace(billingID)
+	if vaultID == "" || billingID == "" {
+		return errors.New("customer vault ID and billing ID are required")
+	}
+	if err := c.sendV5Request(http.MethodDelete, "/customers/"+url.PathEscape(vaultID)+"/billing/"+url.PathEscape(billingID), nil, nil); err != nil {
+		return fmt.Errorf("failed to delete vault billing entry: %w", err)
 	}
 	return nil
 }

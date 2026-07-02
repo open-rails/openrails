@@ -326,6 +326,16 @@ normal `reconciliation_findings` rows.
 
 ### Plane PULL — Provider-Pull (provider authoritative; resolved by the pull, surfaced by `check`)
 
+The pull engine is a MIRROR WRITER (#665): its enforce appliers insert/overwrite
+provider-fact rows only (charges, refunds, vault metadata, PS-1 subscription
+materialization), guarded by the coverage contract, the circuit breaker and the
+operator mutation policy. Subscription STATE transitions (PS-2 cancel, PS-3
+status/period adoption) are never applied by a bespoke applier — the diff
+computes a `reconcile.Decide` transition from the per-subscription snapshot
+slice and the engine applies it through `reconcile.ApplyDecision`
+(the shared lifecycle chokepoints), under the same Overwrite mutation gate the
+legacy appliers had. Advisory runs still only log findings.
+
 Provider-Pull findings are grouped by provider-owned resource. The active #511
 implementation intentionally uses only `missing` and `mismatch` shapes. A local
 provider-owned row not found in a provider list/report is not reliable enough to
@@ -421,6 +431,16 @@ and should be handled conservatively.
 > false-positiving on empty-spec/backfilled payments — the product spec is the signal.
 
 ### Plane LIFE — Lifecycle (clock/state-machine authoritative; converge forward, §3.1)
+
+The three lapsed-subscription rows below are produced by ONE scan
+(`ListLapsedSubscriptionsWithEvidence`) that returns each candidate row with its
+#664 evidence legs; the ONE decider (`reconcile.Decide`) chooses the transition
+and `reconcile.ApplyDecision` applies it through the shared lifecycle
+chokepoints (#665). Cohort exclusivity is structural — one query, one total
+decision function — not a WHERE-clause complement contract. LIFE carries no
+provider snapshot, so its decider invocations can only enter dunning (ownership
+evidence) or park as `unknown`; the SAME decider, fed provider snapshots, drives
+the `unknown`-cohort resolution and the pull engine's enforce transitions.
 
 | Finding type | Invariant — must hold | Shape | Class |
 |---|---|---|---|

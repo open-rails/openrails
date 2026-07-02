@@ -80,16 +80,19 @@ func (s Scope) IsGlobal() bool { return s.Customer == nil && s.Subscription == n
 
 // ConvergeFinding is one divergence emitted by a plane pass. Repair, when set, is
 // the idempotent local write that fixes an AUTO finding; nil means surface-only.
+// RecommendedAction is the operator-readable prose for ADMIN findings (#692);
+// the machine-executable shape rides in Evidence under recommend.EvidenceKey.
 type ConvergeFinding struct {
-	Type         string // finding_type, e.g. "derive.grant.excess"
-	Shape        Shape
-	Class        Class
-	Severity     Severity
-	SubjectKey   string // stable per-finding identity within (merchant, provider, type)
-	Provider     string // "self" for internal planes; a provider name for PULL
-	SourceDomain SourceDomain
-	Evidence     map[string]any
-	Repair       func(ctx context.Context) error // AUTO repair; nil = surface only
+	Type              string // finding_type, e.g. "derive.grant.excess"
+	Shape             Shape
+	Class             Class
+	Severity          Severity
+	SubjectKey        string // stable per-finding identity within (merchant, provider, type)
+	Provider          string // "self" for internal planes; a provider name for PULL
+	SourceDomain      SourceDomain
+	Evidence          map[string]any
+	RecommendedAction string                          // prose; "" = none
+	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
 }
 
 // Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order.
@@ -278,14 +281,19 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 	if err != nil {
 		return fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
 	}
+	var recommended *string
+	if f.RecommendedAction != "" {
+		recommended = &f.RecommendedAction
+	}
 	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-		MerchantID:  scope.Merchant.UUID(),
-		FindingType: f.Type,
-		SubjectKey:  f.SubjectKey,
-		Severity:    string(f.Severity),
-		Status:      status,
-		Evidence:    evidence,
-		RunID:       runID,
+		MerchantID:        scope.Merchant.UUID(),
+		FindingType:       f.Type,
+		SubjectKey:        f.SubjectKey,
+		Severity:          string(f.Severity),
+		Status:            status,
+		RecommendedAction: recommended,
+		Evidence:          evidence,
+		RunID:             runID,
 	})
 	if err != nil {
 		return fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)

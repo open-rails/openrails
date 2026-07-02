@@ -13,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
 func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID string) uuid.UUID {
@@ -930,7 +932,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := dbrepo.NewPaymentRepo(suite.App.Runtime.DB)
+	repo := payments.NewPaymentRepo(suite.App.Runtime.DB)
 	var payments []*models.Payment
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.payments WHERE customer_id = $1 ORDER BY purchased_at DESC",
@@ -949,7 +951,7 @@ func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*mod
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB)
+	repo := paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB)
 	var pms []*models.PaymentMethod
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.payment_methods WHERE customer_id = $1 ORDER BY created_at DESC",

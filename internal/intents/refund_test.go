@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.OpenrailsRailIntent {
@@ -215,11 +216,13 @@ type fakeStripeRefundAPI struct {
 	findErr      error
 	creates      int
 	gotKey       string
+	gotAmount    moneyutil.Cents
 }
 
 func (f *fakeStripeRefundAPI) CreateRefund(_ context.Context, params subscriptions.RefundParams) (*subscriptions.RefundResult, error) {
 	f.creates++
 	f.gotKey = params.IdempotencyKey
+	f.gotAmount = params.Amount
 	return f.createResult, f.createErr
 }
 
@@ -246,6 +249,18 @@ func TestStripeRefundExecuteClassification(t *testing.T) {
 		out := h.Execute(context.Background(), refundIntent(t, TypeStripeRefund, payload))
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "stripe not configured")
+	})
+
+	t.Run("wire-pins the payload cents amount (#671)", func(t *testing.T) {
+		// The intent payload carries CENTS (converted from admin-request micros
+		// at prepare time, 400 on sub-cent). Execute must hand that EXACT value
+		// to Stripe: 5_000_000 micros ⇒ payload 500 ⇒ RefundParams.Amount 500.
+		// The create errors retryably so the (DB-backed) finalize is never reached.
+		fake := &fakeStripeRefundAPI{createErr: &subscriptions.StripeAPICallError{StatusCode: 429, Message: "slow down"}}
+		h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
+		h.Stripe = fake
+		_ = h.Execute(context.Background(), refundIntent(t, TypeStripeRefund, payload))
+		assert.Equal(t, moneyutil.Cents(500), fake.gotAmount, "stripe refund amount must be the payload's literal cents")
 	})
 
 	t.Run("sends the intent idempotency key", func(t *testing.T) {

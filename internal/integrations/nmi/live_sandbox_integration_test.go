@@ -56,7 +56,9 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 	assert.Equal(t, int64(321), detail.AmountCents, "classic edit_plan must be visible through the v5 read")
 	t.Cleanup(func() { _ = client.sendV5Request(http.MethodDelete, "/plans/"+url.PathEscape(planID), nil, nil) })
 
-	// --- vault: classic create (browser-token stand-in), then OUR v5 paths ---
+	// --- vault: classic create (raw-PAN shortcut), then OUR v5 paths ---
+	// The REAL token path (Collect.js token -> v5 create) is proven separately
+	// by TestLiveCollectJSTokenVaultCreate (headless-Chrome tokenization).
 	// Production vault creation takes a Collect.js token (browser-only), so the
 	// vault is minted with the raw test PAN via classic direct post; everything
 	// after is the real client surface.
@@ -145,6 +147,62 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 	subs, err := client.ListSubscriptionsPage("", 5)
 	require.NoError(t, err)
 	_ = subs
+
+	// --- multi-entry vault (#682 shared-vault support), all through OUR code ---
+	// Add a second billing entry (v5 POST /customers/{id}/billing — the LIVE
+	// route; the documented /billing-addresses answers E_ROUTE_NOT_FOUND).
+	var added struct {
+		Billing []struct {
+			ID string `json:"id"`
+		} `json:"billing"`
+		ID string `json:"id"`
+	}
+	require.NoError(t, client.sendV5Request(http.MethodPost, "/customers/"+url.PathEscape(vaultID)+"/billing",
+		map[string]any{"first_name": "LiveSurface", "last_name": "SecondCard", "currency": "USD",
+			"payment_details": map[string]any{"card_number": "4111111111111111", "card_exp": "1030"}}, &added))
+	page2, err := client.ListCustomersPage("", 5, vaultID)
+	require.NoError(t, err)
+	require.Len(t, page2.Customers, 1)
+	require.Len(t, page2.Customers[0].Billing, 2, "vault must now hold two billing entries")
+	var entry1, entry2 string
+	for _, b := range page2.Customers[0].Billing {
+		if b.PaymentDetails.CardExp == "1030" {
+			entry2 = b.ID
+		} else {
+			entry1 = b.ID
+		}
+	}
+	require.NotEmpty(t, entry1)
+	require.NotEmpty(t, entry2)
+
+	// Billing-TARGETED sale (classic lane) must charge the SECOND card.
+	targetAmount := moneyutil.Cents(110 + (time.Now().UnixNano()/13)%80)
+	targeted, err := client.RunSale(SaleParams{
+		CustomerVaultID:  vaultID,
+		BillingID:        entry2,
+		Amount:           targetAmount,
+		Currency:         "USD",
+		OrderDescription: "live multi-entry targeted probe",
+		OrderID:          "live-multi-" + runID[:10],
+	})
+	require.NoError(t, err)
+	txn2, found, err := client.GetPayment(targeted.TransactionID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "1", txn2.Response)
+	require.NoError(t, client.Void(targeted.TransactionID))
+
+	// Entry-scoped delete removes ONE card; the sibling survives.
+	require.NoError(t, client.DeleteCustomerBillingEntry(vaultID, entry2))
+	page3, err := client.ListCustomersPage("", 5, vaultID)
+	require.NoError(t, err)
+	require.Len(t, page3.Customers[0].Billing, 1, "one entry must remain after the scoped delete")
+	assert.Equal(t, entry1, page3.Customers[0].Billing[0].ID)
+
+	// The LAST entry cannot be deleted (NMI refuses to empty a vault) — the
+	// whole-vault delete below is the correct final step.
+	err = client.DeleteCustomerBillingEntry(vaultID, entry1)
+	require.Error(t, err, "deleting the last billing entry must be refused by the gateway")
 
 	// v5 vault delete, then the roster no longer lists the customer.
 	require.NoError(t, client.DeleteCustomerVault(DeleteCustomerVaultData{CustomerVaultID: vaultID}))

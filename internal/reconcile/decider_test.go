@@ -120,6 +120,15 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			wantRemoteGone: true,
 		},
 		{
+			// A roster-declared dead sub is provider certainty; a charge cannot
+			// resurrect it (it is still backfilled — money truth vs lifecycle truth).
+			name:           "renewal charge + roster cancelled → cancel, remote gone (charge cannot resurrect)",
+			snap:           &RemoteSnapshot{Transactions: []RemoteTransaction{sale(true, periodEnd.Add(time.Hour))}, Subscriptions: []RemoteSubscription{roster(SubscriptionStatusCancelled, nil)}},
+			wantKind:       TransitionCancel,
+			wantBackfill:   1,
+			wantRemoteGone: true,
+		},
+		{
 			name:           "roster expired → cancel, remote gone",
 			snap:           &RemoteSnapshot{Subscriptions: []RemoteSubscription{roster(SubscriptionStatusExpired, nil)}},
 			wantKind:       TransitionCancel,

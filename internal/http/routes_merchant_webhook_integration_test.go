@@ -38,7 +38,9 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	ctx := context.Background()
 	pool := newMerchantWebhookRoutePool(t)
 	secrets := merchants.NewMemorySecretStore()
-	svc, err := merchants.NewService(db.WrapPool(pool, ""), secrets)
+	// Deployment posture is test_mode (#681): the merchants service resolves
+	// environment=test rows; live rows are seeded alongside to prove isolation.
+	svc, err := merchants.NewService(db.WrapPool(pool, ""), secrets, "test")
 	require.NoError(t, err)
 
 	acme, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
@@ -50,8 +52,8 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	seedRailMerchantAccount(t, pool, acme.ID.String(), "nmi", "nmi_acme_account")
 	seedRailMerchantAccount(t, pool, evil.ID.String(), "nmi", "nmi_evil_account")
 	seedArchivedRailMerchantAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_archived")
-	seedRailMerchantAccount(t, pool, acme.ID.String(), "ccbill", "945280/0000")
-	seedRailMerchantAccount(t, pool, evil.ID.String(), "ccbill", "945281/0000")
+	// NO live ccbill rows anywhere: the #668 test_mode IP-allowlist bypass is
+	// refused while any environment=live ccbill account exists in the catalog.
 	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "stripe", "test", "acct_acme_test")
 	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_test")
 	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282/0000")
@@ -63,7 +65,7 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "stripe", "test", "acct_acme_test", "webhook_signing_secret", "whsec_acme_test")
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", "nmi_acme_test", "webhook_signing_secret", "nmi_acme_test")
 
-	rt := &app.Runtime{Merchants: svc}
+	rt := &app.Runtime{Config: &config.Config{TestMode: true}, Merchants: svc}
 	globalRT := &app.Runtime{Config: &config.Config{TestMode: true}, Merchants: svc}
 	mux := http.NewServeMux()
 	httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/global", globalRT), globalRT)
@@ -74,15 +76,19 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	body := []byte(`{"id":"evt_1","type":"checkout.session.completed"}`)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 
-	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/nope/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
+	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/nope/webhooks/stripe", body, stripeSig("whsec_acme_test", ts, body)))
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_evil", ts, body)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
+	// test_mode posture resolves the environment=test account's secret (#681);
+	// the live account's secret no longer verifies.
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_acme_test", ts, body)))
 
-	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_account"},"transaction_id":"txn_1"}}`)
+	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_test"},"transaction_id":"txn_1"}}`)
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody)))
 
-	ccbillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945280","clientSubacc":"0000","subscriptionId":"ccs_1","transactionId":"cct_1"}`)
+	ccbillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945282","clientSubacc":"0000","subscriptionId":"ccs_1","transactionId":"cct_1"}`)
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/ccbill?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
 
 	globalNMIBody := []byte(`{"event_id":"evt_nmi_2","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_test"},"transaction_id":"txn_2"}}`)

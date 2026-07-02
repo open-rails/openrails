@@ -25,6 +25,10 @@ type remote struct {
 	// mint failure errors the call so the problem surfaces instead of being
 	// masked.
 	tokenFn func(context.Context) (string, error)
+	// urlErr is the static base-URL validation result from NewRemote. The
+	// constructor stays no-error (mintless pattern): an invalid URL fails each
+	// call with this descriptive error instead.
+	urlErr error
 }
 
 // RemoteOption configures NewRemote.
@@ -49,6 +53,20 @@ func WithTokenProvider(fn func(context.Context) (string, error)) RemoteOption {
 	return func(r *remote) { r.tokenFn = fn }
 }
 
+// WithAPIKey authenticates every call with a static OpenRails API key — sugar
+// over WithTokenProvider for the blessed static-credential case. An empty key
+// fails each call with a descriptive error instead of erroring at construction
+// (the mintless tokenFn pattern).
+func WithAPIKey(key string) RemoteOption {
+	key = strings.TrimSpace(key)
+	return WithTokenProvider(func(context.Context) (string, error) {
+		if key == "" {
+			return "", fmt.Errorf("openrails: WithAPIKey configured with an empty key")
+		}
+		return key, nil
+	})
+}
+
 // WithTimeout bounds EVERY hot-path call. A short value is the point — a slow
 // OpenRails must not stall the request hot path; on timeout the fail-policy
 // decides (ErrUnreachable). Defaults to 2s.
@@ -56,12 +74,15 @@ func WithTimeout(d time.Duration) RemoteOption {
 	return func(r *remote) { r.timeout = d }
 }
 
-// NewRemote builds the HTTP-backed Client against a standalone OpenRails.
+// NewRemote builds the HTTP-backed Client against a standalone OpenRails. The
+// constructor is I/O-free and never errors; a statically invalid base URL fails
+// every call with a descriptive error (see remote.urlErr).
 func NewRemote(baseURL string, opts ...RemoteOption) Client {
 	r := &remote{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		timeout: 2 * time.Second,
 	}
+	r.urlErr = validateBaseURL(r.baseURL)
 	for _, opt := range opts {
 		if opt != nil {
 			opt(r)
@@ -71,6 +92,35 @@ func NewRemote(baseURL string, opts ...RemoteOption) Client {
 		r.client = &http.Client{Timeout: r.timeout}
 	}
 	return r
+}
+
+// validateBaseURL is the I/O-free static check on the configured base URL.
+func validateBaseURL(baseURL string) error {
+	if baseURL == "" {
+		return fmt.Errorf("openrails: base URL is empty")
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("openrails: invalid base URL %q: %w", baseURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("openrails: invalid base URL %q: scheme must be http or https", baseURL)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("openrails: invalid base URL %q: missing host", baseURL)
+	}
+	return nil
+}
+
+// Verify is an authenticated readiness probe (the db.Ping pattern): one cheap
+// authenticated GET that proves both reachability AND credential validity.
+// Constructors stay I/O-free; hosts that want fail-fast-at-boot call Verify in
+// main. It reads /v1/merchant/settings, so the credential needs the merchant
+// settings:read permission (any merchant-owner API key has it). Errors map to
+// the canonical sentinels: ErrUnauthorized (bad credential), ErrUnreachable
+// (transport/5xx), etc.
+func (c *remote) Verify(ctx context.Context) error {
+	return c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, nil)
 }
 
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
@@ -559,6 +609,9 @@ func statusErrorFromBody(status int, raw []byte) error {
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *remote) doRaw(ctx context.Context, method, path string, body any) (int, []byte, error) {
+	if c.urlErr != nil {
+		return 0, nil, c.urlErr
+	}
 	var raw []byte
 	if body != nil {
 		var merr error

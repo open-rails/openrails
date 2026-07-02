@@ -232,10 +232,19 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		assert.Equal(t, "cancelled", status)
 		assert.Equal(t, "expired", cancelType)
 
-		var revokedAt *time.Time
+		// #665 decider semantics (ResolveCancelled): access is revoked AS-OF the
+		// period end — the paid-for window is honored, never cut short by a
+		// provider-side death mid-period. The seeded window already ends at the
+		// period end, so nothing is stamped early and nothing survives past it.
+		var revokedAt, entEndAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT revoked_at FROM openrails.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt))
-		assert.NotNil(t, revokedAt, "subDead's entitlement must be revoked")
+			`SELECT revoked_at, end_at FROM openrails.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt, &entEndAt))
+		assert.Nil(t, revokedAt, "paid-for window is honored: no early revoke on a provider-dead cancel")
+		require.NotNil(t, entEndAt)
+		var deadPeriodEnd time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&deadPeriodEnd))
+		assert.False(t, entEndAt.After(deadPeriodEnd), "no access beyond the paid-for period")
 
 		// PS-4: the missing charge is backfilled, deduped identity.
 		var amount int64

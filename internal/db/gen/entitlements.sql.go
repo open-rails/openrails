@@ -131,6 +131,7 @@ WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
+  AND ent.start_at < $2::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
 `
 
@@ -142,6 +143,11 @@ type EndActiveEntitlementsBySubscriptionParams struct {
 	RevokeReason *string
 }
 
+// #691 closure write: bound a subscription's live windows to a PROVEN end
+// (user cancel at period end, terminal resolution). Advance-written on disk —
+// a dead system cannot extend a cancelled sub. start_at < end_at keeps the
+// generated period range valid; future-start windows are handled by
+// SoftDeleteFutureEntitlementsBySubscription.
 func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg EndActiveEntitlementsBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, endActiveEntitlementsBySubscription,
 		arg.SourceID,
@@ -969,12 +975,27 @@ const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscript
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = $2::timestamptz
-WHERE ent.source_type = 'subscription'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
-  AND ent.end_at > $2::timestamptz
+WHERE ent.id IN (
+    SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
+    FROM openrails.entitlements e
+    WHERE e.source_type = 'subscription'
+      AND e.source_id = $1
+      AND e.revoked_at IS NULL
+      AND e.deleted_at IS NULL
+      AND e.end_at IS NOT NULL
+      AND e.end_at > $2::timestamptz
+      AND NOT EXISTS (
+          SELECT 1 FROM openrails.entitlements o
+          WHERE o.merchant_id = e.merchant_id
+            AND o.customer_id = e.customer_id
+            AND o.entitlement = e.entitlement
+            AND o.id <> e.id
+            AND o.revoked_at IS NULL
+            AND o.deleted_at IS NULL
+            AND o.period && tstzrange(e.start_at, 'infinity'::timestamptz, '[)')
+      )
+    ORDER BY e.customer_id, e.entitlement, e.end_at DESC
+)
 `
 
 type ResumeEntitlementsBySubscriptionParams struct {
@@ -982,6 +1003,11 @@ type ResumeEntitlementsBySubscriptionParams struct {
 	Now      time.Time
 }
 
+// #691 resume: re-open the LATEST live window per (customer, entitlement) of a
+// resumed auto-renew subscription (end_at = NULL), undoing an advance-written
+// cancel closure. Only the latest window per timeline (older bounded windows are
+// history), and only when no other live window would overlap [start, infinity)
+// — the GIST no-overlap constraint stays intact.
 func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg ResumeEntitlementsBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, resumeEntitlementsBySubscription, arg.SourceID, arg.Now)
 	return err
@@ -1215,6 +1241,30 @@ func (q *Queries) SoftDeleteEntitlementByID(ctx context.Context, arg SoftDeleteE
 	return err
 }
 
+const softDeleteFutureEntitlementsBySubscription = `-- name: SoftDeleteFutureEntitlementsBySubscription :exec
+UPDATE openrails.entitlements ent SET
+    deleted_at = $2::timestamptz,
+    updated_at = $2::timestamptz
+WHERE ent.source_type = 'subscription'
+  AND ent.source_id = $1
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at >= $3::timestamptz
+`
+
+type SoftDeleteFutureEntitlementsBySubscriptionParams struct {
+	SourceID uuid.UUID
+	Now      time.Time
+	EndAt    time.Time
+}
+
+// #691 closure companion: scheduled windows starting at/after the proven end
+// cannot be bounded (end <= start); remove them.
+func (q *Queries) SoftDeleteFutureEntitlementsBySubscription(ctx context.Context, arg SoftDeleteFutureEntitlementsBySubscriptionParams) error {
+	_, err := q.db.Exec(ctx, softDeleteFutureEntitlementsBySubscription, arg.SourceID, arg.Now, arg.EndAt)
+	return err
+}
+
 const softDeleteFutureGraceBySubscription = `-- name: SoftDeleteFutureGraceBySubscription :exec
 UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
@@ -1341,6 +1391,42 @@ func (q *Queries) SoftDeleteLaterEntitlementWindows(ctx context.Context, arg Sof
 		arg.ExcludeID,
 	)
 	return err
+}
+
+const standingSubscriptionEntitlementExists = `-- name: StandingSubscriptionEntitlementExists :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.entitlements e
+    WHERE e.merchant_id = $1::uuid
+      AND e.customer_id = $2::uuid
+      AND e.entitlement = $3::text
+      AND e.source_type = 'subscription'
+      AND e.source_id = $4::uuid
+      AND e.end_at IS NULL
+      AND e.revoked_at IS NULL
+      AND e.deleted_at IS NULL
+) AS standing
+`
+
+type StandingSubscriptionEntitlementExistsParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	SourceID    uuid.UUID
+}
+
+// #691: is there a live STANDING (end_at IS NULL) window for this subscription
+// source? One standing window satisfies every per-period grant of the sub —
+// the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
+func (q *Queries) StandingSubscriptionEntitlementExists(ctx context.Context, arg StandingSubscriptionEntitlementExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, standingSubscriptionEntitlementExists,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Entitlement,
+		arg.SourceID,
+	)
+	var standing bool
+	err := row.Scan(&standing)
+	return standing, err
 }
 
 const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one

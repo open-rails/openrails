@@ -362,6 +362,25 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	isSubscription := price.AutoRenew
 
 	if isSubscription {
+		// #691 checkout guard: an `unknown` sub for this product/tier-group means
+		// an existing membership pending provider verification — its real
+		// provider-side sub may still be alive and billing, so a re-purchase
+		// double-bills. Reject with the machine-readable code; verify/resume
+		// instead of repurchase. (past_due already holds the lifecycle slot and is
+		// blocked by the tier-group/coverage guards above.)
+		if s.PurchaseService != nil {
+			conflict, err := s.PurchaseService.checkUnknownSubscriptionConflict(ctx, user.ID, product)
+			if err != nil {
+				return nil, err
+			}
+			if conflict != nil && conflict.Blocked {
+				return &CheckoutResponse{
+					Status:  "blocked",
+					Code:    conflict.Code,
+					Message: conflict.Message,
+				}, nil
+			}
+		}
 		return s.processSubscription(ctx, req, user, price, product, coverage, rail)
 	}
 	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, rail)
@@ -639,7 +658,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -690,6 +709,7 @@ func (s *CheckoutService) processNMISubscription(
 			Provider:               provider,
 			PlanID:                 nmiPlanID,
 			CustomerVaultID:        customerVaultID,
+			BillingID:              vaultBillingID,
 			AmountMicros:           price.Amount,
 			Currency:               price.Currency,
 			Email:                  req.Email,
@@ -1773,7 +1793,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Get or create vault
-	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1794,6 +1814,7 @@ func (s *CheckoutService) processUpgrade(
 		},
 		PlanID:          nmiPlanID,
 		CustomerVaultID: customerVaultID,
+		BillingID:       vaultBillingID,
 		Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(newPrice.Amount)), // NMI recurring amount is DOLLARS
 		Currency:        newPrice.Currency,
 		Email:           req.Email,
@@ -1852,6 +1873,7 @@ func (s *CheckoutService) processUpgrade(
 		if prorationTransactionID == "" {
 			saleResp, err := client.RunSale(nmi.SaleParams{
 				CustomerVaultID:  customerVaultID,
+				BillingID:        vaultBillingID,
 				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
 				Currency:         newPrice.Currency,
 				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),

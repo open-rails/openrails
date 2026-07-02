@@ -117,7 +117,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 	}
 
-	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -136,6 +136,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		Payload: NMISalePayload{
 			Provider:        provider,
 			CustomerVaultID: customerVaultID,
+			BillingID:       vaultBillingID,
 			AmountMicros:    price.Amount,
 			Currency:        price.Currency,
 			Description:     fmt.Sprintf("Purchase: %s", product.DisplayName),

@@ -92,7 +92,7 @@ type solanaTransactionService interface {
 
 type CheckoutSessionService struct {
 	db                       *db.DB
-	repo                     *repo.CheckoutSessionRepo
+	repo                     *CheckoutSessionRepo
 	priceService             *catalog.PriceService
 	productService           *catalog.ProductService
 	paymentMethodService     *paymentmethods.PaymentMethodService
@@ -237,7 +237,7 @@ func NewCheckoutSessionService(
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
 		db:                       db,
-		repo:                     repo.NewCheckoutSessionRepo(db),
+		repo:                     NewCheckoutSessionRepo(db),
 		priceService:             priceService,
 		productService:           productService,
 		paymentMethodService:     paymentMethodService,
@@ -1725,7 +1725,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 
 	signature := strings.TrimSpace(req.Payment.Signature)
 	if s.db != nil {
-		if existingPayment, err := repo.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.RailSolana, signature); err == nil {
+		if existingPayment, err := payments.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.RailSolana, signature); err == nil {
 			if err := validateSolanaPaymentMatchesSession(existingPayment, session, referenceValue); err != nil {
 				return nil, err
 			}
@@ -1787,7 +1787,7 @@ func (s *CheckoutSessionService) verifyRegisteredSolanaPayment(ctx context.Conte
 	if paymentID == uuid.Nil || session == nil || s.db == nil {
 		return nil
 	}
-	payment, err := repo.NewPaymentRepo(s.db).GetByID(ctx, paymentID)
+	payment, err := payments.NewPaymentRepo(s.db).GetByID(ctx, paymentID)
 	if err != nil {
 		return fmt.Errorf("failed to verify registered solana payment: %w", err)
 	}

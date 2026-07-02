@@ -14,6 +14,7 @@ import (
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -166,28 +167,14 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 	}
 
 	// Backfill the provider's missing charges first (#634) so a renewed sub's
-	// confirming payment exists before/with the status flip.
-	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, d.Backfill, now, lookbackCap)
+	// confirming payment exists before/with the status flip, and materialize the
+	// provider customer id (#635) — shared with the #684 webhook converge path.
+	backfilled, railCustomer, err := applyDecisionSideEffects(ctx, q, sub, d, now, lookbackCap)
 	if err != nil {
-		return fmt.Errorf("reconcile unknown: backfill %s: %w", subID, err)
+		return fmt.Errorf("reconcile unknown: %w", err)
 	}
 	res.Backfilled += backfilled
-
-	// #635: materialize a rail_customer_accounts row when the provider exposed a real
-	// card-independent customer id (Stripe cus_*, NMI vault) for this sub. Guarded to
-	// stripe/nmi — CCBill/Solana/vault-less never fabricate one. Idempotent upsert.
-	if d.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
-		if err := q.UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
-			ID:         uuid.New(),
-			CustomerID: sub.CustomerID,
-			Rail:       string(sub.Rail),
-			AccountID:  d.RemoteCustomerID,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-			MerchantID: sub.MerchantID,
-		}); err != nil {
-			return fmt.Errorf("reconcile unknown: materialize rail_customer %s: %w", subID, err)
-		}
+	if railCustomer {
 		res.RailCustomers++
 	}
 
@@ -243,14 +230,17 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			continue
 		}
 		subID := sub.ID
+		// #684/#671: RemoteTransaction amounts are provider-wire CENTS; the
+		// payments ledger is MICROS. Convert at this boundary, never store raw.
+		amountMicros := moneyutil.CentsToMicros(t.AmountCents)
 		n, err := q.CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams{
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,
 			PriceID:        sub.PriceID,
 			Rail:           string(sub.Rail),
 			TransactionID:  t.TransactionID,
-			Amount:         t.AmountCents,
-			ListAmount:     t.AmountCents,
+			Amount:         amountMicros,
+			ListAmount:     amountMicros,
 			Currency:       currency,
 			Status:         status,
 			SubscriptionID: &subID,

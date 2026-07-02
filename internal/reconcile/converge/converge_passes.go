@@ -13,9 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -249,11 +251,16 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	}
 
 	// Revoke direction: a terminally-dead sub (cancelled/expired/failed —
-	// `unknown` keeps access, #664) still projecting live subscription-sourced
-	// windows. Propagation of a recorded terminal decision, so AUTO and NOT
-	// confirmed-absence gated. Repair terminates the backing grants (ledger
-	// truth) then retracts the windows — the direct retract also covers
-	// grant-less legacy rows the ledger never saw.
+	// `unknown` keeps access, #664) still projecting subscription-sourced
+	// BOUNDED windows past its entitled bound. #690/#691 paid-through guard:
+	// the bound is GREATEST(paid-through, ended_at) — a user cancel leaves a
+	// PAID RUNWAY window bounded to period end, which is never excess before
+	// the bound. Propagation of a recorded terminal decision, so AUTO and NOT
+	// confirmed-absence gated; repair writes the missed/correct #691 closure
+	// (bounds live windows at the bound, drops scheduled ones past it) so the
+	// runway survives while the overrun is cleaned. STANDING (end_at NULL)
+	// windows of terminal subs are the freeloader case (derive.entitlement.
+	// orphan below, ADMIN) — the partition keeps one condition per check.
 	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
 	})
@@ -262,7 +269,15 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	}
 	for i := range dead {
 		d := dead[i]
-		reason := "converge: subscription " + string(d.Status) + ", entitlement source not live"
+		closeAt := now // no recorded bound: close at detection time
+		evidence := map[string]any{
+			"subscription_id": d.ID.String(), "customer_id": d.CustomerID.String(),
+			"status": string(d.Status), "direction": "revoke",
+		}
+		if bound := latestTime(d.CurrentPeriodEndsAt, d.EndedAt); bound != nil {
+			closeAt = bound.UTC()
+			evidence["entitled_bound"] = closeAt
+		}
 		out = append(out, ConvergeFinding{
 			Type:       "derive.grant_effect.mismatch",
 			Shape:      ShapeMismatch,
@@ -270,23 +285,104 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Severity:   "high",
 			SubjectKey: "subscription:" + d.ID.String(),
 			Provider:   "self",
-			Evidence: map[string]any{
-				"subscription_id": d.ID.String(), "customer_id": d.CustomerID.String(),
-				"status": string(d.Status), "direction": "revoke",
-			},
+			Evidence:   evidence,
 			Repair: func(ctx context.Context) error {
-				if err := gl.RevokeBySourceAsOf(ctx, d.CustomerID, grants.Entitlement,
-					[]grants.SourceType{grants.Subscription}, d.ID.String(), reason, now); err != nil {
-					return err
-				}
-				_, err := q.ReconcileRevokeSubscriptionEntitlements(ctx, gen.ReconcileRevokeSubscriptionEntitlementsParams{
-					Now: now, Reason: reason, SubscriptionID: d.ID,
-				})
-				return err
+				ctx = merchant.WithID(ctx, scope.Merchant)
+				return entitlements.NewEntitlementService(p.e.DB).BoundSubscriptionAccess(ctx, d.ID, closeAt)
 			},
 		})
 	}
+
+	// derive.entitlement.orphan (#690) — the FREELOADER detector: a LIVE
+	// window whose source is PROVEN dead or absent (sub row missing; standing
+	// window of a terminal sub whose closure never landed; refunded one-off
+	// payment) with no live grant justifying the access. Post-#691 fail-open,
+	// stale is NOT freeloading — standing windows of live/unknown/past_due
+	// subs never surface here. ADMIN surface-only (policy: access removal is
+	// an operator decision, never automatic on a derived conclusion), with the
+	// #692 revoke/admin-grant recommendation pair.
+	orphans, err := q.ListOrphanEntitlementWindows(ctx, gen.ListOrphanEntitlementWindowsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan orphan entitlement windows: %w", err)
+	}
+	for i := range orphans {
+		out = append(out, orphanEntitlementFinding(&orphans[i]))
+	}
 	return out, nil
+}
+
+// latestTime returns the later of two nullable instants (nil when both nil).
+func latestTime(a, b *time.Time) *time.Time {
+	if a == nil {
+		return b
+	}
+	if b == nil || a.After(*b) {
+		return a
+	}
+	return b
+}
+
+// orphanEntitlementFinding renders one freeloader window as an ADMIN finding
+// carrying the #692 recommendation: revoke (default; as-of the entitled bound
+// when the terminal sub recorded one) or record an admin grant instead.
+func orphanEntitlementFinding(o *gen.ListOrphanEntitlementWindowsRow) ConvergeFinding {
+	asOf := ""
+	bound := latestTime(o.SubPeriodEndsAt, o.SubEndedAt)
+	if o.Cause == "terminal_subscription_standing" && bound != nil {
+		asOf = bound.UTC().Format(time.RFC3339)
+	}
+	productID := ""
+	if o.SubProductID != nil {
+		productID = o.SubProductID.String()
+	}
+	if o.PaymentProductID != nil {
+		productID = o.PaymentProductID.String()
+	}
+	alt := recommend.RecordAdminGrantRec(o.CustomerID.String(), productID, "known-legitimate access")
+	rec := recommend.RevokeEntitlementRec(o.EntitlementID.String(), asOf, &alt)
+
+	ev := map[string]any{
+		"entitlement_id": o.EntitlementID.String(), "customer_id": o.CustomerID.String(),
+		"entitlement": o.Entitlement, "source_type": o.SourceType, "source_id": o.SourceID.String(),
+		"cause":               o.Cause,
+		recommend.EvidenceKey: rec.Map(),
+	}
+	if o.SubStatus != nil && *o.SubStatus != "" {
+		ev["subscription_status"] = *o.SubStatus
+	}
+	if bound != nil {
+		ev["entitled_bound"] = bound.UTC()
+	}
+	if o.PaymentID != nil {
+		ev["payment_id"] = o.PaymentID.String()
+	}
+
+	var prose string
+	switch o.Cause {
+	case "missing_subscription":
+		prose = fmt.Sprintf("Live entitlement %q for customer %s references subscription %s, which does not exist — access has no justification. Revoke the window, or record an admin grant if it is known-legitimate.",
+			o.Entitlement, o.CustomerID, o.SourceID)
+	case "terminal_subscription_standing":
+		prose = fmt.Sprintf("Standing (open-ended) entitlement %q outlives its terminal subscription %s and its paid runway — the closure event never bounded it. Revoke the window as of the entitled bound, or record an admin grant if it is known-legitimate.",
+			o.Entitlement, o.SourceID)
+	default: // refunded_payment
+		prose = fmt.Sprintf("Live entitlement %q is sourced by refunded payment %s with no live grant justifying the access. Revoke the window, or record an admin grant if it is known-legitimate.",
+			o.Entitlement, o.SourceID)
+	}
+
+	return ConvergeFinding{
+		Type:              "derive.entitlement.orphan",
+		Shape:             ShapeExcess,
+		Class:             ClassAdmin,
+		Severity:          "high",
+		SubjectKey:        "entitlement:" + o.EntitlementID.String(),
+		Provider:          "self",
+		Evidence:          ev,
+		RecommendedAction: prose,
+		// surface-only (policy, #690): never auto-revoke on a derived conclusion.
+	}
 }
 
 // lockedMaterialize runs a MaterializeGrant repair inside a merchant tx under
@@ -352,7 +448,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// LIFE carries no provider snapshot, so the decider can only enter dunning
 	// (ownership evidence) or PARK as `unknown` (access intact) — convergence
 	// never terminally cancels; FailMembership + provider-confirmed outcomes
-	// own that. Finding vocabulary is unchanged:
+	// own that. #691: grace here is a PACING marker only — an auto-renew sub's
+	// entitlement window is STANDING, so none of these transitions touch
+	// access. Finding vocabulary is unchanged:
 	//   active + ownership evidence  → life.subscription.period_overdue
 	//   active, no evidence          → life.subscription.needs_verification
 	//   past_due, dunning stalled    → life.subscription.grace_exhausted
@@ -628,13 +726,18 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// scope reports all. The remaining CON subtypes (duplicate.*, amount_mismatch.*)
 	// layer onto this same harness.
 	q := p.e.DB.Gen(ctx)
+	now := p.e.Now()
 	var out []ConvergeFinding
 
 	// Customer-scoped when scope.Customer is set (inline Converge(customer) → the
 	// scan is O(that customer)), merchant-wide when nil (the sweep). The SQL does
 	// the filtering, so an after-every-mutation invocation stays cheap.
+	// #690 partition: LIVE windows with dangling sub sources are freeloaders
+	// (derive.entitlement.orphan); this reference check keeps the non-live rest.
 	cust := scope.Customer
-	orphanSubs, err := q.ConOrphanEntitlementSubscriptionSource(ctx, cust)
+	orphanSubs, err := q.ConOrphanEntitlementSubscriptionSource(ctx, gen.ConOrphanEntitlementSubscriptionSourceParams{
+		Now: now, CustomerID: cust,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan subscription sources: %w", err)
 	}
@@ -676,7 +779,9 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// invoice/proration/operator action explains the overlap (folded from the
 	// retired audit D-2 check). EXCESS → ADMIN, surface-only: collecting money
 	// twice is never auto-undone (a refund is an operator decision); the finding
-	// carries the duplicate payment ids for that decision.
+	// carries the duplicate payment ids + the #692 refund recommendation.
+	// Severity CRITICAL (#690, Paul): a duplicate charge is money harm — worse
+	// than a freeloader's marginal content access.
 	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, cust)
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
@@ -687,20 +792,121 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		for j, id := range d.PaymentIds {
 			ids[j] = id.String()
 		}
+		// payment_ids is ordered purchased_at DESC: ids[0] is the later charge —
+		// the default refund target (operator can override before approving).
+		rec := recommend.CancelAndRefundRec("", ids[0])
 		out = append(out, ConvergeFinding{
 			Type:       "consistency.duplicate.provider_charge",
 			Shape:      ShapeExcess,
 			Class:      ClassAdmin,
-			Severity:   "high",
+			Severity:   "critical",
 			SubjectKey: "provider_charge:" + d.UserID + ":" + d.ProductID.String() + ":" + d.FirstDate.Format("2006-01"),
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": d.UserID, "product_id": d.ProductID.String(), "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": d.TotalAmount,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
+				recommend.EvidenceKey: rec.Map(),
 			},
+			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for product %q in %s (total %d micros; payments %s). Refund the later charge %s unless an invoice/proration/operator action explains the overlap.",
+				d.UserID, d.Count, d.ProductKey, d.FirstDate.Format("2006-01"), d.TotalAmount, strings.Join(ids, ", "), ids[0]),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})
 	}
+
+	// consistency.duplicate.ownership (#690) — more than one LIVE paid
+	// ownership grant per (customer, product): the cross-month one-off/
+	// lifetime double-purchase that duplicate.provider_charge's month scope
+	// misses. CRITICAL (customer charged twice), ADMIN surface-only, with the
+	// #692 cancel_and_refund recommendation targeting the LATER purchase
+	// (default only — override_params can flip it before approving).
+	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{Now: now, CustomerID: cust})
+	if err != nil {
+		return nil, fmt.Errorf("con: scan duplicate ownership grants: %w", err)
+	}
+	for i := range dupOwn {
+		f, err := duplicateOwnershipFinding(&dupOwn[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
 	return out, nil
+}
+
+// ownershipPurchase is one leg of a duplicate-ownership group (decoded from
+// the query's jsonb purchases array, ordered oldest-first).
+type ownershipPurchase struct {
+	GrantID     string  `json:"grant_id"`
+	SourceType  string  `json:"source_type"`
+	SourceID    string  `json:"source_id"`
+	PaymentID   *string `json:"payment_id"`
+	Amount      *int64  `json:"amount"`
+	Currency    *string `json:"currency"`
+	PurchasedAt string  `json:"purchased_at"`
+}
+
+func (p ownershipPurchase) describe() string {
+	s := "grant " + p.GrantID + " (purchased " + p.PurchasedAt
+	if p.PaymentID != nil {
+		s += ", payment " + *p.PaymentID
+	}
+	if p.Amount != nil && p.Currency != nil {
+		s += fmt.Sprintf(", %d micros %s", *p.Amount, *p.Currency)
+	}
+	if p.SourceType == "subscription" {
+		s += ", subscription " + p.SourceID
+	}
+	return s + ")"
+}
+
+// duplicateOwnershipFinding renders one duplicate-ownership group. The
+// recommendation cancels the later purchase's subscription (when it is
+// subscription-shaped) and refunds its payment; a pure one-off duplicate
+// carries refund_payment_id only. No payment linkage at all → prose only
+// (approve unavailable; the operator resolves out-of-band).
+func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeFinding, error) {
+	var purchases []ownershipPurchase
+	if err := json.Unmarshal(d.Purchases, &purchases); err != nil {
+		return ConvergeFinding{}, fmt.Errorf("con: decode duplicate ownership purchases: %w", err)
+	}
+	later := purchases[len(purchases)-1]
+	subID, refundPay := "", ""
+	if later.SourceType == "subscription" {
+		subID = later.SourceID
+	}
+	if later.PaymentID != nil {
+		refundPay = *later.PaymentID
+	}
+	productID := ""
+	if d.ProductID != nil {
+		productID = d.ProductID.String()
+	}
+
+	descs := make([]string, len(purchases))
+	for i := range purchases {
+		descs[i] = purchases[i].describe()
+	}
+	prose := fmt.Sprintf("Customer %s holds %d live ownership grants for product %q — charged more than once for the same product: %s. Cancel/refund the later purchase (default) unless the earlier one is the mistake.",
+		d.CustomerID, d.Count, d.ProductKey, strings.Join(descs, "; "))
+
+	ev := map[string]any{
+		"customer_id": d.CustomerID.String(), "product_id": productID, "product_key": d.ProductKey,
+		"grant_count": d.Count, "purchases": json.RawMessage(d.Purchases),
+	}
+	if subID != "" || refundPay != "" {
+		rec := recommend.CancelAndRefundRec(subID, refundPay)
+		ev[recommend.EvidenceKey] = rec.Map()
+	}
+	return ConvergeFinding{
+		Type:              "consistency.duplicate.ownership",
+		Shape:             ShapeExcess,
+		Class:             ClassAdmin,
+		Severity:          "critical",
+		SubjectKey:        "ownership:" + d.CustomerID.String() + ":" + productID,
+		Provider:          "self",
+		Evidence:          ev,
+		RecommendedAction: prose,
+		// surface-only: cancelling/refunding a purchase is an operator decision.
+	}, nil
 }

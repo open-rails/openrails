@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -167,5 +168,51 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 				t.Errorf("errors.Is(err, ErrInvalid) = false; got %T: %v", err, err)
 			}
 		})
+	}
+}
+
+// TestWithAPIKeyAndVerify checks the #685 ergonomics wiring: WithAPIKey sets the
+// static bearer, and Verify hits the cheap authenticated settings read.
+func TestWithAPIKeyAndVerify(t *testing.T) {
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := NewRemote(srv.URL, WithAPIKey(" sk-test "))
+	if err := Verify(context.Background(), client); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Fatalf("WithAPIKey bearer = %q", gotAuth)
+	}
+	if gotPath != "/v1/merchant/settings" {
+		t.Fatalf("Verify path = %q", gotPath)
+	}
+}
+
+// TestWithAPIKeyEmptyFailsPerCall: an empty key errors each call descriptively
+// (constructor stays no-error, the mintless tokenFn pattern).
+func TestWithAPIKeyEmptyFailsPerCall(t *testing.T) {
+	client := NewRemote("http://127.0.0.1:0", WithAPIKey(""))
+	err := Verify(context.Background(), client)
+	if err == nil || !strings.Contains(err.Error(), "WithAPIKey") {
+		t.Fatalf("expected descriptive empty-key error, got %v", err)
+	}
+}
+
+// TestNewRemoteInvalidBaseURL: static URL validation is I/O-free and surfaces
+// as a descriptive per-call error, never a constructor error.
+func TestNewRemoteInvalidBaseURL(t *testing.T) {
+	for _, base := range []string{"", "not a url", "ftp://example.com", "http://"} {
+		client := NewRemote(base, WithAPIKey("k"))
+		_, err := client.Balance(context.Background(), "11111111-1111-1111-1111-111111111111")
+		if err == nil || !strings.Contains(err.Error(), "base URL") {
+			t.Fatalf("base %q: expected descriptive base URL error, got %v", base, err)
+		}
 	}
 }

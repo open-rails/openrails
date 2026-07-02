@@ -4,45 +4,155 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 type ProductService struct {
-	repo *repo.ProductRepo
+	db *db.DB
 }
 
 func NewProductService(db *db.DB) *ProductService {
-	return &ProductService{repo: repo.NewProductRepo(db)}
+	return &ProductService{db: db}
+}
+
+func productPageInt32(v int) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v)
+}
+
+func productTierRankInt32(v int) (int32, error) {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return 0, fmt.Errorf("product tier_rank %d outside int32 range", v)
+	}
+	return int32(v), nil
+}
+
+func productsFromGen(rows []gen.OpenrailsProduct) ([]*models.Product, error) {
+	out := make([]*models.Product, 0, len(rows))
+	for _, r := range rows {
+		p, err := models.ProductFromGen(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *ProductService) Create(ctx context.Context, product *models.Product) error {
-	return s.repo.Create(ctx, product)
+	entSpec, err := models.ToJSONB(product.EntitlementsSpec)
+	if err != nil {
+		return err
+	}
+	credSpec, err := models.ToJSONB(product.CreditsSpec)
+	if err != nil {
+		return err
+	}
+	var desc *string
+	if product.Description != "" {
+		desc = &product.Description
+	}
+	tierRank32, err := productTierRankInt32(product.TierRank)
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
+		ID:               product.ID,
+		MerchantID:       product.MerchantID,
+		Key:              product.Key,
+		DisplayName:      product.DisplayName,
+		Description:      desc,
+		EntitlementsSpec: entSpec,
+		CreditsSpec:      credSpec,
+		TierGroup:        product.TierGroup,
+		TierRank:         tierRank32,
+		Status:           string(product.Status),
+		CreatedAt:        product.CreatedAt,
+		UpdatedAt:        product.UpdatedAt,
+	})
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
 }
 
 func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	return s.repo.GetByID(ctx, id)
+	row, err := s.db.Gen(ctx).GetProductByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return models.ProductFromGen(row)
 }
 
 func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, error) {
-	return s.repo.GetActive(ctx)
+	rows, err := s.db.Gen(ctx).ListActiveProducts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return productsFromGen(rows)
 }
 
 func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) {
-	return s.repo.GetAll(ctx)
+	rows, err := s.db.Gen(ctx).ListAllProducts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return productsFromGen(rows)
 }
 
 // GetActivePaginated returns active products with pagination
 func (s *ProductService) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	return s.repo.GetActivePaginated(ctx, limit, offset)
+	q := s.db.Gen(ctx)
+	total, err := q.CountActiveProducts(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
+		PageLimit:  productPageInt32(limit),
+		PageOffset: productPageInt32(offset),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	products, err := productsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return products, total, nil
 }
 
 // GetAllPaginated returns all products with pagination
 func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	return s.repo.GetAllPaginated(ctx, limit, offset)
+	q := s.db.Gen(ctx)
+	total, err := q.CountAllProducts(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
+		PageLimit:  productPageInt32(limit),
+		PageOffset: productPageInt32(offset),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	products, err := productsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return products, total, nil
 }
 
 // Update is not supported for arbitrary changes - products should be treated as mostly immutable.
@@ -57,8 +167,53 @@ func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("products cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
+// updateRow writes the full product row (the raw persistence Update, formerly
+// repo.ProductRepo.Update). Unexported on purpose: the public Update() forbids
+// arbitrary changes; the allowed mutations funnel here.
+func (s *ProductService) updateRow(ctx context.Context, product *models.Product) error {
+	entSpec, err := models.ToJSONB(product.EntitlementsSpec)
+	if err != nil {
+		return err
+	}
+	credSpec, err := models.ToJSONB(product.CreditsSpec)
+	if err != nil {
+		return err
+	}
+	var desc *string
+	if product.Description != "" {
+		desc = &product.Description
+	}
+	tierRank32, err := productTierRankInt32(product.TierRank)
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
+		ID:               product.ID,
+		Key:              product.Key,
+		DisplayName:      product.DisplayName,
+		Description:      desc,
+		EntitlementsSpec: entSpec,
+		CreditsSpec:      credSpec,
+		TierGroup:        product.TierGroup,
+		TierRank:         tierRank32,
+		Status:           string(product.Status),
+		UpdatedAt:        models.UpdateTimestamp(product.UpdatedAt),
+	})
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
 func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Product, error) {
-	return s.repo.GetByKey(ctx, key)
+	row, err := s.db.Gen(ctx).GetProductByKey(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return models.ProductFromGen(row)
 }
 
 // Deactivate archives a product (status=archived) so it won't appear in product
@@ -78,32 +233,32 @@ func (s *ProductService) SetStatus(ctx context.Context, id uuid.UUID, status mod
 	if !status.Valid() {
 		return fmt.Errorf("invalid catalog status %q", status)
 	}
-	product, err := s.repo.GetByID(ctx, id)
+	product, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	product.Status = status
-	return s.repo.Update(ctx, product)
+	return s.updateRow(ctx, product)
 }
 
 // UpdateDisplayName updates only the display name (cosmetic, does not affect historical data).
 func (s *ProductService) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	product, err := s.repo.GetByID(ctx, id)
+	product, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	product.DisplayName = displayName
-	return s.repo.Update(ctx, product)
+	return s.updateRow(ctx, product)
 }
 
 // UpdateDescription updates only the description (cosmetic, does not affect historical data).
 func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	product, err := s.repo.GetByID(ctx, id)
+	product, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	product.Description = description
-	return s.repo.Update(ctx, product)
+	return s.updateRow(ctx, product)
 }
 
 type ProductDefinitionUpdateParams struct {
@@ -123,7 +278,7 @@ type ProductDefinitionUpdateParams struct {
 //
 // This is intentionally separate from Update(), which forbids arbitrary changes for safety.
 func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, error) {
-	product, err := s.repo.GetByID(ctx, id)
+	product, err := s.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +307,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		product.CreditsSpec = params.CreditsSpec
 	}
 
-	if err := s.repo.Update(ctx, product); err != nil {
+	if err := s.updateRow(ctx, product); err != nil {
 		return nil, err
 	}
 	return product, nil

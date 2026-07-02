@@ -62,7 +62,11 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		return nil, errors.New("merchants: pgx pool is required")
 	}
 	rail = normalizeProviderSecretType(rail)
-	environment = normalizeProviderSecretEnvironment(environment)
+	if strings.TrimSpace(environment) == "" {
+		environment = s.providerEnvironment // deployment posture (#681)
+	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
+		return nil, errors.New("merchants: provider environment must be live or test")
+	}
 	status = strings.ToLower(strings.TrimSpace(status))
 
 	var rows []gen.OpenrailsRailMerchantAccount
@@ -111,9 +115,10 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 
 // GetPaymentProviderConfig returns the active config for provider/env.
 func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
-	environment = normalizeProviderSecretEnvironment(environment)
-	if environment == "" {
-		environment = "live"
+	if strings.TrimSpace(environment) == "" {
+		environment = s.providerEnvironment // deployment posture (#681)
+	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
+		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
 	}
 	items, err := s.ListPaymentProviderConfigs(ctx, id, rail, environment, "active")
 	if err != nil {
@@ -135,8 +140,10 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if !supportedPaymentProvider(rail) {
 		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
 	}
-	environment := normalizeProviderSecretEnvironment(req.Environment)
+	environment := strings.TrimSpace(req.Environment)
 	if environment == "" {
+		environment = s.providerEnvironment // deployment posture (#681)
+	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
 		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider environment must be live or test")
 	}
 	accountID := strings.TrimSpace(req.AccountID)

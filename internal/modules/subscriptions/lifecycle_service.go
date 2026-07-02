@@ -118,67 +118,10 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 	return time.Now()
 }
 
-// appendRenewalGraceWindows pre-appends the #368 trailing grace window
-// [periodEnd, periodEnd + GraceSlack(cycle)) for each of the subscription's
-// entitlements (source_type='grace', source_id=subscription id), so SILENCE
-// at period end — a lost success webhook, a provider billing on its own day
-// boundary, a merely late webhook — extends access briefly instead of cutting
-// it at the period-end second. Called on activation and on every renewal for
-// grace-eligible rails (NMI-backed + Stripe; see
-// RenewalGraceEligibleRail), right after the paid window push, so the
-// timeline tail is the paid period end and the grace window starts exactly
-// there (no-gap property; the DB period range is half-open, so touching
-// boundaries never violate the overlap exclusion).
-//
-// Bounded + revocable by design: truth arriving revokes it (renewal success
-// revokes-then-pushes in RenewMembership; terminal failure revokes in
-// FailMembership/ExpireMembership; a deliberate cancel deletes the scheduled
-// grace in CancelMembership; the #367 liveness sync resolves the silence the
-// grace is bridging). Still-silence past the slack just lapses by end_at —
-// fail-closed eventually, no revocation sweep involved, so the
-// DISABLE_ENTITLEMENT_EXPIRATION flag needs no special handling here.
-//
-// Idempotent: re-pushing the same (sub, period) grace lands in
-// PushNewEntitlement's covered-window branch and returns the existing row.
-// Months-stale period ends (e.g. imported subscriptions) get no resurrection
-// grace: the push is skipped once periodEnd + slack is already in the past.
-// Failures are logged, never returned — generosity must not fail the renewal.
-func (s *SubscriptionLifecycleService) appendRenewalGraceWindows(
-	ctx context.Context,
-	entitlementService *entitlements.EntitlementService,
-	subscription *models.Subscription,
-	entNames []string,
-	periodEnd time.Time,
-	cycleHours int,
-) {
-	if entitlementService == nil || subscription == nil || periodEnd.IsZero() || len(entNames) == 0 {
-		return
-	}
-	if !RenewalGraceEligibleRail(subscription.Rail) {
-		return
-	}
-	notBefore := periodEnd.UTC()
-	graceEnd := notBefore.Add(GraceSlack(cycleHours))
-	if !graceEnd.After(s.now().UTC()) {
-		return
-	}
-	for _, entName := range entNames {
-		if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-			UserID:      subscription.CustomerID.String(),
-			Entitlement: entName,
-			NotBefore:   &notBefore,
-			EndAt:       &graceEnd,
-			SourceType:  models.EntitlementSourceGrace,
-			SourceID:    subscription.ID,
-		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"entitlement":     entName,
-				"grace_end":       graceEnd,
-			}).Error("failed to pre-append renewal grace window")
-		}
-	}
-}
+// (#368 appendRenewalGraceWindows deleted by #691: auto-renew subscription
+// windows are STANDING — silence at period end cannot cut access, so no grace
+// window is pre-appended. Historical `grace` rows are still revoked on
+// renewal/cancel/terminal paths.)
 
 func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
 	if s.NotificationService == nil {
@@ -546,9 +489,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}).Info("Granted subscription entitlement")
 		}
 
-		// #368: pre-append the trailing renewal grace window right behind the
-		// paid window, so silence at the first renewal never gates the user.
-		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 	}
 
 	notification := &models.NotificationQueue{
@@ -929,14 +869,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				}
 			}
 
-			// #368: the old period's grace was revoked above and the new paid
-			// window pushed; pre-append the NEXT trailing grace window so the
-			// next renewal's silence is bridged too.
-			entNames := make([]string, 0, len(entitlementsSpec))
-			for entName := range entitlementsSpec {
-				entNames = append(entNames, entName)
-			}
-			s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 		}
 
 		// Handle entitlements for downgrade
@@ -1109,6 +1041,13 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return fmt.Errorf("failed to update reactivated subscription: %w", err)
 		}
 
+		// #691 resume: re-open the advance-written cancel closure (end_at back to
+		// NULL) so an auto-renew resume restores STANDING access; the pushes below
+		// then only record the paid-period fact.
+		if err := entitlementService.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
+			return fmt.Errorf("failed to resume subscription access windows: %w", err)
+		}
+
 		entNames := make([]string, 0)
 		entitlementsSpec := subscription.EntitlementsSpecSnapshot
 		if len(entitlementsSpec) > 0 {
@@ -1153,10 +1092,6 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 				return fmt.Errorf("failed to restore entitlement %s on reactivation: %w", entName, err)
 			}
 		}
-
-		// #368: a reactivated membership renews like any other — pre-append
-		// the trailing grace window behind the restored paid window.
-		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleHoursOf(price))
 
 		reactivated = subscription
 		return nil
@@ -1406,13 +1341,20 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		}
 	}
 
+	entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
+	entSvc.SetClock(s.Clock())
 	if len(c.RevokeSources) > 0 {
-		entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
-		entSvc.SetClock(s.Clock())
 		if err := entSvc.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, c.RevokeAsOf, c.RevokeReason, c.RevokeSources...); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
 				Error("failed to revoke entitlements during local cancellation")
 		}
+	}
+	// #691 closure: a terminal cancel is PROOF — write the window end on disk now
+	// (period-end cancels leave the paid runway; the standing window must not
+	// outlive it). Idempotent; no-op when the revoke above already closed access.
+	if err := entSvc.BoundSubscriptionAccess(ctx, sub.ID, endedAt); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
+			Error("failed to bound entitlement windows during local cancellation")
 	}
 	return nil
 }
@@ -1882,42 +1824,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// For OpenRails-driven rails (NMI-backed + Solana), we control retry
-		// timing; if the retry schedule would extend beyond the paid term end, model
-		// that access as explicit grace entitlement windows. (#257: Solana gets the
-		// same paid-through grace as NMI.)
-		if rails.OpenRailsDrivenDunning(subscription.Rail) && subscription.Status == models.StatusPastDue {
-			if subscription.CurrentPeriodEndsAt != nil && subscription.NextRetryAt != nil && subscription.NextRetryAt.After(*subscription.CurrentPeriodEndsAt) {
-				paidEnd := subscription.CurrentPeriodEndsAt.UTC()
-				graceUntil := subscription.NextRetryAt.UTC()
-
-				names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-				if err != nil {
-					log.WithContext(ctx).WithError(err).Error("failed to list subscription entitlements for grace append")
-				} else {
-					for _, entName := range names {
-						notBefore := now.UTC()
-						if paidEnd.After(notBefore) {
-							notBefore = paidEnd
-						}
-						_, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-							UserID:      subscription.CustomerID.String(),
-							Entitlement: entName,
-							NotBefore:   &notBefore,
-							EndAt:       &graceUntil,
-							SourceType:  models.EntitlementSourceGrace,
-							SourceID:    subscription.ID,
-						})
-						if err != nil {
-							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-								"subscription_id": subscription.ID,
-								"entitlement":     entName,
-							}).Error("failed to append grace entitlement window during dunning failure")
-						}
-					}
-				}
-			}
-		}
+		// (#691: no grace windows are appended while dunning runs past the paid
+		// term — the auto-renew sub's STANDING window keeps access intact until a
+		// terminal outcome closes it.)
 
 		// #344 follow-up: a terminal payment-failure cancellation of an
 		// NMI-backed subscription must also stop the rail-side recurring

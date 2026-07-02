@@ -39,14 +39,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574): always-on provider truth refresh. It wraps
 	// bounded provider event pulls, the unknown-cohort reconcile (#632/#665 —
 	// the one per-subscription verification path; the #367 liveness worker is
 	// retired), CCBill DataLink, and scoped convergence after refresh writes.
-	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderRefreshWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
 		DB:                  r.DB,
 		Config:              r.Config,
 		Rails:               r.Rails,
@@ -60,19 +60,19 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
 		return fmt.Errorf("add ccbill reconcile worker: %w", err)
 	}
 	// Webhook processing is now synchronous-only - no background workers needed.
 	// Payment rails (CCBill, NMI) retry failed webhooks from their end.
-	if err := river.AddWorkerSafely(workers, &riverjobs.CleanupExpiredDataWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
 		Config: riverjobs.DefaultCleanupConfig(),
 	}); err != nil {
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CreditExpiryWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.CreditExpiryWorker{
 		DB:    r.DB,
 		Clock: clock,
 	}); err != nil {
@@ -82,14 +82,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// every active merchant, catching internal-plane drift (stalled dunning,
 	// elapsed grace, abandoned checkouts, unmaterialized grant effects) that no
 	// inline mutation touched. The background twin of the inline Converge hooks.
-	if err := river.AddWorkerSafely(workers, &riverjobs.ConvergeSweepWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.ConvergeSweepWorker{
 		DB:     r.DB,
 		Config: r.Config,
 		Clock:  clock,
 	}); err != nil {
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
 		Rails:                        r.Rails,
@@ -99,7 +99,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add cancel subscription worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.ResumeSubscriptionWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.ResumeSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
 		Rails:                        r.Rails,
@@ -114,7 +114,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// mutations (deferred NMI deletes, refunds, manual rebills), the verifier
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
-	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentExecuteWorker{
 		DB:             r.DB,
 		Config:         r.Config,
 		Clock:          clock,
@@ -123,7 +123,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentVerifyWorker{
 		DB:             r.DB,
 		Config:         r.Config,
 		Clock:          clock,
@@ -132,12 +132,32 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.WebhookProcessWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.WebhookProcessWorker{
 		Dispatcher: r.WebhookDispatcher,
 	}); err != nil {
 		return fmt.Errorf("add webhook process worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CatalogReconciliationPullWorker{
+	// #684: webhook wake-ups — the coalesced per-subscription fetch-and-converge
+	// job the slimmed Stripe/NMI subscription-state handlers enqueue.
+	if err := addTrackedWorker(r, workers, &riverjobs.SubscriptionConvergeWorker{
+		DB:                           r.DB,
+		Config:                       r.Config,
+		Rails:                        r.Rails,
+		Clock:                        clock,
+		NMIClients:                   r.NMIClients,
+		PriceService:                 r.PriceService,
+		ProductService:               r.ProductService,
+		SubscriptionService:          r.SubscriptionService,
+		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
+		PaymentService:               r.PaymentService,
+		MoneyService:                 r.MoneyService,
+		NotificationService:          r.NotificationService,
+		RailCustomerService:          r.RailCustomerService,
+		CheckoutSessionService:       r.CheckoutSessionService,
+	}); err != nil {
+		return fmt.Errorf("add subscription converge worker: %w", err)
+	}
+	if err := addTrackedWorker(r, workers, &riverjobs.CatalogReconciliationPullWorker{
 		DB:         r.DB,
 		Config:     r.Config,
 		Rails:      r.Rails,
@@ -145,7 +165,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.StripeWebhookReconcileWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.StripeWebhookReconcileWorker{
 		DB:        r.DB,
 		Config:    r.Config,
 		Rails:     r.Rails,
@@ -159,7 +179,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// LowBalanceAlertWorker (#240) is NOT registered: no money.Alerter
 	// implementation exists in the runtime, so registration was a permanent
 	// no-op (#673) — re-add it together with the notification wiring.
-	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.AutoTopupWorker{
 		DB:      r.DB,
 		Money:   r.MoneyService,
 		Config:  r.Config,
@@ -167,7 +187,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.InvoiceWorker{
 		DB:      r.DB,
 		Money:   r.MoneyService,
 		Charger: r.MoneyCharger,
@@ -176,7 +196,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add invoice worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CreditReconcileWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.CreditReconcileWorker{
 		Money: r.MoneyService,
 		Clock: clock,
 	}); err != nil {
@@ -198,12 +218,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.SolanaCranker != nil {
 		solanaCrankWorker.Cranker = r.SolanaCranker
 	}
-	if err := river.AddWorkerSafely(workers, solanaCrankWorker); err != nil {
+	if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
 		return fmt.Errorf("add solana cranker worker: %w", err)
 	}
 	// Solana cranker-wallet gas-float alert (#258): warns when a merchant's cranker
 	// wallet is low on SOL. Alert-only, no auto-top-up.
-	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaGasAlertWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.SolanaGasAlertWorker{
 		DB:  r.DB,
 		RPC: r.SolanaRPC,
 	}); err != nil {
@@ -211,12 +231,23 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Solana ledger reconciliation (#258): cross-checks confirmed on-chain pulls
 	// against openrails.payments and raises operator repair alerts on drift.
-	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaReconcileWorker{
+	if err := addTrackedWorker(r, workers, &riverjobs.SolanaReconcileWorker{
 		DB:                  r.DB,
 		NotificationService: r.NotificationService,
 		Clock:               clock,
 	}); err != nil {
 		return fmt.Errorf("add solana reconcile worker: %w", err)
+	}
+	// Worker health checker (#689): evaluates per-kind health rows written by the
+	// WorkerHealthMiddleware and raises repair alerts for never-succeeded /
+	// failing / stale kinds. Registered last so every kind above is already noted.
+	if err := addTrackedWorker(r, workers, &riverjobs.WorkerHealthCheckWorker{
+		DB:                  r.DB,
+		Clock:               clock,
+		Registrations:       r.workerHealthRegistrations(),
+		NotificationService: r.NotificationService,
+	}); err != nil {
+		return fmt.Errorf("add worker health check worker: %w", err)
 	}
 	return nil
 }
@@ -350,8 +381,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	var jobs []*river.PeriodicJob
 
 	// Every 4 hours: run Dunning worker to process past_due subscriptions
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(4*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		4*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DunningArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -365,8 +396,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// bounded event windows, the unknown-cohort reconcile, and CCBill DataLink.
 	// RunOnStart=true: startup after a stale dump/outage should not wait for
 	// the first 4-hour tick.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(4*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		4*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -384,8 +415,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// RunOnStart drains parked/overdue intents right after boot — when a mode
 	// change, kill-switch flip or restart is exactly what unblocked them —
 	// replacing the retired #344 boot rescan.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Minute),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ProviderIntentExecuteArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -397,8 +428,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Every 5 minutes: resolve unknown_needs_verify intents via provider
 	// reads (#358 verifier) before any retry.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(5*time.Minute),
+	jobs = append(jobs, r.healthPeriodic(
+		5*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ProviderIntentVerifyArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -409,8 +440,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every hour: cleanup expired data (wallet challenges, payment intents, etc.)
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -423,8 +454,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// Every hour: crank due Solana recurring subscriptions (#256). Worker frequency
 	// is decoupled from the monthly billing cadence — the due-query (next_pull_at)
 	// filters to what's actually due.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -435,8 +466,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 6 hours: alert on low Solana cranker-wallet SOL gas (#258).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(6*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		6*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaGasAlertArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -447,8 +478,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 6 hours: reconcile confirmed Solana pulls against the ledger (#258).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(6*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		6*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -459,8 +490,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every hour: expire credit batches
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -475,8 +506,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// Alert-only — never mutates Stripe or the catalog rows. Interval is
 	// configurable via OPENRAILS_CATALOG_RECONCILIATION_INTERVAL (0 disables).
 	if interval, ok := catalogReconciliationInterval(); ok {
-		jobs = append(jobs, river.NewPeriodicJob(
-			river.PeriodicInterval(interval),
+		jobs = append(jobs, r.healthPeriodic(
+			interval,
 			func() (river.JobArgs, *river.InsertOpts) {
 				return riverjobs.CatalogReconciliationPullArgs{}, &river.InsertOpts{
 					Queue:      riverjobs.QueueBilling,
@@ -486,8 +517,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			&river.PeriodicJobOpts{RunOnStart: false},
 		))
 	}
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.StripeWebhookReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -499,8 +530,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Every hour: invoice collection (#241). (Low-balance alert scheduling was
 	// removed with its worker registration — no Alerter implementation exists.)
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			args := riverjobs.InvoiceArgs{Collect: true}
 			opts := &river.InsertOpts{
@@ -513,8 +544,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 	// Monthly invoice sweep (#301): collect the long tail above the merchant's
 	// floor that the hourly threshold trigger leaves behind.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(30*24*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		30*24*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			args := riverjobs.InvoiceArgs{
 				Collect:         true,
@@ -531,8 +562,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Daily: finalize the previous merchant-configured itemized invoice period
 	// (#303). Idempotent per (owner, credit_type, period).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(24*time.Hour),
+	jobs = append(jobs, r.healthPeriodic(
+		24*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.InvoiceArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -543,8 +574,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 15 minutes: prepaid auto-top-up (#239).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(15*time.Minute),
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.AutoTopupArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -555,8 +586,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 30 minutes: credit ledger reconciliation (#243, alert-only).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(30*time.Minute),
+	jobs = append(jobs, r.healthPeriodic(
+		30*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CreditReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
@@ -571,12 +602,25 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// dunning, elapsed grace, abandoned checkouts, unmaterialized grant effects).
 	// RunOnStart=true: a reboot after downtime is exactly when accumulated drift
 	// is largest, and a clean merchant sweep is a cheap no-op.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(15*time.Minute),
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ConvergeSweepArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
+	))
+
+	// Every 5 minutes: worker health check (#689). RunOnStart=true so health rows
+	// are seeded (and lingering incidents re-evaluated) right after boot.
+	jobs = append(jobs, r.healthPeriodic(
+		5*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.WorkerHealthCheckArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},

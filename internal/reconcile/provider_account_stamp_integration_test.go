@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -64,9 +65,9 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			PurchasedAt:   now,
 			CreatedAt:     now,
 		}
-		require.NoError(t, repo.NewPaymentRepo(appDB).Create(ctx, pmt))
+		require.NoError(t, payments.NewPaymentRepo(appDB).Create(ctx, pmt))
 
-		got, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
+		got, err := payments.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
 		require.NoError(t, err)
 		require.Nil(t, got.RailMerchantAccountID, "payment must not invent rail_merchant_account_id from primary routing")
 
@@ -78,8 +79,8 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "usd",
 			Status: "completed", PurchasedAt: now, CreatedAt: now,
 		}
-		require.NoError(t, repo.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))
-		got2, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt2.ID)
+		require.NoError(t, payments.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))
+		got2, err := payments.NewPaymentRepo(appDB).GetByID(ctx, pmt2.ID)
 		require.NoError(t, err)
 		require.NotNil(t, got2.RailMerchantAccountID)
 		require.Equal(t, account.ID, *got2.RailMerchantAccountID, "pinned account is observed provenance")

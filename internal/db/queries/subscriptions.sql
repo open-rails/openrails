@@ -177,6 +177,40 @@ WHERE sub.customer_id = $1
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
+-- #691 checkout guard: an `unknown` sub does NOT hold the lifecycle slot, but it
+-- may still be alive (and billing) at the provider — a re-purchase would
+-- double-bill. These lookups back the subscribe-time rejection.
+-- name: GetUnknownSubscriptionByCustomerAndProduct :one
+SELECT * FROM openrails.subscriptions sub
+WHERE sub.customer_id = $1
+  AND sub.product_id = $2
+  AND sub.status = 'unknown'
+ORDER BY sub.current_period_ends_at DESC NULLS FIRST
+LIMIT 1;
+
+-- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
+SELECT sub.* FROM openrails.subscriptions sub
+JOIN openrails.products prod ON prod.id = sub.product_id
+WHERE sub.customer_id = $1
+  AND sub.status = 'unknown'
+  AND prod.tier_group = $2
+ORDER BY sub.current_period_ends_at DESC NULLS FIRST
+LIMIT 1;
+
+-- #691 projection inversion: does this subscription project STANDING access
+-- (open-ended entitlement window, closed only by proven events)? True for
+-- auto-renew prices while the sub is non-terminal; terminal subs and bounded
+-- (one-off/rental) prices keep bounded interval windows.
+-- name: SubscriptionProjectsStandingAccess :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.subscriptions s
+    JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND s.id = sqlc.arg(id)::uuid
+      AND p.auto_renew
+      AND s.status IN ('pending', 'active', 'past_due', 'unknown')
+) AS standing;
+
 -- name: ListSubscriptionsByPaymentMethodIDs :many
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[]);

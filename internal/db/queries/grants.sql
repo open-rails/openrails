@@ -305,7 +305,20 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         WHERE NOT EXISTS (
             SELECT 1 FROM openrails.entitlements e
             WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
-              AND e.entitlement = feat AND e.deleted_at IS NULL)))
+              AND e.entitlement = feat AND e.deleted_at IS NULL)
+          -- #691: one live STANDING subscription window satisfies every
+          -- per-period grant of that subscription (mirrors MaterializeGrant's
+          -- ensure-standing skip — detection and repair must agree or the
+          -- sweep never converges).
+          AND NOT (g.source_type = 'subscription' AND EXISTS (
+            SELECT 1 FROM openrails.entitlements e2
+            WHERE e2.merchant_id = g.merchant_id
+              AND e2.customer_id = g.customer_id
+              AND e2.entitlement = feat
+              AND e2.source_type = 'subscription'
+              AND e2.source_id::text = g.source_id
+              AND e2.end_at IS NULL
+              AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))))
     OR
     (g.kind = 'credit' AND NOT EXISTS (
         SELECT 1 FROM openrails.ledger_transfers lt
@@ -455,6 +468,21 @@ SELECT EXISTS (
       AND e.deleted_at IS NULL
       AND e.period && tstzrange(sqlc.arg(lower_bound)::timestamptz, sqlc.arg(upper_bound)::timestamptz, '[)')
 ) AS overlaps;
+
+-- #691 per-period grant idempotency: the latest bounded end recorded for one
+-- (customer, source, feature) — a renewal replay whose period end is not past
+-- this mark appends nothing.
+-- name: LatestEntitlementGrantEndForSource :one
+-- Zero time = no bounded grant recorded yet.
+SELECT COALESCE(max(g.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.source_type = sqlc.arg(source_type)::text
+  AND g.source_id = sqlc.arg(source_id)::text
+  AND g.ends_at IS NOT NULL
+  AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text);
 
 -- #636 idempotency for admin-grant import: is there already an entitlement grant
 -- from this admin source? Lets the doujins migrate hand admin comps over as grants

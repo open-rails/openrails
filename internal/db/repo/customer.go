@@ -77,13 +77,13 @@ func ResolveCustomerID(userID string) (uuid.UUID, error) {
 	return uid, nil
 }
 
-// ensureCustomerRow makes sure a openrails.customers row exists for an
-// already-resolved payable customer id, which the commerce repo Create methods
+// EnsureCustomerRow makes sure a openrails.customers row exists for an
+// already-resolved payable customer id, which the commerce Create methods
 // call just before insert so the FK target exists (#317). customers is UUID-only
 // (#491): the row is materialized as (id, merchant_id); the ON CONFLICT makes a
 // repeat a no-op. A zero id is a no-op (the caller must set model.CustomerID
 // before Create).
-func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
+func EnsureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
 	}
@@ -99,6 +99,12 @@ func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsi
 		MerchantID: tenantID,
 		Subject:    stringPtr(tsid.String()),
 	})
+}
+
+// ensureCustomerRow is a transitional alias (#688 phase 1) for the files still
+// in this package (subscription.go, notification_queue.go); goes with them.
+func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
+	return EnsureCustomerRow(ctx, qx, tenantID, tsid)
 }
 
 func stringPtr(s string) *string { return &s }

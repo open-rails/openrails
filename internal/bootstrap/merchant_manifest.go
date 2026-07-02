@@ -478,7 +478,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		if !req.Options.Insert {
 			return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
 		}
-		tn, err = provisionMerchantIdentity(ctx, database, req.ControlPlane, slug, mt)
+		tn, err = provisionMerchantIdentity(ctx, req.Config, database, req.ControlPlane, slug, mt)
 		if err != nil {
 			return nil, err
 		}
@@ -503,7 +503,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	return tn, nil
 }
 
-func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
+func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database *db.DB, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
 	if cp == nil {
 		// Embedded: OpenRails runs no AuthKit, so it creates/records no permission-group.
 		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
@@ -532,7 +532,7 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: provision merchant group/remote_application for %q: %w", slug, err)
 	}
-	svc, err := merchants.NewService(cp.Pool(), nil)
+	svc, err := merchants.NewService(cp.Pool(), nil, config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()))
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +684,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: prune requires a secret store")
 		}
-		if err := pruneManifestSecrets(ctx, merchantID, mt, secretStore); err != nil {
+		if err := pruneManifestSecrets(ctx, cfg, merchantID, mt, secretStore); err != nil {
 			return err
 		}
 	}
@@ -694,11 +694,11 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // pruneManifestSecrets deletes secrets held for the merchant that the manifest
 // no longer declares (#527 --prune), reconciling the stored secret set to the
 // file. Names are derived exactly as Put derives them.
-func pruneManifestSecrets(ctx context.Context, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore) error {
+func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore) error {
 	declared := map[string]struct{}{}
 	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
 		rail := normalizeManifestRail(entry.rail)
-		environment, err := normalizeProviderEnvironment(entry.config.Environment)
+		environment, err := manifestProviderEnvironment(cfg, entry.config.Environment)
 		if err != nil {
 			return err
 		}
@@ -758,7 +758,7 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 	if rail == "" {
 		return fmt.Errorf("provider account rail is required")
 	}
-	environment, err := normalizeProviderEnvironment(account.Environment)
+	environment, err := manifestProviderEnvironment(cfg, account.Environment)
 	if err != nil {
 		return err
 	}
@@ -998,13 +998,23 @@ func solanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 
 func normalizeProviderEnvironment(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "live", "prod", "production", "mainnet":
+	case "live", "prod", "production", "mainnet":
 		return "live", nil
 	case "test", "sandbox", "devnet", "testnet":
 		return "test", nil
 	default:
 		return "", fmt.Errorf("provider account environment must be live or test")
 	}
+}
+
+// manifestProviderEnvironment resolves a manifest-declared provider environment:
+// omitted follows deployment posture (#681 — test under test_mode, live
+// otherwise); explicit values are normalized strictly.
+func manifestProviderEnvironment(cfg *config.Config, raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()), nil
+	}
+	return normalizeProviderEnvironment(raw)
 }
 
 func normalizeManifestRail(raw string) string {

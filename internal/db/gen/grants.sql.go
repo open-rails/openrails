@@ -419,6 +419,43 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 	return terminated, err
 }
 
+const latestEntitlementGrantEndForSource = `-- name: LatestEntitlementGrantEndForSource :one
+SELECT COALESCE(max(g.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end
+FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND g.customer_id = $2::uuid
+  AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.source_type = $3::text
+  AND g.source_id = $4::text
+  AND g.ends_at IS NOT NULL
+  AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), $5::text)
+`
+
+type LatestEntitlementGrantEndForSourceParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	SourceType  string
+	SourceID    string
+	Entitlement string
+}
+
+// #691 per-period grant idempotency: the latest bounded end recorded for one
+// (customer, source, feature) — a renewal replay whose period end is not past
+// this mark appends nothing.
+// Zero time = no bounded grant recorded yet.
+func (q *Queries) LatestEntitlementGrantEndForSource(ctx context.Context, arg LatestEntitlementGrantEndForSourceParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, latestEntitlementGrantEndForSource,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.Entitlement,
+	)
+	var latest_end time.Time
+	err := row.Scan(&latest_end)
+	return latest_end, err
+}
+
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
 FROM openrails.grants g
@@ -684,7 +721,20 @@ WHERE g.merchant_id = $1::uuid
         WHERE NOT EXISTS (
             SELECT 1 FROM openrails.entitlements e
             WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
-              AND e.entitlement = feat AND e.deleted_at IS NULL)))
+              AND e.entitlement = feat AND e.deleted_at IS NULL)
+          -- #691: one live STANDING subscription window satisfies every
+          -- per-period grant of that subscription (mirrors MaterializeGrant's
+          -- ensure-standing skip — detection and repair must agree or the
+          -- sweep never converges).
+          AND NOT (g.source_type = 'subscription' AND EXISTS (
+            SELECT 1 FROM openrails.entitlements e2
+            WHERE e2.merchant_id = g.merchant_id
+              AND e2.customer_id = g.customer_id
+              AND e2.entitlement = feat
+              AND e2.source_type = 'subscription'
+              AND e2.source_id::text = g.source_id
+              AND e2.end_at IS NULL
+              AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))))
     OR
     (g.kind = 'credit' AND NOT EXISTS (
         SELECT 1 FROM openrails.ledger_transfers lt

@@ -193,7 +193,7 @@ func New(deps Dependencies) (*Server, error) {
 		secretStore := secretBackend.Secrets
 		solanaTransit := secretBackend.SolanaTransit
 
-		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore)
+		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
 		if terr != nil {
 			return nil, fmt.Errorf("build merchants service: %w", terr)
 		}

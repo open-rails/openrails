@@ -12,6 +12,11 @@ import (
 
 type SaleParams struct {
 	CustomerVaultID string
+	// BillingID targets ONE stored card inside the vault (#682 shared-vault
+	// support). Empty = the vault's priority-1 entry — always correct under the
+	// one-vault-per-card minting policy; set it (from the payment method's
+	// rail_method_ref) when the vault may hold multiple entries.
+	BillingID string
 	// Amount is CENTS (typed, #671) — rendered as a two-decimal wire amount.
 	Amount           moneyutil.Cents
 	Currency         string
@@ -39,6 +44,13 @@ type RefundResponse struct {
 // RunSale charges a vaulted customer via POST /v5/payments/sale using the
 // top-level customer_vault:{id} object (the live-verified vault-sale form;
 // the documented payment_details.customer_vault_id is rejected).
+//
+// BILLING-TARGETED sales go through classic Direct Post DELIBERATELY: the live
+// v5 sale rejects every billing-selection shape (customer_vault.billing_id,
+// top-level billing_id, payment_details.* — all "extra parameters",
+// live-verified 2026-07-02) and always charges the priority-1 entry, while
+// classic sale + billing_id charges the exact card (same lane the dunning
+// rebill already uses).
 func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -65,6 +77,10 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
 	}
 
+	if billingID := strings.TrimSpace(params.BillingID); billingID != "" {
+		return c.runClassicTargetedSale(params, currency, orderDesc, billingID)
+	}
+
 	req := v5PaymentRequest{
 		Amount:        centsJSONAmount(params.Amount),
 		Currency:      currency,
@@ -84,6 +100,41 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 		TransactionID: txn.ID,
 		Authcode:      txn.AuthCode,
 		ResponseText:  txn.ResponseText,
+	}, nil
+}
+
+// runClassicTargetedSale charges ONE specific billing entry of a vault via
+// classic Direct Post (type=sale + customer_vault_id + billing_id) — see the
+// RunSale doc for why v5 cannot do this.
+func (c *NMIClient) runClassicTargetedSale(params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
+	values := url.Values{
+		"type":              {"sale"},
+		"security_key":      {c.SecurityKey},
+		"customer_vault_id": {params.CustomerVaultID},
+		"billing_id":        {billingID},
+		"amount":            {string(centsJSONAmount(params.Amount))},
+		"currency":          {currency},
+		"order_description": {orderDesc},
+	}
+	if params.OrderID != "" {
+		values.Set("orderid", params.OrderID)
+	}
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return nil, err
+	}
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return nil, err
+	}
+	if !isDirectResponseApproved(output) {
+		return nil, newSaleError(response, output)
+	}
+	return &SaleResponse{
+		TransactionID: output.Get("transactionid"),
+		Authcode:      output.Get("authcode"),
+		ResponseText:  responseText(output, response),
 	}, nil
 }
 

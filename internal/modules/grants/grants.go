@@ -213,7 +213,37 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 		if err != nil {
 			return err
 		}
+		// #691 projection inversion: a grant sourced from an AUTO-RENEW sub in a
+		// non-terminal state projects one STANDING open window (end_at NULL) per
+		// (customer, entitlement, source) instead of per-period windows. The grant
+		// ledger stays per-period/bounded; only the projection is standing. Access
+		// then ends only by PROOF (cancel closure, terminal dunning, provider-
+		// confirmed death) — never by our own machinery going silent.
+		standing := false
+		var standingSubID uuid.UUID
+		if SourceType(g.SourceType) == Subscription {
+			if subID, perr := uuid.Parse(g.SourceID); perr == nil {
+				standing, err = l.q.SubscriptionProjectsStandingAccess(ctx, gen.SubscriptionProjectsStandingAccessParams{
+					MerchantID: l.merchant, ID: subID,
+				})
+				if err != nil {
+					return fmt.Errorf("grants: standing-access check for %s: %w", g.SourceID, err)
+				}
+				standingSubID = subID
+			}
+		}
 		for _, f := range feats {
+			if standing {
+				ok, err := l.q.StandingSubscriptionEntitlementExists(ctx, gen.StandingSubscriptionEntitlementExistsParams{
+					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f, SourceID: standingSubID,
+				})
+				if err != nil {
+					return fmt.Errorf("grants: standing window check %q: %w", f, err)
+				}
+				if ok {
+					continue // one standing window satisfies every per-period grant
+				}
+			}
 			exists, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
 				MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
 			})
@@ -222,6 +252,35 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			}
 			if exists {
 				continue
+			}
+			endAt := g.EndsAt
+			if standing {
+				// Replay safety: a standing window spans [starts_at, infinity). When a
+				// foreign live window would collide with it, fall back to the grant's
+				// own bounded window (so the grant still projects and the sweep
+				// converges); if even that overlaps, skip — self-healing like
+				// derive-1's overlap-skip.
+				overlapsOpen, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
+					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
+					LowerBound: g.StartsAt, UpperBound: overlapUpperBound(nil),
+				})
+				if err != nil {
+					return fmt.Errorf("grants: standing overlap check %q: %w", f, err)
+				}
+				if !overlapsOpen {
+					endAt = nil
+				} else {
+					overlapsBounded, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
+						MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
+						LowerBound: g.StartsAt, UpperBound: overlapUpperBound(g.EndsAt),
+					})
+					if err != nil {
+						return fmt.Errorf("grants: bounded overlap check %q: %w", f, err)
+					}
+					if overlapsBounded {
+						continue
+					}
+				}
 			}
 			gid := g.ID
 			// #511: the entitlement keeps its SEMANTIC source (so source-keyed
@@ -238,7 +297,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			}
 			if _, err := l.q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
 				Entitlement: f, StartAt: g.StartsAt, SourceType: entitlementSourceType(g.SourceType),
-				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: g.EndsAt,
+				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: endAt,
 				SourceID: &entSourceID, GrantID: &gid,
 			}); err != nil {
 				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)

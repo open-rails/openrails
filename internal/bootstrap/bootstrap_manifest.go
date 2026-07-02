@@ -153,8 +153,12 @@ func validateManifestRailMerchantAccount(slug string, key string, account RailMe
 		if rail == "" {
 			return fmt.Errorf("merchant %q rail_merchant_accounts.%s rail is required", slug, key)
 		}
-		if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
-			return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.%w", slug, key, rail, err)
+		// Omitted environment is valid — it follows deployment posture at
+		// reconcile time (#681); explicit values must normalize.
+		if strings.TrimSpace(cfg.Environment) != "" {
+			if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
+				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.%w", slug, key, rail, err)
+			}
 		}
 		for secretKey := range cfg.Secrets {
 			if _, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, secretKey); err != nil {

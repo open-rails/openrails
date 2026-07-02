@@ -244,3 +244,93 @@ func TestUpdateCustomerVault_ResolvesBillingID(t *testing.T) {
 	assert.Contains(t, patchBody, `"payment_token":"tok_new"`)
 	assert.Contains(t, patchBody, `"first_name":"Ada"`)
 }
+
+// TestRunSale_BillingTargetedUsesClassic (#682): the live v5 sale cannot
+// select a billing entry (every shape rejected as extra parameters,
+// live-verified 2026-07-02), so a billing-targeted sale goes through classic
+// Direct Post with customer_vault_id + billing_id — wire-pinned here.
+func TestRunSale_BillingTargetedUsesClassic(t *testing.T) {
+	var seen url.Values
+	var v5Hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") == "application/json" {
+			v5Hits++
+			t.Errorf("billing-targeted sale must not hit v5: %s %s", r.Method, r.URL.Path)
+			return
+		}
+		require.NoError(t, r.ParseForm())
+		seen = r.Form
+		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&transactionid=txn_targeted_1&authcode=42"))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	resp, err := client.RunSale(SaleParams{
+		CustomerVaultID:  "vault-9",
+		BillingID:        "bill-2",
+		Amount:           1234,
+		Currency:         "USD",
+		OrderDescription: "targeted",
+		OrderID:          "ord-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "txn_targeted_1", resp.TransactionID)
+	require.Zero(t, v5Hits)
+	require.Equal(t, "sale", seen.Get("type"))
+	require.Equal(t, "vault-9", seen.Get("customer_vault_id"))
+	require.Equal(t, "bill-2", seen.Get("billing_id"))
+	// Wire-pinned money boundary (#671): 1234 cents -> "12.34".
+	require.Equal(t, "12.34", seen.Get("amount"))
+	require.Equal(t, "ord-1", seen.Get("orderid"))
+}
+
+// TestDeleteCustomerBillingEntry pins the LIVE route: /customers/{v}/billing/{b}
+// (the documented /billing-addresses/{b} answers E_ROUTE_NOT_FOUND).
+func TestDeleteCustomerBillingEntry(t *testing.T) {
+	var method, path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.DeleteCustomerBillingEntry("vault-9", "bill-2"))
+	require.Equal(t, http.MethodDelete, method)
+	require.Equal(t, "/customers/vault-9/billing/bill-2", path)
+
+	// Last-entry refusal surfaces as an error (NMI refuses to empty a vault) —
+	// callers delete the whole vault instead.
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"validationError","error_code":"E_INVALID_SUBMISSION","message":"Customer Vault must have at least one billing"}`))
+	}))
+	t.Cleanup(refusing.Close)
+	client2 := newTestClient(t, refusing.URL)
+	err := client2.DeleteCustomerBillingEntry("vault-9", "bill-last")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least one billing")
+}
+
+// TestAddRecurringSubscription_BillingTargeted: the classic enroll binds the
+// subscription to a specific billing entry when one is supplied (#682).
+func TestAddRecurringSubscription_BillingTargeted(t *testing.T) {
+	var seen url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		seen = r.Form
+		_, _ = w.Write([]byte("response=1&subscription_id=sub-1&transactionid=txn-1"))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	_, err := client.AddRecurringSubscription(RecurringPaymentData{
+		PlanID:          "plan-1",
+		CustomerVaultID: "vault-9",
+		BillingID:       "bill-2",
+		Currency:        "USD",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "bill-2", seen.Get("billing_id"))
+	require.Equal(t, "vault-9", seen.Get("customer_vault_id"))
+}

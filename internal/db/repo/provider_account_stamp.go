@@ -24,8 +24,14 @@ func railMerchantAccountIDFromContext(ctx context.Context) *uuid.UUID {
 	return &v
 }
 
-// resolveRailMerchantAccountIDForStamp returns only explicitly observed provenance.
+// ResolveRailMerchantAccountIDForStamp returns only explicitly observed provenance.
 // ponytail: nil is better than inventing provider-account provenance.
-func resolveRailMerchantAccountIDForStamp(ctx context.Context) *uuid.UUID {
+func ResolveRailMerchantAccountIDForStamp(ctx context.Context) *uuid.UUID {
 	return railMerchantAccountIDFromContext(ctx)
+}
+
+// resolveRailMerchantAccountIDForStamp is a transitional alias (#688 phase 1)
+// for subscription.go; goes with it in phase 2.
+func resolveRailMerchantAccountIDForStamp(ctx context.Context) *uuid.UUID {
+	return ResolveRailMerchantAccountIDForStamp(ctx)
 }

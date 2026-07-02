@@ -91,10 +91,9 @@ func parseCCBillDateUsingTimestamp(dateStr string) (*time.Time, error) {
 }
 
 // ccbillGraceCap bounds how far past the paid term end a CCBill-announced
-// retry date may extend grace. CCBill runs its own dunning cadence; this is
-// purely OpenRails' cap on the grace access granted meanwhile. (Historically
-// this was subscriptions.DunningInterval, before #359 replaced the fixed
-// dunning interval with the cadence-relative offset schedule.)
+// retry date may push the grace_ends_at PACING marker (when the stalled row
+// parks to `unknown`). Since #691 access rides the standing entitlement window
+// — grace_ends_at carries no access role and no grace windows are appended.
 const ccbillGraceCap = 72 * time.Hour
 
 func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
@@ -2609,63 +2608,17 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		sub.RetryAttempts = nil
 		sub.GraceEndsAt = nil
 
-		// For CCBill, retry behavior is dictated by the rail.
-		// We treat nextRetryAt as the only grace signal and model grace as separate entitlement windows
-		// (source_type='grace'), appended to the user's entitlement timeline.
-		var graceUntil *time.Time
+		// For CCBill, retry behavior is dictated by the rail. nextRetryAt only
+		// dates the grace_ends_at PACING marker (when a stalled row parks to
+		// `unknown`); #691 removed the grace-window appends — the auto-renew sub's
+		// STANDING entitlement window keeps access intact through CCBill's dunning.
 		if paidTermEnd != nil && nextRetryAt != nil && nextRetryAt.After(*paidTermEnd) {
 			candidate := nextRetryAt.UTC()
 			sub.GraceEndsAt = &candidate
-			graceUntil = &candidate
 		}
 
 		if err := subService.Update(ctx, sub); err != nil {
 			return fmt.Errorf("failed to update subscription during renewal failure: %w", err)
-		}
-
-		// If grace applies, append grace windows for each entitlement granted by the subscription.
-		if graceUntil != nil {
-			entitlementsSpec := sub.EntitlementsSpecSnapshot
-			if len(entitlementsSpec) == 0 {
-				subPrice := sub.Price
-				if subPrice == nil {
-					loadedPrice, err := priceService.GetByID(ctx, sub.PriceID)
-					if err != nil {
-						return fmt.Errorf("failed to load subscription price for grace entitlements: %w", err)
-					}
-					subPrice = loadedPrice
-				}
-				product, err := productService.GetByID(ctx, subPrice.ProductID)
-				if err != nil {
-					return fmt.Errorf("failed to load subscription product for grace entitlements: %w", err)
-				}
-				entitlementsSpec = product.EntitlementsSpec
-			}
-
-			names := make([]string, 0, len(entitlementsSpec))
-			for entName := range entitlementsSpec {
-				names = append(names, entName)
-			}
-			if len(names) == 0 {
-				names = append(names, "premium")
-			}
-			for _, entName := range names {
-				endAt := (*graceUntil).UTC()
-				notBefore := s.now().UTC()
-				if paidTermEnd != nil && paidTermEnd.After(notBefore) {
-					notBefore = paidTermEnd.UTC()
-				}
-				if _, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-					UserID:      sub.CustomerID.String(),
-					Entitlement: entName,
-					NotBefore:   &notBefore,
-					EndAt:       &endAt,
-					SourceType:  models.EntitlementSourceGrace,
-					SourceID:    sub.ID,
-				}); err != nil {
-					return fmt.Errorf("failed to append grace entitlement window: %w", err)
-				}
-			}
 		}
 
 		subForLogs = sub

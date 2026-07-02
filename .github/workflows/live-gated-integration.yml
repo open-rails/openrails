@@ -1,0 +1,166 @@
+name: Live-Gated Integration
+
+# Scheduled real-wire proof (#694): the env-gated live tests silently t.Skip on
+# normal CI (no credentials there, by design), so without this workflow they
+# run NOWHERE. Weekly cron + on-demand, mirroring solana-devnet-integration.yml.
+#
+# Every job is enforcing (continue-on-error is never set) but the WORKFLOW is
+# not a required check — a sandbox outage must not block merges. Skip-if-absent
+# semantics are preserved: each test t.Skips when its secret is missing, so a
+# fork/missing-secret run is green-but-empty rather than red.
+#
+# Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
+#   NMI_SANDBOX_SECURITY_KEY   — real NMI sandbox account security key (the
+#                                doujins Mobius sandbox; test card 4111 approved).
+#   NMI_WEBHOOK_SIGNING_SECRET — sandbox webhook signing secret (lifecycle e2e).
+#   NMI_TOKENIZATION_KEY       — optional; browser-tokenization legs.
+#   RAILS_STRIPE_SECRET_KEY    — Stripe TEST-mode key (sk_test_/rk_test_) for the
+#                                live invoice-collection proof.
+
+on:
+  schedule:
+    # 06:00 UTC every Monday.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Real NMI sandbox: full card lifecycle through the OpenRails HTTP API
+  # (tests/nmi_live_lifecycle_e2e_test.go), the raw client-surface proof
+  # (internal/integrations/nmi), and the arrears-collection sandbox charge
+  # (internal/modules/money). All carry the `integration` tag and t.Skip
+  # without NMI_SANDBOX_SECURITY_KEY.
+  nmi-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: go mod download
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+        continue-on-error: true
+      - name: NMI sandbox live tests
+        env:
+          NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
+          NMI_WEBHOOK_SIGNING_SECRET: ${{ secrets.NMI_WEBHOOK_SIGNING_SECRET }}
+          NMI_TOKENIZATION_KEY: ${{ secrets.NMI_TOKENIZATION_KEY }}
+        run: |
+          if [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
+            echo "NMI_SANDBOX_SECURITY_KEY not set — live tests will self-skip (skip-if-absent preserved)"
+          fi
+          bash scripts/test_integration.sh \
+            -run 'TestNMILiveLifecycleE2E|TestLiveSandboxClientSurface|TestChargeOutstanding_NMISandbox_CollectsRealCharge' \
+            -v ./tests/ ./internal/integrations/nmi/ ./internal/modules/money/
+
+  # Live invoice collection against real provider test accounts (#241/#619):
+  # Stripe test-mode invoice collection + NMI sandbox invoice collection.
+  # Doubly gated: OPENRAILS_LIVE_RAIL_TESTS=1 opt-in AND per-rail credentials;
+  # each test t.Skips when its key is absent.
+  live-invoice-collection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: go mod download
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+        continue-on-error: true
+      - name: Live rail invoice collection tests
+        env:
+          OPENRAILS_LIVE_RAIL_TESTS: "1"
+          TEST_MODE: "true"
+          RAILS_STRIPE_SECRET_KEY: ${{ secrets.RAILS_STRIPE_SECRET_KEY }}
+          NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
+        run: |
+          if [ -z "${RAILS_STRIPE_SECRET_KEY}" ] && [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
+            echo "no rail credentials set — live invoice tests will self-skip (skip-if-absent preserved)"
+          fi
+          bash scripts/test_integration.sh \
+            -run 'TestLiveStripeInvoiceCollectionAgainstTestAccount|TestLiveNMIInvoiceCollectionAgainstSandbox' \
+            -v ./internal/modules/money/
+
+  # `stripe_integration` lane (#694 hygiene): TestStripeModelBUpgrade_Integration
+  # (real Stripe TEST mode, Model-B upgrade proration, #268) carried an orphaned
+  # tag that ran in NO suite. It self-skips without STRIPE_SECRET_KEY. The vet
+  # step compiles the tag even when the secret is absent, so bit-rot in the
+  # tagged file goes red here instead of rotting silently.
+  # KNOWN-RED until a one-line fix lands in the (currently fenced) file:
+  # stripe_model_b_integration_test.go:214 must become
+  #   {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}}
+  # (RailMerchantAccountConfig lost its flat SecretKey in the payment-provider
+  # restructure).
+  stripe-model-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: go mod download
+      - name: Compile stripe_integration tag
+        run: go vet -tags stripe_integration ./internal/modules/subscriptions/
+      - name: Stripe Model-B upgrade proration (real Stripe TEST mode)
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.RAILS_STRIPE_SECRET_KEY }}
+        run: |
+          if [ -z "${STRIPE_SECRET_KEY}" ]; then
+            echo "STRIPE_SECRET_KEY not set — test will self-skip (skip-if-absent preserved)"
+          fi
+          go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/
+
+  # `vaultint` lane (#694 hygiene): the opt-in real-Vault tests (KV-v2 +
+  # Transit Ed25519) previously ran in NO suite. Needs no repo secrets — a
+  # throwaway dev-mode Vault provides the backend.
+  vaultint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: go mod download
+      - name: Start dev Vault (KV-v2 + Transit)
+        run: |
+          docker run -d --name vault-dev --cap-add=IPC_LOCK -p 8200:8200 \
+            -e VAULT_DEV_ROOT_TOKEN_ID=root \
+            -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
+            hashicorp/vault:1.17
+          for i in $(seq 1 30); do
+            if docker exec -e VAULT_ADDR=http://127.0.0.1:8200 vault-dev vault status >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root vault-dev \
+            vault secrets enable transit
+      - name: Vault live integration tests
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: root
+        run: go test -tags vaultint -run Vault -v -timeout 300s ./internal/integrations/vault/...

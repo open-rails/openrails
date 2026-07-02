@@ -133,6 +133,7 @@ const (
 	PermMerchantAdmissionsCreate       = permissions.MerchantAdmissionsCreate
 	PermMerchantUsageRead              = permissions.MerchantUsageRead
 	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
+	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
 	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Coarse: one

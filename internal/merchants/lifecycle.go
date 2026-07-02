@@ -56,15 +56,25 @@ var ErrExportRequired = errors.New("merchants: export required before delete")
 type Service struct {
 	pool    *db.Pool
 	secrets MerchantSecretStore
+	// providerEnvironment is the deployment posture (#681): test under
+	// test_mode, live otherwise. Scoped credential lookups resolve
+	// rail_merchant_accounts rows in THIS environment only.
+	providerEnvironment string
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
 // directory). secrets may be nil (credential management disabled).
-func NewService(pool *db.Pool, secrets MerchantSecretStore) (*Service, error) {
+// providerEnvironment is the deployment's provider-account environment —
+// derive it via config.ExpectedProviderEnvironment(cfg.IsTestMode()).
+func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment string) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
-	return &Service{pool: pool, secrets: secrets}, nil
+	env := normalizeProviderSecretEnvironment(providerEnvironment)
+	if env == "" {
+		return nil, fmt.Errorf("merchants: provider environment must be live or test, got %q", providerEnvironment)
+	}
+	return &Service{pool: pool, secrets: secrets, providerEnvironment: env}, nil
 }
 
 // NewSecretManagementService builds a secret-management-only Service. It is for

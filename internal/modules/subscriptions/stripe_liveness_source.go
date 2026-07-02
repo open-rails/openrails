@@ -29,16 +29,28 @@ type StripeLivenessRecord struct {
 	Found              bool
 	Status             string
 	CancelAtPeriodEnd  bool
+	CanceledAt         time.Time
 	CurrentPeriodStart time.Time
 	CurrentPeriodEnd   time.Time
+	// CustomerID is Stripe's cus_… id; Metadata is the subscription metadata
+	// (checkout stamps user_id / internal_price_id / checkout_session_id there).
+	// PriceID is the first item's Stripe price id. Fetch-sourced identity for
+	// the #684 converge path — never read from webhook payloads.
+	CustomerID string
+	Metadata   map[string]string
+	PriceID    string
 	// Latest invoice evidence (zero values when no invoice is attached).
 	// LatestInvoiceTransactionID follows the webhook's transaction-id
 	// precedence (charge > payment_intent > invoice id) so a probe-driven
 	// repair and a late-arriving invoice.paid webhook dedupe on the same key.
 	LatestInvoicePaid          bool
+	LatestInvoiceID            string
 	LatestInvoiceTransactionID string
 	LatestInvoiceAmountPaid    int64
+	LatestInvoiceAmountDue     int64
 	LatestInvoiceCurrency      string
+	LatestInvoiceCreated       time.Time
+	LatestInvoiceBillingReason string
 }
 
 // StripeLivenessProber probes one remote Stripe subscription. Interface so
@@ -67,19 +79,32 @@ func NewStripeLivenessProber(rails config.RailMerchantAccountSet) (*HTTPStripeLi
 }
 
 type stripeLivenessSubscriptionEnvelope struct {
-	ID                 string `json:"id"`
-	Status             string `json:"status"`
-	CancelAtPeriodEnd  bool   `json:"cancel_at_period_end"`
-	CurrentPeriodStart int64  `json:"current_period_start"`
-	CurrentPeriodEnd   int64  `json:"current_period_end"`
-	LatestInvoice      struct {
+	ID                 string            `json:"id"`
+	Status             string            `json:"status"`
+	CancelAtPeriodEnd  bool              `json:"cancel_at_period_end"`
+	CanceledAt         int64             `json:"canceled_at"`
+	CurrentPeriodStart int64             `json:"current_period_start"`
+	CurrentPeriodEnd   int64             `json:"current_period_end"`
+	Customer           string            `json:"customer"`
+	Metadata           map[string]string `json:"metadata"`
+	Items              struct {
+		Data []struct {
+			Price struct {
+				ID string `json:"id"`
+			} `json:"price"`
+		} `json:"data"`
+	} `json:"items"`
+	LatestInvoice struct {
 		ID            string `json:"id"`
 		Status        string `json:"status"`
 		Paid          bool   `json:"paid"`
 		Charge        string `json:"charge"`
 		PaymentIntent string `json:"payment_intent"`
 		AmountPaid    int64  `json:"amount_paid"`
+		AmountDue     int64  `json:"amount_due"`
 		Currency      string `json:"currency"`
+		Created       int64  `json:"created"`
+		BillingReason string `json:"billing_reason"`
 	} `json:"latest_invoice"`
 }
 
@@ -94,6 +119,11 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		Found:             strings.TrimSpace(env.ID) != "",
 		Status:            strings.TrimSpace(strings.ToLower(env.Status)),
 		CancelAtPeriodEnd: env.CancelAtPeriodEnd,
+		CustomerID:        strings.TrimSpace(env.Customer),
+		Metadata:          env.Metadata,
+	}
+	if env.CanceledAt > 0 {
+		rec.CanceledAt = time.Unix(env.CanceledAt, 0).UTC()
 	}
 	if env.CurrentPeriodStart > 0 {
 		rec.CurrentPeriodStart = time.Unix(env.CurrentPeriodStart, 0).UTC()
@@ -101,12 +131,21 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 	if env.CurrentPeriodEnd > 0 {
 		rec.CurrentPeriodEnd = time.Unix(env.CurrentPeriodEnd, 0).UTC()
 	}
+	if len(env.Items.Data) > 0 {
+		rec.PriceID = strings.TrimSpace(env.Items.Data[0].Price.ID)
+	}
 	inv := env.LatestInvoice
 	if strings.TrimSpace(inv.ID) != "" {
 		rec.LatestInvoicePaid = inv.Paid || strings.EqualFold(strings.TrimSpace(inv.Status), "paid")
+		rec.LatestInvoiceID = strings.TrimSpace(inv.ID)
 		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent, inv.ID)
 		rec.LatestInvoiceAmountPaid = inv.AmountPaid
+		rec.LatestInvoiceAmountDue = inv.AmountDue
 		rec.LatestInvoiceCurrency = strings.TrimSpace(inv.Currency)
+		rec.LatestInvoiceBillingReason = strings.TrimSpace(inv.BillingReason)
+		if inv.Created > 0 {
+			rec.LatestInvoiceCreated = time.Unix(inv.Created, 0).UTC()
+		}
 	}
 	return rec, nil
 }

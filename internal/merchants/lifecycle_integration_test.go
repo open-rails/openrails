@@ -185,7 +185,7 @@ func newExternalTenancyTestPool(t *testing.T, ctx context.Context, adminDSN stri
 
 func newSvc(t *testing.T) *Service {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore())
+	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "live")
 	require.NoError(t, err)
 	return svc
 }

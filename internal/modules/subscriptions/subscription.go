@@ -233,6 +233,18 @@ func (s *SubscriptionService) GetActiveOrPendingByUserIDAndTierGroup(ctx context
 	return s.subscriptionRepo.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, tierGroup)
 }
 
+// GetUnknownByUserIDAndProductID returns an `unknown`-status subscription for a
+// user and product (#691 checkout guard).
+func (s *SubscriptionService) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetUnknownByUserIDAndProductID(ctx, userID, productID)
+}
+
+// GetUnknownByUserIDAndTierGroup returns an `unknown`-status subscription for a
+// user in the specified tier group (#691 checkout guard).
+func (s *SubscriptionService) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetUnknownByUserIDAndTierGroup(ctx, userID, tierGroup)
+}
+
 func (s *SubscriptionService) Update(ctx context.Context, subscription *models.Subscription) error {
 	return s.subscriptionRepo.UpdateAt(ctx, subscription, s.now())
 }

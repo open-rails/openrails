@@ -923,6 +923,8 @@ type OpenrailsReconciliationFinding struct {
 	UpdatedAt     time.Time
 	// Machine-readable finding evidence. Optional nested keys: provider, local, remote, intent, resolution.
 	Evidence []byte
+	// Authenticated admin identity stamped on manual resolution (approve/ignore via the findings queue, #692); NULL for automatic resolutions.
+	ResolvedBy *string
 }
 
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-provider counts and the dunning-forensics report.
@@ -1058,6 +1060,23 @@ type OpenrailsWebhookEvent struct {
 	Status      string
 	CreatedAt   time.Time
 	CompletedAt time.Time
+}
+
+// #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table (no merchant scope, no RLS — see merchants).
+type OpenrailsWorkerHealth struct {
+	WorkerKind string
+	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.
+	RegisteredAt time.Time
+	// Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).
+	ExpectedPeriodSeconds *int64
+	LastSuccessAt         *time.Time
+	LastErrorAt           *time.Time
+	// Most recent work error, truncated by the writer.
+	LastError           *string
+	ConsecutiveFailures int32
+	// When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).
+	LastAlertedAt *time.Time
+	UpdatedAt     time.Time
 }
 
 type ProfilesUser struct {

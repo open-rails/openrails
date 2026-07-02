@@ -47,6 +47,12 @@ identifiers OUT of committed files (code, trackers, this file).
 - Migrations are squashed to a single baseline (`migrations/postgres/001_*`); new migrations start
   at 002. Greenfield — no numbered history to preserve.
 
+## Layer altitude (#688)
+- A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen` directly;
+  repo-style wrappers exist only where they carry logic (tx/locks/mapping/doctrine) and they live IN
+  the owning module. Module services do NOT re-export their data surface as one-line forwards.
+  Handlers may call `gen` for orchestration-free reads. Never add a wrapper just to "complete" a layer.
+
 ## Trackers (issues)
 - `agents/{progress,future,completed}.md`. One `# #<id>:` section per issue; `next_id` counter lives
   in progress.md; one per-repo id space shared across all three files.

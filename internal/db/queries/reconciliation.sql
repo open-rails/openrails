@@ -171,6 +171,81 @@ SET status = 'ignored',
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
 -- ============================================================================
+-- #692 operator findings queue (admin API)
+-- ============================================================================
+
+-- The operator work list. Default view = OPEN findings only; an explicit
+-- status filter overrides it (e.g. status=ignored). Sort: severity desc
+-- (critical first) then age desc (oldest first). total_count rides every row
+-- for pagination. merchant_id stamped explicitly (multi-merchant pattern);
+-- RLS double-checks on merchant-pinned connections.
+-- name: AdminListReconciliationFindings :many
+SELECT sqlc.embed(f), count(*) OVER () AS total_count
+FROM openrails.reconciliation_findings f
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (CASE
+         WHEN sqlc.narg(status)::text IS NULL THEN f.status IN ('reconcile_required', 'requires_review')
+         ELSE f.status = sqlc.narg(status)::text
+       END)
+  AND (sqlc.narg(severity)::text IS NULL OR f.severity = sqlc.narg(severity)::text)
+  AND (sqlc.narg(finding_type)::text IS NULL OR f.finding_type = sqlc.narg(finding_type)::text)
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- Gauge input (#690): open-finding counts per (type, severity). The Go layer
+-- folds these into the named gauges (freeloaders, duplicate_coverage,
+-- open-by-severity) — the findings ledger IS the metric store.
+-- name: CountOpenReconciliationFindingsByTypeSeverity :many
+SELECT finding_type, severity, count(*) AS open_count
+FROM openrails.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status IN ('reconcile_required', 'requires_review')
+GROUP BY finding_type, severity;
+
+-- Approve: the recommendation executed; mark fixed/admin_fixed with operator
+-- notes + attribution, and record the execution evidence under
+-- evidence.resolution. Only OPEN findings resolve — approve on an already-
+-- resolved finding is a handler-level 409.
+-- name: AdminResolveReconciliationFinding :execrows
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed',
+    resolution = 'admin_fixed',
+    operator_notes = sqlc.narg(operator_notes),
+    resolved_by = sqlc.arg(resolved_by),
+    evidence = CASE
+        WHEN sqlc.narg(resolution_evidence)::jsonb IS NULL THEN evidence
+        ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true)
+    END,
+    resolved_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+
+-- Ignore: permanent silence for the subject (the upsert keeps ignored
+-- identities ignored across re-runs — same semantics the breaker's dismiss
+-- honors). Notes are REQUIRED (enforced at the handler).
+-- name: AdminIgnoreReconciliationFinding :execrows
+UPDATE openrails.reconciliation_findings
+SET status = 'ignored',
+    resolution = 'ignored',
+    operator_notes = sqlc.narg(operator_notes),
+    resolved_by = sqlc.arg(resolved_by),
+    resolved_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+
+-- Partial failure: append the execution error to operator_notes; the finding
+-- STAYS OPEN (never half-marked fixed).
+-- name: AppendReconciliationFindingNotes :execrows
+UPDATE openrails.reconciliation_findings
+SET operator_notes = CASE
+        WHEN COALESCE(operator_notes, '') = '' THEN sqlc.arg(note)::text
+        ELSE operator_notes || E'\n' || sqlc.arg(note)::text
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+
+-- ============================================================================
 -- Local-state reads for the diff engine
 -- ============================================================================
 
@@ -228,17 +303,6 @@ WHERE rails IS NOT NULL
 -- repair: revoke the LIVE subscription-sourced entitlements of one
 -- subscription. Admin grants and grace windows are different source types and
 -- are untouchable by construction.
--- name: ReconcileRevokeSubscriptionEntitlements :execrows
-UPDATE openrails.entitlements
-SET revoked_at = sqlc.arg(now)::timestamptz,
-    revoke_reason = sqlc.arg(reason)::text,
-    updated_at = now()
-WHERE source_type = 'subscription'
-  AND source_id = sqlc.arg(subscription_id)
-  AND revoked_at IS NULL
-  AND deleted_at IS NULL
-  AND (end_at IS NULL OR end_at > sqlc.arg(now)::timestamptz);
-
 -- PS-4/PS-1: grant one subscription-sourced entitlement window unless an
 -- equivalent live window already exists (idempotent via NOT EXISTS; the
 -- re-run inserts nothing).
@@ -521,13 +585,28 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.current_period_ends_at;
 
 -- #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
--- the legacy pull engine's PS-9. A terminally-dead sub still projecting LIVE
--- subscription-sourced windows: propagation of a recorded terminal decision,
--- AUTO (both facts present — NOT the confirmed-absence case). `unknown` is
--- deliberately excluded: access stays intact while provider verification is
--- pending (#664). customer_id nullable: NULL = merchant-wide sweep.
+-- the legacy pull engine's PS-9. A terminally-dead sub still projecting a
+-- BOUNDED live window past its entitled bound: propagation of a recorded
+-- terminal decision, AUTO (both facts present — NOT the confirmed-absence
+-- case). `unknown` is deliberately excluded: access stays intact while
+-- provider verification is pending (#664).
+--
+-- #690/#691 paid-through guard: the entitled bound is
+-- GREATEST(current_period_ends_at, ended_at) — a user cancel leaves a PAID
+-- RUNWAY window bounded to period end (BoundSubscriptionAccess), which is NOT
+-- excess; only the part of a window extending past the bound is. Repair =
+-- BoundSubscriptionAccess(sub, bound) — the missed/correct #691 closure.
+-- Both timestamps NULL (imported oddity) => NULL bound, any live bounded
+-- window counts and the repair bounds at `now`.
+--
+-- Partition (#690, one condition = one finding type):
+--   bounded window past the bound, sub row present  -> HERE (AUTO closure)
+--   STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.orphan (ADMIN)
+--   sub row missing entirely                        -> derive.entitlement.orphan (ADMIN)
+--   terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
+-- customer_id nullable: NULL = merchant-wide sweep.
 -- name: ListDeadSubsWithLiveEntitlements :many
-SELECT s.id, s.customer_id, s.status
+SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
@@ -537,9 +616,113 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-        AND (e.end_at IS NULL OR e.end_at > sqlc.arg(now)::timestamptz)
+        AND e.end_at IS NOT NULL
+        AND e.end_at > sqlc.arg(now)::timestamptz
+        AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
+             OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
 ORDER BY s.id;
+
+-- #690 DERIVE `derive.entitlement.orphan` — the FREELOADER detector. A LIVE
+-- window (not revoked/deleted, started, unbounded or ending in the future)
+-- whose justification chain is PROVEN broken. Post-#691 fail-open, "live
+-- window past paid-through" is NORMAL for a standing auto-renew projection
+-- (stale ≠ freeloader) — a freeloader's SOURCE is proven dead or absent:
+--   missing_subscription           - source_type=subscription, no sub row at all
+--   terminal_subscription_standing - STANDING (end_at NULL) window whose sub is
+--                                    terminal: the #691 closure event should
+--                                    have bounded it and never did
+--   refunded_payment               - one_off window whose payment was refunded,
+--                                    with no live grant justifying the access
+-- Grant-justification guard: never fires when a live un-terminated entitlement
+-- grant covers now (matches MaterializeGrant's standing-access projection:
+-- per-period grants of a live sub lapse while the standing window persists —
+-- that is verification pressure, not freeloading), and never when the window's
+-- backing grant is TERMINATED (derive.grant_effect.excess owns that
+-- retraction). Non-live windows with dangling sub sources stay with
+-- consistency.reference.source_reference. ADMIN surface-only — revoking access
+-- is an operator decision, never auto (policy, #690).
+--
+-- Verification SQL (2026-07-01 doujins analysis, measured ZERO on the full
+-- re-import): (1) grant-justification by source — live windows LEFT JOIN live
+-- grants on (customer, source) counting NULLs per source_type; (2)
+-- window-vs-paid-through by status — live windows joined to subscriptions
+-- grouped by status comparing end_at against GREATEST(current_period_ends_at,
+-- ended_at). This query is the union of both, restricted to proven-dead
+-- sources. customer_id nullable: NULL = merchant-wide sweep.
+-- name: ListOrphanEntitlementWindows :many
+SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
+       e.source_type, e.source_id, e.start_at, e.end_at,
+       COALESCE(s.status::text, '') AS sub_status,
+       s.product_id AS sub_product_id,
+       s.current_period_ends_at AS sub_period_ends_at,
+       s.ended_at AS sub_ended_at,
+       pay.id AS payment_id,
+       pr.product_id AS payment_product_id,
+       CASE
+           WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
+           WHEN e.source_type = 'subscription' THEN 'terminal_subscription_standing'
+           ELSE 'refunded_payment'
+       END::text AS cause
+FROM openrails.entitlements e
+LEFT JOIN openrails.subscriptions s
+       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
+LEFT JOIN openrails.payments pay
+       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
+LEFT JOIN openrails.prices pr
+       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
+WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
+  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+  AND e.start_at <= sqlc.arg(now)::timestamptz
+  AND (e.end_at IS NULL OR e.end_at > sqlc.arg(now)::timestamptz)
+  AND e.source_type IN ('subscription', 'one_off')
+  -- no live un-terminated entitlement grant covering now justifies the window
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = e.merchant_id
+        AND g.customer_id = e.customer_id
+        AND g.event = 'grant' AND g.kind = 'entitlement'
+        AND (g.id = e.grant_id
+             OR (g.source_id = e.source_id::text
+                 AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
+                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+        AND g.starts_at <= sqlc.arg(now)::timestamptz
+        AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
+        AND NOT EXISTS (
+            SELECT 1 FROM openrails.grants t
+            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+              AND t.event IN ('revoke', 'expire', 'supersede'))
+  )
+  -- a TERMINATED backing grant means derive.grant_effect.excess owns the retraction
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants tg
+      JOIN openrails.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
+                             AND t.event IN ('revoke', 'expire', 'supersede')
+      WHERE tg.merchant_id = e.merchant_id AND tg.id = e.grant_id
+  )
+  AND (
+      (e.source_type = 'subscription' AND s.id IS NULL)
+      OR (e.source_type = 'subscription'
+          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND e.end_at IS NULL)
+      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+  )
+ORDER BY e.id;
+
+-- #690/#691 `verification_pressure` gauge input: subscriptions parked (or
+-- stuck) in `unknown` whose recorded paid-through has passed — standing access
+-- awaiting provider verification. A pressure reading over the LIVE table, not
+-- an error count: nonzero is allowed; max_age trending UP means the
+-- verification machinery (pull/probe/converge) is down.
+-- name: CountUnknownSubsPastPaidThrough :one
+SELECT COUNT(*)::bigint AS pressure_count,
+       COALESCE(MAX(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.status = 'unknown'
+  AND s.current_period_ends_at IS NOT NULL
+  AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;
 
 -- #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
 -- to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).

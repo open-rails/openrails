@@ -9,6 +9,62 @@
 
 ---
 
+# #693: operator findings dashboard — triage UI over the #692 queue API
+
+**Completed:** no
+**Status:** FUTURE (2026-07-01, Paul) — the frontend for the #692 operator findings queue. Deliberately parked:
+the #692 backend (queue API, structured recommendations, approve/ignore, self-verifying resolution) ships first;
+this issue is the UI plan to refine when frontend work begins. Doujins/hentai0 embed openrails, so this likely
+lives in the HOST admin panel consuming the /admin/findings API — decide host-side vs openrails-served when
+picked up.
+
+## Metadata
+- Category: admin / frontend
+- Status: future
+- Passes: false
+
+## Dashboard sketch
+
+**Header — the three gauges (#690), one glance = system health:**
+`duplicate_coverage` (critical, red when > 0) · `freeloaders` (high, amber when > 0) · `verification_pressure`
+(count + max-age; green while young, amber when age trends up). All zero/young → green bar: "billing state
+machine healthy". Gauges come free in the #692 list response.
+
+**Queue view — the work list:**
+- Open findings sorted severity desc, then age desc; badge per severity; row shows finding_type, subject (user
+  + product where applicable), age, one-line recommendation.
+- Filters: severity, finding_type, rail. Counts per filter chip.
+- One-at-a-time triage flow: selecting a row opens the detail pane; j/k or arrow navigation for queue grinding.
+
+**Detail pane — everything needed to decide, nothing hidden:**
+- The recommendation sentence up top (from `recommended_action`).
+- Evidence rendered PER FINDING TYPE, not raw JSON: a duplicate shows the user + both subscriptions side by side
+  (created date, price, rail, paid-through, last payment) with the to-cancel one pre-highlighted but SWAPPABLE
+  (the #692 override_params); a freeloader shows the window, its claimed source, and why the chain is broken;
+  held_bulk shows the volume vs budget and the affected intent list.
+- Actions: **Approve** (primary; confirmation modal restates EXACTLY what will execute — "cancel sub B via
+  provider intent + refund payment P ($X)"; disabled when the finding has no structured recommendation) and
+  **Ignore** (requires a note; warns it permanently silences this subject).
+- Post-approve state: "executed — awaiting verification" until the next sweep auto-confirms (finding vanishes)
+  or the finding persists (surface "fix did not take" loudly). The UI never marks anything green on its own —
+  it reflects re-measurement (#692 step 6).
+
+**History tab:** resolved findings (fixed / ignored / auto_vanished) with resolver identity (`resolved_by`),
+notes, timestamps — the audit trail as a browsable log.
+
+## Open decisions (when picked up)
+
+- Host-panel integration (doujins admin already exists; hentai0 = doujins billing merchant) vs openrails-served
+  minimal UI — leaning host-panel consuming the API.
+- Auth: host admin session → /admin/findings gate (embedded pattern) — confirm against the #692 wiring.
+- Notification hook (email/webhook when a critical finding opens) — separate small issue if wanted; the gauges
+  are pull-based today.
+
+Acceptance (to refine): an operator can triage the entire queue one item at a time from a browser — see health
+at a glance, understand each finding without reading JSON, approve with an exact preview or ignore with a note,
+and watch resolutions verify themselves.
+
+---
 
 # #657: per-user archived provider-account cutover on card re-entry
 

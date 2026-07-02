@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -36,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -143,6 +146,11 @@ type Runtime struct {
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally
+
+	// workerHealthRegs captures every registered worker kind + periodic cadence
+	// for the #689 health checker; lazily built (see workerHealthRegistrations).
+	workerHealthRegs     *riverjobs.WorkerRegistrations
+	workerHealthRegsOnce sync.Once
 	// DeferredDeletes is the SYSTEM-origin deferred NMI-delete scheduler
 	// (issue 216 / #344). Since #358 phase A it enqueues durable
 	// nmi_delete_subscription intents on the provider intent ledger (no River
@@ -239,7 +247,8 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build river workers: %w", err)
 	}
-	client, pool, err := buildRiverClient(r.Config, workers)
+	// #689: one middleware covers every registered worker's health bookkeeping.
+	client, pool, err := buildRiverClient(r.Config, workers, []rivertype.Middleware{r.WorkerHealthMiddleware()})
 	if err != nil {
 		return err
 	}

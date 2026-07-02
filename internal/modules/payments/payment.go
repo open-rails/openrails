@@ -11,14 +11,13 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
 type PaymentService struct {
-	repo  *repo.PaymentRepo
+	repo  *PaymentRepo
 	clock clockwork.Clock
 }
 
@@ -37,10 +36,10 @@ func (s *PaymentService) now() time.Time {
 	return time.Now()
 }
 
-type GetPaymentsFilters = repo.PaymentFilters
+type GetPaymentsFilters = PaymentFilters
 
 func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
-	return &PaymentService{repo: repo.NewPaymentRepo(db), clock: timeutil.FirstClock(clocks...)}
+	return &PaymentService{repo: NewPaymentRepo(db), clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *PaymentService) SetClock(c clockwork.Clock) {
@@ -297,7 +296,7 @@ func (s *PaymentService) GetPaginatedByUserID(ctx context.Context, userID string
 }
 
 func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	repoOpts := query.QueryOptions[repo.PaymentFilters]{
+	repoOpts := query.QueryOptions[PaymentFilters]{
 		Filters:  queryOpts.Filters,
 		Limit:    queryOpts.Limit,
 		Offset:   queryOpts.Offset,

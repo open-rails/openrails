@@ -18,9 +18,8 @@ type StripeCatalogService struct {
 	Config *config.Config
 	Rails  config.RailMerchantAccountSet
 	// BaseURL overrides the Stripe API root (https://api.stripe.com). Empty in
-	// production; tests point it at an httptest server. Only the entitlements
-	// (Features) methods read it via baseURL(); the older methods hardcode the
-	// real host.
+	// production; tests point it at an httptest server. Every method routes
+	// through baseURL().
 	BaseURL string
 }
 
@@ -122,7 +121,7 @@ func (s *StripeCatalogService) CreateProduct(ctx context.Context, params CreateP
 		form.Set("metadata["+k+"]", v)
 	}
 
-	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products", form, params.IdempotencyKey)
+	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products", form, params.IdempotencyKey)
 	if err != nil {
 		return "", err
 	}
@@ -188,7 +187,7 @@ func (s *StripeCatalogService) CreatePrice(ctx context.Context, params CreatePri
 		}
 	}
 
-	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices", form, params.IdempotencyKey)
+	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices", form, params.IdempotencyKey)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +237,7 @@ func (s *StripeCatalogService) UpdateProduct(ctx context.Context, stripeProductI
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id), form, params.IdempotencyKey)
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products/"+url.PathEscape(id), form, params.IdempotencyKey)
 	return err
 }
 
@@ -284,7 +283,7 @@ func (s *StripeCatalogService) UpdatePrice(ctx context.Context, stripePriceID st
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id), form, params.IdempotencyKey)
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices/"+url.PathEscape(id), form, params.IdempotencyKey)
 	return err
 }
 
@@ -309,7 +308,7 @@ func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProduc
 	if id == "" {
 		return nil, fmt.Errorf("stripe_product_id required")
 	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +337,7 @@ func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID 
 	if id == "" {
 		return nil, false, fmt.Errorf("stripe_product_id required")
 	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products/"+url.PathEscape(id))
 	if err != nil {
 		return nil, false, err
 	}
@@ -366,7 +365,7 @@ func (s *StripeCatalogService) FindPrice(ctx context.Context, stripePriceID stri
 	if id == "" {
 		return nil, false, fmt.Errorf("stripe_price_id required")
 	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices/"+url.PathEscape(id))
 	if err != nil {
 		return nil, false, err
 	}
@@ -419,7 +418,7 @@ func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key
 	}
 	// Stripe search query syntax: metadata['key']:'value'
 	query := fmt.Sprintf("metadata['%s']:'%s'", escapeStripeQueryValue(key), escapeStripeQueryValue(value))
-	endpoint := "https://api.stripe.com/v1/products/search?limit=10&query=" + url.QueryEscape(query)
+	endpoint := s.baseURL() + "/v1/products/search?limit=10&query=" + url.QueryEscape(query)
 	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, err
@@ -450,7 +449,7 @@ func (s *StripeCatalogService) ListPricesByLookupKey(ctx context.Context, lookup
 	if lookupKey == "" {
 		return nil, fmt.Errorf("lookup_key required")
 	}
-	endpoint := "https://api.stripe.com/v1/prices?limit=10&lookup_keys[]=" + url.QueryEscape(lookupKey)
+	endpoint := s.baseURL() + "/v1/prices?limit=10&lookup_keys[]=" + url.QueryEscape(lookupKey)
 	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, err
@@ -487,7 +486,7 @@ func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter s
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, "", fmt.Errorf("stripe is not configured")
 	}
-	endpoint := fmt.Sprintf("https://api.stripe.com/v1/products?limit=%d", stripeListPageLimit)
+	endpoint := fmt.Sprintf(s.baseURL()+"/v1/products?limit=%d", stripeListPageLimit)
 	if sa := strings.TrimSpace(startingAfter); sa != "" {
 		endpoint += "&starting_after=" + url.QueryEscape(sa)
 	}
@@ -519,7 +518,7 @@ func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter str
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, "", fmt.Errorf("stripe is not configured")
 	}
-	endpoint := fmt.Sprintf("https://api.stripe.com/v1/prices?limit=%d", stripeListPageLimit)
+	endpoint := fmt.Sprintf(s.baseURL()+"/v1/prices?limit=%d", stripeListPageLimit)
 	if sa := strings.TrimSpace(startingAfter); sa != "" {
 		endpoint += "&starting_after=" + url.QueryEscape(sa)
 	}
@@ -553,7 +552,7 @@ func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID 
 	if id == "" {
 		return nil, fmt.Errorf("stripe_price_id required")
 	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +579,7 @@ func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID st
 		return fmt.Errorf("stripe price_id required")
 	}
 
-	endpoint := "https://api.stripe.com/v1/prices/" + url.PathEscape(priceID)
+	endpoint := s.baseURL() + "/v1/prices/" + url.PathEscape(priceID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err

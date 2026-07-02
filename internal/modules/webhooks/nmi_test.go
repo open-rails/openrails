@@ -83,27 +83,6 @@ func TestTransactionSubscriptionID_Fallbacks(t *testing.T) {
 	}
 }
 
-func TestTransactionActionSource(t *testing.T) {
-	require.Equal(t, "recurring", transactionActionSource(&NMITransactionEventBody{
-		Action: &NMIAction{Source: "Recurring"},
-	}))
-
-	require.Equal(t, "retry", transactionActionSource(&NMITransactionEventBody{
-		TransactionDetail: &NMITransactionDetail{
-			Action: &NMIAction{Source: "Retry"},
-		},
-	}))
-
-	require.Equal(t, "", transactionActionSource(&NMITransactionEventBody{}))
-}
-
-func TestIsRecurringSource(t *testing.T) {
-	require.True(t, isRecurringSource("recurring"))
-	require.True(t, isRecurringSource("RETRY"))
-	require.False(t, isRecurringSource("api"))
-	require.False(t, isRecurringSource(""))
-}
-
 func TestNormalizeNMIChargebackLast4(t *testing.T) {
 	require.Equal(t, "1111", normalizeNMIChargebackLast4("411111******1111"))
 	require.Equal(t, "1111", normalizeNMIChargebackLast4(" 1111 "))
@@ -151,16 +130,6 @@ func TestHandleChargebackComplete_RequiresRail(t *testing.T) {
 	err = svc.handleChargebackComplete(context.Background())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "nmi webhook rail is required")
-}
-
-func TestNMIProviderTransactionIDFromMetadata(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{"provider_transaction_id": " txn_123 "})
-	require.NoError(t, err)
-	require.Equal(t, "txn_123", nmiProviderTransactionIDFromMetadata(raw))
-
-	raw, err = json.Marshal(map[string]any{"provider_transaction_id": "nmi_sub_attempt:order_123"})
-	require.NoError(t, err)
-	require.Empty(t, nmiProviderTransactionIDFromMetadata(raw))
 }
 
 func TestNMIDelayedStartFromSubscriptionMetadata(t *testing.T) {

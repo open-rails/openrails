@@ -91,7 +91,8 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	}
 
 	if rails.IsNMI(models.Rail(provider)) {
-		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), "live", "security_key"); err != nil {
+		// Environment follows test_mode (#681), same as the CCBill leg.
+		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key"); err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		} else if ok {
 			proc := cloneRailConfig(s.activeNMIConfig())

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/riverqueue/river"
@@ -72,7 +73,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		return nil
 	}
 
-	paymentRepo := dbrepo.NewPaymentRepo(w.DB)
+	paymentRepo := payments.NewPaymentRepo(w.DB)
 	var drift int
 	for _, row := range rows {
 		select {

@@ -116,42 +116,5 @@ func TestBillingCycleHoursOf(t *testing.T) {
 	require.Equal(t, 168, BillingCycleHoursOf(&models.Price{AccessDurationHours: &seven, AutoRenew: true}))
 }
 
-// TestGraceSlack pins the renewal grace window derivation (#368): half the
-// billing cycle in hours, capped at 48h; unknown cycles defensively get the cap.
-func TestGraceSlack(t *testing.T) {
-	cases := []struct {
-		cycleHours int
-		want       time.Duration
-	}{
-		{0, 48 * time.Hour},        // unknown -> monthly cap, defensively
-		{-3, 48 * time.Hour},       // nonsense -> monthly cap, defensively
-		{24, 12 * time.Hour},       // daily: half a day
-		{2 * 24, 24 * time.Hour},   // 2-day: one day
-		{5 * 24, 48 * time.Hour},   // capped (half = 60h)
-		{6 * 24, 48 * time.Hour},   // capped (half = 72h)
-		{7 * 24, 48 * time.Hour},   // weekly: capped (half = 84h)
-		{30 * 24, 48 * time.Hour},  // monthly: capped
-		{365 * 24, 48 * time.Hour}, // yearly: never more generous than monthly
-	}
-	for _, c := range cases {
-		if got := GraceSlack(c.cycleHours); got != c.want {
-			t.Errorf("GraceSlack(%d) = %s, want %s", c.cycleHours, got, c.want)
-		}
-	}
-}
-
-// TestRenewalGraceEligibleRail pins which rails get the
-// pre-appended renewal grace window: NMI-backed + Stripe only.
-func TestRenewalGraceEligibleRail(t *testing.T) {
-	if !RenewalGraceEligibleRail(models.RailNMI) {
-		t.Error("nmi must be grace-eligible")
-	}
-	if !RenewalGraceEligibleRail(models.RailStripe) {
-		t.Error("stripe must be grace-eligible")
-	}
-	for _, p := range []models.Rail{models.RailCCBill, models.RailSolana, models.RailPayPal} {
-		if RenewalGraceEligibleRail(p) {
-			t.Errorf("%s must NOT be grace-eligible", p)
-		}
-	}
-}
+// (#368 GraceSlack / RenewalGraceEligibleRail tests deleted by #691: the
+// trailing renewal grace machinery is gone — auto-renew windows are standing.)

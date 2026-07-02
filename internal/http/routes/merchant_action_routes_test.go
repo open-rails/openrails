@@ -127,6 +127,12 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			path:   "/billing/v1/merchant/repair-alerts",
 			perm:   controlplane.PermMerchantRepairAlertsRead,
 		},
+		{
+			name:   "worker health read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/worker-health",
+			perm:   controlplane.PermMerchantRepairAlertsRead,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

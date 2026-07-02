@@ -22201,8 +22201,9 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 # #664: evidence-gated subscription lifecycle — cancellation is a last resort, stale rows park as `unknown`
 
 **Completed:** yes
-**Status:** COMPLETE (2026-07-01, uncommitted in-tree) — code + tests in-tree and green; awaiting Paul's fresh doujins
-re-migration for live validation. Originally PLANNED 2026-07-01, REWRITTEN same day after full reconcile/converge
+**Status:** COMPLETE (2026-07-01) — committed in a6ec9070 and pushed. LIVE-VALIDATED twice: the 2026-07-01 doujins
+migration + post-#731 re-import both produced the designed end-state (evidence rows -> dunning, evidence-less ->
+`unknown`, zero convergence cancellations, zero intents, acceptance queries all zero). Originally PLANNED 2026-07-01, REWRITTEN same day after full reconcile/converge
 architecture review. Opened from Doujins embedded-OpenRails DB inspection. Linked downstream tracker:
 `~/doujins/agents/progress.md` #731. Architecture consolidation follow-up: #665.
 
@@ -22504,6 +22505,14 @@ touch), the **checkout key** is the PUBLIC client-side key (Payment Component / 
       either accepted, shape errors never), query.php order-id search finding the v5-created sale, and
       the 404 liveness path. GREEN 2026-07-01. Caught two real bugs: the `current_plan_id` edit_plan fix
       and the missing `billing[].id` on customer update.
+- [x] Live Collect.js token proof (`collectjs_live_integration_test.go`, opt-in via NMI_SANDBOX_SECURITY_KEY
+      + NMI_TOKENIZATION_KEY + a Chrome binary, added 2026-07-02, kept permanently): headless Chrome runs
+      NMI's REAL Collect.js (web security + site isolation disabled so the harness page fills the
+      card-field iframes), the minted token is consumed by OUR CreateCustomerVault on the live v5 gateway
+      (billing.payment_details.payment_token), read back (4111 card), charged, voided, cleaned up.
+      Closed the LAST unverified v5 seam (previously unit-fakes-only). Live quirk: the token only flows
+      via the paymentSelector button click — bare startPaymentRequest() with no paymentSelector stalls
+      silently (validation passes, callback never fires).
 - [x] Live sandbox invoice collection (`TestChargeOutstanding_NMISandbox_CollectsRealCharge`) GREEN —
       caught two more live rules (see divergences): top-level `customer_vault:{id}` for vault sales, and
       the 50-char `order_details.id` cap -> the invoice attempt key maps to a compact deterministic wire
@@ -22771,7 +22780,10 @@ only person). Two operational rules that current code would violate:
 - [x] Rebill-driver mode decoupled: migration 058 adds `payment_methods.rebill_driver`
       ('provider'|'openrails', default 'provider') backfilled EXACTLY from the old inferred rule
       (nmi/mobius + rail_method_ref <> ''); the rails registry's nmiAutoBilled now reads the column
-      (models.RebillDriver* constants); capturing billing[].id is now SAFE whenever an importer needs it.
+      (models.RebillDriver* constants); and billing-id capture is now ON (Paul, 2026-07-01: "always keep
+      the billing_id"): CreateCustomerVault returns the v5 create response's billing[].id and the vault
+      service records it into rail_method_ref verbatim, with RebillDriver set explicitly to 'provider' —
+      tests pin that a billing id no longer flips the dunning lane.
 - [x] Tests: registry pinned-facts updated (NMI remoteCustomer=false; AutoBilled by mode column incl.
       the two new decoupling cases: ref-without-mode stays provider-billed, mode-without-ref flips);
       dunning/liveness/materialize fixtures set the mode explicitly (mirroring the 058 backfill);
@@ -22779,10 +22791,143 @@ only person). Two operational rules that current code would violate:
 - [x] Shared-vault safety guard: `DeleteVault` refuses the whole-vault delete when another payment-method
       row shares the vault id (CountPaymentMethodsSharingCustomerRef; runs BEFORE any provider call);
       integration test TestDeleteVaultRefusesSharedVault green.
-- [ ] IF a multi-card import ever lands: billing-entry-scoped delete + sale billing-targeting per the
-      shared-vault contract above, with the v5 billing-selection question live-probed first.
+- [x] Multi-card-vault support IMPLEMENTED (2026-07-02, Paul: build it now so shared vaults just work).
+      Live-probed first, three MORE docs-vs-live divergences found: (a) v5 create-customer accepts ONE
+      billing object only (the documented billing-array form 422s); entries are added via
+      POST /v5/customers/{id}/billing — the documented /billing-addresses path is E_ROUTE_NOT_FOUND, and
+      DELETE /v5/customers/{id}/billing/{billing_id} is likewise the live delete route; (b) the v5 sale
+      CANNOT target a billing entry (every shape rejected as extra parameters — it always charges
+      priority-1); classic sale + billing_id charges the exact card; (c) deleting the LAST billing entry
+      is refused ("Customer Vault must have at least one billing") — last-entry removal = whole-vault
+      delete. Implementation: `DeleteCustomerBillingEntry` (v5); `RunSale`/`AddRecurringSubscription`
+      gained `BillingID` (targeted ops ride the classic lane, wire-pinned); the charge rule is
+      "charge the exact instrument the row names" — call sites (checkout sale intent + payload,
+      subscription enroll intent + payload, upgrade proration, invoice collection) thread the row's
+      rail_method_ref, "" falls back to the v5 priority-1 sale (correct for one-card-per-vault);
+      `DeleteVault` on a shared vault now deletes ONLY this row's billing entry (sibling cards survive;
+      the guard still refuses when a shared row lacks a billing id; the last row's delete is the
+      whole-vault delete). Verified: unit wire pins, the shared-vault integration test (entry-scoped
+      delete asserted, vault-delete asserted NEVER called, sibling row survives), and the live sandbox
+      surface test now runs the full multi-entry lifecycle (add second entry -> targeted sale charges the
+      specific card -> entry delete -> sibling survives -> last-entry refusal -> vault delete) GREEN
+      against the real gateway.
 
 Acceptance: NMI identity semantics are explicit in code and docs (vault = instrument container, no person
 identity), `rail_customers` holds only genuinely person-unique remote ids (Stripe), the rebill-driver mode
 has its own field with the identity handles free to be captured accurately, and the grouped-vault
 alternative is recorded here as considered-and-rejected with its revisit conditions.
+
+---
+
+# #679: destructive provider-intent circuit breaker — mass NMI deletes must halt and ask
+
+**Completed:** yes
+**Status:** COMPLETE (2026-07-01) — committed in a6ec9070 and pushed. Live validation of the breaker (real destructive volume) pends first production provider-credential rollout — was PLANNED, from Paul's #664 post-mortem question: the
+1,672 wrongful cancellations queued ZERO nmi_delete intents (lucky, see Findings), but the legitimate delete
+path had no volume guard. NMI has no read-only keys, so a bug that mass-cancels through the REAL path
+(FailMembership) would mass-delete real production subscriptions.
+
+## Metadata
+- Category: safety
+- Status: implemented
+- Passes: true
+
+## Findings (why the incident queued no provider intents)
+
+Converge repairs are structurally provider-side-effect-free: the old `grace_exhausted` repair called
+`ApplyLocalCancellation`, which contains NO delete scheduling; only `FailMembership` writes
+`DeletionScheduledAt` + the `nmi_delete_subscription` intent, gated on an injected `deferDelete` scheduler that
+`NewConvergeEngine`'s lifecycle instance never receives. The converge pass comment even deferred the
+provider-cancel remediation ("lands with the provider-action wiring") — never wired. So the incident corrupted
+local state only; NMI was untouched. Post-#664 converge cannot even cancel locally.
+
+## Existing safeguard stack (verified, keep)
+
+1. `test_mode=true` + NMI boot probe: production NMI credentials REFUSE BOOT in a test environment (cached
+   verdict in `openrails.probe_verdicts`) — the "prod keys in a test env" scenario is already fail-closed.
+2. `provider_write_mode=readonly`: transport-level block in the NMI client (every direct-post mutation returns
+   ErrProviderReadOnly) and the stripeapi choke point; REQUIRED outside development.
+3. `provider_write_mode=limited`: no system-initiated provider writes (FailMembership skips delete scheduling).
+4. All remote subscription deletes funnel through the durable provider-intent ledger + executor — one chokepoint.
+
+## Gap + design (recommended)
+
+The unguarded case: a #664-class bug that wrongly routes subs through the LEGITIMATE dunning path — real retries
+fail (cards can't pay for the wrong reason), FailMembership terminally cancels, and thousands of nmi_delete
+intents execute automatically under `provider_write_mode=full`.
+
+Recommend a VOLUME CIRCUIT BREAKER at the intent executor (not blanket approval): destructive intent types
+(`nmi_delete_subscription`) get a per-(merchant, rail) execution budget per rolling window — e.g.
+`max(K, small % of active subs)` per 24h. Over budget → executor HALTS destructive types for that merchant,
+emits an OPERATOR finding, and resumes only on explicit operator ack. Routine churn (a handful/day) stays
+automatic — holding EVERY delete behind approval would let NMI keep billing customers whose subs we cancelled
+(customer harm) and turns normal operation into an ops queue. Mass deletion is always an incident; that is what
+asks permission.
+
+## Tasks
+
+- [x] Queue-always for terminal cancels (Paul's model, 2026-07-01: queue the delete intent even without
+      credentials/mode to execute — execution waits, the decision is durable): (a) `FailMembership` under
+      `provider_write_mode=limited` currently SKIPS queuing the delete entirely (inconsistent — the dunning
+      CHARGE path under limited materializes its intent "for the executor to drain when the mode allows");
+      (b) unknown-resolution's stale-decline → cancelled path queues nothing though the remote may be alive.
+      Both should durably record the desired delete unconditionally; mode/credentials/breaker govern execution
+      only. Aligns with #674 (all external writes post a durable intent first).
+- [x] Budget check in the provider-intent executor for destructive types, per (merchant, rail), rolling window;
+      threshold `max(K, pct of active subs)` — constants, not config knobs, until someone needs tuning.
+      (Implemented per-merchant across all destructive types — one budget + ONE standing finding per merchant;
+      the only destructive type today is nmi_delete_subscription, so per-(merchant,rail) is currently identical.)
+- [x] Breach → halt destructive execution for that merchant + OPERATOR finding (`life.provider_intent.held_bulk`
+      or similar); non-destructive intents unaffected; explicit ack resumes.
+- [x] Intents held by the breaker stay pending (never expire into `abandoned` while held).
+- [x] Tests: N deletes under budget execute; N+1 halts + finding; ack resumes; other merchants unaffected.
+
+## Progress
+
+- 2026-07-01 IMPLEMENTED (uncommitted). What was built:
+  - Queue-always: `FailMembership` no longer skips delete scheduling under `provider_write_mode=limited` —
+    marker + nmi_delete intent are queued unconditionally (atomic in the cancellation tx); if no scheduler is
+    wired it WARNs loudly. Execution was ALREADY executor-gated (`intents.GateExecution` parks system-origin
+    under limited/readonly) — verified by test.
+  - Unknown-resolution stale-decline gap: `UnknownVerdict.RemoteGone` (false only for the stale-decline cancel;
+    true for roster cancelled/expired or absent-from-exhaustive-roster). Apply path maps Cancelled+!RemoteGone
+    to new `ResolveCancelledRemoteAlive`, which cancels locally AND queues the deferred NMI delete
+    (DeletionScheduledAt + intent, FailMembership shape). `jobs_provider_refresh.runUnknownReconcile` now
+    injects the DeferredDeleteScheduler (embedded uses the same Runtime registration — no separate wiring).
+    The production scheduler moved from internal/app to exported `intents.NMIDeleteScheduler` (app keeps a
+    shim) so the reconcile path/tests construct the real thing.
+  - Volume breaker: `intents.VolumeBreaker` in the executor, gating a destructive-types set
+    (`nmi_delete_subscription`). Budget `max(25, 1% of merchant's active subs)` per rolling 24h (package
+    consts). Executed count from the provider_intents ledger (executed_at, plus unresolved attempt statuses;
+    in_flight excluded — batch claims would self-count). Over budget → intent PARKS (stays pending) + ONE
+    `life.provider_intent.held_bulk` requires_review finding per merchant (stable subject_key
+    `destructive_volume`, evidence: executed_count/budget/window_hours/active_subscriptions). Open finding =
+    halted; operator ACK (fixed) resumes with the count window restarted at resolved_at; DISMISS (ignored)
+    permanently silences the breaker for that merchant (findings upsert keeps ignored ignored — documented).
+    `ExpireOverdueProviderIntents` now refuses to expire breaker-held destructive intents while the finding is
+    open. New sqlc queries live in the intents query file (now rail_intents.sql after the concurrent
+    provider_intents→rail_intents rename; NOT reconciliation.sql). Non-destructive intents untouched; the
+    verifier (read-only) is not gated. NOTE: implemented concurrently with the rail-identity rename sweep
+    (provider_intents→rail_intents etc.) — that agent adapted this code in place; #679 semantics unchanged.
+  - Tests: verdict RemoteGone table cases (unit, green); breaker budget math (unit, green); integration —
+    limited-mode FailMembership queues + executor parks under limited + drains under full
+    (TestFailMembershipLimitedModeQueuesDeleteIntent), breaker end-to-end with dedicated merchants: 25 execute,
+    26th halts + finding, open finding keeps halting, held intent survives ExpireOverdue, other merchant
+    unaffected, ack resumes (TestBreakerHaltsBulkDestructiveExecution), stale-decline queues the delete /
+    roster-gone queues nothing (TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete). Full
+    internal/intents integration package green; `go build ./...` + `go test ./...` green; targeted river
+    integration (dunning materialize + provider refresh) green. Incidental rename-completion fixes made while
+    validating (rail-identity sweep leftovers in files #679 owns): jobs_provider_refresh.go watermark upserts'
+    `ON CONFLICT ON CONSTRAINT` now uses rail_refresh_watermarks_identity_key, and
+    unknown_orchestration_integration_test.go finished the #682 half-edit (account_id column; NMI vault now
+    asserts NO rail_customer_accounts row, matching the test's own #682 tail assertion).
+
+## Out of scope
+
+- Per-delete operator approval (rejected: harms customers via continued NMI billing, and normal churn would
+  drown an approval queue).
+- New read-only NMI credentials (NMI doesn't offer them; transport read-only mode already covers it).
+
+Acceptance: no single run/window can mass-delete provider subscriptions; a bulk anomaly halts destructive
+execution and requires explicit operator acknowledgment; routine single deletes remain automatic; the existing
+boot-probe/readonly/limited stack is unchanged.

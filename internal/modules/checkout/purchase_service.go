@@ -26,6 +26,10 @@ type checkoutSubscriptionAccess interface {
 	GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
 	GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
 	GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error)
+	// #691 checkout guard: `unknown` subs don't hold the lifecycle slot but may
+	// still be alive (billing) at the provider — a re-purchase double-bills.
+	GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
+	GetUnknownByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
 }
 
 // nonTerminalSubscriptionStatuses is the single source of truth for which
@@ -184,6 +188,22 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	return &EligibilityResult{Status: EligibilityAllowed, Reason: "Purchase allowed", Coverage: coverage}, nil
 }
 
+// Machine-readable conflict codes (#691) so clients can route the user to the
+// right remedy instead of parsing prose.
+const (
+	// ConflictCodeDuplicateSubscription: a non-terminal subscription to the same
+	// plan/tier already exists — re-purchasing would double-bill.
+	ConflictCodeDuplicateSubscription = "duplicate_subscription"
+	// ConflictCodeChangeTierRequired: the conflict is a tier change — use the
+	// change-tier endpoint, not a second subscribe.
+	ConflictCodeChangeTierRequired = "change_tier_required"
+	// ConflictCodeMembershipPendingVerification (#691): the customer holds an
+	// `unknown` subscription for this product/tier-group — an existing membership
+	// pending provider verification. It may still be alive and billing at the
+	// provider; verify/resume it instead of purchasing again.
+	ConflictCodeMembershipPendingVerification = "membership_pending_verification"
+)
+
 // SubscriptionConflict describes an existing non-terminal subscription that
 // blocks a new subscribe for the same product/tier-group (issue #269).
 type SubscriptionConflict struct {
@@ -195,6 +215,8 @@ type SubscriptionConflict struct {
 	SamePrice bool
 	// Existing is the conflicting subscription, when one was found.
 	Existing *models.Subscription
+	// Code is the machine-readable conflict class (Conflict* consts).
+	Code string
 	// Message is a clear, user-facing explanation of the conflict.
 	Message string
 }
@@ -228,6 +250,7 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 			Blocked:   true,
 			SamePrice: true,
 			Existing:  existingSamePrice,
+			Code:      ConflictCodeDuplicateSubscription,
 			Message:   "You already have an active subscription to this plan",
 		}, nil
 	}
@@ -246,31 +269,73 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
+					Code:     ConflictCodeDuplicateSubscription,
 					Message:  "You already have an active subscription to this plan",
 				}, nil
 			case existingProduct != nil && existingProduct.TierRank < product.TierRank:
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
+					Code:     ConflictCodeChangeTierRequired,
 					Message:  "Use POST /v1/me/subscriptions/change-tier for tier upgrades",
 				}, nil
 			case existingProduct != nil && existingProduct.TierRank > product.TierRank:
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
+					Code:     ConflictCodeChangeTierRequired,
 					Message:  "Use POST /v1/me/subscriptions/change-tier for tier downgrades",
 				}, nil
 			default:
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
+					Code:     ConflictCodeChangeTierRequired,
 					Message:  "You already have an active subscription in this tier group. Use POST /v1/me/subscriptions/change-tier to change tiers.",
 				}, nil
 			}
 		}
 	}
 
+	// #691: an `unknown` sub for the same product or tier-group blocks a new
+	// subscribe — the real provider-side sub may still be alive and billing, so
+	// a re-purchase double-bills. Verify/resume instead of repurchase.
+	if conflict, err := s.checkUnknownSubscriptionConflict(ctx, userID, product); err != nil || conflict != nil {
+		if err != nil {
+			return nil, err
+		}
+		return conflict, nil
+	}
+
 	return &SubscriptionConflict{}, nil
+}
+
+// checkUnknownSubscriptionConflict returns the #691 verification-pending
+// conflict when the customer holds an `unknown` subscription for the product or
+// its tier-group, nil otherwise.
+func (s *CheckoutPurchaseService) checkUnknownSubscriptionConflict(ctx context.Context, userID string, product *models.Product) (*SubscriptionConflict, error) {
+	if s.SubscriptionService == nil || product == nil {
+		return nil, nil
+	}
+	unknownSub, err := s.SubscriptionService.GetUnknownByUserIDAndProductID(ctx, userID, product.ID)
+	if err != nil && !repo.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to check unknown subscription: %w", err)
+	}
+	if unknownSub == nil && product.TierGroup != nil && strings.TrimSpace(*product.TierGroup) != "" {
+		unknownSub, err = s.SubscriptionService.GetUnknownByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
+		if err != nil && !repo.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to check unknown tier-group subscription: %w", err)
+		}
+	}
+	if unknownSub == nil {
+		return nil, nil
+	}
+	return &SubscriptionConflict{
+		Blocked:  true,
+		Existing: unknownSub,
+		Code:     ConflictCodeMembershipPendingVerification,
+		Message:  "You already have a membership for this product that is pending payment verification. Verify or resume it instead of purchasing again — a new purchase could bill you twice.",
+	}, nil
 }
 
 func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {

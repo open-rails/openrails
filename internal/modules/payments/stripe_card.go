@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -195,10 +196,10 @@ func UpsertStripeCardForCustomer(
 		now = clock.Now()
 	}
 
-	methods := repo.NewPaymentMethodRepo(database)
+	methods := paymentmethods.NewPaymentMethodRepo(database)
 	pm, err := methods.GetByRailMethodRef(ctx, string(models.RailStripe), vaultID)
 	switch {
-	case errors.Is(err, repo.ErrPaymentMethodNotFound):
+	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),

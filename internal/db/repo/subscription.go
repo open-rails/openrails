@@ -587,6 +587,41 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Co
 	return r.oneWithDetails(ctx, row, true)
 }
 
+// GetUnknownByUserIDAndProductID finds an `unknown`-status subscription for a
+// user and product (#691 checkout guard): parked pending provider verification,
+// possibly still alive/billing at the provider.
+func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
+	tsid, err := ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndProduct(ctx, gen.GetUnknownSubscriptionByCustomerAndProductParams{
+		CustomerID: tsid,
+		ProductID:  productID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, false)
+}
+
+// GetUnknownByUserIDAndTierGroup is the tier-group variant of the #691 checkout
+// guard lookup. Returns the subscription with Price and Product loaded.
+func (r *SubscriptionRepo) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
+	tsid, err := ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndTierGroup(ctx, gen.GetUnknownSubscriptionByCustomerAndTierGroupParams{
+		CustomerID: tsid,
+		TierGroup:  &tierGroup,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, true)
+}
+
 func derefSubs(subs []*models.Subscription) []models.Subscription {
 	out := make([]models.Subscription, 0, len(subs))
 	for _, s := range subs {

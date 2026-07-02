@@ -55,7 +55,6 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		remoteCustomer       bool
 		chargeSaved          bool
 		openRailsDunning     bool
-		renewalGrace         bool
 		railMerchantAccounts bool
 		merchantKeyCount     int
 		autoBilledNilPM      bool
@@ -63,11 +62,11 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		remoteDeleteTerminal bool
 		activeCancelMode     CancelMode
 	}{
-		{models.RailNMI, false, true, true, true, true, 2, true, false, true, CancelModeDestructive}, // remoteCustomer=false per #682
-		{models.RailCCBill, false, false, false, false, true, 3, true, true, false, CancelModeExternalPortal},
-		{models.RailStripe, true, true, false, true, true, 3, false, false, false, CancelModeReversible},
-		{models.RailSolana, false, false, true, false, true, 0, false, false, false, CancelModeDestructive},
-		{models.RailPayPal, false, false, false, false, false, 0, false, false, false, CancelModeDestructive},
+		{models.RailNMI, false, true, true, true, 2, true, false, true, CancelModeDestructive}, // remoteCustomer=false per #682
+		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeExternalPortal},
+		{models.RailStripe, true, true, false, true, 3, false, false, false, CancelModeReversible},
+		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
+		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer
 	// flips NMI to our-rebill; RebillDriver does.
@@ -85,9 +84,6 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		}
 		if d.OpenRailsDrivenDunning != c.openRailsDunning {
 			t.Errorf("%s: OpenRailsDrivenDunning = %v", c.rail, d.OpenRailsDrivenDunning)
-		}
-		if d.RenewalGraceEligible != c.renewalGrace {
-			t.Errorf("%s: RenewalGraceEligible = %v", c.rail, d.RenewalGraceEligible)
 		}
 		if d.HasRailMerchantAccounts != c.railMerchantAccounts {
 			t.Errorf("%s: HasRailMerchantAccounts = %v", c.rail, d.HasRailMerchantAccounts)
@@ -148,7 +144,7 @@ func TestLookupNormalizes(t *testing.T) {
 	if _, ok := Lookup("mobius"); ok {
 		t.Error("mobius must not resolve to a descriptor")
 	}
-	if HasRemoteCustomer("bogus") || SupportsRailMerchantAccounts("bogus") || AutoBilled("bogus", nil) || RenewalGraceEligible("bogus") || RemoteDeleteOnTerminalCancel("bogus") {
+	if HasRemoteCustomer("bogus") || SupportsRailMerchantAccounts("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") {
 		t.Error("unknown rails must default to false")
 	}
 	if got := CancelModeFor(&models.Subscription{Rail: "bogus"}, time.Now()); got != CancelModeDestructive {

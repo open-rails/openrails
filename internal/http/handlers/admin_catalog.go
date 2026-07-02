@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -233,7 +233,7 @@ func AdminListPrices(r *httprequest.Request) {
 	}
 
 	// Otherwise paginate across all prices with filters.
-	filter := repo.PriceFilter{
+	filter := catalog.PriceFilter{
 		Currency: strings.ToLower(strings.TrimSpace(r.Query("currency"))),
 		Type:     strings.TrimSpace(r.Query("type")),
 	}

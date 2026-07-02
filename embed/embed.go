@@ -1,8 +1,9 @@
-// Package embed is the heavy half of the unified OpenRails SDK (#338): it runs
-// the engine IN-PROCESS (pgx, river, the full pkg/embedded app graph) and
-// exposes the same openrails.Client interface that openrails.NewRemote serves
-// over HTTP. Embedded vs standalone is a constructor choice — host code written
-// against openrails.Client does not change when the deployment flips.
+// Package embed is the heavy half of the unified OpenRails SDK (#338/#685): it
+// runs the engine IN-PROCESS (pgx, river, the full pkg/embedded app graph) and
+// hands out the SAME client implementation openrails.NewRemote builds, wired to
+// an in-process transport (no socket). Embedded vs standalone is a constructor
+// choice — host code written against openrails.Client does not change when the
+// deployment flips.
 //
 // Package layout keeps remote-only consumers light: the root openrails package
 // is interface + remote impl only; this package is the only one that links the
@@ -113,11 +114,16 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	return r, nil
 }
 
-// Client returns the openrails.Client adapter over the in-process engine. Each
-// method transcribes the wire→service mapping of the corresponding standalone
-// handler (internal/http/handlers/service_*.go), including the error→status
-// mapping, so it is observably identical to NewRemote against the same engine
-// (enforced by conformance_integration_test.go).
+// Client returns the unified openrails.Client over the in-process engine
+// (#685): the SAME client implementation NewRemote builds, wired to an
+// in-process transport that dispatches into the real neutral /v1/merchant
+// handler — real auth gate (context-attached host principal), real merchant
+// pinning, real RLS DB-conn middleware. No socket; one JSON round-trip per
+// call. Parity with a standalone deployment is structural (one implementation),
+// enforced by conformance_integration_test.go.
+//
+// A few methods are still served by the transcribed localClient during the
+// method-by-method migration (see unifiedClient).
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 	c := &localClient{svc: r.svc}
 	for _, opt := range opts {
@@ -125,7 +131,43 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 			opt(c)
 		}
 	}
-	return c
+	rt := r.emb.App().Runtime
+	transport := &inprocessTransport{handler: newServiceHandler(rt), rt: rt}
+	remote := openrails.NewRemote(inprocessBaseURL,
+		// No Timeout on the client: in-process calls are bounded by the caller's
+		// ctx, matching the old localClient behavior.
+		openrails.WithHTTPClient(&http.Client{Transport: transport}),
+		// The credential is the context-attached host principal; the bearer is a
+		// placeholder the in-process gate never consults.
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
+		openrails.WithCurrency(c.currency),
+	)
+	return &unifiedClient{Client: remote, localClient: c}
+}
+
+// unifiedClient is the embedded SDK client during the #685 migration: the
+// embedded openrails.Client (the remote implementation over the in-process
+// transport) serves every migrated method; *localClient keeps the not-yet-
+// migrated transcription (SetCustomerSpendDelegations) plus the embedded-only
+// extras (Admit, SetCreditAccountSettings, ListCreditTransactions,
+// BudgetStatus, AbuseUsage), which have no /v1/merchant wire counterpart.
+type unifiedClient struct {
+	openrails.Client
+	*localClient
+}
+
+// SetCustomerSpendDelegations stays transcribed: its HTTP surface is the
+// delegated customer-treasury family (/v1/customers/*), not the merchant API
+// the in-process transport serves. Explicit forward resolves the embedding
+// conflict.
+func (c *unifiedClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
+	return c.localClient.SetCustomerSpendDelegations(ctx, customerID, delegations)
+}
+
+// Verify is the authenticated readiness probe (see openrails.Verify), running
+// through the in-process transport + real auth gate.
+func (c *unifiedClient) Verify(ctx context.Context) error {
+	return openrails.Verify(ctx, c.Client)
 }
 
 // Service exposes the underlying pkg/service facade for host code that wants

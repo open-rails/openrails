@@ -7,21 +7,741 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 688
+next_id: 695
+
+---
+
+# #694: test-suite overhaul — enforce the net, close the gaps, then delete the redundancy
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01, Paul) — from the 2026-07-01 test-system audit. Paul's target: a LEAN suite —
+a few unit tests on critical core invariants (money precision/unit wire-pinning, pure decision logic) +
+integration tests covering all functionality end-to-end; delete everything redundant/mock-theater. Baseline:
+466 test files, ~77k test LOC vs ~140k production LOC, 1,565 test funcs, 124 files using mocks/fakes.
+ORDERING IS THE POINT: enforce + close gaps FIRST, then cut — never delete strands out of an unverified net.
+
+## Metadata
+- Category: testing
+- Status: planned
+- Passes: false
+
+## Phase 1 — make the net real (do first, small) — DONE 2026-07-02 (one deferral, see GAP 1)
+- [x] CI: flipped to enforcing (2026-07-02). ci.yaml integration job: `continue-on-error` removed,
+      `timeout-minutes: 40` added (go test itself is capped at 25m inside scripts/test_integration.sh).
+- [x] GAP 1, session leg (2026-07-02): tests/stripe_checkout_e2e_test.go TestCheckoutSessionStripeRedirect —
+      real HTTP POST /v1/checkout (rail=stripe) through the full suite; fake ONLY at the stripeapi choke
+      point (new integration-build-only hook stripeapi.SetTestBaseTransport + httptest serving real Stripe
+      wire shapes). Asserts requires_action + redirect_url, the persisted checkout_sessions row, the
+      rail_customer_accounts mapping (#212), and wire-pins the checkout-session create form (mode/price/
+      metadata linkage incl. checkout_session_id, customer XOR customer_email, pinned Stripe-Version).
+      New suite option WithSuiteStripeRail. DEFERRED: the activation leg (checkout.session.completed →
+      active local sub) — internal/modules/webhooks/stripe.go is mid-rewrite under #684
+      (fetch-and-converge); add that leg after #684 lands.
+- [x] GAP 2 (2026-07-02): tests/nmi_webhook_signature_http_test.go TestNMIMerchantWebhookSignatureHTTP —
+      real HTTP POST /v1/merchants/{slug}/webhooks/nmi with the webhook_signing_secret seeded through the
+      merchant secret store; valid sigverify HMAC (t=ts,s=hex(hmac-sha256(secret, ts+"."+body))) ⇒ accepted
+      AND the recurring.subscription.delete event actually cancels the seeded active sub in PG; missing /
+      wrong-secret / signed-then-tampered ⇒ 401 with no state change.
+- [x] GAP 3 (2026-07-02): tests/river_stripe_webhook_worker_test.go TestStripeWebhookReconcileRiverWorker —
+      enqueue StripeWebhookReconcileArgs ⇒ real in-process River worker picks it up (waits on THAT job id,
+      not a completed-count) ⇒ handler proven by effects: managed-endpoint list→create against the fake
+      Stripe wire (merchant-scoped URL, pinned api_version, openrails_managed marker) and the returned
+      whsec persisted into the merchant secret store. (jobs_stripe_webhooks is the ENDPOINT RECONCILER, not
+      an event-apply path — no #684 overlap.)
+- [x] Live-gated workflow (2026-07-02): .github/workflows/live-gated-integration.yml — weekly cron +
+      workflow_dispatch, modeled on solana-devnet-integration.yml. Jobs (each enforcing; the workflow is
+      non-required): nmi-sandbox (TestNMILiveLifecycleE2E + TestLiveSandboxClientSurface +
+      TestChargeOutstanding_NMISandbox_CollectsRealCharge), live-invoice-collection (Stripe/NMI invoice
+      collection, OPENRAILS_LIVE_RAIL_TESTS=1 + TEST_MODE), stripe-model-b (lane for the orphaned
+      `stripe_integration` tag; a vet step compiles the tag even secret-less), vaultint (dev Vault container
+      + transit — validated green locally end-to-end). Skip-if-secret-absent semantics preserved and
+      verified locally (secret-less run is green-but-empty).
+      Phase-3 hygiene items pulled forward: (b) vaultint lane DONE; (a) stripe_model_b_integration_test.go
+      could NOT be retagged/fixed in place — internal/modules/subscriptions/* was fenced this wave
+      (concurrent agents), and the file HAS bit-rotted exactly as the audit warned (tag compiled nowhere):
+      line ~214 `{Rail: models.RailStripe, SecretKey: key}` must become
+      `{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}}`. Until that one-liner
+      lands, the stripe-model-b job is KNOWN-RED at its vet step — that red IS the enforcement working.
+      Note: correct resolution is the live-gated lane, NOT retagging to plain `integration` (the test hits
+      real Stripe TEST mode and must never run on PR CI).
+
+## Phase 2 — harness consolidation (one blessed stack: dbtest + integrationharness)
+Audit verdict: sprawl is SMALLER than suspected — dbtest already unifies PG/Redis/TestMain across ~30
+packages (per-run DBs, orphan reaper, shared containers). The one true duplicate is the legacy
+tests/TestContainerSuite sitting beside the newer, better integrationharness (real standalone server, real
+AuthKit-minted credentials, RLS-enforced app role, dbtest-shared infra).
+- [ ] Extend integrationharness.StartStandalone with the two options tests/ needs: worker boot (RunWorkers +
+      River wait) and per-test injectable clock (kills the 27 fresh-suite boots that exist only for
+      WithSuiteClock — tests/ wall-clock drops from ~8-9 min to ~3-4).
+- [ ] Migrate tests/ onto it; DELETE TestContainerSuite (~600-800 LOC incl. stub JWT authenticators replaced
+      by real minted tokens, dead ResetDatabase — invalid SQL, zero callers — and deprecated SetMockClock +
+      its 15-service setClock fan-out). ClickHouse becomes opt-in dbtest.SharedClickHouse.
+
+## Phase 3 — the deletion sweep (after 1+2 prove the net)
+Rule: every deleted test must be DOMINATED by a surviving one (same behavior, stronger level). A test that is
+the only coverage of something real gets replaced (usually by extending an e2e flow), never dropped.
+- [ ] Integration-side redundant clusters (~4,500-6,000 LOC, audit-verified):
+      - dunning tested across FIVE layers (~2,500 LOC: tests/dunning_worker_test.go 833-LOC/14 fresh boots +
+        tests/entitlements_dunning_* 808 + river + intents + units) → keep intents rebill semantics + ONE
+        per-rail e2e ladder; filter/skip mechanics become unit invariants.
+      - spend/hold/capture across five levels → the internal/modules/admission middle layer (~190 LOC)
+        mostly re-asserts spendgate outcomes through an adapter; collapse.
+      - cancel-subscription across four levels → keep intents + one HTTP test.
+      - catalog push/dump round-trip ×3 (pkg/embedded + bootstrap + integrationharness) → one HTTP publish +
+        one dump unit.
+- [ ] Unit-side sweep — AUDIT LANDED (2026-07-01), suspicion NOT confirmed: ~95% of the 34.4k unit LOC pins
+      exactly the target philosophy (money wire formats, pure decision law, byte-exact layouts, fail-closed
+      posture matrices — usually citing the incident/issue it guards); MOCK THEATER IS ESSENTIALLY ABSENT
+      (fakes sit at transport seams; real logic runs underneath). Deletable: ~1,550 LOC in ~21 SMALL files —
+      the big files are the best files. Kill-list (whole files unless noted): pkg/embedded/pull_provider_log_test.go
+      (120, pins log prose), pkg/service/catalog_pagination_test.go (82, clamp table), pkg/embedded/river_test.go
+      (67, nil-guard self-asserts), payments/stripe_card_test.go (62, brand display trivia),
+      controlplane/api_key_test.go (57, subsumed by perm_glob matrix; fix its stale comment),
+      migrations catalog_benefits_metering/identity_anchors/merchant_provisioning schema tests (56+43+53,
+      immutable-migration byte-pins), merchant_rls_encryption_schema_test.go (42, salvage ~10 role/DEK asserts
+      then delete), pkg/service/catalog_credits_spec_test.go (48), normalize_test.go (33, tests TrimSpace),
+      cmd catalog_apply_test.go (33, asserts cmd.Use literal), subscriptions/solana_cancel_cascade_test.go (32),
+      auth/provider_test.go (31, keep blank-issuer check), embed/provision_test.go (31),
+      pkg/service/currency_test.go (31, error-prose pins), pkg/api/error_test.go (30, builder echo),
+      controlplane/catalog_delegated_test.go (30, dup of delegated_test), pkg/embedded/gin/api_test.go (29),
+      + ~600 LOC intra-file trims (stripe_refunds_test validation-prose tables, webhooks/nmi_test dead cases).
+      CONDITIONAL: vault/kv_httptest_test.go (187) folds ONLY if the `vaultint` tag gets a CI lane.
+- [ ] Hygiene surfaced by the audit: (a) `stripe_model_b_integration_test.go` carries an orphaned
+      `//go:build stripe_integration` tag that runs in NO suite — fix the tag or the unit tests stay
+      load-bearing; (b) `vaultint` opt-in tag runs nowhere in CI — add a lane or accept the httptest twin;
+      (c) watch-item: reconcile engine_test's ~500-LOC in-memory store re-implements SQL upsert semantics —
+      earning its keep today, but flag for divergence when store semantics change.
+- [ ] PROTECTED (audit-confirmed only-coverage — never delete without replacement): intents
+      enforcement_guard_test (#674 CI wall), reconcile decider{,_property}_test, merchantsecrets store_test
+      (#667), db/rls_test (bypass-role refuse-boot), analytics admin_metrics_merchant_test (ClickHouse has no
+      RLS), deps_test.go, solana confirm-mirror + failure-classify tests, webhooks webhook_handler_test +
+      deduplication_test, checkout duplicate_billing_guard + stripe_customer_resolution, money currency_test
+      (JPY), remote_test (trust_tier wire name), routes merchant_action_routes_test (perm axis), pyth
+      client_test, catalog apply_options_test.
+- [ ] PROTECTED CLASSES (never cut): wire-pinning money tests (#671 test wall — micros in ⇒ exact wire value
+      out), pure-invariant tests (reconcile decider property suite, pricing big.Int math, registry
+      completeness, config/posture matrices), RLS isolation suite, conformance.
+
+## Acceptance (revised after both audits)
+CI enforces the integration suite; Stripe checkout + NMI webhook-HTTP e2e exist; ONE app-boot harness
+(dbtest + integrationharness) — TestContainerSuite gone; redundant integration clusters collapsed with every
+deletion dominated by a surviving stronger test; protected classes intact. HONEST TARGET: ~7-8k LOC net cut
+(~10% — integration clusters 4.5-6k + harness ~800 + unit kill-list ~1.5k); the bigger leanness wins are
+SPEED (tests/ wall-clock ~halved via injectable clock) and ENFORCEMENT (the net actually gates merges). Both
+audits agree the suite is substantively healthy — the 77k figure buys real guarantees; cut the named waste,
+don't chase a ratio.
+
+---
+
+# #692: operator findings queue — recommended actions, approve/ignore per item, self-verifying resolution
+
+**Completed:** no
+**Status:** IMPLEMENTED (2026-07-02, uncommitted; planned 2026-07-01, Paul) — the end-to-end operator flow for surfaced findings (#690 duplicates/
+freeloaders, held_bulk, and every other ADMIN/OPERATOR finding): detect → save with a machine-computable
+recommendation → admin queue API → operator approves (executes the recommendation) or ignores (with note) one
+item at a time → the next converge sweep verifies the fix took. BACKEND ONLY — the dashboard frontend is
+future.md #693, planned later.
+
+## Metadata
+- Category: admin / reconciliation
+- Status: implemented (uncommitted)
+- Passes: true (unit + integration green on touched packages; see Progress)
+
+## The end-to-end flow
+
+1. **DETECT (exists).** Converge passes + the pull engine emit findings into `reconciliation_findings` with
+   stable identity (upsert per subject), severity, evidence JSONB, first/last-seen runs; vanished conditions
+   auto-resolve. Cadence: 15-min sweep + inline converge per mutation + post-pull pass.
+2. **RECOMMEND (new).** Checks that emit ADMIN/OPERATOR findings populate `recommended_action` (column exists,
+   almost nothing writes it) with an operator-readable sentence AND a STRUCTURED recommendation in evidence
+   (`evidence.recommendation = {action, params}`) so approval can execute mechanically:
+   - `consistency.duplicate.ownership` / `duplicate.provider_charge`: "User X holds two overlapping
+     subscriptions A (created …, price …) and B (created …, price …). Cancel B (later-created) and refund
+     payment P (amount, date)." → `{action: "cancel_and_refund", subscription_id: B, refund_payment_id: P}`.
+     Later-created is the DEFAULT recommendation only — the structured params let the operator flip which one
+     dies before approving (the later one may be the annual plan the user meant to keep).
+   - `derive.entitlement.orphan` (freeloader): "Live access with no recorded justification — revoke window W
+     unless known-legitimate (then record an admin grant instead)." → `{action: "revoke_entitlement", ...}` and
+     the alternative `{action: "record_admin_grant", ...}`.
+   - `life.provider_intent.held_bulk`: "N destructive deletes in 24h exceeded budget B — review the cohort;
+     approve to resume." → `{action: "ack_resume"}` (resolution already resumes the breaker, #679).
+   - Findings with no mechanical fix (e.g. amount mismatches) get prose + no structured action → approve is
+     disabled for them; resolve/ignore only.
+3. **SAVE (exists).** The ledger IS the queue: `requires_review` rows ordered by severity+age are the work list;
+   #690's gauges are counts over it.
+4. **QUEUE API (new).** Admin-gated endpoints following the existing `/admin/*` conventions
+   (admin_catalog_drift.go is the pattern; embedded hosts front them with host admin auth):
+   - `GET /admin/findings` — open findings; filters (severity, finding_type, status), sort severity desc + age
+     desc, pagination; response includes the #690 gauge summary (freeloaders, duplicate_coverage, and later
+     verification_pressure) so one call paints the dashboard header.
+   - `GET /admin/findings/{id}` — full evidence + recommendation.
+   - `POST /admin/findings/{id}/resolve` — `{outcome: approve|ignore, notes, override_params?}`:
+     - **approve** → execute the structured recommendation (with optional operator overrides, e.g. swapping
+       which duplicate sub to cancel), then mark `fixed`/`admin_fixed` with notes.
+     - **ignore** → `ignored` with REQUIRED notes; permanent silence for that subject (same semantics the
+       breaker's dismiss already has — an ignored subject never re-pages).
+   - One item at a time by design; no bulk-approve endpoint (bulk destructive ops are what #679 guards against).
+5. **EXECUTE (new, thin — composes existing machinery only).** An action executor mapping
+   `evidence.recommendation.action` → existing paths, never new mutation logic:
+   - `cancel_and_refund`: lifecycle cancel (remote side = durable intent, queue-always #679, breaker-guarded) +
+     operator-authorized refund (the spec's `RevokeGrant(grant, {refund})` bundle — the approve click IS the
+     authorization; refund executes via the rail's refund API through the intents log, recorded in the money
+     ledger). Partial failure leaves the finding open with the error in notes — never half-marked fixed.
+   - `revoke_entitlement` / `record_admin_grant` (freeloader orphan): as-of revoke via the existing entitlement
+     service, or an admin-sourced grant making the access legitimate.
+   - `ack_resume`: plain resolution (breaker re-arms per #679).
+   - Idempotent: approve on an already-resolved finding is a no-op; remote effects ride intents (#674
+     effectively-once).
+6. **VERIFY (exists — the loop closes itself).** The next sweep re-derives truth: condition gone → auto-vanish
+   confirms the fix; condition persists → the finding stays open and the gauge stays nonzero, so a fix that
+   didn't take is indistinguishable from no fix — the dashboard never trusts, it re-measures.
+7. **AUDIT (small).** Record the acting operator identity on resolution (add `resolved_by` via forward-only
+   migration — `operator_notes`/`resolution` exist; actor identity does not). Every approve/ignore is
+   attributable.
+
+## Tasks
+
+- [x] Structured recommendations: `evidence.recommendation` shape + `recommended_action` prose
+      (`internal/reconcile/recommend`, leaf contract package); written NOW by held_bulk (#679); the #690
+      duplicate/orphan checks consume the same contract when they land. Later-created default for duplicates;
+      params overridable at approve time.
+- [x] Queue API: list/get/resolve endpoints per above, admin-gated, embedded + standalone wiring; gauge summary
+      in the list response.
+- [x] Action executor composing existing paths (cancel+refund bundle, revoke/admin-grant, ack); partial-failure
+      → finding stays open with error notes; idempotent approve.
+- [x] `resolved_by` migration (065) + stamped on every resolution.
+- [x] Tests: end-to-end per action type — seed the broken shape → finding with recommendation → approve →
+      effects (intent queued / refund recorded / window revoked) → next converge auto-confirms → gauge back to
+      zero; ignore → permanent silence; approve with override_params; partial failure leaves finding open.
+
+## Progress
+
+- 2026-07-02 IMPLEMENTED (uncommitted, this tree). What was built:
+  - Contract: `internal/reconcile/recommend` — `evidence.recommendation = {action, params, alternatives?}`;
+    actions `cancel_and_refund` {subscription_id, refund_payment_id?, amount?}, `revoke_entitlement`
+    {entitlement_id, as_of?}, `record_admin_grant` {customer_id, product_id, reason?}, `ack_resume` {}.
+    Canonical location top-level `evidence.recommendation`; `evidence.local.recommendation` honored for
+    converge-pass writers. The #679 breaker now writes prose + `{action: "ack_resume"}` (intents/breaker.go).
+  - Queue API (mounted on the shared merchant action surface → BOTH standalone `/v1/merchant/findings*` and
+    embedded `/billing/v1/merchant/findings*`): GET list (severity/finding_type/status filters, severity-desc +
+    age-desc sort, pagination, `gauges` = freeloaders + duplicate_coverage + open-by-severity + total_open),
+    GET one (full evidence + parsed recommendation), POST resolve {outcome approve|ignore, notes,
+    override_params?}. Reads gated on merchant:repair-alerts:read; resolve on NEW merchant:findings:resolve.
+    422 approve without structured rec; 409 on already-resolved; ignore requires notes. No bulk endpoint.
+  - Executor (internal/http/handlers/admin_findings_actions.go — in handlers deliberately, to reuse the
+    EXISTING admin-refund producer `executeAdminRefund` unchanged): cancel via ApplyLocalCancellation +
+    NMIDeleteScheduler (queue-always #679, breaker-guarded) / Stripe cancel + CancelMembership; refund via the
+    admin refund intent path (idempotency key derived from the finding); revoke via
+    RevokeExistingEntitlement(AsOf); grant via GrantProductAccess (SourceID `finding:<id>`, grant ledger).
+    Clear not-supported error for rails without a cancel/refund path (CCBill/solana). Partial failure appends
+    error + completed compensation state to notes, finding stays OPEN.
+  - Audit: migration 065 `resolved_by text`; stamped from the authenticated admin identity on every resolve;
+    exposed in GET responses.
+  - Tests (REAL testcontainers Postgres + fake NMI HTTP server only): handlers integration —
+    duplicate-approve e2e (sort/filters/gauges → cancel + durable delete intent + refund executed & recorded →
+    fixed w/ resolved_by → converge sweep does NOT reopen → gauge back to 0 → re-approve 409), partial refund
+    failure (finding open, cancel documented), ignore (notes required, permanent silence on re-upsert),
+    override_params swaps the cancelled sub, revoke/grant paths, held_bulk e2e (trip breaker → ack_resume rec
+    in queue → approve → held delete drains). Routes unit tests pin permission gates on both prefixes + 401.
+    `go test ./...` and `-tags integration` green on every touched package.
+  - Known concurrent-tree noise (NOT this issue): sibling #691's uncommitted converge/entitlements work
+    (converge derive-mismatch integration test red in their tree state). Known edge: a terminally-declined
+    refund cannot be re-approved through the same finding (content-addressed intent identity) — resolve via
+    the payments refund endpoint, then ack/ignore the finding.
+
+## Out of scope
+
+- The dashboard frontend (future.md #693).
+- Bulk approve, auto-execution of recommendations, notification/paging integrations.
+- New mutation logic of any kind — the executor only composes existing, already-guarded paths.
+
+Acceptance: every ADMIN/OPERATOR finding carries an operator-readable recommendation (structured when
+mechanically executable); an operator can list, inspect, approve (with overrides), or ignore findings one at a
+time through admin endpoints; approvals execute through the existing intent/refund/entitlement machinery with
+full attribution; and resolution is verified by re-measurement, not trust — a failed fix keeps the finding open
+and the #690 gauges nonzero.
+
+---
+
+# #691: access ends only by proof — fail-open entitlements for auto-renew subscriptions
+
+**Completed:** no
+**Status:** IMPLEMENTED (2026-07-02, uncommitted) — see Progress; planned 2026-07-01 (Paul) — policy: a user must NEVER lose access because OUR billing system failed.
+Extends the #664 doctrine (cancellation requires certainty) to its conclusion: ACCESS REMOVAL requires certainty.
+Uncertainty resolves in the customer's favor. Motivated by a real incident: CCBill kept billing a user, our
+webhooks were lost, local state went stale, the user was downgraded (window lapsed), was told to re-subscribe,
+and was then double-billed for a year.
+
+## Metadata
+- Category: entitlements / policy
+- Status: implemented (uncommitted; #690 gauge bullet outstanding)
+- Passes: true (unit + integration green on every touched package; see Progress)
+
+## Problem
+
+#664 stopped guess-CANCELLATION, but access still fails closed on our own failure: a parked-`unknown` sub's
+entitlement window expires at paid-through, so webhook loss / converge downtime / provider outage downgrades a
+PAYING user by window math. The two failure costs are asymmetric: a freeloader costs marginal content access
+(bounded, visible via #690); a wrongful downgrade costs a paying customer, support load, a double purchase and
+double-billing.
+
+Second, still-open hole (fix regardless of the main design): the one-live-sub-per-(customer, product) constraint
+covers active/pending/past_due only — `unknown` does NOT hold the lifecycle slot, so a downgraded user can
+re-purchase the same product while their real provider-side sub is alive → double-billing.
+
+## Design — invert the projection for auto-renew subscriptions
+
+Two candidate shapes; the second is chosen:
+
+- REJECTED: bridge windows appended when parking `unknown` — fails closed when the convergence engine itself is
+  down (nothing writes the bridge), which is an explicitly named failure mode to survive.
+- CHOSEN: the entitlement PROJECTION for an auto-renew subscription is OPEN-ENDED from creation
+  (`end_at = NULL`) and is CLOSED only by a PROVEN event: user cancellation (closure written in advance at the
+  known period end — the resumable-cancel runway), provider-confirmed death, or dunning exhausted with real
+  attempts (FailMembership terminal). Paid-through remains a first-class FACT on the subscription and on the
+  (unchanged, bounded, frozen-window) grant ledger — accounting truth is not weakened; only the access
+  projection becomes standing. Under total system failure on a provider-autonomous rail the outcome is CORRECT:
+  provider bills, user keeps access, our ledger is stale — staleness becomes an accounting problem, not a
+  customer problem.
+
+Scope boundaries:
+- Bounded purchases STAY bounded intervals: one-off durations/rentals, trials, and the runway of a
+  user-cancelled sub — the user paid for a bounded thing.
+- Grants stay per-period, bounded, frozen (#658 replay determinism untouched). Derive's per-renewal
+  window-append becomes "ensure standing window open + record paid-through"; the projection is a deterministic
+  fold of grants + closure events ([first grant start, closure or NULL)).
+- Revocation as-of semantics already exist (RevokeSourcesForSubscriptionAsOf) — closures stamp effective time.
+
+Consequences handled in-issue:
+- **#690 gauges redefinition**: freeloader = live access whose source is PROVEN dead/absent (not merely stale) —
+  still always-zero-when-healthy. NEW pressure gauge: count + max-age of standing access past paid-through with
+  verification unresolved — drift visible without being wrong.
+- **Deletion opportunity (Paul: "eliminate the 48-hour grace window entirely — way more ergonomic")**: every
+  grace mechanism exists solely to keep ACCESS alive across silence, which standing access solves at the root.
+  Delete wholesale for auto-renew subs: #368 trailing renewal grace (`GraceSlack`/`graceSlackCap`,
+  `appendRenewalGraceWindows`, `RenewalGraceEligibleRail`), CCBill webhook-driven grace appends, and the
+  EntitlementSourceGrace plumbing in the sub cancel/revoke paths. The converge dunning-entry grace
+  (`periodGrace`, `grace_ends_at`) loses its access role — its only surviving job is pacing when a stalled
+  past_due row parks to `unknown`, better expressed by the cadence-derived `DunningWindow` than a 48h constant
+  (evaluate dropping the column's role entirely). The needs_verification 48h cutoff survives but is DEMOTED to a
+  pure internal detection debounce with zero customer stakes. Net: no constant anywhere is a bet on how long our
+  infrastructure can silently fail.
+- **GIST no-overlap**: standing window + per-period appends would collide — the append path is replaced, not
+  layered.
+
+## Tasks
+
+- [x] Checkout guard (independent, do FIRST — closes the double-billing hole today): block or explicitly warn on
+      purchase of a product/tier-group for which the customer holds an `unknown` (or past_due) subscription;
+      offer verify/resume instead. Cover the embedded checkout path + tests.
+- [x] Projection inversion in derive/MaterializeGrant for auto-renew subscription sources: standing open window,
+      paid-through recorded as fact; renewal grants extend the fact, not the window.
+- [x] Closure events write window end: user cancel (advance-scheduled at period end), FailMembership terminal
+      (as-of policy instant), ResolveCancelled/ResolveCancelledRemoteAlive (as-of provider truth), import of
+      declared-expiry rows (#731 shape — closure at legacy expiry).
+- [x] Migration for existing live auto-renew windows → standing (open) with recorded paid-through; bounded
+      purchase windows untouched.
+- [x] Delete the now-redundant trailing-grace machinery for auto-renew subs (#368) after parity tests.
+- [x] Redefine #690's freeloader query (proven-dead source) + add the unresolved-verification pressure gauge. (DONE in #690, 2026-07-02.)
+- [x] Tests: webhook loss → access retained + pressure gauge rises + provider pull resolves; converge fully off →
+      access retained; user cancel → access ends exactly at period end; dunning exhausted → access ends;
+      provider-confirmed dead → access ends as-of truth; bounded purchases unaffected; GIST holds.
+
+Acceptance: no failure of OUR machinery (webhook loss, converge downtime, provider outage, operator error) can
+remove a paying user's access; access ends ONLY on proof (user cancel, provider-confirmed death, exhausted real
+dunning); paid-through remains truthful for accounting and the gauges make fail-open drift visible; a user with
+an `unknown` sub cannot silently double-purchase the same product.
+
+## Progress
+
+- 2026-07-02 IMPLEMENTED (uncommitted). What was built:
+  - **Checkout guard**: `CheckSubscriptionConflict` (+ new `checkUnknownSubscriptionConflict`) rejects a
+    subscribe when the customer holds an `unknown` sub for the product OR tier-group, with machine-readable
+    `code=membership_pending_verification` (existing blocks also carry codes now: `duplicate_subscription`,
+    `change_tier_required`); wired into BOTH `CheckoutService.Checkout` (embedded /checkout + standalone
+    session flow, which funnels through it) and the solana session subscribe paths (already on
+    CheckSubscriptionConflict). New queries `GetUnknownSubscriptionByCustomerAndProduct/TierGroup` +
+    repo/service wrappers; `CheckoutResponse.Code` added.
+  - **Projection inversion (derive-2)**: `MaterializeGrant` for an entitlement grant sourced from an
+    auto-renew-priced sub in a non-terminal state (new query `SubscriptionProjectsStandingAccess`) ENSURES one
+    standing open window per (customer, entitlement, source) — `StandingSubscriptionEntitlementExists` skip,
+    grant-row skip, open-overlap check with bounded fallback (GIST-safe replay). The grant ledger stays
+    per-period/bounded/frozen: `PushNewEntitlement`'s indefinite-covered branch appends the bounded per-period
+    grant for same-source renewals (`appendCoveredPeriodGrant`, idempotent via
+    `LatestEntitlementGrantEndForSource`); `ListLiveGrantsMissingEffects` mirrors the standing-satisfied skip
+    so DERIVE detection ⇔ repair agree.
+  - **Closures**: user cancel writes end_at IN ADVANCE at period end (`BoundSubscriptionAccess` — modified
+    `EndActiveEntitlementsBySubscription` + new `SoftDeleteFutureEntitlementsBySubscription`), called from
+    `ApplyLocalCancellation` (all lifecycle/converge cancels) AND `CancelUserSubscription` (NMI user cancel,
+    tx-atomic); FailMembership terminal / ResolveCancelled(RemoteAlive) close via the existing as-of revokes;
+    parking unknown / past_due entry touch NOTHING. Resume re-opens (end_at→NULL): rewritten
+    `ResumeEntitlementsBySubscription` (latest-window, overlap-guarded) via `ResumeSubscriptionAccess` in
+    `ReactivateMembership` + the Stripe resume worker.
+  - **Grace deletion**: #368 trailing renewal grace fully deleted (`GraceSlack`, `graceSlackCap`,
+    `appendRenewalGraceWindows`, `RenewalGraceEligibleRail` + the rails-registry field), FailMembership's
+    dunning grace-append block deleted, CCBill webhook grace appends deleted (grace_ends_at kept as PACING
+    marker only, still capped by ccbillGraceCap). `EntitlementSourceGrace` enum + all grace REVOCATION paths
+    kept for historical rows. `PeriodGrace` (48h) kept as pure pacing/debounce — evaluated the cadence-derived
+    DunningWindow swap and deliberately declined (Decide is pure/price-less; zero access stakes now; rationale
+    on the const).
+  - **Migration 063** (`063_failopen_standing_entitlements.up.sql`): latest live window per (customer,
+    entitlement, source) of auto-renew non-terminal subs → end_at NULL; overlap-guarded (conflicting-future-
+    window shapes stay bounded and heal at next renewal); cancelled runway / bounded prices / one-off windows
+    untouched; idempotent.
+  - **Tests (real testcontainers Postgres, no mocks)**: lifecycle_failopen_integration_test.go (webhook
+    silence → park unknown → resolve renewed with access continuous; converge-off trivially; user cancel closes
+    exactly at period end; immediate cancel; reactivate restores standing; dunning exhaustion via real recorded
+    FailMembership attempts; ResolveCancelledRemoteAlive closes + #679 delete still queued; bounded purchase
+    expires; derive replay idempotent + MissingEffects parity), converge_failopen_integration_test.go (REAL
+    sweep parks unknown, standing window untouched across repeated sweeps + resolution),
+    failopen_migration_integration_test.go (5 seeded shapes, GIST holds, idempotent re-run),
+    unknown_guard_integration_test.go (same product/tier-group blocked w/ code, unrelated allowed, resolved-
+    terminal allowed, full Checkout() blocked), CCBill webhook tests rewritten to the new state machine.
+    All integration suites green on touched packages: subscriptions, entitlements, grants, checkout, webhooks,
+    reconcile, reconcile/converge (incl. the #664 imported-shape cohort), rails; one pre-existing test
+    (converge derive-mismatch grant direction) re-seeded to the legacy bounded shape its scenario requires.
+  - DEFERRED to #690 (unticked bullet): freeloader redefinition + verification_pressure gauge.
+  - NOTED, not fixed (sibling-owned reconciliation.sql): `ListDeadSubsWithLiveEntitlements` flags a cancelled
+    sub with a LIVE runway window (end_at > now) and its AUTO repair revokes it as-of now — pre-existing; under
+    #691 every period-end cancel produces that shape for the runway duration, so the check needs a
+    paid-through/ended_at guard or the runway dies at the next sweep. Follow-up needed.
+    → FIXED in #690 (2026-07-02): entitled-bound guard + BoundSubscriptionAccess repair; see #690 Progress.
+
+---
+
+# #690: invariant gauges — freeloader count + duplicate-coverage count, always zero
+
+**Completed:** no
+**Status:** IMPLEMENTED (2026-07-02, uncommitted) — see Progress; planned 2026-07-01, Paul — two always-zero error metrics; any nonzero value means the billing state
+machine is failing. Named by Paul: "freeloaders" = users retaining a live entitlement they did not pay for
+(membership expired, no admin grant). Legacy production doujins has ~400 of them today (the #664/#731 analysis
+cohort: source-active NMI rows unpaid since before late April); the new system measured ZERO on the full
+re-imported dataset at every level of the definition — this gauge makes that property observable and alertable.
+
+## Metadata
+- Category: reconciliation
+- Status: implemented (uncommitted)
+- Passes: true (unit + integration green on every touched package; see Progress)
+
+## Definitions
+
+**Freeloader** — a LIVE entitlement window (start<=now<end, not revoked/deleted) whose justification chain is
+broken. The chain: window ← live (unterminated) grant with a window covering now ← live source (subscription
+whose paid/grace period covers now, completed non-refunded payment for ownership, or admin grant). Coverage
+after #664/#665:
+- grant terminated but window still live → `derive.grant_effect.excess` (exists);
+- dead subscription with live windows → the #665 DERIVE check `ListDeadSubsWithLiveEntitlements` (exists;
+  `unknown` correctly excluded — access-intact is policy, and their windows end at paid-through naturally);
+- live window with NO grant at all (the spec's deferred "true orphan") → MISSING, build it;
+- live window extending past its subscription's paid-through+grace → verify the dead-sub/derive checks cover
+  every path here; if any slips through (e.g. active sub whose window outruns period end), add the check.
+
+**Duplicate coverage** — the same (customer, product) holding overlapping paid coverage twice. Mostly
+STRUCTURAL already: `uq_subscriptions_customer_product_lifecycle` (one live lifecycle sub per customer+product),
+GIST no-overlap on live entitlement windows, `consistency.duplicate.provider_charge` (double charge, same
+month), `pull.subscription.duplicate` (remote-side duplicates, #665 rename). The real gap: ownership
+double-purchase ACROSS months (same one-off/lifetime product bought twice > 1 month apart escapes the
+month-scoped charge check) → one CON check: more than one live ownership grant per (customer, product).
+
+## Tasks
+
+- [x] DERIVE/CON check `derive.entitlement.orphan` (freeloader): live entitlement window with no live grant
+      covering now for its (customer, source_type, source_id) — merchant-wide set query + customer-scoped narg,
+      converge-pass pattern. ADMIN surface-only (revoking access is an operator decision; per policy never
+      auto-revoke on a derived conclusion alone) unless the orphan is provably a projection bug.
+- [x] CON check: >1 live ownership grant per (merchant, customer, product) → `consistency.duplicate.ownership`,
+      ADMIN surface-only (refund is an operator decision).
+- [x] The gauges: expose named counters computed from OPEN findings of the designated type sets —
+      `freeloaders` = open {derive.entitlement.orphan, derive.grant_effect.excess, dead-sub-live-window type};
+      `duplicate_coverage` = open {consistency.duplicate.provider_charge, consistency.duplicate.ownership,
+      pull.subscription.duplicate}. Surface on the existing report/admin path (findings ledger is the metric
+      store — no new tables); alert semantics: > 0 for one full sweep cycle = state machine failing.
+      SEVERITY ORDER (Paul 2026-07-01): a duplicate is WORSE than a freeloader — it means a customer is being
+      CHARGED TWICE (money harm, refund + trust damage) vs marginal content access deliberately tolerated under
+      #691 fail-open. duplicate_coverage findings carry severity `critical`; freeloader findings `high`.
+- [x] #691 interplay: once fail-open lands, redefine `freeloaders` to PROVEN-dead/absent sources only (stale ≠
+      freeloading) and add the companion `verification_pressure` gauge (count + max-age of standing access past
+      paid-through awaiting verification) — allowed to be nonzero, but its AGE trending up means the
+      verification machinery is down.
+- [x] Integration tests: seed each broken-chain shape → finding + gauge > 0; healthy dataset → both gauges 0;
+      the #664 imported-shape dataset stays 0 (regression: freeloaders can never be reintroduced by an import).
+- [x] Verification SQL from the 2026-07-01 analysis documented on the checks (the two queries proving doujins
+      measured 0: grant-justification by source, window-vs-paid-through by status).
+
+Acceptance: `freeloaders` and `duplicate_coverage` are queryable named gauges that read 0 on a healthy merchant
+(doujins full import measures 0 today); each broken-justification shape and the cross-month ownership
+double-purchase produce an open finding that moves its gauge above 0; no auto-revocation is introduced —
+surfacing only.
+
+## Progress
+
+- 2026-07-02 IMPLEMENTED (uncommitted). What was built:
+  - **Runway-hazard fix FIRST (the #691 NOTED item)**: `ListDeadSubsWithLiveEntitlements` now guards on the
+    ENTITLED BOUND = GREATEST(current_period_ends_at, ended_at) — a terminal sub's BOUNDED live window is
+    excess only past that bound (a user-cancel runway is paid access, never flagged before period end); the
+    repair is no longer revoke-as-of-now but the missed/correct #691 closure
+    (`entitlements.BoundSubscriptionAccess(sub, bound)` — bounds the overrun back to the bound, runway
+    survives). STANDING (end_at NULL) windows of terminal subs moved OUT of this AUTO check into the orphan
+    detector (ADMIN). `ReconcileRevokeSubscriptionEntitlements` deleted (sole caller was the old repair).
+  - **Freeloader detector `derive.entitlement.orphan`** (DERIVE, ADMIN surface-only, severity high, subject
+    `entitlement:<id>`): a LIVE window with NO live un-terminated entitlement grant covering now (matches
+    MaterializeGrant's standing-access projection — per-period grants of a live sub lapsing is verification
+    pressure, NOT freeloading) whose source is PROVEN dead/absent. Exactly three legs (query
+    `ListOrphanEntitlementWindows`, customer-narg + merchant-wide, converge-pass pattern):
+    `missing_subscription` (no sub row at all — LIVE dangling windows moved here from
+    consistency.reference.source_reference, which now keeps only NON-LIVE dangling refs),
+    `terminal_subscription_standing` (end_at NULL on a cancelled/expired/failed sub — the #691 closure never
+    landed; fires only once no grant covers now, i.e. past paid-through), `refunded_payment` (one_off window,
+    payment status refunded, no live grant; grant-backed refunded shapes stay derive.grant.excess, terminated-
+    grant-backed windows stay derive.grant_effect.excess). Recommendation: prose + `{action:
+    revoke_entitlement, params:{entitlement_id, as_of?}}` (as_of = entitled bound for the terminal-standing
+    leg) + alternative `{action: record_admin_grant}`. Verification SQL from the 2026-07-01 doujins analysis
+    documented on the query.
+  - **Duplicate detector `consistency.duplicate.ownership`** (CON, ADMIN surface-only, severity CRITICAL,
+    subject `ownership:<customer>:<product>`): >1 live un-terminated PAID (purchase/subscription-sourced,
+    `include:%` bundle children excluded) ownership grant per (customer, product) — the cross-month double
+    purchase (`ConDuplicateOwnershipGrants`). Refund-netting BOTH ways (status='refunded' OR a linked refund
+    row, the admin path) so an approved refund self-confirms on the next sweep; same netting added to
+    `ConDuplicateChargesSamePeriod`. Recommendation: prose naming both purchases (grant/payment ids, amounts,
+    dates) + `{action: cancel_and_refund, params:{subscription_id? (later leg if subscription-shaped),
+    refund_payment_id (later payment)}}`. `duplicate.provider_charge` bumped to CRITICAL + given the same
+    refund recommendation (later charge). #692 executor relaxed: cancel_and_refund's subscription_id is now
+    OPTIONAL (refund-only for pure one-off duplicates; ≥1 of the two params required) — with tests.
+  - **Gauges** (`GET /merchant/findings` → `gauges`): freeloaders = open {derive.entitlement.orphan,
+    derive.grant_effect.excess} (dead-sub check deliberately NOT in the set — it auto-repairs in the same
+    sweep, never sits open); duplicate_coverage = open {consistency.duplicate.ownership,
+    duplicate.provider_charge, pull.subscription.duplicate}; NEW `verification_pressure` = {count,
+    max_age_seconds} of `unknown` subs past paid-through, computed LIVE from subscriptions
+    (`CountUnknownSubsPastPaidThrough`) — pressure reading, not findings. Alert semantics documented on the
+    handler: freeloaders/duplicate_coverage nonzero for a full sweep cycle = state machine failing;
+    verification_pressure nonzero allowed, max_age trending up = verification machinery down.
+  - **Plumbing**: `ConvergeFinding.RecommendedAction` → UpsertReconciliationFinding.recommended_action (prose
+    now persists from converge passes); structured recommendation rides `evidence.local.recommendation`
+    (FromEvidence honors both); recommendation builders added to internal/reconcile/recommend
+    (RevokeEntitlementRec/RecordAdminGrantRec/CancelAndRefundRec). Findings CHECK is pattern-based
+    (`^(pull|derive|life|consistency)\.…`) — both new types pass, NO migration needed. Route-surface golden
+    updated with the sibling's `/v1/merchant/findings*` + `/v1/merchant/worker-health` routes.
+  - **Tests (REAL testcontainers Postgres, no mocks)**: converge_gauge_detectors_integration_test.go (runway
+    guard: paid runway never flagged, overrun bounded back to period end not revoked, idempotent; all three
+    orphan legs fire with recommendations + as_of; runway/unknown/past_due/completed-payment negatives — stale
+    ≠ freeloader; partition assertions: live dangling window is orphan-only, standing terminal window never
+    touched by the AUTO dead-subs check; duplicate ownership: cross-month pair fires critical w/ later-payment
+    rec, subscription-shaped rec carries subscription_id, single/sequential-after-termination clean,
+    surface-only), admin_findings_gauges_integration_test.go (healthy dataset → all three gauges zero;
+    freeloader detector e2e: sweep detects → gauge 1 → approve revoke via the #692 endpoint → next sweep
+    confirms, gauge 0; verification_pressure count+max-age, resolve one → drops; duplicate detector e2e incl.
+    refund-only approve → refund nets the duplicate → sweep confirms, gauge 0; empty cancel_and_refund → 400).
+    Re-seeded two pre-existing tests to the new partition (derive-mismatch revoke direction → bounded-overrun
+    shape asserting closure-not-revoke; CON source_reference → non-live dangling window). Full
+    `-tags integration` suites green: internal/reconcile, internal/reconcile/converge (incl. the #664
+    imported-shape cohort), internal/http/handlers, internal/integrationharness (route-surface golden);
+    `go build ./...` + `go test ./...` green.
+  - Files: internal/db/queries/{reconciliation,consistency}.sql (+ regen), internal/reconcile/converge/
+    {converge,converge_passes}.go, internal/reconcile/{store.go,recommend/recommend.go},
+    internal/http/handlers/{admin_findings.go,admin_findings_actions.go},
+    internal/integrationharness/testdata/standalone_route_surface.txt, tests.
+  - NOT done (deliberate): no auto-resolve sweep for orphan/duplicate findings whose condition clears WITHOUT
+    operator action (converge has no vanish machinery; matches every other ADMIN finding — operator ignores
+    stale items); `pull.subscription.duplicate` severity/emission untouched (pull-engine-owned);
+    subscription-shaped duplicates with NO payment linkage emit prose-only (cancel alone would not clear the
+    condition — operator resolves out-of-band).
+
+---
+
+# #689: worker observability — a River worker failing 100% of its runs must be impossible to miss
+
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented + verified: go build/vet clean (plain and -tags integration);
+unit tests green; river + app + handlers + migrations integration suites green on the working tree (alongside
+the landed #688/#665 churn). Origin: the #673 lesson generalized. InvoiceWorker/AutoTopupWorker failed
+EVERY run since birth (bare job context → merchant.Require → ErrNoMerchant) and no signal anyone watched could
+distinguish that from health: the process was up, the queue moved, jobs reached terminal states on schedule,
+and the identical hourly error line read as wallpaper. Nobody missed the money because the capability had
+never visibly worked. Found only by reading the call graph in an audit.
+
+## Implementation (2026-07-01)
+- Mechanism: `rivertype.WorkerMiddleware` (river v0.26 `river.Config.Middleware`) — ONE middleware
+  (`riverjobs.WorkerHealthMiddleware`, internal/river/worker_health.go) wraps every registered worker; zero
+  per-worker code. Snoozes are neutral; bookkeeping runs on a detached ctx and never fails the job.
+- Table: migration `062_worker_health.up.sql` → `openrails.worker_health` (kind PK, registered_at,
+  expected_period_seconds, last_success_at/last_error_at/last_error (2000-rune truncate),
+  consecutive_failures, last_alerted_at). RLS posture: OPERATOR-GLOBAL control-plane table like
+  `openrails.merchants` — no merchant_id, NO RLS policy, granted to openrails_app (documented in migration).
+- Registration capture: `addTrackedWorker` + `Runtime.healthPeriodic` (internal/app/worker_health.go) note
+  every kind + periodic cadence (shortest wins) in `riverjobs.WorkerRegistrations`; river_register.go routes
+  all registrations/schedules through them. Standalone client installs the middleware in InitRiver; embedded
+  hosts get `Embedded.WorkerMiddleware()` for their own client config.
+- Alert rule: `WorkerHealthCheckWorker` (kind `openrails.worker_health_check`, every 5m, RunOnStart) seeds a
+  row per registered kind, then alerts on consecutive_failures ≥ 3, never-succeeded past
+  max(3×period, 30m) since registered_at, or stale last_success past the same threshold (periodic kinds
+  only). Deduped: re-alert after 24h or a fresh incident (success since last alert). Routed via
+  `webhooks.RecordLedgerRepairAlert` (notification_queue system alerts, operation=worker_health) fanned to
+  every active merchant — the SAME surface as the ledger reconcilers. The checker heartbeats its own row.
+- Admin surface: `GET /merchant/worker-health` (handler→gen read, `PermMerchantRepairAlertsRead`,
+  internal/http/handlers/admin_worker_health.go).
+- Tests: unit (rule matrix/dedup/registrations/truncation, internal/river/worker_health_test.go) +
+  REAL-River-client integration (internal/river/worker_health_integration_test.go: always-failing worker →
+  streak row + alert within threshold; healthy worker never alerts; #673 merchant.Require repro trips
+  never_succeeded; checker dedup) + admin endpoint integration
+  (internal/http/handlers/admin_worker_health_integration_test.go).
+
+## Metadata
+- Category: reliability
+- Status: done
+- Passes: true
+
+## Target
+Per-worker health bookkeeping + a screaming signal:
+- Record per worker kind: last_success_at, last_error_at, last_error, consecutive_failures (a tiny table or
+  in-Postgres upsert from a worker middleware — River supports middleware/hooks; wrap once, cover every
+  registered worker, zero per-worker code).
+- Alert condition: worker has NEVER succeeded since deploy, or consecutive_failures ≥ N, or no success within
+  k× its expected period (periodic kinds' cadence is known at registration). Route to the existing
+  repair-alert channel (durable, surfaced in admin) — not just a log line.
+- Admin surface: one endpoint/table listing every registered worker kind with last success/error — the
+  "expected N collections, got 0" dashboard that would have caught #673 on day one.
+- Integration test: a worker registered with an always-failing Work() trips the alert within the threshold;
+  a healthy worker never does.
+
+## Non-goals
+Not a metrics stack (no prometheus dependency for this); not per-job tracing. One middleware, one table, one
+alert rule, one admin view.
+
+## Acceptance
+A worker that errors on every run (or stops succeeding) produces a durable repair alert within its threshold
+window without any per-worker instrumentation code; the admin surface shows last-success for every registered
+kind; the #673 scenario reproduced in a test trips the alarm.
+
+---
+
+# #688: flatten the layer ceremony — retire internal/db/repo as a layer, trim service re-exports
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01, approved by Paul) — from the layering discussion in the 2026-07-01 design
+review. Principle (goes in CLAUDE.md as part of this issue): **a layer earns its existence by doing work at
+its own altitude** — handler = HTTP concerns; module/service = orchestration (tx, locks, state machines,
+doctrine); gen = your SQL, typed. Traverse a layer only when it has a job for that operation; skipping a
+layer with nothing to do is correctness, not sloppiness. The anti-pattern is mandatory ceremony.
+
+## Metadata
+- Category: refactor
+- Status: planned
+- Passes: false
+
+## Problem
+Two styles coexist: the newest, most-audited code (money, grants) calls sqlc `gen` directly; older modules
+route through `internal/db/repo` wrappers that are often pure relays, and some module services re-export
+their repo's surface as one-line forwards (entitlement service: 18 of them). Three names per operation,
+parity by discipline, zero added behavior.
+
+## Design (settled in review)
+- **Retire `internal/db/repo` as a LAYER, not as logic.** Every repo method is one of:
+  (a) PURE RELAY (forwards to gen with the same args) → delete; callers call gen.
+  (b) LOGIC-BEARING (decides/transforms/coordinates — e.g. subscription.go UpdateAt full-row contract +
+      FOR-UPDATE variant, entitlement_timeline.go non-overlap window logic, genmap.go model conversion,
+      payment.go CreateIfNotExists semantics) → RELOCATE into the owning domain module (subscriptions,
+      entitlements, payments…), then delete the repo shell. The logic moves home; the layer disappears.
+  Current inventory: ~20 files / ~6k lines in internal/db/repo (+ its integration tests, which move with
+  their logic or retarget gen).
+- **Trim service re-export forwards**: a module service does not mirror its data surface; callers that need
+  a bare read call gen (or the module's real method). Entitlement service's 18 forwards are the poster case;
+  sweep other modules for the same shape.
+- **Explicitly OUT of scope**: pkg/service's dual-transport role (that's #685's parity-mirror retirement);
+  handlers that already call gen for orchestration-free reads (that pattern is BLESSED — admin_operations.go
+  style); building any new wrapper to "complete" a layer (forbidden — the trap is adding forwarding to the
+  good code to match the bad pattern).
+
+## Tasks
+- [x] Write the altitude principle + conventions into .claude/CLAUDE.md (modules talk to gen; repo-style
+      wrappers only where they carry logic, and they live IN the module; services don't re-export data
+      surfaces; handlers may call gen for orchestration-free reads). (phase 1, 2026-07-01)
+- [x] Inventory pass: classify every internal/db/repo method relay vs logic (write the table into this
+      section); count callers per method. (phase 1 — table below; hot files classified + deferred)
+- [x] Relocate logic-bearing methods into their owning modules (keep names/semantics; move tests alongside) —
+      PHASE 1 domains done: entitlements, catalog (price/product), productaccess, checkout-session,
+      payments, paymentmethods. Phase 2: subscriptions, customer/profile, notification-queue, solana-subs.
+- [x] Delete pure relays; migrate callers to gen (phase-1 domains; green suites between batches).
+- [x] Trim service re-export forwards — entitlements poster case done (the 18 forwards absorbed their repo
+      bodies and became the real methods); catalog services likewise. payments/paymentmethods/checkout
+      services still forward to their (now module-local) repos — trim in phase 2.
+- [ ] Delete internal/db/repo when empty (genmap conversions land in internal/db/models or the modules that
+      own the shapes).
+- [ ] Full unit + integration suites green after each batch; no behavior change anywhere (pure motion).
+
+## Sequencing
+After the in-flight #665/#686/dedup agents land (subscriptions + reconcile are hot); safe to run per-domain
+batches concurrently with #684/#685 as long as batches avoid their areas. Good candidate for the same
+one-agent-per-domain pattern as the audit batch.
+
+## Acceptance
+internal/db/repo no longer exists; every former repo behavior lives either in gen (relays gone) or in its
+owning module (logic relocated, tests moved); no module service re-exports its data surface; CLAUDE.md states
+the altitude convention; zero behavior change (suites green throughout, no wire/API drift).
+
+## Phase 1 (2026-07-01) — safe domains DONE, hot domains deferred
+
+Classification + disposition per repo file (build + vet + per-module integration suites green;
+zero test-assertion changes):
+
+| repo file | disposition |
+|---|---|
+| genmap.go | conversions RELOCATED to internal/db/models/genmap.go (exported *FromGen, To/FromJSONB, UpdateTimestamp, IntPtrTo32, Deref*, RevokeReasonPtr). repo/genmap.go shrunk to transitional one-line shims for subscription.go / notification_queue.go (phase-2 deletions). |
+| entitlement.go | ABSORBED into entitlements.EntitlementService — the 18 forwards inlined the repo bodies and became real methods; Insert + LatestFiniteWindow* gained real bodies; EntitlementRepo type deleted. DEAD methods deleted (zero callers, grep-verified): SetEndAtTx, GetLatestActive(+ByCustomer), EndActiveBySubscription, ResumeBySubscription, RevokeByID, RevokeBySubscriptionAndName. |
+| entitlement_grace.go | DEAD entirely (3 methods, zero callers — orphaned by the #511/#512 grant rewrite) → deleted. |
+| entitlement_timeline.go | RELOCATED to internal/modules/entitlements/timeline.go (all logic-bearing; only caller was the module). DEAD deleted: RevokeEntitlementNowTx, InsertTimelineWindow, SetEntitlementEndAtTx. |
+| entitlement_feature.go | RELOCATED whole (merchant scoping + RLS-bypass FK guard + mapping) → entitlements/feature_repo.go; FeatureService holds the local type + *EntitlementService. |
+| price.go / product.go | ABSORBED into catalog.PriceService / catalog.ProductService (forwards became real bodies). Raw Update → unexported updateRow (public Update/Delete keep the deliberate immutability errors); raw Delete DEAD → deleted. PriceFilter moved into catalog, alias killed. |
+| product_access_grant.go | RELOCATED whole (grant-ledger mapping logic) → productaccess/grant_repo.go. |
+| checkout_session.go | RELOCATED whole → checkout/session_repo.go (incl. BindSolanaTransactionRequest). solana/poller.go's two orchestration-free reads now call gen + models.CheckoutSessionFromGen directly (avoids a checkout→solana import cycle). |
+| payment.go | RELOCATED whole → payments/payment_repo.go (CreateIfNotExists semantics, provider-account stamping, relation stitching). PaymentRepo.Delete DEAD → deleted. PaymentFilters moved along; payment_test.go moved. |
+| payment_method.go | RELOCATED whole → paymentmethods/payment_method_repo.go. The repo + service ErrPaymentMethodNotFound sentinels UNIFIED (same package now; same message, errors.Is-compatible for all callers). |
+| customer.go | DEFERRED (callers in modules/subscriptions + modules/webhooks — hot). Enabler only: ensureCustomerRow exported as EnsureCustomerRow (unexported alias kept for subscription.go). Phase 2 finds identity's home. |
+| profile.go | DEFERRED (ProfileRepo fields live in modules/webhooks dispatcher/ccbill — hot). |
+| notification_queue.go | DEFERRED (all callers in modules/subscriptions — hot). |
+| solana_subscription.go | DEFERRED (callers incl. modules/subscriptions lifecycle + cascade test — hot; river/http callers move with it). |
+| subscription.go | DEFERRED per plan (concurrent agents own it). |
+| provider_account_stamp.go | stays (subscription.go dep); resolver exported (ResolveRailMerchantAccountIDForStamp) for the relocated payment/payment-method code; WithRailMerchantAccountID unchanged (handlers/webhook.go, reconcile test). Moves with subscription.go in phase 2. |
+| errors.go (IsNotFound) | stays — 98 call sites across all modules incl. hot; its own phase-2 sweep. |
+
+Tests moved with their logic (assertions untouched): entitlement_timeline → entitlements/timeline_integration_test.go
+(calls the unexported extendActiveBySubscription/endActiveByPayment where the old repo API took an explicit
+now the public service API injects via clock), entitlement_feature, price_intro, price_by_product,
+rls_realtable (ProductService), catalog_platform_sidecars (RLS-boot helpers duplicated locally),
+payment_method_charge, payment_test. catalog gained main_test.go (dbtest.RunMain).
+
+Line delta over phase-1 files: 41 files, +990/−2243 (net −1253).
+
+Cross-module edits flagged: internal/reconcile/provider_account_stamp_integration_test.go — one mechanical
+swap repo.NewPaymentRepo → payments.NewPaymentRepo (reconcile is a concurrent agent's area; the file had no
+uncommitted churn). pkg/service needed NO edits (it only uses repo.IsNotFound, untouched).
+
+Full ./tests/... run (2026-07-02): ONE failure — TestFailMembershipLimitedModeLeavesRemoteSubscription
+("limited mode must not stamp a proactive deletion marker / schedule a remote delete",
+tests/deferred_delete_followups_test.go). VERIFIED PRE-EXISTING: fails identically in a clean worktree at
+committed HEAD a6ec9070 with zero uncommitted changes — NOT caused by #688 phase 1; it's in the #664/#665
+limited-mode/deferred-delete domain (concurrent agents active there). Everything else in ./tests/... green.
+
+Phase 2 remainder: subscription.go (+ callers in subscriptions/webhooks/intents/river), notification_queue.go,
+solana_subscription.go, customer.go, profile.go, provider_account_stamp.go, errors.go, repo/genmap.go shims;
+trim residual same-name forwards in payments/paymentmethods/checkout services (their repos now live in-module,
+but the intra-module forward ceremony remains); delete internal/db/repo when empty.
 
 ---
 
 # #686: decompose the subscriptions module along the #669 registry seam
 
-**Completed:** no
-**Status:** IN_PROGRESS (2026-07-01, approved by Paul) — rail-specific lifecycle behavior moves out of giant
-per-rail branches inside internal/modules/subscriptions and into the #669 rail descriptor registry (function
-fields), leaving lifecycle orchestration rail-agnostic.
+**Completed:** yes
+**Status:** DONE (2026-07-01, uncommitted in-tree) — rail-specific lifecycle behavior moved out of the
+per-rail branches inside internal/modules/subscriptions into the #669 rail descriptor registry (3 new
+descriptor fields: RemoteDeleteOnTerminalCancel, CancelMode func, CancelPortalURL); lifecycle orchestration no
+longer switches on rail strings (six justified single-rail executor/machinery sites remain, see Inventory).
+Behavior-preserving; all suites verified (see Tasks) with an isolated A/B proving zero introduced tests/
+failures.
 
 ## Metadata
 - Category: architecture
-- Status: in_progress
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 internal/modules/subscriptions (~9k lines) carries rail-conditional behavior inline: lifecycle
@@ -102,7 +822,23 @@ change shape (CancelMode aliasing is additive); no webhooks-side edits required,
       TestRegistryPinnedFacts pins per-rail RemoteDeleteOnTerminalCancel + active-sub cancel mode + ccbill
       portal URL + NMI's pending/executed/lapsed cancel-mode window; TestLookupNormalizes pins unknown-rail
       destructive default + nil-sub destructive + empty portal URL.
-- [ ] Existing subscriptions + webhooks + tests/ suites green as the behavior-preservation net.
+- [x] Existing subscriptions + webhooks + tests/ suites green as the behavior-preservation net.
+      → go build + go vet (both tags) clean; repo-wide unit suite green (incl. rails + subscriptions);
+      integration green: internal/modules/subscriptions, internal/reconcile (incl. the #679
+      unknown-resolution queue-always test), internal/reconcile/converge (converge still constructs lifecycle
+      with NIL side-effect deps — cannot fire the remote NMI delete), internal/river (dunning).
+      tests/ suite: verified via ISOLATED A/B (staged baseline ± only this issue's 5-file diff, because
+      concurrent webhook-dedup/decider work shares the tree and briefly broke the build): identical failure
+      sets with and without the diff — ZERO failures introduced. Two PRE-EXISTING failures (confirmed at clean
+      HEAD by other agents, NOT #686's): TestFailMembershipLimitedModeLeavesRemoteSubscription (stale pre-#679
+      test still asserting the old #345 "limited mode doesn't queue" semantic; code correctly queue-always +
+      parks at the executor — the test belongs to the #679 follow-up) and six ordering-dependent CCBill
+      webhook-500 tests (pass in filtered runs both with and without the diff).
+
+## Verification summary (2026-07-01)
+Behavior-preserving; no migrations; no webhooks-module edits (its consumed subscriptions surface unchanged —
+see Inventory tail); remaining rail checks in the module are exactly the six justified-(c) executor/machinery
+sites. STATUS: DONE pending Paul's review/commit.
 
 ## Acceptance
 No rail-string switches remain in subscription lifecycle orchestration; adding a rail's lifecycle behavior =
@@ -113,14 +849,38 @@ filling descriptor fields; all existing suites green with no behavior change.
 # #685: unify embedded and remote modes — one client, pluggable transport
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — direction set by Paul: embedded mode is a KEPT product feature (removal
-considered in the 2026-07-01 design review and REJECTED); the fix for dual-mode cost is further consolidation,
-not removal. Successor in spirit to the deferred #338/#468 unified-SDK work; unblocked by #670 (one neutral
-HTTP stack).
+**Status:** IN PROGRESS (2026-07-01) — core landed in-tree. In-process RoundTripper (`embed/transport.go`)
+dispatches into the real neutral /v1/merchant mux (same RegisterServiceRoutes standalone mounts); AUTH =
+context-attached host principal (`billingauth.HostPrincipal` via `WithHostPrincipal`) checked FIRST in
+`legacyGate.Authorize` — unforgeable from the network because the gate consults the request CONTEXT, never a
+header; permissions = merchant owner grant, gated like every credential. Merchant pinning: transport pins
+`Runtime.ConfiguredMerchant` (live read; falls back to caller's `openrails.WithMerchant`). `Runtime.Client()`
+now returns the unified client (remote impl over the in-process transport); 20/21 `openrails.Client` methods
+migrated, their transcriptions DELETED from embed/client.go (~1080 → ~370 lines). Still transcribed:
+`SetCustomerSpendDelegations` (wire surface is /v1/customers/* delegated customer-treasury auth, not the
+merchant API) + the embedded-only extras with no wire counterpart (single `Admit`, `SetCreditAccountSettings`,
+`ListCreditTransactions`, `BudgetStatus`, `AbuseUsage` — kept conservatively; no in-repo or host callers
+found, later-retirement candidates together with their sole pkg/service backers `BudgetStatus`/`AbuseUsage`).
+pkg/service audit: nothing retired this pass — every facade method the deleted transcriptions used is still
+handler-backed. SDK ergonomics shipped: `WithAPIKey`, `Verifier`/`openrails.Verify` (probe =
+GET /v1/merchant/settings; needs settings:read), static base-URL validation (no-error constructor,
+descriptive per-call failure). Conformance now runs the embedded side through the NEW in-process transport;
+new integration tests: auth-traversal (context marker vs spoofed header), Verify (good/bad/unreachable/
+invalid-URL), WithAPIKey against the real service-credential middleware. Direction set by Paul: embedded mode
+is a KEPT product feature (removal considered in the 2026-07-01 design review and REJECTED). Successor in
+spirit to #338/#468; unblocked by #670.
+VERIFIED (2026-07-01): go build ./... + -tags integration green; vet green on touched packages; unit suites
+green (root, embed, pkg/billingauth, pkg/embedded/*, pkg/service, internal/http/*); integration GREEN for
+./embed (full conformance THROUGH the new in-process transport + TestInProcessTransportAuthTraversal +
+TestSDKErgonomics_WithAPIKeyAndVerify), ./pkg/embedded/..., ./pkg/service. NOT mine (reported, not fixed):
+integrationharness TestStandaloneRouteSurface golden drifted by concurrent agents' new routes
+(/v1/merchant/findings*, /v1/merchant/worker-health — #689's to update); ./tests CCBill
+dunning/entitlement family (9 fails) = the known pre-existing ordering-dependent CCBill webhook failures +
+the concurrent subscriptions/dunning agent's in-flight work.
 
 ## Metadata
 - Category: architecture
-- Status: planned
+- Status: in-progress
 - Passes: false
 
 ## Problem
@@ -146,13 +906,26 @@ Boot/infra ownership (`BootstrapOptions` injected pool; posture gates keyed on i
 cozy-art's browser surface is already unified (frontend → embedded HTTP routes with normal AuthKit bearers).
 
 ## Tasks
-- [ ] In-process RoundTripper over the neutral handler (context propagation: merchant pinning + auth principal
-      must traverse it identically to a real request).
-- [ ] `Embed(app)` constructor on the root SDK; wire pkg/embedded to hand out the unified client.
-- [ ] Migrate embed/client.go method-by-method onto it; delete transcriptions as they fall.
-- [ ] Collapse conformance suite to transport smoke tests once both constructors share one implementation.
-- [ ] Audit pkg/service for facade-vs-parity-mirror roles; retire the mirror half.
-- [ ] Host adoption notes (cozy-art, doujins): constructor swap, no behavior change expected.
+- [x] In-process RoundTripper over the neutral handler (context propagation: merchant pinning + auth principal
+      traverse identically — host principal is a context value, checked by the real gate; test proves a
+      header-spoofed network-shaped request is 401 while the transport-injected one authorizes).
+- [x] Unified constructor: `Runtime.Client()` hands out the unified client (remote impl + in-process
+      transport). (A root-SDK `Embed(app)` is impossible without linking the engine into the root package —
+      deps_test forbids it; `embed.Runtime.Client()` IS the second constructor.)
+- [~] Migrate embed/client.go method-by-method; 20/21 interface methods migrated + transcriptions deleted.
+      Remaining: SetCustomerSpendDelegations (customer-treasury auth surface) + embedded-only extras
+      (Admit/SetCreditAccountSettings/ListCreditTransactions/BudgetStatus/AbuseUsage — no wire counterpart).
+- [ ] Collapse conformance suite to transport smoke tests once the last transcription falls (kept full for
+      now; it currently proves the new transport against the real standalone).
+- [~] Audit pkg/service for facade-vs-parity-mirror roles: nothing retired this pass (all still
+      handler-backed); flagged svc.BudgetStatus/svc.AbuseUsage (sole callers = embed extras) as retirement
+      candidates once host non-use is confirmed.
+- [ ] Host adoption notes (cozy-art, doujins): constructor swap, no behavior change expected (hosts keep
+      compiling unchanged — Runtime.Client signature untouched).
+- [x] SDK ergonomics (2026-07-01): `WithAPIKey(key)` sugar; `Verifier`/`openrails.Verify(ctx, c)`
+      authenticated readiness probe (GET /v1/merchant/settings — kept OUT of the Client interface so
+      third-party implementations keep compiling); static url.Parse validation at construction
+      (no-error constructor, descriptive per-call error).
 
 ## Acceptance
 One SDK implementation serves both modes; adding an endpoint touches handler + route + (generated/typed) client
@@ -164,13 +937,15 @@ infra ownership genuinely differs.
 # #684: webhooks as wake-up signals — fetch-and-converge for fetchable rails (Stripe, NMI)
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 design review; sibling of the rescoped #665 (they feed
-the same decider — do them in sight of each other, #665's decider seam first or together).
+**Status:** IMPLEMENTED (2026-07-02, uncommitted) — fetch-and-converge shipped for Stripe + NMI
+subscription-STATE events; thin-destination cutover DEFERRED (final task, needs live verification — see
+Implementation notes); refund/void/dispute/checkout money-record handlers deliberately stay payload-apply
+this round (documented below). Originally from the 2026-07-01 design review; sibling of the rescoped #665.
 
 ## Metadata
 - Category: architecture
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Problem
 Webhook handlers APPLY the event payload to local state. Every ordering defense we built in #675 (row locks,
@@ -203,33 +978,128 @@ timestamp (fetch until object updated_at >= event created, bounded retries) — 
 ReadUntilConsistent.
 
 ## Tasks
-- [ ] Dirty-mark + coalesced fetch worker (River; per-subscription debounce; UniqueOpts on the sub id).
-- [ ] Stripe: reduce snapshot-event handlers to dirty-marks; converge from fetched objects (reuse the
-      thin-event hydration path + #665 decider seam). Keep payment-record writes fetch-sourced.
-- [ ] NMI: same, via the v5 read surface (#663) + `unknown_probe.go` sources.
-- [ ] Delete the then-dead payload-apply machinery for those rails (the #675 watermark/lock code retires where
-      fetch-first makes it unreachable; keep for CCBill).
-- [ ] Out-of-order/burst integration tests become trivial-by-construction — port the #675 ordering tests to
-      assert convergence instead.
+- [x] Dirty-mark + coalesced fetch worker (River; per-subscription debounce; UniqueOpts on the sub id).
+      → internal/river/jobs_subscription_converge.go: `SubscriptionConvergeWorker` + enqueuer, unique per
+      (merchant, rail, subscription_reference) via `river:"unique"` tags, 5s debounce (ScheduledAt),
+      ByState = default MINUS completed (a finished converge never blocks the next wake-up; forces river's
+      slower advisory-lock insert — fine at webhook volume). Registered in internal/app/river_register.go;
+      dispatcher gets a late-bound enqueuer (`runtimeConvergeEnqueuer`, build_runtime.go) that resolves the
+      runtime's producer at call time (works for config-built AND embedded-injected River clients).
+- [x] Stripe: reduce snapshot-event handlers to dirty-marks; converge from fetched objects. Keep
+      payment-record writes fetch-sourced.
+      → invoice.paid / invoice.payment_failed / customer.subscription.updated / customer.subscription.deleted
+      now parse IDENTITY ONLY (`markDirtyFromInvoice`/`markDirtyFromSubscription`) and enqueue. The fetch is
+      GET /v1/subscriptions/{id}?expand[]=latest_invoice via the #665 liveness prober (stripeapi read-only
+      choke), EXTENDED with metadata/customer/items-price/canceled_at/invoice created+amount_due+billing_reason.
+      webhooks/converge_stripe.go `StripeConvergeService`: (1) creation leg — no local row: CreateMembership
+      from FETCHED metadata (user_id/internal_price_id stamped by checkout) + latest paid invoice; checkout
+      session marked succeeded; initial credits; cross-key payment dedup ported
+      (fetchedInvoicePaymentAlreadyRecorded); (2) fetch-sourced MIRROR FACTS outside the decider vocabulary —
+      price remap (Model B) + entitlement downgrade revoke, scheduled-cancel marks (Stripe-portal
+      cancel_at_period_end), portal resume (terminal-reason guarded); (3) decider convergence via the new
+      `reconcile.ConvergeSubscriptionFromSnapshot`; renewal credits granted post-renew (idempotent per
+      period_end), payment-failed notification on past_due.
+- [x] NMI: same, via the v5 read surface + `unknown_probe.go` sources.
+      → recurring.subscription.add/update/delete + transaction.sale.success/failure → identity-only
+      dirty-marks. webhooks/converge_nmi.go `NMIConvergeService`: pending rows take the SIGNUP leg (the
+      decider deliberately doesn't own pending): fetched settled charge (ProbeSalesByOrderID on the local id)
+      → CreateMembership (amount verbatim from the report, 2% price tolerance check kept), fetched decline →
+      failed-payment row + FailMembership, nothing yet → ErrConvergeRetryLater (worker snoozes 1m, gives up
+      after 24h — the pull sweep owns it then). Non-pending rows: the ONE #665 NMISubscriptionProber snapshot
+      → decider. v5 404 = provider-confirmed-gone (cancel w/ RemoteGone).
+- [x] Delete the then-dead payload-apply machinery for those rails.
+      → stripe.go −1007 lines / nmi.go −1006 lines (net −2,553 across handlers+tests, +1,199 converge code).
+      RETIRED: `stripe_last_event_created` watermark (const + read/set/bump helpers), the FOR-UPDATE
+      read-modify-write applies (handleSubscriptionUpdated/handleInvoicePaymentFailed row locks + stale-event
+      rejection + terminal-transition guard), handleInvoicePaid/handleSubscriptionDeleted,
+      applyStripeSubscriptionStatus/applyStripeScheduledCancellation, ensureStripePaidSubscriptionEntitlements,
+      validateStripeInvoicePrice (fetched-record variant lives in converge_stripe.go), NMI
+      handleAdd/Update/DeleteSubscription + handleTransactionSaleSuccess/Failure + the metadata-transaction-id
+      activation helpers. KEPT: everything CCBill uses (ccbill.go untouched), the NMI/Stripe money-record
+      handlers listed in the notes, #671's wire-pinning helpers (stripeInvoicePaidAmountMicros/
+      FailedAmountMicros + their test), stripeInvoice identity parsing (classic + 2026-04-22.preview shapes —
+      the dirty-mark needs it).
+- [x] Port the #675 ordering tests to convergence assertions.
+      → webhooks_apply_integration_test.go rewritten (Stripe half): fake Stripe TRANSPORT (httptest, real wire
+      shape) + real decider. Stale-updated-after-payment-failed → TestStripeConvergeStaleEventsCannotRevertPastDue
+      (N wake-ups re-fetch the same truth; recovery only when truth changes); invoice.paid ∥ subscription.updated
+      both orders → TestStripeConvergeRenewalIdempotentAnyOrder (same op now; exactly-once payment);
+      terminal-blocked renewal → TestStripeConvergeTerminalRowKeepsMoneyTruth (no resurrect; the charge lands
+      as a durable PAYMENT ROW instead of the old repair alert — money truth ≠ lifecycle truth). CCBill/NMI
+      void/refund-race #675 tests kept unchanged (those handlers stay payload-apply). stripe_ordering_test.go
+      (watermark unit tests) deleted with the watermark.
+- [ ] FINAL — thin-destination cutover: DEFERRED (unchanged scope). Requires live verification that every
+      relied-on event type is thin-deliverable via v2 event destinations + a signing-secret rotation; can't be
+      live-verified here and correctness doesn't depend on it (fetch-first already ignores snapshot bodies for
+      subscription state). No flag-gated blind implementation shipped (NMI-v5 lesson: probe first).
 
 ## Acceptance
 For Stripe and NMI: no webhook handler writes subscription/payment state from an event payload; all state
 writes flow through fetch → decider (#665). The #675 ordering tests pass with the ordering machinery deleted
 for those rails. CCBill behavior unchanged.
 
+## Implementation notes (2026-07-02)
+- **Converge entry point** (reconcile is #665's, extended): `reconcile.ConvergeSubscriptionFromSnapshot(ctx,
+  db, lc, sub, snap, now, window)` — Decide over EvidenceBundle{Snapshot} → UNCONDITIONAL money-truth mirror
+  (ALL fetched charge events for the sub backfilled idempotently by transaction id, even on TransitionNone:
+  terminal rows, early renewals, mid-cycle upgrade invoices) → rail-customer materialization → ApplyDecision.
+  Side-effects factored into `applyDecisionSideEffects`, shared with the unknown-cohort resolution.
+  `StripeSnapshotFromLiveness` exported (probe + webhook converge share one record→snapshot mapping); an
+  UNPAID latest invoice w/ amount_due now maps to a decline transaction ("failed:"-prefixed id, invoice's own
+  created — #651 no fabricated instants) so failed attempts land as failed payment rows fetch-sourced.
+- **#671-family fix (load-bearing now)**: unknown_orchestration's backfillSubscriptionPayments wrote
+  RemoteTransaction.AmountCents (CENTS) raw into payments.amount (MICROS) — 10,000× under. Converted at the
+  boundary (CentsToMicros); the pull-engine applier already converted (appliers.go), only this path was wrong.
+- **Deliberate scope keeps (payload-apply survivors, all idempotent money-RECORD paths resolved against local
+  rows)**: Stripe checkout.session.* (one-time purchase + session bookkeeping), charge.succeeded /
+  payment_method.attached (card snapshots), invoice_payment.paid (payment linking), refunds + disputes; NMI
+  refunds/voids/ACU/chargeback batches. They never move SUBSCRIPTION state except through terminal
+  cancel-on-full-refund paths that key off recorded payments. Fetch-sourcing these is a possible follow-up.
+- **Behavior deltas (deliberate)**: (1) NMI transaction events with NO reference at all are now terminal
+  non-retryable (was: retry forever on the same bytes). (2) A renewal charge against a TERMINAL row records a
+  payment row instead of a `terminal_blocked_renewal_success` repair alert (stronger durable trace). (3) NMI
+  sale.success with an unknown/unresolvable reference: converge job logs + completes (checkout/pull own it)
+  instead of erroring the webhook. (4) Analytics event-log calls from the deleted Stripe/NMI handlers
+  (charge success/failure payment events) were not ported — analytics for those rails' renewals now come from
+  the payment rows; re-addable in the converge services if wanted.
+- **Read-after-write lag**: kept minimal per the issue — the 5s enqueue debounce absorbs most of it;
+  settlement lag on NMI signups snoozes (bounded); anything else self-heals via the next event/pull (converge
+  is never-corrupting). No per-read consistency gate was added.
+- **Coalescing window caveat**: `running` must stay in the unique states (river v3 requirement), so an event
+  arriving mid-fetch dedupes away; the next event or the 4h pull sweep re-converges. Documented in the worker.
+- **Tests (all real integration, testcontainers PG; provider = httptest transport fakes; NO mocks)**:
+  (a) ported #675 scenarios above; (b) burst coalescing — TestSubscriptionConvergeBurstCoalescesToOneFetch
+  (5 enqueues through a REAL started river client ⇒ 1 river_job row ⇒ 1 provider fetch by transport counter);
+  (c) provider-down — TestStripeConvergeProviderDownParksAndRecovers + TestNMIConvergeProviderDownParks
+  (retryable error, state/access intact, converges after recovery); (d) fetch-404 through the REAL decider —
+  TestStripeConvergeFetch404IsProviderConfirmedGone + TestNMIConvergeFetch404IsProviderConfirmedGone (terminal
+  cancel, cancel_type=expired); (e) end-to-end — TestWebhookWakeUpEndToEnd_{StripeRenewal,NMIRenewal}
+  (REAL signature verification via sigverify [webhookutil unusable in river tests: import cycle], dispatcher →
+  Postgres dedup truth row → coalesced job on a real river client → converged subscription + payment row;
+  payload carries DECOY amounts to prove nothing is payload-applied). NMI activation ported:
+  nmi_add_subscription_integration_test.go → converge activation/retry-later tests (fake NMI query.php + v5,
+  direct-post counter must stay 0). Cross-key dedup test ported to the fetched-record helper.
+- **Suites**: go build/vet clean both tags. Unit: whole repo green. Integration green: internal/modules/webhooks
+  (full), internal/reconcile (full), internal/reconcile/converge (full — 2 transient failures observed mid-run
+  were the #691 agent's in-flight churn and cleared once their edit settled), internal/river (full incl. new
+  tests), internal/app, internal/http (merchant webhook routing). tests/ suite result recorded below.
+- **Wiring note**: per-merchant Stripe/NMI converge credentials follow the EXISTING worker precedent
+  (config.RailMerchantAccountSet + process NMI client map — same as ProviderRefreshWorker/dispatcher); a
+  deployment without a River producer fails the dirty-mark RETRYABLY (provider redelivers; nothing lost).
+
 ---
 
 # #681: scoped provider-credential lookups hardcode environment="live" — sandbox deployments can't resolve NMI/Stripe/Solana credentials
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — surfaced by the #668 test-posture work. The CCBill instance of this bug was
-FIXED (internal/modules/checkout/merchant_rail_secrets.go now derives via
-`config.ExpectedProviderEnvironment(IsTestMode())`); the remaining rails still hardcode.
+**Status:** IMPLEMENTED (2026-07-01, uncommitted) — full sweep done; every scoped lookup now derives environment
+from deployment posture (`config.ExpectedProviderEnvironment(IsTestMode())` or the plumbed
+`merchants.Service.providerEnvironment`). Fixtures un-masked, per-rail integration tests added.
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Problem
 Under #355/#668 semantics, `test_mode=true` ⇒ provider-account catalog rows get `environment='test'`
@@ -244,139 +1114,58 @@ A true sandbox deployment (test rows) can never resolve those rails' scoped cred
 masks it by seeding NMI as 'live'.
 
 ## Tasks
-- [ ] Sweep all sites to derive environment from config (`ExpectedProviderEnvironment(IsTestMode())`) — some
+- [x] Sweep all sites to derive environment from config (`ExpectedProviderEnvironment(IsTestMode())`) — some
       `merchants.Service` methods carry no config today, so signatures change; plumb, don't global.
-- [ ] Un-mask the test fixtures: seed NMI/Stripe as 'test' under test_mode posture and keep the suite green.
-- [ ] One regression test per rail: sandbox posture resolves scoped credentials.
+- [x] Un-mask the test fixtures: seed NMI/Stripe as 'test' under test_mode posture and keep the suite green.
+- [x] One regression test per rail: sandbox posture resolves scoped credentials.
 
 ## Acceptance
 A test_mode deployment resolves every configured rail's scoped credentials from its 'test' catalog rows; no
 lookup hardcodes an environment literal.
 
----
-
-# #679: destructive provider-intent circuit breaker — mass NMI deletes must halt and ask
-
-**Completed:** no
-**Status:** IMPLEMENTED (2026-07-01, uncommitted) — was PLANNED, from Paul's #664 post-mortem question: the
-1,672 wrongful cancellations queued ZERO nmi_delete intents (lucky, see Findings), but the legitimate delete
-path had no volume guard. NMI has no read-only keys, so a bug that mass-cancels through the REAL path
-(FailMembership) would mass-delete real production subscriptions.
-
-## Metadata
-- Category: safety
-- Status: implemented
-- Passes: true
-
-## Findings (why the incident queued no provider intents)
-
-Converge repairs are structurally provider-side-effect-free: the old `grace_exhausted` repair called
-`ApplyLocalCancellation`, which contains NO delete scheduling; only `FailMembership` writes
-`DeletionScheduledAt` + the `nmi_delete_subscription` intent, gated on an injected `deferDelete` scheduler that
-`NewConvergeEngine`'s lifecycle instance never receives. The converge pass comment even deferred the
-provider-cancel remediation ("lands with the provider-action wiring") — never wired. So the incident corrupted
-local state only; NMI was untouched. Post-#664 converge cannot even cancel locally.
-
-## Existing safeguard stack (verified, keep)
-
-1. `test_mode=true` + NMI boot probe: production NMI credentials REFUSE BOOT in a test environment (cached
-   verdict in `openrails.probe_verdicts`) — the "prod keys in a test env" scenario is already fail-closed.
-2. `provider_write_mode=readonly`: transport-level block in the NMI client (every direct-post mutation returns
-   ErrProviderReadOnly) and the stripeapi choke point; REQUIRED outside development.
-3. `provider_write_mode=limited`: no system-initiated provider writes (FailMembership skips delete scheduling).
-4. All remote subscription deletes funnel through the durable provider-intent ledger + executor — one chokepoint.
-
-## Gap + design (recommended)
-
-The unguarded case: a #664-class bug that wrongly routes subs through the LEGITIMATE dunning path — real retries
-fail (cards can't pay for the wrong reason), FailMembership terminally cancels, and thousands of nmi_delete
-intents execute automatically under `provider_write_mode=full`.
-
-Recommend a VOLUME CIRCUIT BREAKER at the intent executor (not blanket approval): destructive intent types
-(`nmi_delete_subscription`) get a per-(merchant, rail) execution budget per rolling window — e.g.
-`max(K, small % of active subs)` per 24h. Over budget → executor HALTS destructive types for that merchant,
-emits an OPERATOR finding, and resumes only on explicit operator ack. Routine churn (a handful/day) stays
-automatic — holding EVERY delete behind approval would let NMI keep billing customers whose subs we cancelled
-(customer harm) and turns normal operation into an ops queue. Mass deletion is always an incident; that is what
-asks permission.
-
-## Tasks
-
-- [x] Queue-always for terminal cancels (Paul's model, 2026-07-01: queue the delete intent even without
-      credentials/mode to execute — execution waits, the decision is durable): (a) `FailMembership` under
-      `provider_write_mode=limited` currently SKIPS queuing the delete entirely (inconsistent — the dunning
-      CHARGE path under limited materializes its intent "for the executor to drain when the mode allows");
-      (b) unknown-resolution's stale-decline → cancelled path queues nothing though the remote may be alive.
-      Both should durably record the desired delete unconditionally; mode/credentials/breaker govern execution
-      only. Aligns with #674 (all external writes post a durable intent first).
-- [x] Budget check in the provider-intent executor for destructive types, per (merchant, rail), rolling window;
-      threshold `max(K, pct of active subs)` — constants, not config knobs, until someone needs tuning.
-      (Implemented per-merchant across all destructive types — one budget + ONE standing finding per merchant;
-      the only destructive type today is nmi_delete_subscription, so per-(merchant,rail) is currently identical.)
-- [x] Breach → halt destructive execution for that merchant + OPERATOR finding (`life.provider_intent.held_bulk`
-      or similar); non-destructive intents unaffected; explicit ack resumes.
-- [x] Intents held by the breaker stay pending (never expire into `abandoned` while held).
-- [x] Tests: N deletes under budget execute; N+1 halts + finding; ack resumes; other merchants unaffected.
-
-## Progress
-
-- 2026-07-01 IMPLEMENTED (uncommitted). What was built:
-  - Queue-always: `FailMembership` no longer skips delete scheduling under `provider_write_mode=limited` —
-    marker + nmi_delete intent are queued unconditionally (atomic in the cancellation tx); if no scheduler is
-    wired it WARNs loudly. Execution was ALREADY executor-gated (`intents.GateExecution` parks system-origin
-    under limited/readonly) — verified by test.
-  - Unknown-resolution stale-decline gap: `UnknownVerdict.RemoteGone` (false only for the stale-decline cancel;
-    true for roster cancelled/expired or absent-from-exhaustive-roster). Apply path maps Cancelled+!RemoteGone
-    to new `ResolveCancelledRemoteAlive`, which cancels locally AND queues the deferred NMI delete
-    (DeletionScheduledAt + intent, FailMembership shape). `jobs_provider_refresh.runUnknownReconcile` now
-    injects the DeferredDeleteScheduler (embedded uses the same Runtime registration — no separate wiring).
-    The production scheduler moved from internal/app to exported `intents.NMIDeleteScheduler` (app keeps a
-    shim) so the reconcile path/tests construct the real thing.
-  - Volume breaker: `intents.VolumeBreaker` in the executor, gating a destructive-types set
-    (`nmi_delete_subscription`). Budget `max(25, 1% of merchant's active subs)` per rolling 24h (package
-    consts). Executed count from the provider_intents ledger (executed_at, plus unresolved attempt statuses;
-    in_flight excluded — batch claims would self-count). Over budget → intent PARKS (stays pending) + ONE
-    `life.provider_intent.held_bulk` requires_review finding per merchant (stable subject_key
-    `destructive_volume`, evidence: executed_count/budget/window_hours/active_subscriptions). Open finding =
-    halted; operator ACK (fixed) resumes with the count window restarted at resolved_at; DISMISS (ignored)
-    permanently silences the breaker for that merchant (findings upsert keeps ignored ignored — documented).
-    `ExpireOverdueProviderIntents` now refuses to expire breaker-held destructive intents while the finding is
-    open. New sqlc queries live in the intents query file (now rail_intents.sql after the concurrent
-    provider_intents→rail_intents rename; NOT reconciliation.sql). Non-destructive intents untouched; the
-    verifier (read-only) is not gated. NOTE: implemented concurrently with the rail-identity rename sweep
-    (provider_intents→rail_intents etc.) — that agent adapted this code in place; #679 semantics unchanged.
-  - Tests: verdict RemoteGone table cases (unit, green); breaker budget math (unit, green); integration —
-    limited-mode FailMembership queues + executor parks under limited + drains under full
-    (TestFailMembershipLimitedModeQueuesDeleteIntent), breaker end-to-end with dedicated merchants: 25 execute,
-    26th halts + finding, open finding keeps halting, held intent survives ExpireOverdue, other merchant
-    unaffected, ack resumes (TestBreakerHaltsBulkDestructiveExecution), stale-decline queues the delete /
-    roster-gone queues nothing (TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete). Full
-    internal/intents integration package green; `go build ./...` + `go test ./...` green; targeted river
-    integration (dunning materialize + provider refresh) green. Incidental rename-completion fixes made while
-    validating (rail-identity sweep leftovers in files #679 owns): jobs_provider_refresh.go watermark upserts'
-    `ON CONFLICT ON CONSTRAINT` now uses rail_refresh_watermarks_identity_key, and
-    unknown_orchestration_integration_test.go finished the #682 half-edit (account_id column; NMI vault now
-    asserts NO rail_customer_accounts row, matching the test's own #682 tail assertion).
-
-## Out of scope
-
-- Per-delete operator approval (rejected: harms customers via continued NMI billing, and normal churn would
-  drown an approval queue).
-- New read-only NMI credentials (NMI doesn't offer them; transport read-only mode already covers it).
-
-Acceptance: no single run/window can mass-delete provider subscriptions; a bulk anomaly halts destructive
-execution and requires explicit operator acknowledgment; routine single deletes remain automatic; the existing
-boot-probe/readonly/limited stack is unchanged.
+## Implementation notes (2026-07-01)
+- Plumbing: `merchants.NewService(pool, secrets, providerEnvironment)` — posture is a constructor REQUIREMENT
+  (validated live|test); scoped lookups (`LoadStripeCredentials`, `LoadNMIWebhookSigningSecret`,
+  `LoadNMITokenizationConfig`) use `s.providerEnvironment`. Callers: internal/http/server.go and
+  bootstrap provisionMerchantIdentity (cfg plumbed in) pass `config.ExpectedProviderEnvironment(IsTestMode())`.
+- Root-cause default removed: `normalizeProviderSecretEnvironment("")` no longer silently returns "live";
+  empty env is now an error at AssertRailMerchantAccountUnowned / ResolveRailMerchantAccountByIdentity, and
+  List/Get/UpsertPaymentProviderConfig default an OMITTED environment to the service posture (invalid ⇒ error).
+- Sites fixed: handlers/checkout_session.go checkoutRailConfigured; checkout merchant_rail_secrets.go
+  resolveNMIClient (NMI leg); paymentmethods/vault_service.go resolveNMIClient; merchants/credentials.go ×3;
+  solana recurring wiring.go (environment now a REQUIRED param, empty errors — no live fallback);
+  handlers/webhook.go webhookProviderEnvironment now uses the config helper (was literal-but-correct).
+- Fixtures un-masked: tests/testcontainer_suite.go NMI seeded at posture env (helper hardcoding 'live' deleted);
+  tests/nmi_live_lifecycle_e2e_test.go secret name follows posture; integrationharness
+  standalone_no_default_merchant_test.go stripe row 'live'→'test'; internal/http
+  routes_merchant_webhook_integration_test.go reworked to test posture (its ccbill 500 asserts were ALREADY
+  red at HEAD — 403 — pre-existing; now honest: no live ccbill rows so the #668 bypass engages).
+- Integration tests (real testcontainers PG, no mocks): merchants/sandbox_posture_integration_test.go
+  (Stripe + NMI + live-row isolation), checkout/sandbox_rail_credentials_integration_test.go (NMI +
+  CCBill through real merchants.Service), solana covered by existing
+  TestRailMerchantAccountSignerUsesConfiguredEnvironment (env=test rows).
+- Write-side too: merchant-manifest reconcile/prune now default an OMITTED account environment to posture
+  (`manifestProviderEnvironment(cfg, raw)`) instead of silently writing live rows a sandbox can't resolve;
+  static manifest validation accepts omitted env (resolved at reconcile).
+- Left alone on purpose: HasLiveRailMerchantAccounts (deliberate live probe, #668), gen SQL
+  `COALESCE(environment,'live')` (nullable-arg default, all callers bind non-nil), probe_cache verdict string.
+- ./tests full suite: 7 failures (6 CCBill webhook 500s + TestFailMembershipLimitedModeLeavesRemoteSubscription)
+  are PRE-EXISTING — reproduced IDENTICALLY on a clean HEAD (a6ec9070) worktree; pass in isolation
+  (ordering-dependent, webhooks/subscriptions area). integrationharness: TestStandaloneRouteSurface (new
+  worker-health route not in the #670 golden) + TestNativeCatalogBundleIncludesHTTP (catalog validation) fail
+  from OTHER agents' in-flight uncommitted work, not #681.
 
 ---
 
 # #671: CRITICAL — micros passed where cents/dollars expected: real charges at 10,000×
 
-**Completed:** no
-**Status:** IN_PROGRESS (2026-07-01) — 1a/1b/1c/1d/1e/1g + the analytics siblings of 1f FIXED, with
-wire-pinning unit tests; `go build ./...` + all touched-package tests green. DEFERRED: 1f storage row
-(webhooks/stripe.go — #675 owns that file) and the NMI/Stripe/CCBill provider-boundary wire tests + boundary
-struct retyping (collide with the in-flight #663 nmi-v5 rewrite; post-#663 task added below). Notable:
+**Completed:** yes
+**Status:** DONE (2026-07-02) — all findings fixed (1a-1g), boundary structs retyped
+(moneyutil.Micros/Cents/MajorUnits), and the TEST WALL is complete: every provider money boundary (NMI, Stripe
+outbound + inbound webhook, CCBill parsing/±2% threshold, Solana, rail-minor converters) is wire-pinned with
+literal expected values. Final leg 2026-07-02: Stripe + CCBill batteries (see TEST WALL bullet).
+`go build ./...` + money/intents/pkg-service/subscriptions/webhooks/catalog unit suites green.
+Ready for completed.md. Notable:
 CalculateModelBUpgradeCharge output was generally NOT whole-cent micros (integer proration), so the fix
 quantizes the unused credit UP to a whole cent inside the shared helper (customer-favored; preview==charge on
 every rail) and the NMI RunSale seam converts via MicrosToCentsExact (errors on sub-cent, never rounds).
@@ -390,8 +1179,8 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Findings
 - **1a. NMI upgrade proration sale**: `internal/modules/checkout/service.go:1690` computes `prorationAmount` in
@@ -440,12 +1229,15 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
       → DONE: `money.NativeToRailMinor` (registry-driven: new `MinorDecimals` on the Currency table; ceil,
       errors on unknown currency); arrears chargeOneOpenInvoice + topUpAccount both use it;
       `nativeAmountToRailMinor` deleted; ChargeRequest.AmountCents unit contract documented.
-- [ ] SYSTEMIC: introduce `Micros`/`Cents` defined types at the integration boundaries (nmi.SaleParams,
+- [x] SYSTEMIC: introduce `Micros`/`Cents` defined types at the integration boundaries (nmi.SaleParams,
       RefundPayload, solana helpers) so this bug shape is a compile error; sweep remaining `/100` and `/10_000`
       literals.
       → PARTIAL: `moneyutil.Micros`/`moneyutil.Cents` defined; applied to CalculateTokenQuote +
       FiatMicrosToStablecoinBaseUnits params. Remaining sweep hits are inside internal/modules/webhooks (#675)
       and internal/integrations/nmi (#663).
+      → COMPLETE 2026-07-02: boundary retyping shipped via the POST-#663 bullet; re-swept webhooks +
+      integrations/nmi after #663/#675 landed — the only surviving `* 100` hits (nmi.go:2057, ccbill.go:1724)
+      are refund PERCENTAGE math on already-micros values, not unit conversions.
 - [x] POST-#663: retype the provider boundary structs (`nmi.SaleParams.Amount`/`RefundParams.Amount` →
       `moneyutil.Cents`, `RecurringPaymentData.Amount` dollars → consider a defined type,
       `intents.RefundPayload.AmountCents`, `subscriptions.RefundParams.Amount`, `money.ChargeRequest.AmountCents`)
@@ -464,7 +1256,7 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
       0 ⇒ amount key omitted), TestAddRecurringSubscription_WirePinsDollarsAmount (MajorUnits(19.99) ⇒
       form amount=19.99) — joining the pre-existing TestCentsAmountWirePinning + plan-shape tests. The
       Stripe outbound+webhook and CCBill parsing wire-test battery remains under the TEST WALL bullet.
-- [ ] TEST WALL (Paul 2026-07-01: mandatory — a units mixup must never reach production again; unit-test EVERY
+- [x] TEST WALL (Paul 2026-07-01: mandatory — a units mixup must never reach production again; unit-test EVERY
       place that matters). PARTIAL — landed now: TestUpgradeWirePinning + TestCalculateModelBUpgradeCharge
       (checkout: preview micros == 3133-cent "31.33" NMI wire, recurring dollars shared converter, sub-cent ⇒
       error), TestCalculateTokenQuote_MicrosWirePin + TestFiatMicrosToStablecoinBaseUnits (solana: $19.99 ⇒
@@ -488,6 +1280,28 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
          micros == charged amount converted back (no truncation gain).
       Convention going forward: any NEW provider boundary ships with its wire-pinning test in the same PR —
       typed Micros/Cents makes new mixups uncompilable, the tests pin the conversions that remain.
+      → DONE 2026-07-02 (final leg — Stripe + CCBill; NMI/Solana/rail-minor/cross-path shipped earlier, above):
+      - Stripe catalog push: pkg/service/catalog_provider_stripe_test.go —
+        TestStripeAdapter_AutoCreate_WirePinsUnitAmountCents (19_990_000 micros ⇒ literal unit_amount=1999 +
+        lowercased currency on POST /v1/prices, captured via httptest through the stripeapi choke point) +
+        TestStripeAdapter_AutoCreate_SubCentMicrosErrorNeverRounds (19_995_000 ⇒ error, ZERO price POSTs).
+        Enabler: ALL StripeCatalogService endpoints now honor BaseURL (was entitlements-only; hardcoded hosts
+        removed) + stripeAdapter.testBaseURL hook plumbed through stripeServiceFor. The pre-existing live test
+        (catalog_provider_stripe_live_test.go, 12_340_000⇒1234) stays as the gated live twin.
+      - Stripe outbound charge + refund: subscriptions/stripe_wire_pinning_test.go —
+        TestStripeCollectInvoice_WirePinsCentsAmount (Cents(1999) ⇒ /v1/invoiceitems amount=1999, currency
+        lowercased; underpaid 1998<1999 rejected) + TestStripeCreateRefund_WirePinsCentsAmount (500⇒"500",
+        1999⇒"1999", 0 ⇒ amount key OMITTED = full refund). Intents leg: refund_test.go
+        "wire-pins the payload cents amount" — Execute hands the payload's literal Cents(500) to Stripe.
+      - Stripe inbound webhook: webhooks/stripe_wire_pinning_test.go — success row amount_paid 1999 ⇒
+        19_990_000 micros, failed row (#675) amount_due 1200 ⇒ 12_000_000, plus no-cross-leak cases
+        (amount_due never feeds success, amount_paid never feeds failed); conversions extracted to
+        stripeInvoicePaidAmountMicros/stripeInvoiceFailedAmountMicros and both handlers now call them.
+      - CCBill (inbound-only): webhooks/ccbill_wire_pinning_test.go (NEW file; ccbill.go untouched — #691 owns
+        it) — "19.99"⇒1999¢, "0.01"⇒1¢, "1999.00"⇒199900¢ (dollars, never raw cents), garbage/negative/zero
+        rejected; stored-row chain "19.99"⇒19_990_000 micros; ±2% window pinned EXACTLY for $19.99 (tolerance
+        39¢: 1960/2038 pass, 1959/2039 trip the ErrorTypeAmount BillingError that records the repair alert);
+        micros-as-cents 10,000× mixup trips; sub-cent expected (19_995_000) errors, never rounds.
 - [x] Stale unit docs while in there: pkg/catalog/manifest.go:159 example, solana/recurring/confirm_tier_change.go:73,
       models/payment.go:28. → DONE (plus micros notes on manifest UnitAmount fields and solana types.go Amounts).
 
@@ -1102,8 +1916,11 @@ never to replayed money effects.
 
 # #666: dead-code purge — ~7k lines of unreachable features and orphaned surface
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 whole-repo audit (two independent sweeps agreed on the
+**Completed:** yes
+**Status:** DONE (2026-07-01) — phases 1+2 executed (~5.1k lines deleted; per-item annotations below); the
+deliberately-left tail (fx.NoOpProvider, response pkg, webhookutil re-exports, gin remainder, etc.) was
+deleted by #670. Two audit corrections recorded (merchant_env.go live; MicrosToCentsCeil live). Ready for
+completed.md. Originally: from the 2026-07-01 whole-repo audit (two independent sweeps agreed on the
 big items; every claim below was deadcode- AND grep-verified, including `//go:build integration` files).
 
 ## Metadata
@@ -1615,8 +2432,13 @@ no route/middleware behavior change on either deployment mode.
 
 # #665: consolidate the lapsed-subscription machinery — one probe, one decider, one freshness signal
 
-**Completed:** no
-**Status:** RE-OPENED + RESCOPED 2026-07-01 (Paul): parts A-E of the original scope LANDED (see Progress — one
+**Completed:** yes
+**Status:** DONE (2026-07-01) — ALL rescope tasks completed by the decider-consolidation agent: mirror-writer
+refactor (appliers demoted; CancelLocal/AdoptStatus/RevokeEntitlements actions deleted), decider seam
+(internal/reconcile/decider.go — pure Decide(sub, evidence, now) + ApplyDecision as the ONLY state mover,
+called by LIFE/unknown/PULL), EvidenceBundle type, and the interleaving property test (243 orderings × 16
+bundles ⇒ identical terminals; evidence-less ⇒ park-only is now a theorem). Ready for completed.md.
+Original scope note: parts A-E of the original scope LANDED (see Progress — one
 probe primitive, silent-lapsed lane deleted, single writer per invariant, coverage-derived confirmed-absence
 gate, spec/states reconciled). What remains is (1) the one original open task — the mirror-writer refactor of
 `engine.go`/`diff.go` — and (2) the EXTENDED end state below (from the 2026-07-01 design review): one
@@ -1697,15 +2519,19 @@ sets it.
       the cohort through LIFE.
 - [x] Single writer per invariant: stop emitting `derive.*`/`consistency.*` from the pull engine; move any check
       not already covered by a converge pass into one.
-- [ ] Mirror-writer refactor of `engine.go`/`diff.go`; `pull.*` findings only. (The "pull.* findings only" half
-      landed with the single-writer move; the appliers/selective-apply refactor itself is still open.)
-- [ ] RESCOPE: extract the decider seam — one function (row, evidence) → transition, called by LIFE sweep,
+- [x] Mirror-writer refactor of `engine.go`/`diff.go`; `pull.*` findings only. (The "pull.* findings only" half
+      landed with the single-writer move; the appliers/selective-apply refactor landed 2026-07-01: PS-2
+      cancel / PS-3 adopt appliers + their SQL deleted, transitions are decider invocations — see Progress.)
+- [x] RESCOPE: extract the decider seam — one function (row, evidence) → transition, called by LIFE sweep,
       unknown-resolution, and (later) #684 webhook-triggered fetches; planes stop writing subscription state
-      directly.
-- [ ] RESCOPE: evidence bundle type unifying what the planes produce today (pull snapshot / probe result /
+      directly. (`reconcile.Decide` + `reconcile.ApplyDecision`, decider.go.)
+- [x] RESCOPE: evidence bundle type unifying what the planes produce today (pull snapshot / probe result /
       charge evidence / coverage proof) so the decider's inputs are explicit and testable as data.
-- [ ] RESCOPE: property test — for a fixed evidence bundle, ANY interleaving/ordering of plane execution yields
+      (`reconcile.EvidenceBundle`.)
+- [x] RESCOPE: property test — for a fixed evidence bundle, ANY interleaving/ordering of plane execution yields
       the same terminal state (the #664 acceptance, generalized to the whole machine).
+      (decider_property_test.go: 243 interleavings × 16 bundles + evidence-less-can-only-park state sweep;
+      converge/decider_interleaving_integration_test.go on real Postgres.)
 - [x] Watermark-derived confirmed-absence gate; retire or import-scope `reconciliation_state`. (Implemented
       COVERAGE-derived, not watermark-derived — absence proofs need exhaustive pulls, not event-window freshness.)
 - [x] Spec/code finding-state reconciliation (docs/consistency-invariants.md §8).
@@ -1766,6 +2592,54 @@ sets it.
     unreachable stays unknown); probe→snapshot mapping unit-tested against a fake NMI HTTP server
     (direct-post counter stays 0). `go build ./...` + full unit suite + reconcile/converge/river
     integration (`-tags integration -count=1`) green; net ≈ −450 lines.
+
+- 2026-07-01 — RESCOPE COMPLETE (decider seam + mirror-writer refactor + property test), in-tree.
+  - **Decider seam:** `internal/reconcile/decider.go` — `Decide(SubscriptionState, EvidenceBundle, now,
+    dunningWindow) Decision` (PURE) + `ApplyDecision(ctx, db, lc, sub, Decision, now)` (the ONLY state mover:
+    non-unknown rows take the `unknown` waypoint — ApplyLocalUnknown then ResolveUnknownSubscription — so every
+    transition lands through the one resolution implementation; Park/PastDue use the direct lifecycle cores).
+    `ResolveUnknownFromSnapshot`/`UnknownOutcome`/`UnknownVerdict` deleted — the old body IS Decide's snapshot
+    stage, extended with the #664 first-party stage (ownership/park/certainty legs). Transitions: renew /
+    adopt-period-end / past_due / park-unknown / cancel(±RemoteGone) / none. Grace rule unified: period end +
+    PeriodGrace (48h) everywhere (unknown-resolution previously used bare period end).
+  - **Evidence bundle:** `EvidenceBundle{Snapshot *RemoteSnapshot (coverage-absence proof rides in
+    Snapshot.Coverage), Charge ChargeEvidence{PaymentOpenedCurrentPeriod, RenewalPaymentAfterPeriodEnd,
+    NonRetryableDecline, RetryAttempts/DunningMaxAttempts}, WatermarkNewerThanPeriodEnd bool}`. The certainty
+    legs (non-retryable decline / dunning exhausted) are encoded in the law but no sweep plane produces them —
+    converge structurally can only park/dun (evidence-less-can-only-park is now a tested theorem).
+  - **All three planes call the seam:** LIFE — the 3 cohort queries (period_overdue/needs_verification/
+    grace_exhausted) replaced by ONE `ListLapsedSubscriptionsWithEvidence` returning the evidence legs;
+    converge_passes.go maps Decide's transition back onto the unchanged finding vocabulary. The WHERE-clause
+    complement contract is GONE — exclusivity is structural (one query, one total function). Unknown-resolution —
+    unknown_orchestration feeds Decide directly (probe fallback unchanged). PULL — see mirror-writer below.
+    #684 webhook fetches get the same seam for free.
+  - **Mirror-writer refactor:** ApplyAction lost CancelLocal/AdoptStatus (+ RevokeEntitlements helper); LocalWriter
+    is now mirror-facts-only (backfill/refund/vault/materialize). PS-2/PS-3 findings carry `Decide` actions
+    computed at diff time from the per-subscription snapshot slice (perSubscriptionSnapshot; NMI absence branch
+    stamps SubscriptionsExhaustive — the trait IS a coverage statement); engine applies via Engine.Decisions
+    (DecisionApplier; river injects the DeferDelete scheduler so pull-path stale-decline cancels queue the NMI
+    delete, #679). Kept as guards: read-only fetchers, coverage contract, circuit breaker, mutation policy (Decide
+    actions gated under the same Overwrite class). SQL deleted: ReconcileCancelSubscriptionLocal,
+    ReconcileAdoptSubscriptionStatus (ReconcileRevokeSubscriptionEntitlements kept — converge DERIVE repair).
+  - **Law fixes surfaced by tests:** a roster-declared DEAD sub is certainty — a renewal charge cannot resurrect
+    it (charge still backfilled; money truth ≠ lifecycle truth). PS-2 cancel now revokes AS-OF the period end
+    (ResolveCancelled semantics — paid-for window honored) instead of the legacy immediate revoke; integration
+    test updated to pin the doctrine.
+  - **Property test:** decider_property_test.go — model of the 3 planes (LIFE slice / PULL slice with the diff's
+    divergence pre-filter / UNKNOWN slice) mirroring ApplyDecision's guards; 243 interleavings (3^5 + fixpoint) ×
+    16 evidence bundles ⇒ identical terminal (status, period end, grace); plus a full state-space sweep proving
+    an evidence-less bundle only ever yields none/park (#664, structural). Real-Postgres companion:
+    converge/decider_interleaving_integration_test.go (renewal + provider-dead fixtures, LIFE-first vs
+    resolution-first orderings ⇒ same terminals, exactly-once backfill, revokes intact).
+  - **Deliberately dropped/deferred:** pending→active pull adoption (old PS-3 could flip a pending row active
+    from roster truth; the decider treats pending as the signup/confirm path's — divergence still surfaced as a
+    finding, pending_stale still cleans up at 72h). Pull-path PastDue on a NULL-period row skips (constraint
+    chk_past_due_has_period_end; the park→probe path owns it, matching the old nil-apply guard).
+  - Spec updated (LIFE one-scan note, PULL mirror-writer note). Verified: go build/vet (+integration) repo-wide,
+    full unit suite, reconcile + converge + river integration suites green (incl. new interleaving test).
+    ./tests full suite: 2 failures OUTSIDE this scope (TestFailMembershipLimitedModeLeavesRemoteSubscription —
+    subscriptions limited-mode marker gating; TestCustomerTreasuryPayer_DelegatedDrawDownE2E — spend window) —
+    both in the concurrent agents' areas, not touched here.
 
 ## Acceptance
 

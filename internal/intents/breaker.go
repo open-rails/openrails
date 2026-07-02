@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 )
 
 // Destructive intent types irreversibly destroy provider-side billing state.
@@ -122,7 +123,9 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 		return false, "", nil
 	}
 
-	// Over budget: raise/refresh the operator finding, then hold.
+	// Over budget: raise/refresh the operator finding, then hold. The #692
+	// structured recommendation (ack_resume) lets the findings queue approve
+	// mechanically — resolution alone re-arms the breaker.
 	evidence, merr := json.Marshal(map[string]any{
 		"provider":             intent.Provider,
 		"intent_type":          intent.IntentType,
@@ -131,11 +134,14 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 		"window_hours":         int(DestructiveWindow / time.Hour),
 		"active_subscriptions": active,
 		"held_at":              now.UTC().Format(time.RFC3339),
+		recommend.EvidenceKey:  recommend.Recommendation{Action: recommend.ActionAckResume}.Map(),
 	})
 	if merr != nil {
 		return false, "", fmt.Errorf("volume breaker: marshal evidence: %w", merr)
 	}
-	action := "review the burst of destructive provider intents; resolve (ack) this finding to resume destructive execution for the merchant"
+	action := fmt.Sprintf(
+		"%d destructive provider intents in %s exceeded budget %d — review the cohort; approve (ack) to resume destructive execution for the merchant",
+		executed, DestructiveWindow, budget)
 	if _, uerr := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        intent.MerchantID,
 		FindingType:       HeldBulkFindingType,

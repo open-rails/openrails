@@ -34,6 +34,7 @@ type FindingRecord struct {
 	LastSeenAt        time.Time      `json:"last_seen_at"`
 	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
 	Resolution        string         `json:"resolution,omitempty"`
+	ResolvedBy        string         `json:"resolved_by,omitempty"`
 	Notes             string         `json:"operator_notes,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
@@ -327,6 +328,189 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 	return n > 0, err
 }
 
+// --- #692 operator findings queue (admin API) ---
+
+// #690 gauge type sets: named counts over OPEN findings. The detectors live
+// in the converge DERIVE/CON passes; extend the sets here when a new type
+// joins a gauge, not the queries.
+var (
+	// FreeloaderFindingTypes: live access whose source is PROVEN dead or
+	// absent (#691: stale ≠ freeloader). The dead-sub-live-window check
+	// (derive.grant_effect.mismatch, revoke direction) is deliberately NOT in
+	// the set: it is AUTO-repaired (the missed #691 closure) in the same
+	// sweep, so it never sits open — its standing-window shape surfaces here
+	// as derive.entitlement.orphan instead.
+	FreeloaderFindingTypes = []string{
+		"derive.entitlement.orphan",
+		"derive.grant_effect.excess",
+	}
+	// DuplicateCoverageFindingTypes: the same (customer, product) holding
+	// overlapping paid coverage twice.
+	DuplicateCoverageFindingTypes = []string{
+		"consistency.duplicate.ownership",
+		"consistency.duplicate.provider_charge",
+		string(FindingDuplicateSubscriptions),
+	}
+)
+
+// QueueFilter narrows the operator work list. Empty Status = open findings
+// only (reconcile_required | requires_review).
+type QueueFilter struct {
+	Severity string
+	Type     string
+	Status   string
+	Limit    int
+	Offset   int
+}
+
+// ListQueueFindings returns the operator work list: severity desc (critical
+// first) then age desc (oldest first), paginated, with the unpaginated total.
+func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]FindingRecord, int64, error) {
+	if filter.Limit <= 0 || filter.Limit > 500 {
+		filter.Limit = 100
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	params := gen.AdminListReconciliationFindingsParams{
+		MerchantID: tid.UUID(),
+		PageLimit:  int64(filter.Limit),
+		PageOffset: int64(filter.Offset),
+	}
+	if filter.Status != "" {
+		params.Status = &filter.Status
+	}
+	if filter.Severity != "" {
+		params.Severity = &filter.Severity
+	}
+	if filter.Type != "" {
+		params.FindingType = &filter.Type
+	}
+	rows, err := s.DB.Gen(ctx).AdminListReconciliationFindings(ctx, params)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]FindingRecord, 0, len(rows))
+	var total int64
+	for _, row := range rows {
+		total = row.TotalCount
+		out = append(out, findingRecordFromRow(row.OpenrailsReconciliationFinding))
+	}
+	return out, total, nil
+}
+
+// QueueGauges is the #690 dashboard header. Freeloaders and DuplicateCoverage
+// are ALWAYS-ZERO error metrics (counts over OPEN findings of the type sets);
+// VerificationPressure is a live pressure reading, allowed to be nonzero.
+type QueueGauges struct {
+	Freeloaders          int64                `json:"freeloaders"`
+	DuplicateCoverage    int64                `json:"duplicate_coverage"`
+	VerificationPressure VerificationPressure `json:"verification_pressure"`
+	OpenBySeverity       map[string]int64     `json:"open_by_severity"`
+	TotalOpen            int64                `json:"total_open"`
+}
+
+// VerificationPressure (#690/#691): subscriptions parked `unknown` whose
+// recorded paid-through has passed — fail-open standing access awaiting
+// provider verification. Computed live from the subscriptions table, NOT from
+// findings: it measures drift, not error. MaxAgeSeconds is the age of the
+// oldest lapsed paid-through; the COUNT may legitimately be nonzero, but the
+// max age trending UP means the verification machinery (pull/probe/converge)
+// is down.
+type VerificationPressure struct {
+	Count         int64 `json:"count"`
+	MaxAgeSeconds int64 `json:"max_age_seconds"`
+}
+
+// Gauges folds open-finding counts into the named gauges and reads the live
+// verification pressure.
+func (s *PGStore) Gauges(ctx context.Context) (QueueGauges, error) {
+	g := QueueGauges{OpenBySeverity: map[string]int64{}}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return g, err
+	}
+	rows, err := s.DB.Gen(ctx).CountOpenReconciliationFindingsByTypeSeverity(ctx, tid.UUID())
+	if err != nil {
+		return g, err
+	}
+	inSet := func(set []string, t string) bool {
+		for _, s := range set {
+			if s == t {
+				return true
+			}
+		}
+		return false
+	}
+	for _, row := range rows {
+		g.TotalOpen += row.OpenCount
+		g.OpenBySeverity[row.Severity] += row.OpenCount
+		if inSet(FreeloaderFindingTypes, row.FindingType) {
+			g.Freeloaders += row.OpenCount
+		}
+		if inSet(DuplicateCoverageFindingTypes, row.FindingType) {
+			g.DuplicateCoverage += row.OpenCount
+		}
+	}
+	pressure, err := s.DB.Gen(ctx).CountUnknownSubsPastPaidThrough(ctx, gen.CountUnknownSubsPastPaidThroughParams{
+		MerchantID: tid.UUID(), Now: time.Now().UTC(),
+	})
+	if err != nil {
+		return g, err
+	}
+	g.VerificationPressure.Count = pressure.PressureCount
+	if pressure.MaxAgeSeconds != nil {
+		g.VerificationPressure.MaxAgeSeconds = *pressure.MaxAgeSeconds
+	}
+	return g, nil
+}
+
+// ResolveFindingFixed marks an OPEN finding fixed/admin_fixed with operator
+// notes, attribution and execution evidence (evidence.resolution). Returns
+// false when the finding was not open.
+func (s *PGStore) ResolveFindingFixed(ctx context.Context, id uuid.UUID, notes, resolvedBy string, resolutionEvidence map[string]any) (bool, error) {
+	var notesPtr *string
+	if notes != "" {
+		notesPtr = &notes
+	}
+	n, err := s.DB.Gen(ctx).AdminResolveReconciliationFinding(ctx, gen.AdminResolveReconciliationFindingParams{
+		ID:                 id,
+		OperatorNotes:      notesPtr,
+		ResolvedBy:         &resolvedBy,
+		ResolutionEvidence: marshalEvidence(resolutionEvidence),
+	})
+	return n > 0, err
+}
+
+// IgnoreFindingWithActor marks an OPEN finding ignored with attribution —
+// permanent silence for the subject (upserts keep ignored identities ignored).
+func (s *PGStore) IgnoreFindingWithActor(ctx context.Context, id uuid.UUID, notes, resolvedBy string) (bool, error) {
+	var notesPtr *string
+	if notes != "" {
+		notesPtr = &notes
+	}
+	n, err := s.DB.Gen(ctx).AdminIgnoreReconciliationFinding(ctx, gen.AdminIgnoreReconciliationFindingParams{
+		ID:            id,
+		OperatorNotes: notesPtr,
+		ResolvedBy:    &resolvedBy,
+	})
+	return n > 0, err
+}
+
+// AppendFindingNotes appends an execution-failure note to an OPEN finding
+// (partial failure: the finding stays open, never half-marked fixed).
+func (s *PGStore) AppendFindingNotes(ctx context.Context, id uuid.UUID, note string) error {
+	_, err := s.DB.Gen(ctx).AppendReconciliationFindingNotes(ctx, gen.AppendReconciliationFindingNotesParams{
+		ID:   id,
+		Note: note,
+	})
+	return err
+}
+
 func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
 	evidence := unmarshalEvidence(row.Evidence)
 	provider, _ := evidence["provider"].(string)
@@ -358,6 +542,9 @@ func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 	}
 	if row.Resolution != nil {
 		rec.Resolution = *row.Resolution
+	}
+	if row.ResolvedBy != nil {
+		rec.ResolvedBy = *row.ResolvedBy
 	}
 	if row.OperatorNotes != nil {
 		rec.Notes = *row.OperatorNotes

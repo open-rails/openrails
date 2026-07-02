@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -206,10 +205,11 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		// the vault id is an instrument-scoped handle, never a person. NMI has
 		// no person-level identity in our model (see rails registry
 		// HasRemoteCustomer=false); the person is the local customer_id UUID.
-		// rail_method_ref (billing id) stays uncaptured for native vaults until
-		// an importer needs it — RebillDriver (not ref-emptiness) now carries
-		// the rebill-driver mode, defaulting to 'provider'.
+		// Both handles are recorded verbatim; RebillDriver (not ref-emptiness)
+		// carries the rebill-driver mode, defaulting to 'provider'.
 		RailCustomerRef:      nmiResponse.CustomerVaultID,
+		RailMethodRef:        nmiResponse.BillingID,
+		RebillDriver:         models.RebillDriverProvider,
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
@@ -273,7 +273,9 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 		if err != nil {
 			return nil, nil, err
 		}
-		scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailNMI), "live")
+		// Environment follows deployment posture (#681): test rows under test_mode.
+		env := config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
+		scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailNMI), env)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
@@ -571,24 +573,38 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return errors.New("payment method rail is required")
 	}
 
-	// #682 shared-vault guard: deleting the remote vault customer destroys EVERY
-	// billing entry in it. Our minting policy is one vault per card, so sharing
-	// only happens if an importer materialized a multi-card vault as several
-	// payment-method rows — in that case refuse the whole-vault delete (a
-	// billing-entry-scoped delete is the correct future path, see #682).
+	// #682 shared-vault handling: deleting the remote vault customer destroys
+	// EVERY billing entry in it. Our minting policy is one vault per card, so
+	// sharing only happens when an importer materialized a multi-card vault as
+	// several payment-method rows — in that case delete ONLY this row's billing
+	// entry (the vault survives for the sibling cards; NMI refuses to empty a
+	// vault, so the LAST row's delete is the whole-vault delete below).
+	sharedVault := false
 	if s.DB != nil && strings.TrimSpace(pm.RailCustomerRef) != "" {
-		shared, err := repo.NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
+		shared, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
 		if err != nil {
 			return fmt.Errorf("failed to check vault sharing: %w", err)
 		}
-		if shared > 0 {
-			return fmt.Errorf("cannot delete vault: %d other stored payment method(s) share vault %s (imported multi-card vault; delete the billing entry instead)", shared, pm.RailCustomerRef)
-		}
+		sharedVault = shared > 0
 	}
 
 	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
 	if err != nil {
 		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
+	}
+
+	if sharedVault {
+		if strings.TrimSpace(pm.RailMethodRef) == "" {
+			// Cannot identify WHICH entry is this card — refuse rather than
+			// destroy the siblings (an importer that shares vaults must record
+			// per-row billing ids, see #682's shared-vault contract).
+			return fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
+		}
+		if err := client.DeleteCustomerBillingEntry(pm.RailCustomerRef, pm.RailMethodRef); err != nil {
+			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
+			return fmt.Errorf("failed to delete payment vault entry: %w", err)
+		}
+		return s.PaymentMethodService.Delete(ctx, pm.ID)
 	}
 
 	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {

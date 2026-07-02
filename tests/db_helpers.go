@@ -15,7 +15,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -48,7 +52,7 @@ func (suite *TestContainerSuite) InsertProduct(ctx context.Context, p *models.Pr
 		require.NoError(suite.t, err, "Failed to resolve merchant for product")
 		p.MerchantID = tid.UUID()
 	}
-	require.NoError(suite.t, dbrepo.NewProductRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert product")
+	require.NoError(suite.t, catalog.NewProductService(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert product")
 }
 
 func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Price) {
@@ -62,7 +66,7 @@ func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Pric
 		require.NoError(suite.t, err, "Failed to resolve merchant for price")
 		p.MerchantID = tid.UUID()
 	}
-	require.NoError(suite.t, dbrepo.NewPriceRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert price")
+	require.NoError(suite.t, catalog.NewPriceService(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert price")
 }
 
 func (suite *TestContainerSuite) InsertSubscription(ctx context.Context, s *models.Subscription) {
@@ -72,12 +76,12 @@ func (suite *TestContainerSuite) InsertSubscription(ctx context.Context, s *mode
 
 func (suite *TestContainerSuite) InsertPaymentMethod(ctx context.Context, pm *models.PaymentMethod) {
 	suite.t.Helper()
-	require.NoError(suite.t, dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB).Create(ctx, pm), "Failed to insert payment method")
+	require.NoError(suite.t, paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB).Create(ctx, pm), "Failed to insert payment method")
 }
 
 func (suite *TestContainerSuite) InsertPayment(ctx context.Context, p *models.Payment) {
 	suite.t.Helper()
-	require.NoError(suite.t, dbrepo.NewPaymentRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert payment")
+	require.NoError(suite.t, payments.NewPaymentRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert payment")
 }
 
 func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *models.Entitlement) {
@@ -89,7 +93,7 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 	if _, err := merchant.Require(ctx); err != nil {
 		ctx = dbtest.WithTestMerchant(ctx)
 	}
-	require.NoError(suite.t, dbrepo.NewEntitlementRepo(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
+	require.NoError(suite.t, entitlements.NewEntitlementService(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
 }
 
 func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *models.NotificationQueue) {
@@ -137,7 +141,7 @@ func (suite *TestContainerSuite) lotRemaining(ctx context.Context, merchantID, l
 // GetPaymentByID loads a payment by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUID) *models.Payment {
 	suite.t.Helper()
-	p, err := dbrepo.NewPaymentRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	p, err := payments.NewPaymentRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment %s", id)
 	return p
 }
@@ -146,7 +150,7 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 // fails the test when missing.
 func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := dbrepo.NewPaymentRepo(suite.App.Runtime.DB).GetByTransactionID(ctx, rail, transactionID)
+	p, err := payments.NewPaymentRepo(suite.App.Runtime.DB).GetByTransactionID(ctx, rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }
@@ -154,7 +158,7 @@ func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, ra
 // GetPaymentMethod loads a payment method by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.UUID) *models.PaymentMethod {
 	suite.t.Helper()
-	pm, err := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	pm, err := paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment method %s", id)
 	return pm
 }

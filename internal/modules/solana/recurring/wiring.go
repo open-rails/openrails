@@ -62,11 +62,10 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 	return sec.Value, nil
 }
 
-func NewSignerFromRailMerchantAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment ...string) solanaint.Signer {
-	env := "live"
-	if len(environment) > 0 && strings.TrimSpace(environment[0]) != "" {
-		env = strings.TrimSpace(environment[0])
-	}
+// NewSignerFromRailMerchantAccounts builds the per-merchant signer. environment
+// is required (#681): deployment posture, via config.ExpectedProviderEnvironment.
+func NewSignerFromRailMerchantAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment string) solanaint.Signer {
+	env := strings.TrimSpace(environment)
 	return railMerchantAccountSigner{
 		keypair:     solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database, environment: env}, ttl),
 		store:       store,
@@ -180,7 +179,7 @@ func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merc
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		environment = "live"
+		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: provider account environment is required")
 	}
 	var row gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -206,7 +205,7 @@ func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, m
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		environment = "live"
+		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: provider account environment is required")
 	}
 	var row gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {

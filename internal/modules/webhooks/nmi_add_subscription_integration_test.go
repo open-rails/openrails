@@ -5,15 +5,22 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -21,130 +28,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+// #684: NMI signup activation, converged. The recurring.subscription.add /
+// transaction.sale.success webhooks are wake-up signals only — activation
+// happens off the FETCHED settled charge (query.php by order reference) and
+// the FETCHED recurring record (v5 GET), through NMIConvergeService. The
+// provider is a real httptest server speaking the NMI wire shapes; direct-post
+// mutations must never happen (counter stays zero).
 
-	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbi.Pool()
-	q := gen.New(pool)
+type nmiConvergeFixture struct {
+	svc            *NMIConvergeService
+	dbi            *db.DB
+	clock          *clockwork.FakeClock
+	directPostHits *atomic.Int64
+	// transactionXML answers query.php; subscriptionJSON answers the v5 GET
+	// ("" = 404, gone at NMI); queryStatus != 0 forces an HTTP error.
+	transactionXML   string
+	subscriptionJSON string
+	queryStatus      int
 
-	require.NoError(t, svc.handleAddSubscription(ctx))
-
-	gotSub, err := q.GetSubscriptionByID(ctx, ids.subscriptionID)
-	require.NoError(t, err)
-	require.Equal(t, string(models.StatusActive), string(gotSub.Status))
-	require.NotNil(t, gotSub.CurrentPeriodStartsAt)
-	require.NotNil(t, gotSub.CurrentPeriodEndsAt)
-	require.Equal(t, time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC), gotSub.CurrentPeriodEndsAt.UTC())
-
-	var paymentCustomerID uuid.UUID
-	var paymentSubscriptionID *uuid.UUID
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT customer_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
-		ids.transactionID).Scan(&paymentCustomerID, &paymentSubscriptionID))
-	require.Equal(t, ids.tenantSubjectID, paymentCustomerID)
-	require.NotNil(t, paymentSubscriptionID)
-	require.Equal(t, ids.subscriptionID, *paymentSubscriptionID)
-
-	var exists bool
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT EXISTS (
-			SELECT 1 FROM openrails.entitlements
-			WHERE customer_id = $1
-			  AND entitlement = $2
-			  AND source_type = $3
-			  AND source_id = $4
-			  AND revoked_at IS NULL
-			  AND deleted_at IS NULL
-		)`,
-		ids.tenantSubjectID, "premium", string(models.EntitlementSourceSubscription), ids.subscriptionID,
-	).Scan(&exists))
-	require.True(t, exists)
-
-	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: ids.transactionBody}
-	require.NoError(t, svc.handleTransactionSaleSuccess(ctx))
-	var count int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
-	require.Equal(t, 1, count)
-}
-
-func TestHandleTransactionSaleSuccess_AcksDuplicateInitialChargeOnActiveSubscription(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbi.Pool()
-
-	// Activate the subscription and record the initial charge (the analogue of
-	// the synchronous saved-card checkout activation, #330).
-	require.NoError(t, svc.handleAddSubscription(ctx))
-
-	// Live NMI sale.success notifications for the initial charge carry no
-	// explicit subscription reference — only the order id — and arrive after
-	// the subscription is already active. The already-recorded transaction
-	// must be acknowledged as a duplicate, not surfaced as a webhook error.
-	implicitBody, err := json.Marshal(NMITransactionEventBody{
-		TransactionID: Stringish(ids.transactionID),
-		Amount:        Stringish("23.99"),
-		Currency:      Stringish("USD"),
-		OrderID:       Stringish(ids.providerSubID),
-	})
-	require.NoError(t, err)
-	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: implicitBody}
-	require.NoError(t, svc.handleTransactionSaleSuccess(ctx))
-
-	var count int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
-	require.Equal(t, 1, count)
-	gotSub, err := gen.New(pool).GetSubscriptionByID(ctx, ids.subscriptionID)
-	require.NoError(t, err)
-	require.Equal(t, string(models.StatusActive), string(gotSub.Status))
-
-	// A non-recurring transaction that is NOT already recorded must still be
-	// rejected rather than mutate the active subscription.
-	unknownBody, err := json.Marshal(NMITransactionEventBody{
-		TransactionID: Stringish("txn_unknown_" + uuid.New().String()),
-		Amount:        Stringish("23.99"),
-		Currency:      Stringish("USD"),
-		OrderID:       Stringish(ids.providerSubID),
-	})
-	require.NoError(t, err)
-	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: unknownBody}
-	require.Error(t, svc.handleTransactionSaleSuccess(ctx))
-}
-
-func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, false)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbi.Pool()
-
-	require.NoError(t, svc.handleAddSubscription(ctx))
-
-	gotSub, err := gen.New(pool).GetSubscriptionByID(ctx, ids.subscriptionID)
-	require.NoError(t, err)
-	require.Equal(t, string(models.StatusPending), string(gotSub.Status))
-
-	var count int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
-	require.Equal(t, 0, count)
-}
-
-type nmiAddSubscriptionTestIDs struct {
 	userID          string
 	tenantSubjectID uuid.UUID
 	subscriptionID  uuid.UUID
 	providerSubID   string
-	transactionID   string
-	transactionBody []byte
+	productID       uuid.UUID
+	priceID         uuid.UUID
 }
 
-func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMetadata bool) (*NMIWebhookService, *db.DB, nmiAddSubscriptionTestIDs) {
+func nmiConvergeSaleXML(txnID, orderID, success string, at time.Time, amount string) string {
+	return fmt.Sprintf(`<?xml version="1.0"?>
+<nm_response>
+  <transaction>
+    <transaction_id>%s</transaction_id>
+    <order_id>%s</order_id>
+    <currency>USD</currency>
+    <action><amount>%s</amount><action_type>sale</action_type><success>%s</success><date>%s</date><response_code>202</response_code><response_text>Insufficient funds</response_text></action>
+  </transaction>
+</nm_response>`, txnID, orderID, amount, success, at.UTC().Format("20060102150405"))
+}
+
+func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.SubscriptionStatus) *nmiConvergeFixture {
 	t.Helper()
 
 	ctx := context.Background()
@@ -152,30 +74,69 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
-	now := time.Date(2026, time.May, 18, 13, 28, 21, 0, time.UTC)
-	fakeClock := clockwork.NewFakeClockAt(now)
-	provider := string(models.RailNMI)
-	planID := "premium_test_" + uuid.New().String()
-	providerSubID := "nmi_sub_" + uuid.New().String()
-	transactionID := "txn_" + uuid.New().String()
-	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
-	productID := uuid.New()
-	priceID := uuid.New()
-	subscriptionID := uuid.New()
-	durationDays := 720
-
-	entitlementsSpec := map[string]*int{
-		"premium": &durationDays,
+	// Real "now": the NMI prober classifies roster liveness against the wall
+	// clock (next charge before today's boundary = stalled), so a historical
+	// fake clock would misclassify a live roster as past_due.
+	now := time.Now().UTC().Truncate(time.Second)
+	f := &nmiConvergeFixture{
+		dbi:            dbi,
+		clock:          clockwork.NewFakeClockAt(now),
+		directPostHits: &atomic.Int64{},
+		transactionXML: `<?xml version="1.0"?><nm_response></nm_response>`,
+		userID:         uuid.New().String(),
+		subscriptionID: uuid.New(),
+		providerSubID:  "nmi_sub_" + uuid.New().String(),
+		productID:      uuid.New(),
+		priceID:        uuid.New(),
 	}
+	f.tenantSubjectID = dbtest.EnsureCustomerIDPgx(ctx, t, pool, f.userID)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // v5 GET /subscriptions/{id}
+			if f.queryStatus != 0 {
+				w.WriteHeader(f.queryStatus)
+				return
+			}
+			if f.subscriptionJSON == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(f.subscriptionJSON))
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("report_type") == "" { // Direct Post (mutations)
+			f.directPostHits.Add(1)
+			_, _ = w.Write([]byte("response=1"))
+			return
+		}
+		if f.queryStatus != 0 {
+			w.WriteHeader(f.queryStatus)
+			return
+		}
+		_, _ = w.Write([]byte(f.transactionXML))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		require.Zero(t, f.directPostHits.Load(), "fetch-and-converge must never send a provider mutation")
+	})
+
+	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	require.NoError(t, err)
+	client.DirectPostURL = srv.URL
+	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
+
+	entitlementsSpec := map[string]*int{"premium": nil}
 	entitlementsSpecJSON, err := json.Marshal(entitlementsSpec)
 	require.NoError(t, err)
 
 	description := "Test premium product"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID:       dbtest.TestMerchantID.UUID(),
-		ID:               productID,
-		Key:              "nmi_add_subscription_" + uuid.New().String(),
+		ID:               f.productID,
+		Key:              "nmi_converge_" + uuid.New().String(),
 		DisplayName:      "Premium Membership",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
@@ -185,109 +146,176 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	})
 	require.NoError(t, err)
 
-	railsJSON, err := json.Marshal(map[string]map[string]string{
-		provider: {
-			models.RailKeyPlanID:   planID,
-			models.RailKeyProvider: provider,
-		},
-	})
-	require.NoError(t, err)
-	billingCycleDays := int32(30)
+	billingCycleHours := int32(720)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		MerchantID:          dbtest.TestMerchantID.UUID(),
-		ID:                  priceID,
-		ProductID:           productID,
+		ID:                  f.priceID,
+		ProductID:           f.productID,
 		Amount:              23_990_000,
 		Currency:            "USD",
 		Status:              string(models.CatalogStatusActive),
-		AccessDurationHours: &billingCycleDays,
+		AccessDurationHours: &billingCycleHours,
 		AutoRenew:           true,
-		Rails:               railsJSON,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
 
-	metadata := map[string]any{
-		"order_id": "order_" + uuid.New().String(),
-	}
-	if includeTransactionMetadata {
-		metadata["provider_transaction_id"] = transactionID
-	}
-	metadataBytes, err := json.Marshal(metadata)
-	require.NoError(t, err)
-
-	snapshotJSON, err := json.Marshal(models.CloneEntitlementsSpec(entitlementsSpec))
-	require.NoError(t, err)
-	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+	periodStart := now.Add(-30 * 24 * time.Hour)
+	periodEnd := now.Add(5 * 24 * time.Hour)
+	createParams := gen.CreateSubscriptionParams{
 		MerchantID:               dbtest.TestMerchantID.UUID(),
-		ID:                       subscriptionID,
-		CustomerID:               tenantSubjectID,
-		ProductID:                productID,
-		PriceID:                  &priceID,
-		EntitlementsSpecSnapshot: snapshotJSON,
-		Status:                   string(models.StatusPending),
+		ID:                       f.subscriptionID,
+		CustomerID:               f.tenantSubjectID,
+		ProductID:                f.productID,
+		PriceID:                  &f.priceID,
+		EntitlementsSpecSnapshot: entitlementsSpecJSON,
+		Status:                   string(subStatus),
 		Rail:                     string(models.RailNMI),
-		RailSubscriptionID:       providerSubID,
+		RailSubscriptionID:       f.providerSubID,
 		StartedAt:                now,
-		GatewayResponse:          metadataBytes,
 		CreatedAt:                now,
 		UpdatedAt:                now,
-	})
+	}
+	if subStatus != models.StatusPending {
+		createParams.CurrentPeriodStartsAt = &periodStart
+		createParams.CurrentPeriodEndsAt = &periodEnd
+	}
+	_, err = q.CreateSubscription(ctx, createParams)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subscriptionID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subscriptionID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", f.priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", f.productID)
 	})
-
-	body, err := json.Marshal(NMIRecurringEventBody{
-		SubscriptionID: Stringish(providerSubID),
-		NextChargeDate: Stringish("2026-06-17"),
-		Plan: &NMIPlan{
-			ID:     Stringish(planID),
-			Amount: Stringish("23.99"),
-		},
-	})
-	require.NoError(t, err)
-	transactionBody, err := json.Marshal(NMITransactionEventBody{
-		TransactionID: Stringish(transactionID),
-		Amount:        Stringish("23.99"),
-		Currency:      Stringish("USD"),
-		Subscription: &NMISubscriptionRef{
-			SubscriptionID: Stringish(providerSubID),
-		},
-	})
-	require.NoError(t, err)
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
-	entitlementSvc := entitlements.NewEntitlementService(dbi, fakeClock)
-	paymentSvc := payments.NewPaymentService(dbi, fakeClock)
-	subscriptionSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil, fakeClock)
-	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, nil, fakeClock)
+	entitlementSvc := entitlements.NewEntitlementService(dbi, f.clock)
+	paymentSvc := payments.NewPaymentService(dbi, f.clock)
+	subscriptionSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil, f.clock)
+	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, nil, f.clock)
 
-	return &NMIWebhookService{
-			DB:                           dbi,
-			Clock:                        fakeClock,
-			PriceService:                 priceSvc,
-			ProductService:               productSvc,
-			Data:                         NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMIAddSubscription), EventBody: body},
-			Rail:                         provider,
-			SubscriptionService:          subscriptionSvc,
-			PaymentService:               paymentSvc,
-			SubscriptionLifecycleService: lifecycleSvc,
-		}, dbi, nmiAddSubscriptionTestIDs{
-			userID:          userID,
-			tenantSubjectID: tenantSubjectID,
-			subscriptionID:  subscriptionID,
-			providerSubID:   providerSubID,
-			transactionID:   transactionID,
-			transactionBody: transactionBody,
-		}
+	f.svc = &NMIConvergeService{
+		DB:                           dbi,
+		Clock:                        f.clock,
+		Rail:                         string(models.RailNMI),
+		NMIClient:                    client,
+		PriceService:                 priceSvc,
+		SubscriptionService:          subscriptionSvc,
+		SubscriptionLifecycleService: lifecycleSvc,
+		PaymentService:               paymentSvc,
+	}
+	return f
+}
+
+func (f *nmiConvergeFixture) status(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	row, err := gen.New(f.dbi.Pool()).GetSubscriptionByID(ctx, f.subscriptionID)
+	require.NoError(t, err)
+	return string(row.Status)
+}
+
+// End-to-end activation: a pending signup + a fetched settled charge for the
+// subscription's order reference activates the membership, records the payment
+// row, and grants the entitlement — fetch-sourced, never payload-sourced.
+// Duplicate wake-ups are no-ops.
+func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	pool := f.dbi.Pool()
+
+	txnID := "txn_" + uuid.New().String()
+	chargedAt := f.clock.Now().UTC().Add(-time.Hour)
+	// The order reference NMI carries is the LOCAL subscription id (stamped at
+	// signup as orderid/ponumber).
+	f.transactionXML = nmiConvergeSaleXML(txnID, f.subscriptionID.String(), "1", chargedAt, "23.99")
+	// Remote recurring record alive with a future boundary (for post-activation converges).
+	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`,
+		f.providerSubID, f.clock.Now().UTC().Add(30*24*time.Hour).Format("2006-01-02"))
+
+	_, err := f.svc.Converge(ctx, f.providerSubID)
+	require.NoError(t, err)
+	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
+
+	var paymentCustomerID uuid.UUID
+	var paymentSubscriptionID *uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT customer_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
+		txnID).Scan(&paymentCustomerID, &paymentSubscriptionID))
+	require.Equal(t, f.tenantSubjectID, paymentCustomerID)
+	require.NotNil(t, paymentSubscriptionID)
+	require.Equal(t, f.subscriptionID, *paymentSubscriptionID)
+
+	var entitled bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM openrails.entitlements
+			WHERE customer_id = $1 AND entitlement = 'premium'
+			  AND source_type = $2 AND source_id = $3
+			  AND revoked_at IS NULL AND deleted_at IS NULL
+		)`, f.tenantSubjectID, string(models.EntitlementSourceSubscription), f.subscriptionID).Scan(&entitled))
+	require.True(t, entitled)
+
+	// Duplicate wake-up (the sale.success webhook echoing the same charge, in
+	// any order): fetches the same truth, changes nothing.
+	_, err = f.svc.Converge(ctx, f.providerSubID)
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID).Scan(&count))
+	require.Equal(t, 1, count, "duplicate converge must not duplicate the payment")
+	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
+}
+
+// A pending signup with NO fetched charge attempt yet (settlement lag) parks
+// as retry-later; the subscription stays pending, nothing is fabricated.
+func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	_, err := f.svc.Converge(ctx, f.providerSubID)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrConvergeRetryLater), "settlement lag must snooze, got %v", err)
+	require.Equal(t, string(models.StatusPending), f.status(t, ctx))
+}
+
+// NMI v5 404 IS provider truth (cancelled records are deleted at NMI): the
+// REAL decider turns provider-confirmed-gone into a terminal cancel.
+func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	// subscriptionJSON stays "" → v5 GET answers 404; no sale rows either.
+	_, err := f.svc.Converge(ctx, f.providerSubID)
+	require.NoError(t, err)
+	require.Equal(t, string(models.StatusCancelled), f.status(t, ctx))
+}
+
+// Provider API down: the converge fails retryably and local state (access)
+// stays intact; a later converge against healthy truth proceeds.
+func TestNMIConvergeProviderDownParks(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	f.queryStatus = http.StatusInternalServerError
+	_, err := f.svc.Converge(ctx, f.providerSubID)
+	require.Error(t, err, "provider outage must fail the converge for retry")
+	require.Equal(t, string(models.StatusActive), f.status(t, ctx), "outage must not move local state")
+
+	f.queryStatus = 0
+	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`,
+		f.providerSubID, f.clock.Now().UTC().Add(30*24*time.Hour).Format("2006-01-02"))
+	_, err = f.svc.Converge(ctx, f.providerSubID)
+	require.NoError(t, err)
+	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
 }

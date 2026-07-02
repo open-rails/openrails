@@ -13,10 +13,12 @@
 //     server with the control plane attached, authenticated by a REAL minted
 //     API key resolved through AuthKit core (#481 role-based authz).
 //
-// The SAME operation script then runs through BOTH clients (openrails.NewRemote
-// against each surface) on separate payer subjects, and the observable results
-// must be EQUAL after normalizing ids/timestamps. Every divergence is an adapter
-// bug: fix the adapter, never the assertion.
+// The SAME operation script then runs through BOTH clients — the #685 UNIFIED
+// embedded client (Runtime.Client(): one implementation over the in-process
+// transport + context-attached host principal) and openrails.NewRemote against
+// the standalone surface — on separate payer subjects, and the observable
+// results must be EQUAL after normalizing ids/timestamps. Every divergence is
+// an adapter bug: fix the adapter, never the assertion.
 package embed_test
 
 import (
@@ -32,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
@@ -549,11 +552,14 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 
 	// Two REAL servers over the same migrated Postgres + shared Redis.
 	h := integrationharness.New(t, ctx)
-	embedded := h.StartEmbeddedHost(currency) // Server 1: embedded no-auth host
+	embedded := h.StartEmbeddedHost(currency) // Server 1: embedded host (in-process transport)
 	standalone := h.StartStandalone(currency) // Server 2: real standalone + AuthKit
 
 	pool := h.Pool()
-	embeddedClient := embedded.Client()
+	// #685: the embedded side is the UNIFIED client — Runtime.Client() over the
+	// in-process transport, traversing the real gate via the context-attached
+	// host principal (not the retired localClient transcriptions).
+	embeddedClient := embedded.Runtime().Client(embed.WithCurrency(currency))
 	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"

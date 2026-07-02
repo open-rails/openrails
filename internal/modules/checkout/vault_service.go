@@ -24,34 +24,39 @@ func NewCheckoutVaultService(paymentMethodService *paymentmethods.PaymentMethodS
 	}
 }
 
-func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, provider string) (string, *models.PaymentMethod, error) {
+// ResolveVault returns the vault handle pair (customer-scope vault id +
+// instrument-scope billing id, #682) and the created payment method when a
+// fresh token was vaulted. The billing id is "" for pre-#682 rows that never
+// recorded one.
+func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, provider string) (string, string, *models.PaymentMethod, error) {
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid payment_method_id: %w", err)
+			return "", "", nil, fmt.Errorf("invalid payment_method_id: %w", err)
 		}
 
 		pm, err := s.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pmID, user.ID)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid payment method: %w", err)
+			return "", "", nil, fmt.Errorf("invalid payment method: %w", err)
 		}
 
 		if !rails.IsNMI(pm.Rail) {
-			return "", nil, errors.New("payment method is not compatible with card payments")
+			return "", "", nil, errors.New("payment method is not compatible with card payments")
 		}
 		if !rails.SameRail(pm.Rail, models.Rail(provider)) {
-			return "", nil, errors.New("payment method belongs to a different payment provider")
+			return "", "", nil, errors.New("payment method belongs to a different payment provider")
 		}
 
-		// NMI-backed only (checked above): the customer vault id is the customer-scope handle.
-		return pm.RailCustomerRef, nil, nil
+		// NMI-backed only (checked above): vault id = customer-scope handle,
+		// billing id = instrument-scope handle (targets the exact card, #682).
+		return pm.RailCustomerRef, pm.RailMethodRef, nil, nil
 	}
 
 	if req.PaymentToken == "" {
-		return "", nil, errors.New("payment_method_id or payment_token is required")
+		return "", "", nil, errors.New("payment_method_id or payment_token is required")
 	}
 	if s.VaultService == nil {
-		return "", nil, errors.New("vault service unavailable")
+		return "", "", nil, errors.New("vault service unavailable")
 	}
 
 	pm, err := s.VaultService.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
@@ -84,10 +89,10 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 		}(),
 	})
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
-	return pm.RailCustomerRef, pm, nil
+	return pm.RailCustomerRef, pm.RailMethodRef, pm, nil
 }
 
 func ResolveCheckoutFirstName(req *CheckoutRequest, user *UserIdentity) string {

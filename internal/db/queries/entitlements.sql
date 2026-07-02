@@ -131,6 +131,11 @@ WHERE ent.source_type = 'subscription'
   AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
 
 -- name: EndActiveEntitlementsBySubscription :exec
+-- #691 closure write: bound a subscription's live windows to a PROVEN end
+-- (user cancel at period end, terminal resolution). Advance-written on disk —
+-- a dead system cannot extend a cancelled sub. start_at < end_at keeps the
+-- generated period range valid; future-start windows are handled by
+-- SoftDeleteFutureEntitlementsBySubscription.
 UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz,
@@ -140,7 +145,20 @@ WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
+  AND ent.start_at < sqlc.arg(end_at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(end_at)::timestamptz);
+
+-- name: SoftDeleteFutureEntitlementsBySubscription :exec
+-- #691 closure companion: scheduled windows starting at/after the proven end
+-- cannot be bounded (end <= start); remove them.
+UPDATE openrails.entitlements ent SET
+    deleted_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE ent.source_type = 'subscription'
+  AND ent.source_id = $1
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
 
 -- name: ListExtendableSubscriptionEntitlements :many
 SELECT * FROM openrails.entitlements ent
@@ -161,15 +179,35 @@ WHERE ent.id = $1
   AND ent.end_at = sqlc.arg(old_end_at)::timestamptz;
 
 -- name: ResumeEntitlementsBySubscription :exec
+-- #691 resume: re-open the LATEST live window per (customer, entitlement) of a
+-- resumed auto-renew subscription (end_at = NULL), undoing an advance-written
+-- cancel closure. Only the latest window per timeline (older bounded windows are
+-- history), and only when no other live window would overlap [start, infinity)
+-- — the GIST no-overlap constraint stays intact.
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'subscription'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
-  AND ent.end_at > sqlc.arg(now)::timestamptz;
+WHERE ent.id IN (
+    SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
+    FROM openrails.entitlements e
+    WHERE e.source_type = 'subscription'
+      AND e.source_id = $1
+      AND e.revoked_at IS NULL
+      AND e.deleted_at IS NULL
+      AND e.end_at IS NOT NULL
+      AND e.end_at > sqlc.arg(now)::timestamptz
+      AND NOT EXISTS (
+          SELECT 1 FROM openrails.entitlements o
+          WHERE o.merchant_id = e.merchant_id
+            AND o.customer_id = e.customer_id
+            AND o.entitlement = e.entitlement
+            AND o.id <> e.id
+            AND o.revoked_at IS NULL
+            AND o.deleted_at IS NULL
+            AND o.period && tstzrange(e.start_at, 'infinity'::timestamptz, '[)')
+      )
+    ORDER BY e.customer_id, e.entitlement, e.end_at DESC
+);
 
 -- name: SoftDeleteFutureOneOffEntitlements :exec
 UPDATE openrails.entitlements ent SET
@@ -432,3 +470,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: StandingSubscriptionEntitlementExists :one
+-- #691: is there a live STANDING (end_at IS NULL) window for this subscription
+-- source? One standing window satisfies every per-period grant of the sub —
+-- the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
+SELECT EXISTS (
+    SELECT 1 FROM openrails.entitlements e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND e.customer_id = sqlc.arg(customer_id)::uuid
+      AND e.entitlement = sqlc.arg(entitlement)::text
+      AND e.source_type = 'subscription'
+      AND e.source_id = sqlc.arg(source_id)::uuid
+      AND e.end_at IS NULL
+      AND e.revoked_at IS NULL
+      AND e.deleted_at IS NULL
+) AS standing;

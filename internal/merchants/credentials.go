@@ -51,7 +51,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if s.pool == nil {
 		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin)
 	}
-	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "stripe", "live")
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "stripe", s.providerEnvironment)
 	if err != nil {
 		return creds, err
 	}
@@ -83,7 +83,7 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 	if s.pool == nil {
 		return s.secretValue(ctx, id, SecretNMIWebhookSigning)
 	}
-	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", "live")
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", s.providerEnvironment)
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 			cfg.CollectJSURL = DefaultNMICollectJSURL
 			return cfg, nil
 		}
-		scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", "live")
+		scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", s.providerEnvironment)
 		if err != nil {
 			return cfg, err
 		}
@@ -435,7 +435,7 @@ func AssertRailMerchantAccountUnowned(ctx context.Context, q *gen.Queries, merch
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		environment = "live"
+		return errors.New("merchants: provider account environment must be live or test")
 	}
 	row, err := q.GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
 		Rail:        rail,
@@ -465,7 +465,7 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		environment = "live"
+		return RailMerchantAccountIdentity{}, false, errors.New("merchants: provider account environment must be live or test")
 	}
 	row, err := gen.New(s.pool).GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
 		Rail:        rail,

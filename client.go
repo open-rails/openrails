@@ -4,14 +4,14 @@
 //   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over its
 //     service-credential-authenticated /v1/merchant/* routes (this file + remote.go,
 //     ported from the go-client module, which this package supersedes);
-//   - openrails/embed.New(...).Client() runs the engine in-process and adapts
-//     pkg/service.Service to the same interface.
+//   - openrails/embed.New(...).Client() runs the engine in-process and returns
+//     the SAME client implementation wired to an in-process transport (#685): a
+//     custom http.RoundTripper dispatching into the neutral /v1/merchant
+//     handler, no socket.
 //
-// PARITY IS STRUCTURAL: the HTTP handlers are thin adapters over
-// pkg/service.Service, the remote client is the inverse adapter, and the
-// embedded client transcribes the handler mapping — so the two transports are
-// the same code path with an optional wire round-trip inserted. The dual-mode
-// conformance test in openrails/embed enforces this.
+// PARITY IS STRUCTURAL: one client implementation, one handler surface — the
+// transports cannot drift because there is nothing to drift between. The
+// dual-mode conformance test in openrails/embed enforces this end to end.
 //
 // This root package stays dependency-light: it MUST NOT import internal/* or
 // pkg/embedded, so a remote-only consumer's binary does not link the engine
@@ -20,6 +20,7 @@ package openrails
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -137,6 +138,25 @@ type Client interface {
 	PolicySyncClient
 	AdminFundingClient
 	CustomerLookupClient
+}
+
+// Verifier is implemented by clients that support an authenticated readiness
+// probe (both constructors' clients do). Kept OUT of Client so existing
+// third-party implementations of the interface keep compiling.
+type Verifier interface {
+	// Verify checks reachability AND credential validity via one cheap
+	// authenticated call (the db.Ping pattern). Call it from main for
+	// fail-fast-at-boot; constructors stay I/O-free.
+	Verify(ctx context.Context) error
+}
+
+// Verify runs the client's authenticated readiness probe (see Verifier).
+func Verify(ctx context.Context, c Client) error {
+	v, ok := c.(Verifier)
+	if !ok {
+		return fmt.Errorf("openrails: client does not support Verify")
+	}
+	return v.Verify(ctx)
 }
 
 // SelfIssuer is the issuer keying customers rows for self-service

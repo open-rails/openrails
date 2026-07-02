@@ -23,6 +23,11 @@ const (
 	MerchantAdmissionsCreate       = "merchant:admissions:create"
 	MerchantUsageRead              = "merchant:usage:read"
 	MerchantRepairAlertsRead       = "merchant:repair-alerts:read"
+	// MerchantFindingsResolve gates POST /merchant/findings/{id}/resolve
+	// (#692): approving a finding executes its recommendation (cancel/refund/
+	// revoke/grant), so it is a distinct write grant; reads share
+	// merchant:repair-alerts:read (the operator repair surface).
+	MerchantFindingsResolve = "merchant:findings:resolve"
 )
 
 // Customer (buyer/treasury) permissions.

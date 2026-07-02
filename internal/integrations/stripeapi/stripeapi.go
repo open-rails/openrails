@@ -68,7 +68,7 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	base := t.base
 	if base == nil {
-		base = http.DefaultTransport
+		base = defaultBaseTransport()
 	}
 	return base.RoundTrip(req)
 }
@@ -109,6 +109,20 @@ func SetIdempotencyKey(req *http.Request, key string) {
 		return
 	}
 	req.Header.Set(IdempotencyKeyHeader, key)
+}
+
+// testBaseTransport, when non-nil, replaces http.DefaultTransport UNDER the
+// guard (readonly + version pinning still apply). Settable only in
+// `integration` builds via SetTestBaseTransport (stripeapi_integration.go) so
+// e2e tests can point every Stripe byte at a fake wire server; always nil in
+// production builds.
+var testBaseTransport http.RoundTripper
+
+func defaultBaseTransport() http.RoundTripper {
+	if testBaseTransport != nil {
+		return testBaseTransport
+	}
+	return http.DefaultTransport
 }
 
 func newClient(readOnly bool, timeout time.Duration) *http.Client {

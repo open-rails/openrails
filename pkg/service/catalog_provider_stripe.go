@@ -21,6 +21,9 @@ import (
 // (find-or-create via metadata search and lookup_key), Verify, and Update.
 type stripeAdapter struct {
 	svc *Service
+	// testBaseURL points StripeCatalogServices built by stripeServiceFor at an
+	// httptest server (wire-pinning tests, #671). Empty in production.
+	testBaseURL string
 }
 
 func (a *stripeAdapter) Name() string { return "stripe" }
@@ -141,7 +144,7 @@ func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.Strip
 		if proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
 			return nil, false
 		}
-		return &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}, true
+		return &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails, BaseURL: a.testBaseURL}, true
 	}
 	proc, ok := a.svc.rt.Rails.FindByAccountID(models.RailStripe, targetAccountID)
 	if !ok || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
@@ -150,8 +153,9 @@ func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.Strip
 	// Single-entry rail set with the target as the (implicit) primary, so the
 	// StripeCatalogService resolves THAT account's secret key.
 	return &catalog.StripeCatalogService{
-		Config: a.svc.rt.Config,
-		Rails:  config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
+		Config:  a.svc.rt.Config,
+		Rails:   config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
+		BaseURL: a.testBaseURL,
 	}, true
 }
 

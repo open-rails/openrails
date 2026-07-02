@@ -33,11 +33,14 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
-		// An active entitlement pointing at a subscription that does not exist.
+		// A NON-LIVE (already-ended) entitlement pointing at a subscription that
+		// does not exist. #690 partition: a LIVE dangling window is the
+		// freeloader case (derive.entitlement.orphan); this reference check
+		// keeps the non-live rest — history rows with broken provenance.
 		_, err := appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 			 VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
-			entID, customer, feature, time.Now().Add(-24*time.Hour), time.Now().Add(24*time.Hour), danglingSubID, merchantID)
+			entID, customer, feature, time.Now().Add(-24*time.Hour), time.Now().Add(-time.Hour), danglingSubID, merchantID)
 		require.NoError(t, err)
 		return nil
 	}))

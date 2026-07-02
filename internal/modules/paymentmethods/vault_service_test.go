@@ -102,7 +102,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		seen <- v5CreateSeen{auth: r.Header.Get("Authorization"), body: body}
-		_, _ = io.WriteString(w, `{"object":"customer","id":"vault_123"}`)
+		_, _ = io.WriteString(w, `{"object":"customer","id":"vault_123","billing":[{"object":"billing","id":"billing_456","priority":1}]}`)
 	}))
 	defer server.Close()
 
@@ -137,6 +137,8 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Equal(t, "vault_123", pm.RailCustomerRef)
+	require.Equal(t, "billing_456", pm.RailMethodRef, "billing id recorded verbatim (#682)")
+	require.Equal(t, models.RebillDriverProvider, pm.RebillDriver, "native vaults stay provider-billed regardless of billing id")
 	require.Len(t, pms.created, 1)
 
 	got := <-seen

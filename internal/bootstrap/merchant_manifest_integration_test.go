@@ -415,7 +415,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	`, merchantID).Scan(&liveDisplayName))
 	require.Equal(t, "mobius", liveDisplayName)
 
-	merchantSvc, err := merchants.NewService(cp.Pool(), nil)
+	merchantSvc, err := merchants.NewService(cp.Pool(), nil, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
 	require.NoError(t, err)
 	tokenization, err := merchantSvc.LoadNMITokenizationConfig(ctx, parsedMerchantID, "nmi")
 	require.NoError(t, err)

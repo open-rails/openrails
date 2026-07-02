@@ -9,15 +9,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 type PaymentMethodService struct {
-	repo *repo.PaymentMethodRepo
+	repo *PaymentMethodRepo
 }
 
 func NewPaymentMethodService(db *db.DB) *PaymentMethodService {
-	return &PaymentMethodService{repo: repo.NewPaymentMethodRepo(db)}
+	return &PaymentMethodService{repo: NewPaymentMethodRepo(db)}
 }
 
 var (
@@ -32,7 +31,7 @@ func (s *PaymentMethodService) Create(ctx context.Context, method *models.Paymen
 func (s *PaymentMethodService) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
 	pm, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
+		if errors.Is(err, ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
 		}
 		return nil, err
@@ -83,7 +82,7 @@ func (s *PaymentMethodService) GetByRailMethodRef(ctx context.Context, provider,
 	}
 	pm, err := s.repo.GetByRailMethodRef(ctx, provider, methodRef)
 	if err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
+		if errors.Is(err, ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
 		}
 		return nil, err
@@ -99,7 +98,7 @@ func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, pr
 	}
 	pm, err := s.repo.GetByInitialTransactionID(ctx, provider, initialTransactionID)
 	if err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
+		if errors.Is(err, ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
 		}
 		return nil, err
@@ -109,7 +108,7 @@ func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, pr
 
 func (s *PaymentMethodService) Update(ctx context.Context, method *models.PaymentMethod) error {
 	if err := s.repo.Update(ctx, method); err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
+		if errors.Is(err, ErrPaymentMethodNotFound) {
 			return ErrPaymentMethodNotFound
 		}
 		return err
@@ -119,7 +118,7 @@ func (s *PaymentMethodService) Update(ctx context.Context, method *models.Paymen
 
 func (s *PaymentMethodService) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
+		if errors.Is(err, ErrPaymentMethodNotFound) {
 			return ErrPaymentMethodNotFound
 		}
 		return err

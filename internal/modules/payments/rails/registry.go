@@ -68,11 +68,6 @@ type Descriptor struct {
 	// drives its own dunning and emits webhooks.
 	OpenRailsDrivenDunning bool
 
-	// RenewalGraceEligible: subscriptions get the pre-appended renewal grace
-	// window (#368): NMI + Stripe. CCBill keeps its own retry-driven grace;
-	// Solana is pull-based (no webhook silence to bridge).
-	RenewalGraceEligible bool
-
 	// RemoteDeleteOnTerminalCancel: a terminal cancellation must durably queue
 	// deletion of the rail-side recurring schedule or the provider keeps
 	// rebilling it (#344/#679). NMI only: Stripe/CCBill drive their own
@@ -150,7 +145,6 @@ var descriptors = []Descriptor{
 		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
 		true,          // SupportsChargeSavedMethod
 		true,          // OpenRailsDrivenDunning
-		true,          // RenewalGraceEligible
 		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
 		nmiAutoBilled,
 		nmiCancelMode,
@@ -164,7 +158,6 @@ var descriptors = []Descriptor{
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
-		false,         // RenewalGraceEligible (grace from CCBill nextRetryDate)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
 		cancelExternalPortal,
@@ -178,7 +171,6 @@ var descriptors = []Descriptor{
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
-		true,     // RenewalGraceEligible
 		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
 		autoBilledNever,
 		cancelReversible, // cancel_at_period_end
@@ -192,7 +184,6 @@ var descriptors = []Descriptor{
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
-		false,    // RenewalGraceEligible (pull-based)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
 		cancelDestructive,
@@ -206,7 +197,6 @@ var descriptors = []Descriptor{
 		false,    // HasRemoteCustomer
 		false,    // SupportsChargeSavedMethod
 		false,    // OpenRailsDrivenDunning
-		false,    // RenewalGraceEligible
 		false,    // RemoteDeleteOnTerminalCancel
 		autoBilledNever,
 		cancelDestructive,
@@ -259,13 +249,6 @@ func SupportsRailMerchantAccounts(rail models.Rail) bool {
 func AutoBilled(rail models.Rail, pm *models.PaymentMethod) bool {
 	d, ok := Lookup(rail)
 	return ok && d.AutoBilled(pm)
-}
-
-// RenewalGraceEligible reports whether the rail's subscriptions get the
-// pre-appended renewal grace window (#368). Unknown rails: false.
-func RenewalGraceEligible(rail models.Rail) bool {
-	d, ok := Lookup(rail)
-	return ok && d.RenewalGraceEligible
 }
 
 // RemoteDeleteOnTerminalCancel reports whether a terminal cancellation on this

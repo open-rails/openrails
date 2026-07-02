@@ -55,6 +55,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 
 	sale, err := a.Client.RunSale(nmi.SaleParams{
 		CustomerVaultID:  vaultID,
+		BillingID:        strings.TrimSpace(method.RailMethodRef),
 		Amount:           req.AmountCents,
 		Currency:         currency,
 		OrderDescription: description,

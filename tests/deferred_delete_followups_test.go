@@ -259,11 +259,11 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 	assert.WithinDuration(t, time.Now(), recorder.scheduled[0].RunAt, time.Minute)
 }
 
-// TestFailMembershipLimitedModeLeavesRemoteSubscription verifies the #345 gate:
+// TestFailMembershipLimitedModeQueuesDeleteButGatesExecution verifies the #345 gate:
 // in limited mode a terminal dunning failure still cancels locally, but takes
 // NO proactive provider action — no deferred delete is scheduled and no marker
 // is set (the remote subscription is left for reconciliation).
-func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
+func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	rt := suite.App.Runtime
@@ -300,13 +300,17 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 		FailureReason:  &reason,
 	}))
 
+	// #679 queue-always: limited mode no longer suppresses RECORDING the
+	// desired provider action — the marker is stamped and the deferred delete
+	// durably queued, so it is never lost. What limited mode gates is
+	// EXECUTION: the intent gate parks system-origin provider writes until
+	// mode=full (internal/intents/gate.go; execution-side coverage lives in
+	// the intents integration suite's limited-mode origin-gating test).
 	updated := suite.GetSubscription(sub.ID)
 	require.Equal(t, models.StatusCancelled, updated.Status, "local lifecycle proceeds in limited mode")
-	assert.Nil(t, updated.DeletionScheduledAt, "limited mode must not stamp a proactive deletion marker")
-	assert.Empty(t, recorder.scheduled, "limited mode must not schedule a remote delete")
-
-	count, _, _ := queryNMIDeleteIntents(t, suite, sub.ID)
-	assert.Zero(t, count, "no delete intent may exist for the limited-mode cancellation")
+	require.NotNil(t, updated.DeletionScheduledAt, "the deferred-delete marker is recorded even in limited mode (queue-always)")
+	require.Len(t, recorder.scheduled, 1, "the deferred delete is durably queued even in limited mode (queue-always)")
+	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 }
 
 // TestDunningWorkerWindowExpirySchedulesDeferredDelete closes the #344 tail:

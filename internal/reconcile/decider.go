@@ -23,10 +23,14 @@ import (
 // scheduler ordering structurally cannot change outcomes (#664: an
 // evidence-less bundle can only park).
 
-// PeriodGrace is the grace window appended to a missed period end when a
-// lapsed sub enters dunning. Matches the dunning grace cap
-// (subscriptions.graceSlackCap = 48h). Also the detection slack before an
-// evidence-less lapsed row is parked as `unknown`.
+// PeriodGrace dates the grace_ends_at PACING marker when a lapsed sub enters
+// dunning, and is the detection debounce before an evidence-less lapsed row is
+// parked as `unknown` (needs_verification). Since #691 it carries ZERO access
+// stakes — an auto-renew sub's entitlement window is STANDING and closes only
+// on proof, so this constant only paces state transitions. Evaluated against
+// the cadence-derived subscriptions.DunningWindow for that pacing role and
+// deliberately kept: Decide is pure and price-less, and a pure internal
+// debounce doesn't warrant threading price cadence through every plane.
 const PeriodGrace = 48 * time.Hour
 
 // renewalAlignmentSlack (#367 port): providers bill on their own day boundary, so
@@ -269,9 +273,15 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 		return d
 	}
 
+	// A roster-declared dead sub is provider certainty: it will never bill
+	// again, so a renewal charge cannot resurrect it (the charge is still
+	// backfilled — money truth is separate from lifecycle truth).
+	rosterDead := remoteSub != nil &&
+		(remoteSub.Status == SubscriptionStatusCancelled || remoteSub.Status == SubscriptionStatusExpired)
+
 	// 1) A VERIFIED successful renewal charge → the provider billed the new
 	//    period. The only renewal-shaped outcome (#367: renew only off a real charge).
-	if renewTxn != nil {
+	if renewTxn != nil && !rosterDead {
 		return with(Decision{Kind: TransitionRenew, NewPeriodEnd: remoteNextEnd(remoteSub), Reason: "verified_renewal_charge"})
 	}
 	// 2) Roster alive with a FUTURE boundary but no charge → adopt the provider's

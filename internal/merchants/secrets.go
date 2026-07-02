@@ -152,8 +152,10 @@ func normalizeProviderSecretType(rail string) string {
 }
 
 func normalizeProviderSecretEnvironment(environment string) string {
+	// Empty is NOT defaulted (#681): the caller must know its environment
+	// (deployment posture) — a silent live default hid sandbox lookups.
 	switch strings.ToLower(strings.TrimSpace(environment)) {
-	case "", "live", "prod", "production", "mainnet":
+	case "live", "prod", "production", "mainnet":
 		return "live"
 	case "test", "sandbox", "devnet", "testnet":
 		return "test"

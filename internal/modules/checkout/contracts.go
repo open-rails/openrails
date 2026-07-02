@@ -54,8 +54,11 @@ type CheckoutRequest struct {
 }
 
 type CheckoutResponse struct {
-	Status         string     `json:"status"`
-	Action         string     `json:"action,omitempty"`
+	Status string `json:"status"`
+	Action string `json:"action,omitempty"`
+	// Code is the machine-readable reason for a blocked checkout (the
+	// Conflict* consts), so clients can route to the right remedy.
+	Code           string     `json:"code,omitempty"`
 	Message        string     `json:"message,omitempty"`
 	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
 	PaymentID      *uuid.UUID `json:"payment_id,omitempty"`

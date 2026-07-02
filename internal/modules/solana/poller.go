@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -342,7 +341,11 @@ func (p *SolanaPayPoller) attachCheckoutExpiry(ctx context.Context, reference st
 	if err != nil {
 		return fmt.Errorf("invalid checkout session id %q: %w", pending.SessionID, err)
 	}
-	session, err := dbrepo.NewCheckoutSessionRepo(p.db).GetByID(ctx, sessionID)
+	row, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	session, err := models.CheckoutSessionFromGen(row)
 	if err != nil {
 		return err
 	}
@@ -362,11 +365,16 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	if p.db == nil {
 		return nil, nil
 	}
-	session, err := dbrepo.NewCheckoutSessionRepo(p.db).GetByReference(ctx, reference)
+	ref := strings.TrimSpace(reference)
+	row, err := p.db.Gen(ctx).GetCheckoutSessionByReference(ctx, &ref)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	session, err := models.CheckoutSessionFromGen(row)
+	if err != nil {
 		return nil, err
 	}
 	if session.Rail != models.RailSolana {

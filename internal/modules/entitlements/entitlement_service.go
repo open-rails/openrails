@@ -32,12 +32,11 @@ func grantSourceType(s models.EntitlementSourceType) grants.SourceType {
 
 type EntitlementService struct {
 	db    *db.DB
-	repo  *repo.EntitlementRepo
 	clock clockwork.Clock
 }
 
 func NewEntitlementService(db *db.DB, clocks ...clockwork.Clock) *EntitlementService {
-	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db), clock: timeutil.FirstClock(clocks...)}
+	return &EntitlementService{db: db, clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
@@ -70,60 +69,263 @@ func (s *EntitlementService) now() time.Time {
 
 // IsEntitled returns true if the user currently has an active entitlement
 func (s *EntitlementService) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.IsEntitled(ctx, userID, entitlement, at)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return false, err
+	}
+	return s.IsCustomerEntitled(ctx, tsid, entitlement, at)
 }
 
 func (s *EntitlementService) IsCustomerEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.IsCustomerEntitled(ctx, tenantSubjectID, entitlement, at)
+	// Merchant scoping (issue #223): the merchant is resolved from context and is
+	// required — an absent merchant is an error.
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.db.Gen(ctx).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
+	})
 }
 
 func (s *EntitlementService) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.HasActiveIndefinite(ctx, userID, entitlement, at)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return false, err
+	}
+	return s.HasActiveIndefiniteByCustomer(ctx, tsid, entitlement, at)
 }
 
 func (s *EntitlementService) HasActiveIndefiniteByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.HasActiveIndefiniteByCustomer(ctx, tenantSubjectID, entitlement, at)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.db.Gen(ctx).EntitlementHasActiveIndefinite(ctx, gen.EntitlementHasActiveIndefiniteParams{
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
+	})
 }
 
 func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
-	return s.repo.ExistsBySource(ctx, sourceType, sourceID, entitlement)
+	return s.db.Gen(ctx).EntitlementExistsBySource(ctx, gen.EntitlementExistsBySourceParams{
+		SourceType:  string(sourceType),
+		SourceID:    sourceID,
+		Entitlement: entitlement,
+	})
 }
 
 func (s *EntitlementService) LatestFiniteWindow(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	return s.repo.GetLatestFiniteActive(ctx, userID, entitlement, at)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.LatestFiniteWindowByCustomer(ctx, tsid, entitlement, at)
 }
 
 func (s *EntitlementService) LatestFiniteWindowByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	return s.repo.GetLatestFiniteActiveByCustomer(ctx, tenantSubjectID, entitlement, at)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.db.Gen(ctx).GetLatestFiniteActiveEntitlement(ctx, gen.GetLatestFiniteActiveEntitlementParams{
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.EntitlementFromGen(row), nil
+}
+
+// Insert persists a fully-populated entitlement window directly (test/seed
+// surface; the production write path is PushNewEntitlement via the grant ledger).
+func (s *EntitlementService) Insert(ctx context.Context, entitlement *models.Entitlement) error {
+	// Validate that end_at > start_at if end_at is provided (non-indefinite entitlement)
+	if entitlement.EndAt != nil && !entitlement.EndAt.After(entitlement.StartAt) {
+		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
+	}
+
+	// Stamp the resolved merchant (issue #223) when the caller did not set one,
+	// so new rows are merchant-scoped consistently with reads. The merchant is
+	// required from context — an absent merchant is an error.
+	if (entitlement.MerchantID == uuid.UUID{}) {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		entitlement.MerchantID = tid.UUID()
+	}
+
+	id, err := s.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:           entitlement.ID,
+		MerchantID:   entitlement.MerchantID,
+		CustomerID:   entitlement.CustomerID,
+		Entitlement:  entitlement.Entitlement,
+		StartAt:      entitlement.StartAt,
+		EndAt:        entitlement.EndAt,
+		SourceID:     entitlement.SourceID,
+		SourceType:   string(entitlement.SourceType),
+		RevokedAt:    entitlement.RevokedAt,
+		RevokeReason: models.RevokeReasonPtr(entitlement.RevokeReason),
+		CreatedAt:    entitlement.CreatedAt,
+		UpdatedAt:    entitlement.UpdatedAt,
+	})
+	if err != nil {
+		return err
+	}
+	entitlement.ID = id
+	return nil
 }
 
 func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
-	return s.repo.ListByUser(ctx, userID)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListEntitlementsByCustomer(ctx, tsid)
+	if err != nil {
+		return nil, err
+	}
+	return models.EntitlementsFromGen(rows), nil
 }
 
 func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
-	return s.repo.ListActiveRecords(ctx, userID, at)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecords(ctx, gen.ListActiveEntitlementRecordsParams{
+		CustomerID: tsid,
+		At:         at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.EntitlementsFromGen(rows), nil
 }
 
 func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
-	return s.repo.ListActiveRecordsByCustomer(ctx, tenantSubjectID, at)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecordsMerchant(ctx, gen.ListActiveEntitlementRecordsMerchantParams{
+		MerchantID: tid.UUID(),
+		CustomerID: tenantSubjectID,
+		At:         at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.EntitlementsFromGen(rows), nil
 }
 
+// ListActiveRecordsByExternalSubjects (#354/#539/#555): one query, grouped by the
+// caller-supplied subject; subjects with no active rows are absent from the map.
+// Customer identity is (merchant, stable host/AuthKit subject) — the merchant is
+// pinned from the request credential (RLS), so no issuer is needed.
 func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
-	return s.repo.ListActiveRecordsByExternalSubjects(ctx, subjects, at)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	merchantID := tid.UUID()
+	resolved, err := s.db.Gen(ctx).LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{
+		MerchantID: merchantID,
+		Subjects:   subjects,
+	})
+	if err != nil {
+		return nil, err
+	}
+	subjectByCustomerID := make(map[uuid.UUID]string, len(resolved))
+	customerIDs := make([]uuid.UUID, 0, len(resolved))
+	for _, row := range resolved {
+		subj := ""
+		if row.Subject != nil {
+			subj = *row.Subject
+		}
+		subjectByCustomerID[row.ID] = subj
+		customerIDs = append(customerIDs, row.ID)
+	}
+	return s.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
+}
+
+func (s *EntitlementService) listActiveRecordsByCustomerIDs(ctx context.Context, merchantID uuid.UUID, subjectByCustomerID map[uuid.UUID]string, customerIDs []uuid.UUID, at time.Time) (map[string][]models.Entitlement, error) {
+	if len(customerIDs) == 0 {
+		return map[string][]models.Entitlement{}, nil
+	}
+	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecordsByCustomerIDs(ctx, gen.ListActiveEntitlementRecordsByCustomerIDsParams{
+		MerchantID:  merchantID,
+		CustomerIds: customerIDs,
+		At:          at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]models.Entitlement, len(rows))
+	for _, row := range rows {
+		sourceID := row.SourceID
+		m := models.Entitlement{
+			ID:          row.ID,
+			MerchantID:  row.MerchantID,
+			CustomerID:  row.CustomerID,
+			Entitlement: row.Entitlement,
+			StartAt:     row.StartAt,
+			EndAt:       row.EndAt,
+			SourceID:    &sourceID,
+			SourceType:  models.EntitlementSourceType(row.SourceType),
+			RevokedAt:   row.RevokedAt,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			DeletedAt:   row.DeletedAt,
+		}
+		if row.RevokeReason != nil {
+			rr := models.EntitlementRevokeReason(*row.RevokeReason)
+			m.RevokeReason = &rr
+		}
+		subj := subjectByCustomerID[row.CustomerID]
+		out[subj] = append(out[subj], m)
+	}
+	return out, nil
 }
 
 func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
-	return s.repo.ListDistinctEntitlementNamesBySource(ctx, sourceType, sourceID)
+	return s.db.Gen(ctx).ListDistinctEntitlementNamesBySource(ctx, gen.ListDistinctEntitlementNamesBySourceParams{
+		SourceType: string(sourceType),
+		SourceID:   sourceID,
+	})
 }
 
 // ListActiveEntitlements returns a de-duplicated list of active entitlement names for a user at a point in time.
 func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	return s.repo.ListActiveEntitlements(ctx, userID, at)
+	tsid, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.db.Gen(ctx).ListActiveEntitlementNames(ctx, gen.ListActiveEntitlementNamesParams{
+		CustomerID: tsid,
+		At:         at,
+	})
 }
 
 func (s *EntitlementService) ListActiveEntitlementsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
-	return s.repo.ListActiveEntitlementsByCustomer(ctx, tenantSubjectID, at)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.db.Gen(ctx).ListActiveEntitlementNamesMerchant(ctx, gen.ListActiveEntitlementNamesMerchantParams{
+		MerchantID: tid.UUID(),
+		CustomerID: tenantSubjectID,
+		At:         at,
+	})
 }
 
 // CustomersWithEntitlementMaxPageSize bounds a single reverse-lookup page; the
@@ -135,6 +337,7 @@ const CustomersWithEntitlementMaxPageSize = 10000
 // keyset-paginated by customer_id (afterID exclusive; uuid.Nil starts). Backs the
 // host directory's filter-by-entitlement (AuthKit's EntitlementFilterProvider).
 // limit <= 0 defaults to 1000; it is capped at CustomersWithEntitlementMaxPageSize.
+// The query is merchant-scoped by RLS (the merchant is pinned from the request).
 func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
 	if strings.TrimSpace(entitlement) == "" {
 		return nil, fmt.Errorf("entitlement is required")
@@ -145,12 +348,21 @@ func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, e
 	if limit > CustomersWithEntitlementMaxPageSize {
 		limit = CustomersWithEntitlementMaxPageSize
 	}
-	return s.repo.ListCustomersWithEntitlement(ctx, strings.TrimSpace(entitlement), at, afterID, int32(limit))
+	return s.db.Gen(ctx).ListCustomersWithEntitlement(ctx, gen.ListCustomersWithEntitlementParams{
+		Entitlement: strings.TrimSpace(entitlement),
+		At:          at,
+		AfterID:     afterID,
+		Lim:         int32(limit),
+	})
 }
 
 // GetByID retrieves an entitlement by its ID
 func (s *EntitlementService) GetByID(ctx context.Context, id uuid.UUID) (*models.Entitlement, error) {
-	return s.repo.GetByID(ctx, id)
+	row, err := s.db.Gen(ctx).GetEntitlementByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return models.EntitlementFromGen(row), nil
 }
 
 type PushNewEntitlementParams struct {
@@ -215,7 +427,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	var created *models.Entitlement
 
 	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if err := repo.LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
+		if err := LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
 			return err
 		}
 
@@ -233,19 +445,30 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		}
 
 		// If an indefinite entitlement exists, the timeline is terminal.
-		hasIndefinite, err := repo.TimelineHasIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
+		hasIndefinite, err := TimelineHasIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
 		if err != nil {
 			return err
 		}
 		if hasIndefinite {
-			created, err = repo.GetTimelineIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
+			created, err = GetTimelineIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
 			if err != nil {
 				return err
 			}
-			return repo.AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
+			// #691: the covering window is THIS subscription's own STANDING window
+			// and the caller pushed a bounded paid period — the projection is
+			// already right (standing), but the paid period is still recorded as a
+			// bounded per-period grant (the ledger stays per-period; the fold is
+			// grants + closure events).
+			if p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil &&
+				created.SourceType == p.SourceType && created.SourceID != nil && *created.SourceID == p.SourceID {
+				if err := s.appendCoveredPeriodGrant(ctx, tx, merchantID.UUID(), p, now); err != nil {
+					return err
+				}
+			}
+			return AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
 		}
 
-		tailEnd, err := repo.GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
+		tailEnd, err := GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
 		if err != nil {
 			return err
 		}
@@ -271,7 +494,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.EndAt != nil:
 			e := p.EndAt.UTC()
 			if !e.After(start) {
-				covered, cerr := repo.GetTimelineCoveringWindow(ctx, tx, p.CustomerID, p.Entitlement, e)
+				covered, cerr := GetTimelineCoveringWindow(ctx, tx, p.CustomerID, p.Entitlement, e)
 				if cerr != nil {
 					if errors.Is(cerr, pgx.ErrNoRows) {
 						return fmt.Errorf("requested entitlement window is already covered by timeline tail but no covering row was found")
@@ -279,7 +502,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 					return cerr
 				}
 				created = covered
-				return repo.AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
+				return AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
 			}
 			endAt = &e
 		}
@@ -304,7 +527,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			return mErr
 		}
 		// Return the entitlement window MaterializeGrant just projected for this grant.
-		window, fErr := repo.GetEntitlementByGrant(ctx, tx, merchantID.UUID(), g.ID, p.Entitlement)
+		window, fErr := GetEntitlementByGrant(ctx, tx, merchantID.UUID(), g.ID, p.Entitlement)
 		if fErr != nil {
 			return fErr
 		}
@@ -317,19 +540,204 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	return created, nil
 }
 
-func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
-	if s == nil || s.repo == nil {
-		return fmt.Errorf("entitlement service not initialized")
+// appendCoveredPeriodGrant records the bounded per-period grant for a renewal
+// whose projection is already covered by the subscription's own standing window
+// (#691). Idempotent: a replayed period whose end is not past the latest
+// recorded bounded end appends nothing. Runs inside the caller's tx with the
+// timeline lock held.
+func (s *EntitlementService) appendCoveredPeriodGrant(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p PushNewEntitlementParams, now time.Time) error {
+	q := gen.New(tx)
+	end := p.EndAt.UTC()
+	start := now
+	if p.NotBefore != nil && !p.NotBefore.IsZero() {
+		start = p.NotBefore.UTC()
 	}
-	return s.repo.ExtendActiveBySubscription(ctx, subscriptionID, endAt.UTC(), s.now().UTC())
+	latest, err := q.LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
+		MerchantID: merchantID, CustomerID: p.CustomerID,
+		SourceType: string(grantSourceType(p.SourceType)), SourceID: p.SourceID.String(),
+		Entitlement: p.Entitlement,
+	})
+	if err != nil {
+		return err
+	}
+	if !latest.IsZero() {
+		if !end.After(latest) {
+			return nil // replay: this period is already recorded
+		}
+		if latest.After(start) {
+			start = latest // contiguous per-period ledger
+		}
+	}
+	if !end.After(start) {
+		return nil
+	}
+	gl := grants.New(q, merchantID)
+	gl.SetClock(func() time.Time { return s.now().UTC() })
+	g, err := gl.Grant(ctx, grants.GrantInput{
+		Customer: p.CustomerID, Kind: grants.Entitlement,
+		Source: grantSourceType(p.SourceType), SourceID: p.SourceID.String(),
+		Spec:     &grants.Spec{Entitlements: []string{p.Entitlement}},
+		StartsAt: start, EndsAt: &end,
+	})
+	if err != nil {
+		return err
+	}
+	// The standing window satisfies the projection; MaterializeGrant is a no-op
+	// window-wise but keeps usage-limit bindings and future retractions wired.
+	return gl.MaterializeGrant(ctx, g)
 }
 
-func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.EntitlementRevokeReason) error {
-	if s == nil || s.repo == nil {
+// BoundSubscriptionAccess writes the PROVEN closure for a subscription's access
+// (#691): live subscription-sourced windows get end_at = endAt — advance-written
+// on disk, so a dead system cannot extend a cancelled sub — and scheduled
+// windows starting at/after the closure are removed. Idempotent.
+func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
+	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	now := s.now().UTC()
-	return s.repo.EndActiveByPayment(ctx, paymentID, now, now, &reason)
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := q.SoftDeleteFutureEntitlementsBySubscription(ctx, gen.SoftDeleteFutureEntitlementsBySubscriptionParams{
+			SourceID: subscriptionID, EndAt: endAt.UTC(), Now: now,
+		}); err != nil {
+			return err
+		}
+		return q.EndActiveEntitlementsBySubscription(ctx, gen.EndActiveEntitlementsBySubscriptionParams{
+			SourceID: subscriptionID, EndAt: endAt.UTC(), Now: now, SetRevoked: false,
+		})
+	})
+}
+
+// ResumeSubscriptionAccess re-opens a resumed auto-renew subscription's latest
+// bounded window (end_at = NULL), undoing an advance-written cancel closure
+// (#691). Gated on the sub actually projecting standing access again (auto-renew
+// price + non-terminal status), so terminal/bounded subs are a no-op.
+func (s *EntitlementService) ResumeSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	mID, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		standing, err := q.SubscriptionProjectsStandingAccess(ctx, gen.SubscriptionProjectsStandingAccessParams{
+			MerchantID: mID.UUID(), ID: subscriptionID,
+		})
+		if err != nil {
+			return err
+		}
+		if !standing {
+			return nil
+		}
+		return q.ResumeEntitlementsBySubscription(ctx, gen.ResumeEntitlementsBySubscriptionParams{
+			SourceID: subscriptionID, Now: now,
+		})
+	})
+}
+
+func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	return s.extendActiveBySubscription(ctx, subscriptionID, endAt.UTC(), s.now().UTC())
+}
+
+// extendActiveBySubscription extends active entitlements for a subscription to endAt.
+// It only updates rows whose end_at is NULL or before endAt, and will never shorten a window.
+func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
+	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// Fetch all subscription entitlements that would be extended, then shift any following
+		// scheduled windows forward by the same delta (per user+entitlement) to avoid overlaps.
+		//
+		// This keeps the entitlement timeline gapless for the affected entitlement key and avoids
+		// double-access from overlapping scheduled windows.
+		q := gen.New(tx)
+		rows, err := q.ListExtendableSubscriptionEntitlements(ctx, gen.ListExtendableSubscriptionEntitlementsParams{
+			SourceID: subscriptionID,
+			EndAt:    endAt,
+		})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+
+		for _, row := range rows {
+			ent := models.EntitlementFromGen(row)
+			if ent.EndAt == nil || ent.EndAt.IsZero() {
+				continue
+			}
+			oldEnd := ent.EndAt.UTC()
+			newEnd := endAt.UTC()
+			if !newEnd.After(oldEnd) {
+				continue
+			}
+
+			// Validate: do not produce end_at <= start_at
+			if !newEnd.After(ent.StartAt) {
+				return fmt.Errorf("cannot extend end_at to %v: entitlement start_at=%v would be >= end_at", newEnd, ent.StartAt)
+			}
+
+			if err := LockEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement); err != nil {
+				return err
+			}
+
+			// Shift the following windows forward FIRST to open the gap. Extending
+			// the subscription row to newEnd before shifting would transiently
+			// overlap the next (not-yet-shifted) window, and entitlements_no_overlap
+			// is an IMMEDIATE (non-deferrable) exclusion constraint checked per
+			// statement — so it must never be violated mid-transaction.
+			delta := newEnd.Sub(oldEnd)
+			if err := ShiftEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
+				return err
+			}
+
+			// Extend the subscription's entitlement row.
+			if err := q.UpdateEntitlementEndAtIfMatch(ctx, gen.UpdateEntitlementEndAtIfMatchParams{
+				ID:       ent.ID,
+				NewEndAt: newEnd,
+				Now:      now,
+				OldEndAt: oldEnd,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.EntitlementRevokeReason) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	now := s.now().UTC()
+	return s.endActiveByPayment(ctx, paymentID, now, now, &reason)
+}
+
+// endActiveByPayment revokes active one-off entitlements for a payment and removes future windows.
+// The now parameter is used for updated_at and revoked_at timestamps to support mock clocks in tests.
+func (s *EntitlementService) endActiveByPayment(ctx context.Context, paymentID uuid.UUID, endAt time.Time, now time.Time, reason *models.EntitlementRevokeReason) error {
+	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := q.SoftDeleteFutureOneOffEntitlements(ctx, gen.SoftDeleteFutureOneOffEntitlementsParams{
+			SourceID: paymentID,
+			Now:      now,
+			EndAt:    endAt,
+		}); err != nil {
+			return err
+		}
+		return q.RevokeActiveOneOffEntitlements(ctx, gen.RevokeActiveOneOffEntitlementsParams{
+			SourceID:     paymentID,
+			EndAt:        endAt,
+			Now:          now,
+			RevokeReason: models.RevokeReasonPtr(reason),
+		})
+	})
 }
 
 func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
@@ -341,7 +749,7 @@ func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, u
 // as-of when grace actually lapsed (converge-not-replay), not at convergence
 // time. Pass s.now() for the normal "revoke now" semantics.
 func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
-	if s == nil || s.repo == nil {
+	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	at := asOf.UTC()
@@ -448,13 +856,13 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 		userID := p.UserID
 		entitlement := p.Entitlement
 		if p.EntitlementID != nil {
-			ent, err := repo.GetEntitlementByIDTx(ctx, tx, *p.EntitlementID)
+			ent, err := GetEntitlementByIDTx(ctx, tx, *p.EntitlementID)
 			if err != nil {
 				return err
 			}
 			userID = ent.CustomerID.String()
 			entitlement = ent.Entitlement
-			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+			if err := LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 				return err
 			}
 			if ent.RevokedAt != nil || ent.DeletedAt != nil {
@@ -469,15 +877,15 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 				}
 			}
 			if ent.StartAt.After(now) {
-				return repo.SoftDeleteEntitlementByID(ctx, tx, ent.ID, now)
+				return SoftDeleteEntitlementByID(ctx, tx, ent.ID, now)
 			}
 			if ent.EndAt == nil || ent.EndAt.After(now) {
-				return repo.RevokeEntitlementByID(ctx, tx, ent.ID, p.Reason, now)
+				return RevokeEntitlementByID(ctx, tx, ent.ID, p.Reason, now)
 			}
 			return nil
 		}
 
-		if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+		if err := LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 			return err
 		}
 
@@ -488,9 +896,9 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			return terr
 		}
 
-		if err := repo.RevokeActiveTimelineWindows(ctx, tx, tsid, entitlement, p.Reason, p.SourceType, p.SourceID, now); err != nil {
+		if err := RevokeActiveTimelineWindows(ctx, tx, tsid, entitlement, p.Reason, p.SourceType, p.SourceID, now); err != nil {
 			return err
 		}
-		return repo.SoftDeleteFutureTimelineWindows(ctx, tx, tsid, entitlement, p.SourceType, p.SourceID, now)
+		return SoftDeleteFutureTimelineWindows(ctx, tx, tsid, entitlement, p.SourceType, p.SourceID, now)
 	})
 }

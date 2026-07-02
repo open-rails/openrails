@@ -34,6 +34,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -93,6 +94,21 @@ func (e *Embedded) GetPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, e
 		return nil, ErrNotInitialized
 	}
 	return e.app.Runtime.GetBillingPeriodicJobs(ctx)
+}
+
+// WorkerMiddleware returns the #689 worker-health bookkeeping middleware. Add
+// it to your River client's river.Config.Middleware so billing workers get
+// per-kind health rows (and the health checker can alert on wedged workers):
+//
+//	client, _ := river.NewClient(driver, &river.Config{
+//	    Workers:    workers,
+//	    Middleware: []rivertype.Middleware{openrails.WorkerMiddleware()},
+//	})
+func (e *Embedded) WorkerMiddleware() rivertype.Middleware {
+	if e == nil || e.app == nil || e.app.Runtime == nil {
+		return nil
+	}
+	return e.app.Runtime.WorkerHealthMiddleware()
 }
 
 // SetRiverClient injects an external River client for billing to use for job enqueueing.

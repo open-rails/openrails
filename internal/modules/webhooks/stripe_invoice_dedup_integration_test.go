@@ -12,15 +12,17 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 )
 
-// TestStripeInvoicePaymentAlreadyRecorded covers the Bug 2 cross-key dedup: the
-// reconcile backfill records a subscription payment keyed by the CHARGE id (with
-// stripe_invoice_id in metadata), while the 2026-04-22.preview invoice.paid
-// webhook keys the SAME payment by the INVOICE id. The (merchant, rail,
-// transaction_id) unique index cannot see across those keys, so without this
-// helper a backfill-then-webhook ordering inserts a duplicate row.
+// TestStripeInvoicePaymentAlreadyRecorded covers the cross-key dedup, ported to
+// the #684 fetch-and-converge creation leg: the reconcile backfill records a
+// subscription payment keyed by the CHARGE id (with stripe_invoice_id in
+// metadata), while a fetched latest invoice without charge/payment_intent keys
+// the SAME payment by the INVOICE id. The (merchant, rail, transaction_id)
+// unique index cannot see across those keys, so without this helper a
+// backfill-then-converge ordering inserts a duplicate row.
 func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
@@ -72,7 +74,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	})
 
 	paymentSvc := payments.NewPaymentService(dbi)
-	svc := &StripeWebhookService{PaymentService: paymentSvc}
+	svc := &StripeConvergeService{PaymentService: paymentSvc}
 
 	// Reconcile-backfill row: keyed by CHARGE id, invoice id only in metadata.
 	const chargeID = "ch_dedup_1"
@@ -96,19 +98,25 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		},
 	}))
 
-	// Preview invoice.paid (no charge/payment_intent): must dedupe via the
-	// stripe_invoice_id metadata of the backfill row.
-	recorded, err := svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: invoiceID})
+	// Fetched invoice without charge/payment_intent (transaction id falls back
+	// to the invoice id): must dedupe via the backfill row's stripe_invoice_id.
+	recorded, err := svc.fetchedInvoicePaymentAlreadyRecorded(ctx, subscriptions.StripeLivenessRecord{
+		LatestInvoiceID: invoiceID, LatestInvoiceTransactionID: invoiceID,
+	})
 	require.NoError(t, err)
-	require.True(t, recorded, "preview invoice must match backfill row via stripe_invoice_id metadata")
+	require.True(t, recorded, "fetched invoice must match backfill row via stripe_invoice_id metadata")
 
-	// Non-preview invoice.paid that carries the charge: matches by transaction id.
-	recorded, err = svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: invoiceID, Charge: chargeID})
+	// Fetched invoice carrying the charge: matches by transaction id.
+	recorded, err = svc.fetchedInvoicePaymentAlreadyRecorded(ctx, subscriptions.StripeLivenessRecord{
+		LatestInvoiceID: invoiceID, LatestInvoiceTransactionID: chargeID,
+	})
 	require.NoError(t, err)
-	require.True(t, recorded, "invoice carrying the charge id must match by transaction id")
+	require.True(t, recorded, "fetched invoice carrying the charge id must match by transaction id")
 
 	// Unrelated invoice: no match.
-	recorded, err = svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: "in_unrelated", Charge: "ch_unrelated"})
+	recorded, err = svc.fetchedInvoicePaymentAlreadyRecorded(ctx, subscriptions.StripeLivenessRecord{
+		LatestInvoiceID: "in_unrelated", LatestInvoiceTransactionID: "ch_unrelated",
+	})
 	require.NoError(t, err)
 	require.False(t, recorded, "unrelated invoice must not match")
 
@@ -128,7 +136,9 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		PurchasedAt:   now,
 		CreatedAt:     now,
 	}))
-	recorded, err = svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: "in_dedup_2"})
+	recorded, err = svc.fetchedInvoicePaymentAlreadyRecorded(ctx, subscriptions.StripeLivenessRecord{
+		LatestInvoiceID: "in_dedup_2", LatestInvoiceTransactionID: "in_dedup_2",
+	})
 	require.NoError(t, err)
 	require.False(t, recorded, "a prior failed attempt must not suppress recording the success")
 }

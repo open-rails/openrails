@@ -151,20 +151,29 @@ func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	if err != nil {
 		return nil, err
 	}
+	return StripeSnapshotFromLiveness(subj.RailSubscriptionID, rec, time.Now().UTC()), nil
+}
+
+// StripeSnapshotFromLiveness maps one fetched Stripe subscription record onto a
+// narrow RemoteSnapshot for the decider. Shared by the unknown-cohort probe and
+// the #684 webhook fetch-and-converge path.
+func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) *RemoteSnapshot {
 	snap := &RemoteSnapshot{
 		Provider:  ProviderStripe,
-		FetchedAt: time.Now().UTC(),
+		FetchedAt: now,
 		// A 404 is Stripe's authoritative "gone" — exhaustive for this subject.
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true},
 	}
 	if !rec.Found {
-		return snap, nil
+		return snap
 	}
 	sub := RemoteSubscription{
-		RailSubscriptionID: subj.RailSubscriptionID,
+		RailSubscriptionID: railSubID,
 		Status:             normalizeStripeStatus(rec.Status),
 		RawStatus:          rec.Status,
+		CustomerID:         rec.CustomerID,
+		PlanID:             rec.PriceID,
 	}
 	if !rec.CurrentPeriodEnd.IsZero() {
 		end := rec.CurrentPeriodEnd
@@ -176,7 +185,7 @@ func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	if rec.LatestInvoicePaid && rec.LatestInvoiceTransactionID != "" && !rec.CurrentPeriodStart.IsZero() {
 		snap.Transactions = []RemoteTransaction{{
 			TransactionID:  rec.LatestInvoiceTransactionID,
-			SubscriptionID: subj.RailSubscriptionID,
+			SubscriptionID: railSubID,
 			Type:           TransactionTypeSale,
 			Success:        true,
 			AmountCents:    rec.LatestInvoiceAmountPaid,
@@ -184,7 +193,25 @@ func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 			OccurredAt:     rec.CurrentPeriodStart,
 		}}
 	}
-	return snap, nil
+	// An UNPAID latest invoice with an amount due is decline evidence (#684):
+	// the fetch-sourced replacement for invoice.payment_failed's payload facts.
+	// The "failed:" transaction-id prefix matches the legacy failed-row key so a
+	// backfilled failed attempt and the eventual success never collide. Only
+	// recorded when Stripe gives the invoice's own created time (#651: no
+	// fabricated instants).
+	if !rec.LatestInvoicePaid && rec.LatestInvoiceAmountDue > 0 &&
+		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
+		snap.Transactions = append(snap.Transactions, RemoteTransaction{
+			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,
+			SubscriptionID: railSubID,
+			Type:           TransactionTypeDecline,
+			Success:        false,
+			AmountCents:    rec.LatestInvoiceAmountDue,
+			Currency:       rec.LatestInvoiceCurrency,
+			OccurredAt:     rec.LatestInvoiceCreated,
+		})
+	}
+	return snap
 }
 
 // BuildSubscriptionProbers assembles the per-rail probe sources from the same
