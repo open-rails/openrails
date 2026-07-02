@@ -795,6 +795,16 @@ func Validate(cfg *Config) error {
 				return fmt.Errorf("default ClickHouse credentials are not allowed outside development")
 			}
 		}
+		// The auth issuer is the root of trust: the verifier derives the JWKS
+		// URI from it and fetches signing keys over its scheme. A plaintext-HTTP
+		// issuer lets an on-path attacker serve forged keys, so require https
+		// outside development. (Empty is legal here — standalone boot fails
+		// later in controlplane.New; embedded needs no issuer.)
+		if cfg.Auth != nil {
+			if issuer := strings.TrimSpace(cfg.Auth.Issuer); issuer != "" && !strings.HasPrefix(strings.ToLower(issuer), "https://") {
+				return fmt.Errorf("auth issuer %q must use https outside development", issuer)
+			}
+		}
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
