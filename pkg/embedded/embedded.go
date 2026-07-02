@@ -72,10 +72,8 @@ func New(opts Options) (*Embedded, error) {
 		return nil, err
 	}
 
-	// Build the gin-free application graph only. The standalone gin HTTP surface
-	// (Handler / Register*Routes) lives in the pkg/embedded/gin subpackage, which
-	// constructs the gin server from this App on demand (#285). Keeping the gin
-	// server out of this core type is what makes pkg/embedded gin-free.
+	// Build the application graph only; HTTP surfaces (StandaloneHandler /
+	// NewHTTPHandler / MountHandler) are constructed from this App on demand.
 	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,
@@ -89,8 +87,8 @@ func New(opts Options) (*Embedded, error) {
 	return &Embedded{app: application}, nil
 }
 
-// App returns the gin-free application graph. It is the bridge the
-// pkg/embedded/gin subpackage uses to build the gin HTTP surface (#285).
+// App returns the application graph, the bridge the HTTP surface constructors
+// (and embed.Runtime) build from.
 func (e *Embedded) App() *app.App {
 	if e == nil {
 		return nil
@@ -150,9 +148,9 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 }
 
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface (NewHTTPHandler / pkg/embedded/gin MountHandler / RegisterAPI),
-// recorded at mount time; nil before any mount. Returns a copy. The typical host
-// mounts once, so this reflects its live surface.
+// surface (NewHTTPHandler / MountHandler), recorded at mount time; nil before
+// any mount. Returns a copy. The typical host mounts once, so this reflects its
+// live surface.
 func (e *Embedded) ActiveRouteSets() []RouteSet {
 	if e == nil {
 		return nil

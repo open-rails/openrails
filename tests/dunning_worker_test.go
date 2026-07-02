@@ -534,7 +534,10 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 	})
 
 	limitedCfg := *rt.Config
-	limitedCfg.Mode = config.ModeLimited
+	// ProviderWriteMode, not the deprecated Mode alias: the harness now sets
+	// ProviderWriteMode explicitly, and setting BOTH (differing) fail-closes
+	// to readonly (Paul 2026-07-02).
+	limitedCfg.ProviderWriteMode = config.ProviderWriteModeLimited
 
 	// A zero-value NMI client: present (so the scan proceeds) but unconfigured —
 	// any attempted provider call would error, proving the limited-mode path

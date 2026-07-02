@@ -10,10 +10,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Authenticator is the gin-free auth boundary backed by an AuthKit JWT verifier.
-// It implements billingauth.Authenticator. The gin Required()/Optional()
-// Gin middleware wraps it from pkg/authprovider/ginauth so this gin-free core
-// and its transitive importers do not pull in github.com/gin-gonic/gin (#285).
+// Authenticator is the framework-neutral auth boundary backed by an AuthKit JWT
+// verifier. It implements billingauth.Authenticator (the gin adapter package
+// pkg/authprovider/ginauth was removed with the gin exit, #670).
 type Authenticator struct {
 	verifier Verifier
 }

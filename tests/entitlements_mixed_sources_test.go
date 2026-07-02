@@ -48,12 +48,16 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
-		ID:                  priceID,
-		ProductID:           productID,
-		Status:              models.CatalogStatusActive,
-		Amount:              999,
-		Currency:            "usd",
-		AccessDurationHours: &billingDays, AutoRenew: true,
+		ID:        priceID,
+		ProductID: productID,
+		Status:    models.CatalogStatusActive,
+		Amount:    999,
+		Currency:  "usd",
+		// AutoRenew FALSE deliberately (#691): this test pins BOUNDED-window
+		// stacking mechanics across mixed sources. An auto-renew price would get
+		// a STANDING window (access ends only by proof) — that doctrine has its
+		// own tests (lifecycle_failopen/converge_failopen).
+		AccessDurationHours: &billingDays, AutoRenew: false,
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CreatedAt:  clock.Now().UTC(),
 		UpdatedAt:  clock.Now().UTC(),

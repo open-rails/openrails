@@ -9,7 +9,6 @@ application instead of running it as a standalone service.
 import (
     "github.com/open-rails/openrails/config"
     "github.com/open-rails/openrails/pkg/embedded"
-    embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 func main() {
@@ -23,7 +22,7 @@ func main() {
         Redis:   yourRedis,    // Share your existing Redis client
         PaymentProviders: []embedded.PaymentProvider{
             {
-                Config: config.ProviderAccountConfig{
+                Config: config.RailMerchantAccountConfig{
                     Rail:      models.RailStripe,
                     AccountID: "acct_1M9QZULkdIwHu7ix",
                     Stripe:    &config.StripeRailConfig{SecretKey: hostSecrets.StripeKey},
@@ -31,7 +30,7 @@ func main() {
             },
             {
                 Name: "stripe_old",
-                Config: config.ProviderAccountConfig{
+                Config: config.RailMerchantAccountConfig{
                     Rail:      models.RailStripe,
                     AccountID: "acct_1N2YbMLkdIwHu7ix",
                     Archived:  true,
@@ -45,27 +44,33 @@ func main() {
     }
     defer openrails.Close(context.Background())
 
-    // Mount OpenRails on its canonical billing namespace. The mount prefix is
-    // inferred from the group; select only the route groups this host needs.
-    router := gin.Default()
-    api := router.Group("/billing")
-    if err := embgin.RegisterAPI(api, openrails,
-        embgin.WithGroups(
+    // Mount OpenRails on its canonical billing namespace. MountHandler strips
+    // MountPrefix and combines the user/admin/webhook surface with the /v1/me
+    // self-service subtree; select only the route groups this host needs.
+    handler, err := embedded.MountHandler(openrails, embedded.MountOptions{
+        MountPrefix: "/billing",
+        RouteSets: []embedded.RouteSet{
             embedded.RouteSetCheckout,
             embedded.RouteSetCustomer,
             embedded.RouteSetWebhooks,
-        ),
-        embgin.WithAuthenticator(hostAuthn),          // checkout + customer routes
-        embgin.WithDelegatedAuthenticator(hostDeleg), // /v1/me + /v1/customers
-        embgin.WithGate(hostGate),                    // merchant groups (catalog/providers/admin)
-    ); err != nil {
+        },
+        Authenticator:          hostAuthn, // checkout + customer routes
+        DelegatedAuthenticator: hostDeleg, // /v1/me + /v1/customers
+        Gate:                   hostGate,  // merchant groups (catalog/providers/admin)
+    })
+    if err != nil {
         log.Fatal(err)
     }
+
+    mux := http.NewServeMux()
+    mux.Handle("/billing/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
 }
 ```
 
-`MountHandler` remains the lower-level `net/http` escape hatch for hosts that
-already have a single mount point.
+The handler is framework-neutral `net/http` (#670): a gin host mounts it with
+`gin.WrapH`, chi with `Mount`, etc. `Embedded.NewHTTPHandler` remains the
+lower-level single-surface constructor for hosts that do their own prefix
+handling.
 
 ### Route-group discovery
 
@@ -97,7 +102,7 @@ openrails, err := embedded.New(embedded.Options{
     Config: cfg,
     PaymentProviders: []embedded.PaymentProvider{
         {
-            Config: config.ProviderAccountConfig{
+            Config: config.RailMerchantAccountConfig{
                 Rail:      models.RailStripe,
                 AccountID: "acct_1M9QZULkdIwHu7ix",
                 Stripe:    &config.StripeRailConfig{SecretKey: stripeSecret},
@@ -105,7 +110,7 @@ openrails, err := embedded.New(embedded.Options{
         },
         {
             Name: "stripe_old",
-            Config: config.ProviderAccountConfig{
+            Config: config.RailMerchantAccountConfig{
                 Rail:      models.RailStripe,
                 AccountID: "acct_1N2YbMLkdIwHu7ix",
                 Archived:  true,
@@ -114,7 +119,7 @@ openrails, err := embedded.New(embedded.Options{
         },
         {
             Name: "mobius",
-            Config: config.ProviderAccountConfig{
+            Config: config.RailMerchantAccountConfig{
                 Rail:      models.RailNMI,
                 AccountID: "579145",
                 NMI:       &config.NMIRailConfig{SecurityKey: mobiusSecurityKey},

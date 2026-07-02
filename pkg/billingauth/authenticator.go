@@ -13,9 +13,8 @@ import (
 // implements this single method to verify the incoming request however it likes
 // — a JWT, a session cookie, an opaque API key, an mTLS / gateway header,
 // anything — and return the resulting UserContext. It is pure net/http:
-// implementers never touch gin, context keys, or status codes. OpenRails adapts
-// it into the middleware it needs ([Required]/[Optional] here for the net/http
-// form; the gin bridge lives app-side in pkg/authprovider).
+// implementers never touch framework types, context keys, or status codes.
+// OpenRails adapts it into the middleware it needs ([Required]/[Optional]).
 //
 // Return [ErrUnauthenticated] (or any non-nil error) when the request carries no
 // valid credential. OpenRails maps that to 401 on required routes and to

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -19,14 +18,13 @@ import (
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
-// TestRegisterAPIEndToEnd proves the AuthKit-style RegisterAPI front door (#623):
-// route-group selection, prefix inference from the gin group, customer gating,
-// ActiveRouteSets, and the GET /v1/capabilities discovery endpoint.
-func TestRegisterAPIEndToEnd(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+// TestMountHandlerRouteSelection proves the neutral MountHandler front door
+// (#623, gin-free since #670): route-group selection, MountPrefix stripping,
+// customer gating, ActiveRouteSets, and the GET /v1/capabilities discovery
+// endpoint.
+func TestMountHandlerRouteSelection(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	dbtest.EnsureTestMerchant(ctx, t, h.sharedPool())
@@ -63,21 +61,21 @@ func TestRegisterAPIEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
-	eng1 := gin.New()
-	grp1 := eng1.Group("/billing")
-	require.NoError(t, embgin.RegisterAPI(grp1, rt.Embedded(),
-		embgin.WithGroups(embedded.RouteSetCheckout, embedded.RouteSetWebhooks),
-		embgin.WithAuthenticator(authn),
-		embgin.WithProviderRoutes(embgin.ProviderRoutes{}),
-	))
+	h1, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+		MountPrefix:    "/billing",
+		RouteSets:      []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
+		Authenticator:  authn,
+		ProviderRoutes: &embedded.ProviderRoutes{},
+	})
+	require.NoError(t, err)
 	require.ElementsMatch(t,
 		[]embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
 		rt.ActiveRouteSets())
 
-	w := doMounted(eng1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
+	w := doMounted(h1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
 	require.Equal(t, http.StatusNotFound, w.Code, "customer omitted -> /v1/me must 404")
 
-	caps1 := getCapabilities(t, eng1)
+	caps1 := getCapabilities(t, h1)
 	require.True(t, caps1.RouteGroups["checkout"])
 	require.False(t, caps1.RouteGroups["webhooks"])
 	require.False(t, caps1.RouteGroups["customer"])
@@ -87,20 +85,20 @@ func TestRegisterAPIEndToEnd(t *testing.T) {
 	require.False(t, caps1.Routes["webhooks"])
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	eng2 := gin.New()
-	grp2 := eng2.Group("/billing")
-	require.NoError(t, embgin.RegisterAPI(grp2, rt.Embedded(),
-		embgin.WithGroups(embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks),
-		embgin.WithAuthenticator(authn),
-		embgin.WithDelegatedAuthenticator(delegated),
-		embgin.WithProviderRoutes(embgin.ProviderRoutes{}),
-	))
+	h2, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+		MountPrefix:            "/billing",
+		RouteSets:              []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks},
+		Authenticator:          authn,
+		DelegatedAuthenticator: delegated,
+		ProviderRoutes:         &embedded.ProviderRoutes{},
+	})
+	require.NoError(t, err)
 	require.Contains(t, rt.ActiveRouteSets(), embedded.RouteSetCustomer)
 
-	caps2 := getCapabilities(t, eng2)
+	caps2 := getCapabilities(t, h2)
 	require.True(t, caps2.RouteGroups["customer"], "customer selected -> advertised true even though the user handler strips it")
 
-	w = doMounted(eng2, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
+	w = doMounted(h2, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 

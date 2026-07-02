@@ -69,8 +69,9 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(paidTermEndTS), "current_period_ends_at should match nextRenewalDate + timestamp time-of-day")
 
 	ent := mustGetSubscriptionEntitlement(t, suite, ctx, userID, sub.ID, "premium")
-	require.NotNil(t, ent.EndAt)
-	require.True(t, ent.EndAt.Equal(paidTermEndTS), "entitlement end_at should match paid term end")
+	// #691: an active auto-renew sub projects STANDING access (end_at NULL);
+	// paid-through is the subscription fact asserted above.
+	require.Nil(t, ent.EndAt, "active auto-renew sub projects a standing window (#691)")
 
 	// 2) RenewalFailure marks past_due and sets next_retry_at.
 	renewalFailure := mustLoadJSONMap(t, "testdata/webhooks/ccbill/renewalfailure.json")
@@ -97,8 +98,8 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	require.True(t, sub.GraceEndsAt.Equal(nextRetryAt))
 
 	ent = mustGetSubscriptionEntitlement(t, suite, ctx, userID, sub.ID, "premium")
-	require.NotNil(t, ent.EndAt)
-	require.True(t, ent.EndAt.Equal(paidTermEndTS), "paid entitlement end_at should remain at paid term end")
+	// #691: dunning (past_due) never touches access — the window stays standing.
+	require.Nil(t, ent.EndAt, "past_due leaves the standing window intact (#691)")
 
 	// 3) RenewalSuccess clears dunning/grace and extends the paid term + entitlement window.
 	// The event is stamped ~now (verbatim provider time becomes purchased_at,
@@ -127,8 +128,9 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	require.Nil(t, sub.GraceEndsAt)
 
 	ent = mustGetSubscriptionEntitlement(t, suite, ctx, userID, sub.ID, "premium")
-	require.NotNil(t, ent.EndAt)
-	require.True(t, ent.EndAt.Equal(newPaidTermEndTS), "entitlement end_at should extend to new paid term end")
+	// #691: renewal extends the paid-through FACT (asserted on the sub above);
+	// the standing window needs no extension.
+	require.Nil(t, ent.EndAt, "renewal keeps the standing window (#691)")
 }
 
 func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
 )
@@ -83,18 +84,19 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		UpdatedAt:             clock.Now().UTC(),
 	})
 
-	paidEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		CustomerID:  suite.ensureCustomer(ctx, userID),
+	// Seed through the REAL projection (#691): an active auto-renew sub gets a
+	// STANDING window (end_at NULL); paid-through lives on the subscription.
+	notBefore := periodStart.UTC()
+	endAt := paidEnd.UTC()
+	_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+		UserID:      userID,
 		Entitlement: "premium",
-		StartAt:     periodStart,
-		EndAt:       &paidEnd,
+		NotBefore:   &notBefore,
+		EndAt:       &endAt,
 		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   clock.Now().UTC(),
-		UpdatedAt:   clock.Now().UTC(),
-	}
-	suite.InsertEntitlement(ctx, paidEnt)
+		SourceID:    subID,
+	})
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
@@ -103,13 +105,14 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
-	// (1) Subscription entitlement is active until paidEnd.
+	// (1) #691 standing access: entitled inside the paid window AND past its
+	// end — access ends only by proven closure, never by clock.
 	ok, err := rt.EntitlementService.IsEntitled(ctx, userID, "premium", paidEnd.Add(-time.Second))
 	require.NoError(t, err)
 	require.True(t, ok)
 	ok, err = rt.EntitlementService.IsEntitled(ctx, userID, "premium", paidEnd.Add(time.Second))
 	require.NoError(t, err)
-	require.False(t, ok)
+	require.True(t, ok, "standing window: paid-window lapse alone never removes access (#691)")
 
 	// Jump time to the paid term end.
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -123,20 +126,6 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 			suite.ensureCustomer(ctx, userID), "premium",
 			string(models.EntitlementSourceGrace), subID)
 	}
-	latestGraceEnd := func() time.Time {
-		ents := suite.QueryEntitlements(ctx, `
-			WHERE customer_id = $1 AND entitlement = $2
-			  AND source_type = $3 AND source_id = $4
-			  AND deleted_at IS NULL
-			ORDER BY end_at DESC
-			LIMIT 1`,
-			suite.ensureCustomer(ctx, userID), "premium",
-			string(models.EntitlementSourceGrace), subID)
-		require.Len(t, ents, 1)
-		require.NotNil(t, ents[0].EndAt)
-		return ents[0].EndAt.UTC()
-	}
-
 	callRenewalFailure := func(nextRetryDate string) {
 		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
 			TransactionID:  "txn_" + uuid.New().String(),
@@ -162,33 +151,26 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
 	}
 
-	// Fail #1: grace until +3d (end-of-day).
+	// Fail #1: past_due + grace_ends_at PACING marker on the sub (from
+	// nextRetryDate). #691 deleted grace entitlement appends — access is the
+	// untouched standing window, so ZERO grace rows ever exist.
 	grace1 := paidEnd.Add(3 * 24 * time.Hour)
 	callRenewalFailure(grace1.Format("2006-01-02"))
-	require.Equal(t, 1, countGrace())
-	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
+	require.Equal(t, 0, countGrace(), "#691: no grace entitlement windows are appended")
+	sub := suite.GetSubscription(subID)
+	require.Equal(t, models.StatusPastDue, sub.Status)
+	require.NotNil(t, sub.GraceEndsAt)
 
-	// Fail #2 (during grace): keep the original grace entitlement window.
+	// Fails #2/#3 (during dunning): state unchanged, still zero grace rows.
 	clock.Advance(24 * time.Hour)
-	grace2 := paidEnd.Add(5 * 24 * time.Hour)
-	callRenewalFailure(grace2.Format("2006-01-02"))
-	require.Equal(t, 1, countGrace())
-	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
-
-	// Fail #3 (during grace): still keep the original grace entitlement window.
+	callRenewalFailure(paidEnd.Add(5 * 24 * time.Hour).Format("2006-01-02"))
 	clock.Advance(12 * time.Hour)
-	grace3 := paidEnd.Add(7 * 24 * time.Hour)
-	callRenewalFailure(grace3.Format("2006-01-02"))
-	require.Equal(t, 1, countGrace())
-	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
+	callRenewalFailure(paidEnd.Add(7 * 24 * time.Hour).Format("2006-01-02"))
+	require.Equal(t, 0, countGrace())
+	require.Equal(t, models.StatusPastDue, suite.GetSubscription(subID).Status)
 
-	// Sanity: paid window is unchanged.
-	gotPaid := *suite.GetEntitlement(ctx, paidEnt.ID)
-	require.NotNil(t, gotPaid.EndAt)
-	require.Equal(t, paidEnd.UTC(), gotPaid.EndAt.UTC())
-	require.Nil(t, gotPaid.RevokedAt)
-
-	// During grace, user should still be entitled.
+	// Throughout dunning the user stays entitled — the standing window is
+	// untouched (dunning never gates access, #691).
 	ok, err = rt.EntitlementService.IsEntitled(ctx, userID, "premium", clock.Now().UTC())
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -223,17 +205,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	}
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))
 
-	// The single active grace window should be revoked by renewal success.
-	// (No deleted_at filter: this is the bun WhereAllWithDeleted read.)
-	graceRows := suite.QueryEntitlements(ctx, `
-		WHERE customer_id = $1 AND entitlement = $2
-		  AND source_type = $3 AND source_id = $4
-		ORDER BY start_at ASC`,
-		suite.ensureCustomer(ctx, userID), "premium",
-		string(models.EntitlementSourceGrace), subID)
-	require.Len(t, graceRows, 1)
-	require.NotNil(t, graceRows[0].RevokedAt, "active grace window should be revoked")
-	require.Nil(t, graceRows[0].DeletedAt, "historical grace window should not be deleted")
+	// #691: no grace rows ever existed, renewal appends no windows — the sub
+	// keeps its ONE standing window; the renewal advances the paid-through FACT.
+	require.Equal(t, 0, countGrace())
 
 	expectedPaidEnd := time.Date(
 		paidEnd.Add(30*24*time.Hour).Year(),
@@ -241,6 +215,12 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		paidEnd.Add(30*24*time.Hour).Day(),
 		23, 59, 59, 0, time.UTC,
 	)
+	sub = suite.GetSubscription(subID)
+	require.Equal(t, models.StatusActive, sub.Status)
+	require.NotNil(t, sub.CurrentPeriodEndsAt)
+	require.True(t, sub.CurrentPeriodEndsAt.Equal(expectedPaidEnd), "renewal advances the paid-through fact")
+	require.Nil(t, sub.GraceEndsAt)
+
 	paidWindows := suite.QueryEntitlements(ctx, `
 		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
@@ -249,12 +229,8 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		ORDER BY start_at ASC`,
 		suite.ensureCustomer(ctx, userID), "premium",
 		string(models.EntitlementSourceSubscription), subID)
-	require.GreaterOrEqual(t, len(paidWindows), 2)
-
-	latest := paidWindows[len(paidWindows)-1]
-	require.NotNil(t, latest.EndAt)
-	require.Equal(t, expectedPaidEnd.UTC(), latest.EndAt.UTC())
-	require.True(t, latest.StartAt.UTC().Equal(successAt.UTC()) || latest.StartAt.UTC().After(successAt.UTC()))
+	require.Len(t, paidWindows, 1, "one standing window, no per-period appends (#691)")
+	require.Nil(t, paidWindows[0].EndAt, "the window is standing")
 
 	ok, err = rt.EntitlementService.IsEntitled(ctx, userID, "premium", successAt.Add(time.Second))
 	require.NoError(t, err)

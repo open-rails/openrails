@@ -375,9 +375,14 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	cfg := &config.Config{
 		Env:      "dev",
 		TestMode: true,
-		Host:     "127.0.0.1",
-		Port:     0, // ephemeral; we serve via httptest below
-		DB:       &config.DBConfig{URL: appDSN},
+		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
+		// would park every provider write. The harness is a sandbox — fake
+		// providers, testcontainers DB — so full behavior is safe and required
+		// by the dunning/checkout/refund suites.
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		Host:              "127.0.0.1",
+		Port:              0, // ephemeral; we serve via httptest below
+		DB:                &config.DBConfig{URL: appDSN},
 		Auth: &config.AuthConfig{
 			// The control plane's own AuthKit issuer.
 			Issuer: "https://controlplane.openrails.test",

@@ -1,20 +1,22 @@
-package gin
+package embedded
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MountOptions configures the combined embedded surface (MountHandler).
 type MountOptions struct {
 	// RouteSets selects the mounted billing surfaces. A zero slice uses the
 	// embedded defaults.
-	RouteSets []embedded.RouteSet
+	RouteSets []RouteSet
 	// Authenticator protects checkout/user routes.
 	Authenticator billingauth.Authenticator
 	// Gate protects merchant routes.
@@ -30,35 +32,16 @@ type MountOptions struct {
 	ProviderRoutes *ProviderRoutes
 }
 
-// ProviderRoutes selects provider-specific public routes for a Gin embedded
-// mount.
-type ProviderRoutes struct {
-	StripePortal bool
-	Solana       bool
-	Webhooks     bool
-}
-
-func (p ProviderRoutes) internal() routesurface.ProviderRoutes {
-	// An explicit host selection is authoritative — enabling Solana enables its
-	// signing routes, and the write surface stays on (no capability second-guess).
-	return routesurface.ProviderRoutes{
-		StripePortal:  p.StripePortal,
-		Solana:        p.Solana,
-		SolanaSigning: p.Solana,
-		Webhooks:      p.Webhooks,
-		SecretWrite:   true,
-	}
-}
-
-// MountHandler returns the selected embedded billing surfaces as ONE handler.
-// The host mounts this once and rewrites nothing.
-func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error) {
+// MountHandler returns the selected embedded billing surfaces as ONE
+// framework-neutral net/http handler. The host mounts this once (a gin host
+// uses gin.WrapH) and rewrites nothing.
+func MountHandler(e *Embedded, opts MountOptions) (http.Handler, error) {
 	// Resolve + record the full selection (incl. customer); the combined mount
 	// serves customer via the self handler, so it is part of the advertised set.
 	active := e.MountRouteSets(opts.RouteSets)
 	var self http.Handler
 	providerRoutes := providerRoutesFromMountOptions(opts.ProviderRoutes)
-	if routeSetSelected(active, embedded.RouteSetCustomer) {
+	if routeSetSelected(active, RouteSetCustomer) {
 		var err error
 		self, err = selfHandler(e, opts.DelegatedAuthenticator, providerRoutes)
 		if err != nil {
@@ -87,6 +70,49 @@ func MountHandler(e *embedded.Embedded, opts MountOptions) (http.Handler, error)
 	return combinedMount(opts.MountPrefix, base, self, user), nil
 }
 
+// SelfHandler returns the mountable browser-direct SELF-SERVICE surface for an
+// embedded host (issues #339/#467), authenticated by a host-supplied
+// billingauth.DelegatedAuthenticator.
+//
+// Routes are served at the CANONICAL embedded paths, alongside the
+// NewHTTPHandler surface:
+//
+//	/billing/v1/me/*                      (self-service)
+//	/billing/v1/customers/:customer_id/*  (customer treasury)
+//
+// so a host that mounts NewHTTPHandler under /billing without prefix stripping
+// can route this subtree to this handler and everything else to the base
+// handler. Most hosts should use MountHandler, which does that routing itself.
+// Errors when the app graph is not initialized or no identity source can be
+// derived — the surface is never mounted without authentication.
+func SelfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator) (http.Handler, error) {
+	return selfHandler(e, authn, nil)
+}
+
+func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) (http.Handler, error) {
+	if e == nil {
+		return nil, fmt.Errorf("embedded billing: not initialized")
+	}
+	a := e.App()
+	if a == nil {
+		return nil, fmt.Errorf("embedded billing: not initialized")
+	}
+	if authn == nil {
+		return nil, fmt.Errorf("embedded billing: self surface requires MountOptions.DelegatedAuthenticator")
+	}
+	var configured merchant.ID
+	if a.Runtime != nil {
+		configured = a.Runtime.ConfiguredMerchant
+	}
+	return newSelfHandler(a.Runtime, authn, configured, providerRouteOverride), nil
+}
+
+// newSelfHandler delegates to the neutral assembly; kept as the unit-testable
+// seam (no live app graph required).
+func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
+	return embedhttp.NewSelfHandler(rt, authn, configured, providerRouteOverride)
+}
+
 func providerRoutesFromMountOptions(opt *ProviderRoutes) *routesurface.ProviderRoutes {
 	if opt == nil {
 		return nil
@@ -95,9 +121,9 @@ func providerRoutesFromMountOptions(opt *ProviderRoutes) *routesurface.ProviderR
 	return &v
 }
 
-func routeSetSelected(routeSets []embedded.RouteSet, want embedded.RouteSet) bool {
+func routeSetSelected(routeSets []RouteSet, want RouteSet) bool {
 	if len(routeSets) == 0 {
-		routeSets = embedded.EmbeddedDefaultRouteSets
+		routeSets = EmbeddedDefaultRouteSets
 	}
 	for _, routeSet := range routeSets {
 		if routeSet == want {
@@ -107,13 +133,13 @@ func routeSetSelected(routeSets []embedded.RouteSet, want embedded.RouteSet) boo
 	return false
 }
 
-func routeSetsWithoutCustomer(routeSets []embedded.RouteSet) []embedded.RouteSet {
+func routeSetsWithoutCustomer(routeSets []RouteSet) []RouteSet {
 	if len(routeSets) == 0 {
-		routeSets = embedded.EmbeddedDefaultRouteSets
+		routeSets = EmbeddedDefaultRouteSets
 	}
-	out := make([]embedded.RouteSet, 0, len(routeSets))
+	out := make([]RouteSet, 0, len(routeSets))
 	for _, routeSet := range routeSets {
-		if routeSet != embedded.RouteSetCustomer {
+		if routeSet != RouteSetCustomer {
 			out = append(out, routeSet)
 		}
 	}

@@ -96,6 +96,16 @@ func registrationMode(locked bool) authcore.RegistrationMode {
 	return authcore.RegistrationModeOpen
 }
 
+// registrationVerification maps the lock flag to a verification policy: closed
+// registration has nothing to verify (none); hosted (open) keeps the secure
+// required default and must configure a sender.
+func registrationVerification(locked bool) authcore.RegistrationVerificationPolicy {
+	if locked {
+		return authcore.RegistrationVerificationNone
+	}
+	return authcore.RegistrationVerificationRequired
+}
+
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
 // pool. The pool must point at the database that holds AuthKit's `profiles.*`
 // schema (in self-hosted mode this is the same database OpenRails uses). The
@@ -168,8 +178,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
 		// config/env knob opens this in standalone.
+		// Verification set EXPLICITLY: authkit v0.76.0 defaults unset to
+		// "required" (its doc says "none" — code wins), which refuses boot with
+		// no sender. Locked registration has nothing to verify → none; hosted
+		// keeps required and must configure an email/SMS sender.
 		Registration: authcore.RegistrationConfig{
 			NativeUserMode: registrationMode(lockedRegistration),
+			Verification:   registrationVerification(lockedRegistration),
 		},
 	}
 

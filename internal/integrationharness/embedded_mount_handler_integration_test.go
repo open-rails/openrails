@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
@@ -55,7 +54,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := embgin.MountHandler(rt.Embedded(), embgin.MountOptions{
+	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
 		MountPrefix:            "/api/openrails",
 		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),

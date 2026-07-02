@@ -1,6 +1,7 @@
 package openrails
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -40,5 +41,19 @@ func TestRootPackageStaysLight(t *testing.T) {
 				t.Errorf("root openrails package links engine dependency %q — keep the root remote-only light (#338)", dep)
 			}
 		}
+	}
+}
+
+// TestModuleIsGinFree pins the #670 gin exit for the WHOLE module: gin must not
+// reappear in go.mod (direct or indirect — post-1.17 go.mod lists both). The
+// HTTP surface is framework-neutral net/http; hosts wrap it themselves
+// (gin.WrapH etc.).
+func TestModuleIsGinFree(t *testing.T) {
+	gomod, err := os.ReadFile("go.mod")
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if strings.Contains(string(gomod), "github.com/gin-gonic/gin") {
+		t.Errorf("github.com/gin-gonic/gin is back in go.mod — the module is gin-free since #670; mount the neutral handler via the host framework's WrapH instead")
 	}
 }

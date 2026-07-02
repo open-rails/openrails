@@ -180,8 +180,7 @@ func (c *unifiedClient) Verify(ctx context.Context) error {
 func (r *Runtime) Service() *service.Service { return r.svc }
 
 // Embedded exposes the underlying pkg/embedded app for advanced wiring
-// (control plane attach, river client injection, gin route registration via
-// pkg/embedded/gin).
+// (control plane attach, river client injection, embedded.MountHandler).
 func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
@@ -194,8 +193,8 @@ func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
 }
 
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface (Handler, or pkg/embedded/gin MountHandler / RegisterAPI); nil before
-// any mount. It is the in-process twin of GET /v1/capabilities — same source.
+// surface (Handler or embedded.MountHandler); nil before any mount. It is the
+// in-process twin of GET /v1/capabilities — same source.
 func (r *Runtime) ActiveRouteSets() []RouteSet {
 	if r == nil {
 		return nil

@@ -22,9 +22,9 @@ OpenRails core remains a multi-merchant billing engine. A hosted SaaS product co
 ## Embedded Seams
 
 - Runtime: `pkg/embedded.New`, `Embedded.App`, `Embedded.RunWorkers`, `Embedded.Service`.
-- HTTP: `Embedded.NewHTTPHandler` for default merchant-scoped billing routes; `pkg/embedded/gin` for gin hosts.
+- HTTP: `Embedded.NewHTTPHandler` for default merchant-scoped billing routes; `embedded.MountHandler` for the combined prefix-stripping mount (framework hosts wrap it, e.g. `gin.WrapH`).
 - AuthKit: `pkg/embedded/controlplane.AttachWithOptions` with `HostedPosture` for public registration and full AuthKit routes.
 - Platform authority: AuthKit `platform:` roles gate directory/platform routes; SaaS never grants them to merchant admins.
-- Webhooks: default wiring mounts only `/merchants/:merchant/webhooks/:provider`; hosted SaaS mounts `pkg/embedded/gin.RegisterHostWebhookRoutes` behind Host-resolver middleware that pins `merchant.ID` before OpenRails verifies the merchant's signing secret.
+- Webhooks: default wiring mounts only `/merchants/:merchant/webhooks/:provider`; hosted SaaS fronts the webhook surface with Host-resolver middleware that pins `merchant.ID` before OpenRails verifies the merchant's signing secret.
 
 No `saas_mode` flag exists in core. The deployed binary and host-injected seams choose the posture.

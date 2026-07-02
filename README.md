@@ -281,7 +281,6 @@ var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
 import (
     "github.com/open-rails/openrails/config"
     "github.com/open-rails/openrails/pkg/embedded"
-    embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 cfg, _ := config.Load()
@@ -301,7 +300,7 @@ go openrails.RunWorkers(ctx)
 // Mount the billing surface. Routes live under /billing/v1/*.
 // Zero value uses embedded.EmbeddedDefaultRouteSets:
 // checkout, customer, merchant admin, catalog, and webhooks.
-handler, err := embgin.MountHandler(openrails, embgin.MountOptions{
+handler, err := embedded.MountHandler(openrails, embedded.MountOptions{
     MountPrefix: "/billing",
     Authenticator: myAuth,
     Gate: myGate,
@@ -321,9 +320,9 @@ mux := http.NewServeMux()
 mux.Handle("/billing/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
 ```
 
-The handler is framework-neutral `net/http` with zero gin on the request path. Gin hosts
-that want the combined `/me` + user/admin/webhook surface under one mount should use
-`pkg/embedded/gin` (`embgin.MountHandler(e, embgin.MountOptions{MountPrefix: "/billing"})`).
+The handler is framework-neutral `net/http` — OpenRails links no web framework at all
+(#670). Gin/chi/echo hosts mount the same handler with their framework's wrapper
+(`gin.WrapH(handler)`, `chi.Mount`, …).
 
 Your frontend now calls these routes with its **normal session credential**.
 `Authenticator` protects checkout/user routes; `Gate` protects merchant routes.

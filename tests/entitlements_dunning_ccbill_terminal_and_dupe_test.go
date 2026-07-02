@@ -304,7 +304,10 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx)) // duplicate
 
-	// Only one renewal window should exist for this subscription.
+	// #691: renewals never append windows — the sub projects ONE standing
+	// window (end_at NULL); the renewal advances the paid-through FACT on the
+	// subscription. The duplicate-webhook property is therefore even stronger:
+	// exactly one window exists no matter how many times the event replays.
 	n := suite.Count(ctx, `
 		SELECT COUNT(*) FROM openrails.entitlements
 		WHERE customer_id = $1 AND entitlement = $2
@@ -312,5 +315,13 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		  AND deleted_at IS NULL`,
 		suite.ensureCustomer(ctx, userID), "premium",
 		string(models.EntitlementSourceSubscription), subID)
-	require.Equal(t, 2, n) // original + one renewal
+	require.Equal(t, 1, n)
+	standing := suite.Count(ctx, `
+		SELECT COUNT(*) FROM openrails.entitlements
+		WHERE customer_id = $1 AND entitlement = $2
+		  AND source_type = $3 AND source_id = $4
+		  AND end_at IS NULL AND revoked_at IS NULL AND deleted_at IS NULL`,
+		suite.ensureCustomer(ctx, userID), "premium",
+		string(models.EntitlementSourceSubscription), subID)
+	require.Equal(t, 1, standing, "the single window is standing (#691)")
 }

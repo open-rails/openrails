@@ -390,7 +390,7 @@ func captchaSiteKey(cfg *config.CaptchaConfig) string {
 }
 
 // rateLimitSubjectsHTTP derives the ip:/user: subjects from a plain request,
-// reading identity from the request context (billingauth/authprovider).
+// reading identity from the request context (billingauth).
 func rateLimitSubjectsHTTP(r *http.Request) []RateLimitSubject {
 	if r == nil {
 		return nil

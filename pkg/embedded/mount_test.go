@@ -1,11 +1,9 @@
-package gin
+package embedded
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func TestCombinedMountRoutesAndRewrites(t *testing.T) {
@@ -42,10 +40,10 @@ func TestCombinedMountRoutesAndRewrites(t *testing.T) {
 }
 
 func TestRouteSetSelectedCustomer(t *testing.T) {
-	if !routeSetSelected(nil, embedded.RouteSetCustomer) {
+	if !routeSetSelected(nil, RouteSetCustomer) {
 		t.Fatal("default embedded route sets should include customer routes")
 	}
-	if routeSetSelected([]embedded.RouteSet{embedded.RouteSetCheckout}, embedded.RouteSetCustomer) {
+	if routeSetSelected([]RouteSet{RouteSetCheckout}, RouteSetCustomer) {
 		t.Fatal("explicit route sets without customer should not include customer routes")
 	}
 }

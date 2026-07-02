@@ -61,8 +61,9 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 	require.True(t, entitled)
 
 	latestEnt := mustGetSubscriptionEntitlement(t, suite, ctx, userID, subscriptionID, "premium")
-	require.NotNil(t, latestEnt.EndAt)
-	require.True(t, latestEnt.EndAt.Equal(expectedPeriodEnd))
+	// #691: reactivated auto-renew sub projects standing access (end_at NULL);
+	// the paid-through fact is asserted on the subscription above.
+	require.Nil(t, latestEnt.EndAt, "reactivated auto-renew sub projects a standing window (#691)")
 	require.Nil(t, latestEnt.RevokedAt)
 }
 

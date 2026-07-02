@@ -5,9 +5,8 @@
 // use.
 //
 // A host brings its own auth by implementing Authenticator; OpenRails attaches
-// the resulting UserContext to the request context. The gin adapter and the
-// AuthKit-backed implementation live in app-side packages (pkg/authprovider and
-// internal/auth respectively), not here.
+// the resulting UserContext to the request context. The AuthKit-backed
+// implementation lives app-side (internal/auth), not here.
 package billingauth
 
 import (
