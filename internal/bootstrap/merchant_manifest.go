@@ -88,6 +88,9 @@ func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectRenamedMerchantEnvVars(); err != nil {
+		return nil, err
+	}
 	k := koanf.New(".")
 	if err := k.Load(env.Provider(MerchantBillingEnvPrefix, ".", MerchantBillingEnvKey), nil); err != nil {
 		return nil, fmt.Errorf("load merchant config env overlay: %w", err)
@@ -109,6 +112,9 @@ func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
 // push-merchant-config. Bootstrap authority and catalog state are intentionally
 // rejected by the strict YAML decoder.
 func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
+	if err := rejectRenamedMerchantConfigKeys(raw); err != nil {
+		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
+	}
 	var manifest BillingConfig
 	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
@@ -120,6 +126,34 @@ func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
 		return nil, err
 	}
 	return &manifest, nil
+}
+
+// rejectRenamedMerchantConfigKeys fails a manifest that still spells the
+// accounts key by a retired name (#698: accounts <- rail_merchant_accounts;
+// #683: rail_merchant_accounts <- provider_accounts). The strict parser would
+// reject these as unknown fields anyway, but "unknown field" reads like a typo
+// — a rename deserves a pointer. Silent-ignore is the worst failure here: it
+// would apply an empty account set.
+func rejectRenamedMerchantConfigKeys(raw []byte) error {
+	var probe struct {
+		Merchants map[string]map[string]any `yaml:"merchants"`
+	}
+	if yaml.Unmarshal(raw, &probe) != nil {
+		return nil // malformed YAML: let the strict parser report it
+	}
+	slugs := make([]string, 0, len(probe.Merchants))
+	for slug := range probe.Merchants {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
+			if _, ok := probe.Merchants[slug][old]; ok {
+				return fmt.Errorf("merchants.%s.%s was renamed to accounts", slug, old)
+			}
+		}
+	}
+	return nil
 }
 
 func mergeMerchantConfigManifest(dst, src *BillingConfig) {
@@ -251,8 +285,14 @@ type MerchantConfig struct {
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers (#646): per-window spend ceilings on wasted (failed/abused)
 	// generation. Empty leaves the service-default windows (burst 15m/$5, sustained 5h/$20).
-	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig                 `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
-	RailMerchantAccounts               map[string]RailMerchantAccountConfig `yaml:"rail_merchant_accounts,omitempty" koanf:"rail_merchant_accounts"`
+	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
+	// RailMerchantAccounts is the operator-declared rail account catalog. The
+	// CONFIG key is `accounts` (#698 — operators type it, and inside
+	// merchants.<slug>. nothing else it could mean). DELIBERATE DIVERGENCE: the
+	// DB table and the merchant-secret name prefix REMAIN `rail_merchant_accounts`
+	// (#683 vocabulary; distinguishes rail_customer_accounts) — do not "fix" them
+	// to match this key.
+	RailMerchantAccounts map[string]RailMerchantAccountConfig `yaml:"accounts,omitempty" koanf:"accounts"`
 }
 
 // InvoiceConfig is the merchant invoice/collection policy block, mirroring

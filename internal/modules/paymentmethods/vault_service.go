@@ -33,8 +33,11 @@ type VaultService struct {
 	Config               *config.Config
 	Rails                config.RailMerchantAccountSet
 	DB                   *db.DB
-	clock                clockwork.Clock
-	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
+	// DeleteIntents routes DeleteVault through the durable nmi_vault_delete
+	// provider intent (#674 tail); wired at runtime assembly.
+	DeleteIntents VaultDeleteExecutor
+	clock         clockwork.Clock
+	newNMIClient  func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
 
 type subscriptionReader interface {
@@ -224,7 +227,9 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store vault locally")
-		// Attempt remote cleanup
+		// Best-effort direct remote cleanup — deliberately NOT intent-routed
+		// (#674 tail): the vault was created milliseconds ago and is referenced
+		// nowhere; losing this delete leaves only an inert orphan entry at NMI.
 		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		return nil, fmt.Errorf("failed to store vault locally: %w", err)
 	}
@@ -547,12 +552,80 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 	return stringPtrOrNil(sanitize(*value))
 }
 
-// DeleteVault deletes the vault remotely after ensuring no active subscriptions use it; deactivates locally
+// ErrVaultDeleteProcessing: the durable vault-delete intent could not confirm
+// the remote delete inline (transport-ambiguous outcome, parked provider). The
+// intent ledger completes it out-of-band; a retried request maps onto the SAME
+// intent. Never a lost delete.
+var ErrVaultDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
+
+// VaultDeleteOutcome mirrors the durable intent's post-execution state without
+// importing the intents package (import cycle: intents → subscriptions →
+// paymentmethods). Neither Done nor Terminal = still resolving out-of-band.
+type VaultDeleteOutcome struct {
+	// Done: the remote delete is confirmed and the local row is gone.
+	Done bool
+	// Terminal: the delete failed permanently; Reason says why.
+	Terminal bool
+	Reason   string
+}
+
+// VaultDeleteExecutor posts the durable nmi_vault_delete intent and executes
+// it inline (#674 write-through). Implemented by intents.VaultDeleteThrough.
+type VaultDeleteExecutor interface {
+	ExecuteVaultDelete(ctx context.Context, pm *models.PaymentMethod) (VaultDeleteOutcome, error)
+}
+
+// DeleteVault deletes a stored payment method the DURABLE way (#674 tail):
+// guards run inline, then the remote NMI delete goes through the write-ahead
+// nmi_vault_delete intent — a crash or lost response after the user's request
+// is accepted can never lose the delete (the verifier resolves "vault gone at
+// provider ⇒ done" and finalizes the local removal).
 func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
+	if _, _, err := s.deleteVaultGuards(ctx, pm); err != nil {
+		return err
+	}
+	if s.DeleteIntents == nil {
+		return errors.New("vault delete intent executor not wired")
+	}
+	out, err := s.DeleteIntents.ExecuteVaultDelete(ctx, pm)
+	if err != nil {
+		return fmt.Errorf("post vault delete intent: %w", err)
+	}
+	switch {
+	case out.Done:
+		log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment vault")
+		return nil
+	case out.Terminal:
+		return fmt.Errorf("failed to delete payment vault: %s", out.Reason)
+	default:
+		return ErrVaultDeleteProcessing
+	}
+}
+
+// CleanupVaultBestEffort is the DIRECT delete for reactive decline-cleanup
+// (checkout removing a vault it just created for a now-declined attempt).
+// Deliberately NOT intent-routed (#674 tail): the vault is referenced nowhere,
+// a lost delete leaves only an inert orphan entry at NMI (no billing state can
+// act on it), and card-testing decline floods must not spam the intent ledger
+// or burn the #679 destructive-volume budget. Durable user-initiated deletes
+// go through DeleteVault.
+func (s *VaultService) CleanupVaultBestEffort(ctx context.Context, pm *models.PaymentMethod) error {
+	shared, client, err := s.deleteVaultGuards(ctx, pm)
+	if err != nil {
+		return err
+	}
+	return s.deleteVaultDirect(ctx, client, pm, shared)
+}
+
+// deleteVaultGuards runs the shared pre-delete checks: no active subscription
+// may use the method, the rail must resolve to a configured client (fail fast
+// instead of parking a user-facing request), and a shared vault without a
+// billing id is refused outright.
+func (s *VaultService) deleteVaultGuards(ctx context.Context, pm *models.PaymentMethod) (shared bool, client *nmi.NMIClient, err error) {
 	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for vault")
-		return fmt.Errorf("failed to check vault usage: %w", err)
+		return false, nil, fmt.Errorf("failed to check vault usage: %w", err)
 	}
 
 	activeCount := 0
@@ -564,13 +637,13 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		}
 	}
 	if activeCount > 0 {
-		return fmt.Errorf("cannot delete vault: %d active subscription(s) are using this payment method", activeCount)
+		return false, nil, fmt.Errorf("cannot delete vault: %d active subscription(s) are using this payment method", activeCount)
 	}
 
 	// Use rail from the payment method
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
-		return errors.New("payment method rail is required")
+		return false, nil, errors.New("payment method rail is required")
 	}
 
 	// #682 shared-vault handling: deleting the remote vault customer destroys
@@ -578,28 +651,32 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 	// sharing only happens when an importer materialized a multi-card vault as
 	// several payment-method rows — in that case delete ONLY this row's billing
 	// entry (the vault survives for the sibling cards; NMI refuses to empty a
-	// vault, so the LAST row's delete is the whole-vault delete below).
-	sharedVault := false
+	// vault, so the LAST row's delete is the whole-vault delete).
 	if s.DB != nil && strings.TrimSpace(pm.RailCustomerRef) != "" {
-		shared, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
+		n, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
 		if err != nil {
-			return fmt.Errorf("failed to check vault sharing: %w", err)
+			return false, nil, fmt.Errorf("failed to check vault sharing: %w", err)
 		}
-		sharedVault = shared > 0
+		shared = n > 0
+	}
+	if shared && strings.TrimSpace(pm.RailMethodRef) == "" {
+		// Cannot identify WHICH entry is this card — refuse rather than
+		// destroy the siblings (an importer that shares vaults must record
+		// per-row billing ids, see #682's shared-vault contract).
+		return shared, nil, fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
 	}
 
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
+	client, _, err = s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
 	if err != nil {
-		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
+		return shared, nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
+	return shared, client, nil
+}
 
-	if sharedVault {
-		if strings.TrimSpace(pm.RailMethodRef) == "" {
-			// Cannot identify WHICH entry is this card — refuse rather than
-			// destroy the siblings (an importer that shares vaults must record
-			// per-row billing ids, see #682's shared-vault contract).
-			return fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
-		}
+// deleteVaultDirect performs the remote delete (billing-entry-scoped for
+// shared vaults, whole-vault otherwise) followed by the local removal.
+func (s *VaultService) deleteVaultDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
+	if shared {
 		if err := client.DeleteCustomerBillingEntry(pm.RailCustomerRef, pm.RailMethodRef); err != nil {
 			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
 			return fmt.Errorf("failed to delete payment vault entry: %w", err)
@@ -619,6 +696,18 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 
 	log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment vault")
 	return nil
+}
+
+// ResolveClientForPaymentMethod resolves the per-merchant NMI client for the
+// payment method's rail + declared rail merchant account — the surface the
+// nmi_vault_delete intent handler executes through.
+func (s *VaultService) ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error) {
+	rail := strings.ToLower(string(pm.Rail))
+	if rail == "" {
+		return nil, errors.New("payment method rail is required")
+	}
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
+	return client, err
 }
 
 // GetUserVaults lists all vaults for a user

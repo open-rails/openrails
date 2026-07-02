@@ -416,12 +416,17 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// #674: write-through provider intents. Producers post a durable intent and
 	// execute it inline through the SAME registry/runner the scheduled
 	// executor/verifier drains — one primitive, identical semantics.
+	intentRunner := runtime.IntentRunner()
 	if runtime.CheckoutService != nil {
-		intentRunner := runtime.IntentRunner()
 		runtime.CheckoutService.Intents = intentRunner
 		if runtime.CheckoutService.NMISaleService != nil {
 			runtime.CheckoutService.NMISaleService.Intents = intentRunner
 		}
+	}
+	// #674 tail: user-initiated payment-method deletes route through the
+	// durable nmi_vault_delete intent.
+	if runtime.VaultService != nil {
+		runtime.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
 	}
 
 	return runtime, nil

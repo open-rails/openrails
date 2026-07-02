@@ -3,81 +3,18 @@ package reconcile
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 )
 
-// FetcherClients are the already-built runtime clients the fetchers wrap.
-// Every dependency is read-only from the engine's perspective: the NMI
-// fetcher only reaches query.php, CCBill only DataLink exports, Stripe only
-// GETs through the write-blocked stripeapi transport, Solana only RPC reads.
-type FetcherClients struct {
-	NMIClients     map[string]*nmi.NMIClient
-	CCBillDataLink *ccbill.DataLinkClient
-	SolanaRPC      *solanaint.RPCClient
-}
-
-type FetcherOptions struct {
-	// ProviderKeys optionally pins a provider type to a local config key. These
-	// keys are selectors only; durable identity still comes from provider_accounts.
-	ProviderKeys map[Provider]string
-}
-
-// BuildFetchersWithOptions is the strict builder used by operator commands.
-// It respects active rail selection and returns config errors instead of
-// silently picking an arbitrary account.
-func BuildFetchersWithOptions(cfg *config.Config, rails config.RailMerchantAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
-	fetchers := map[Provider]RailFetcher{}
-
-	if key, c, err := selectNMIClient(rails, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
-		return nil, err
-	} else if c != nil {
-		fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(c), key: key}
-	}
-	if clients.CCBillDataLink != nil {
-		key, proc, err := selectRailByType(rails, models.RailCCBill, opts.providerKey(ProviderCCBill))
-		if err != nil {
-			return nil, err
-		}
-		if proc != nil {
-			fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(clients.CCBillDataLink), key: key}
-		}
-	}
-	{
-		key, sp, err := selectRailByType(rails, models.RailStripe, opts.providerKey(ProviderStripe))
-		if err != nil {
-			return nil, err
-		}
-		if sp != nil && sp.Stripe != nil && sp.Stripe.SecretKey != "" {
-			fetchers[ProviderStripe] = keyedFetcher{RailFetcher: NewStripeFetcher(sp.Stripe.SecretKey), key: key}
-		}
-	}
-	if clients.SolanaRPC != nil && d != nil {
-		key, proc, err := selectRailByType(rails, models.RailSolana, opts.providerKey(ProviderSolana))
-		if err != nil {
-			return nil, err
-		}
-		if proc != nil {
-			fetchers[ProviderSolana] = keyedFetcher{RailFetcher: NewSolanaFetcher(clients.SolanaRPC, SolanaSubscriptionSourceFromDB(d)), key: key}
-		}
-	}
-
-	return fetchers, nil
-}
-
-func (o FetcherOptions) providerKey(provider Provider) string {
-	if o.ProviderKeys == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
-}
+// Fetcher/prober construction is per merchant (#699): see
+// MerchantFetcherBuilder in merchant_wiring.go. The selectors below resolve
+// the BOOT-CONFIG fallback plane it uses when a merchant declares no account
+// row on a rail.
 
 func selectRailByType(rails config.RailMerchantAccountSet, rail models.Rail, explicitKey string) (string, *config.RailMerchantAccountConfig, error) {
 	if explicitKey != "" {
@@ -106,11 +43,18 @@ func selectNMIClient(rails config.RailMerchantAccountSet, clients map[string]*nm
 		return "", nil, err
 	}
 	if proc != nil {
-		c := clients[key]
-		if c == nil {
-			return "", nil, fmt.Errorf("active nmi rail %q is not configured for reconciliation", key)
+		// Runtime client maps are keyed by account_id (#641) with the active
+		// account aliased under "nmi"; older sets keyed by the rail-set name.
+		// Try all three before declaring the active rail unconfigured.
+		for _, k := range []string{key, proc.EffectiveAccountID(), string(models.RailNMI)} {
+			if k == "" {
+				continue
+			}
+			if c := clients[k]; c != nil {
+				return k, c, nil
+			}
 		}
-		return key, c, nil
+		return "", nil, fmt.Errorf("active nmi rail %q is not configured for reconciliation", key)
 	}
 	key, c := pickNMIClient(clients)
 	return key, c, nil

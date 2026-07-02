@@ -72,9 +72,12 @@ var (
 	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
 )
 
-// PaymentProvider is one embedded payment-provider credential set. It aliases
-// pkg/embedded.PaymentProvider so hosts using embed.New can configure multiple
-// provider accounts without importing the lower-level package.
+// PaymentProvider is one embedded payment-provider credential set (the
+// boot-config plane). It aliases pkg/embedded.PaymentProvider so hosts using
+// embed.New can configure multiple provider accounts without importing the
+// lower-level package. Hosts that seed provider accounts + secrets via the
+// merchant manifest (UpsertMerchantConfig) don't need it: checkout, webhooks
+// and provider pulls all arm per merchant from the secrets store (#699).
 type PaymentProvider = embedded.PaymentProvider
 
 // Runtime is the in-process OpenRails engine plus its SDK adapter. It is the
@@ -122,8 +125,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 // call. Parity with a standalone deployment is structural (one implementation),
 // enforced by conformance_integration_test.go.
 //
-// A few methods are still served by the transcribed localClient during the
-// method-by-method migration (see unifiedClient).
+// One interface method (SetCustomerSpendDelegations) is PERMANENTLY served by
+// the transcribed localClient — see unifiedClient and the localClient doc for
+// the authz reasoning.
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 	c := &localClient{svc: r.svc}
 	for _, opt := range opts {
@@ -145,21 +149,22 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 	return &unifiedClient{Client: remote, localClient: c}
 }
 
-// unifiedClient is the embedded SDK client during the #685 migration: the
-// embedded openrails.Client (the remote implementation over the in-process
-// transport) serves every migrated method; *localClient keeps the not-yet-
-// migrated transcription (SetCustomerSpendDelegations) plus the embedded-only
-// extras (Admit, SetCreditAccountSettings, ListCreditTransactions,
-// BudgetStatus, AbuseUsage), which have no /v1/merchant wire counterpart.
+// unifiedClient is the embedded SDK client (#685): the embedded
+// openrails.Client (the remote implementation over the in-process transport)
+// serves 20/21 interface methods; *localClient keeps the PERMANENT
+// transcription (SetCustomerSpendDelegations — customer-treasury auth surface,
+// see the localClient doc) plus the embedded-only single-Admit extra, which has
+// no /v1/merchant wire counterpart.
 type unifiedClient struct {
 	openrails.Client
 	*localClient
 }
 
-// SetCustomerSpendDelegations stays transcribed: its HTTP surface is the
-// delegated customer-treasury family (/v1/customers/*), not the merchant API
-// the in-process transport serves. Explicit forward resolves the embedding
-// conflict.
+// SetCustomerSpendDelegations stays transcribed PERMANENTLY: its HTTP surface
+// is the delegated customer-treasury family (/v1/customers/*), whose gate
+// requires a credential that IS the customer — a mapping the merchant host
+// principal cannot honestly satisfy (see the localClient doc). Explicit
+// forward resolves the embedding conflict.
 func (c *unifiedClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	return c.localClient.SetCustomerSpendDelegations(ctx, customerID, delegations)
 }

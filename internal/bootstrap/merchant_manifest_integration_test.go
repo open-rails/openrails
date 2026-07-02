@@ -273,6 +273,30 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	}
 }
 
+// #697: the manifest rejects a slash-form CCBill account_id loudly — the
+// composite identity is dash-joined (clientAccnum-clientSubacc).
+func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
+	ctx := context.Background()
+	pool := newMerchantManifestTestPool(t)
+	cp := newMerchantManifestControlPlane(t, pool)
+	manifest := cozyArtMerchantManifest()
+	mt := manifest.Merchants["cozy-art"]
+	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+		"ccbill": {
+			"ccbill": {
+				Environment: "live",
+				AccountID:   "900000/0000",
+				Secrets:     map[string]string{"salt": "secret"},
+			},
+		},
+	}
+	manifest.Merchants["cozy-art"] = mt
+
+	err := ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
+}
+
 func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
@@ -382,6 +406,16 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 				},
 			},
 		},
+		// #697: CCBill composite identity is dash-joined (clientAccnum-clientSubacc).
+		"ccbill": {
+			"ccbill": {
+				Environment: "live",
+				AccountID:   "945280-0000",
+				Secrets: map[string]string{
+					"salt": "flexform-salt",
+				},
+			},
+		},
 	}
 	manifest.Merchants["cozy-art"] = mt
 
@@ -445,14 +479,21 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, int64(5_000_000), gotWindows["burst"].Limit)
 	require.Equal(t, "5h", gotWindows["sustained"].Window)
 
-	require.Len(t, d.RailMerchantAccounts, 2)
+	require.Len(t, d.RailMerchantAccounts, 3)
 	byEnv := map[string]ProviderRailAccountConfig{}
+	var ccbillDump ProviderRailAccountConfig
 	for _, account := range d.RailMerchantAccounts {
 		require.Len(t, account, 1)
-		for _, a := range account {
+		for rail, a := range account {
+			if rail == "ccbill" {
+				ccbillDump = a
+				continue
+			}
 			byEnv[a.Environment] = a
 		}
 	}
+	// #697: the dash-form CCBill composite id survives push⇄dump verbatim.
+	require.Equal(t, "945280-0000", ccbillDump.AccountID)
 	require.Equal(t, "579145", byEnv["live"].AccountID)
 	require.False(t, byEnv["live"].Archived)
 	require.False(t, byEnv["test"].Archived)
@@ -467,7 +508,8 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
 	require.NotNil(t, reparsed.Merchants["cozy-art"].Invoice)
-	require.Len(t, reparsed.Merchants["cozy-art"].RailMerchantAccounts, 2)
+	require.Len(t, reparsed.Merchants["cozy-art"].RailMerchantAccounts, 3)
+	require.Equal(t, "945280-0000", reparsed.Merchants["cozy-art"].RailMerchantAccounts["ccbill"]["ccbill"].AccountID)
 }
 
 func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T) {

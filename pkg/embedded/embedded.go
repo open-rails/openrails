@@ -43,9 +43,15 @@ type Options struct {
 	Redis   *redis.Client
 	Cache   cache.Cache
 	// PaymentProviders lets embedding hosts supply one or more payment-provider
-	// credential sets programmatically. Local provider names are optional
-	// selectors; durable provider-account identity is resolved from the provider
-	// itself.
+	// credential sets programmatically — the BOOT-CONFIG plane. Local provider
+	// names are optional selectors; durable provider-account identity is
+	// resolved from the provider itself.
+	//
+	// This is NOT the only way to arm providers (#699): a host that seeds
+	// provider accounts + secrets through the merchant manifest (the
+	// per-merchant secrets store) gets checkout, webhooks AND provider pulls
+	// (refresh/probes/unknown-resolution) armed per merchant from the store,
+	// with this boot plane as fallback. Store credentials win on conflict.
 	PaymentProviders []PaymentProvider
 }
 

@@ -2,10 +2,8 @@ package embed
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -15,19 +13,33 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// localClient is the REMAINDER of the pre-#685 handler-transcribing adapter.
-// Every openrails.Client interface method now runs through the unified remote
-// implementation over the in-process transport (see unifiedClient in embed.go);
-// what stays here is:
+// localClient is the PERMANENT remainder of the pre-#685 handler-transcribing
+// adapter. Every openrails.Client interface method except one runs through the
+// unified remote implementation over the in-process transport (see
+// unifiedClient in embed.go); what stays here is:
 //
-//   - SetCustomerSpendDelegations — its wire surface is the delegated
-//     customer-treasury family (/v1/customers/*), not the merchant API the
-//     in-process transport serves; migrate it when that surface is routable
-//     in-process.
-//   - Embedded-only extras with NO wire counterpart (single Admit — the batch
-//     route is the surviving HTTP surface, #666 — SetCreditAccountSettings,
-//     ListCreditTransactions, BudgetStatus, AbuseUsage), reachable via type
-//     assertion by hosts that need them.
+//   - SetCustomerSpendDelegations — PERMANENTLY transcribed (#685 tail
+//     decision). Its wire surface is the delegated customer-treasury family
+//     (/v1/customers/*), whose gate semantics are "the credential IS the
+//     customer": CustomerScopeRequired matches :customer_id against the
+//     delegated principal's OWN resolved identity and the handler derives the
+//     payer FROM the principal (a body customer_id is rejected). The host
+//     principal is the MERCHANT — one fixed identity — while this method takes
+//     an arbitrary customerID per call; routing it in-process would require
+//     synthesizing a per-request ResolvedDelegated whose identity is copied
+//     from the very path segment the gate exists to check (fabrication, not
+//     auth), with a merchant.ID holding a non-merchant UUID. The wire also
+//     deliberately offers NO merchant-credential route for this operation
+//     (#666 retired the merchant-side service routes; every /v1/customers
+//     route is gated on customer:* perms because the balance may be shared) —
+//     an in-process mapping would mint embedded-only authority with no
+//     standalone equivalent. The transcription states what this really is:
+//     direct engine access by the process owner.
+//   - Embedded-only extra with NO wire counterpart: single Admit (the batch
+//     route is the surviving HTTP surface, #666), reachable via type assertion
+//     by hosts that need it. (SetCreditAccountSettings, ListCreditTransactions,
+//     BudgetStatus, AbuseUsage were deleted in the #685 tail — no host used
+//     them.)
 type localClient struct {
 	svc *billingservice.Service
 	// currency is the default currency the unified client is built with
@@ -175,128 +187,12 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 	return out
 }
 
-// SetCreditAccountSettings carries the semantics of the retired
-// handlers.ServiceSetCreditAccountSettings (#666) and then — like the remote
-// client did — re-reads the account snapshot via the balance path.
-func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, currency string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
-	payer, err := parseCustomer(customerID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	ct, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	settings := money.AccountSettingsInput{
-		BillingMode:              in.BillingMode,
-		MaxSpendPerDay:           in.MaxSpendPerDay,
-		MaxSpendPerMonth:         in.MaxSpendPerMonth,
-		MaxOutstandingOwedAmount: in.MaxOutstandingOwedAmount,
-		LowBalanceThreshold:      in.LowBalanceThreshold,
-		AutoTopupEnabled:         in.AutoTopupEnabled,
-		AutoTopupAmountCents:     in.AutoTopupAmountCents,
-		DefaultCreditExpiryHours: in.DefaultCreditExpiryHours,
-		HardStopOnBreach:         in.HardStopOnBreach,
-		AlertThresholdPct:        in.AlertThresholdPct,
-	}
-	if in.AutoTopupPaymentMethod != nil {
-		if pm, perr := uuid.Parse(strings.TrimSpace(*in.AutoTopupPaymentMethod)); perr == nil {
-			settings.AutoTopupPaymentMethod = &pm
-		}
-	}
-	if err := c.svc.SetCreditAccountSettings(ctx, payer, ct, settings); err != nil {
-		return nil, invalidErr(err.Error())
-	}
-	// The handler also re-read + returned the stored settings; mirror both steps
-	// so a settings-read failure surfaces identically.
-	if _, err := c.svc.GetCreditAccountSettings(ctx, payer, ct); err != nil {
-		return nil, invalidErr(err.Error())
-	}
-	snap, err := c.svc.GetCreditAccount(ctx, payer, ct)
-	if err != nil {
-		return nil, invalidErr(err.Error())
-	}
-	return &openrails.CreditAccount{
-		CustomerID:            snap.CustomerID.String(),
-		Currency:              snap.Currency,
-		BillingMode:           snap.BillingMode,
-		BalanceAmount:         snap.BalanceAmount,
-		HeldAmount:            snap.HeldAmount,
-		AvailableAmount:       snap.AvailableAmount,
-		OutstandingOwedAmount: snap.OutstandingOwedAmount,
-	}, nil
-}
-
-// serviceTxn mirrors the handler's serviceTxnResponse wire shape
-// (service_credits.go) for ListCreditTransactions passthrough JSON.
-type serviceTxn struct {
-	ID              uuid.UUID `json:"id"`
-	CustomerID      uuid.UUID `json:"customer_id"`
-	Invoker         string    `json:"invoker"`
-	Currency        string    `json:"currency"`
-	Amount          int64     `json:"amount"`
-	TransactionType string    `json:"transaction_type"`
-	Status          string    `json:"status"`
-	Source          string    `json:"source"`
-	CreatedAt       time.Time `json:"created_at"`
-}
-
-// ListCreditTransactions carries the semantics of the retired
-// handlers.ServiceListCustomerCreditTransactions (#666), producing the same
-// {"transactions":[...],"total":N} JSON the wire carried.
-func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
-	currency, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	payer, err := parseCustomer(customerID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	items, total, err := c.svc.GetCustomerCreditTransactions(ctx, payer, currency, limit, 0)
-	if err != nil {
-		return nil, invalidErr(err.Error())
-	}
-	out := make([]serviceTxn, 0, len(items))
-	for _, t := range items {
-		out = append(out, serviceTxn{
-			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Currency: t.Currency, Amount: t.Amount,
-			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
-			CreatedAt: t.CreatedAt,
-		})
-	}
-	raw, merr := json.Marshal(map[string]any{"transactions": out, "total": total})
-	if merr != nil {
-		return nil, internalErr(merr.Error())
-	}
-	return raw, nil
-}
-
-// BudgetStatus carries the semantics of the retired handlers.ServiceGetBudget (#666).
-func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
-	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	currency, err = requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	statuses, err := c.svc.BudgetStatus(ctx, payer, invokerID, currency, tier)
-	if err != nil {
-		return nil, internalErr("budget lookup failed")
-	}
-	out := make([]openrails.BudgetWindow, 0, len(statuses))
-	for _, w := range statuses {
-		out = append(out, budgetWindowFromDTO(w))
-	}
-	return out, nil
-}
-
 // SetCustomerSpendDelegations transcribes the customer treasury spend-delegations
-// replace operation for embedded hosts (#567). NOT yet migrated to the
-// in-process transport: its wire surface is /v1/customers/* (delegated
-// customer-treasury auth), not the merchant API.
+// replace operation for embedded hosts (#567). PERMANENTLY transcribed — see the
+// localClient doc: the /v1/customers/* gate requires a credential that IS the
+// customer, which a host (merchant) principal cannot honestly satisfy for an
+// arbitrary customerID; the wire deliberately has no merchant-credential
+// equivalent for this operation.
 func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
@@ -320,36 +216,4 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 		return internalErr("set customer spend delegations failed")
 	}
 	return nil
-}
-
-// AbuseUsage carries the semantics of the retired handlers.ServiceAbuseUsage (#488/#666).
-func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*openrails.AbuseUsageResponse, error) {
-	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
-	if err != nil {
-		return nil, err
-	}
-	currency, err = requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	pw, aw, uerr := c.svc.AbuseUsage(ctx, payer, invoker, currency, tier)
-	if uerr != nil {
-		return nil, internalErr("abuse usage lookup failed")
-	}
-	return &openrails.AbuseUsageResponse{
-		Currency:       currency,
-		PayerWindows:   abuseUsageWindows(pw),
-		InvokerWindows: abuseUsageWindows(aw),
-	}, nil
-}
-
-func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUsageWindow {
-	out := make([]openrails.AbuseUsageWindow, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, openrails.AbuseUsageWindow{
-			Key: w.Key, Currency: w.Currency, Window: w.Window, Used: w.Used,
-			Limit: w.Limit, OverBudget: w.OverBudget,
-		})
-	}
-	return out
 }

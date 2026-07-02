@@ -77,6 +77,10 @@ Examples:
 CCBill's composite identity is dash-joined (`clientAccnum-clientSubacc`, #697),
 so no account_id embeds the `/` name delimiter.
 
+The `rail_merchant_accounts/` name prefix is deliberate #683 vocabulary and does
+NOT follow the manifest key rename: the config key is `accounts` (#698), while
+secret names and the DB table keep `rail_merchant_accounts`.
+
 Secret stores:
 
 - DB-backed store: `openrails.merchant_secrets`, envelope-encrypted by
@@ -120,34 +124,37 @@ The merchant config manifest used by `openrails push-merchant-config` declares
 OpenRails-owned merchants. Catalog state is pushed separately with
 `openrails push-merchant-catalog`.
 
-See `config/merchants.example.yaml` for a fuller example with
-merchant issuer trust, profile data, provider accounts, and provider secret
-sources.
+See `config/merchants_config.example.yaml` for a fuller example with
+merchant remote-application trust, profile data, rail merchant accounts, and
+secret seeds. The `accounts` key (#698) declares rail merchant accounts; secret
+values can also arrive via the `BILLING_MERCHANTS_*` env overlay (e.g.
+`BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY`).
 
 ```yaml
 version: 1
 
 merchants:
-  - slug: doujins
+  doujins:
     display_name: Doujins
-    issuer:
-      uri: https://doujins.example
+    remote_application:
+      issuer: https://doujins.example
       jwks_uri: https://doujins.example/.well-known/jwks.json
     profile:
       display_name: Doujins Billing
       logo_url: https://doujins.example/logo.png
       from_email: billing@doujins.example
       support_url: https://doujins.example/support
-    provider_accounts:
-      - rail: nmi
-        environment: live
-        account_id: mobius-profile-id
-        archived: false
-        settings:
-          tokenization_key: {env: DOUJINS_NMI_TOKENIZATION_KEY}
-        secrets:
-          security_key: {env: DOUJINS_NMI_SECURITY_KEY}
-          webhook_signing_secret: {env: DOUJINS_NMI_WEBHOOK_SECRET}
+    accounts:
+      mobius:
+        nmi:
+          environment: live
+          account_id: "579145"
+          archived: false
+          settings:
+            tokenization_key: replace-with-nmi-tokenization-key
+          secrets:
+            security_key: replace-with-nmi-security-key
+            webhook_signing_secret: replace-with-nmi-webhook-secret
 ```
 
 Catalog manifests are explicitly catalog-scoped and may contain one or more

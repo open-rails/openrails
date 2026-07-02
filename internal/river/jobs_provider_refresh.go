@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -44,18 +45,31 @@ func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 // durable watermarks, the unknown-cohort reconcile (#632/#633/#665 — the ONE
 // per-subscription verification path), and the CCBill DataLink bulk lane.
 // Provider outages leave watermarks in place for the next scheduled/startup pass.
+//
+// Credentials arm PER MERCHANT (#699): fetchers/probers are built inside each
+// merchant's scope from the merchant-secrets store first, with the boot-config
+// rails (Rails + the boot-built clients below) as the fallback plane. Clients
+// are cheap per-merchant structs — nothing credentialed is cached across
+// merchants (#653).
 type ProviderRefreshWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
-	DB                  *db.DB
-	Config              *config.Config
-	Rails               config.RailMerchantAccountSet
-	Clock               clockwork.Clock
+	DB     *db.DB
+	Config *config.Config
+	Rails  config.RailMerchantAccountSet
+	Clock  clockwork.Clock
+	// Merchants resolves per-merchant provider accounts + scoped secrets
+	// (#699). nil = boot-config plane only.
+	Merchants           *merchants.Service
 	NMIClients          map[string]*nmi.NMIClient
 	CCBillDataLink      *ccbill.DataLinkClient
 	SolanaRPC           *solanaint.RPCClient
 	EventLogService     *analytics.EventLogService
 	DeferDelete         subscriptions.DeferredDeleteScheduler
 	NotificationService *subscriptions.NotificationService
+
+	// PullEndpoints overrides provider base URLs on store-armed clients
+	// (fake-provider test seam).
+	PullEndpoints reconcile.ProviderEndpoints
 
 	Window          time.Duration
 	SafetyLag       time.Duration
@@ -90,53 +104,53 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	}
 	stats.Merchants = len(merchantIDs)
 
-	fetchers, fetcherErr := reconcile.BuildFetchersWithOptions(w.Config, w.Rails, reconcile.FetcherClients{
+	// #699: fetchers + per-sub probers (#665) arm PER MERCHANT inside the
+	// merchant scope — merchant-store credentials first, boot-config rails as
+	// the fallback plane. A rail that cannot arm is absent for that merchant
+	// (its WARN names merchant/rail/secret); the other rails keep pulling.
+	builder := reconcile.MerchantFetcherBuilder{
+		Config:         w.Config,
+		Rails:          w.Rails,
+		Merchants:      w.Merchants,
+		DB:             w.DB,
 		NMIClients:     w.NMIClients,
 		CCBillDataLink: w.CCBillDataLink,
 		SolanaRPC:      w.SolanaRPC,
-	}, w.DB, reconcile.FetcherOptions{})
-	if fetcherErr != nil {
-		stats.LaneErrors++
-		logger.WithError(fetcherErr).Warn("Provider Refresh: event lane unavailable")
+		Endpoints:      w.PullEndpoints,
 	}
-	// #665: per-subscription probe fallbacks for rows the bulk pull can't decide
-	// (NULL period end / evidence outside the window). Snapshot sources only —
-	// the unknown-reconcile core stays the one decider.
-	probers := reconcile.BuildSubscriptionProbers(w.Rails, w.NMIClients, w.CCBillDataLink)
 
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
-			if err := w.runCCBillDataLinkLane(tctx); err != nil {
+			armed := builder.Build(tctx, merchant.ID(mid))
+			if err := w.runCCBillDataLinkLane(tctx, armed.CCBillDataLink); err != nil {
 				stats.CCBillErrors++
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
 			}
-			if fetcherErr == nil {
-				res := w.runEventRefresh(tctx, mid, fetchers)
-				stats.add(res)
-				// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
-				// PROVES a source domain — flip reconciliation_state before the
-				// convergence pass so held EXCESS repairs can proceed.
-				if len(res.Proofs) > 0 {
-					if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
-						stats.LaneErrors++
-						logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
-					} else if len(flipped) > 0 {
-						logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
-					}
+			res := w.runEventRefresh(tctx, mid, armed.Fetchers)
+			stats.add(res)
+			// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
+			// PROVES a source domain — flip reconciliation_state before the
+			// convergence pass so held EXCESS repairs can proceed.
+			if len(res.Proofs) > 0 {
+				if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
+					stats.LaneErrors++
+					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
+				} else if len(flipped) > 0 {
+					logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
 				}
-				if res.Changed {
-					if err := w.runConvergence(tctx, mid); err != nil {
-						stats.ConvergeErrors++
-						logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
-					}
+			}
+			if res.Changed {
+				if err := w.runConvergence(tctx, mid); err != nil {
+					stats.ConvergeErrors++
+					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
 				}
 			}
 			// #633: reconcile the `unknown` cohort against provider truth (one
 			// windowed bulk pull per rail + targeted per-sub probe fallbacks).
 			// Tolerant of missing/failed fetchers — those rails' subs stay
 			// `unknown` and are retried next pass (backoff).
-			if err := w.runUnknownReconcile(tctx, mid, fetchers, probers); err != nil {
+			if err := w.runUnknownReconcile(tctx, mid, armed.Fetchers, armed.Probers); err != nil {
 				stats.LaneErrors++
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
 			}
@@ -163,10 +177,10 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	return nil
 }
 
-func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context) error {
+func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
 	worker := CCBillReconcileWorker{
 		DB:                  w.DB,
-		DataLink:            w.CCBillDataLink,
+		DataLink:            dataLink,
 		NotificationService: w.NotificationService,
 	}
 	return worker.Work(ctx, &river.Job[CCBillReconcileArgs]{})

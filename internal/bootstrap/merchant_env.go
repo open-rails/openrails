@@ -1,17 +1,24 @@
 package bootstrap
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"strings"
+)
 
 const MerchantBillingEnvPrefix = "BILLING_"
 
 // MerchantBillingEnvKey maps a BILLING_ env var to a koanf key for BillingConfig.
 // It is schema-aware so single underscores can be used without array indexes:
 //
-//	BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
-//	-> merchants.doujins.rail_merchant_accounts.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME
+//	-> merchants.doujins.accounts.ccbill.ccbill.secrets.datalink_username
+//	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
+//	-> merchants.doujins.accounts.mobius.nmi.secrets.security_key
 //
 // Map-key spans are lower-kebab-cased. Keep merchant/provider account keys
-// lowercase and avoid underscores in the YAML keys.
+// lowercase, avoid underscores in the YAML keys, and avoid the fixed section
+// words (ACCOUNTS, PROFILE, ...) inside merchant/account key spans.
 func MerchantBillingEnvKey(envName string) string {
 	s := strings.ToUpper(strings.TrimSpace(envName))
 	s = strings.TrimPrefix(s, MerchantBillingEnvPrefix)
@@ -41,7 +48,7 @@ func MerchantBillingEnvKey(envName string) string {
 		if len(rest) > 0 {
 			return base + "." + strings.ToLower(strings.Join(rest, "_"))
 		}
-	case "rail_merchant_accounts":
+	case "accounts":
 		return providerAccountEnvKey(base, rest)
 	}
 	return ""
@@ -56,7 +63,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		{"ISSUER", "issuer"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
-		{"RAIL_MERCHANT_ACCOUNTS", "rail_merchant_accounts"},
+		{"ACCOUNTS", "accounts"},
 		{"DELEGATED_INVOKER_WASTED_SPEND_WINDOWS", "delegated_invoker_wasted_spend_windows"},
 	}
 	for i := range tokens {
@@ -105,6 +112,35 @@ func providerAccountEnvKey(base string, tokens []string) string {
 		return accountBase + "." + strings.ToLower(strings.Join(rest, "_"))
 	}
 	return ""
+}
+
+// rejectRenamedMerchantEnvVars fails loudly when a BILLING_MERCHANTS_* env var
+// still uses a retired accounts anchor (#698: ACCOUNTS <- RAIL_MERCHANT_ACCOUNTS;
+// #683: RAIL_MERCHANT_ACCOUNTS <- PROVIDER_ACCOUNTS). Without this the old var
+// would not just be dropped — the single-token ACCOUNTS anchor would mis-split
+// it into a wrong merchant key ("doujins-rail-merchant") and overlay config
+// nobody declared. The retired anchors are therefore poison token sequences
+// anywhere in the name (which also means a merchant key span must not contain
+// them, e.g. a merchant slugged "provider" cannot use env overlays).
+func rejectRenamedMerchantEnvVars() error {
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, MerchantBillingEnvPrefix+"MERCHANTS_") {
+			continue
+		}
+		tokens := strings.Split(name, "_")
+		for _, old := range [][]string{
+			{"RAIL", "MERCHANT", "ACCOUNTS"},
+			{"PROVIDER", "ACCOUNTS"},
+		} {
+			for i := range tokens {
+				if hasPrefixTokens(tokens[i:], old) {
+					return fmt.Errorf("env %s: %s was renamed to ACCOUNTS (merchants.<slug>.accounts, #698); use BILLING_MERCHANTS_<MERCHANT>_ACCOUNTS_...", name, strings.Join(old, "_"))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func envKeySpan(tokens []string) string {

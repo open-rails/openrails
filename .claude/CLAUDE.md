@@ -23,6 +23,10 @@ identifiers OUT of committed files (code, trackers, this file).
 - `openrails.rail_merchant_accounts` (#683; was provider_accounts) is an OPERATOR-DECLARED catalog (manifest `account_id`). There is
   NO runtime "whoami"/identity resolution and NO account-mismatch guard — that whole subsystem was
   ripped out (#592). `account_id` is an opaque, operator-declared label.
+- The merchant-config manifest key is the SHORT form `merchants.<slug>.accounts.<key>.<rail>` (#698;
+  env overlay `BILLING_MERCHANTS_<M>_ACCOUNTS_…`). Deliberate divergence: the DB table and the
+  merchant-secret name prefix stay `rail_merchant_accounts` (#683 vocabulary). The old config
+  key/env anchor fails loudly with a rename error — no aliases.
 - Per rail, the declared `account_id` is:
   - **NMI / Mobius** — the dashboard **"Gateway ID"**. In NMI this IS the *merchant account* id
     (NMI provisions every merchant as a "gateway account"; its v4 API documents `{gateway_id}` as

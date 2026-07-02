@@ -424,23 +424,6 @@ type PayerSpendLimitInput struct {
 	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }
 
-// AbuseUsageWindow is one wasted-spend window's running $ total (#488).
-type AbuseUsageWindow struct {
-	Key        string `json:"key"`
-	Currency   string `json:"currency"`
-	Window     string `json:"window"`
-	Used       int64  `json:"used"`
-	Limit      int64  `json:"limit"`
-	OverBudget bool   `json:"over_budget"`
-}
-
-// AbuseUsageResponse is the running wasted-$ totals for a payer + invoker (#488).
-type AbuseUsageResponse struct {
-	Currency       string             `json:"currency"`
-	PayerWindows   []AbuseUsageWindow `json:"payer_windows"`
-	InvokerWindows []AbuseUsageWindow `json:"invoker_windows,omitempty"`
-}
-
 // WastedSpendReport is one host-reported failed attempt that cost money.
 // Source and SourceID are required and together form the idempotency key —
 // duplicate (Source, SourceID) reports are accepted but recorded as Duplicate=true.

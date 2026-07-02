@@ -28,10 +28,15 @@ func (noSubsReader) GetPaginatedByUserID(context.Context, string, int, int) ([]m
 // TestDeleteVaultSharedVaultScopesToBillingEntry (#682): a whole-vault delete
 // would destroy every billing entry in the vault, so when another
 // payment-method row shares the vault id (an imported multi-card vault),
-// DeleteVault must delete ONLY this row's billing entry
+// the delete must scope to ONLY this row's billing entry
 // (DELETE /v5/customers/{vault}/billing/{billing_id}) and never the vault —
 // the sibling card survives. A shared row WITHOUT a billing id (cannot
 // identify which entry) still refuses outright.
+//
+// This exercises the DIRECT decline-cleanup path (CleanupVaultBestEffort);
+// the durable intent path's identical scoping is covered by the handler
+// tests in internal/intents (nmi_vault_delete_integration_test.go — this
+// package cannot import intents: import cycle via subscriptions).
 func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	pool := dbtest.SharedPGXPool(t)
 	database, err := db.NewWithPGXPool(pool, "openrails")
@@ -95,7 +100,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, svc.DeleteVault(ctx, pmA), "shared vault deletes must scope to the billing entry")
+	require.NoError(t, svc.CleanupVaultBestEffort(ctx, pmA), "shared vault deletes must scope to the billing entry")
 	require.Len(t, entryDeletes, 1, "exactly one billing-entry delete")
 	require.Contains(t, entryDeletes[0], "/customers/"+sharedVault+"/billing/"+pmA.RailMethodRef)
 	require.Empty(t, vaultDeletes, "the shared vault itself must NEVER be deleted")
@@ -110,7 +115,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	pmC := mk("")
 	pmD := mk("bill-d-" + uuid.NewString()[:8])
 	_ = pmD
-	err = svc.DeleteVault(ctx, pmC)
+	err = svc.CleanupVaultBestEffort(ctx, pmC)
 	require.Error(t, err, "shared vault without a billing id must refuse")
 	require.Contains(t, err.Error(), "no billing id", "refusal names the missing handle: %v", err)
 }

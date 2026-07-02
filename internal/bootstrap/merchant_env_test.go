@@ -13,10 +13,11 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 		"BILLING_VERSION":                              "version",
 		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":       "merchants.doujins.display_name",
 		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL": "merchants.doujins.profile.from_email",
-		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.rail_merchant_accounts.mobius.nmi.secrets.security_key",
-		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.rail_merchant_accounts.mobius-sandbox.nmi.settings.tokenization_url",
-		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.rail_merchant_accounts.mobius-sandbox.nmi.settings.tokenization_key",
-		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.rail_merchant_accounts.solana.solana.signer.mode",
+		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.accounts.mobius.nmi.secrets.security_key",
+		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.accounts.mobius-sandbox.nmi.settings.tokenization_url",
+		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.accounts.mobius-sandbox.nmi.settings.tokenization_key",
+		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME":      "merchants.doujins.accounts.ccbill.ccbill.secrets.datalink_username",
+		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.accounts.solana.solana.signer.mode",
 	}
 	for envName, want := range tests {
 		t.Run(envName, func(t *testing.T) {
@@ -24,6 +25,31 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 		})
 	}
 	require.Empty(t, MerchantBillingEnvKey("DB_URL"))
+}
+
+// #698: env vars still using a retired accounts anchor must fail loudly. The
+// new single-token ACCOUNTS anchor would otherwise mis-split the old name into
+// a wrong merchant key and silently overlay config nobody declared.
+func TestLoadMerchantConfigManifestBytesRejectsRenamedEnvAnchor(t *testing.T) {
+	manifest := []byte(`
+version: 1
+merchants:
+  doujins:
+    display_name: Doujins
+`)
+	t.Run("rail_merchant_accounts", func(t *testing.T) {
+		t.Setenv("BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY", "old-form")
+		_, err := LoadMerchantConfigManifestBytes(manifest)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "RAIL_MERCHANT_ACCOUNTS was renamed to ACCOUNTS")
+		require.Contains(t, err.Error(), "BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY")
+	})
+	t.Run("provider_accounts", func(t *testing.T) {
+		t.Setenv("BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY", "pre-683-form")
+		_, err := LoadMerchantConfigManifestBytes(manifest)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "PROVIDER_ACCOUNTS was renamed to ACCOUNTS")
+	})
 }
 
 func TestLoadMerchantConfigManifestFilesMergesStructuredOverlay(t *testing.T) {
@@ -35,7 +61,7 @@ version: 1
 merchants:
   cozy-art:
     display_name: Cozy Art
-    rail_merchant_accounts:
+    accounts:
       mobius:
         nmi:
           environment: live
@@ -46,7 +72,7 @@ merchants:
 	require.NoError(t, os.WriteFile(overlay, []byte(`
 merchants:
   cozy-art:
-    rail_merchant_accounts:
+    accounts:
       mobius:
         nmi:
           secrets:
@@ -65,14 +91,14 @@ merchants:
 }
 
 func TestLoadMerchantConfigManifestBytesMergesEnvOverlay(t *testing.T) {
-	t.Setenv("BILLING_MERCHANTS_COHOST_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
+	t.Setenv("BILLING_MERCHANTS_COHOST_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
 
 	manifest, err := LoadMerchantConfigManifestBytes([]byte(`
 version: 1
 merchants:
   cohost:
     display_name: Cohost
-    rail_merchant_accounts:
+    accounts:
       mobius-sandbox:
         nmi:
           environment: test

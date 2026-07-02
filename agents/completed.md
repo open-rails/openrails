@@ -23899,6 +23899,63 @@ verify-then-resolve from the intent log — effectively-once into the external s
 never a charged-but-unrecorded outcome, never a lost write. No code path can reach a provider write without an
 intent (enforced by CI guard).
 
+## Tail completed 2026-07-02 (deferred kinds resolved)
+
+**Vault-delete dispositions (per site):**
+- **User-initiated delete (VaultService.DeleteVault ← pkg/service DeletePaymentMethod)** — MIGRATED onto the new
+  `nmi_vault_delete` intent kind (handler + VaultDeleteThrough adapter in internal/intents/nmi_vault_delete.go;
+  the adapter exists because paymentmethods cannot import intents — cycle via subscriptions). Semantics:
+  idempotency key = `nmi_vault_delete:<payment_method_id>`; verify-then-execute (id-filtered v5 customer read;
+  absent ⇒ done — the tombstone-reads-as-gone pattern from nmi_delete.go; a DELETE answering v5 404 also counts
+  as done); #682 shared vaults recompute sharedness at EXECUTION time and scope to the billing entry; relevance
+  supersedes only when the method is back in use by an active/past_due subscription (never destroy billing
+  state in use); a local row deleted out-of-band falls back to the payload ref copies so the remote delete
+  still finishes; finalize = idempotent local row delete. Producer contract: Done ⇒ nil, Terminal ⇒ error,
+  else ErrVaultDeleteProcessing (ledger finishes out-of-band; retry maps onto the same intent).
+- **Decline-cleanup deletes (checkout nmi_sale_service.go, service.go subscription-create + upgrade-proration
+  terminal branches)** — LEFT DIRECT via the new `VaultService.CleanupVaultBestEffort` (same guards + scoped
+  delete, no intent). Justification (in-code at each site): the vault was created for THIS declined attempt and
+  is referenced nowhere — losing the delete leaves an inert orphan entry; and card-testing decline floods must
+  not spam the intent ledger or burn the #679 destructive budget.
+- **CreateVault local-store-failure cleanup (vault_service.go)** — LEFT DIRECT, same rationale (vault created
+  milliseconds ago, referenced nowhere).
+
+**Breaker (#679) decision:** `nmi_vault_delete` IS destructive (added to destructiveIntentTypes) — a vaulted
+card is irrecoverable (only the cardholder can re-enter it), so mass vault deletion is exactly the #679 threat
+model. Held user deletes stay pending and complete after operator ack. The decline-cleanup path deliberately
+bypasses the ledger so it can never consume this budget.
+
+**Upgrade-compensation saga — assessed, NOT built (permanent record):** the remaining post-#674/#684 exposure
+was ONE leg: a transport-ambiguous successor CREATE was treated as a clean failure while the order id was a
+fresh uuid per attempt (undiscoverable orphan; retry double-creates). Fixed IN PLACE, mirroring the proration
+hardening: successor order id is now content-derived (`upgs-` + shortHash(idempotency key)); an ambiguous
+create roster-scans (vault, plan) via the extracted findUnregisteredRemoteSubscriptions (shared with the
+nmi_subscription_create verify leg) and ADOPTS a single unknown-local match inline, else surfaces
+ErrCheckoutProcessing; the retry (same content-derived key) re-runs the adopt scan before creating. A FULL
+saga intent (create + proration + swap + old-cancel + compensation as one durable state machine) was declined
+as a redesign with little residual payoff: the local swap is already atomic (ReplaceForTierChange), the
+proration leg is verify-hardened, both delete legs are verify-then-execute idempotent, compensation failures
+are loudly error-logged with structured events, and the #684-era NMI reconcile pulls the full roster so
+remote-live/local-cancelled drift (the step-5 old-cancel failure mode) surfaces as findings. Known accepted
+residue: a crash AFTER the swap commits but before idempotency Complete relies on tier-rank routing to reject
+a re-run (same tier ⇒ blocked), and step-5 old-cancel remains best-effort + reconcile-backstopped — wiring it
+onto the nmi_delete_subscription intent would entangle the DeletionScheduledAt resume-window doctrine
+(#664/#665) for no incremental safety.
+
+**Guard updates (enforcement_guard_test.go):** `.DeleteCustomerVault(` now allowlists the intent handler + the
+vault_service.go reactive-cleanup paths (justified); NEW token `.DeleteCustomerBillingEntry(` (same two files);
+`.AddRecurringSubscription(` service.go entry re-justified (adopt-or-processing, saga declined).
+
+**Tests (all green, testcontainers + fake NMI transport):** intents — vault-delete happy-path/replay(zero
+provider calls), crash-before-execute (executor drains, exactly-once), ambiguous-landed ⇒ verifier resolves
+without re-delete, ambiguous-not-landed ⇒ verify says not-executed ⇒ executor retries (effectively-once),
+shared-vault entry-scoping through the handler, back-in-use ⇒ superseded with ZERO provider deletes; breaker
+unit list updated (3 destructive types). checkout — upgrade ambiguous-create-landed adopts inline (one create,
+old sub cancelled local+remote), ambiguous-create-lost ⇒ ErrCheckoutProcessing then retry re-creates under the
+SAME order id. paymentmethods — producer outcome-branching unit tests + shared-guard test moved onto the
+direct cleanup path. Full unit+integration suites for intents/checkout/paymentmethods/subscriptions/app pass;
+go build ./... + go vet ./... clean.
+
 ---
 
 # #675: webhook state correctness — clobbering writes, dropped renewals, swallowed reversals
@@ -24668,7 +24725,7 @@ for those rails. CCBill behavior unchanged.
 # #685: unify embedded and remote modes — one client, pluggable transport
 
 **Completed:** yes
-**Status:** DONE (2026-07-02) — 20/21 methods unified through the in-process transport (conformance green); documented holdout: SetCustomerSpendDelegations (customer-treasury wire family) + embed-only extras + pkg/service retirement follow-ups recorded in-section. Originally: IN PROGRESS (2026-07-01) — core landed in-tree. In-process RoundTripper (`embed/transport.go`)
+**Status:** DONE (2026-07-02, tail closed same day — see "Tail completed 2026-07-02" below) — 20/21 methods unified through the in-process transport (conformance green); SetCustomerSpendDelegations is a PERMANENT documented transcription (authz decision, tail note); extras/pkg/service retirements executed in the tail. Originally: IN PROGRESS (2026-07-01) — core landed in-tree. In-process RoundTripper (`embed/transport.go`)
 dispatches into the real neutral /v1/merchant mux (same RegisterServiceRoutes standalone mounts); AUTH =
 context-attached host principal (`billingauth.HostPrincipal` via `WithHostPrincipal`) checked FIRST in
 `legacyGate.Authorize` — unforgeable from the network because the gate consults the request CONTEXT, never a
@@ -24731,14 +24788,14 @@ cozy-art's browser surface is already unified (frontend → embedded HTTP routes
 - [x] Unified constructor: `Runtime.Client()` hands out the unified client (remote impl + in-process
       transport). (A root-SDK `Embed(app)` is impossible without linking the engine into the root package —
       deps_test forbids it; `embed.Runtime.Client()` IS the second constructor.)
-- [~] Migrate embed/client.go method-by-method; 20/21 interface methods migrated + transcriptions deleted.
-      Remaining: SetCustomerSpendDelegations (customer-treasury auth surface) + embedded-only extras
-      (Admit/SetCreditAccountSettings/ListCreditTransactions/BudgetStatus/AbuseUsage — no wire counterpart).
-- [ ] Collapse conformance suite to transport smoke tests once the last transcription falls (kept full for
-      now; it currently proves the new transport against the real standalone).
-- [~] Audit pkg/service for facade-vs-parity-mirror roles: nothing retired this pass (all still
-      handler-backed); flagged svc.BudgetStatus/svc.AbuseUsage (sole callers = embed extras) as retirement
-      candidates once host non-use is confirmed.
+- [x] Migrate embed/client.go method-by-method; 20/21 interface methods migrated + transcriptions deleted.
+      RESOLVED 2026-07-02 (tail note below): SetCustomerSpendDelegations stays transcribed PERMANENTLY —
+      keep-transcribed is the recorded answer, not a deferral; single-Admit extra kept (no wire counterpart);
+      the other four extras DELETED (host non-use confirmed).
+- [x] Collapse conformance suite: N/A by the keep-transcribed decision — the suite stays as-is (it proves the
+      in-process transport against the real standalone; it never covered the transcription or the extras).
+- [x] Audit pkg/service for facade-vs-parity-mirror roles: svc.BudgetStatus + svc.AbuseUsage RETIRED
+      2026-07-02 (host non-use confirmed — tail note below); every other facade method is handler-backed.
 - [ ] Host adoption notes (cozy-art, doujins): constructor swap, no behavior change expected (hosts keep
       compiling unchanged — Runtime.Client signature untouched).
 - [x] SDK ergonomics (2026-07-01): `WithAPIKey(key)` sugar; `Verifier`/`openrails.Verify(ctx, c)`
@@ -24750,6 +24807,37 @@ cozy-art's browser surface is already unified (frontend → embedded HTTP routes
 One SDK implementation serves both modes; adding an endpoint touches handler + route + (generated/typed) client
 once; embedded and remote cannot drift because there is nothing to drift between. Boot remains dual only where
 infra ownership genuinely differs.
+
+## Tail completed 2026-07-02
+The recorded remainder is closed. (1) `SetCustomerSpendDelegations` stays TRANSCRIBED — permanent decision,
+not a deferral. Why the in-process mapping is unsound: the /v1/customers/* gate's trust semantics are "the
+credential IS the customer" — `CustomerScopeRequired` matches `:customer_id` against the delegated
+principal's OWN resolved identity (Merchant/MerchantSlug/MerchantID) and the handler derives the payer FROM
+the principal (`identity.CustomerID(resolved.MerchantID.UUID())`; a body customer_id is rejected). The host
+principal is ONE fixed identity (the merchant), while the SDK method takes an arbitrary customerID per call;
+traversing the gate would require synthesizing a per-request `ResolvedDelegated` whose identity fields are
+copied from the very path segment the gate exists to verify — fabrication, not auth — with a `merchant.ID`
+holding a non-merchant UUID (and bindDelegated would RLS-pin that wrong "merchant"). The wire also
+deliberately offers NO merchant-credential route for this operation (#666 retired the merchant-side service
+routes; every /v1/customers route is gated on customer:* perms because the balance may be shared), so an
+in-process mapping would mint embedded-only authority with no standalone equivalent — the drift #685 exists
+to kill, relocated into auth. The transcription is honest about what it is: direct engine access by the
+process owner (`svc.ReplaceInvokerSpendLimits` under the host's own merchant scope). Comments in
+embed/client.go + embed/embed.go now state the decision. (2) Retirements: grepped all four host repos
+(doujins, hentai0, cozy-art, tensorhub incl. tests) — ZERO uses of the type-asserted extras
+`BudgetStatus`/`AbuseUsage`/`ListCreditTransactions`/`SetCreditAccountSettings` (tensorhub's "abuse-usage"
+hits are its OWN pg-backed platform endpoints + historical comments; tensorhub DOES use
+SetCustomerSpendDelegations via the Client interface — platform_budget_sync.go — which stays). Deleted: the
+four embed extras (+ serviceTxn/abuseUsageWindows helpers), pkg/service `BudgetStatus` + `AbuseUsage`
+(+ AbuseUsageWindow DTO + toAbuseUsageWindows), and the orphaned root SDK types
+`openrails.AbuseUsageWindow`/`AbuseUsageResponse`. Kept: single `Admit` extra (out of scope, no wire
+counterpart) and the credit-settings/transactions facade methods (`SetCreditAccountSettings`/
+`GetCreditAccountSettings`/`GetCreditAccount`/`GetCustomerCreditTransactions`) — real handler backers
+(internal/http/handlers/self_account.go, service_credits.go). Two pkg/service integration tests used
+svc.AbuseUsage as a probe: the malformed-config decode-error probe now goes through `ReportWastedSpend`
+(same merchantconfig path, coverage preserved); the EUR-introspection probe was dropped with the feature
+(the per-currency forgiveness assertions above it already cover the behavior). (3) Conformance collapse:
+N/A per the keep-transcribed decision — suite unchanged.
 
 ---
 
@@ -25831,3 +25919,82 @@ mechanically executable); an operator can list, inspect, approve (with overrides
 time through admin endpoints; approvals execute through the existing intent/refund/entitlement machinery with
 full attribution; and resolution is verified by re-measurement, not trust — a failed fix keeps the finding open
 and the #690 gauges nonzero.
+
+---
+
+# #126: test-architecture-improvements
+
+**Completed:** yes (CLOSED-SUPERSEDED)
+**Status:** CLOSED 2026-07-02 — superseded by #694 (test-suite overhaul, completed): the unit-test audit
+found the map[string]interface{} / parallel-helper-struct slop this issue targeted largely absent or already
+deleted in #694's sweep; the harness rework replaced the suite-level abstractions (stub authenticators →
+real minted tokens; SetMockClock fan-out → injectable clock). Remaining philosophy is encoded in #694's
+protected-class rules. No separate work left.
+
+Tests should use real structs and functions from production code, not invent test-specific abstractions
+
+## Metadata
+
+- Category: testing
+- Status: not_started
+- Passes: false
+
+## Details
+
+- current_problems: ["SubscriptionOptions helper struct uses different field names than models.Subscription (PeriodStart vs CurrentPeriodStartsAt)","Tests can pass while using wrong field names because helpers translate between them","When a model field is renamed/removed, tests may not break because helper abstracts it away","Developers get confused about which struct to use and what fields are available"]
+- example_bad: {"code":"suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{PeriodStart: now})","problem":"SubscriptionOptions.PeriodStart doesn't exist on models.Subscription"}
+- example_good: {"code":"sub := &models.Subscription{CurrentPeriodStartsAt: now, ...}; suite.CreateTestSubscription(sub)","benefit":"Uses real model, compiler catches field name errors"}
+- philosophy: {"principle":"Tests should verify actual production code behavior, not test-specific wrappers","goal":"When production code changes, tests should break if they're testing the affected behavior","anti_pattern":"Test helper structs that diverge from production models hide API changes and create maintenance burden"}
+- recommendations: ["Use models.Subscription directly in tests instead of SubscriptionOptions","Use api.ListResponse[T] for parsing API responses instead of map[string]interface{}","Import and use the actual request/response structs from handlers","If a helper is needed, it should take the real model struct as input, not a parallel struct","Test assertions should use strongly-typed response parsing"]
+
+**Tasks:**
+- REFACTORING:
+- [ ] Audit all test helper structs (SubscriptionOptions, PaymentMethodOptions, etc.)
+- [ ] Replace helper structs with direct model usage where possible
+- [ ] Update CreateTestSubscriptionWithOptions to accept *models.Subscription
+- [ ] Use json.Unmarshal with actual API response types instead of map[string]interface{}
+- [ ] Add linter rule or CI check to discourage map[string]interface{} in tests
+
+---
+
+# #291: processor-capability-metadata
+
+**Completed:** yes (CLOSED-ABSORBED)
+**Status:** CLOSED 2026-07-02 — absorbed by #669 (rail capability descriptor registry, completed):
+internal/modules/payments/rails/registry.go IS this issue's capability model (per-rail descriptors:
+HasRemoteCustomer, AutoBilled, SupportsChargeSavedMethod, OpenRailsDrivenDunning, CancelMode/PortalURL,
+CredentialKeys, DisplayName; compile-time completeness + pinning tests). #686 moved lifecycle behavior onto
+it. The unbuilt ambitions here (checkout-validation capability errors, routing integration) belong to #288
+when picked up — noted there is no separate #291 work left.
+
+Expose processor capability metadata in code, APIs, catalog planning, checkout validation, and admin/provider status so OpenRails can explain what each rail supports instead of relying on scattered processor-specific conditionals.
+
+## Metadata
+
+- Category: architecture
+- Status: planned
+- Passes: false
+
+## Motivation
+
+- Stripe, NMI, CCBill, and Solana have different lifecycle semantics. Customers need predictable errors and routing decisions. OpenRails also needs a shared capability source for routing/fallback, catalog-as-code, checkout validation, and the provider certification matrix.
+
+**Tasks:**
+- CAPABILITY MODEL:
+- [ ] Define ProcessorCapabilities with booleans/enums for recurring, one_time, vault/tokenization, hosted checkout, redirect checkout, direct sale, catalog push, recurring plan push, refund, dispute, cancel immediate, cancel deferred, remote subscription listing, remote dedup check, webhooks, drift enumeration, and manual actions.
+- [ ] Add capability details for current processors: stripe, NMI-backed (`mobius`), ccbill, solana.
+- [ ] Distinguish processor class capabilities (NMI-backed) from named provider overrides (Mobius).
+-
+- INTEGRATION POINTS:
+- [ ] Use capabilities in checkout validation instead of hard-coded processor switches where practical.
+- [ ] Use capabilities in catalog planning/reconciliation to decide provider actions and pending_manual_actions.
+- [ ] Use capabilities in routing/fallback policy (#288) so unsupported rails are filtered before checkout.
+- [ ] Surface capabilities through admin/provider status endpoints and docs.
+-
+- ERRORS / UX:
+- [ ] Return structured unsupported-capability errors with processor, capability, and suggested alternative when possible.
+- [ ] Ensure user-facing errors are clean while admin/debug surfaces retain processor detail.
+-
+- VERIFY:
+- [ ] Unit-test capability metadata for each supported processor.
+- [ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction.

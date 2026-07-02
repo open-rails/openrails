@@ -35,7 +35,7 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 		},
 		".AddRecurringSubscription(": {
 			"internal/modules/checkout/nmi_subscription_intent.go": "nmi_subscription_create intent handler",
-			"internal/modules/checkout/service.go":                 "upgrade successor create; intent migration deferred (#674 tracker note)",
+			"internal/modules/checkout/service.go":                 "upgrade successor create: content-derived order id + ambiguity ⇒ roster-scan adopt-or-processing (#674 tail); full saga assessed and declined (completed.md #674)",
 		},
 		".AttemptManualRebill(": {
 			"internal/intents/manual_rebill.go": "manual_rebill intent handler",
@@ -59,7 +59,12 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 			"pkg/service/service_user.go":                                  "embedded-surface twin of the handler above",
 		},
 		".DeleteCustomerVault(": {
-			"internal/modules/paymentmethods/vault_service.go": "vault ops choke through VaultService (single call site); intent migration deferred",
+			"internal/intents/nmi_vault_delete.go":             "nmi_vault_delete intent handler (the sanctioned executor for durable user-initiated deletes)",
+			"internal/modules/paymentmethods/vault_service.go": "reactive decline-cleanup only (CreateVault local-store-failure cleanup + CleanupVaultBestEffort): vault referenced nowhere, harmless if lost; durable deletes route through DeleteVault → nmi_vault_delete intent (#674 tail)",
+		},
+		".DeleteCustomerBillingEntry(": {
+			"internal/intents/nmi_vault_delete.go":             "nmi_vault_delete intent handler (shared-vault #682 billing-entry-scoped delete)",
+			"internal/modules/paymentmethods/vault_service.go": "reactive decline-cleanup path (CleanupVaultBestEffort shared-vault scope); see .DeleteCustomerVault( note",
 		},
 		"solanaint.BuildSignSubmit": {
 			"internal/modules/solana/recurring/plan_service.go": "the Submitter implementation — the single Solana sign+submit choke; pulls route through the solana_pull intent handler",

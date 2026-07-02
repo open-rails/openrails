@@ -99,16 +99,17 @@ Notes:
 ```yaml
 version: 1
 merchants:
-  - slug: local-stack
+  local-stack:
     display_name: Local Stack
-    provider_accounts:
-      - rail: nmi
-        environment: live
-        account_id: mobius-profile-id
-        archived: false
-        secrets:
-          security_key: {env: NMI_SANDBOX_SECURITY_KEY}
-          webhook_signing_secret: {env: NMI_WEBHOOK_SIGNING_SECRET}
+    accounts:
+      mobius-sandbox:
+        nmi:
+          environment: test
+          account_id: "681902"
+          archived: false
+          secrets:
+            security_key: replace-with-nmi-sandbox-security-key
+            webhook_signing_secret: replace-with-nmi-webhook-signing-secret
 ```
 
 - Collect.js origin restrictions belong to the browser origin that loads

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -20,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -79,7 +82,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		providers = append(providers, reconcile.Provider(strings.ToLower(strings.TrimSpace(p))))
 	}
 
-	rt, cleanup, err := newPullProviderRuntime(opts.Config)
+	rt, cleanup, err := newPullProviderRuntime(ctx, opts.Config)
 	if err != nil {
 		return err
 	}
@@ -91,10 +94,10 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		providerKeys := map[reconcile.Provider]string{}
+		accountPins := map[reconcile.Provider]string{}
 		explicitBindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{}
 		if strings.TrimSpace(opts.RailMerchantAccount) != "" {
-			provider, providerKey, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.RailMerchantAccount)
+			provider, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.RailMerchantAccount)
 			if err != nil {
 				return err
 			}
@@ -107,20 +110,27 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 					}
 				}
 			}
-			providerKeys[provider] = providerKey
+			accountPins[provider] = binding.AccountID
 			explicitBindings[provider] = binding
 		}
 
-		fetchers, err := reconcile.BuildFetchersWithOptions(rt.Config, rt.Rails, reconcile.FetcherClients{
+		// #699: fetchers arm from the merchant-secrets store for this merchant
+		// (boot-config rails as fallback) — a manifest-seeded host pulls with no
+		// process-wide rail set. An explicit --provider-account pins that rail to
+		// the named account (archived accounts stay addressable for drain, #655).
+		armed := reconcile.MerchantFetcherBuilder{
+			Config:         rt.Config,
+			Rails:          rt.Rails,
+			Merchants:      rt.Merchants,
+			DB:             rt.DB,
 			NMIClients:     rt.NMIClients,
 			CCBillDataLink: rt.CCBillDataLink,
 			SolanaRPC:      rt.SolanaRPC,
-		}, rt.DB, reconcile.FetcherOptions{ProviderKeys: providerKeys})
-		if err != nil {
-			return err
-		}
+			AccountIDs:     accountPins,
+		}.Build(ctx, merchantID)
+		fetchers := armed.Fetchers
 		if len(fetchers) == 0 {
-			return fmt.Errorf("no payment providers configured for reconciliation")
+			return fmt.Errorf("no payment providers configured for reconciliation (no merchant-store provider secrets and no boot-config rails)")
 		}
 		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(explicitBindings))
 		for provider, binding := range explicitBindings {
@@ -270,12 +280,13 @@ type pullProviderRuntime struct {
 	DB             *db.DB
 	Config         *config.Config
 	Rails          config.RailMerchantAccountSet
+	Merchants      *merchants.Service
 	NMIClients     map[string]*nmi.NMIClient
 	CCBillDataLink *ccbill.DataLinkClient
 	SolanaRPC      *solanaint.RPCClient
 }
 
-func newPullProviderRuntime(cfg *config.Config) (*pullProviderRuntime, func(), error) {
+func newPullProviderRuntime(ctx context.Context, cfg *config.Config) (*pullProviderRuntime, func(), error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
@@ -296,10 +307,22 @@ func newPullProviderRuntime(cfg *config.Config) (*pullProviderRuntime, func(), e
 		cleanup()
 		return nil, nil, err
 	}
+	// #699: pulls arm from the per-merchant secrets store. A store build
+	// failure degrades loudly to the boot-config plane instead of aborting the
+	// operator command.
+	var merchantsSvc *merchants.Service
+	if backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool()); err != nil {
+		log.WithError(err).Warn("pull-provider: merchant secret store unavailable; pulls arm from boot-config rails only (#699)")
+	} else if svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode())); err != nil {
+		log.WithError(err).Warn("pull-provider: merchants service unavailable; pulls arm from boot-config rails only (#699)")
+	} else {
+		merchantsSvc = svc
+	}
 	return &pullProviderRuntime{
 		DB:             database,
 		Config:         cfg,
 		Rails:          rails,
+		Merchants:      merchantsSvc,
 		NMIClients:     nmiClients,
 		CCBillDataLink: ccbillDataLink,
 		SolanaRPC:      solanaRPC,
@@ -360,23 +383,16 @@ func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug stri
 	return merchant.ParseID(id)
 }
 
-func resolvePullRailMerchantAccountTarget(ctx context.Context, rt *pullProviderRuntime, railMerchantAccountStr string) (reconcile.Provider, string, reconcile.RailMerchantAccountBinding, error) {
+func resolvePullRailMerchantAccountTarget(ctx context.Context, rt *pullProviderRuntime, railMerchantAccountStr string) (reconcile.Provider, reconcile.RailMerchantAccountBinding, error) {
 	id, err := uuid.Parse(strings.TrimSpace(railMerchantAccountStr))
 	if err != nil {
-		return "", "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
+		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
 	}
 	account, err := rt.DB.Gen(ctx).GetRailMerchantAccount(ctx, id)
 	if err != nil {
-		return "", "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
+		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
-	provider := reconcile.Provider(account.Rail)
-	providerKey := account.Rail
-	if rt.Rails != nil {
-		if key, _, err := rt.Rails.ActiveRailByType(models.Rail(account.Rail)); err == nil && key != "" {
-			providerKey = key
-		}
-	}
-	return provider, providerKey, reconcile.RailMerchantAccountBinding{
+	return reconcile.Provider(account.Rail), reconcile.RailMerchantAccountBinding{
 		ID:        account.ID,
 		Rail:      account.Rail,
 		AccountID: account.AccountID,

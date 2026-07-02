@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -278,21 +277,7 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	return snap, nil
 }
 
-// BuildSubscriptionProbers assembles the per-rail probe sources from the same
-// runtime clients the bulk fetchers use. Best-effort: a rail without usable
-// credentials simply has no probe fallback. NMI (query.php + v5 GET), Stripe
-// (GET /v1/subscriptions/{id}) and CCBill (DataLink viewSubscriptionStatus,
-// #696) all probe per-record; Solana is pull-based and gets none.
-func BuildSubscriptionProbers(rails config.RailMerchantAccountSet, nmiClients map[string]*nmi.NMIClient, ccbillDataLink *ccbill.DataLinkClient) map[Provider]SubscriptionProber {
-	probers := map[Provider]SubscriptionProber{}
-	if _, c, err := selectNMIClient(rails, nmiClients, ""); err == nil && c != nil {
-		probers[ProviderNMI] = &NMISubscriptionProber{Client: c}
-	}
-	if p, err := subscriptions.NewStripeLivenessProber(rails); err == nil && p != nil {
-		probers[ProviderStripe] = &StripeSubscriptionProber{Prober: p}
-	}
-	if ccbillDataLink != nil {
-		probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: ccbillDataLink}
-	}
-	return probers
-}
+// Probers are assembled per merchant alongside the fetchers (#699): NMI
+// (query.php + v5 GET), Stripe (GET /v1/subscriptions/{id}) and CCBill
+// (DataLink viewSubscriptionStatus, #696) all probe per-record; Solana is
+// pull-based and gets none. See MerchantFetcherBuilder in merchant_wiring.go.

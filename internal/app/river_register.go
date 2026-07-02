@@ -30,6 +30,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := r.validateBillingWorkerRuntime(); err != nil {
 		return err
 	}
+	// #699: workers that resolve per-merchant secrets (provider refresh, Stripe
+	// webhook reconcile) need the merchants service even on embedded hosts that
+	// never build the standalone HTTP server. No-op when already set.
+	r.EnsureMerchantsService(ctx)
 
 	clock := r.Clock
 	if clock == nil {
@@ -51,6 +55,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Config:              r.Config,
 		Rails:               r.Rails,
 		Clock:               clock,
+		Merchants:           r.Merchants, // #699: per-merchant store-armed pulls
 		NMIClients:          r.NMIClients,
 		CCBillDataLink:      r.CCBillDataLink,
 		SolanaRPC:           r.SolanaRPC,
@@ -276,6 +281,11 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
 		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
+	}
+	// #674 tail: durable user-initiated vault deletes (an unwired VaultService
+	// resolves no client, so the handler parks — never fails).
+	if r.VaultService != nil {
+		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.VaultService))
 	}
 	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.NMIClients, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine

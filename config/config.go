@@ -1564,7 +1564,7 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest")
 	}
 	if ignoredRails {
-		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].rail_merchant_accounts")
+		log.Warn("ignoring retired rails config (#521): seed merchant rail accounts and secrets with openrails push-merchant-config under merchants[].accounts")
 	}
 	if ignoredControlPlaneLegacy {
 		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")

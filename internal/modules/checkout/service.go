@@ -744,10 +744,11 @@ func (s *CheckoutService) processNMISubscription(
 		// finalize already completed the idempotency record.
 		return nmiSubscriptionResponseFromIntent(intent)
 	case intents.StatusFailedTerminal:
-		// Verified-clean decline/rejection. Cleanup a vault created for this
-		// attempt, mirroring the pre-intent behavior.
+		// Verified-clean decline/rejection. Direct best-effort cleanup of the
+		// vault created for THIS attempt, NOT an intent (#674 tail): it is
+		// referenced nowhere — harmless if lost.
 		if createdPaymentMethod != nil && s.VaultService != nil {
-			if cleanupErr := s.VaultService.DeleteVault(ctx, createdPaymentMethod); cleanupErr != nil {
+			if cleanupErr := s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod); cleanupErr != nil {
 				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
@@ -1802,42 +1803,80 @@ func (s *CheckoutService) processUpgrade(
 	// Step 1: Create the successor subscription at NMI before charging/cancelling.
 	newSubscriptionID := uuidutil.NewV7()
 
-	params := nmi.RecurringPaymentData{
-		CardUserData: nmi.CardUserData{
-			FirstName: ResolveCheckoutFirstName(req, user),
-			LastName:  ResolveCheckoutLastName(req),
-			Address1:  DefaultIfEmpty(req.Address1, "N/A"),
-			City:      DefaultIfEmpty(req.City, "N/A"),
-			State:     DefaultIfEmpty(req.State, "N/A"),
-			Zip:       DefaultIfEmpty(req.Zip, "00000"),
-			Country:   DefaultIfEmpty(req.Country, "US"),
-		},
-		PlanID:          nmiPlanID,
-		CustomerVaultID: customerVaultID,
-		BillingID:       vaultBillingID,
-		Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(newPrice.Amount)), // NMI recurring amount is DOLLARS
-		Currency:        newPrice.Currency,
-		Email:           req.Email,
-		OrderID:         newSubscriptionID.String(),
-		PONumber:        newSubscriptionID.String(),
-		CustomerID:      user.ID,
-		// Start date uses day precision and must be strictly in the future for NMI.
-		StartDate: startDate,
+	// Successor order id is CONTENT-DERIVED (stable across retries, like the
+	// proration order id below): an ambiguous create stays recoverable — the
+	// roster scan re-finds the orphan instead of minting a second live
+	// subscription (#674 tail).
+	successorOrderID := "upgs-" + shortHash(idempotencyKey)
+
+	// A previous failed attempt may have created the successor at NMI and lost
+	// the response. Adopt it instead of creating a duplicate.
+	var resp *nmi.AddSubscriptionResponse
+	if retryAfterFailure {
+		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+		if aerr != nil {
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+			return nil, ErrCheckoutProcessing
+		}
+		if ok {
+			resp = adopted
+		}
 	}
 
-	resp, err := client.AddRecurringSubscription(params)
-	if err != nil {
-		subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
-		var nmiErr *nmi.CustomerVaultError
-		if errors.As(err, &nmiErr) {
-			subErr = &paymentmethods.VaultError{
-				Err:            subErr,
-				LocalizationID: nmiErr.LocalizationID,
-				Message:        subErr.Error(),
-			}
+	if resp == nil {
+		params := nmi.RecurringPaymentData{
+			CardUserData: nmi.CardUserData{
+				FirstName: ResolveCheckoutFirstName(req, user),
+				LastName:  ResolveCheckoutLastName(req),
+				Address1:  DefaultIfEmpty(req.Address1, "N/A"),
+				City:      DefaultIfEmpty(req.City, "N/A"),
+				State:     DefaultIfEmpty(req.State, "N/A"),
+				Zip:       DefaultIfEmpty(req.Zip, "00000"),
+				Country:   DefaultIfEmpty(req.Country, "US"),
+			},
+			PlanID:          nmiPlanID,
+			CustomerVaultID: customerVaultID,
+			BillingID:       vaultBillingID,
+			Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(newPrice.Amount)), // NMI recurring amount is DOLLARS
+			Currency:        newPrice.Currency,
+			Email:           req.Email,
+			OrderID:         successorOrderID,
+			PONumber:        successorOrderID,
+			CustomerID:      user.ID,
+			// Start date uses day precision and must be strictly in the future for NMI.
+			StartDate: startDate,
 		}
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, subErr)
-		return nil, subErr
+
+		created, err := client.AddRecurringSubscription(params)
+		switch {
+		case err == nil:
+			resp = created
+		case nmi.IsTransportAmbiguous(err):
+			// The successor MAY exist at NMI — never treat as a clean failure.
+			// Adopt it if the roster already shows it; otherwise surface
+			// "processing" so the retry (same content-derived key) re-runs the
+			// adopt scan. Never a second blind create, never a live remote
+			// subscription abandoned as failed (#674 tail).
+			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+			if aerr != nil || !ok {
+				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+				return nil, ErrCheckoutProcessing
+			}
+			resp = adopted
+		default:
+			// Verified-clean decline/rejection: nothing was created.
+			subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
+			var nmiErr *nmi.CustomerVaultError
+			if errors.As(err, &nmiErr) {
+				subErr = &paymentmethods.VaultError{
+					Err:            subErr,
+					LocalizationID: nmiErr.LocalizationID,
+					Message:        subErr.Error(),
+				}
+			}
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, subErr)
+			return nil, subErr
+		}
 	}
 
 	rollbackNewSubscription := func() {
@@ -1896,10 +1935,12 @@ func (s *CheckoutService) processUpgrade(
 					return nil, ErrCheckoutProcessing
 				}
 			default:
-				// Verified-clean decline/rejection: no money moved.
+				// Verified-clean decline/rejection: no money moved. Direct
+				// best-effort cleanup of the vault created for THIS attempt,
+				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
 				if createdPaymentMethod != nil && s.VaultService != nil {
-					_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
+					_ = s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod)
 				}
 				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
@@ -2052,6 +2093,33 @@ func (s *CheckoutService) processUpgrade(
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// findAdoptableUpgradeSuccessor re-finds a successor subscription a previous
+// (transport-ambiguous) upgrade attempt created at NMI: a live roster entry on
+// (vault, plan) unknown locally. Exactly one match is adopted; zero means the
+// create verifiably did not land (safe to create); more than one is refused
+// (never guess which orphan to adopt — operator attention via the returned
+// error, surfaced as ErrCheckoutProcessing).
+func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, vaultID, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
+	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, vaultID, planID, orderID)
+	if err != nil {
+		return nil, false, err
+	}
+	switch len(candidates) {
+	case 0:
+		return nil, false, nil
+	case 1:
+		log.WithFields(log.Fields{
+			"rail_subscription_id": candidates[0],
+			"rail":                 provider,
+			"order_id":             orderID,
+			"event":                "upgrade_successor_adopted",
+		}).Info("adopted successor NMI subscription from a previous ambiguous upgrade attempt")
+		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
+	default:
+		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required", len(candidates), vaultID, planID)
+	}
 }
 
 // compensateFailedUpgrade rolls back rail-side state after a post-charge DB

@@ -302,3 +302,69 @@ func vaultTestRails(mobiusKey string) config.RailMerchantAccountSet {
 		},
 	}
 }
+
+// --- DeleteVault durable-intent producer branching (#674 tail) ---
+
+type deleteVaultNoSubs struct{}
+
+func (deleteVaultNoSubs) GetPaginatedByUserID(context.Context, string, int, int) ([]models.Subscription, int, error) {
+	return nil, 0, nil
+}
+
+type fakeVaultDeleteExecutor struct {
+	out    VaultDeleteOutcome
+	err    error
+	called int
+}
+
+func (f *fakeVaultDeleteExecutor) ExecuteVaultDelete(context.Context, *models.PaymentMethod) (VaultDeleteOutcome, error) {
+	f.called++
+	return f.out, f.err
+}
+
+func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.PaymentMethod) {
+	client, _ := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	svc := &VaultService{
+		SubscriptionService: deleteVaultNoSubs{},
+		NMIClients:          map[string]*nmi.NMIClient{"mobius": client},
+		Config:              vaultTestConfig(true),
+		DeleteIntents:       exec,
+	}
+	pm := &models.PaymentMethod{
+		ID:              uuid.New(),
+		CustomerID:      uuid.New(),
+		Rail:            "mobius",
+		RailCustomerRef: "vault-1",
+		RailMethodRef:   "bill-1",
+	}
+	return svc, pm
+}
+
+// The producer maps the durable intent's post-execution state onto the caller
+// contract: Done ⇒ nil, Terminal ⇒ error with the reason, anything still
+// resolving ⇒ ErrVaultDeleteProcessing (the ledger finishes out-of-band).
+func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
+	ctx := context.Background()
+
+	exec := &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Done: true}}
+	svc, pm := deleteVaultTestService(exec)
+	require.NoError(t, svc.DeleteVault(ctx, pm))
+	require.Equal(t, 1, exec.called)
+
+	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Terminal: true, Reason: "shared vault, no billing id"}}
+	svc, pm = deleteVaultTestService(exec)
+	err := svc.DeleteVault(ctx, pm)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shared vault, no billing id")
+
+	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Reason: "vault delete outcome unknown"}}
+	svc, pm = deleteVaultTestService(exec)
+	require.ErrorIs(t, svc.DeleteVault(ctx, pm), ErrVaultDeleteProcessing)
+}
+
+func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {
+	svc, pm := deleteVaultTestService(nil)
+	err := svc.DeleteVault(context.Background(), pm)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not wired")
+}

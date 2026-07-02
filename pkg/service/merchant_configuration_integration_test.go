@@ -269,7 +269,13 @@ func TestMerchantConfiguration_InvalidJSONShapeReturnsError(t *testing.T) {
 	`, tid.UUID())
 	require.NoError(t, err)
 
-	_, _, err = svc.AbuseUsage(ctx, payer, "user:bad-config", money.DefaultCurrency, "")
+	// ReportWastedSpend resolves the delegated-invoker wasted-spend policy from
+	// the stored merchant config; a malformed stored config must surface loudly,
+	// never fall back silently.
+	_, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
+		CustomerID: payer, Invoker: "user:bad-config", Currency: money.DefaultCurrency, Amount: 1,
+		Source: "test", SourceID: "bad-config", Reason: "test",
+	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "merchant config: decode config")
 }
@@ -381,11 +387,6 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 	require.False(t, res.Duplicate)
 	require.Equal(t, "EUR", res.Currency)
 	require.Equal(t, int64(1), res.ForgivenAmount)
-
-	payerWindows, _, err := svc.AbuseUsage(ctx, payer, "", "EUR", "")
-	require.NoError(t, err)
-	require.NotEmpty(t, payerWindows)
-	require.Equal(t, "EUR", payerWindows[0].Currency)
 }
 
 func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {

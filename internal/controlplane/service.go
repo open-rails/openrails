@@ -133,7 +133,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// authkit ErrMissingSigner). This is the expected posture for a standalone
 	// deployment with no login-capable users; mounting a key (env/vault) re-enables
 	// minting automatically. Key presence is the enablement signal — no separate knob.
-	keySource, keyErr := jwtkit.NewAutoKeySource()
+	keySource, keyErr := jwtkit.NewAutoKeySourceWithPath(jwtkit.DefaultAuthKeysPath)
 	verifyOnly := false
 	if keyErr != nil {
 		log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled)")

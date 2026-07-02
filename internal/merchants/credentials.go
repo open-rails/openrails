@@ -333,6 +333,68 @@ func railMerchantAccountSettings(raw []byte) map[string]any {
 	return evidence.Settings
 }
 
+// PullRailMerchantAccountScope resolves the provider account the PULL plane
+// (provider refresh, unknown-cohort resolution, probes — #699) reads with: the
+// active account for new work when one exists, else the NEWEST archived
+// account. Archived accounts stay pull-addressable so existing obligations can
+// drain (#655) — only NEW checkout/subscription work excludes them. ok=false
+// when the merchant declares no account on the rail/environment at all.
+func (s *Service) PullRailMerchantAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (RailMerchantAccountScope, bool, error) {
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, rail, environment)
+	if errors.Is(err, ErrNoActiveRailMerchantAccount) {
+		return s.newestRailMerchantAccountScope(ctx, id, rail, environment)
+	}
+	if err != nil || !ok {
+		return RailMerchantAccountScope{}, ok, err
+	}
+	return scope.exported(), true, nil
+}
+
+// newestRailMerchantAccountScope returns the newest declared account for
+// rail/environment regardless of archived state (the #699 drain-pull leg).
+func (s *Service) newestRailMerchantAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (RailMerchantAccountScope, bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() {
+		return RailMerchantAccountScope{}, false, nil
+	}
+	rail = normalizeProviderSecretType(rail)
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return RailMerchantAccountScope{}, false, fmt.Errorf("provider account environment must be live or test")
+	}
+	var scope railMerchantAccountSecretScope
+	var evidence []byte
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+				SELECT id, rail, environment, account_id, evidence
+				  FROM openrails.rail_merchant_accounts
+				 WHERE merchant_id = $1::uuid
+				   AND rail = lower($2)
+				   AND environment = $3
+				 ORDER BY created_at DESC, id DESC
+				 LIMIT 1
+			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RailMerchantAccountScope{}, false, nil
+	}
+	if err != nil {
+		return RailMerchantAccountScope{}, false, fmt.Errorf("load newest provider account %s/%s: %w", rail, environment, err)
+	}
+	scope.settings = railMerchantAccountSettings(evidence)
+	return scope.exported(), true, nil
+}
+
+// RailMerchantAccountScopeByAccountID resolves a specific declared account by
+// its rail-native account_id (#641). Archived accounts remain addressable —
+// operator pulls may target them for drain.
+func (s *Service) RailMerchantAccountScopeByAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (RailMerchantAccountScope, bool, error) {
+	scope, ok, err := s.railMerchantAccountSecretScopeByAccountID(ctx, id, rail, accountID)
+	if err != nil || !ok {
+		return RailMerchantAccountScope{}, ok, err
+	}
+	return scope.exported(), true, nil
+}
+
 // LoadNMIWebhookSigningSecretForAccount loads the webhook secret for a specific NMI
 // account (#641). ok=false when no such enabled account — the caller must reject.
 func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id merchant.ID, accountID string) (string, bool, error) {

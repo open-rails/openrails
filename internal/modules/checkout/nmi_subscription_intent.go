@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -219,40 +220,9 @@ func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Contex
 		return intents.Ambiguous("pre-send verification read failed: " + err.Error()), true
 	}
 
-	provider := strings.ToLower(p.Provider)
-	var candidates []string
-	cursor := ""
-	for {
-		page, perr := client.ListSubscriptionsPage(cursor, 0)
-		if perr != nil {
-			return intents.Ambiguous("subscription roster read failed: " + perr.Error()), true
-		}
-		for _, sub := range page.Subscriptions {
-			if strings.TrimSpace(sub.CustomerVaultID) != strings.TrimSpace(p.CustomerVaultID) {
-				continue
-			}
-			if sub.Plan == nil || strings.TrimSpace(sub.Plan.ID) != strings.TrimSpace(p.PlanID) {
-				continue
-			}
-			local, lerr := h.Checkout.SubscriptionService.GetByRailSubscriptionID(ctx, provider, sub.ID)
-			if lerr != nil {
-				if !db.IsNotFound(lerr) {
-					return intents.Ambiguous("local subscription lookup failed: " + lerr.Error()), true
-				}
-				// Unknown locally: the orphan this intent created.
-				candidates = append(candidates, sub.ID)
-				continue
-			}
-			if subscriptionMetadataString(local.Metadata, "order_id") == orderID {
-				// Registered by a partially-completed finalize of THIS intent.
-				candidates = append(candidates, sub.ID)
-			}
-		}
-		next := string(page.NextCursor)
-		if !page.HasMore || next == "" {
-			break
-		}
-		cursor = next
+	candidates, err := findUnregisteredRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
+	if err != nil {
+		return intents.Ambiguous(err.Error()), true
 	}
 
 	switch {
@@ -268,6 +238,55 @@ func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Contex
 	default:
 		return intents.Outcome{}, false
 	}
+}
+
+// railSubscriptionReader is the local-lookup surface the roster scan needs
+// (satisfied by *subscriptions.SubscriptionService).
+type railSubscriptionReader interface {
+	GetByRailSubscriptionID(ctx context.Context, provider, railSubscriptionID string) (*models.Subscription, error)
+}
+
+// findUnregisteredRemoteSubscriptions scans the NMI recurring roster for
+// subscriptions on (vault, plan) that are unknown locally, or whose local row
+// carries the given order id (a partially-completed finalize). Shared by the
+// nmi_subscription_create verify leg and the upgrade successor-create
+// ambiguity recovery (#674): both answer "did OUR create land at NMI?".
+func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscriptionReader, client *nmi.NMIClient, provider, vaultID, planID, orderID string) ([]string, error) {
+	var candidates []string
+	cursor := ""
+	for {
+		page, perr := client.ListSubscriptionsPage(cursor, 0)
+		if perr != nil {
+			return nil, fmt.Errorf("subscription roster read failed: %w", perr)
+		}
+		for _, sub := range page.Subscriptions {
+			if strings.TrimSpace(sub.CustomerVaultID) != strings.TrimSpace(vaultID) {
+				continue
+			}
+			if sub.Plan == nil || strings.TrimSpace(sub.Plan.ID) != strings.TrimSpace(planID) {
+				continue
+			}
+			local, lerr := subs.GetByRailSubscriptionID(ctx, provider, sub.ID)
+			if lerr != nil {
+				if !db.IsNotFound(lerr) {
+					return nil, fmt.Errorf("local subscription lookup failed: %w", lerr)
+				}
+				// Unknown locally: the orphan the create left behind.
+				candidates = append(candidates, sub.ID)
+				continue
+			}
+			if orderID != "" && subscriptionMetadataString(local.Metadata, "order_id") == orderID {
+				// Registered by a partially-completed finalize of THIS intent.
+				candidates = append(candidates, sub.ID)
+			}
+		}
+		next := string(page.NextCursor)
+		if !page.HasMore || next == "" {
+			break
+		}
+		cursor = next
+	}
+	return candidates, nil
 }
 
 // subscriptionMetadataString reads one string key off a subscription's raw

@@ -21,6 +21,13 @@ import (
 var destructiveIntentTypes = map[string]struct{}{
 	TypeNMIDeleteSubscription:    {},
 	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
+	// #674 tail: deleting a vaulted card destroys the stored instrument
+	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
+	// is exactly the #679 threat model. Held user deletes stay pending and
+	// complete after operator ack; decline-cleanup deletes bypass the ledger
+	// entirely (paymentmethods.CleanupVaultBestEffort) so card-testing floods
+	// cannot burn this budget.
+	TypeNMIVaultDelete: {},
 }
 
 // IsDestructiveIntentType reports whether the type is breaker-gated.

@@ -13,8 +13,8 @@ next_id: 700
 
 # #699: provider pull must arm from merchant secrets — manifest credentials alone should enable fetchers
 
-**Completed:** no
-**Status:** PLANNED (2026-07-02) — flagged by the doujins #731 enablement audit: reconcile fetchers (and the
+**Completed:** yes
+**Status:** IMPLEMENTED (2026-07-02) — see Progress below. Originally flagged by the doujins #731 enablement audit: reconcile fetchers (and the
 rail clients under them) are built from BOOT-TIME config (`embedded.Options.PaymentProviders` /
 `config.Rails` railSet), NOT from the merchant-secrets store the manifest seeds. A host like doujins that
 declares DataLink/NMI credentials ONLY in `openrails-merchant.yaml` (the intended #653 model: manifest seeds
@@ -24,8 +24,8 @@ drain until this is fixed.
 
 ## Metadata
 - Category: reconciliation / config
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Problem
 
@@ -49,20 +49,20 @@ WARN naming the missing key (no silent empty maps, per no-silent-fabrication).
 
 ## Tasks
 
-- [ ] Merchant-scoped credential resolution helper (merchant-secrets store → rail client configs) for the
+- [x] Merchant-scoped credential resolution helper (merchant-secrets store → rail client configs) for the
       pull plane; document the two-plane precedence (store overrides/extends boot rails? pick ONE rule —
       recommend: store first, boot-config fallback, conflict = store wins with WARN).
-- [ ] Rewire the four construction sites above; delete or demote `Options.PaymentProviders`-only assumptions
+- [x] Rewire the four construction sites above; delete or demote `Options.PaymentProviders`-only assumptions
       in embedded provisioning docs.
-- [ ] Respect existing gates: test_mode filtering (test creds in test mode only), provider_write_mode
+- [x] Respect existing gates: test_mode filtering (test creds in test mode only), provider_write_mode
       (readonly skips the refresh job entirely today — unchanged here), archived accounts excluded from NEW
       pull targeting only where #655 semantics demand.
-- [ ] Integration tests (real PG, fake provider HTTP): manifest-seeded ccbill datalink + nmi secrets, NO boot
+- [x] Integration tests (real PG, fake provider HTTP): manifest-seeded ccbill datalink + nmi secrets, NO boot
       rails → refresh job builds fetchers, pulls, advances watermarks; missing one secret → that rail absent +
       WARN; standalone multi-merchant: two merchants with different secrets pull with their OWN credentials
       inside their own scopes (no cross-merchant leakage); embedded doujins-shaped boot (no PaymentProviders)
       arms from the store.
-- [ ] Cross-repo note: with this landed, doujins enablement = manifest secrets + provider_write_mode=limited —
+- [x] Cross-repo note: with this landed, doujins enablement = manifest secrets + provider_write_mode=limited —
       nothing else; update the #731 enablement subsection pointer.
 
 Acceptance: a host that seeds provider credentials via the merchant manifest (and sets
@@ -70,13 +70,60 @@ provider_write_mode=limited+) gets working provider refresh, unknown resolution,
 boot-config rails; per-merchant isolation preserved (no process-wide plaintext credential tree); missing
 secrets fail loud per rail; the doujins parked-unknown backlog can drain on real credentials alone.
 
+## Progress
+
+**2026-07-02 — IMPLEMENTED.** The pull plane arms per merchant from the merchant-secrets store.
+
+- ONE resolution helper: `reconcile.MerchantFetcherBuilder` (internal/reconcile/merchant_wiring.go).
+  `Build(ctx, merchantID)` → `MerchantPullClients{Fetchers, Probers, CCBillDataLink}` built INSIDE the
+  merchant scope, per pass — clients are cheap per-merchant structs, no process-wide plaintext tree (#653),
+  no cross-merchant caching. PRECEDENCE (documented in-file): merchant-store FIRST, boot-config rails
+  fallback; a merchant that DECLARES a rail account row resolves from the store ONLY (missing/incomplete
+  secret = rail absent + ONE WARN naming merchant/rail/secret name — fail closed like checkout, never a
+  cross-plane fallback); both planes armed and differing = store wins + WARN. Per rail: NMI security_key
+  (+opportunistic webhook_signing_secret) → nmi client; CCBill datalink_username/password + dash-split
+  account_id (#697) → DataLink client; Stripe secret_key → fetcher + liveness prober; Solana needs no
+  per-merchant pull credential (private_key is signing-only) — a declared account row arms the fetcher on
+  the boot RPC client or a read-only public default.
+- Store scope resolution: `merchants.PullRailMerchantAccountScope` (active-for-new-work, else NEWEST
+  archived — #655: archived stays pull-addressable so obligations drain) +
+  `merchants.RailMerchantAccountScopeByAccountID` (explicit `--provider-account` pins, archived allowed).
+- Rewired sites: internal/river/jobs_provider_refresh.go (per-merchant build in the loop; DataLink lane
+  takes the merchant-resolved client; readonly skip unchanged), ReconcileUnknownCohort + probers fed from
+  the same build, pkg/embedded/pull_provider.go (CLI `pull-provider` routes here too — builds a merchants
+  service over the config DB; `--provider-account` now pins the store scope). `BuildFetchersWithOptions` /
+  `FetcherClients` / `FetcherOptions` / `BuildSubscriptionProbers` deleted (subsumed). Also fixed
+  `selectNMIClient` to resolve runtime client maps keyed by account_id (#641) — the boot plane previously
+  errored for any NMI rail not literally named "nmi".
+- Embedded arming: `Runtime.EnsureMerchantsService` (internal/app/merchants_wiring.go) builds the secret
+  backend + merchants service at worker registration (`addBillingWorkersToRegistry`) when the composition
+  root didn't — embedded hosts with RunWorkers/AddBillingWorkersTo get store-armed pulls (and the Stripe
+  webhook-reconcile worker's store) with no standalone server. Build failure = loud WARN + boot-plane-only
+  degradation (never a boot error; #667's hard gate still guards provisioning paths). Docs updated:
+  pkg/embedded README + Options.PaymentProviders + embed.PaymentProvider now describe the two planes.
+- Tests (all green, real testcontainers PG, fake provider HTTP only): internal/river
+  jobs_provider_refresh_pull_integration_test.go (store-armed refresh with NO boot rails: two merchants pull
+  with their OWN NMI keys + DataLink creds, watermarks advance, fake servers assert per-merchant credentials
+  and no leakage; missing security_key → rail absent + WARN naming merchant/rail/secret, ccbill unaffected;
+  readonly skip pinned), internal/reconcile merchant_wiring_integration_test.go (store-wins-with-WARN,
+  boot fallback when no store row, declared-account-never-falls-back), embed
+  pull_arming_integration_test.go (doujins-shaped embed.New, NO PaymentProviders, manifest Secrets →
+  AddBillingWorkersTo arms Merchants; builder yields nmi+ccbill fetchers AND probers carrying the seeded
+  credentials).
+- NOT observed green in this pass (pre-existing / sibling): embed + bootstrap integration suites fail on the
+  in-flight authkit v0.76.0 bump ("registration verification policy required but no sender") — reproduced
+  independent of #699 (clean HEAD passes; working tree carries the bump).
+- Remaining: doujins bump rides the next openrails release; enablement then = manifest secrets +
+  provider_write_mode=limited, nothing else (#731 pointer added in doujins).
+
 ---
 
 # #698: merchant-config key `rail_merchant_accounts` → `accounts` (config/env surface only)
 
 **Completed:** no
-**Status:** PLANNED (2026-07-02, Paul) — shorten the operator-facing config key. Inside `merchants.<slug>.`
-nothing else "accounts" could mean; the env var drops from
+**Status:** IMPLEMENTED, uncommitted (2026-07-02) — openrails-side hard cut done; cross-repo lockstep bump
+remains (operator edits below). Original rationale: shorten the operator-facing config key. Inside
+`merchants.<slug>.` nothing else "accounts" could mean; the env var drops from
 `BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME` to
 `BILLING_MERCHANTS_DOUJINS_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME`. DELIBERATE DIVERGENCE, named:
 the DB table stays `rail_merchant_accounts` (#683 vocabulary uniformity, distinguishes rail_customer_accounts)
@@ -84,48 +131,86 @@ the DB table stays `rail_merchant_accounts` (#683 vocabulary uniformity, disting
 
 ## Metadata
 - Category: config
-- Status: planned
-- Passes: false
+- Status: implemented (uncommitted); cross-repo bump pending
+- Passes: true (openrails side)
 
 ## Scope
 
-- [ ] YAML shape: `merchants.<slug>.rail_merchant_accounts.<key>.<rail>` → `merchants.<slug>.accounts.<key>.<rail>`
+- [x] YAML shape: `merchants.<slug>.rail_merchant_accounts.<key>.<rail>` → `merchants.<slug>.accounts.<key>.<rail>`
       — parser structs/tags (internal/bootstrap merchant manifest), validation messages, and REJECT the old key
       with a clear "renamed to accounts" error (hard cut, not silent-ignore — a manifest using the old key must
       fail loudly, not apply empty).
-- [ ] Env mapper anchor (internal/bootstrap/merchant_env.go): `RAIL_MERCHANT_ACCOUNTS` → `ACCOUNTS` as the fixed
+- [x] Env mapper anchor (internal/bootstrap/merchant_env.go): `RAIL_MERCHANT_ACCOUNTS` → `ACCOUNTS` as the fixed
       section token; keep the schema-aware single-underscore parsing property (ACCOUNTS is still a fixed anchor
       between the merchant key span and the account key span); update mapper doc examples + tests.
-- [ ] dump-merchant-config emits `accounts:`; round-trip load⇄dump tests updated.
-- [ ] Examples + docs sweep: config examples, .env.example (openrails; note doujins/.env.example is ALREADY
-      stale with pre-#683 names — fix it to the NEW short form in the same pass, host-side, at bump time),
-      docs/*, CLAUDE.md merchant-config mentions.
-- [ ] SECRET NAMES + DB UNCHANGED: `merchant_secrets` names keep the `rail_merchant_accounts/...` prefix and the
+- [x] dump-merchant-config emits `accounts:`; round-trip load⇄dump tests updated.
+- [x] Examples + docs sweep: config examples, .env.example (openrails has NO BILLING_MERCHANTS_* vars — nothing
+      to change there; doujins/.env.example fix rides the host bump), docs/*, CLAUDE.md merchant-config mentions.
+- [x] SECRET NAMES + DB UNCHANGED: `merchant_secrets` names keep the `rail_merchant_accounts/...` prefix and the
       table keeps its name — this issue is ONLY the koanf/YAML/env surface. State this in the parser comment so
       the asymmetry is documented, not rediscovered.
 - [ ] Cross-repo lockstep: doujins (+ hentai0 if it grows a manifest) openrails-merchant.yaml key rename +
       .env var renames ride the next openrails release bump. Coordinate with #697's account_id dash edit —
       one operator YAML touch for both.
-- [ ] Sequencing: AFTER the in-flight #690/#697/doujins agents land (the doujins agent is auditing these exact
-      key names; #697 touches the same manifest surface).
+- [x] Sequencing: implemented concurrently with #697/#699 by agreement (2026-07-02); no conflicts — #697's
+      ValidateRailAccountID call in bootstrap_manifest.go was preserved.
 
 Acceptance: manifests and env overlays use `accounts`; the old key/anchor fails loudly with a rename-pointing
 error; dump round-trips the new shape; DB/secret-name vocabulary untouched and the divergence documented;
 hosts bumped in lockstep.
+
+## Progress
+
+- 2026-07-02 IMPLEMENTED (uncommitted). Changes:
+  - `internal/bootstrap/merchant_manifest.go`: `MerchantConfig.RailMerchantAccounts` tags →
+    `yaml:"accounts,omitempty" koanf:"accounts"` + divergence doc comment on the field; new
+    `rejectRenamedMerchantConfigKeys` pre-check in `ParseMerchantConfigManifest` — old keys error with
+    `merchants.<slug>.rail_merchant_accounts was renamed to accounts` (also rejects pre-#683
+    `provider_accounts` the same way); `LoadMerchantConfigManifestBytes` calls
+    `rejectRenamedMerchantEnvVars()` before loading the env overlay.
+  - `internal/bootstrap/merchant_env.go`: section anchor `RAIL_MERCHANT_ACCOUNTS` → `ACCOUNTS`; doc examples
+    updated; new `rejectRenamedMerchantEnvVars` — retired anchors (`RAIL_MERCHANT_ACCOUNTS`,
+    `PROVIDER_ACCOUNTS`) are poison token sequences in any `BILLING_MERCHANTS_*` name and fail loudly
+    (necessary: the single-token ACCOUNTS anchor would otherwise mis-split old vars into a wrong merchant
+    key like `doujins-rail-merchant` and silently overlay undeclared config). Side effect, documented in
+    code: a merchant key span itself may not contain those sequences (e.g. slug `provider` can't use env
+    overlays).
+  - `internal/bootstrap/bootstrap_manifest.go`: validation error paths `rail_merchant_accounts.…` → `accounts.…`.
+  - `config/merchants_config.example.yaml` manifest key → `accounts:` (+ divergence comment); the top-of-file
+    RUNTIME rail-set comment (`RailMerchantAccountSet` surface) deliberately untouched.
+  - `config/config.go` retired-rails warn message → `merchants[].accounts`.
+  - Docs: `docs/merchant-provisioning.md` (secret-prefix divergence note + manifest example modernized to
+    current map shape with `accounts:`), `docs/e2e-mobius-sandbox.md` (stale pre-#683 example → current
+    shape), `.claude/CLAUDE.md` (short-key + divergence note in the rail identity section). Secret-name docs
+    (operations.md, vault-secret-ops.md) untouched on purpose.
+  - Tests: mapper table updated to ACCOUNTS (incl. the CCBill datalink example); new
+    `TestLoadMerchantConfigManifestBytesRejectsRenamedEnvAnchor` (both retired anchors);
+    `TestParseMerchantConfigManifestValidationErrors` gained rename-rejection cases (verbatim messages);
+    new `TestMarshalMerchantManifestEmitsAccountsKey` pins dump emission + round-trip.
+  - Validation: `go build ./...` green; full `go test ./...` green; `go test -tags integration -count=1
+    ./internal/bootstrap/...` green (64s, includes dump⇄load round-trip).
+- OPERATOR EDITS AT THE NEXT LOCKSTEP BUMP (doujins; hentai0 has no manifest today):
+  - `config/openrails-merchant.yaml`: rename `rail_merchant_accounts:` → `accounts:` under each merchant
+    (same touch as #697's ccbill account_id dash edit).
+  - `.env` / `.env.example`: rename `BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_*` →
+    `BILLING_MERCHANTS_DOUJINS_ACCOUNTS_*` (e.g. `…_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME`,
+    `…_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY`); any pre-#683 `…_PROVIDER_ACCOUNTS_*` spellings get the
+    same treatment. Old spellings now fail boot loudly with a rename-pointing error instead of no-opping.
 
 ---
 
 # #697: CCBill account_id format — `945280-0000` (dash), matching CCBill's own convention
 
 **Completed:** no
-**Status:** PLANNED (2026-07-02, Paul) — CCBill itself writes account identity as `clientAccnum-clientSubacc`
-with a DASH (e.g. `945280-0000`, seen in their own dashboard/support conventions). OpenRails currently stores
-`945280/0000` with a slash. Hard-cut the stored/declared format to the dash form.
+**Status:** IMPLEMENTED, uncommitted tails only (2026-07-02) — dash form is canonical everywhere; migration 068
+rewrites existing slash-form rows + secret names forward-only. Original note: CCBill itself writes account
+identity as `clientAccnum-clientSubacc` with a DASH (e.g. `945280-0000`, seen in their own dashboard/support
+conventions). OpenRails previously stored `945280/0000` with a slash.
 
 ## Metadata
 - Category: config / data-integrity
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Why (beyond matching the provider)
 
@@ -140,25 +225,63 @@ The slash is actively harmful in our own machinery:
 
 ## Scope (hard cut, no aliases — pre-launch discipline)
 
-- [ ] Canonical format: `<clientAccnum>-<clientSubacc>` (e.g. `945280-0000`). Validation on the ccbill
+- [x] Canonical format: `<clientAccnum>-<clientSubacc>` (e.g. `945280-0000`). Validation on the ccbill
       rail block: reject `/` with a clear "use dash" error.
-- [ ] Where the composite is built/parsed in code: webhook auth/routing (clientAccnum+clientSubacc →
+- [x] Where the composite is built/parsed in code: webhook auth/routing (clientAccnum+clientSubacc →
       account lookup), reconcile account bindings, catalog/config push + dump-merchant-config output,
       merchant-config parser, any Sprintf joining acc/subacc — grep `client_acc_num|ClientSubAcc|945280`
       and the `%s/%s` joins.
-- [ ] Forward-only migration: rewrite existing `rail_merchant_accounts.account_id` values for rail=ccbill
+- [x] Forward-only migration: rewrite existing `rail_merchant_accounts.account_id` values for rail=ccbill
       (`s|/|-|`), plus `merchant_secrets`/`merchant_credential_audit` NAME segments containing the old form
       (pattern: 059's secret-name rewrite).
-- [ ] Config surfaces: doujins `config/openrails-merchant.yaml` (operator edits alongside the bump),
-      openrails examples, CLAUDE.md rail-identity note (`client_acc_num[/client_sub_acc]` → dash form),
-      docs/glossary-rails.md if it spells the format.
-- [ ] Tests: round-trip config load⇄dump with dash ids; webhook routing resolves the dash id; migration
+- [x] Config surfaces: doujins `config/openrails-merchant.yaml` (operator edits alongside the bump — see
+      Progress), openrails examples, CLAUDE.md rail-identity note (`client_acc_num[/client_sub_acc]` → dash
+      form), docs/glossary-rails.md if it spells the format (it doesn't; vault-secret-ops/merchant-provisioning/
+      operations updated instead).
+- [x] Tests: round-trip config load⇄dump with dash ids; webhook routing resolves the dash id; migration
       rewrites existing rows + secret names; validation rejects slash.
 - [ ] Cross-repo: doujins manifest + any hentai0 manifest bump in lockstep with the release carrying this.
 
 Acceptance: grep for `945280/0000`-style slash ids finds nothing outside historical tracker text; CCBill
 account identity everywhere (DB, secrets, config, dump, webhook resolution) is `clientAccnum-clientSubacc`;
 existing rows/secrets migrated forward-only; slash ids fail validation loudly.
+
+## Progress
+
+- 2026-07-02 — IMPLEMENTED (partly swept into 22daeff8; load-time manifest validation + round-trip/strict test
+  tails still uncommitted alongside the #698 accounts-key work).
+  - **Join/parse sites flipped to dash**: `ccbillWebhookAccountID` (internal/http/handlers/webhook.go — the ONE
+    composite build site: `clientAccnum + "-" + clientSubacc`, no-subacc still → bare accnum) and
+    `resolveScopedCCBillConfig` (internal/modules/checkout/merchant_rail_secrets.go — the ONE parse site:
+    `strings.Cut(id, "-")`, both parts still required). Reconcile bindings / dump / secret names treat
+    account_id as opaque — no other build/parse existed. Wire fields unchanged: clientAccnum/clientSubacc are
+    still SEPARATE form/query fields to CCBill.
+  - **Validation** (shared helper `config.ValidateRailAccountID`, error: `CCBill account_id uses a dash:
+    clientAccnum-clientSubacc, e.g. 945280-0000`): enforced in `validateCCBillRail` (even in dev — format bug,
+    not missing credential), in the manifest apply path (reconcileManifestRailMerchantAccount), and at manifest
+    load time (validateManifestRailMerchantAccount in bootstrap_manifest.go).
+  - **Migration 068** (`068_ccbill_account_id_dash.up.sql`, forward-only, 059 pattern):
+    `rail_merchant_accounts.account_id` s|/|-| for rail='ccbill'; `merchant_secrets`/`merchant_credential_audit`
+    names LIKE 'rail_merchant_accounts/ccbill/%' — canonical `%2F`-escaped 5-segment form (writer URL-escapes)
+    gets `%2F`→`-` in the id segment, defensive raw-slash 6-segment form collapses the two id segments into one
+    dash-joined segment. Non-ccbill rows/names untouched. Vault KV moves = operator step (none pre-launch).
+  - **Docs**: .claude/CLAUDE.md rail-identity bullet, config/merchants_config.example.yaml, docs/vault-secret-ops.md
+    (+ stale provider_accounts→rail_merchant_accounts prefix fixed), docs/merchant-provisioning.md,
+    docs/operations.md. #662's "account_id contains `/`" hazard example lives only in ITS tracker spec (no code
+    comment exists yet — DeterministicID not implemented); keep injective length-prefixed encoding when building it.
+  - **Tests** (green): TestCCBillWebhookAccountIDIsDashJoined + msg tests (handlers);
+    routes_merchant_webhook_integration_test resolves a dash-stored account from wire accnum+subacc;
+    TestCheckoutCCBillSlashAccountIDRejected + dash fixtures (checkout);
+    TestCCBillAccountIDRejectsSlash (config); TestParseMerchantConfigManifestRejectsCCBillSlashAccountID
+    (load-time); TestReconcileMerchantManifestRejectsCCBillSlashAccountID (apply);
+    TestMerchantConfigPushDumpRoundTrip extended with a dash ccbill account (push⇄dump⇄reparse verbatim);
+    TestMigration068RewritesCCBillSlashAccountIDs (internal/merchants, real 068 file against Postgres: rewrites
+    slash rows + both secret-name shapes in both tables, leaves canonical/non-ccbill untouched, parser round-trip).
+  - **OPERATOR (doujins, rides the next lockstep release)**: one-line edit in doujins
+    `config/openrails-merchant.yaml`: `account_id: "945280/0000"` → `account_id: "945280-0000"` (hentai0's
+    manifest likewise if it declares ccbill). Deploy order: bump openrails (068 runs) + edit manifest together;
+    old slash form now fails validation loudly at boot/push.
+  - NOT done here (out of scope): ~/doujins/~hentai0 edits themselves; #662 DeterministicID.
 
 ---
 
@@ -482,36 +605,6 @@ Add rate limiting to admin endpoints to limit blast radius of compromised JWT
 
 ---
 
-# #126: test-architecture-improvements
-
-**Completed:** no
-
-Tests should use real structs and functions from production code, not invent test-specific abstractions
-
-## Metadata
-
-- Category: testing
-- Status: not_started
-- Passes: false
-
-## Details
-
-- current_problems: ["SubscriptionOptions helper struct uses different field names than models.Subscription (PeriodStart vs CurrentPeriodStartsAt)","Tests can pass while using wrong field names because helpers translate between them","When a model field is renamed/removed, tests may not break because helper abstracts it away","Developers get confused about which struct to use and what fields are available"]
-- example_bad: {"code":"suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{PeriodStart: now})","problem":"SubscriptionOptions.PeriodStart doesn't exist on models.Subscription"}
-- example_good: {"code":"sub := &models.Subscription{CurrentPeriodStartsAt: now, ...}; suite.CreateTestSubscription(sub)","benefit":"Uses real model, compiler catches field name errors"}
-- philosophy: {"principle":"Tests should verify actual production code behavior, not test-specific wrappers","goal":"When production code changes, tests should break if they're testing the affected behavior","anti_pattern":"Test helper structs that diverge from production models hide API changes and create maintenance burden"}
-- recommendations: ["Use models.Subscription directly in tests instead of SubscriptionOptions","Use api.ListResponse[T] for parsing API responses instead of map[string]interface{}","Import and use the actual request/response structs from handlers","If a helper is needed, it should take the real model struct as input, not a parallel struct","Test assertions should use strongly-typed response parsing"]
-
-**Tasks:**
-- REFACTORING:
-- [ ] Audit all test helper structs (SubscriptionOptions, PaymentMethodOptions, etc.)
-- [ ] Replace helper structs with direct model usage where possible
-- [ ] Update CreateTestSubscriptionWithOptions to accept *models.Subscription
-- [ ] Use json.Unmarshal with actual API response types instead of map[string]interface{}
-- [ ] Add linter rule or CI check to discourage map[string]interface{} in tests
-
----
-
 # #158: ccbill-dunning-grace-entitlements
 
 **Completed:** no
@@ -693,44 +786,6 @@ Publish and maintain a provider certification matrix for Stripe, NMI, CCBill, an
 
 ---
 
-# #291: processor-capability-metadata
-
-**Completed:** no
-
-Expose processor capability metadata in code, APIs, catalog planning, checkout validation, and admin/provider status so OpenRails can explain what each rail supports instead of relying on scattered processor-specific conditionals.
-
-## Metadata
-
-- Category: architecture
-- Status: planned
-- Passes: false
-
-## Motivation
-
-- Stripe, NMI, CCBill, and Solana have different lifecycle semantics. Customers need predictable errors and routing decisions. OpenRails also needs a shared capability source for routing/fallback, catalog-as-code, checkout validation, and the provider certification matrix.
-
-**Tasks:**
-- CAPABILITY MODEL:
-- [ ] Define ProcessorCapabilities with booleans/enums for recurring, one_time, vault/tokenization, hosted checkout, redirect checkout, direct sale, catalog push, recurring plan push, refund, dispute, cancel immediate, cancel deferred, remote subscription listing, remote dedup check, webhooks, drift enumeration, and manual actions.
-- [ ] Add capability details for current processors: stripe, NMI-backed (`mobius`), ccbill, solana.
-- [ ] Distinguish processor class capabilities (NMI-backed) from named provider overrides (Mobius).
--
-- INTEGRATION POINTS:
-- [ ] Use capabilities in checkout validation instead of hard-coded processor switches where practical.
-- [ ] Use capabilities in catalog planning/reconciliation to decide provider actions and pending_manual_actions.
-- [ ] Use capabilities in routing/fallback policy (#288) so unsupported rails are filtered before checkout.
-- [ ] Surface capabilities through admin/provider status endpoints and docs.
--
-- ERRORS / UX:
-- [ ] Return structured unsupported-capability errors with processor, capability, and suggested alternative when possible.
-- [ ] Ensure user-facing errors are clean while admin/debug surfaces retain processor detail.
--
-- VERIFY:
-- [ ] Unit-test capability metadata for each supported processor.
-- [ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction.
-
----
-
 # #320: Add Hyperswitch payment vault support for cloud and self-hosted deployments
 
 **Completed:** no
@@ -764,6 +819,12 @@ This should integrate with the provider capability and routing work in #288, #29
 # #333: admin-e2e-suite-needs-control-plane-wiring
 
 **Completed:** no
+**UPDATE 2026-07-02:** likely FIXED INCIDENTALLY by #694's harness rework — tests/ now runs on
+integrationharness with the embedded control plane attached and REAL AuthKit-minted delegated tokens through
+the real permission gate (exactly what this issue's diagnosis called for; the stub operatorAdminClaims path
+is gone). Verification run attempted 2026-07-02 but blocked by concurrent #698 config-rename churn breaking
+the tests/ build. TO CLOSE: run `go test -tags integration -run TestAdmin ./tests/` on a settled tree; if
+green, move to completed.md and delete any vestigial admin-claim helpers.
 **Status:** OPEN 2026-06-10 (Claude): diagnosed during the #332 failure review; not started. All other e2e failures from that review are fixed (see completed #332 + commits 9fe72d4 openrails, 68cb6a1 tensorhub, b72f61e8 cozy-art).
 
 The admin e2e tests (tests/admin_payments_test.go, admin_metrics_test.go, admin_entitlements_source_test.go, admin_offchannel_payments_test.go) fail with 500 {'message':'authorization unavailable'} — the nil-admin-checker fail-closed path. DIAGNOSIS (2026-06-10): pre-existing #312 bit-rot, documented in the suite itself (testcontainer_suite.go Auth config comment: 'Admin-route integration tests therefore require the embedded control plane wired with the test admin granted openrails:admin'). The #312 hard-cut moved admin authority from JWT claims (tests still mint operatorAdminClaims() tokens via test_helpers.go) to the LIVE control-plane permission check (routes_admin.go only sets AdminPermissionChecker when s.controlPlane != nil; the suite never enables Auth.ControlPlane -> checker nil -> admin_neutral.go/ginmw admin gates 500 fail-closed).

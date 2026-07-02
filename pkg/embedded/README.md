@@ -79,8 +79,18 @@ two ways over one source of truth:
 
 ## Payment Providers
 
-Embedded hosts configure payment providers by passing `PaymentProviders` to
-`embedded.New`. `config.yaml` does not carry provider credentials.
+Embedded hosts have two credential planes; `config.yaml` carries neither:
+
+1. **Per-merchant secrets store (preferred)** — declare provider accounts +
+   secrets in the merchant manifest (`embed.Runtime.UpsertMerchantConfig` /
+   bootstrap). Checkout, webhooks AND the pull plane (provider refresh,
+   unknown-cohort resolution, per-subscription probes, `PullProvider`) all
+   resolve those credentials per merchant at use time (#699). A host that only
+   seeds the store needs **no** `Options.PaymentProviders`.
+2. **Boot-config plane** — `Options.PaymentProviders` on `embedded.New` feeds
+   the process-wide rail set. It remains the fallback for rails a merchant has
+   no declared account row on; when both planes are configured and differ, the
+   merchant store wins (with a WARN).
 
 ```go
 openrails, err := embedded.New(embedded.Options{

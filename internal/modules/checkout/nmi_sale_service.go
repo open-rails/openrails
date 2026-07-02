@@ -164,10 +164,11 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		_ = s.IdempotencyStore.Complete(ctx, idempOp, idempotencyKey, payload)
 		return saleResponse(cached, "Purchase completed successfully"), nil
 	case intents.StatusFailedTerminal:
-		// Verified-clean decline/rejection: no money moved. Cleaning up a vault
-		// created for this attempt mirrors the pre-intent behavior.
+		// Verified-clean decline/rejection: no money moved. Direct best-effort
+		// cleanup, NOT an intent (#674 tail): the vault was created for THIS
+		// declined attempt and is referenced nowhere — harmless if lost.
 		if createdPaymentMethod != nil && s.VaultService != nil {
-			_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
+			_ = s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod)
 		}
 		reason := "payment failed"
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -143,26 +145,26 @@ func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 func validateManifestRailMerchantAccount(slug string, key string, account RailMerchantAccountConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return fmt.Errorf("merchant %q rail_merchant_accounts key is required", slug)
+		return fmt.Errorf("merchant %q accounts key is required", slug)
 	}
 	if len(account) != 1 {
-		return fmt.Errorf("merchant %q rail_merchant_accounts.%s must set exactly one rail block", slug, key)
+		return fmt.Errorf("merchant %q accounts.%s must set exactly one rail block", slug, key)
 	}
 	for rail, cfg := range account {
 		rail = strings.ToLower(strings.TrimSpace(rail))
 		if rail == "" {
-			return fmt.Errorf("merchant %q rail_merchant_accounts.%s rail is required", slug, key)
+			return fmt.Errorf("merchant %q accounts.%s rail is required", slug, key)
 		}
 		// Omitted environment is valid — it follows deployment posture at
 		// reconcile time (#681); explicit values must normalize.
 		if strings.TrimSpace(cfg.Environment) != "" {
 			if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
-				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.%w", slug, key, rail, err)
+				return fmt.Errorf("merchant %q accounts.%s.%s.%w", slug, key, rail, err)
 			}
 		}
 		for secretKey := range cfg.Secrets {
 			if _, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, secretKey); err != nil {
-				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s: %w", slug, key, rail, err)
+				return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
 			}
 		}
 		if rail == "solana" {
@@ -170,12 +172,16 @@ func validateManifestRailMerchantAccount(slug string, key string, account RailMe
 			// public key, and a declared value is ignored (warned at apply). A signer
 			// is required so there is a key to derive from.
 			if !solanaSignerConfigured(cfg) {
-				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
+				return fmt.Errorf("merchant %q accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
 			}
 			continue
 		}
 		if strings.TrimSpace(cfg.AccountID) == "" {
-			return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
+			return fmt.Errorf("merchant %q accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
+		}
+		// #697: rail-specific format doctrine (CCBill ids are dash-joined).
+		if err := config.ValidateRailAccountID(models.Rail(rail), strings.TrimSpace(cfg.AccountID)); err != nil {
+			return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
 		}
 	}
 	return nil
