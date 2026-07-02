@@ -23437,8 +23437,13 @@ net/http stack as embedded; every gin internal deleted.
 - [x] Standalone serves the embedhttp/neutral mux; gin hosts keep working via `gin.WrapH` (pkg/embedded/gin
       is now a thin delegating shim — cozy-art public API preserved).
 - [x] Port the few live gin-only middlewares to the neutral chain; delete the gin packages.
-- [ ] Remove gin from go.mod — deferred until cozy-art drops pkg/embedded/gin (shim + ginauth are the only
-      remaining importers; the standalone binary already links zero gin-gonic).
+- [x] Remove gin from go.mod — DONE 2026-07-02, gin fully removed; cozy-art migrated off the shim (its one
+      call site now uses `embedded.MountHandler`, drift-fixed to openrails HEAD). `pkg/embedded/gin` +
+      `pkg/authprovider/ginauth` DELETED (MountHandler/MountOptions/SelfHandler relocated verbatim into
+      pkg/embedded as the neutral mount surface; RegisterAPI died with the shim — hosts wrap with their own
+      `gin.WrapH`). gin gone from go.mod/go.sum (`go list -deps ./...` ⇒ zero gin-gonic), pinned by root
+      TestModuleIsGinFree. embed + pkg/embedded + integrationharness (mount tests re-pointed; register_api
+      test reworked to TestMountHandlerRouteSelection) + tests/ suites all green.
 - [x] Route-surface parity test green (TestStandaloneRouteSurface: neutral table == pre-cut gin golden) +
       integration suites (see verification note).
 
@@ -23814,7 +23819,9 @@ these paths predate/bypass it.
   verify-then-execute, so safe, but a lost-create-response leaves a remote sub until the delete lands).
 - **Vault delete / payment-method swap / reactive cancels**: still direct calls through their service chokes
   (VaultService.DeleteVault, UpdateSubscriptionPaymentSource, DeleteRecurringSubscription in user/admin
-  cancels) — allowlisted in the guard; migrate opportunistically.
+  cancels) — allowlisted in the guard; migrate opportunistically. (RESOLVED since: vault delete migrated in
+  the 2026-07-02 tail below; payment-source update migrated 2026-07-02 — see the payment-source block at the
+  section end; reactive cancels stay direct by design. No migration gap remains.)
 - **CCBill**: no writes migrated (its mutations are hosted-page/DataLink shaped); unchanged.
 
 NOTE (2026-07-01): the MINIMAL arrears-collection hardening landed with #672/#673 — chargeOneOpenInvoice now
@@ -23955,6 +23962,51 @@ old sub cancelled local+remote), ambiguous-create-lost ⇒ ErrCheckoutProcessing
 SAME order id. paymentmethods — producer outcome-branching unit tests + shared-guard test moved onto the
 direct cleanup path. Full unit+integration suites for intents/checkout/paymentmethods/subscriptions/app pass;
 go build ./... + go vet ./... clean.
+
+## Payment-source update migrated 2026-07-02 (Paul's queueability criterion: the one gap needing system-driven repair)
+
+Criterion (Paul, 2026-07-02): write-through intent for actions whose AMBIGUOUS outcome leaves durable damage
+the caller won't naturally repair. `UpdateSubscriptionPaymentSource` was the last such gap — a
+timeout-after-send could leave local pointing at the new vault while NMI rebills the OLD card (or vice versa):
+silent wrong-instrument charges until dunning surfaces it.
+
+- **New kind `nmi_payment_source_update`** (internal/intents/nmi_payment_source_update.go). Payload:
+  sub/rail-sub ids + old/new payment-method + vault ids; intent stamped with subscription_id +
+  rail_merchant_account_id. Idempotency key = `nmi_payment_source_update:<sub_id>:<new_vault_id>:swap<n>`,
+  n = durable count of SUCCEEDED swap intents for the sub (the #672/#673 attempt-count pattern) — a retry
+  while unresolved maps onto the SAME intent; a later A→B→A cycle can never be falsely answered from an old
+  succeeded tombstone (integration-tested).
+- **Execute** is read-first: provider already billing the new vault IS success (crash-after-write recovery =
+  one read, zero writes); otherwise send the classic update (the write is an absolute set, so a re-send after
+  a lost response is harmless by construction). Transport-ambiguous ⇒ unknown_needs_verify; parsed clean
+  rejection ⇒ retryable; readonly/unconfigured ⇒ parked.
+- **Verify** reads the recurring record's CURRENT vault (v5 GetSubscription, a surface the code already
+  exercises): new ⇒ done (finalize local), old ⇒ verified-not-executed (executor re-sends), record
+  gone/tombstoned or a vault matching NEITHER ⇒ terminal with a repair note (the verifier never stomps
+  out-of-band provider state). Relevance supersedes when the sub stopped rebilling or a newer swap moved the
+  row to a third method.
+- **Ordering decision**: kept the pre-existing local-after-provider order, but finalize (pointing
+  subscriptions.payment_method_id at the new method) now lives IN the handler and runs only after provider
+  confirmation — the intent row is the durable source of truth for every crash/timeout ordering in between,
+  and the sweeper converges local↔remote (the old handler's "NMI updated but local DB update failed — manual
+  reconciliation needed" branch is dead).
+- **Producer** `intents.PaymentSourceUpdateThrough` (Runtime.PaymentSourceUpdateIntents, wired in
+  build_runtime.go; handler registered in buildIntentRegistry). Both call sites route through it
+  (internal/http/handlers/update_subscription_payment_method.go — user AND admin variants — and the embedded
+  twin pkg/service UpdateSubscriptionPaymentMethod); both keep a read-only pre-flight client resolution so
+  misconfiguration still surfaces as 503/unavailable. Contract: Done ⇒ success, Terminal ⇒ error, else
+  ErrPaymentSourceUpdateProcessing (HTTP 409; never success, never decline).
+- **Breaker (#679) decision**: NOT destructive (documented in breaker.go's type list) — repointing which
+  vaulted card a subscription bills destroys nothing (both vaults survive; swap back any time), so it must
+  not burn the destructive budget.
+- **Guard**: `.UpdateSubscriptionPaymentSource(` now allowlists ONLY the intent handler; both call-site
+  entries removed.
+- **Tests** (nmi_payment_source_update_integration_test.go, fake NMI v5+direct-post transport): happy path +
+  replay (read-first, zero extra writes); ambiguous-landed ⇒ retry maps onto the same intent with zero
+  provider calls, verifier confirms new vault + finalizes local; ambiguous-lost ⇒ verify sees old vault ⇒
+  executor re-sends (effectively-once, local stays on old until confirmed); crash-before-execute ⇒ sweeper
+  completes; repeat-swap cycle re-executes (tombstone-lie guard). intents/handlers/pkg-service/subscriptions/
+  paymentmethods/app suites green; go build (+integration) + go vet clean; enforcement guard green.
 
 ---
 
@@ -24555,7 +24607,7 @@ lookup hardcodes an environment literal.
 # #684: webhooks as wake-up signals — fetch-and-converge for fetchable rails (Stripe, NMI)
 
 **Completed:** yes
-**Status:** DONE (2026-07-02) — verified green; thin-destination cutover deferred pending live verification (in-section note). Originally: IMPLEMENTED (2026-07-02, uncommitted) — fetch-and-converge shipped for Stripe + NMI
+**Status:** DONE (2026-07-02) — verified green; thin-destination cutover RESOLVED CLOSED-IMPOSSIBLE by live probe 2026-07-02 (in-section note). Originally: IMPLEMENTED (2026-07-02, uncommitted) — fetch-and-converge shipped for Stripe + NMI
 subscription-STATE events; thin-destination cutover DEFERRED (final task, needs live verification — see
 Implementation notes); refund/void/dispute/checkout money-record handlers deliberately stay payload-apply
 this round (documented below). Originally from the 2026-07-01 design review; sibling of the rescoped #665.
@@ -24646,10 +24698,17 @@ ReadUntilConsistent.
       as a durable PAYMENT ROW instead of the old repair alert — money truth ≠ lifecycle truth). CCBill/NMI
       void/refund-race #675 tests kept unchanged (those handlers stay payload-apply). stripe_ordering_test.go
       (watermark unit tests) deleted with the watermark.
-- [ ] FINAL — thin-destination cutover: DEFERRED (unchanged scope). Requires live verification that every
-      relied-on event type is thin-deliverable via v2 event destinations + a signing-secret rotation; can't be
-      live-verified here and correctness doesn't depend on it (fetch-first already ignores snapshot bodies for
-      subscription state). No flag-gated blind implementation shipped (NMI-v5 lesson: probe first).
+- [x] FINAL — thin-destination cutover: RESOLVED CLOSED-IMPOSSIBLE (2026-07-02, live-probed with the cozy-art
+      test key per the probe-first doctrine). Stripe REFUSES classic v1 billing event types on a thin-payload
+      destination: POST /v2/core/event_destinations {event_payload: thin, enabled_events:
+      [customer.subscription.updated, customer.subscription.deleted, invoice.paid, invoice.payment_failed,
+      charge.refunded]} ⇒ "Enabled events list contains 'thin' event types when event_payload is 'snapshot'"
+      (structured fields: selected_payload=snapshot — those types are snapshot-only; thin is v2-native-only
+      today; req_v24HfPrACiOEPQthn). Confirmed by inspection: the account's live thin destination carries only
+      v2-native types (meters/accounts/catalog). No cutover exists until Stripe ships v2-native billing
+      events. CORRECTNESS UNAFFECTED: fetch-and-converge already ignores snapshot payloads (identity-only
+      parse + fetch), so OpenRails has thin-event safety semantics regardless of wire shape — the cutover
+      would have bought only bandwidth + version-decoupling. Re-probe when Stripe announces v2 billing events.
 
 ## Acceptance
 For Stripe and NMI: no webhook handler writes subscription/payment state from an event payload; all state
@@ -25298,10 +25357,48 @@ Kept AGAINST the kill-list (re-verification overruled):
 Totals: −1,389 test LOC phase 3; phase 2 harness compat net −444 more (suite 796→470, helpers 247→118).
 
 - [x] Integration-side redundant clusters:
-      - DUNNING CLUSTER DEFERRED (2026-07-02): tests/dunning_worker_test.go + entitlements_dunning_* (and
-        deferred_delete_followups_test.go) are being actively reshaped by #691 fail-open work (0cfd279a);
-        5 of them are red under the concurrent session's in-flight rework. Never delete tests another
-        session is rewriting — revisit after #691 settles.
+      - DUNNING CLUSTER — EXECUTED 2026-07-02 (second pass, the #691-deferred leg; Paul unblocked it).
+        The 5 #691-churn reds first went green (fix-or-fold): 3 already updated in-tree
+        (ccbill_dunning_grace, ccbill_user_reactivation, entitlements_mixed_sources — standing-window pins),
+        TestEntitlementsDunningStateMachine_CCBill REWRITTEN to #691 doctrine (zero grace rows ever, ONE
+        standing window, entitled past paid end — unique pins, kept), DuplicateRenewalSuccess updated
+        (1 standing window) + strengthened with the GRANT-ledger idempotency pin (activation + exactly one
+        renewal grant; duplicate delivery records no second period).
+        Deletion ledger (file → LOC → dominated-by):
+        - tests/dunning_worker_test.go → 836 → whole file:
+          · filter/skip mechanics (NoDue/SkipsWithoutNMIClients/SkipsNonNMI/QueryFilters/MultipleDue — all
+            asserted through no-op worker runs) → NEW internal/river TestDunningScan_DueQueryFilters:
+            real-row exact-set pin on ListDueDunningSubscriptions (due NMI in; future-retry, active,
+            cancelled, other-rail, retry-less out; cancelled-with-retry is schema-unrepresentable,
+            chk_cancelled_no_retry_schedule) + nil-clients guard.
+          · MissingPaymentMethod(+Vault) (asserted status ∈ {past_due, cancelled}) → NEW internal/river
+            TestDunningScan_MissingPaymentMethodAppliesFailurePolicy: openrails-driven pm with missing vault
+            refs ⇒ failure policy (no provider mutation, no intent, soft schedule +2d); pm-less NMI ⇒
+            #635 provider-auto-billed, sub left COMPLETELY untouched (no claim, no policy).
+          · WindowExpiredCancelsWithoutCharge → tests/ TestDunningWorkerWindowExpirySchedulesDeferredDelete
+            (cancel + durable marker + exactly one deferred delete) + internal/river
+            TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally.
+          · WithinWindowIsNotExpired → internal/river TestDunningWorker_MaterializeRecordsParkedIntent
+            (in-window ⇒ parked, sub untouched) + the NMI ladder's real retries.
+          · LimitedModeMaterializesWithoutProviderWrites → the river materialize pair + intents
+            TestManualRebillSystemOriginParksUnderLimitedThenDrains + tests/
+            TestFailMembershipLimitedModeQueuesDeleteButGatesExecution (its "no delete intent" half was
+            self-wired DeferDelete=nil theater and contradicts #679 queue-always).
+          · Weekly/DailyCycle worker window tests → unit tier tables (subscriptions/dunning_test.go) +
+            window comparison proven at monthly (above) + the ported daily plumbing test (next line).
+          · FailMembershipDailyCycleFirstFailureTerminal → PORTED to internal/modules/subscriptions
+            TestFailOpen_DailyCycleFirstFailureTerminal (0-retry-tier PLUMBING: price cycle reaches the
+            policy, first failure terminal, standing window closed — catches a silent monthly fallback).
+          · FailMembershipWeeklyCycleSchedule → unit DunningNextRetryIn weekly gaps + the daily plumbing
+            proof + monthly exhaustion (TestFailOpen_DunningExhaustionClosesAccess).
+        Net: −836, new dominators ~+290. Per-rail dunning ladders (kept, de-graced, strengthened with
+        fail-open mid-dunning access pins): NMI = entitlements_dunning_nmi_state_machine_test.go
+        (SucceedsAfterRetries + TerminalFailure, renamed from TerminalFailureRevokesGrace); CCBill =
+        ccbill_dunning_grace_entitlements_test.go (real-HTTP ladder) + entitlements_dunning_state_machine
+        (service-level, zero-grace pins) + _ccbill_terminal_and_dupe (provider-confirmed death + dupe);
+        Stripe = N/A (OpenRailsDrivenDunning=false, provider-autonomous; event-apply path owned by #684).
+        Full ./tests/ integration package GREEN end-to-end (first time this campaign) + river/intents/
+        webhooks/subscriptions suites green.
       - spend/hold/capture middle layer: collapsed (admitter_integration_test.go, ledger above).
       - cancel-subscription: keepers confirmed (intents + tests/cancel_subscription_test.go); the redundant
         strands live in the deferred dunning/subscriptions churn zone (river cancel plumbing re-test
@@ -25783,6 +25880,9 @@ an `unknown` sub cannot silently double-purchase the same product.
     reconcile, reconcile/converge (incl. the #664 imported-shape cohort), rails; one pre-existing test
     (converge derive-mismatch grant direction) re-seeded to the legacy bounded shape its scenario requires.
   - DEFERRED to #690 (unticked bullet): freeloader redefinition + verification_pressure gauge.
+  - 2026-07-02: the deferred TEST-UPDATES leg landed via #694's dunning-cluster pass — the 5 #691-churn
+    reds in tests/ pinned to the new doctrine (or strengthened: grant-ledger dupe pin, fail-open
+    mid-dunning access pins), grace-asserting names/comments swept, full ./tests/ green.
   - NOTED, not fixed (sibling-owned reconciliation.sql): `ListDeadSubsWithLiveEntitlements` flags a cancelled
     sub with a LIVE runway window (end_at > now) and its AUTO repair revokes it as-of now — pre-existing; under
     #691 every period-end cancel produces that shape for the runway duration, so the check needs a
@@ -25998,3 +26098,66 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 - VERIFY:
 - [ ] Unit-test capability metadata for each supported processor.
 - [ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction.
+
+---
+
+# #700: squash postgres migrations back to a single 001 baseline (openrails + authkit)
+
+**Completed:** yes
+**Status:** COMPLETED 2026-07-02 (Claude; uncommitted). Precursor to the config/DB-shape design-lock audit.
+
+OpenRails: folded migrations 002, 028–068 (41 files) into `migrations/postgres/001_schema.up.sql` and
+deleted them. The new baseline is regenerated from a fully-migrated database (pg_dump --schema-only
+--no-owner) and REORDERED: tables in FK-dependency (topological) order, each table's PK/UNIQUE/FK
+constraints, indexes, triggers, RLS policy, and grants grouped beside its CREATE TABLE; pg_dump banner
+comments dropped, COMMENT ON metadata preserved. Pure data migrations (032 micros, 043 spec-hours,
+044 mobius→nmi, 053/060/063/066/068 backfills) fold to nothing on a fresh DB by construction.
+
+AuthKit: folded 002_session_perf_indexes + 003_provider_lookup_index into 001_auth_schema.up.sql (hand
+edit — file was already topological/hand-written).
+
+VERIFICATION (both repos): applied the OLD full chain and the NEW single file to two fresh Postgres 18
+databases and diffed `pg_dump --schema-only` output including ACLs — byte-identical. sqlc regenerated
+from the new schema inputs with ZERO diff in generated code (openrails via scripts/sqlc-vet-db.sh vet DB;
+authkit against the compose DB). Guard tests updated to post-#683 vocabulary
+(migrations/postgres/merchant_aware_schema_test.go merchantOwnedTables now lists the rail_* names + the
+13 newer RLS tables; catalog_dedup_constraints_test.go pins products_merchant_key_key +
+unique_prices_product_amount_window). Deleted three integration tests whose only subject was the
+squashed-away data migrations (failopen_migration_integration_test.go,
+ccbill_account_dash_migration_integration_test.go, TestFindingsOrphanRenameMigrationMovesRows).
+migratekit tracks by filename so already-migrated DBs skip 001; ledger rows for the deleted 002–068
+filenames are inert. New migrations start at 002.
+
+---
+
+# #333: admin-e2e-suite-needs-control-plane-wiring
+
+**Completed:** yes (CLOSED-FIXED-BY-#694)
+**Status:** CLOSED 2026-07-02 — verified: the full ./tests integration package (including all admin_* tests)
+runs GREEN on the #694 harness, which does exactly what this issue's diagnosis demanded: tests/ boots
+integrationharness with the embedded control plane attached and REAL AuthKit-minted delegated tokens through
+the live permission gate (admin authority = real role grant, not JWT claims); the stub operatorAdminClaims
+path was deleted in the #694 migration. Stale-CH-ledger hygiene: dbtest.SharedClickHouse owns CH provisioning
+per-run, removing the stale-env class.
+**UPDATE 2026-07-02:** likely FIXED INCIDENTALLY by #694's harness rework — tests/ now runs on
+integrationharness with the embedded control plane attached and REAL AuthKit-minted delegated tokens through
+the real permission gate (exactly what this issue's diagnosis called for; the stub operatorAdminClaims path
+is gone). Verification run attempted 2026-07-02 but blocked by concurrent #698 config-rename churn breaking
+the tests/ build. TO CLOSE: run `go test -tags integration -run TestAdmin ./tests/` on a settled tree; if
+green, move to completed.md and delete any vestigial admin-claim helpers.
+**Status:** OPEN 2026-06-10 (Claude): diagnosed during the #332 failure review; not started. All other e2e failures from that review are fixed (see completed #332 + commits 9fe72d4 openrails, 68cb6a1 tensorhub, b72f61e8 cozy-art).
+
+The admin e2e tests (tests/admin_payments_test.go, admin_metrics_test.go, admin_entitlements_source_test.go, admin_offchannel_payments_test.go) fail with 500 {'message':'authorization unavailable'} — the nil-admin-checker fail-closed path. DIAGNOSIS (2026-06-10): pre-existing #312 bit-rot, documented in the suite itself (testcontainer_suite.go Auth config comment: 'Admin-route integration tests therefore require the embedded control plane wired with the test admin granted openrails:admin'). The #312 hard-cut moved admin authority from JWT claims (tests still mint operatorAdminClaims() tokens via test_helpers.go) to the LIVE control-plane permission check (routes_admin.go only sets AdminPermissionChecker when s.controlPlane != nil; the suite never enables Auth.ControlPlane -> checker nil -> admin_neutral.go/ginmw admin gates 500 fail-closed).
+
+WHAT THE FIX NEEDS:
+1. suite.Config.Auth.ControlPlane = &config.ControlPlaneConfig{Enabled: true} (ginboot embcp.Attach then builds it; authkit profiles schema is already applied by migrate.RunPostgres).
+2. The admin test users must EXIST in authkit profiles.users with ids equal to the JWT subs the suite mints, then be made members + granted the admin role (controlplane Bootstrap/AddMember/AssignRole or authkit core APIs — NOT raw SQL into roles). authkit core.CreateUser(email, username) generates its own id, so either (a) resolve the verifier's user mapping (issuer+sub -> user) and mint tokens for created users' real ids, or (b) add a test-only authkit user-provisioning hook.
+3. operatorAdminClaims()/CreateAdminToken in tests/test_helpers.go are then vestigial — admin authority comes from the role grant, not claims.
+
+NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exist' failures were a STALE TEST ENV artifact (migratekit records the ClickHouse ledger in postgres; reusing a postgres DB across runs against fresh CH containers skips re-apply). On a fresh env CH applies fine and those tests fail at the same admin-auth gate instead. Squashed CH baseline (cb9200b) is NOT at fault (daily_metrics present; migrations/clickhouse schema_test passes).
+
+**Tasks:**
+- [ ] Enable Auth.ControlPlane in testcontainer_suite config and verify embcp.Attach builds it in ginboot.
+- [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
+- [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
+- [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).

@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -116,7 +117,9 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	nmiClient, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.DB, r.State.NMIClients, subscription)
+	// Pre-flight: resolve the rail read-only so misconfiguration surfaces as
+	// 503 immediately (the intent handler re-resolves at execution time).
+	_, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.DB, r.State.NMIClients, subscription)
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI provider account for subscription")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to resolve payment rail")
@@ -128,24 +131,31 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	err = nmiClient.UpdateSubscriptionPaymentSource(subscription.RailSubscriptionID, paymentMethod.RailCustomerRef)
-	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID}).Error("Failed to update subscription payment source with NMI")
-		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
-		return
+	// #674: the swap goes through the durable nmi_payment_source_update intent
+	// (write-through) — a lost provider response can never leave local and NMI
+	// silently billing different cards; the intent ledger converges them.
+	origin, originReason := intents.OriginUser, "user payment-method swap"
+	if !enforceOwnership {
+		origin, originReason = intents.OriginAdmin, "admin payment-method swap"
 	}
-
 	oldPaymentMethodID := subscription.PaymentMethodID
-	subscription.PaymentMethodID = &paymentMethodID
-	subscription.UpdatedAt = r.Clock.Now()
-
-	if err := r.State.SubscriptionService.Update(ctx, subscription); err != nil {
-		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID}).Error("NMI updated but local DB update failed - manual reconciliation needed")
-		r.ErrorJSON(http.StatusInternalServerError, "Payment method updated but failed to save locally")
+	out, err := r.State.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, subscription, paymentMethod, origin, originReason)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID}).Error("Failed to post payment-source update intent")
+		r.ErrorJSON(http.StatusInternalServerError, "Failed to update payment method")
 		return
 	}
-
-	log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
-
-	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
+	switch {
+	case out.Done:
+		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
+		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
+	case out.Terminal:
+		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID, "reason": out.Reason}).Error("Failed to update subscription payment source with NMI")
+		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
+	default:
+		// Ambiguous/parked: neither success nor decline — the durable intent
+		// finishes out-of-band and a retried request maps onto the SAME intent.
+		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
+		r.ErrorJSON(http.StatusConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
+	}
 }

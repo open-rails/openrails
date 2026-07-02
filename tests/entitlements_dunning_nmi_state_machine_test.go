@@ -118,7 +118,8 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 
 	// Monthly billing cycle -> progressive retry gaps (#359): +2d after the
 	// initial failure, then +3d after the second.
-	// First retry attempt: fail via mock, should append grace up to next_retry_at.
+	// First retry attempt: fail via mock. #691: no grace machinery exists —
+	// access rides the untouched standing window through the failed retry.
 	mock.ShouldFail = true
 	clock.Advance(subscriptions.DunningNextRetryIn(30*24, 1))
 
@@ -132,7 +133,21 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 
-	// Second retry attempt: succeed via mock, should clear grace and push the next paid window.
+	// Fail-open mid-dunning (#691): the failed retry must not have touched
+	// access — entitled well past the missed paid end, with zero grace rows.
+	for _, entName := range []string{"premium", "extra"} {
+		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
+		require.NoError(t, err)
+		require.True(t, ok, "access never lapses mid-dunning (%s)", entName)
+	}
+	graceRows := suite.Count(ctx, `
+		SELECT COUNT(*) FROM openrails.entitlements
+		WHERE source_type = $1 AND source_id = $2 AND deleted_at IS NULL`,
+		string(models.EntitlementSourceGrace), sub.ID)
+	require.Zero(t, graceRows, "#691: no grace windows are ever appended during NMI dunning")
+
+	// Second retry attempt: succeed via mock — recovery records the renewal;
+	// the standing window needs no extension.
 	mock.ShouldFail = false
 	clock.Advance(subscriptions.DunningNextRetryIn(30*24, 2))
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
@@ -144,7 +159,10 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 }
 
-func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *testing.T) {
+// TestEntitlementsDunningStateMachine_NMI_TerminalFailure: the NMI ladder's
+// certainty-gated terminal outcome — real retries exhaust the cadence schedule
+// through the worker, and ONLY that proof closes access (#691/#664).
+func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	suite, mock := SetupSuiteWithMockNMI(t)
 	rt := suite.App.Runtime
 	require.NotNil(t, rt)

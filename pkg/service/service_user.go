@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -458,29 +459,34 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
 		return nil, fmt.Errorf("payment method belongs to a different payment provider account")
 	}
-	nmiClient, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.DB, s.rt.NMIClients, sub)
-	if err != nil {
+	// Pre-flight: resolve the rail read-only so misconfiguration surfaces
+	// immediately (the intent handler re-resolves at execution time).
+	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.DB, s.rt.NMIClients, sub); err != nil {
 		return nil, fmt.Errorf("resolve subscription provider account: %w", err)
-	}
-	if !ok {
+	} else if !ok {
 		return nil, fmt.Errorf("payment rail not available")
 	}
-	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.RailSubscriptionID, pm.RailCustomerRef); err != nil {
+
+	// #674: the swap goes through the durable nmi_payment_source_update intent
+	// (write-through); an unresolved outcome surfaces as
+	// intents.ErrPaymentSourceUpdateProcessing, never success or decline.
+	out, err := s.rt.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, sub, pm, intents.OriginUser, "user payment-method swap")
+	if err != nil {
 		return nil, fmt.Errorf("update payment method with rail: %w", err)
 	}
-
-	// Update subscription payment method
-	sub.PaymentMethodID = &pmID
-	if err := subscriptionService.Update(ctx, sub); err != nil {
-		return nil, fmt.Errorf("update subscription: %w", err)
+	switch {
+	case out.Done:
+		return &UpdateSubscriptionPaymentMethodResult{
+			Success:         true,
+			Message:         "Payment method updated successfully",
+			SubscriptionID:  api.FormatSubscriptionID(subID),
+			PaymentMethodID: api.FormatPaymentMethodID(pmID),
+		}, nil
+	case out.Terminal:
+		return nil, fmt.Errorf("update payment method with rail: %s", out.Reason)
+	default:
+		return nil, intents.ErrPaymentSourceUpdateProcessing
 	}
-
-	return &UpdateSubscriptionPaymentMethodResult{
-		Success:         true,
-		Message:         "Payment method updated successfully",
-		SubscriptionID:  api.FormatSubscriptionID(subID),
-		PaymentMethodID: api.FormatPaymentMethodID(pmID),
-	}, nil
 }
 
 // -------------------------------- Payments --------------------------------

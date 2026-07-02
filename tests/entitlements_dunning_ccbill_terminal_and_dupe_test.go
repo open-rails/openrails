@@ -132,10 +132,19 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
 	}
 
-	// Build a grace tail with a future window, then expire during the active grace window.
+	// Drive CCBill dunning (past_due + pacing marker; #691: no grace windows —
+	// access rides the standing window), then the provider declares the sub
+	// expired mid-dunning.
 	sendRenewalFailure(paidEnd.Add(3 * 24 * time.Hour).Format("2006-01-02"))
 	sendRenewalFailure(paidEnd.Add(5 * 24 * time.Hour).Format("2006-01-02"))
 	sendRenewalFailure(paidEnd.Add(7 * 24 * time.Hour).Format("2006-01-02"))
+
+	// Fail-open mid-dunning (#691): renewal failures never touch access.
+	for _, entName := range []string{"premium", "extra"} {
+		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
+		require.NoError(t, err)
+		require.True(t, ok, "access intact during CCBill dunning (%s)", entName)
+	}
 
 	expireAt := paidEnd.Add(4 * 24 * time.Hour)
 	clock.Advance(expireAt.Sub(clock.Now().UTC()))
@@ -164,7 +173,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	}
 	require.NoError(t, expSvc.HandleCCBillWebhook(ctx))
 
-	// Terminal failure: grace should not keep access after expiration.
+	// Provider-confirmed death is PROOF (#691/#664): expiration closes access.
 	for _, entName := range []string{"premium", "extra"} {
 		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
 		require.NoError(t, err)
@@ -324,4 +333,14 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		suite.ensureCustomer(ctx, userID), "premium",
 		string(models.EntitlementSourceSubscription), subID)
 	require.Equal(t, 1, standing, "the single window is standing (#691)")
+
+	// The paid period lands on the GRANT ledger as bounded per-period rows:
+	// activation + exactly ONE renewal — the duplicate delivery appends no
+	// second period grant (idempotent via the latest recorded period end).
+	grantCount := suite.Count(ctx, `
+		SELECT COUNT(*) FROM openrails.grants
+		WHERE source_type = 'subscription' AND source_id = $1
+		  AND event = 'grant' AND ends_at IS NOT NULL`,
+		subID.String())
+	require.Equal(t, 2, grantCount, "activation + one renewal grant; the duplicate records no second period")
 }

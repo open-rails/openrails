@@ -428,6 +428,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	if runtime.VaultService != nil {
 		runtime.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
 	}
+	// #674: user/admin payment-method swaps route through the durable
+	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
+	// silent local↔remote split).
+	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
 
 	return runtime, nil
 }

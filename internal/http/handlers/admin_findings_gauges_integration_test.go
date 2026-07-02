@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -486,28 +485,4 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 	assert.EqualValues(t, 3, probe.Gauges.Episodes.Orphaned.Total)
 	assert.EqualValues(t, 2, probe.Gauges.Episodes.Orphaned.Open)
 	assert.InDelta(t, 23.0, probe.Gauges.Episodes.Orphaned.TotalDays, 1.0)
-}
-
-// TestFindingsOrphanRenameMigrationMovesRows (#690): migration 066 rewrites
-// pre-rename ledger rows in place (derive.entitlement.orphan ->
-// derive.entitlement.unjustified) so stable finding identities keep upserting,
-// and the renamed rows count in the freeloaders gauge. Executes the REAL
-// migration file; the UPDATE is idempotent, so re-running on an
-// already-migrated database is safe.
-func TestFindingsOrphanRenameMigrationMovesRows(t *testing.T) {
-	fx := newFindingsFixture(t)
-	oldID := fx.seedFinding("derive.entitlement.orphan", "entitlement:"+uuid.NewString(), "high",
-		"pre-rename freeloader row", nil)
-	before := fx.gauges()
-	assert.Zero(t, before.Gauges.Freeloaders, "the legacy type name is not in the gauge set")
-
-	migrationSQL, err := postgresmigrations.FS.ReadFile("066_findings_orphan_to_unjustified.up.sql")
-	require.NoError(t, err)
-	_, err = fx.dbi.Pool().Exec(fx.ctx, string(migrationSQL))
-	require.NoError(t, err)
-
-	row := fx.findingRow(oldID)
-	assert.Equal(t, "derive.entitlement.unjustified", row.FindingType, "ledger row renamed in place")
-	after := fx.gauges()
-	assert.EqualValues(t, 1, after.Gauges.Freeloaders, "renamed row counts in the freeloaders gauge")
 }

@@ -33,11 +33,12 @@ func loadSchemaMigration(t *testing.T) string {
 // products or prices — the property that makes "a row only exists if it
 // meaningfully differs" true at the database layer rather than by convention.
 //
-//   - A product's identity is its merchant plus slug (UNIQUE).
+//   - A product's identity is its merchant plus key (UNIQUE).
 //   - A price's identity is its financial substance: (product, amount, currency,
-//     billing cycle). That is EXACTLY the content key the provider adapters reuse
-//     as the Stripe lookup_key, the NMI plan_id, and the Solana plan PDA — so the
-//     local uniqueness and the provider de-dup key are one and the same.
+//     access window, auto_renew, trial terms). That is EXACTLY the content key the
+//     provider adapters reuse as the Stripe lookup_key, the NMI plan_id, and the
+//     Solana plan PDA — so the local uniqueness and the provider de-dup key are one
+//     and the same.
 //
 // These two constraints are what make duplicate products/prices (and therefore
 // duplicate provider objects) structurally impossible. If either is ever dropped,
@@ -48,11 +49,11 @@ func TestCatalogDedupConstraints(t *testing.T) {
 	schema := collapseWS(loadSchemaMigration(t))
 
 	for _, want := range []string{
-		// Product identity = merchant + slug.
-		"constraint products_merchant_slug_key unique (merchant_id, slug)",
+		// Product identity = merchant + key.
+		"constraint products_merchant_key_key unique (merchant_id, key)",
 		// Price identity = financial substance (the provider/content de-dup key).
-		"constraint unique_prices_product_amount_cycle",
-		"unique (product_id, amount, currency, billing_cycle_days)",
+		"constraint unique_prices_product_amount_window",
+		"unique nulls not distinct (product_id, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours)",
 	} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("catalog de-dup constraint missing from schema migration: %q", want)

@@ -8,11 +8,9 @@ import (
 
 // Merchant-owned tables that the consolidated schema must scope by merchant_id
 // (issue #223). Kept in sync with the merchant_isolation policies in 001.
-// Updated after squashing 001..029: removed tables that were dropped during the
-// migration chain (budget_inflight_holds, budget_window_state, money_transactions,
-// money_blocks, money_spend_limits, money_windows) and added tables added in
-// later migrations (external_provider_mutation_logs, grants, ledger_accounts,
-// ledger_transfers, provider_accounts, provider_refresh_watermarks, reconciliation_state).
+// Updated after squashing 001..068 (rail_* renames per #683; catalog/metering
+// sidecars, webhook_events, customer_minimum_spend, metered_rating_watermarks
+// added along the chain).
 var merchantOwnedTables = []string{
 	"customers",
 	"merchant_deks",
@@ -33,14 +31,14 @@ var merchantOwnedTables = []string{
 	"invoice_items",
 	"invoice_payments",
 	"notification_queue",
-	"rail_customers",
-	"external_provider_mutation_logs",
+	"rail_customer_accounts",
+	"rail_mutation_logs",
 	"grants",
 	"ledger_accounts",
 	"ledger_transfers",
-	"provider_accounts",
-	"provider_intents",
-	"provider_refresh_watermarks",
+	"rail_merchant_accounts",
+	"rail_intents",
+	"rail_refresh_watermarks",
 	"reconciliation_state",
 	// #472: money ledger replaced the credit_* tables. money_balances dropped (#491).
 	"invoker_spend_limits",
@@ -53,6 +51,21 @@ var merchantOwnedTables = []string{
 	"reconciliation_findings",
 	"money_settings",
 	"custom_credit_types",
+	// #594/#599/#638/#639/#640 catalog + metering sidecars
+	"catalog_usage_limits",
+	"product_usage_limit_bindings",
+	"catalog_meters",
+	"catalog_price_metered",
+	"product_includes",
+	"product_usage_limits",
+	"catalog_rate_cards",
+	"catalog_credit_purchases",
+	"catalog_credit_balances",
+	"catalog_credit_purchase_prices",
+	"customer_minimum_spend",
+	"metered_rating_watermarks",
+	// #678 webhook dedup truth
+	"webhook_events",
 }
 
 func loadSchema001(t *testing.T) string {
@@ -201,11 +214,11 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"uq_payment_methods_customer_vault",
+		"uq_payment_methods_customer_instrument_legacy",
 		"uq_subscriptions_customer_product_lifecycle",
 		"uq_entitlements_customer_active",
 		"uq_payments_merchant_rail_transaction",
-		"uq_rail_customers_customer_rail",
+		"uq_rail_customer_accounts_customer_rail",
 		"entitlements_customer_no_overlap",
 	} {
 		if !strings.Contains(c, want) {

@@ -55,8 +55,7 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 			"internal/modules/subscriptions/user_service.go":  "reactive user cancel (see admin_service note)",
 		},
 		".UpdateSubscriptionPaymentSource(": {
-			"internal/http/handlers/update_subscription_payment_method.go": "reactive user payment-method swap; intent migration deferred",
-			"pkg/service/service_user.go":                                  "embedded-surface twin of the handler above",
+			"internal/intents/nmi_payment_source_update.go": "nmi_payment_source_update intent handler (the sanctioned executor; both call sites route through PaymentSourceUpdateThrough)",
 		},
 		".DeleteCustomerVault(": {
 			"internal/intents/nmi_vault_delete.go":             "nmi_vault_delete intent handler (the sanctioned executor for durable user-initiated deletes)",

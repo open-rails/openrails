@@ -372,6 +372,33 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	assert.False(t, f.entitledAt(t, farFuture))
 }
 
+// TestFailOpen_DailyCycleFirstFailureTerminal pins the 0-retry-tier PLUMBING
+// (#359): the price's billing cycle (24h here) actually reaches the failure
+// policy — the FIRST recorded failure is terminal (no retry ever scheduled, no
+// silent monthly fallback) and closes the standing window. The tier tables
+// themselves are unit-pinned in dunning_test.go; this proves cycleHours flows
+// from the price into FailMembership. Ports the essence of the deleted tests/
+// dunning_worker FailMembership cadence tests (#694).
+func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
+	f := newFailopenFixture(t, 24, true)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	sub, _ := f.create(t, models.RailNMI)
+
+	reason := "rebill declined"
+	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
+		Rail:           models.RailNMI,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+	}))
+
+	terminal := f.loadSub(t, sub.ID)
+	require.Equal(t, models.StatusCancelled, terminal.Status, "first failure on a 1d cycle is terminal (0-retry tier)")
+	require.NotNil(t, terminal.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *terminal.CancelType)
+	assert.Nil(t, terminal.NextRetryAt, "the 0-retry tier never schedules a retry")
+	assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)), "terminal dunning closes the standing window")
+}
+
 // failopenDeferredDelete records ScheduleNMIDelete calls (#679 regression leg).
 type failopenDeferredDelete struct{ scheduled []uuid.UUID }
 

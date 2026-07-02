@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -80,6 +81,10 @@ type Runtime struct {
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	PaymentService       *payments.PaymentService
 	VaultService         *paymentmethods.VaultService
+	// PaymentSourceUpdateIntents routes NMI payment-method swaps through the
+	// durable nmi_payment_source_update intent (#674 write-through). Set by the
+	// composition root alongside the other write-through producers.
+	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService

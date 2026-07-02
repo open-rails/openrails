@@ -28,6 +28,10 @@ var destructiveIntentTypes = map[string]struct{}{
 	// entirely (paymentmethods.CleanupVaultBestEffort) so card-testing floods
 	// cannot burn this budget.
 	TypeNMIVaultDelete: {},
+	// TypeNMIPaymentSourceUpdate is deliberately NOT listed: repointing which
+	// vaulted card a subscription bills destroys nothing (both vaults survive;
+	// swap back any time), so it doesn't fit the #679 mass-destruction threat
+	// model and must not burn the destructive budget.
 }
 
 // IsDestructiveIntentType reports whether the type is breaker-gated.
