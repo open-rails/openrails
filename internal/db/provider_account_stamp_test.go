@@ -1,4 +1,4 @@
-package repo
+package db
 
 import (
 	"context"
@@ -8,12 +8,12 @@ import (
 )
 
 func TestResolveRailMerchantAccountIDForStampOnlyUsesPinnedContext(t *testing.T) {
-	if got := resolveRailMerchantAccountIDForStamp(context.Background()); got != nil {
+	if got := ResolveRailMerchantAccountIDForStamp(context.Background()); got != nil {
 		t.Fatalf("unpinned provider account = %v, want nil", *got)
 	}
 
 	id := uuid.New()
-	got := resolveRailMerchantAccountIDForStamp(WithRailMerchantAccountID(context.Background(), id))
+	got := ResolveRailMerchantAccountIDForStamp(WithRailMerchantAccountID(context.Background(), id))
 	if got == nil || *got != id {
 		t.Fatalf("pinned provider account = %v, want %s", got, id)
 	}

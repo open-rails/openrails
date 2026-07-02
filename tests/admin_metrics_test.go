@@ -99,7 +99,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 // currency present each section is a bare object; the response carries all five
 // sections in one document. Authorized by merchant:usage:read.
 func TestAdminMetricsFolded(t *testing.T) {
-	suite := getSharedTestSuite(t)
+	suite := setupTestSuite(t, WithSuiteClickHouse())
 	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000003",
 		[]string{controlplane.PermMerchantUsageRead})
 
@@ -152,7 +152,7 @@ func TestAdminMetricsFolded(t *testing.T) {
 // TestAdminMetrics_RequiresMetricsRead proves the delegated gate fails closed:
 // a principal without metrics:read cannot read the dashboard.
 func TestAdminMetrics_RequiresMetricsRead(t *testing.T) {
-	suite := getSharedTestSuite(t)
+	suite := setupTestSuite(t, WithSuiteClickHouse())
 	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000004",
 		[]string{controlplane.PermMerchantCustomerSettingsRead})
 

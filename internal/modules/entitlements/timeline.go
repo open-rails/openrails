@@ -11,9 +11,9 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 // Timeline helpers (#334, relocated from internal/db/repo in #688): the
@@ -61,7 +61,7 @@ func ShiftEntitlementTimeline(
 		return nil
 	}
 
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return err
 	}

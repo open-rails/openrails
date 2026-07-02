@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -161,7 +160,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 
 // applyUnknownDecision applies one decider transition + its payment backfill.
 func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, q *gen.Queries, subID uuid.UUID, d Decision, now time.Time, lookbackCap time.Duration, res *UnknownReconcileResult) error {
-	sub, err := repo.NewSubscriptionRepo(database).GetByID(ctx, subID)
+	sub, err := subscriptions.NewSubscriptionRepo(database).GetByID(ctx, subID)
 	if err != nil {
 		return fmt.Errorf("reconcile unknown: load subscription %s: %w", subID, err)
 	}

@@ -43,7 +43,7 @@ func TestReconcileManagedStripeWebhookStoresRailMerchantAccountSecret(t *testing
 	require.NoError(t, err)
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:                &config.Config{APIURL: "https://billing.example.com"},
+		Config:                &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:           store,
 		MerchantID:            merchantID,
 		MerchantSlug:          "acme",
@@ -70,7 +70,7 @@ func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
 	rails := config.RailMerchantAccountSet{"stripe": rail}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:        &config.Config{APIURL: "https://billing.example.com"},
+		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails:         rails,
 		EnabledEvents: []string{"invoice.paid"},
 		StripeBaseURL: svc.BaseURL,

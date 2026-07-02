@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -203,7 +203,7 @@ func (s *MoneyService) HasAutoTopupDeposit(ctx context.Context, customerID uuid.
 		MerchantID: tid.UUID(), CustomerID: customerID, SourceID: sourceID,
 	})
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err

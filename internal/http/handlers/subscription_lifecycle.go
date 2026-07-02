@@ -6,8 +6,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -78,7 +78,7 @@ func CancelSubscription(r *httprequest.Request) {
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -91,15 +91,8 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if sub.Rail == subscriptions.RailCCBill {
-		r.JSON(http.StatusUnprocessableEntity, map[string]any{
-			"error":       "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
-			"support_url": "https://support.ccbill.com",
-			"code":        "ccbill_cancel_required",
-		})
-		return
-	}
-
+	// #696: CCBill cancels queue like every other rail — the worker's user
+	// cancel path records the local runway cancel + durable remote-cancel intent.
 	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
@@ -137,7 +130,7 @@ func ResumeSubscription(r *httprequest.Request) {
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}

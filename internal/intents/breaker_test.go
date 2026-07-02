@@ -26,11 +26,14 @@ func TestIsDestructiveIntentType(t *testing.T) {
 	if !IsDestructiveIntentType(TypeNMIDeleteSubscription) {
 		t.Fatal("nmi_delete_subscription must be destructive")
 	}
+	if !IsDestructiveIntentType(TypeCCBillCancelSubscription) {
+		t.Fatal("ccbill_cancel_subscription must be destructive (#696: no resume API)")
+	}
 	if IsDestructiveIntentType(TypeManualRebill) {
 		t.Fatal("manual_rebill must not be destructive (charges are not breaker-gated)")
 	}
 	types := DestructiveIntentTypes()
-	if len(types) == 0 || types[0] != TypeNMIDeleteSubscription {
+	if len(types) != 2 || types[0] != TypeCCBillCancelSubscription || types[1] != TypeNMIDeleteSubscription {
 		t.Fatalf("DestructiveIntentTypes() = %v", types)
 	}
 }

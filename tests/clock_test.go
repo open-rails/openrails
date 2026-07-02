@@ -26,21 +26,13 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	rt := suite.App.Runtime
-	require.Equal(t, mockClock, rt.Clock)
-	require.Equal(t, mockClock, rt.SubscriptionLifecycleService.Clock())
-	require.Equal(t, mockClock, rt.SubscriptionService.Clock())
-	require.Equal(t, mockClock, rt.EntitlementService.Clock())
-	require.Equal(t, mockClock, rt.PaymentService.Clock())
-	require.Equal(t, mockClock, rt.VaultService.Clock())
-	require.Equal(t, mockClock, rt.WebhookDispatcher.Clock)
-	require.Equal(t, mockClock, rt.CheckoutService.Clock())
-	require.Equal(t, mockClock, rt.CheckoutSessionService.Clock())
-	require.Equal(t, mockClock, rt.MoneyService.Clock())
-	require.Equal(t, mockClock, rt.SolanaPayService.Clock())
-	require.Equal(t, mockClock, rt.SolanaTransactionService.Clock())
-	if rt.EventLogService != nil {
-		require.Equal(t, mockClock, rt.EventLogService.Clock())
-	}
+	// #694: services capture ONE construction-time SettableClock whose delegate
+	// is the injected fake — assert observed time, not clock identity (the
+	// retired SetMockClock per-service fan-out has no equivalent).
+	require.Equal(t, fixedTime, rt.Clock.Now())
+	require.Equal(t, fixedTime, rt.SubscriptionLifecycleService.Clock().Now())
+	require.Equal(t, fixedTime, rt.EntitlementService.Clock().Now())
+	require.Equal(t, fixedTime, rt.MoneyService.Clock().Now())
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID

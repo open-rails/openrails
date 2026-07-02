@@ -148,7 +148,7 @@ func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "merchant-acc/merchant-sub", "salt")
+	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "945280-0000", "salt")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-salt")
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{
 		rail:        "ccbill",
 		environment: "live",
-		accountID:   "merchant-acc/merchant-sub",
+		accountID:   "945280-0000",
 		settings:    map[string]any{"allowed_cidrs": []any{"64.38.240.0/24"}},
 	})
 
@@ -173,8 +173,8 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	require.NoError(t, err)
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
-	require.Equal(t, "merchant-acc", parsed.Query().Get("clientAccnum"))
-	require.Equal(t, "merchant-sub", parsed.Query().Get("clientSubacc"))
+	require.Equal(t, "945280", parsed.Query().Get("clientAccnum"))
+	require.Equal(t, "0000", parsed.Query().Get("clientSubacc"))
 	require.NotEmpty(t, parsed.Query().Get("signature"))
 }
 
@@ -189,17 +189,30 @@ func TestCheckoutRailMerchantAccountResolverMissingCCBillSecretDoesNotUseStaticC
 	require.Contains(t, err.Error(), "missing scoped merchant CCBill provider account")
 }
 
+// #697: the composite CCBill identity is dash-joined; a legacy slash-form
+// account_id must fail loudly, never split on '/'.
+func TestCheckoutCCBillSlashAccountIDRejected(t *testing.T) {
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
+	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
+	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280/0000"})
+
+	_, err := svc.resolveCCBillClient(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
+}
+
 func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "merchant-acc/merchant-sub", "salt")
+	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "945280-0000", "salt")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-salt")
 	require.NoError(t, err)
 
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "merchant-acc/merchant-sub"})
+	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280-0000"})
 
 	email := "alice@example.com"
 	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, &UserIdentity{
@@ -218,8 +231,8 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	require.NoError(t, err)
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
-	require.Equal(t, "merchant-acc", parsed.Query().Get("clientAccnum"))
-	require.Equal(t, "merchant-sub", parsed.Query().Get("clientSubacc"))
+	require.Equal(t, "945280", parsed.Query().Get("clientAccnum"))
+	require.Equal(t, "0000", parsed.Query().Get("clientSubacc"))
 }
 
 func checkoutRailConfig(testMode bool) *config.Config {

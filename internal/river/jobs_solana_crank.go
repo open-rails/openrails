@@ -13,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/billing/declinecode"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
@@ -61,7 +61,7 @@ type membershipManager interface {
 }
 
 // solanaSubStore is the persistence surface crankOne mutates (satisfied by
-// *dbrepo.SolanaSubscriptionRepo). Extracted as an interface so the
+// *solanasubs.SolanaSubscriptionRepo). Extracted as an interface so the
 // state-machine/scheduling logic can be exercised by a fake in fast, network-
 // free unit tests (#275) while production keeps using the real repo.
 type solanaSubStore interface {
@@ -146,7 +146,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	if batch <= 0 {
 		batch = solanaCrankBatchSize
 	}
-	repo := dbrepo.NewSolanaSubscriptionRepo(w.DB)
+	repo := solanasubs.NewSolanaSubscriptionRepo(w.DB)
 	due, err := repo.ListDue(ctx, w.now(), batch)
 	if err != nil {
 		return fmt.Errorf("solana crank: list due: %w", err)
@@ -414,7 +414,7 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 // resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
 // amount/currency for the subscription's price.
 func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error) {
-	subRepo := dbrepo.NewSubscriptionRepo(w.DB)
+	subRepo := subscriptions.NewSubscriptionRepo(w.DB)
 	sub, err := subRepo.GetByID(ctx, row.SubscriptionID)
 	if err != nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: load subscription: %w", err)

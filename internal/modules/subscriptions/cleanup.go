@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 // RemoveCancelledSubscriptionsForActivation preserves cancelled subscriptions for later
@@ -32,7 +31,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		exclude = &excludeID
 	}
 
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return 0, err
 	}

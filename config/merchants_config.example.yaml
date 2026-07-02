@@ -76,7 +76,8 @@ merchants:
       ccbill:
         ccbill:
           environment: live
-          account_id: "945280/0000"
+          # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
+          account_id: "945280-0000"
           # Omit allowed_cidrs to use built-in defaults; supplying it replaces the allowlist.
           settings:
             allowed_cidrs:

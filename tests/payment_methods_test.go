@@ -182,7 +182,7 @@ func TestCreatePaymentMethod(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "pm-create-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	t.Run("creates payment method successfully", func(t *testing.T) {
 		mock.Reset()
@@ -315,7 +315,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "pm-update-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	t.Run("updates payment method successfully", func(t *testing.T) {
 		mock.Reset()

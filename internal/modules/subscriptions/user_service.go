@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db"
 	openrailsdb "github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -51,6 +51,10 @@ type UserSubscriptionService struct {
 	// When nil, NMI cancellations fall back to deleting inline immediately. It is
 	// injected post-construction (the River producer is built after services).
 	deferDelete DeferredDeleteScheduler
+
+	// ccbillCancel enqueues the durable ccbill_cancel_subscription intent
+	// (#696). Injected post-construction like deferDelete.
+	ccbillCancel CCBillRemoteCancelScheduler
 }
 
 // DeferredDeleteScheduler schedules an NMI delete_subscription intent to run
@@ -68,6 +72,21 @@ type DeferredDeleteScheduler interface {
 // build_runtime after the River producer exists.
 func (s *UserSubscriptionService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
 	s.deferDelete = d
+}
+
+// CCBillRemoteCancelScheduler schedules a durable ccbill_cancel_subscription
+// intent (#696) — merchant-initiated cancel through the DataLink SMS choke
+// point. WithTx rebinds onto the caller's transaction so the intent enqueue
+// COMMITS ATOMICALLY with the local cancellation (queue-always, #679).
+type CCBillRemoteCancelScheduler interface {
+	ScheduleCCBillCancel(ctx context.Context, userID string, subscriptionID uuid.UUID) error
+	WithTx(tx pgx.Tx) CCBillRemoteCancelScheduler
+}
+
+// SetCCBillCancelScheduler injects the CCBill remote-cancel scheduler
+// (intents.CCBillCancelScheduler, wired in build_runtime).
+func (s *UserSubscriptionService) SetCCBillCancelScheduler(c CCBillRemoteCancelScheduler) {
+	s.ccbillCancel = c
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -294,7 +313,7 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 		resp := &UserSubscriptionResponse{Subscription: subscription, Access: accessFromSubscription(subscription)}
 		s.enrichSubscriptionResponse(ctx, resp)
 		return resp, nil
-	case repo.IsNotFound(err):
+	case db.IsNotFound(err):
 		access, accessErr := s.activeEntitlementAccess(ctx, userID)
 		if accessErr != nil {
 			return nil, accessErr
@@ -316,7 +335,7 @@ func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userI
 		if sub, err := s.SubscriptionService.GetActiveSubscription(ctx, userID); err == nil {
 			grants = append(grants, accessFromSubscription(sub))
 			skipSubscriptionIDs[sub.ID] = struct{}{}
-		} else if err != nil && !repo.IsNotFound(err) {
+		} else if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to fetch subscription access: %w", err)
 		}
 	}
@@ -335,7 +354,7 @@ func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userI
 func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, userID string, subscriptionID uuid.UUID) (*UserSubscriptionResponse, error) {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, ErrSubscriptionNotFound
 		}
 		return nil, fmt.Errorf("failed to get subscription: %w", err)
@@ -456,17 +475,6 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 	return s.NotificationService.Update(ctx, notification)
 }
 
-// CCBillCancelError is returned when a user tries to cancel a CCBill subscription
-// CCBill does not have a public API for merchant-initiated cancellation
-type CCBillCancelError struct {
-	SupportURL string `json:"support_url"`
-	Message    string `json:"message"`
-}
-
-func (e *CCBillCancelError) Error() string {
-	return e.Message
-}
-
 // CancelUserSubscription cancels a user's subscription
 func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, userID string, feedback string) error {
 	subscription, err := s.SubscriptionService.GetActiveSubscription(ctx, userID)
@@ -474,47 +482,63 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
 	}
 
-	// External-portal rails (CCBill) have no merchant-initiated cancellation
-	// API; users must cancel through the rail's own consumer portal.
-	if CancelModeFor(subscription, s.now()) == CancelModeExternalPortal {
-		return &CCBillCancelError{
-			SupportURL: rails.CancelPortalURL(subscription.Rail),
-			Message:    "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
-		}
-	}
-
-	// Only NMI-backed rails can be cancelled via this service
-	if !rails.IsNMI(subscription.Rail) {
-		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
-	}
-
 	now := s.now()
-	// Issue 216: when there is a genuine future undo window, DEFER the
-	// rail-side delete instead of doing it inline. We keep the NMI
-	// subscription alive (so a resume is a no-op rail-side) and schedule
-	// delete_subscription to fire at period_end - safety margin. If the window
-	// has already opened (now >= period_end - margin, common near rebill) or the
-	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
-	deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
-	deferScheduled := defer_ && s.deferDelete != nil
-	if deferScheduled {
-		// The delete intent is enqueued below, in the SAME transaction as the
-		// cancellation update, so marker and intent commit atomically.
-		subscription.DeletionScheduledAt = &deleteAt
-	} else {
-		// Immediate delete with NMI (no scheduled job).
-		subscription.DeletionScheduledAt = nil
-		if subscription.RailSubscriptionID != "" {
-			client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
-			if err != nil {
-				return fmt.Errorf("resolve subscription provider account: %w", err)
+
+	// enqueueRemoteIntent commits the rail's durable remote-mutation intent in
+	// the SAME transaction as the local cancellation (nil = no remote intent).
+	var enqueueRemoteIntent func(ctx context.Context, tx pgx.Tx) error
+
+	switch {
+	case rails.IsNMI(subscription.Rail):
+		// Issue 216: when there is a genuine future undo window, DEFER the
+		// rail-side delete instead of doing it inline. We keep the NMI
+		// subscription alive (so a resume is a no-op rail-side) and schedule
+		// delete_subscription to fire at period_end - safety margin. If the window
+		// has already opened (now >= period_end - margin, common near rebill) or the
+		// period end is unknown/past, we delete IMMEDIATELY exactly as before.
+		deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
+		if defer_ && s.deferDelete != nil {
+			// The delete intent is enqueued below, in the SAME transaction as the
+			// cancellation update, so marker and intent commit atomically. The
+			// DeletionScheduledAt marker <-> intent invariant cannot be broken by
+			// a crash between the two writes, and atomic commit kills the old
+			// relevance race (the executor cannot observe the intent before the
+			// cancellation is visible).
+			subscription.DeletionScheduledAt = &deleteAt
+			runAt := deleteAt
+			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, runAt)
 			}
-			if ok {
-				if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
-					return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
+		} else {
+			// Immediate delete with NMI (no scheduled job).
+			subscription.DeletionScheduledAt = nil
+			if subscription.RailSubscriptionID != "" {
+				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
+				if err != nil {
+					return fmt.Errorf("resolve subscription provider account: %w", err)
+				}
+				if ok {
+					if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
+						return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
+					}
 				}
 			}
 		}
+	case subscription.Rail == models.RailCCBill:
+		// #696: merchant-initiated CCBill cancel via DataLink SMS — same
+		// semantics as NMI: local cancel with the #691 paid runway plus a
+		// durable remote-cancel intent, atomic in the cancel tx. CCBill's
+		// cancelSubscription stops rebilling and keeps access through the paid
+		// period on its own side, so the intent is due immediately (no undo
+		// window to defer for) and the cancel is not resumable.
+		if s.ccbillCancel == nil {
+			return fmt.Errorf("ccbill remote-cancel scheduler unavailable")
+		}
+		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+			return s.ccbillCancel.WithTx(tx).ScheduleCCBillCancel(ctx, userID, subscription.ID)
+		}
+	default:
+		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 
 	// Update subscription status in database
@@ -535,43 +559,27 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		accessEnd = *subscription.CurrentPeriodEndsAt
 	}
 
-	// Persist the cancellation; when a deferred undo-window delete is involved,
-	// enqueue its intent IN THE SAME TRANSACTION. The DeletionScheduledAt marker
-	// and the nmi_delete_subscription intent commit or roll back together, so
-	// the marker<->intent invariant cannot be broken by a crash between the two
-	// writes. Atomic commit also kills the old relevance race (the executor
-	// cannot observe the intent before the cancellation is visible).
-	if deferScheduled && s.deferDelete != nil {
-		runAt := deleteAt
-		if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			txdb := openrailsdb.NewWithPgxTx(tx)
-			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
-			if err := txSubSvc.Update(ctx, subscription); err != nil {
-				return fmt.Errorf("failed to update subscription status: %w", err)
-			}
-			txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
-			if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
-				return fmt.Errorf("failed to bound subscription access windows: %w", err)
-			}
-			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, runAt)
-		}); err != nil {
-			return fmt.Errorf("failed to persist cancellation with deferred delete intent: %w", err)
+	// Persist the cancellation; any durable remote intent (deferred NMI delete,
+	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
+	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := openrailsdb.NewWithPgxTx(tx)
+		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
+		if err := txSubSvc.Update(ctx, subscription); err != nil {
+			return fmt.Errorf("failed to update subscription status: %w", err)
 		}
-	} else {
-		if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			txdb := openrailsdb.NewWithPgxTx(tx)
-			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
-			if err := txSubSvc.Update(ctx, subscription); err != nil {
-				return fmt.Errorf("failed to update subscription status: %w", err)
-			}
-			txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
-			if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
-				return fmt.Errorf("failed to bound subscription access windows: %w", err)
-			}
-			return nil
-		}); err != nil {
-			return err
+		txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
+		if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+			return fmt.Errorf("failed to bound subscription access windows: %w", err)
 		}
+		if enqueueRemoteIntent != nil {
+			return enqueueRemoteIntent(ctx, tx)
+		}
+		return nil
+	}); err != nil {
+		if enqueueRemoteIntent != nil {
+			return fmt.Errorf("failed to persist cancellation with remote intent: %w", err)
+		}
+		return err
 	}
 
 	// Add notification

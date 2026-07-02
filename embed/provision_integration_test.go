@@ -42,7 +42,7 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 				"nmi": {Environment: "live", AccountID: "579145"},
 			},
 			"ccbill": {
-				"ccbill": {Environment: "live", AccountID: "945280/0000"},
+				"ccbill": {Environment: "live", AccountID: "945280-0000"},
 			},
 		},
 	}

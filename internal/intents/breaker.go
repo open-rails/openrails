@@ -19,7 +19,8 @@ import (
 // Destructive intent types irreversibly destroy provider-side billing state.
 // The volume breaker (#679) gates ONLY these; add future destructive types here.
 var destructiveIntentTypes = map[string]struct{}{
-	TypeNMIDeleteSubscription: {},
+	TypeNMIDeleteSubscription:    {},
+	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
 }
 
 // IsDestructiveIntentType reports whether the type is breaker-gated.

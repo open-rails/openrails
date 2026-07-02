@@ -1,4 +1,4 @@
-package repo
+package db_test
 
 import (
 	"strings"
@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // ResolveCustomerID is pure derivation (#364): a UUID subject IS its own
@@ -13,19 +15,19 @@ import (
 func TestResolveCustomerID(t *testing.T) {
 	uid := uuid.New()
 
-	got, err := ResolveCustomerID(uid.String())
+	got, err := db.ResolveCustomerID(uid.String())
 	require.NoError(t, err)
 	require.Equal(t, uid, got)
 
 	// Case-insensitive: uppercase form parses to the same id.
-	got, err = ResolveCustomerID(" " + strings.ToUpper(uid.String()) + " ")
+	got, err = db.ResolveCustomerID(" " + strings.ToUpper(uid.String()) + " ")
 	require.NoError(t, err)
 	require.Equal(t, uid, got)
 
-	got, err = ResolveCustomerID("")
+	got, err = db.ResolveCustomerID("")
 	require.NoError(t, err)
 	require.Equal(t, uuid.Nil, got)
 
-	_, err = ResolveCustomerID("legacy-user-123")
+	_, err = db.ResolveCustomerID("legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")
 }

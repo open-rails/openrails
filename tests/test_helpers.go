@@ -4,35 +4,19 @@ package tests
 
 import (
 	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	authtesting "github.com/open-rails/authkit/authtest"
-	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 var (
-	// Test issuer for auth verification (shared across tests)
-	testIssuerOnce sync.Once
-	testIssuer     *authtesting.TestIssuer
-
-	// Shared test container suite for tests that need infra
+	// Package-shared suite: booted once, reused by every test that has no
+	// construction-time divergence (#694 phase 2 — the pooled harness).
 	sharedSuiteOnce sync.Once
 	sharedSuite     *TestContainerSuite
 )
@@ -45,101 +29,20 @@ func personalOwnerID(userID string) uuid.UUID {
 	return uuid.MustParse(userID)
 }
 
-// getTestIssuer returns a shared test issuer for authentication.
-// The issuer provides a JWKS endpoint and can sign tokens.
-func getTestIssuer() *authtesting.TestIssuer {
-	testIssuerOnce.Do(func() {
-		testIssuer = authtesting.NewTestIssuerWithAudience("test-app")
-	})
-	return testIssuer
-}
-
-// GetTestIssuerURL returns the URL of the test JWKS server to use as issuer.
-// This is called by testcontainer_suite.go when configuring the auth verifier.
-func GetTestIssuerURL() string {
-	return getTestIssuer().URL()
-}
-
-type testTokenClaims struct {
-	Subject  string `json:"sub"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Expires  int64  `json:"exp"`
-}
-
-func parseTestBearer(r *http.Request) (testTokenClaims, error) {
-	if r == nil {
-		return testTokenClaims{}, billingauth.ErrUnauthenticated
-	}
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	const prefix = "Bearer "
-	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return testTokenClaims{}, billingauth.ErrUnauthenticated
-	}
-	parts := strings.Split(strings.TrimSpace(header[len(prefix):]), ".")
-	if len(parts) != 3 {
-		return testTokenClaims{}, errors.New("invalid_token")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return testTokenClaims{}, errors.New("invalid_token")
-	}
-	var claims testTokenClaims
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return testTokenClaims{}, errors.New("invalid_token")
-	}
-	if claims.Subject == "" {
-		return testTokenClaims{}, errors.New("invalid_token")
-	}
-	if claims.Expires > 0 && time.Now().Unix() >= claims.Expires {
-		return testTokenClaims{}, errors.New("invalid_token")
-	}
-	return claims, nil
-}
-
-type suiteTestAuthenticator struct{}
-
-func (suiteTestAuthenticator) Authenticate(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
-	claims, err := parseTestBearer(r)
-	if err != nil {
-		return billingauth.UserContext{}, err
-	}
-	return billingauth.UserContext{
-		UserID:   claims.Subject,
-		Email:    claims.Email,
-		Username: claims.Username,
-	}, nil
-}
-
-type suiteTestDelegatedAuthenticator struct{}
-
-func (suiteTestDelegatedAuthenticator) AuthenticateDelegated(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-	claims, err := parseTestBearer(r)
-	if err != nil {
-		return nil, err
-	}
-	return &billingauth.DelegatedPrincipal{
-		MerchantID:   dbtest.TestMerchantID.String(),
-		MerchantSlug: dbtest.TestMerchantSlug,
-		SubjectID:    claims.Subject,
-		Issuer:       getTestIssuer().URL(),
-		Email:        claims.Email,
-		Username:     claims.Username,
-	}, nil
-}
-
-// getSharedTestSuite returns a shared TestContainerSuite for integration tests.
-// The suite is initialized once and reused across tests for performance.
+// getSharedTestSuite returns the shared TestContainerSuite, booting it on first
+// use. The suite's testing handle is refreshed per test, real time restored,
+// and the NMI clients re-derived (tests mutate them).
 func getSharedTestSuite(t *testing.T) *TestContainerSuite {
 	sharedSuiteOnce.Do(func() {
-		sharedSuite = NewTestContainerSuite(t)
+		sharedSuite = newPersistentSuite(t)
 	})
 	if sharedSuite == nil {
 		t.Fatalf("shared integration suite failed to initialize in an earlier test; inspect the first setup failure")
 	}
-	// The suite is shared across tests; keep its t handle fresh to avoid panics
-	// when helpers call require/assert via suite.t.
+	// The suite is shared across tests; keep its t handle fresh so helpers'
+	// require/assert calls fail the CURRENT test.
 	sharedSuite.t = t
+	sharedSuite.harness.SetT(t)
 	sharedSuite.ResetMutableRuntimeState()
 	return sharedSuite
 }
@@ -154,90 +57,58 @@ func logResponse(t *testing.T, w *httptest.ResponseRecorder, testName string) {
 	t.Logf("[%s]: Status=%d, Body=%s", testName, w.Code, body)
 }
 
-// setupTestServer creates a test server using testcontainers infrastructure.
-// This requires the integration build tag and Docker to be available.
+// setupTestServer returns the shared suite's real standalone server.
 func setupTestServer(t *testing.T) *server.Server {
-	suite := getSharedTestSuite(t)
-
-	// Register cleanup only once at the end of all tests
-	t.Cleanup(func() {
-		// Don't cleanup the shared suite here - it will be cleaned up when all tests finish
-		// The suite.Cleanup() should be called in TestMain or similar
-	})
-
-	return suite.Server
+	return getSharedTestSuite(t).Server
 }
 
-// setupTestSuite returns the shared test suite for tests that need direct database access.
-// Use this when you need to seed data or query the database directly.
+// setupTestSuite returns a suite for tests that need direct database access.
+// Construction-time divergence (Stripe rail, ClickHouse) boots a FRESH suite
+// bound to t; everything else — including clock control, which is a per-test
+// swap on the injectable SettableClock — pools onto the shared suite.
 func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
-	opts = append([]TestSuiteOption{WithSuitePort(freeTestPort(t))}, opts...)
-	suite := NewTestContainerSuite(t, opts...)
-	t.Cleanup(suite.Cleanup)
+	probe := &TestContainerSuite{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(probe)
+		}
+	}
+	if probe.stripeSecretKey != "" || probe.clickhouse {
+		return NewTestContainerSuite(t, opts...)
+	}
+	suite := getSharedTestSuite(t)
+	if probe.initialClock != nil {
+		suite.clock.Set(probe.initialClock)
+		t.Cleanup(func() { suite.clock.Set(nil) })
+	}
 	return suite
 }
 
-func freeTestPort(t *testing.T) int {
-	t.Helper()
-	for port := 20000; port <= 32767; port++ {
-		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port)))
-		if err != nil {
-			continue
-		}
-		require.NoError(t, listener.Close())
-		return port
-	}
-	t.Fatal("failed to allocate a test port compatible with FlexiblePort")
-	return 0
-}
-
-// setupTestServerWithAuth creates a test server with a valid JWT token.
-// The token is signed by the test issuer and will validate against the JWKS
-// endpoint. The subject is a fixed UUID — payable identities are UUID-only
-// (#364) and the auth boundary rejects anything else.
+// setupTestServerWithAuth returns the shared server plus a REAL minted
+// delegated access token. The subject is a fixed UUID — payable identities are
+// UUID-only (#364) and the auth boundary rejects anything else.
 func setupTestServerWithAuth(t *testing.T) (*server.Server, string) {
-	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("b1111111-1111-4111-8111-111111111111", "test@openrails.openrails.com")
-	return srv, token
+	suite := getSharedTestSuite(t)
+	token := suite.MintUserToken("b1111111-1111-4111-8111-111111111111", "test@openrails.openrails.com")
+	return suite.Server, token
 }
 
-// setupTestSuiteWithAuth returns the shared test suite with a valid JWT token and user ID.
-// Use this when you need to seed data and make authenticated requests.
-// The userID is a valid UUID string that can be used in database columns expecting UUID format.
+// setupTestSuiteWithAuth returns the shared test suite with a real minted token
+// and its user ID. Use this when you need to seed data and make authenticated
+// requests. The userID is a valid UUID string usable in UUID columns.
 func setupTestSuiteWithAuth(t *testing.T) (*TestContainerSuite, string, string) {
 	suite := getSharedTestSuite(t)
-	// Generate a valid UUID for the user ID (required by database schema)
 	userID := uuid.New().String()
 	email := "test-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 	return suite, token, userID
 }
 
-// setupTestServerWithRSAuth creates a test server with RS256-authenticated JWT token.
-// This is the same as setupTestServerWithAuth since all tokens use RS256.
-func setupTestServerWithRSAuth(t *testing.T) (*server.Server, string) {
-	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("b2222222-2222-4222-8222-222222222222", "rs256@openrails.openrails.com")
-	return srv, token
-}
-
-// CreateUserToken creates a JWT token without admin role for the given user ID.
-// Use this when you need a regular user token for a specific user ID.
-func CreateUserToken(t *testing.T, userID string) string {
-	t.Helper()
-	email := "user-" + userID[:8] + "@test.example.com"
-	return getTestIssuer().CreateToken(userID, email)
-}
-
-// CleanupSharedSuite should be called at the end of all tests to cleanup containers.
+// CleanupSharedSuite should be called at the end of all tests (TestMain) to
+// tear the shared suite down.
 func CleanupSharedSuite() {
 	if sharedSuite != nil {
-		sharedSuite.Server.Close(context.Background())
-		sharedSuite.App.Close(context.Background())
 		sharedSuite.Cleanup()
-	}
-	if testIssuer != nil {
-		testIssuer.Close()
 	}
 }
 

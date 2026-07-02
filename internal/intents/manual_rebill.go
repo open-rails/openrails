@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -111,9 +110,9 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 	if err != nil {
 		return SupersededBy("unusable manual rebill intent: " + err.Error()), nil
 	}
-	sub, err := repo.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
+	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return SupersededBy("subscription row no longer exists"), nil
 		}
 		return Relevance{}, err
@@ -156,7 +155,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		}
 	}
 
-	sub, err := repo.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
+	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
 	if err != nil {
 		return Retryable("load subscription: " + err.Error())
 	}
@@ -249,7 +248,7 @@ func (h *ManualRebillHandler) findSuccessfulSale(client *nmi.NMIClient, p Manual
 // that already left past_due (the renewal applied, or a racing worker
 // repaired it) is left alone.
 func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebillPayload, transactionID string) error {
-	subRepo := repo.NewSubscriptionRepo(h.DB)
+	subRepo := subscriptions.NewSubscriptionRepo(h.DB)
 	sub, err := subRepo.GetByID(ctx, p.SubscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription: %w", err)

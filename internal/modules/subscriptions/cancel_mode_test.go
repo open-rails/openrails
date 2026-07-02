@@ -32,9 +32,9 @@ func TestCancelMode_PerRail(t *testing.T) {
 		require.Equal(t, CancelModeReversible, CancelModeFor(sub, now))
 	})
 
-	t.Run("ccbill is external_portal", func(t *testing.T) {
+	t.Run("ccbill is destructive (#696 DataLink SMS cancel, no resume)", func(t *testing.T) {
 		sub := baseSub(models.RailCCBill, models.StatusActive)
-		require.Equal(t, CancelModeExternalPortal, CancelModeFor(sub, now))
+		require.Equal(t, CancelModeDestructive, CancelModeFor(sub, now))
 	})
 
 	t.Run("solana is destructive", func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestResumable(t *testing.T) {
 		sub := baseSub(models.RailCCBill, models.StatusCancelled)
 		sub.CurrentPeriodEndsAt = ptrTime(future)
 		require.False(t, Resumable(sub, now))
-		require.Equal(t, CancelModeExternalPortal, CancelModeFor(sub, now))
+		require.Equal(t, CancelModeDestructive, CancelModeFor(sub, now))
 	})
 
 	t.Run("nmi cancelled without deferred delete is NOT resumable", func(t *testing.T) {
@@ -125,10 +125,9 @@ func TestCancelPortalURL(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
 
+	// #696: no rail is external_portal anymore — CCBill cancels on OUR site.
 	ccbill := baseSub(models.RailCCBill, models.StatusCancelled)
-	url := CancelPortalURL(ccbill, now)
-	require.NotNil(t, url)
-	require.Equal(t, CCBillSupportPortalURL, *url)
+	require.Nil(t, CancelPortalURL(ccbill, now))
 
 	stripe := baseSub(models.RailStripe, models.StatusCancelled)
 	require.Nil(t, CancelPortalURL(stripe, now))

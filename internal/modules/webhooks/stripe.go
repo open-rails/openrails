@@ -11,7 +11,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -698,7 +697,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return fmt.Errorf("lookup original stripe payment for existing refund: %w", err)
 		}
-	} else if err != nil && !repo.IsNotFound(err) {
+	} else if err != nil && !db.IsNotFound(err) {
 		return fmt.Errorf("lookup stripe refund payment: %w", err)
 	}
 	if original == nil {
@@ -774,7 +773,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		if err != nil {
 			return fmt.Errorf("lookup original stripe payment for existing dispute: %w", err)
 		}
-	} else if err != nil && !repo.IsNotFound(err) {
+	} else if err != nil && !db.IsNotFound(err) {
 		return fmt.Errorf("lookup stripe dispute payment: %w", err)
 	}
 	var ledgerErr error
@@ -848,7 +847,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	}
 	disputeReversal, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, disputeID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("lookup stripe dispute reversal for won dispute: %w", err)
@@ -861,7 +860,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	var existingRecovery *models.Payment
 	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, recoveryID); err == nil && existing != nil {
 		existingRecovery = existing
-	} else if err != nil && !repo.IsNotFound(err) {
+	} else if err != nil && !db.IsNotFound(err) {
 		return fmt.Errorf("lookup stripe won dispute recovery payment: %w", err)
 	}
 
@@ -985,7 +984,7 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 		if err == nil {
 			return payment, nil
 		}
-		if !repo.IsNotFound(err) {
+		if !db.IsNotFound(err) {
 			return nil, fmt.Errorf("lookup stripe original payment: %w", err)
 		}
 	}

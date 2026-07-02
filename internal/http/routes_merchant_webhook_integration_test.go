@@ -56,7 +56,7 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	// refused while any environment=live ccbill account exists in the catalog.
 	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "stripe", "test", "acct_acme_test")
 	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_test")
-	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282/0000")
+	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282-0000")
 	putProviderSecret(t, ctx, secrets, acme.ID, "stripe", "acct_acme", "webhook_signing_secret", "whsec_acme")
 	putProviderSecret(t, ctx, secrets, evil.ID, "stripe", "acct_evil", "webhook_signing_secret", "whsec_evil")
 	putProviderSecret(t, ctx, secrets, acme.ID, "nmi", "nmi_acme_account", "webhook_signing_secret", "nmi_acme")

@@ -548,8 +548,12 @@ WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL;
 -- this period (no subscription-sourced window — live OR revoked — overlapping
 -- it; a recorded revoke is a recorded decision, never re-granted, spec §6).
 -- Excludes no-grant subs (owned by derive.subscription.missing) so the two
--- checks never double-fire. Returns the missing features as a spec blob so the
--- repair (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
+-- checks never double-fire. #695 absent-by-overlap: a LIVE window of ANY source
+-- overlapping the running period also counts as projected — derive-2 would
+-- deliberately project NO window over it (the repair records provenance only),
+-- so detection must mirror the repair's no-op or the finding re-fires forever.
+-- Returns the missing features as a spec blob so the repair
+-- (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
 -- nullable: NULL = merchant-wide sweep.
 -- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
@@ -568,6 +572,14 @@ CROSS JOIN LATERAL (
           AND e.deleted_at IS NULL
           AND e.start_at < s.current_period_ends_at
           AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM openrails.entitlements eo
+        WHERE eo.merchant_id = s.merchant_id
+          AND eo.customer_id = s.customer_id
+          AND eo.entitlement = feat
+          AND eo.revoked_at IS NULL AND eo.deleted_at IS NULL
+          AND eo.period && tstzrange(COALESCE(s.current_period_starts_at, s.started_at), s.current_period_ends_at, '[)')
     )
 ) missing
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -601,8 +613,8 @@ ORDER BY s.current_period_ends_at;
 --
 -- Partition (#690, one condition = one finding type):
 --   bounded window past the bound, sub row present  -> HERE (AUTO closure)
---   STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.orphan (ADMIN)
---   sub row missing entirely                        -> derive.entitlement.orphan (ADMIN)
+--   STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.unjustified (ADMIN)
+--   sub row missing entirely                        -> derive.entitlement.unjustified (ADMIN)
 --   terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
 -- customer_id nullable: NULL = merchant-wide sweep.
 -- name: ListDeadSubsWithLiveEntitlements :many
@@ -623,7 +635,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 ORDER BY s.id;
 
--- #690 DERIVE `derive.entitlement.orphan` — the FREELOADER detector. A LIVE
+-- #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector
+-- (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
+-- reserved for the paying-without-access category). A LIVE
 -- window (not revoked/deleted, started, unbounded or ending in the future)
 -- whose justification chain is PROVEN broken. Post-#691 fail-open, "live
 -- window past paid-through" is NORMAL for a standing auto-renew projection
@@ -650,7 +664,7 @@ ORDER BY s.id;
 -- grouped by status comparing end_at against GREATEST(current_period_ends_at,
 -- ended_at). This query is the union of both, restricted to proven-dead
 -- sources. customer_id nullable: NULL = merchant-wide sweep.
--- name: ListOrphanEntitlementWindows :many
+-- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        e.source_type, e.source_id, e.start_at, e.end_at,
        COALESCE(s.status::text, '') AS sub_status,
@@ -723,6 +737,32 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.status = 'unknown'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;
+
+-- #690 episode analytics totals: one compact pass over the two episode views
+-- (migration 067) for the gauges header. Freeloader episodes split out the
+-- `unsanctioned` cause (the failure class — sanctioned_dunning and
+-- awaiting_verification are policy, never failure); open = the span still
+-- accrues at now(). Days carry the views' documented approximations
+-- (paid-through snapshot, uncovered-tail-only measurement).
+-- name: CountErrorEpisodeTotals :one
+SELECT fl.total::bigint            AS freeloader_total,
+       fl.open_count::bigint       AS freeloader_open,
+       fl.unsanctioned::bigint     AS freeloader_unsanctioned,
+       fl.days::double precision   AS freeloader_days,
+       o.total::bigint             AS orphaned_total,
+       o.open_count::bigint        AS orphaned_open,
+       o.days::double precision    AS orphaned_days
+FROM (SELECT count(*) AS total,
+             count(*) FILTER (WHERE open) AS open_count,
+             count(*) FILTER (WHERE cause = 'unsanctioned') AS unsanctioned,
+             COALESCE(sum(days), 0) AS days
+        FROM openrails.freeloader_episodes
+       WHERE merchant_id = sqlc.arg(merchant_id)::uuid) fl
+CROSS JOIN (SELECT count(*) AS total,
+                   count(*) FILTER (WHERE open) AS open_count,
+                   COALESCE(sum(days), 0) AS days
+              FROM openrails.orphaned_episodes
+             WHERE merchant_id = sqlc.arg(merchant_id)::uuid) o;
 
 -- #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
 -- to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).

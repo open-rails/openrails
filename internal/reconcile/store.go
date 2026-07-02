@@ -330,22 +330,34 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 
 // --- #692 operator findings queue (admin API) ---
 
-// #690 gauge type sets: named counts over OPEN findings. The detectors live
-// in the converge DERIVE/CON passes; extend the sets here when a new type
-// joins a gauge, not the queries.
+// #690 gauge type sets: named counts over OPEN findings, one per error
+// category (Orphaned / Freeloader / Double-Billed). The detectors live in the
+// converge DERIVE/CON passes; extend the sets here when a new type joins a
+// gauge, not the queries.
 var (
-	// FreeloaderFindingTypes: live access whose source is PROVEN dead or
-	// absent (#691: stale ≠ freeloader). The dead-sub-live-window check
-	// (derive.grant_effect.mismatch, revoke direction) is deliberately NOT in
-	// the set: it is AUTO-repaired (the missed #691 closure) in the same
-	// sweep, so it never sits open — its standing-window shape surfaces here
-	// as derive.entitlement.orphan instead.
+	// OrphanedFindingTypes: PAYING WITHOUT ACCESS — the MISSING side (money
+	// collected, entitlement absent/wrongly revoked). Only the ADMIN-side
+	// type counts: derive.subscription.missing and derive.wallet.missing are
+	// AUTO-repaired in the same sweep and never sit open (same rationale that
+	// keeps the dead-subs AUTO check out of freeloaders) — they are episode
+	// material (openrails.orphaned_episodes), not standing errors.
+	// derive.grant.missing is ADMIN surface-only and DOES sit open.
+	OrphanedFindingTypes = []string{
+		"derive.grant.missing",
+	}
+	// FreeloaderFindingTypes: ACCESS WITHOUT PAYING — live access whose
+	// source is PROVEN dead or absent (#691: stale ≠ freeloader). The
+	// dead-sub-live-window check (derive.grant_effect.mismatch, revoke
+	// direction) is deliberately NOT in the set: it is AUTO-repaired (the
+	// missed #691 closure) in the same sweep, so it never sits open — its
+	// standing-window shape surfaces here as derive.entitlement.unjustified
+	// instead.
 	FreeloaderFindingTypes = []string{
-		"derive.entitlement.orphan",
+		"derive.entitlement.unjustified",
 		"derive.grant_effect.excess",
 	}
-	// DuplicateCoverageFindingTypes: the same (customer, product) holding
-	// overlapping paid coverage twice.
+	// DuplicateCoverageFindingTypes: DOUBLE-BILLED — the same (customer,
+	// product) holding overlapping paid coverage twice.
 	DuplicateCoverageFindingTypes = []string{
 		"consistency.duplicate.ownership",
 		"consistency.duplicate.provider_charge",
@@ -403,15 +415,45 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]
 	return out, total, nil
 }
 
-// QueueGauges is the #690 dashboard header. Freeloaders and DuplicateCoverage
-// are ALWAYS-ZERO error metrics (counts over OPEN findings of the type sets);
-// VerificationPressure is a live pressure reading, allowed to be nonzero.
+// QueueGauges is the #690 dashboard header. OrphanedMembers, Freeloaders and
+// DuplicateCoverage are ALWAYS-ZERO error metrics (counts over OPEN findings
+// of the three category type sets); VerificationPressure is a live pressure
+// reading, allowed to be nonzero; Episodes is the historical/interval measure
+// (spans + error-days from the migration-067 views, approximations documented
+// there).
 type QueueGauges struct {
+	OrphanedMembers      int64                `json:"orphaned_members"`
 	Freeloaders          int64                `json:"freeloaders"`
 	DuplicateCoverage    int64                `json:"duplicate_coverage"`
 	VerificationPressure VerificationPressure `json:"verification_pressure"`
+	Episodes             EpisodeTotals        `json:"episodes"`
 	OpenBySeverity       map[string]int64     `json:"open_by_severity"`
 	TotalOpen            int64                `json:"total_open"`
+}
+
+// EpisodeTotals (#690): compact summary of the two episode views — the
+// historical/interval companions to the point-in-time gauges. A freeloader/
+// orphaned episode is a SPAN (access-without-payment / payment-without-access)
+// with open episodes still accruing at now().
+type EpisodeTotals struct {
+	Freeloader FreeloaderEpisodeSummary `json:"freeloader"`
+	Orphaned   EpisodeSummary           `json:"orphaned"`
+}
+
+// EpisodeSummary: episode count, how many are still open (accruing), and the
+// total error-days across all spans.
+type EpisodeSummary struct {
+	Total     int64   `json:"total"`
+	Open      int64   `json:"open"`
+	TotalDays float64 `json:"total_days"`
+}
+
+// FreeloaderEpisodeSummary adds the `unsanctioned` split: sanctioned_dunning
+// and awaiting_verification spans are POLICY (deliberate unpaid access), never
+// failure — only unsanctioned spans indicate the state machine failed.
+type FreeloaderEpisodeSummary struct {
+	EpisodeSummary
+	Unsanctioned int64 `json:"unsanctioned"`
 }
 
 // VerificationPressure (#690/#691): subscriptions parked `unknown` whose
@@ -449,6 +491,9 @@ func (s *PGStore) Gauges(ctx context.Context) (QueueGauges, error) {
 	for _, row := range rows {
 		g.TotalOpen += row.OpenCount
 		g.OpenBySeverity[row.Severity] += row.OpenCount
+		if inSet(OrphanedFindingTypes, row.FindingType) {
+			g.OrphanedMembers += row.OpenCount
+		}
 		if inSet(FreeloaderFindingTypes, row.FindingType) {
 			g.Freeloaders += row.OpenCount
 		}
@@ -465,6 +510,25 @@ func (s *PGStore) Gauges(ctx context.Context) (QueueGauges, error) {
 	g.VerificationPressure.Count = pressure.PressureCount
 	if pressure.MaxAgeSeconds != nil {
 		g.VerificationPressure.MaxAgeSeconds = *pressure.MaxAgeSeconds
+	}
+	episodes, err := s.DB.Gen(ctx).CountErrorEpisodeTotals(ctx, tid.UUID())
+	if err != nil {
+		return g, err
+	}
+	g.Episodes = EpisodeTotals{
+		Freeloader: FreeloaderEpisodeSummary{
+			EpisodeSummary: EpisodeSummary{
+				Total:     episodes.FreeloaderTotal,
+				Open:      episodes.FreeloaderOpen,
+				TotalDays: episodes.FreeloaderDays,
+			},
+			Unsanctioned: episodes.FreeloaderUnsanctioned,
+		},
+		Orphaned: EpisodeSummary{
+			Total:     episodes.OrphanedTotal,
+			Open:      episodes.OrphanedOpen,
+			TotalDays: episodes.OrphanedDays,
+		},
 	}
 	return g, nil
 }

@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -128,6 +127,9 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// MISSING → ADMIN surface-only: auto-granting re-runs derive-1 (product-spec-
 	// dependent, owned by the purchase path), so an operator investigates the
 	// creation failure and re-triggers rather than the engine guessing the window.
+	// Severity CRITICAL (#690, Paul's ordering): this is the ORPHANED category —
+	// taking money without delivering access — which outranks giving content
+	// away (freeloader findings stay high).
 	ungranted, err := gl.UngrantedGrantablePayments(ctx, customer)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted grantable payments: %w", err)
@@ -138,7 +140,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Type:       "derive.grant.missing",
 			Shape:      ShapeMissing,
 			Class:      ClassAdmin,
-			Severity:   "high",
+			Severity:   "critical",
 			SubjectKey: "payment:" + p.ID.String(),
 			Provider:   "self",
 			Evidence:   map[string]any{"payment_id": p.ID.String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
@@ -260,7 +262,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// (bounds live windows at the bound, drops scheduled ones past it) so the
 	// runway survives while the overrun is cleaned. STANDING (end_at NULL)
 	// windows of terminal subs are the freeloader case (derive.entitlement.
-	// orphan below, ADMIN) — the partition keeps one condition per check.
+	// unjustified below, ADMIN) — the partition keeps one condition per check.
 	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
 	})
@@ -293,22 +295,24 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.entitlement.orphan (#690) — the FREELOADER detector: a LIVE
-	// window whose source is PROVEN dead or absent (sub row missing; standing
-	// window of a terminal sub whose closure never landed; refunded one-off
-	// payment) with no live grant justifying the access. Post-#691 fail-open,
-	// stale is NOT freeloading — standing windows of live/unknown/past_due
-	// subs never surface here. ADMIN surface-only (policy: access removal is
-	// an operator decision, never automatic on a derived conclusion), with the
-	// #692 revoke/admin-grant recommendation pair.
-	orphans, err := q.ListOrphanEntitlementWindows(ctx, gen.ListOrphanEntitlementWindowsParams{
+	// derive.entitlement.unjustified (#690, renamed from derive.entitlement.
+	// orphan in migration 066 — "orphaned" is the paying-without-access
+	// category) — the FREELOADER detector: a LIVE window whose source is
+	// PROVEN dead or absent (sub row missing; standing window of a terminal
+	// sub whose closure never landed; refunded one-off payment) with no live
+	// grant justifying the access. Post-#691 fail-open, stale is NOT
+	// freeloading — standing windows of live/unknown/past_due subs never
+	// surface here. ADMIN surface-only (policy: access removal is an operator
+	// decision, never automatic on a derived conclusion), with the #692
+	// revoke/admin-grant recommendation pair.
+	unjustified, err := q.ListUnjustifiedEntitlementWindows(ctx, gen.ListUnjustifiedEntitlementWindowsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("derive: scan orphan entitlement windows: %w", err)
+		return nil, fmt.Errorf("derive: scan unjustified entitlement windows: %w", err)
 	}
-	for i := range orphans {
-		out = append(out, orphanEntitlementFinding(&orphans[i]))
+	for i := range unjustified {
+		out = append(out, unjustifiedEntitlementFinding(&unjustified[i]))
 	}
 	return out, nil
 }
@@ -324,10 +328,11 @@ func latestTime(a, b *time.Time) *time.Time {
 	return b
 }
 
-// orphanEntitlementFinding renders one freeloader window as an ADMIN finding
-// carrying the #692 recommendation: revoke (default; as-of the entitled bound
-// when the terminal sub recorded one) or record an admin grant instead.
-func orphanEntitlementFinding(o *gen.ListOrphanEntitlementWindowsRow) ConvergeFinding {
+// unjustifiedEntitlementFinding renders one freeloader window as an ADMIN
+// finding carrying the #692 recommendation: revoke (default; as-of the
+// entitled bound when the terminal sub recorded one) or record an admin grant
+// instead.
+func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) ConvergeFinding {
 	asOf := ""
 	bound := latestTime(o.SubPeriodEndsAt, o.SubEndedAt)
 	if o.Cause == "terminal_subscription_standing" && bound != nil {
@@ -373,7 +378,7 @@ func orphanEntitlementFinding(o *gen.ListOrphanEntitlementWindowsRow) ConvergeFi
 	}
 
 	return ConvergeFinding{
-		Type:              "derive.entitlement.orphan",
+		Type:              "derive.entitlement.unjustified",
 		Shape:             ShapeExcess,
 		Class:             ClassAdmin,
 		Severity:          "high",
@@ -508,7 +513,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:   "self",
 			Evidence:   evidence,
 			Repair: func(ctx context.Context) error {
-				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				sub, err := subscriptions.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
 				if err != nil {
 					return fmt.Errorf("life: load lapsed subscription %s: %w", subID, err)
 				}
@@ -541,7 +546,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				// Terminal cancel through the shared core. A never-confirmed pending
 				// sub has no entitlements/money to unwind (RevokeSources empty); the
 				// Solana cascade is a tolerant no-op when no row was ever enrolled.
-				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				sub, err := subscriptions.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
 				if err != nil {
 					return fmt.Errorf("life: load stale-pending subscription %s: %w", subID, err)
 				}
@@ -733,7 +738,8 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// scan is O(that customer)), merchant-wide when nil (the sweep). The SQL does
 	// the filtering, so an after-every-mutation invocation stays cheap.
 	// #690 partition: LIVE windows with dangling sub sources are freeloaders
-	// (derive.entitlement.orphan); this reference check keeps the non-live rest.
+	// (derive.entitlement.unjustified); this reference check keeps the
+	// non-live rest.
 	cust := scope.Customer
 	orphanSubs, err := q.ConOrphanEntitlementSubscriptionSource(ctx, gen.ConOrphanEntitlementSubscriptionSourceParams{
 		Now: now, CustomerID: cust,

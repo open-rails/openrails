@@ -48,7 +48,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 
 	userID := uuid.New().String()
 	email := "checkout-session-mobius-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	mock.Reset()
 
@@ -187,9 +187,7 @@ func TestCheckoutSessionCCBillRedirect(t *testing.T) {
 
 	userID := uuid.New().String()
 	email := "checkout-session-ccbill-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateTokenWithClaims(userID, email, map[string]any{
-		"username": "user_" + t.Name(),
-	})
+	token := suite.minter.Mint(userID, email, "user_"+t.Name(), nil)
 
 	body := map[string]any{
 		"price_id": priceID.String(),
@@ -235,7 +233,7 @@ func TestCheckoutSessionMobiusTokenXOR(t *testing.T) {
 
 	userID := uuid.New().String()
 	email := "checkout-session-xor-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
 		"price_id": priceID.String(),

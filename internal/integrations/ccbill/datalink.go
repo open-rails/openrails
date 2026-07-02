@@ -23,7 +23,11 @@ type DataLinkClient struct {
 	Username     string
 	Password     string
 	DevMode      bool
-	HTTPClient   *http.Client
+	// ReadOnly blocks every SMS mutation (CancelSubscription) at the transport
+	// with ErrProviderReadOnly; reads stay available. Set from
+	// cfg.IsProviderReadOnly() in build_runtime (mode=readonly, #346).
+	ReadOnly   bool
+	HTTPClient *http.Client
 }
 
 const defaultDataLinkBaseURL = "https://datalink.ccbill.com"

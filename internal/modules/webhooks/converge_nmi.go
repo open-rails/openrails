@@ -15,7 +15,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -74,7 +73,7 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 
 	sub, err := resolveNMISubscriptionByReference(ctx, rail, s.SubscriptionService, s.PaymentService, reference)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			// One-time sale, foreign object, or the checkout row hasn't landed
 			// yet. The webhook was never a state source for those — the
 			// checkout path and the pull sweep own them.
@@ -232,10 +231,10 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
 	if s.PaymentService != nil && probe.DeclineTransactionID != "" {
 		existing, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(rail), probe.DeclineTransactionID)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return fmt.Errorf("nmi converge: lookup fetched decline payment: %w", err)
 		}
-		if existing == nil || repo.IsNotFound(err) {
+		if existing == nil || db.IsNotFound(err) {
 			amountMicros := int64(0)
 			if raw := strings.TrimSpace(probe.DeclineAmount); raw != "" {
 				if cents, perr := moneyutil.ParseDecimalToCents(raw); perr == nil {
@@ -299,7 +298,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 // local subscription: rail subscription id first, then the order-id metadata
 // stamped at signup, then the signup attempt's payment metadata. Identity
 // resolution only — shared by the converge path and the payload-apply money
-// handlers (refund/void). Returns repo.IsNotFound-style error when unresolved.
+// handlers (refund/void). Returns db.IsNotFound-style error when unresolved.
 func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc *subscriptions.SubscriptionService, paySvc *payments.PaymentService, reference string) (*models.Subscription, error) {
 	if subSvc == nil {
 		return nil, fmt.Errorf("subscription service is required")
@@ -312,7 +311,7 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 	subscription, err := subSvc.GetByRailSubscriptionID(ctx, rail, ref)
 	if err == nil {
 		return subscription, nil
-	} else if !repo.IsNotFound(err) {
+	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load subscription by rail subscription ID: %w", err)
 	}
 
@@ -320,13 +319,13 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 	if err == nil {
 		return subscription, nil
 	}
-	if !repo.IsNotFound(err) {
+	if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load subscription by NMI order metadata: %w", err)
 	}
 
 	if paySvc != nil {
 		attempt, lookupErr := paySvc.GetByMetadataValue(ctx, "nmi_subscription_order_id", ref)
-		if lookupErr != nil && !repo.IsNotFound(lookupErr) {
+		if lookupErr != nil && !db.IsNotFound(lookupErr) {
 			return nil, fmt.Errorf("load NMI subscription attempt by order metadata: %w", lookupErr)
 		}
 		if lookupErr == nil && attempt != nil {

@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #690 detector tests: the freeloader detector (derive.entitlement.orphan),
+// #690 detector tests: the freeloader detector (derive.entitlement.unjustified),
 // the cross-month duplicate-ownership detector (consistency.duplicate.
 // ownership), and the #691 runway guard on the dead-subs check.
 
@@ -110,10 +110,10 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 	}))
 }
 
-// TestConverge_DeriveEntitlementOrphan: the three freeloader legs fire ADMIN
+// TestConverge_DeriveEntitlementUnjustified: the three freeloader legs fire ADMIN
 // findings with the revoke/admin-grant recommendation; stale-but-live sources
 // (unknown/past_due standing windows, #691) and paid shapes never fire.
-func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
+func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -220,14 +220,14 @@ func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
 		})
 	})
 
-	assertOrphan := func(ctx context.Context, entID uuid.UUID, wantCause string) map[string]any {
+	assertUnjustified := func(ctx context.Context, entID uuid.UUID, wantCause string) map[string]any {
 		t.Helper()
 		var status, severity string
 		var prose *string
 		var evidence []byte
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status, severity, recommended_action, evidence FROM openrails.reconciliation_findings
-			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.orphan' AND subject_key=$2`,
+			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&status, &severity, &prose, &evidence))
 		require.Equal(t, "requires_review", status, "freeloaders are ADMIN surface-only")
 		require.Equal(t, "high", severity)
@@ -245,12 +245,12 @@ func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
 		require.Equal(t, recommend.ActionRecordAdminGrant, rec.Alternatives[0].Action)
 		return rec.Params
 	}
-	noOrphan := func(ctx context.Context, entID uuid.UUID, label string) {
+	noUnjustified := func(ctx context.Context, entID uuid.UUID, label string) {
 		t.Helper()
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.reconciliation_findings
-			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.orphan' AND subject_key=$2`,
+			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&n))
 		require.Zero(t, n, label)
 	}
@@ -259,21 +259,21 @@ func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
 		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 
-		assertOrphan(ctx, entMissingSub, "missing_subscription")
-		params := assertOrphan(ctx, entTerminal, "terminal_subscription_standing")
+		assertUnjustified(ctx, entMissingSub, "missing_subscription")
+		params := assertUnjustified(ctx, entTerminal, "terminal_subscription_standing")
 		asOf, hasAsOf := params["as_of"].(string)
 		require.True(t, hasAsOf, "terminal-standing recommendation carries the entitled bound as as_of")
 		parsed, err := time.Parse(time.RFC3339, asOf)
 		require.NoError(t, err)
 		require.WithinDuration(t, bound, parsed, 2*time.Second)
-		assertOrphan(ctx, entRefunded, "refunded_payment")
+		assertUnjustified(ctx, entRefunded, "refunded_payment")
 
-		noOrphan(ctx, entRunway, "#691: paid runway (grant covers now) is not freeloading — no finding until past period end")
-		noOrphan(ctx, entUnknown, "#691: stale unknown sub is not a freeloader")
-		noOrphan(ctx, entPastDue, "#691: past_due standing window is not a freeloader")
-		noOrphan(ctx, entPaidOneOff, "a completed payment justifies its window")
+		noUnjustified(ctx, entRunway, "#691: paid runway (grant covers now) is not freeloading — no finding until past period end")
+		noUnjustified(ctx, entUnknown, "#691: stale unknown sub is not a freeloader")
+		noUnjustified(ctx, entPastDue, "#691: past_due standing window is not a freeloader")
+		noUnjustified(ctx, entPaidOneOff, "a completed payment justifies its window")
 
-		// Partition: the LIVE dangling-sub window belongs to the orphan check —
+		// Partition: the LIVE dangling-sub window belongs to the unjustified check —
 		// the CON reference check must not double-fire on it; and the dead-subs
 		// AUTO check must not touch STANDING windows of terminal subs.
 		var n int
@@ -281,12 +281,12 @@ func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
 			`SELECT count(*) FROM openrails.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
 			merchantID, "entitlement:"+entMissingSub.String()).Scan(&n))
-		require.Zero(t, n, "partition: live dangling window is orphan-only")
+		require.Zero(t, n, "partition: live dangling window is unjustified-only")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
 			merchantID, "subscription:"+subTerminal.String()).Scan(&n))
-		require.Zero(t, n, "partition: standing window of a terminal sub is orphan-only, not the dead-subs AUTO check")
+		require.Zero(t, n, "partition: standing window of a terminal sub is unjustified-only, not the dead-subs AUTO check")
 
 		// Surface-only: every window is untouched.
 		for _, id := range []uuid.UUID{entMissingSub, entTerminal, entRefunded} {
@@ -304,7 +304,7 @@ func TestConverge_DeriveEntitlementOrphan(t *testing.T) {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.reconciliation_findings
-			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.orphan' AND subject_key=ANY($2)`,
+			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=ANY($2)`,
 			merchantID, subjects).Scan(&n))
 		require.Equal(t, 3, n, "three freeloader shapes, one finding each, no duplicates")
 		return nil

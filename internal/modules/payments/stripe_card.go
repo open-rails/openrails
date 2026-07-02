@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -117,7 +116,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 	}
 
 	source, err := database.Gen(ctx).GetStripeAliasCardSnapshot(ctx, aliases)
-	if repo.IsNotFound(err) {
+	if db.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -215,7 +214,7 @@ func UpsertStripeCardForCustomer(
 			pm.ExpiryDate = &card.Expiry
 		}
 		// Stamp the payable merchant subject alongside the legacy user_id (#317).
-		if pm.CustomerID, err = repo.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
+		if pm.CustomerID, err = db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
 			return fmt.Errorf("resolve merchant subject for stripe payment method: %w", err)
 		}
 		if err := methods.Create(ctx, pm); err != nil {

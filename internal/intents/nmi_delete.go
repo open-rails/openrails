@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // TypeNMIDeleteSubscription is the deferred NMI delete_subscription intent
@@ -81,7 +81,7 @@ func (h *NMIDeleteHandler) now() time.Time {
 func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return SupersededBy("subscription row no longer exists"), nil
 		}
 		return Relevance{}, err
@@ -181,7 +181,7 @@ func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.Open
 	if intent.SubscriptionID == nil {
 		return nil, fmt.Errorf("intent has no subscription_id")
 	}
-	return repo.NewSubscriptionRepo(h.DB).GetByID(ctx, *intent.SubscriptionID)
+	return subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, *intent.SubscriptionID)
 }
 
 // finalize clears the DeletionScheduledAt read model: the cancellation is now
@@ -190,7 +190,7 @@ func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.Open
 func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent) error {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -199,7 +199,7 @@ func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsRai
 		return nil
 	}
 	sub.DeletionScheduledAt = nil
-	return repo.NewSubscriptionRepo(h.DB).UpdateAt(ctx, sub, h.now())
+	return subscriptions.NewSubscriptionRepo(h.DB).UpdateAt(ctx, sub, h.now())
 }
 
 // subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/

@@ -787,6 +787,10 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 		}
 		return fmt.Errorf("provider account %q requires account_id", rail)
 	}
+	// #697: rail-specific format doctrine (CCBill ids are dash-joined).
+	if err := config.ValidateRailAccountID(models.Rail(rail), accountID); err != nil {
+		return fmt.Errorf("provider account %q: %w", rail, err)
+	}
 	for key, value := range account.Secrets {
 		name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
 		if err != nil {

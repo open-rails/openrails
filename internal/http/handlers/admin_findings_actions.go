@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -239,7 +239,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 	ctx := r.Request.Context()
 	sub, err := r.State.SubscriptionService.GetByID(ctx, subID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return paramErrorf("subscription %s not found", subID)
 		}
 		return fmt.Errorf("load subscription %s: %w", subID, err)
@@ -279,6 +279,31 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 			result["delete_intent"] = "queued"
 		}
 		return nil
+	case sub.Rail == models.RailCCBill:
+		// #696: local cancel + durable ccbill_cancel_subscription intent
+		// (queue-always — mode/credentials gate execution, never the enqueue),
+		// mirroring the NMI branch. The executor drains it through the DataLink
+		// SMS choke point and verifies via viewSubscriptionStatus.
+		if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, r.State.DB, sub, subscriptions.LocalCancellation{
+			EndedAt:       now,
+			CancelType:    models.CancelTypeMerchant,
+			Feedback:      &feedback,
+			RevokeReason:  models.EntitlementRevokeAdmin,
+			RevokeAsOf:    now,
+			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
+		}); err != nil {
+			return fmt.Errorf("cancel subscription %s: %w", subID, err)
+		}
+		result["cancel"] = "cancelled"
+		result["subscription_id"] = subID.String()
+		if sub.RailSubscriptionID != "" {
+			if err := intents.NewCCBillCancelScheduler(r.State.DB, intents.OriginAdmin, reason).
+				ScheduleCCBillCancel(ctx, sub.CustomerID.String(), sub.ID); err != nil {
+				return fmt.Errorf("local cancel applied but ccbill cancel intent enqueue failed: %w", err)
+			}
+			result["cancel_intent"] = "queued"
+		}
+		return nil
 	case sub.Rail == models.RailStripe:
 		stripeSvc := &subscriptions.StripeService{Config: r.State.Config, Rails: r.State.Rails}
 		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
@@ -297,8 +322,8 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		result["subscription_id"] = subID.String()
 		return nil
 	default:
-		// CCBill (external portal), Solana (subscriber-signed) etc.: no
-		// operator-driven cancel path here.
+		// Solana (subscriber-signed by design) etc.: no operator-driven cancel
+		// path here.
 		return paramErrorf("cancel_and_refund is not supported for rail %q (subscription %s)", sub.Rail, subID)
 	}
 }
@@ -317,6 +342,11 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	payment, err := r.State.PaymentService.GetByID(ctx, paymentID)
 	if err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
+	}
+	if payment.Rail == models.RailCCBill {
+		// #696: DataLink SMS exposes no verified refund action (Phase 0 will
+		// confirm whether one exists); refunds stay operator-manual.
+		return paramErrorf("refunds are not supported for ccbill through OpenRails; issue the refund manually in the CCBill admin portal (payment %s, transaction %s)", paymentID, payment.TransactionID)
 	}
 	amount := payment.Amount // full refund by default (micros)
 	if raw, ok := params["amount"]; ok && raw != nil {

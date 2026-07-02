@@ -1,6 +1,6 @@
 //go:build integration
 
-package repo
+package db_test
 
 import (
 	"context"
@@ -10,8 +10,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
+
+// TestMain terminates the shared dbtest Postgres container after this package's
+// tests so the container is closed after use even when the testcontainers Ryuk
+// reaper is unavailable (offline/sandboxed runs).
+func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	ctx := context.Background()
@@ -31,7 +37,7 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, userID)
 	})
 
-	resolved, err := EnsureCustomerID(ctx, pool, tenantID, userID.String())
+	resolved, err := db.EnsureCustomerID(ctx, pool, tenantID, userID.String())
 	require.NoError(t, err)
 	require.Equal(t, userID, resolved)
 
@@ -50,10 +56,10 @@ func TestEnsureCustomerID_RejectsNonUUIDSubject(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
 
-	_, err := EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "legacy-user-123")
+	_, err := db.EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")
 
-	id, err := EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "")
+	id, err := db.EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "")
 	require.NoError(t, err)
 	require.Equal(t, uuid.Nil, id)
 }

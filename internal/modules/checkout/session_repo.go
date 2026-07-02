@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -41,7 +40,7 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	if currency == "" {
 		return fmt.Errorf("checkout session currency required")
 	}
-	if err := repo.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
 		return err
 	}
 	meta, fields, state, err := checkoutSessionJSONB(session)
@@ -176,7 +175,7 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 }
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -26,16 +27,28 @@ import (
 // read live from the subscriptions table.
 // ============================================================================
 
-// gaugesProbe decodes the full gauges object incl. verification_pressure
-// (the sibling findingsListBody predates the third gauge).
+// gaugesProbe decodes the full gauges object incl. verification_pressure and
+// the #690 episode summary (the sibling findingsListBody predates them).
+type episodeSummaryProbe struct {
+	Total        int64   `json:"total"`
+	Open         int64   `json:"open"`
+	Unsanctioned int64   `json:"unsanctioned"`
+	TotalDays    float64 `json:"total_days"`
+}
+
 type gaugesProbe struct {
 	Gauges struct {
+		OrphanedMembers      int64 `json:"orphaned_members"`
 		Freeloaders          int64 `json:"freeloaders"`
 		DuplicateCoverage    int64 `json:"duplicate_coverage"`
 		VerificationPressure struct {
 			Count         int64 `json:"count"`
 			MaxAgeSeconds int64 `json:"max_age_seconds"`
 		} `json:"verification_pressure"`
+		Episodes struct {
+			Freeloader episodeSummaryProbe `json:"freeloader"`
+			Orphaned   episodeSummaryProbe `json:"orphaned"`
+		} `json:"episodes"`
 		TotalOpen int64 `json:"total_open"`
 	} `json:"gauges"`
 }
@@ -81,7 +94,7 @@ func TestFindingsGaugesFreeloaderDetectorEndToEnd(t *testing.T) {
 
 	fx.sweep()
 
-	body := fx.list("?finding_type=derive.entitlement.orphan")
+	body := fx.list("?finding_type=derive.entitlement.unjustified")
 	require.Len(t, body.Items, 1, "the sweep detected the freeloader")
 	item := body.Items[0]
 	assert.Equal(t, "high", item.Severity)
@@ -219,4 +232,282 @@ func TestFindingsCancelAndRefundRequiresATarget(t *testing.T) {
 		map[string]any{"outcome": "approve", "notes": "try"}, findingID.String())
 	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	assert.Equal(t, "requires_review", string(fx.findingRow(findingID).Status))
+}
+
+// seedGrantableProduct: a product that PROMISES entitlements (non-empty
+// entitlements_spec) with a time-boxed price — the shape derive.grant.missing
+// and the episode views key on (the fixture's default product is spec-less).
+func (fx *findingsFixture) seedGrantableProduct(feature string, hours int) (productID, priceID uuid.UUID) {
+	fx.t.Helper()
+	productID, priceID = uuid.New(), uuid.New()
+	sfx := uuid.NewString()[:8]
+	fx.exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+	         VALUES ($1, $2, $2, jsonb_build_object($3::text, NULL), $4)`,
+		productID, "grantable-"+sfx, feature, fx.merchant)
+	fx.exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	         VALUES ($1, $2, 10000000, 'usd', $3, true, $4)`, priceID, productID, hours, fx.merchant)
+	return productID, priceID
+}
+
+// TestFindingsGaugesOrphanedMembersDetectorEndToEnd (#690 three categories):
+// the ORPHANED shape — money collected, access never delivered (a completed
+// payment for a grantable product with NO grant) — is detected by the sweep as
+// derive.grant.missing at severity CRITICAL (taking money wrongly outranks
+// giving content away), moves the orphaned_members gauge, and shows up in the
+// orphaned_episodes analytic as an OPEN paying-without-access span. The
+// finding is surface-only (no structured recommendation → approve is 422);
+// ignoring it clears the gauge while the episode persists (history, not
+// queue state).
+func TestFindingsGaugesOrphanedMembersDetectorEndToEnd(t *testing.T) {
+	fx := newFindingsFixture(t)
+
+	healthy := fx.gauges()
+	assert.Zero(t, healthy.Gauges.OrphanedMembers)
+	assert.Zero(t, healthy.Gauges.Episodes.Orphaned.Total)
+	assert.Zero(t, healthy.Gauges.Episodes.Freeloader.Total)
+
+	_, priceID := fx.seedGrantableProduct("orph-feat-"+uuid.NewString()[:8], 720)
+	payID := uuid.New()
+	fx.exec(`INSERT INTO openrails.payments
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'usd', 'completed', now() - interval '3 days', $4, $5)`,
+		payID, priceID, "orphpay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
+
+	fx.sweep()
+
+	body := fx.list("?finding_type=derive.grant.missing")
+	require.Len(t, body.Items, 1, "the sweep detected the undelivered paid grant")
+	item := body.Items[0]
+	assert.Equal(t, "critical", item.Severity, "#690: orphaned (paying, no access) is critical")
+	assert.Equal(t, "requires_review", item.Status, "ADMIN surface-only")
+	assert.Nil(t, item.Recommendation, "no mechanical fix: re-granting re-runs derive-1")
+
+	probe := fx.gauges()
+	assert.EqualValues(t, 1, probe.Gauges.OrphanedMembers, "orphaned_members counts the open MISSING-side finding")
+	assert.Zero(t, probe.Gauges.Freeloaders, "orphaned is not freeloading")
+	assert.EqualValues(t, 1, probe.Gauges.Episodes.Orphaned.Total, "paid-but-no-access span in the episode view")
+	assert.EqualValues(t, 1, probe.Gauges.Episodes.Orphaned.Open, "still paying (coverage reaches past now): open episode")
+	assert.InDelta(t, 3.0, probe.Gauges.Episodes.Orphaned.TotalDays, 0.2, "3 uncovered days so far")
+
+	// approve is unavailable (surface-only finding) …
+	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+item.ID+"/resolve",
+		map[string]any{"outcome": "approve", "notes": "try"}, item.ID)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+	// … ignore clears the gauge; the episode is history and persists.
+	rec = fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+item.ID+"/resolve",
+		map[string]any{"outcome": "ignore", "notes": "operator investigated out-of-band"}, item.ID)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	after := fx.gauges()
+	assert.Zero(t, after.Gauges.OrphanedMembers, "gauge reads open findings only")
+	assert.EqualValues(t, 1, after.Gauges.Episodes.Orphaned.Total, "the episode analytic is unaffected by queue state")
+}
+
+// TestFindingsFreeloaderEpisodes (#690 episode analytics): the freeloader view
+// turns access-without-payment into labeled SPANS — sanctioned_dunning
+// (past_due with a retry scheduled) and awaiting_verification (`unknown` past
+// paid-through, the #691 carve-out) are POLICY labels; unsanctioned is the
+// failure class. Open episodes end at now(); a revoked overrun is a CLOSED
+// span [paid-through, revoked_at). A paying active sub never appears.
+func TestFindingsFreeloaderEpisodes(t *testing.T) {
+	fx := newFindingsFixture(t)
+	now := time.Now().UTC()
+	sfx := uuid.NewString()[:8]
+
+	seedSub := func(productID, priceID uuid.UUID, status string, periodEnd time.Time, endedAt, nextRetry *time.Time) uuid.UUID {
+		subID := uuid.New()
+		var cancelledAt *time.Time
+		var cancelType *string
+		if status == "cancelled" {
+			ct := "user"
+			ca := periodEnd
+			cancelledAt, cancelType = &ca, &ct
+		}
+		fx.exec(`INSERT INTO openrails.subscriptions
+		          (id, price_id, product_id, status, rail, rail_subscription_id,
+		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
+		           next_retry_at, cancelled_at, cancel_type, customer_id, merchant_id)
+		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12,$13)`,
+			subID, priceID, productID, status, "fl-"+uuid.NewString()[:8],
+			now.Add(-40*24*time.Hour), periodEnd, endedAt, nextRetry, cancelledAt, cancelType,
+			fx.customer, fx.merchant)
+		return subID
+	}
+	seedWindow := func(feature string, subID uuid.UUID, revokedAt *time.Time) {
+		var reason *string
+		if revokedAt != nil {
+			r := "episode test revocation"
+			reason = &r
+		}
+		fx.exec(`INSERT INTO openrails.entitlements
+		          (customer_id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, merchant_id)
+		        VALUES ($1,$2,$3,NULL,$4,'subscription',$5,$6,$7)`,
+			fx.customer, feature, now.Add(-40*24*time.Hour), subID, revokedAt, reason, fx.merchant)
+	}
+	ts := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+
+	// a: cancelled sub, closure never landed -> OPEN unsanctioned, ~10 days.
+	pA, prA := fx.seedGrantableProduct("fl-a-"+sfx, 720)
+	seedWindow("fl-a-"+sfx, seedSub(pA, prA, "cancelled", now.Add(-10*24*time.Hour), ts(-10*24*time.Hour), nil), nil)
+	// b: past_due WITH retry scheduled -> OPEN sanctioned_dunning, ~5 days.
+	pB, prB := fx.seedGrantableProduct("fl-b-"+sfx, 720)
+	seedWindow("fl-b-"+sfx, seedSub(pB, prB, "past_due", now.Add(-5*24*time.Hour), nil, ts(24*time.Hour)), nil)
+	// c: unknown past paid-through -> OPEN awaiting_verification, ~3 days.
+	pC, prC := fx.seedGrantableProduct("fl-c-"+sfx, 720)
+	seedWindow("fl-c-"+sfx, seedSub(pC, prC, "unknown", now.Add(-3*24*time.Hour), nil, nil), nil)
+	// d: cancelled sub, overrun later revoked -> CLOSED unsanctioned,
+	// [paid-through -20d, revoked -8d) = ~12 days.
+	pD, prD := fx.seedGrantableProduct("fl-d-"+sfx, 720)
+	seedWindow("fl-d-"+sfx, seedSub(pD, prD, "cancelled", now.Add(-20*24*time.Hour), ts(-20*24*time.Hour), nil), ts(-8*24*time.Hour))
+	// e (negative): active, paid through the future -> never an episode.
+	pE, prE := fx.seedGrantableProduct("fl-e-"+sfx, 720)
+	seedWindow("fl-e-"+sfx, seedSub(pE, prE, "active", now.Add(20*24*time.Hour), nil, nil), nil)
+
+	type episode struct {
+		cause string
+		open  bool
+		days  float64
+	}
+	got := map[string]episode{}
+	rows, err := fx.dbi.Pool().Query(fx.ctx,
+		`SELECT entitlement, cause, open, days FROM openrails.freeloader_episodes WHERE merchant_id=$1`, fx.merchant)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var feature string
+		var e episode
+		require.NoError(t, rows.Scan(&feature, &e.cause, &e.open, &e.days))
+		got[feature] = e
+	}
+	require.NoError(t, rows.Err())
+
+	require.Len(t, got, 4, "four freeloader spans, the paying active sub excluded")
+	assert.Equal(t, "unsanctioned", got["fl-a-"+sfx].cause, "closure never landed: the failure class")
+	assert.True(t, got["fl-a-"+sfx].open)
+	assert.InDelta(t, 10.0, got["fl-a-"+sfx].days, 0.2)
+	assert.Equal(t, "sanctioned_dunning", got["fl-b-"+sfx].cause, "dunning with a scheduled retry is policy, labeled — never counted as failure")
+	assert.True(t, got["fl-b-"+sfx].open)
+	assert.InDelta(t, 5.0, got["fl-b-"+sfx].days, 0.2)
+	assert.Equal(t, "awaiting_verification", got["fl-c-"+sfx].cause, "#691 fail-open carve-out labeled, not failure")
+	assert.InDelta(t, 3.0, got["fl-c-"+sfx].days, 0.2)
+	assert.Equal(t, "unsanctioned", got["fl-d-"+sfx].cause)
+	assert.False(t, got["fl-d-"+sfx].open, "revocation closed the episode")
+	assert.InDelta(t, 12.0, got["fl-d-"+sfx].days, 0.2)
+
+	probe := fx.gauges()
+	assert.EqualValues(t, 4, probe.Gauges.Episodes.Freeloader.Total)
+	assert.EqualValues(t, 3, probe.Gauges.Episodes.Freeloader.Open)
+	assert.EqualValues(t, 2, probe.Gauges.Episodes.Freeloader.Unsanctioned, "only the failure class; sanctioned spans are policy")
+	assert.InDelta(t, 30.0, probe.Gauges.Episodes.Freeloader.TotalDays, 1.0)
+	assert.Zero(t, probe.Gauges.Freeloaders, "no sweep ran: the point-in-time gauge reads findings, the episodes read state")
+}
+
+// TestFindingsOrphanedEpisodes (#690 episode analytics, the mirror): spans
+// where payment coverage existed but no entitlement window covered the time —
+// an active paying sub with NO window (open, still accruing), a runway wrongly
+// revoked early (closed span [revoked_at, paid-through)), and a completed
+// one-off purchase that never got its window. Covered subs and spec-less
+// products never appear.
+func TestFindingsOrphanedEpisodes(t *testing.T) {
+	fx := newFindingsFixture(t)
+	now := time.Now().UTC()
+	sfx := uuid.NewString()[:8]
+	ts := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+
+	seedSub := func(productID, priceID uuid.UUID, status string, periodStart, periodEnd time.Time, endedAt *time.Time) uuid.UUID {
+		subID := uuid.New()
+		var cancelledAt *time.Time
+		var cancelType *string
+		if status == "cancelled" {
+			ct := "user"
+			cancelledAt, cancelType = endedAt, &ct
+		}
+		fx.exec(`INSERT INTO openrails.subscriptions
+		          (id, price_id, product_id, status, rail, rail_subscription_id,
+		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
+		           cancelled_at, cancel_type, customer_id, merchant_id)
+		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12)`,
+			subID, priceID, productID, status, "orph-"+uuid.NewString()[:8],
+			periodStart, periodEnd, endedAt, cancelledAt, cancelType, fx.customer, fx.merchant)
+		return subID
+	}
+
+	// a: active paying sub, NO window at all -> OPEN span from period start.
+	pA, prA := fx.seedGrantableProduct("oe-a-"+sfx, 720)
+	subA := seedSub(pA, prA, "active", now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), nil)
+	// b: cancelled sub whose window was revoked 10 days BEFORE paid-through ->
+	// CLOSED span [revoked -15d, paid-through -5d).
+	pB, prB := fx.seedGrantableProduct("oe-b-"+sfx, 720)
+	subB := seedSub(pB, prB, "cancelled", now.Add(-30*24*time.Hour), now.Add(-5*24*time.Hour), ts(-5*24*time.Hour))
+	fx.exec(`INSERT INTO openrails.entitlements
+	          (customer_id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, merchant_id)
+	        VALUES ($1,$2,$3,NULL,$4,'subscription',$5,'wrongly revoked early',$6)`,
+		fx.customer, "oe-b-"+sfx, now.Add(-30*24*time.Hour), subB, now.Add(-15*24*time.Hour), fx.merchant)
+	// c: completed one-off purchase (30-day window promised), no window -> OPEN, ~3 days.
+	_, prC := fx.seedGrantableProduct("oe-c-"+sfx, 720)
+	fx.exec(`INSERT INTO openrails.payments
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'usd', 'completed', now() - interval '3 days', $4, $5)`,
+		uuid.New(), prC, "oe-pay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
+	// d (negative): active sub fully covered by a standing window.
+	pD, prD := fx.seedGrantableProduct("oe-d-"+sfx, 720)
+	subD := seedSub(pD, prD, "active", now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), nil)
+	fx.exec(`INSERT INTO openrails.entitlements (customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+	         VALUES ($1,$2,$3,NULL,$4,'subscription',$5)`,
+		fx.customer, "oe-d-"+sfx, now.Add(-10*24*time.Hour), subD, fx.merchant)
+	// e (negative): paying sub for a product that promises NOTHING (spec-less
+	// fixture product) — no window to miss, never an episode.
+	seedSub(fx.product, fx.price, "active", now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), nil)
+
+	type episode struct {
+		sourceType string
+		open       bool
+		days       float64
+	}
+	got := map[string]episode{} // keyed by source_id
+	rows, err := fx.dbi.Pool().Query(fx.ctx,
+		`SELECT source_id, source_type, open, days FROM openrails.orphaned_episodes WHERE merchant_id=$1`, fx.merchant)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var sourceID uuid.UUID
+		var e episode
+		require.NoError(t, rows.Scan(&sourceID, &e.sourceType, &e.open, &e.days))
+		got[sourceID.String()] = e
+	}
+	require.NoError(t, rows.Err())
+
+	require.Len(t, got, 3, "covered and spec-less shapes never appear")
+	assert.True(t, got[subA.String()].open, "still paying: open span, accruing at now()")
+	assert.InDelta(t, 10.0, got[subA.String()].days, 0.2)
+	assert.False(t, got[subB.String()].open, "coverage ended in the past: closed span")
+	assert.InDelta(t, 10.0, got[subB.String()].days, 0.2, "the uncovered tail [revoked_at, paid-through)")
+
+	probe := fx.gauges()
+	assert.EqualValues(t, 3, probe.Gauges.Episodes.Orphaned.Total)
+	assert.EqualValues(t, 2, probe.Gauges.Episodes.Orphaned.Open)
+	assert.InDelta(t, 23.0, probe.Gauges.Episodes.Orphaned.TotalDays, 1.0)
+}
+
+// TestFindingsOrphanRenameMigrationMovesRows (#690): migration 066 rewrites
+// pre-rename ledger rows in place (derive.entitlement.orphan ->
+// derive.entitlement.unjustified) so stable finding identities keep upserting,
+// and the renamed rows count in the freeloaders gauge. Executes the REAL
+// migration file; the UPDATE is idempotent, so re-running on an
+// already-migrated database is safe.
+func TestFindingsOrphanRenameMigrationMovesRows(t *testing.T) {
+	fx := newFindingsFixture(t)
+	oldID := fx.seedFinding("derive.entitlement.orphan", "entitlement:"+uuid.NewString(), "high",
+		"pre-rename freeloader row", nil)
+	before := fx.gauges()
+	assert.Zero(t, before.Gauges.Freeloaders, "the legacy type name is not in the gauge set")
+
+	migrationSQL, err := postgresmigrations.FS.ReadFile("066_findings_orphan_to_unjustified.up.sql")
+	require.NoError(t, err)
+	_, err = fx.dbi.Pool().Exec(fx.ctx, string(migrationSQL))
+	require.NoError(t, err)
+
+	row := fx.findingRow(oldID)
+	assert.Equal(t, "derive.entitlement.unjustified", row.FindingType, "ledger row renamed in place")
+	after := fx.gauges()
+	assert.EqualValues(t, 1, after.Gauges.Freeloaders, "renamed row counts in the freeloaders gauge")
 }

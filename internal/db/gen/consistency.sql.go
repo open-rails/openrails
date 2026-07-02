@@ -258,7 +258,7 @@ type ConOrphanEntitlementSubscriptionSourceRow struct {
 // NULL (the merchant-wide sweep) it scans the whole merchant. All are RLS-scoped.
 // These replace the retired internal/audit checks (#511 Phase F hard cut).
 // Partition (#690): a LIVE window with a dangling subscription source is the
-// freeloader case — derive.entitlement.orphan (severity high, revoke
+// freeloader case — derive.entitlement.unjustified (severity high, revoke
 // recommendation) owns it. This check keeps only NON-LIVE dangling references
 // (revoked/expired history rows): referential hygiene, no access at stake.
 func (q *Queries) ConOrphanEntitlementSubscriptionSource(ctx context.Context, arg ConOrphanEntitlementSubscriptionSourceParams) ([]ConOrphanEntitlementSubscriptionSourceRow, error) {

@@ -17,7 +17,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 )
 
 // UserDirectory is the host-injectable view of the user store that billing
@@ -40,12 +39,12 @@ type UserDirectory interface {
 // profiles.* for the facts above; all billing code depends on the
 // UserDirectory interface instead.
 type ProfilesDirectory struct {
-	profiles *repo.ProfileRepo
+	profiles *ProfileRepo
 }
 
 // NewProfilesDirectory wraps a ProfileRepo as a UserDirectory. Returns nil when
 // repo is nil so callers can treat "no directory" uniformly.
-func NewProfilesDirectory(profiles *repo.ProfileRepo) *ProfilesDirectory {
+func NewProfilesDirectory(profiles *ProfileRepo) *ProfilesDirectory {
 	if profiles == nil {
 		return nil
 	}

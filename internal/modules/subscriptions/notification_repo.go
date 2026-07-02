@@ -1,4 +1,4 @@
-package repo
+package subscriptions
 
 import (
 	"context"
@@ -26,24 +26,10 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationFromGen(n gen.OpenrailsNotificationQueue) (*models.NotificationQueue, error) {
-	m := &models.NotificationQueue{
-		ID:         n.ID,
-		CustomerID: n.CustomerID,
-		EventType:  models.NotificationEventType(n.EventType),
-		Seen:       n.Seen,
-		CreatedAt:  n.CreatedAt,
-	}
-	if err := fromJSONB(n.Data, &m.Data, "notification_queue.data"); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func notificationsFromGen(rows []gen.OpenrailsNotificationQueue) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
 	for _, r := range rows {
-		m, err := notificationFromGen(r)
+		m, err := models.NotificationFromGen(r)
 		if err != nil {
 			return nil, err
 		}
@@ -53,10 +39,10 @@ func notificationsFromGen(rows []gen.OpenrailsNotificationQueue) ([]*models.Noti
 }
 
 func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
 		return err
 	}
-	data, err := toJSONB(notification.Data)
+	data, err := models.ToJSONB(notification.Data)
 	if err != nil {
 		return err
 	}
@@ -87,11 +73,11 @@ func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*mod
 	if err != nil {
 		return nil, err
 	}
-	return notificationFromGen(row)
+	return models.NotificationFromGen(row)
 }
 
 func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +89,7 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 }
 
 func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +109,7 @@ func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType mo
 }
 
 func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +129,7 @@ func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, s
 }
 
 func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +158,7 @@ func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) er
 }
 
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	data, err := toJSONB(notification.Data)
+	data, err := models.ToJSONB(notification.Data)
 	if err != nil {
 		return err
 	}
@@ -206,7 +192,7 @@ func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error 
 func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query.QueryOptions[NotificationFilters]) ([]*models.NotificationQueue, int64, error) {
 	var tsid *uuid.UUID
 	if opts.Filters.UserID != "" {
-		id, err := ResolveCustomerID(opts.Filters.UserID)
+		id, err := db.ResolveCustomerID(opts.Filters.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -244,10 +230,4 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 		return nil, 0, err
 	}
 	return notifications, total, nil
-}
-
-// NotificationFromGen exposes the gen -> model mapping for callers outside the
-// repo (e.g. the admin operations handlers reading repair alerts).
-func NotificationFromGen(n gen.OpenrailsNotificationQueue) (*models.NotificationQueue, error) {
-	return notificationFromGen(n)
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -124,7 +123,7 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 		}
 		grant.MerchantID = tid.UUID()
 	}
-	if err := repo.EnsureCustomerRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.CustomerID); err != nil {
 		return err
 	}
 	productID := grant.ProductID
@@ -183,7 +182,7 @@ func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string,
 	if err != nil {
 		return nil, err
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +213,7 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 	if err != nil {
 		return false, err
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -252,7 +251,7 @@ func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID st
 	if err != nil {
 		return nil, err
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +283,7 @@ func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) 
 	if err != nil {
 		return nil, err
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}

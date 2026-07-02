@@ -58,6 +58,14 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	sort.Strings(gotBilling)
 	sort.Strings(gotAuth)
 
+	// UPDATE_ROUTE_GOLDEN=1 rewrites the golden from the live route table (for
+	// deliberate surface changes); the assertions below then pin the new state.
+	if os.Getenv("UPDATE_ROUTE_GOLDEN") != "" {
+		require.NoError(t, os.WriteFile("testdata/standalone_route_surface.txt",
+			[]byte(strings.Join(gotBilling, "\n")+"\n"), 0o644))
+		t.Log("regenerated testdata/standalone_route_surface.txt")
+	}
+
 	// Billing surface == golden.
 	raw, err := os.ReadFile("testdata/standalone_route_surface.txt")
 	require.NoError(t, err)

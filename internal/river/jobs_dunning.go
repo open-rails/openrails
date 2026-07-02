@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/analytics"
@@ -144,7 +143,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Query all due past_due NMI-backed subscriptions
 	// Use w.now() instead of SQL NOW() to support time mocking in tests
 	nmiRails := []string{string(models.RailNMI)}
-	dueSubscriptions, err := repo.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiRails, w.now())
+	dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiRails, w.now())
 	if err != nil {
 		return fmt.Errorf("query due subscriptions: %w", err)
 	}

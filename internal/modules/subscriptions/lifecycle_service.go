@@ -13,12 +13,12 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -193,7 +193,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	productService := catalog.NewProductService(dbb)
 	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
 	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
-	notificationRepo := repo.NewNotificationQueueRepo(dbb)
+	notificationRepo := NewNotificationQueueRepo(dbb)
 	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil, s.Clock())
 
 	price, err := priceService.GetByID(ctx, params.PriceID)
@@ -213,7 +213,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var existingPendingSub *models.Subscription
 	if params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "" {
 		found, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
 		if err == nil && found.Status == models.StatusPending {
@@ -228,7 +228,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
 		if err == nil {
@@ -270,7 +270,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	activeSub, err := subService.GetActiveOrPendingByUserIDAndProductID(ctx, params.UserID, price.ProductID)
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return nil, nil, fmt.Errorf("failed to check existing subscriptions: %w", err)
 	}
 
@@ -589,7 +589,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := repo.NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
 		entitlementService := entitlements.NewEntitlementService(db, s.Clock())
 		paymentService := payments.NewPaymentService(db, s.Clock())
@@ -1143,7 +1143,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := repo.NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
 
 		// Use rail name for gateway lookup
@@ -1327,7 +1327,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	sub.CancelledAt = &cancelledAt
 	sub.ClearRetrySchedule()
 
-	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 		return fmt.Errorf("apply local cancellation: update subscription %s: %w", sub.ID, err)
 	}
 
@@ -1377,7 +1377,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 		ge := graceEndsAt
 		sub.GraceEndsAt = &ge
 	}
-	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
 		return fmt.Errorf("apply local past_due: update subscription %s: %w", sub.ID, err)
 	}
 	return nil
@@ -1399,7 +1399,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 	sub.Status = models.StatusUnknown
 	sub.GraceEndsAt = nil
 	sub.NextRetryAt = nil
-	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
 		return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
 	}
 	return nil
@@ -1472,7 +1472,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			}
 		}
 		sub.ClearRetrySchedule()
-		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
 		}
 		return nil
@@ -1485,7 +1485,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			sub.CurrentPeriodEndsAt = &end
 		}
 		sub.ClearRetrySchedule()
-		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("resolve unknown (adopted) %s: %w", sub.ID, err)
 		}
 		return nil
@@ -1495,7 +1495,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			ge := graceEndsAt
 			sub.GraceEndsAt = &ge
 		}
-		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
 		}
 		return nil
@@ -1560,10 +1560,10 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 // Solana sub that was never enrolled): returns nil after logging so the cancel
 // itself never fails on the cascade.
 func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
-	solanaRepo := repo.NewSolanaSubscriptionRepo(d)
+	solanaRepo := solanasubs.NewSolanaSubscriptionRepo(d)
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
@@ -1594,7 +1594,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := repo.NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing
@@ -1725,7 +1725,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := repo.NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing

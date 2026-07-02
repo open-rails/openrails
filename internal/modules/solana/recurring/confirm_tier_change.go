@@ -32,7 +32,7 @@ type tierChangeLifecycle interface {
 }
 
 // tierChangeStore is the on-chain state store the mirror reads + writes
-// (satisfied by *dbrepo.SolanaSubscriptionRepo). GetBySubscriptionPDA powers the
+// (satisfied by *solanasubs.SolanaSubscriptionRepo). GetBySubscriptionPDA powers the
 // idempotency/resumability check; SetStatus flips the old row cancelled; Upsert
 // writes the new active row.
 type tierChangeStore interface {

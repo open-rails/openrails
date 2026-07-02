@@ -62,8 +62,8 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		remoteDeleteTerminal bool
 		activeCancelMode     CancelMode
 	}{
-		{models.RailNMI, false, true, true, true, 2, true, false, true, CancelModeDestructive}, // remoteCustomer=false per #682
-		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeExternalPortal},
+		{models.RailNMI, false, true, true, true, 2, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682
+		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
 		{models.RailStripe, true, true, false, true, 3, false, false, false, CancelModeReversible},
 		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
 		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},
@@ -105,9 +105,12 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		}
 	}
 
-	// CCBill is the only external-portal rail and carries the portal URL.
-	if got := CancelPortalURL(models.RailCCBill); got != "https://support.ccbill.com" {
-		t.Errorf("ccbill CancelPortalURL = %q", got)
+	// No rail carries a consumer portal URL since #696 (CCBill cancels via the
+	// DataLink SMS choke point on OUR site).
+	for _, d := range All() {
+		if d.CancelPortalURL != "" {
+			t.Errorf("%s: CancelPortalURL = %q, want none", d.Rail, d.CancelPortalURL)
+		}
 	}
 
 	// NMI's cancel mode is state-conditional (issue 216): reversible ONLY while

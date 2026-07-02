@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -96,7 +95,7 @@ func (h *TopupChargeHandler) CheckRelevance(ctx context.Context, intent gen.Open
 		return SupersededBy("unusable topup charge intent: " + err.Error()), nil
 	}
 	if _, err := h.DB.Gen(ctx).GetPaymentMethodByID(ctx, p.PaymentMethodID); err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return SupersededBy("auto-topup payment method no longer exists"), nil
 		}
 		return Relevance{}, err

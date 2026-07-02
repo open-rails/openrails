@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -80,7 +79,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 
 	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	if err != nil {
-		if !repo.IsNotFound(err) {
+		if !db.IsNotFound(err) {
 			return uuid.Nil, fmt.Errorf("stripe converge: load local subscription: %w", err)
 		}
 		if !rec.Found {
@@ -277,7 +276,7 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 		}
 		existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, candidate)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				continue
 			}
 			return false, fmt.Errorf("stripe converge: dedup fetched invoice payment: %w", err)
@@ -289,7 +288,7 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 	if invoiceID := strings.TrimSpace(rec.LatestInvoiceID); invoiceID != "" {
 		existing, err := s.PaymentService.GetByMetadataValue(ctx, "stripe_invoice_id", invoiceID)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				return false, nil
 			}
 			return false, fmt.Errorf("stripe converge: dedup fetched invoice payment by metadata: %w", err)
@@ -344,10 +343,10 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	remoteAlive := status == "active" || status == "trialing"
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		subRepo := repo.NewSubscriptionRepo(db.NewWithPgxTx(tx))
+		subRepo := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(tx))
 		sub, err := subRepo.GetByRailSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				return nil
 			}
 			return fmt.Errorf("stripe converge: load subscription for mirror facts: %w", err)

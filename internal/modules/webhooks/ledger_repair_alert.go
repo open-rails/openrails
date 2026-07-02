@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -77,10 +76,10 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		CreatedAt: now.UTC(),
 	}
 	// The alert is owned by the well-known system merchant subject
-	// (repo.SystemCustomerID) — materialize its row through the normal
+	// (db.SystemCustomerID) — materialize its row through the normal
 	// self-issuer path like any other UUID subject (#364).
 	if database != nil {
-		sysTSID, err := repo.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, repo.SystemCustomerID.String())
+		sysTSID, err := db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, db.SystemCustomerID.String())
 		if err != nil {
 			return fmt.Errorf("resolve system merchant subject for ledger repair alert: %w", err)
 		}

@@ -5,7 +5,7 @@
 -- These replace the retired internal/audit checks (#511 Phase F hard cut).
 
 -- Partition (#690): a LIVE window with a dangling subscription source is the
--- freeloader case — derive.entitlement.orphan (severity high, revoke
+-- freeloader case — derive.entitlement.unjustified (severity high, revoke
 -- recommendation) owns it. This check keeps only NON-LIVE dangling references
 -- (revoked/expired history rows): referential hygiene, no access at stake.
 -- name: ConOrphanEntitlementSubscriptionSource :many

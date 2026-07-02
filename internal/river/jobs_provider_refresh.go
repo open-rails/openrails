@@ -102,7 +102,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	// #665: per-subscription probe fallbacks for rows the bulk pull can't decide
 	// (NULL period end / evidence outside the window). Snapshot sources only —
 	// the unknown-reconcile core stays the one decider.
-	probers := reconcile.BuildSubscriptionProbers(w.Rails, w.NMIClients)
+	probers := reconcile.BuildSubscriptionProbers(w.Rails, w.NMIClients, w.CCBillDataLink)
 
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))

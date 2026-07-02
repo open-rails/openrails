@@ -54,14 +54,22 @@ type findingsListResponse struct {
 // AdminListFindings lists the operator work list (open findings by default),
 // sorted severity desc then age desc, with the #690 gauge summary.
 //
-// Gauge alert semantics (#690): `freeloaders` and `duplicate_coverage` are
+// Gauge alert semantics (#690, three error categories): `orphaned_members`
+// (paying without access — MISSING side), `freeloaders` (access without
+// paying — EXCESS side) and `duplicate_coverage` (double-billed) are
 // always-zero error metrics — nonzero for a full sweep cycle (15 min) means
-// the billing state machine is failing (a broken justification chain or a
-// double charge that detection re-confirmed). `verification_pressure` is a
-// live pressure reading over `unknown` subs past paid-through — nonzero is
-// allowed (fail-open standing access awaiting provider verification), but its
-// max_age_seconds trending UP means the verification machinery (pull/probe/
-// converge) is down.
+// the billing state machine is failing (an undelivered paid grant, a broken
+// justification chain, or a double charge that detection re-confirmed).
+// Severity ordering (Paul): taking money wrongly (orphaned, double-billed =
+// critical) outranks giving content away (freeloader = high).
+// `verification_pressure` is a live pressure reading over `unknown` subs past
+// paid-through — nonzero is allowed (fail-open standing access awaiting
+// provider verification), but its max_age_seconds trending UP means the
+// verification machinery (pull/probe/converge) is down. `episodes` is the
+// historical/interval companion: freeloader/orphaned SPANS with total
+// error-days from the migration-067 views (open episodes still accrue;
+// sanctioned freeloader spans — dunning, awaiting verification — are policy
+// and only the `unsanctioned` split indicates failure).
 //
 //	GET /merchant/findings?severity=&finding_type=&status=&limit=&offset=
 func AdminListFindings(r *httprequest.Request) {

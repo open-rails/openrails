@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -214,18 +215,84 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	return snap
 }
 
+// CCBillStatusReader is the one SMS read the CCBill prober needs
+// (*ccbill.DataLinkClient satisfies it).
+type CCBillStatusReader interface {
+	ViewSubscriptionStatus(ctx context.Context, subscriptionID string) (ccbill.SubscriptionStatusResult, error)
+}
+
+// CCBillSubscriptionProber probes one CCBill subscription via DataLink's
+// per-record viewSubscriptionStatus (#696 — corrects the old premise that
+// CCBill had no per-record read API). Read-only by construction.
+type CCBillSubscriptionProber struct {
+	Client CCBillStatusReader
+}
+
+func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (*RemoteSnapshot, error) {
+	if p.Client == nil {
+		return nil, errors.New("ccbill datalink client not configured")
+	}
+	if strings.TrimSpace(subj.RailSubscriptionID) == "" {
+		return nil, errors.New("rail subscription id is required")
+	}
+	res, err := p.Client.ViewSubscriptionStatus(ctx, subj.RailSubscriptionID)
+	if err != nil {
+		// Includes the (Phase-0-uncaptured) unknown-subscription answer: an
+		// error keeps the row `unknown` — absence is never fabricated.
+		return nil, err
+	}
+	snap := &RemoteSnapshot{
+		Provider:  ProviderCCBill,
+		FetchedAt: time.Now().UTC(),
+		// The SMS answer names THIS subscription — exhaustive for this subject.
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
+		Capabilities: Capabilities{Subscriptions: true},
+	}
+	sub := RemoteSubscription{
+		RailSubscriptionID: subj.RailSubscriptionID,
+		RawStatus:          res.RawStatus,
+		Currency:           "USD", // DataLink convention (bulk fetcher parity)
+	}
+	// Provisional SMS vocabulary (ccbill.SubscriptionStatusResult): "2" active
+	// recurring, "1" active non-recurring (no future rebill), "0" inactive.
+	// Unrecognized values stay SubscriptionStatusUnknown — the decider then
+	// leaves the row unknown rather than acting on a guess (#651).
+	sub.Status = SubscriptionStatusUnknown
+	if rebilling, verr := res.Rebilling(); verr == nil {
+		switch {
+		case rebilling:
+			sub.Status = SubscriptionStatusActive
+		case res.RawStatus == "1":
+			sub.Status = SubscriptionStatusCancelled
+		default:
+			sub.Status = SubscriptionStatusExpired
+		}
+	}
+	if exp, ok := res.ExpiresAt(); ok {
+		// Paid-through boundary: the rebill instant for a recurring sub, the
+		// runway end for a cancelled one.
+		e := exp
+		sub.NextBillingAt = &e
+	}
+	snap.Subscriptions = []RemoteSubscription{sub}
+	return snap, nil
+}
+
 // BuildSubscriptionProbers assembles the per-rail probe sources from the same
 // runtime clients the bulk fetchers use. Best-effort: a rail without usable
-// credentials simply has no probe fallback. CCBill has no per-record read API
-// (its DataLink bulk lane is its prober) and Solana is pull-based — neither
-// gets one, matching the retired #367 worker's rail coverage.
-func BuildSubscriptionProbers(rails config.RailMerchantAccountSet, nmiClients map[string]*nmi.NMIClient) map[Provider]SubscriptionProber {
+// credentials simply has no probe fallback. NMI (query.php + v5 GET), Stripe
+// (GET /v1/subscriptions/{id}) and CCBill (DataLink viewSubscriptionStatus,
+// #696) all probe per-record; Solana is pull-based and gets none.
+func BuildSubscriptionProbers(rails config.RailMerchantAccountSet, nmiClients map[string]*nmi.NMIClient, ccbillDataLink *ccbill.DataLinkClient) map[Provider]SubscriptionProber {
 	probers := map[Provider]SubscriptionProber{}
 	if _, c, err := selectNMIClient(rails, nmiClients, ""); err == nil && c != nil {
 		probers[ProviderNMI] = &NMISubscriptionProber{Client: c}
 	}
 	if p, err := subscriptions.NewStripeLivenessProber(rails); err == nil && p != nil {
 		probers[ProviderStripe] = &StripeSubscriptionProber{Prober: p}
+	}
+	if ccbillDataLink != nil {
+		probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: ccbillDataLink}
 	}
 	return probers
 }

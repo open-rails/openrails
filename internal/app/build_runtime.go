@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -283,7 +282,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 				serviceInstances.SubscriptionService,
 				serviceInstances.ProductService,
 				serviceInstances.PriceService,
-				identity.NewProfilesDirectory(repo.NewProfileRepo(database)),
+				identity.NewProfilesDirectory(identity.NewProfileRepo(database)),
 			)
 		}
 	}
@@ -384,6 +383,11 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
 		runtime.UserSubscriptionService.SetDeferredDeleteScheduler(userDeferredDeletes)
+		// #696: user CCBill cancels queue a durable ccbill_cancel_subscription
+		// intent atomically with the local cancel. User-origin: reactive
+		// completion, executes under mode=limited.
+		runtime.UserSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, intents.OriginUser,
+			"user cancellation; remote CCBill subscription must stop rebilling"))
 	}
 	if runtime.SubscriptionLifecycleService != nil {
 		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
@@ -703,6 +707,9 @@ func createCCBillDataLinkClient(cfg *config.Config, rails config.RailMerchantAcc
 	ccbillConfig := ccbillProc.ToCCBillConfig()
 	ccbillConfig.TestMode = cfg.IsTestMode()
 	client := ccbill.NewDataLinkClient(ccbillConfig)
+	// #696: SMS mutations (cancelSubscription) are blocked at the transport
+	// under mode=readonly, mirroring the NMI clients.
+	client.ReadOnly = cfg.IsProviderReadOnly()
 	if err := client.ValidateConfig(); err != nil {
 		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")
 		return nil
@@ -760,7 +767,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	railCustomerService := payments.NewRailCustomerService(database)
-	profileRepo := repo.NewProfileRepo(database)
+	profileRepo := identity.NewProfileRepo(database)
 
 	// Create FX provider for Solana token quoting and policy-currency admission.
 	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency

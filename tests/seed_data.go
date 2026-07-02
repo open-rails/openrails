@@ -10,16 +10,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.EnsureCustomerID(ctx, suite.Pool, dbtest.TestMerchantID.UUID(), userID)
+	tenantSubjectID, err := db.EnsureCustomerID(ctx, suite.Pool, dbtest.TestMerchantID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure customer")
 	return tenantSubjectID
 }
@@ -29,7 +30,7 @@ func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID stri
 // IS its own customer_id. Non-UUID test user ids are rejected.
 func (suite *TestContainerSuite) resolveCustomer(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.ResolveCustomerID(userID)
+	tenantSubjectID, err := db.ResolveCustomerID(userID)
 	require.NoError(suite.t, err, "Failed to resolve customer")
 	return tenantSubjectID
 }
@@ -901,7 +902,7 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	sub, err := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get subscription %s", id)
 
 	return sub
@@ -913,7 +914,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB)
+	repo := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB)
 	var subs []*models.Subscription
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.subscriptions WHERE customer_id = $1 ORDER BY created_at DESC",

@@ -33,7 +33,7 @@ type accountReader interface {
 }
 
 // subscriptionStore persists the on-chain state row (satisfied by
-// *dbrepo.SolanaSubscriptionRepo).
+// *solanasubs.SolanaSubscriptionRepo).
 type subscriptionStore interface {
 	Upsert(ctx context.Context, s *models.SolanaSubscription) error
 }

@@ -400,7 +400,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	t.Run("returns 404 when subscription not found", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		nonExistentSubID := "sub_" + uuid.New().String()
 		body := map[string]string{
@@ -421,7 +421,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	t.Run("returns 409 when already on same plan", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		// Create subscription on Premium
 		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -451,7 +451,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	t.Run("Mobius upgrade succeeds with proration", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		now := suite.GetClock().Now()
 		periodEnd := now.Add(15 * 24 * time.Hour) // 15 days remaining
@@ -512,7 +512,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	t.Run("Mobius downgrade is scheduled", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		now := suite.GetClock().Now()
 		periodEnd := now.Add(15 * 24 * time.Hour)
@@ -572,7 +572,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	t.Run("checkout blocks upgrade attempts", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		// Create Premium subscription
 		suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -617,7 +617,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	t.Run("checkout blocks downgrade attempts", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		// Create Premium+ subscription
 		suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -662,7 +662,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	t.Run("checkout still works for new subscriptions", func(t *testing.T) {
 		userID := uuid.New().String()
 		email := userID + "@test.example.com"
-		token := getTestIssuer().CreateToken(userID, email)
+		token := suite.MintUserToken(userID, email)
 
 		mock.Reset()
 

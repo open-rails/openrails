@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -76,7 +75,7 @@ func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, p
 		}
 		// Per-subject override: materialize the payable customers row so the
 		// payer_spend_limits FK (migration 076) is satisfied on first write (#317).
-		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := db.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		subjectID := payer.UUID()
@@ -285,7 +284,7 @@ func (s *InvokerSpendLimitStore) Upsert(ctx context.Context, payer identity.Cust
 		return fmt.Errorf("admission: encode invoker spend-limit windows: %w", err)
 	}
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := db.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		return s.db.Gen(ctx).UpsertInvokerSpendLimit(ctx, gen.UpsertInvokerSpendLimitParams{

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -180,7 +180,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 		if err == nil && found {
 			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(repo.WithRailMerchantAccountID(r.Request.Context(), pid))
+				r.Request = r.Request.WithContext(db.WithRailMerchantAccountID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -350,7 +350,7 @@ func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment
 		return merchants.RailMerchantAccountIdentity{}, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
-	ctx = repo.WithRailMerchantAccountID(ctx, account.ID)
+	ctx = db.WithRailMerchantAccountID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
 	return account, true
 }
@@ -379,7 +379,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		// (overriding the repo's primary-default stamping).
 		if err == nil && found {
 			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(repo.WithRailMerchantAccountID(r.Request.Context(), pid))
+				r.Request = r.Request.WithContext(db.WithRailMerchantAccountID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -791,7 +791,9 @@ func ccbillWebhookAccountID(body []byte) string {
 	if clientSubacc == "" || clientSubacc == "<nil>" {
 		return clientAccnum
 	}
-	return clientAccnum + "/" + clientSubacc
+	// #697: composite CCBill identity is dash-joined (clientAccnum-clientSubacc),
+	// matching CCBill's own convention and the declared account_id format.
+	return clientAccnum + "-" + clientSubacc
 }
 
 func firstPresentHeader(header http.Header, names ...string) string {

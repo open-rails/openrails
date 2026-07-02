@@ -293,15 +293,16 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "provider_write_mode is required outside development")
 	})
 
-	t.Run("a zero-value struct is live + full behavior (Load applies the dev sandbox default separately)", func(t *testing.T) {
+	t.Run("a zero-value struct is live + readonly behavior (Load applies the dev sandbox default separately)", func(t *testing.T) {
 		// This builds the struct directly, bypassing Load(), so the zero-value
 		// TestMode is live. The dev sandbox-by-default behavior is applied by
-		// Load() and covered in TestLoad_EnvMapping (#355).
+		// Load() and covered in TestLoad_EnvMapping (#355). Unset
+		// provider_write_mode FAIL-CLOSES to readonly (Paul 2026-07-02).
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsTestMode(), "zero-value test_mode is live; the dev sandbox default is a Load() concern")
-		assert.False(t, cfg.IsLimitedMode(), "unset provider_write_mode in dev defaults to full behavior")
+		assert.True(t, cfg.IsProviderReadOnly(), "unset provider_write_mode fail-closes to readonly")
 		assert.NoError(t, Validate(cfg))
 	})
 
@@ -546,6 +547,21 @@ func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
 	require.ErrorContains(t, err, "type stripe must use stripe block")
 }
 
+// #697: CCBill composite identity is dash-joined; slash-form account ids are
+// rejected loudly (even in dev — a format bug, not a missing credential).
+func TestCCBillAccountIDRejectsSlash(t *testing.T) {
+	ccbillBlock := &CCBillRailConfig{ClientAccNum: "945280", ClientSubAcc: "0000", Salt: "s"}
+	err := ValidateRailSet(&Config{}, RailMerchantAccountSet{
+		"ccbill": {Rail: models.RailCCBill, AccountID: "945280/0000", CCBill: ccbillBlock},
+	})
+	require.ErrorContains(t, err, "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
+
+	// The dash form passes.
+	require.NoError(t, ValidateRailSet(&Config{}, RailMerchantAccountSet{
+		"ccbill": {Rail: models.RailCCBill, AccountID: "945280-0000", CCBill: ccbillBlock},
+	}))
+}
+
 func TestSolanaRPCProviderValidation(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.Env = "production"
@@ -699,9 +715,10 @@ func TestLoad_DBSchemaEnv(t *testing.T) {
 }
 
 func TestOperatingModes(t *testing.T) {
-	// unset: nothing limited (dev default = full); test_mode defaults off
-	require.False(t, (&Config{}).IsLimitedMode())
-	require.False(t, (&Config{}).IsProviderReadOnly())
+	// unset: FAIL CLOSED to readonly (Paul 2026-07-02) — provider writes need an
+	// explicit full|limited; test_mode defaults off
+	require.True(t, (&Config{}).IsLimitedMode())
+	require.True(t, (&Config{}).IsProviderReadOnly())
 	require.False(t, (&Config{}).IsTestMode())
 
 	require.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsLimitedMode())
@@ -720,9 +737,10 @@ func TestOperatingModes(t *testing.T) {
 	require.True(t, roSandbox.IsLimitedMode())
 	require.True(t, roSandbox.IsProviderReadOnly())
 
-	// case/space tolerant; unknown normalizes to "" pre-validation
+	// case/space tolerant; unknown fail-closes to readonly pre-validation (a
+	// typo must never run with full behavior) and is rejected by Validate
 	require.True(t, (&Config{ProviderWriteMode: " Limited "}).IsLimitedMode())
-	require.False(t, (&Config{ProviderWriteMode: "redaonly"}).IsLimitedMode())
+	require.True(t, (&Config{ProviderWriteMode: "redaonly"}).IsProviderReadOnly())
 	require.Error(t, Validate(&Config{ProviderWriteMode: "redaonly"}))
 
 	// hard cut (#355): the old mode values are gone, not aliased

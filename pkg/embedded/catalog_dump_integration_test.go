@@ -5,9 +5,6 @@ package embedded
 import (
 	"bytes"
 	"context"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,53 +103,7 @@ catalogs:
 	require.Equal(t, firstDump.String(), secondDump.String(), "push -> dump -> push should not drift")
 }
 
-func TestExampleCatalogRoundTripsThroughDump(t *testing.T) {
-	ctx := context.Background()
-	_, appDSN := dbtest.SharedRLSPostgres(t)
-	pool, err := pgxpool.New(ctx, appDSN)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
-	require.NoError(t, err)
-	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: raw})
-	require.NoError(t, err)
-	require.NotEmpty(t, targets)
-
-	for _, target := range targets {
-		id := uuid.New()
-		_, err = pool.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
-			id, target.Merchant)
-		require.NoError(t, err)
-	}
-
-	cfg := &config.Config{
-		ProviderWriteMode: config.ProviderWriteModeReadOnly,
-		DB:                &config.DBConfig{Schema: config.DefaultSchema},
-	}
-	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
-		Config: cfg, PGXPool: pool, Manifest: raw, Out: io.Discard,
-		Insert: true, Overwrite: true, Prune: true,
-	}))
-
-	for _, target := range targets {
-		var firstDump bytes.Buffer
-		require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
-			Config: cfg, PGXPool: pool, Merchant: target.Merchant, Out: &firstDump,
-		}))
-		_, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
-		require.NoError(t, err, "dump for %s should parse as push-catalog YAML", target.Merchant)
-
-		require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{
-			Config: cfg, PGXPool: pool, Manifest: firstDump.Bytes(), Out: io.Discard,
-			Insert: true, Overwrite: true, Prune: true,
-		}))
-
-		var secondDump bytes.Buffer
-		require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
-			Config: cfg, PGXPool: pool, Merchant: target.Merchant, Out: &secondDump,
-		}))
-		require.Equal(t, firstDump.String(), secondDump.String(), "%s example catalog dump should be stable", target.Merchant)
-	}
-}
+// TestExampleCatalogRoundTripsThroughDump was deleted (#694): the example
+// manifest's publish path is dominated by the integrationharness HTTP publish
+// test (TestExampleCatalogPublishesOverHTTP) and dump stability by
+// TestCatalogPushDumpRoundTrip above.

@@ -20,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -220,7 +219,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 		default:
 			return nil, adminRefundHTTPError(http.StatusConflict, "refund request already failed; retry with a new idempotency key")
 		}
-	} else if !repo.IsNotFound(err) {
+	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {

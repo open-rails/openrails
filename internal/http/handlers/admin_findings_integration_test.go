@@ -341,7 +341,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 
 	// Older, lower-severity finding first: proves severity-desc sort and the
 	// freeloader gauge type-set; it has NO structured recommendation.
-	orphanID := fx.seedFinding("derive.entitlement.orphan", "ent:"+uuid.NewString(), "high",
+	orphanID := fx.seedFinding("derive.entitlement.unjustified", "ent:"+uuid.NewString(), "high",
 		"Live access with no recorded justification — revoke or record an admin grant.", nil)
 	dupID := fx.seedFinding("consistency.duplicate.ownership",
 		"customer:"+fx.customer.String()+":product:"+fx.product.String(), "critical",
@@ -371,7 +371,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	filtered := fx.list("?severity=critical")
 	require.Len(t, filtered.Items, 1)
 	assert.Equal(t, dupID.String(), filtered.Items[0].ID)
-	filtered = fx.list("?finding_type=derive.entitlement.orphan")
+	filtered = fx.list("?finding_type=derive.entitlement.unjustified")
 	require.Len(t, filtered.Items, 1)
 	assert.Equal(t, orphanID.String(), filtered.Items[0].ID)
 
@@ -511,7 +511,7 @@ func TestFindingsQueueApprovePartialFailureLeavesOpen(t *testing.T) {
 func TestFindingsQueueIgnoreRequiresNotesAndSilences(t *testing.T) {
 	fx := newFindingsFixture(t)
 	subject := "ent:" + uuid.NewString()
-	findingID := fx.seedFinding("derive.entitlement.orphan", subject, "high", "freeloader", nil)
+	findingID := fx.seedFinding("derive.entitlement.unjustified", subject, "high", "freeloader", nil)
 
 	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+findingID.String()+"/resolve",
 		map[string]any{"outcome": "ignore", "notes": "   "}, findingID.String())
@@ -526,7 +526,7 @@ func TestFindingsQueueIgnoreRequiresNotesAndSilences(t *testing.T) {
 	assert.Equal(t, fx.adminID, resolved.Finding.ResolvedBy)
 
 	// Detector re-emits the same identity: stays ignored (permanent silence).
-	reupserted := fx.seedFinding("derive.entitlement.orphan", subject, "high", "freeloader", nil)
+	reupserted := fx.seedFinding("derive.entitlement.unjustified", subject, "high", "freeloader", nil)
 	assert.Equal(t, findingID, reupserted, "stable identity per (merchant, type, subject)")
 	row := fx.findingRow(findingID)
 	assert.Equal(t, "ignored", row.Status)
@@ -536,7 +536,7 @@ func TestFindingsQueueIgnoreRequiresNotesAndSilences(t *testing.T) {
 
 	// Approve on a finding with NO structured recommendation is 422 (on a
 	// fresh open one), and resolve on the ignored one is a 409 no-op.
-	fresh := fx.seedFinding("derive.entitlement.orphan", "ent:"+uuid.NewString(), "high", "freeloader", nil)
+	fresh := fx.seedFinding("derive.entitlement.unjustified", "ent:"+uuid.NewString(), "high", "freeloader", nil)
 	rec = fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+fresh.String()+"/resolve",
 		map[string]any{"outcome": "approve"}, fresh.String())
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
@@ -588,7 +588,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 		fx.merchant, fx.customer, uuid.New()).Scan(&entID))
 
 	asOf := time.Now().UTC().Truncate(time.Second)
-	revokeFinding := fx.seedFinding("derive.entitlement.orphan", "ent:"+entID.String(), "high",
+	revokeFinding := fx.seedFinding("derive.entitlement.unjustified", "ent:"+entID.String(), "high",
 		"live access with no justification — revoke unless known-legitimate", &recommend.Recommendation{
 			Action: recommend.ActionRevokeEntitlement,
 			Params: map[string]any{"entitlement_id": entID.String(), "as_of": asOf.Format(time.RFC3339)},
@@ -612,7 +612,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 	assert.WithinDuration(t, asOf, *revokedAt, 2*time.Second, "as-of revoke instant honored")
 
 	// record_admin_grant on a second freeloader finding.
-	grantFinding := fx.seedFinding("derive.entitlement.orphan", "cust:"+fx.customer.String(), "high",
+	grantFinding := fx.seedFinding("derive.entitlement.unjustified", "cust:"+fx.customer.String(), "high",
 		"known-legitimate — record an admin grant instead", &recommend.Recommendation{
 			Action: recommend.ActionRecordAdminGrant,
 			Params: map[string]any{"customer_id": fx.customer.String(), "product_id": fx.product.String(), "reason": "comp account"},

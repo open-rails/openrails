@@ -49,7 +49,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-success-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create an active subscription for the user
 	oldPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
@@ -144,7 +144,7 @@ func TestUpdateSubscriptionPaymentMethodNotOwned(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-not-owned-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create subscription owned by different user
 	otherUserID := uuid.New().String()
@@ -184,7 +184,7 @@ func TestUpdateSubscriptionPaymentMethodNotOwnedPM(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-not-owned-pm-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create subscription for current user
 	sub := suite.CreateTestSubscription(userID, priceID, models.StatusActive)
@@ -224,7 +224,7 @@ func TestUpdateSubscriptionPaymentMethodCancelledSub(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-cancelled-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create cancelled subscription
 	cancelledSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -268,7 +268,7 @@ func TestUpdateSubscriptionPaymentMethodCCBillNotSupported(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-ccbill-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create CCBill subscription (can't have payment method updated)
 	ccbillSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -312,7 +312,7 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-notfound-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create subscription for user
 	sub := suite.CreateTestSubscription(userID, priceID, models.StatusActive)
@@ -363,7 +363,7 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-invalid-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	t.Run("returns error for invalid subscription ID", func(t *testing.T) {
 		body := map[string]string{
@@ -423,7 +423,7 @@ func TestUpdateSubscriptionPaymentMethodPastDue(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-pastdue-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create past_due subscription (payment failed but still retrying)
 	pastDueSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -476,7 +476,7 @@ func TestUpdateSubscriptionPaymentMethodNMIFailure(t *testing.T) {
 	// Create auth token for test user
 	userID := uuid.New().String()
 	email := "update-pm-nmifail-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	// Create subscription
 	sub := suite.CreateTestSubscription(userID, priceID, models.StatusActive)

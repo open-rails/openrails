@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -309,7 +309,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 // produced a different customer id than every read on the admin surface — the
 // "wrong assumption" #528 removes.)
 func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
-	return repo.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
+	return db.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {

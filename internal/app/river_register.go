@@ -261,6 +261,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
+		intents.NewCCBillCancelHandler(r.DB, r.CCBillDataLink, clock), // #696 (nil client parks)
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),

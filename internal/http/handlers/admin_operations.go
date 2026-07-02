@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -32,7 +32,7 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	tsid := repo.SystemCustomerID
+	tsid := db.SystemCustomerID
 
 	var seen *bool
 	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))
@@ -61,7 +61,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 	}
 	items := make([]*models.NotificationQueue, 0, len(rows))
 	for _, row := range rows {
-		m, merr := repo.NotificationFromGen(row)
+		m, merr := models.NotificationFromGen(row)
 		if merr != nil {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to decode repair alerts")
 			return

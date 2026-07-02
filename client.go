@@ -161,7 +161,7 @@ func Verify(ctx context.Context, c Client) error {
 
 // SelfIssuer is the issuer keying customers rows for self-service
 // identities whose subject is the user's own UUID — what an embedded host
-// passes to ListActiveEntitlements for its own users (internal/db/repo
+// passes to ListActiveEntitlements for its own users (internal/db
 // EnsureCustomerID materializes rows under it).
 const SelfIssuer = "openrails:self"
 

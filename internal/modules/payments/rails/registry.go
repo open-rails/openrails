@@ -24,7 +24,8 @@ const (
 	CancelModeDestructive CancelMode = "destructive"
 
 	// CancelModeExternalPortal: we cannot cancel or resume from our system; the
-	// user must use the rail's own consumer portal (CCBill).
+	// user must use the rail's own consumer portal. No current rail (#696 moved
+	// CCBill onto the DataLink SMS cancel); kept for the API vocabulary.
 	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
@@ -104,9 +105,6 @@ func autoBilledAlways(*models.PaymentMethod) bool { return true }
 
 func cancelReversible(*models.Subscription, time.Time) CancelMode  { return CancelModeReversible }
 func cancelDestructive(*models.Subscription, time.Time) CancelMode { return CancelModeDestructive }
-func cancelExternalPortal(*models.Subscription, time.Time) CancelMode {
-	return CancelModeExternalPortal
-}
 
 // nmiCancelMode: reversible only while the subscription is cancelled, its
 // deferred delete_subscription has not yet executed (DeletionScheduledAt is
@@ -160,8 +158,8 @@ var descriptors = []Descriptor{
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
-		cancelExternalPortal,
-		"https://support.ccbill.com", // CancelPortalURL (consumer support portal)
+		cancelDestructive, // #696: DataLink SMS cancel — no resume API, access rides the paid runway
+		"",                // CancelPortalURL (none since #696; cancels happen on OUR site)
 		[]CredentialKey{{"salt", true}, {"datalink_username", true}, {"datalink_password", true}},
 	},
 	{

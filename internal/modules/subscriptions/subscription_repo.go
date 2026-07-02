@@ -1,4 +1,4 @@
-package repo
+package subscriptions
 
 import (
 	"context"
@@ -37,11 +37,11 @@ type SubscriptionRepo struct {
 func NewSubscriptionRepo(d *db.DB) *SubscriptionRepo { return &SubscriptionRepo{db: d} }
 
 func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionParams, error) {
-	entSnap, err := toJSONB(s.EntitlementsSpecSnapshot)
+	entSnap, err := models.ToJSONB(s.EntitlementsSpecSnapshot)
 	if err != nil {
 		return gen.CreateSubscriptionParams{}, err
 	}
-	credSnap, err := toJSONB(s.CreditsSpecSnapshot)
+	credSnap, err := models.ToJSONB(s.CreditsSpecSnapshot)
 	if err != nil {
 		return gen.CreateSubscriptionParams{}, err
 	}
@@ -73,7 +73,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
-		RetryAttempts:            intPtrTo32(s.RetryAttempts),
+		RetryAttempts:            models.IntPtrTo32(s.RetryAttempts),
 		NextRetryAt:              s.NextRetryAt,
 		GraceEndsAt:              s.GraceEndsAt,
 		CancelFeedback:           s.CancelFeedback,
@@ -87,7 +87,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 }
 
 func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) error {
-	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, s.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, s.CustomerID); err != nil {
 		return err
 	}
 	params, err := subscriptionInsertParams(s)
@@ -100,7 +100,7 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	}
 	params.MerchantID = tid.UUID()
 	if params.RailMerchantAccountID == nil {
-		params.RailMerchantAccountID = resolveRailMerchantAccountIDForStamp(ctx)
+		params.RailMerchantAccountID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
@@ -146,11 +146,11 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	}
 	s.UpdatedAt = now
 
-	entSnap, err := toJSONB(s.EntitlementsSpecSnapshot)
+	entSnap, err := models.ToJSONB(s.EntitlementsSpecSnapshot)
 	if err != nil {
 		return err
 	}
-	credSnap, err := toJSONB(s.CreditsSpecSnapshot)
+	credSnap, err := models.ToJSONB(s.CreditsSpecSnapshot)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
-		RetryAttempts:            intPtrTo32(s.RetryAttempts),
+		RetryAttempts:            models.IntPtrTo32(s.RetryAttempts),
 		NextRetryAt:              s.NextRetryAt,
 		GraceEndsAt:              s.GraceEndsAt,
 		CancelFeedback:           s.CancelFeedback,
@@ -241,11 +241,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 				return err
 			}
 			for _, row := range rows {
-				price, err := priceFromGen(row.OpenrailsPrice)
+				price, err := models.PriceFromGen(row.OpenrailsPrice)
 				if err != nil {
 					return err
 				}
-				product, err := productFromGen(row.OpenrailsProduct)
+				product, err := models.ProductFromGen(row.OpenrailsProduct)
 				if err != nil {
 					return err
 				}
@@ -258,7 +258,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 				return err
 			}
 			for _, row := range rows {
-				price, err := priceFromGen(row)
+				price, err := models.PriceFromGen(row)
 				if err != nil {
 					return err
 				}
@@ -273,7 +273,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 			return err
 		}
 		for _, row := range rows {
-			pm, err := paymentMethodFromGen(row)
+			pm, err := models.PaymentMethodFromGen(row)
 			if err != nil {
 				return err
 			}
@@ -291,7 +291,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 
 // oneWithDetails maps a single gen row and attaches the standard relations.
 func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.OpenrailsSubscription, withProduct bool) (*models.Subscription, error) {
-	sub, err := subscriptionFromGen(row)
+	sub, err := models.SubscriptionFromGen(row)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +302,7 @@ func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.Openrails
 }
 
 func (r *SubscriptionRepo) manyWithDetails(ctx context.Context, rows []gen.OpenrailsSubscription) ([]*models.Subscription, error) {
-	subs, err := subscriptionsFromGen(rows)
+	subs, err := models.SubscriptionsFromGen(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.S
 }
 
 func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string)
 }
 
 func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID str
 // GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +372,7 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	if now.IsZero() {
 		now = time.Now()
 	}
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +425,7 @@ func (r *SubscriptionRepo) GetByRailMetadataValue(ctx context.Context, rail, key
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +472,7 @@ func (r *SubscriptionRepo) GetPaginatedByUserID(ctx context.Context, userID stri
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -500,7 +500,7 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 
 func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.QueryOptions[SubscriptionFilters]) ([]*models.Subscription, int64, error) {
 	f := params.Filters
-	tsidResolved, err := ResolveCustomerID(f.UserID)
+	tsidResolved, err := db.ResolveCustomerID(f.UserID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -573,7 +573,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +591,7 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Co
 // user and product (#691 checkout guard): parked pending provider verification,
 // possibly still alive/billing at the provider.
 func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +608,7 @@ func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, u
 // GetUnknownByUserIDAndTierGroup is the tier-group variant of the #691 checkout
 // guard lookup. Returns the subscription with Price and Product loaded.
 func (r *SubscriptionRepo) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -628,14 +628,6 @@ func derefSubs(subs []*models.Subscription) []models.Subscription {
 		out = append(out, *s)
 	}
 	return out
-}
-
-func intPtrTo32(v *int) *int32 {
-	if v == nil {
-		return nil
-	}
-	i, _ := safecast.Convert[int32](*v)
-	return &i
 }
 
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
@@ -668,7 +660,7 @@ func (r *SubscriptionRepo) ListPendingDeletionScheduled(ctx context.Context) ([]
 	if err != nil {
 		return nil, err
 	}
-	return subscriptionsFromGen(rows)
+	return models.SubscriptionsFromGen(rows)
 }
 
 // GetLatestResumableCancelled returns the payer's most recent cancelled

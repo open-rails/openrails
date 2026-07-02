@@ -253,13 +253,18 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			if exists {
 				continue
 			}
+			// #695: derive-2 OWNS the window-or-no-window decision. The grant row is
+			// provenance and always recorded by derive-1; only the WINDOW is overlap-
+			// constrained (entitlements_customer_no_overlap GIST). A standing-source
+			// grant tries the open window first, falling back to its own bounded
+			// window; when even that overlaps a live window the effect stays
+			// deliberately ABSENT-BY-OVERLAP — no window, no error, and
+			// ListLiveGrantsMissingEffects mirrors the same overlap condition so the
+			// sweep converges instead of re-firing. ponytail: an overlapped window is
+			// dropped whole; #631-followup (O2) clips/merges partial overlaps.
 			endAt := g.EndsAt
+			bounded := true
 			if standing {
-				// Replay safety: a standing window spans [starts_at, infinity). When a
-				// foreign live window would collide with it, fall back to the grant's
-				// own bounded window (so the grant still projects and the sweep
-				// converges); if even that overlaps, skip — self-healing like
-				// derive-1's overlap-skip.
 				overlapsOpen, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
 					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
 					LowerBound: g.StartsAt, UpperBound: overlapUpperBound(nil),
@@ -268,18 +273,19 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 					return fmt.Errorf("grants: standing overlap check %q: %w", f, err)
 				}
 				if !overlapsOpen {
-					endAt = nil
-				} else {
-					overlapsBounded, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
-						MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
-						LowerBound: g.StartsAt, UpperBound: overlapUpperBound(g.EndsAt),
-					})
-					if err != nil {
-						return fmt.Errorf("grants: bounded overlap check %q: %w", f, err)
-					}
-					if overlapsBounded {
-						continue
-					}
+					endAt, bounded = nil, false
+				}
+			}
+			if bounded {
+				overlaps, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
+					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
+					LowerBound: g.StartsAt, UpperBound: overlapUpperBound(g.EndsAt),
+				})
+				if err != nil {
+					return fmt.Errorf("grants: bounded overlap check %q: %w", f, err)
+				}
+				if overlaps {
+					continue // absent-by-overlap: another live window already projects access
 				}
 			}
 			gid := g.ID
@@ -633,11 +639,11 @@ func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUI
 	})
 }
 
-// DeriveSubscriptionGrant creates the entitlement grant(s) + window for a
-// subscription that has none (derive-1). The window is the subscription period
-// [COALESCE(period_start,started_at), COALESCE(period_end,ended_at)); access-state
-// gating already happened in the detection query. Re-runnable: once a grant
-// exists the detection excludes the sub.
+// DeriveSubscriptionGrant creates the entitlement grant(s) — and, when no live
+// window overlaps, the window — for a subscription that has none (derive-1). The
+// window is the subscription period [COALESCE(period_start,started_at),
+// COALESCE(period_end,ended_at)); access-state gating already happened in the
+// detection query. Re-runnable: once a grant exists the detection excludes the sub.
 func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngrantedSubscriptionsRow) error {
 	start, end, ok := subscriptionWindow(sub)
 	if !ok {
@@ -647,10 +653,10 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 	return err
 }
 
-// DeriveWalletGrant creates the entitlement grant(s) + window for a solana wallet
-// payment that has none (derive-1). Window = [purchased_at, expiration_rfc3339);
-// grant source is `purchase` (→ `one_off` entitlement), payment-linked so the
-// refund check sees it.
+// DeriveWalletGrant creates the entitlement grant(s) — and, when no live window
+// overlaps, the window — for a solana wallet payment that has none (derive-1).
+// Window = [purchased_at, expiration_rfc3339); grant source is `purchase` (→
+// `one_off` entitlement), payment-linked so the refund check sees it.
 func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWalletPaymentsRow) error {
 	if !pay.ExpiresAt.After(pay.PurchasedAt) {
 		return nil
@@ -671,10 +677,11 @@ func (l *Ledger) AdminGrantExists(ctx context.Context, sourceID string) (bool, e
 // (source_type=admin) + materializes its entitlement window(s) — derive-1 for the
 // access FACT that has no payment/subscription behind it (#636). The host (e.g. the
 // doujins legacy migrate) hands over the comp instead of writing entitlements.
-// Idempotent by sourceID. end nil = indefinite. Per-feature overlap-skip, like the
-// other derive-1 paths. Returns the number of feature-windows created (0 = every
-// feature overlapped an existing live window, i.e. blocked) and whether the source
-// was already imported (idempotent skip — no write).
+// Idempotent by sourceID. end nil = indefinite. The grant is ALWAYS recorded
+// (#695 provenance); a feature whose window overlaps an existing live window gets
+// NO window (derive-2's absent-by-overlap no-op). Returns the number of feature-
+// windows materialized (0 = every feature's window absent-by-overlap, i.e.
+// blocked) and whether the source was already imported (idempotent skip — no write).
 func (l *Ledger) GrantAdmin(ctx context.Context, customer uuid.UUID, sourceID string, feats []string, start time.Time, end *time.Time) (created int, alreadyExists bool, err error) {
 	exists, err := l.AdminGrantExists(ctx, sourceID)
 	if err != nil {
@@ -699,27 +706,33 @@ type customerWindow struct {
 	End      *time.Time
 }
 
-// deriveEntitlementWindows grants + materializes one entitlement window per
-// feature, SKIPPING any feature that overlaps an existing live entitlement (so a
-// CreateEntitlement can never trip the no-overlap exclusion constraint). One grant
-// per (source, feature), mirroring the live entitlement path. The overlap check
-// sees rows committed earlier in the same converge run (each create auto-commits
-// on the shared conn), so sequential derives within a run stay consistent.
-// ponytail: v1 drops a feature's window entirely when it overlaps; #631-followup
-// (O2) clips/merges partial overlaps. A fully-overlapped sub re-fires each sweep
-// until the overlapping window expires, then converges — bounded, self-healing.
+// deriveEntitlementWindows records one entitlement grant per feature and asks
+// derive-2 to project it. The GRANT is provenance — recorded UNCONDITIONALLY
+// (#695: detection keys on grant existence, so a recorded grant is what makes
+// the sweep converge); whether a WINDOW materializes is MaterializeGrant's
+// decision alone (it no-ops on standing-satisfied and absent-by-overlap shapes),
+// so derive-1 can never trip the no-overlap exclusion constraint and a fully-
+// overlapped source converges in ONE sweep instead of re-firing forever.
+// Replay guard (mirrors #691's appendCoveredPeriodGrant): a bounded window whose
+// end is not past the latest grant end recorded for (source, feature) appends
+// nothing — the grant_effect.mismatch repair re-enters here with grants already
+// on the ledger. Returns the number of feature-windows actually MATERIALIZED
+// (grants-recorded is the always case); GrantAdmin's Imported/Blocked split
+// reads it.
 func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow) (int, error) {
-	upper := overlapUpperBound(w.End)
 	created := 0
 	for _, f := range w.Feats {
-		overlaps, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
-			MerchantID: l.merchant, CustomerID: w.Customer, Entitlement: f, LowerBound: w.Start, UpperBound: upper,
-		})
-		if err != nil {
-			return created, fmt.Errorf("grants: derive-1 overlap check %q: %w", f, err)
-		}
-		if overlaps {
-			continue
+		if w.End != nil {
+			latest, err := l.q.LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
+				MerchantID: l.merchant, CustomerID: w.Customer,
+				SourceType: string(w.Source), SourceID: w.SourceID, Entitlement: f,
+			})
+			if err != nil {
+				return created, fmt.Errorf("grants: derive-1 replay check %q: %w", f, err)
+			}
+			if !latest.IsZero() && !w.End.After(latest) {
+				continue // replay: this window is already on the grant ledger
+			}
 		}
 		g, err := l.Grant(ctx, GrantInput{
 			Customer: w.Customer, Kind: Entitlement, Source: w.Source, SourceID: w.SourceID, Payment: w.Payment,
@@ -731,7 +744,15 @@ func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow)
 		if err := l.MaterializeGrant(ctx, g); err != nil {
 			return created, fmt.Errorf("grants: derive-1 materialize %s/%q: %w", w.SourceID, f, err)
 		}
-		created++
+		materialized, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
+			MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
+		})
+		if err != nil {
+			return created, fmt.Errorf("grants: derive-1 window check %s/%q: %w", w.SourceID, f, err)
+		}
+		if materialized {
+			created++
+		}
 	}
 	return created, nil
 }

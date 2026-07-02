@@ -123,7 +123,7 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "acct_1M9QZULkdIwHu7ix", byName[key{"stripe", "live"}].AccountID)
 	require.Equal(t, "acct_1N2YbMLkdIwHu7ix", byName[key{"stripe-sandbox", "test"}].AccountID)
 	// CCBill — one account.
-	require.Equal(t, "945280/0000", byName[key{"ccbill", "live"}].AccountID)
+	require.Equal(t, "945280-0000", byName[key{"ccbill", "live"}].AccountID)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

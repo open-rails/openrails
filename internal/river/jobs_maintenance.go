@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -93,7 +92,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		missingLocal++
 		existing, err := subscriptionService.GetByRailSubscriptionID(ctx, "ccbill", railSubID)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_local", nil, "", railSubID, &record, nil); alertErr != nil {
 					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-local repair alert")
 				}

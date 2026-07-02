@@ -29,7 +29,7 @@ identifiers OUT of committed files (code, trackers, this file).
     "the merchant ID"). It is NOT the reseller/ISO (e.g. MobiusPay). It is NOT fetchable from the
     `security_key` — operator must declare it.
   - **Stripe** — `acct_…` (the one rail that self-discovers, via `GET /v1/account`).
-  - **CCBill** — `client_acc_num[/client_sub_acc]`.
+  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (e.g. `945280-0000`, #697 — never a slash).
   - **Solana** — the recipient wallet address.
   - Don't try to derive any of these from credentials at runtime.
 

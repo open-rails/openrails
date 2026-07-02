@@ -16,9 +16,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -119,7 +119,7 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	require.NoError(t, dbrepo.NewSolanaSubscriptionRepo(dbi).Upsert(ctx, row))
+	require.NoError(t, solanasubs.NewSolanaSubscriptionRepo(dbi).Upsert(ctx, row))
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
@@ -221,7 +221,7 @@ func TestSolanaPullIntent_CrashAfterSubmit_SignatureRepairsRenewal(t *testing.T)
 	require.Equal(t, 1, fx.crank.calls, "never re-pulled")
 
 	// Row advanced past the period.
-	row, err := dbrepo.NewSolanaSubscriptionRepo(fx.db).GetBySubscriptionPDA(fx.ctx, fx.row.SubscriptionPDA)
+	row, err := solanasubs.NewSolanaSubscriptionRepo(fx.db).GetBySubscriptionPDA(fx.ctx, fx.row.SubscriptionPDA)
 	require.NoError(t, err)
 	require.True(t, row.NextPullAt.After(fx.row.NextPullAt), "AdvanceAfterPull applied")
 	require.NotNil(t, row.LastSignature)

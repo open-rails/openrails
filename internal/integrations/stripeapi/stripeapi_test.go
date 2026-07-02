@@ -65,8 +65,7 @@ func TestReadOnlyAllowsGet(t *testing.T) {
 func TestNonReadOnlyAllowsWrites(t *testing.T) {
 	srv, hits := newCountingServer(t)
 	for _, cfg := range []*config.Config{
-		nil,
-		{},
+		nil,                                     // nil = tests/full (documented Client contract)
 		{Mode: config.ModeFull, TestMode: true}, // sandbox creds, full behavior (old mode=test)
 		{Mode: config.ModeFull},
 		{Mode: config.ModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
@@ -77,7 +76,19 @@ func TestNonReadOnlyAllowsWrites(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.NoError(t, resp.Body.Close())
 	}
-	require.Equal(t, int64(5), hits.Load())
+	require.Equal(t, int64(4), hits.Load())
+}
+
+// provider_write_mode FAIL-CLOSES (2026-07-02): an EMPTY config (mode never
+// declared) blocks writes at the wire exactly like an explicit readonly.
+func TestUnsetModeFailsClosedAtTheWire(t *testing.T) {
+	srv, hits := newCountingServer(t)
+	client := Client(&config.Config{}, 0)
+	resp, err := client.Post(srv.URL+"/v1/customers", "application/x-www-form-urlencoded", strings.NewReader("email=a@b.c")) //nolint:bodyclose // resp is nil on error
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, ErrProviderReadOnly)
+	require.Equal(t, int64(0), hits.Load(), "unset mode must never reach the wire")
 }
 
 func TestReadOnlyClientAlwaysBlocksWrites(t *testing.T) {

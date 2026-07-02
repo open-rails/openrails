@@ -1,4 +1,4 @@
-package repo
+package db
 
 import (
 	"context"
@@ -21,7 +21,7 @@ var SystemCustomerID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 // errNonUUIDSubject builds the rejection for non-UUID payable identities.
 // OpenRails is UUID-only (#364): there is no legacy issuer, no generated row
 // ids, no string subjects. The auth boundary rejects non-UUID subjects before
-// they reach handlers; this repo-layer error is defense in depth.
+// they reach handlers; this error is defense in depth.
 func errNonUUIDSubject(userID string) error {
 	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
 }
@@ -94,17 +94,10 @@ func EnsureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsi
 		}
 		tenantID = tid.UUID()
 	}
+	subject := tsid.String()
 	return gen.New(qx).EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
 		ID:         tsid,
 		MerchantID: tenantID,
-		Subject:    stringPtr(tsid.String()),
+		Subject:    &subject,
 	})
 }
-
-// ensureCustomerRow is a transitional alias (#688 phase 1) for the files still
-// in this package (subscription.go, notification_queue.go); goes with them.
-func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
-	return EnsureCustomerRow(ctx, qx, tenantID, tsid)
-}
-
-func stringPtr(s string) *string { return &s }

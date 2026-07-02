@@ -233,7 +233,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 		"ccbill": {
 			"ccbill": {
 				Environment: "live",
-				AccountID:   "900000/0000",
+				AccountID:   "900000-0000",
 				Secrets: map[string]string{
 					"salt":              "secret",
 					"datalink_username": "merchant-user",
@@ -254,14 +254,14 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 		FROM openrails.rail_merchant_accounts
 		WHERE merchant_id = $1::uuid AND rail = 'ccbill'
 	`, merchantID).Scan(&accountID))
-	require.Equal(t, "900000/0000", accountID)
+	require.Equal(t, "900000-0000", accountID)
 
 	for key, want := range map[string]string{
 		"salt":              "secret",
 		"datalink_username": "merchant-user",
 		"datalink_password": "merchant-pass",
 	} {
-		secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "900000/0000", key)
+		secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "900000-0000", key)
 		require.NoError(t, err)
 		var secretValue string
 		require.NoError(t, pool.QueryRow(ctx, `

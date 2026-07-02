@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -232,7 +231,7 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 		return id
 	}
 	get := func(ctx context.Context, id uuid.UUID) *models.Subscription {
-		s, err := repo.NewSubscriptionRepo(appDB).GetByID(ctx, id)
+		s, err := subscriptions.NewSubscriptionRepo(appDB).GetByID(ctx, id)
 		require.NoError(t, err)
 		return s
 	}

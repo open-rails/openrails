@@ -209,9 +209,9 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	// 4) UPGRADE through OpenRails' OWN code path. These are exactly the Model-B
 	//    params the checkout upgrade branch passes.
 	svc := &StripeService{
-		Config: &config.Config{},
+		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: config.RailMerchantAccountSet{
-			"stripe": {Rail: models.RailStripe, SecretKey: key},
+			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}
 	require.NoError(t, svc.UpdateSubscriptionPrice(

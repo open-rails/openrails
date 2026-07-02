@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -73,7 +73,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 
 		// #641: a context-pinned account (the per-account inbound webhook path)
 		// records observed external-account provenance.
-		pinnedCtx := repo.WithRailMerchantAccountID(ctx, account.ID)
+		pinnedCtx := db.WithRailMerchantAccountID(ctx, account.ID)
 		pmt2 := &models.Payment{
 			ID: uuid.New(), CustomerID: customerID, PriceID: priceID, Rail: models.RailNMI,
 			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "usd",

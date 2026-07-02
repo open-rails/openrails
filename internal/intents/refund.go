@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -104,7 +103,7 @@ func (r refundReservations) checkRelevance(ctx context.Context, intent gen.Openr
 	}
 	reservation, err := r.payments().GetByID(ctx, p.ReservationID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return SupersededBy("refund reservation no longer exists"), nil
 		}
 		return Relevance{}, err
@@ -127,7 +126,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 	svc := r.payments()
 	reservation, err := svc.GetByID(ctx, p.ReservationID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil
 		}
 		return err

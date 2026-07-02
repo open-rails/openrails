@@ -330,6 +330,21 @@ type OpenrailsEntitlementFeature struct {
 	UpdatedAt  time.Time
 }
 
+// #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
+type OpenrailsFreeloaderEpisode struct {
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	EntitlementID uuid.UUID
+	Entitlement   string
+	SourceType    string
+	SourceID      uuid.UUID
+	Cause         string
+	StartedAt     interface{}
+	EndedAt       interface{}
+	Open          bool
+	Days          float64
+}
+
 // #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.
 type OpenrailsGrant struct {
 	ID         uuid.UUID
@@ -627,6 +642,19 @@ type OpenrailsNotificationQueue struct {
 	CreatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+}
+
+// #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
+type OpenrailsOrphanedEpisode struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	SourceType string
+	SourceID   uuid.UUID
+	ProductID  uuid.UUID
+	StartedAt  interface{}
+	EndedAt    interface{}
+	Open       bool
+	Days       float64
 }
 
 // Per-tier payer spend limit (#477/#517): the platform caps the payer's spend, keyed by trust-tier. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override.

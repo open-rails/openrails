@@ -52,7 +52,7 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	seed("nmi", nmiAccount)
 	putSecret("nmi", nmiAccount, "security_key", "nmi-sandbox-key-681")
 
-	const ccbillAccount = "945284/0001"
+	const ccbillAccount = "945284-0001"
 	seed("ccbill", ccbillAccount)
 	putSecret("ccbill", ccbillAccount, "salt", "ccbill-sandbox-salt-681")
 

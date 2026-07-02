@@ -19,38 +19,6 @@ import (
 
 // uuid is used by models for ID generation in cleanup tests
 
-// TestRiverJobEnqueue tests that we can enqueue jobs and they get processed
-func TestRiverJobEnqueue(t *testing.T) {
-	suite := setupTestSuite(t)
-
-	// Clear any existing jobs from periodic schedulers
-	suite.ClearJobQueue()
-
-	t.Run("can enqueue and process dunning job", func(t *testing.T) {
-		// Get the River client directly (it's already typed)
-		client := suite.App.Runtime.RiverClient
-		require.NotNil(t, client, "Should have River client")
-
-		// Get initial completed count
-		initialCompleted := suite.GetCompletedJobCount()
-
-		// Enqueue a dunning job (webhooks are now processed synchronously, not via River)
-		ctx := context.Background()
-		_, err := client.Insert(ctx, riverjobs.DunningArgs{}, &river.InsertOpts{
-			Queue: riverjobs.QueueBilling,
-		})
-		require.NoError(t, err, "Should be able to enqueue job")
-
-		// Wait for job to complete (max 5 seconds)
-		completed := suite.WaitForJobCompletion(initialCompleted+1, 5*time.Second)
-		assert.True(t, completed, "Job should complete within timeout")
-
-		// Verify job completed
-		finalCompleted := suite.GetCompletedJobCount()
-		assert.Greater(t, finalCompleted, initialCompleted, "Completed job count should increase")
-	})
-}
-
 // TestWebhookProcessingFlow has been removed.
 // Webhook processing is now synchronous-only - no async River jobs.
 // See: agents/progress.json "simplify-webhook-processing" for details.

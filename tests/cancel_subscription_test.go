@@ -64,6 +64,9 @@ func TestCancelSubscriptionNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// #696: CCBill cancels queue like every other rail (no more portal redirect);
+// the worker's user cancel path then records the local runway cancel + the
+// durable ccbill_cancel_subscription intent.
 func TestCancelSubscriptionCCBill(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
@@ -89,13 +92,12 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
 	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.Equal(t, http.StatusAccepted, w.Code)
 
 	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "ccbill_cancel_required", response["code"])
-	require.Equal(t, "https://support.ccbill.com", response["support_url"])
+	require.Equal(t, "queued", response["status"])
 }
 
 func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {

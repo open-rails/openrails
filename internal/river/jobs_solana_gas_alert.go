@@ -6,7 +6,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/db"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -55,7 +55,7 @@ func (w *SolanaGasAlertWorker) Work(ctx context.Context, _ *river.Job[SolanaGasA
 		threshold = defaultGasAlertThresholdLamports
 	}
 
-	wallets, err := dbrepo.NewSolanaSubscriptionRepo(w.DB).ListActiveMerchantWallets(ctx)
+	wallets, err := solanasubs.NewSolanaSubscriptionRepo(w.DB).ListActiveMerchantWallets(ctx)
 	if err != nil {
 		return fmt.Errorf("solana gas alert: list cranker wallets: %w", err)
 	}

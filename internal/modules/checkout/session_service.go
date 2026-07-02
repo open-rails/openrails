@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -154,7 +153,7 @@ type subscriptionReader interface {
 }
 
 // solanaSubscriptionRowReader loads the stored on-chain identifiers for a
-// subscription (satisfied by *repo.SolanaSubscriptionRepo).
+// subscription (satisfied by *solanasubs.SolanaSubscriptionRepo).
 type solanaSubscriptionRowReader interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
 }
@@ -1126,7 +1125,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	// an active Solana subscription.
 	sub, err := s.subscriptionReader.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
 		}
 		return nil, fmt.Errorf("failed to load subscription: %w", err)
@@ -1740,7 +1739,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 				return nil, err
 			}
 			return s.sessionToResponse(updated), nil
-		} else if !repo.IsNotFound(err) {
+		} else if !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed checking existing solana payment: %w", err)
 		}
 	}
@@ -1934,7 +1933,7 @@ func (s *CheckoutSessionService) FindOpenByUserPriceRail(ctx context.Context, us
 	}
 	session, err := s.repo.GetLatestOpenByUserPriceRail(ctx, userID, priceID, rail)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -2123,7 +2122,7 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, ErrCheckoutSessionNotFound
 		}
 		return nil, err
@@ -2200,7 +2199,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, ErrCheckoutSessionNotFound
 		}
 		return nil, err

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -62,7 +62,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 
 	subscription, err := r.State.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
 			return
 		}

@@ -203,7 +203,8 @@ type Subscription struct {
 	// current period ends (status==cancelled && current period end in the future);
 	// the expiry date is CurrentPeriodEndsAt.
 	// CancelMode: "reversible" | "destructive" | "external_portal".
-	// CancelPortalURL: external consumer-portal URL (set only for CCBill).
+	// CancelPortalURL: external consumer-portal URL for external_portal rails
+	// (none since #696 — CCBill cancels via the DataLink SMS choke point).
 	Resumable       bool
 	CancelScheduled bool
 	CancelMode      string

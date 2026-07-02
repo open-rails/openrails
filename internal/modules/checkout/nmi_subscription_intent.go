@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -236,7 +236,7 @@ func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Contex
 			}
 			local, lerr := h.Checkout.SubscriptionService.GetByRailSubscriptionID(ctx, provider, sub.ID)
 			if lerr != nil {
-				if !repo.IsNotFound(lerr) {
+				if !db.IsNotFound(lerr) {
 					return intents.Ambiguous("local subscription lookup failed: " + lerr.Error()), true
 				}
 				// Unknown locally: the orphan this intent created.

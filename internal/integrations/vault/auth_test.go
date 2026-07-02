@@ -2,8 +2,10 @@ package vault
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +17,7 @@ func TestLogin_Token(t *testing.T) {
 	var hitAuthLogin bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawToken = r.Header.Get("X-Vault-Token")
-		if contains(r.URL.Path, "/auth/") && contains(r.URL.Path, "/login") {
+		if strings.Contains(r.URL.Path, "/auth/") && strings.Contains(r.URL.Path, "/login") {
 			hitAuthLogin = true
 		}
 		// Respond to a token-self lookup or any probe with an empty OK.
@@ -66,4 +68,11 @@ func TestLogin_UnsupportedMethod(t *testing.T) {
 	if _, err := Login(context.Background(), Config{Address: "http://127.0.0.1:1", AuthMethod: "bogus"}); err == nil {
 		t.Fatal("expected error for unsupported auth method")
 	}
+}
+
+// writeJSON is the shared httptest response helper (was in the deleted
+// kv_httptest_test.go twin; the live-Vault coverage moved to the vaultint lane).
+func writeJSON(w http.ResponseWriter, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }

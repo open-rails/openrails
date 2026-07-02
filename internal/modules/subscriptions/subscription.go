@@ -11,7 +11,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -39,8 +38,8 @@ type GetSubscriptionsFilters struct {
 
 type SubscriptionService struct {
 	db                   *db.DB
-	subscriptionRepo     *repo.SubscriptionRepo
-	notificationRepo     *repo.NotificationQueueRepo
+	subscriptionRepo     *SubscriptionRepo
+	notificationRepo     *NotificationQueueRepo
 	clock                clockwork.Clock
 	PriceService         *catalog.PriceService
 	ProductService       *catalog.ProductService
@@ -173,8 +172,8 @@ func NewSubscriptionService(
 ) *SubscriptionService {
 	return &SubscriptionService{
 		db:                   db,
-		subscriptionRepo:     repo.NewSubscriptionRepo(db),
-		notificationRepo:     repo.NewNotificationQueueRepo(db),
+		subscriptionRepo:     NewSubscriptionRepo(db),
+		notificationRepo:     NewNotificationQueueRepo(db),
 		clock:                timeutil.FirstClock(clocks...),
 		PriceService:         priceService,
 		ProductService:       productService,
@@ -194,7 +193,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 		if err == nil {
 			return ErrActiveSubscriptionExists
 		}
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return fmt.Errorf("check existing subscription: %w", err)
 		}
 	}
@@ -258,8 +257,8 @@ func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, 
 }
 
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
-	repoParams := query.QueryOptions[repo.SubscriptionFilters]{
-		Filters: repo.SubscriptionFilters{
+	repoParams := query.QueryOptions[SubscriptionFilters]{
+		Filters: SubscriptionFilters{
 			UserID:          params.Filters.UserID,
 			Status:          params.Filters.Status,
 			PriceID:         params.Filters.PriceID,

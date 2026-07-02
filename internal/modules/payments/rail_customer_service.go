@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -48,7 +47,7 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	now := time.Now().UTC()
 	// Resolve the payable merchant subject for this (merchant, user) so the row carries
 	// customer_id alongside the legacy user_id (#317).
-	customerRowID, err := repo.EnsureCustomerID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
+	customerRowID, err := db.EnsureCustomerID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
@@ -84,7 +83,7 @@ func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail st
 	if userID == "" || rail == "" {
 		return "", fmt.Errorf("invalid rail customer args")
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return "", err
 	}

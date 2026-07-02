@@ -11,10 +11,11 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
 
 // TypeSolanaPull is the recurring on-chain pull (#674): one durable intent per
@@ -95,7 +96,7 @@ func recordedSignature(intent gen.OpenrailsRailIntent) string {
 }
 
 func (h *SolanaPullIntentHandler) loadRow(ctx context.Context, p SolanaPullPayload) (*models.SolanaSubscription, error) {
-	return dbrepo.NewSolanaSubscriptionRepo(h.Core.DB).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
+	return solanasubs.NewSolanaSubscriptionRepo(h.Core.DB).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
 }
 
 // CheckRelevance: the pull applies while the row is still active ON the same
@@ -108,7 +109,7 @@ func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen
 	}
 	row, err := h.loadRow(ctx, p)
 	if err != nil {
-		if dbrepo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return intents.SupersededBy("solana subscription row no longer exists"), nil
 		}
 		return intents.Relevance{}, err
@@ -134,7 +135,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Openra
 	if err != nil {
 		return intents.Retryable("load solana subscription: " + err.Error())
 	}
-	repo := dbrepo.NewSolanaSubscriptionRepo(h.Core.DB)
+	repo := solanasubs.NewSolanaSubscriptionRepo(h.Core.DB)
 
 	// A previously-recorded signature means a tx WAS signed (and possibly
 	// landed). Resolve it via the chain BEFORE any re-pull: landed ⇒ renewal
@@ -220,7 +221,7 @@ func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.Openrai
 	if err != nil {
 		return intents.Ambiguous("pull landed on-chain, but local row load failed: " + err.Error())
 	}
-	return h.repairFromSignature(ctx, dbrepo.NewSolanaSubscriptionRepo(h.Core.DB), row, sig)
+	return h.repairFromSignature(ctx, solanasubs.NewSolanaSubscriptionRepo(h.Core.DB), row, sig)
 }
 
 // repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:

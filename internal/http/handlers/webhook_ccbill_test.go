@@ -94,15 +94,31 @@ func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 	require.False(t, ccbillWebhookIPAllowed(httprequest.NewHTTP(httptest.NewRecorder(), req, nil), "203.0.113.5"))
 }
 
+// #697: the composite CCBill account identity is dash-joined
+// (clientAccnum-clientSubacc), matching CCBill's own convention and the declared
+// rail_merchant_accounts.account_id format.
+func TestCCBillWebhookAccountIDIsDashJoined(t *testing.T) {
+	require.Equal(t, "900000-0000",
+		ccbillWebhookAccountID([]byte(`{"clientAccnum":"900000","clientSubacc":"0000"}`)))
+	// Numeric wire values coerce the same way.
+	require.Equal(t, "900000-3",
+		ccbillWebhookAccountID([]byte(`{"clientAccnum":900000,"clientSubacc":3}`)))
+	// No subacc → bare accnum, no separator.
+	require.Equal(t, "900000",
+		ccbillWebhookAccountID([]byte(`{"clientAccnum":"900000"}`)))
+	// No accnum → no identity.
+	require.Empty(t, ccbillWebhookAccountID([]byte(`{"clientSubacc":"0000"}`)))
+}
+
 // #668: CCBill events carry no signature, so they must never claim
 // SignatureValid — on the direct-dispatch path or the River path.
 func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 	prepared, err := webhookutil.PrepareCCBill([]byte(`{"eventType":"NewSaleSuccess","clientAccnum":"900000","transactionId":"1"}`), "NewSaleSuccess")
 	require.NoError(t, err)
 
-	msg := ccbillWebhookMessage("64.38.212.5", prepared, "900000/0000")
+	msg := ccbillWebhookMessage("64.38.212.5", prepared, "900000-0000")
 	require.Nil(t, msg.SignatureValid)
-	require.Equal(t, "900000/0000", msg.RailMerchantAccountID)
+	require.Equal(t, "900000-0000", msg.RailMerchantAccountID)
 
 	// River path: an unverified Prepared must enqueue with SignatureValid nil.
 	require.Nil(t, prepared.QueueArgs("64.38.212.5").SignatureValid)

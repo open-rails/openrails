@@ -57,7 +57,7 @@ runtime source of truth. The command resolves each declared provider account
 identity `(merchant, rail, environment, account_id)` and imports its
 secret values into the same backend the server will read:
 
-- `vault.enabled: true`: `secret/openrails/merchants/<merchant-slug>/provider_accounts/<rail>/<environment>/<account_id>/<secret_key>`
+- `vault.enabled: true`: `secret/openrails/merchants/<merchant-slug>/rail_merchant_accounts/<rail>/<environment>/<account_id>/<secret_key>`
 - Vault disabled: `openrails.merchant_secrets` with the same secret name,
   envelope-encrypted when `encryption.master_key` is configured
 
@@ -175,7 +175,8 @@ bound to a merchant-scoped `payment_provider_accounts` row. The row stores the a
 own identity, never the credential or local config key: NMI uses the merchant
 identity from the gateway's profile report (query.php `report_type=profile`),
 Stripe uses the `acct_...` id from GET /v1/account, CCBill uses the configured
-account/subaccount identity, and Solana uses the configured recipient/authority
+dash-joined `clientAccnum-clientSubacc` identity (#697), and Solana uses the
+configured recipient/authority
 identity where account-binding is useful. Local config keys such as
 `stripe_live` are disposable selectors only.
 

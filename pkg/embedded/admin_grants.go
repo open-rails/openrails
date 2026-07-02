@@ -45,7 +45,7 @@ type AdminGrantImportResult struct {
 	Imported []string // newly recorded as admin grants (+ entitlement materialized)
 	Skipped  []string // SourceID already imported (idempotent re-run)
 	NoSpec   []string // product has no entitlements_spec → nothing to grant
-	Blocked  []string // every feature overlapped an existing live window → not granted
+	Blocked  []string // grant recorded, but every feature's window overlapped a live window → no window materialized (#695)
 }
 
 // ImportAdminGrants records each admin comp as a source_type=admin entitlement

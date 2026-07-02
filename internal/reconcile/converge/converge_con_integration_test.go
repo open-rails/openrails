@@ -35,7 +35,7 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		// A NON-LIVE (already-ended) entitlement pointing at a subscription that
 		// does not exist. #690 partition: a LIVE dangling window is the
-		// freeloader case (derive.entitlement.orphan); this reference check
+		// freeloader case (derive.entitlement.unjustified); this reference check
 		// keeps the non-live rest — history rows with broken provenance.
 		_, err := appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)

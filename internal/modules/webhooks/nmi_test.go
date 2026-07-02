@@ -24,15 +24,6 @@ func TestTransactionSubscriptionID_Fallbacks(t *testing.T) {
 			},
 			want: "sub-123",
 		},
-		/*{
-			name: "transaction detail subscription",
-			body: &NMITransactionEventBody{
-				TransactionDetail: &NMITransactionDetail{
-					Subscription: &NMISubscriptionRef{SubscriptionID: " detail-456 "},
-				},
-			},
-			want: "detail-456",
-		},*/
 		{
 			name: "order id fallback",
 			body: &NMITransactionEventBody{OrderID: " order-789 "},
@@ -57,18 +48,6 @@ func TestTransactionSubscriptionID_Fallbacks(t *testing.T) {
 			},
 			want: "detail-po",
 		},
-		/*{
-			name: "customer id fallback",
-			body: &NMITransactionEventBody{CustomerID: " cust-002 "},
-			want: "cust-002",
-		},
-		{
-			name: "transaction detail customer id fallback",
-			body: &NMITransactionEventBody{
-				TransactionDetail: &NMITransactionDetail{CustomerID: " detail-cust "},
-			},
-			want: "detail-cust",
-		},*/
 		{
 			name: "empty payload",
 			body: &NMITransactionEventBody{},

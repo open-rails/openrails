@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -155,7 +155,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 
 	if product.TierGroup != nil && *product.TierGroup != "" {
 		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to check tier group: %w", err)
 		}
 
@@ -242,7 +242,7 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 
 	// Exact-same-price re-subscribe: idempotent, never charge twice (issue #269).
 	existingSamePrice, err := s.SubscriptionService.GetByUserIDAndPriceID(ctx, userID, price.ID)
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to check existing price subscription: %w", err)
 	}
 	if existingSamePrice != nil && IsNonTerminalSubscriptionStatus(existingSamePrice.Status) {
@@ -259,7 +259,7 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 	// already filters to the non-terminal status set) blocks a second subscribe.
 	if product.TierGroup != nil && strings.TrimSpace(*product.TierGroup) != "" {
 		existing, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to check tier group: %w", err)
 		}
 		if existing != nil {
@@ -318,12 +318,12 @@ func (s *CheckoutPurchaseService) checkUnknownSubscriptionConflict(ctx context.C
 		return nil, nil
 	}
 	unknownSub, err := s.SubscriptionService.GetUnknownByUserIDAndProductID(ctx, userID, product.ID)
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to check unknown subscription: %w", err)
 	}
 	if unknownSub == nil && product.TierGroup != nil && strings.TrimSpace(*product.TierGroup) != "" {
 		unknownSub, err = s.SubscriptionService.GetUnknownByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to check unknown tier-group subscription: %w", err)
 		}
 	}
@@ -344,7 +344,7 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 
 	if s.SubscriptionService != nil {
 		sub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, userID, product.ID)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to check subscription: %w", err)
 		}
 		if sub != nil {
@@ -385,7 +385,7 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 			}
 
 			ent, err := s.EntitlementService.LatestFiniteWindow(ctx, userID, entitlementName, now)
-			if err != nil && !repo.IsNotFound(err) {
+			if err != nil && !db.IsNotFound(err) {
 				return nil, fmt.Errorf("failed to check finite entitlement: %w", err)
 			}
 			if ent != nil {

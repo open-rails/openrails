@@ -63,8 +63,10 @@ type Config struct {
 	//   - "full":     normal operation
 	//   - "limited":  no system-initiated provider writes
 	//   - "readonly": no provider writes
-	// Unset defaults to "full" in development; outside development an explicit
-	// provider_write_mode is REQUIRED (Validate refuses to boot without one).
+	// Unset defaults to "readonly" — FAIL CLOSED (Paul 2026-07-02): no provider
+	// write (cancellation, deletion, charge) executes until the operator
+	// explicitly sets full or limited. Outside development an explicit value is
+	// still REQUIRED (Validate refuses to boot without one).
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 	// Mode is a deprecated compatibility alias for provider_write_mode.
 	Mode string `koanf:"mode,omitempty"`
@@ -358,8 +360,9 @@ type RailMerchantAccountConfig struct {
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail `koanf:"rail"`
 	// AccountID is this account's rail-native identity (#641/#655): NMI
-	// gateway-id, Stripe acct_…, CCBill client_acc_num[/sub], or Solana wallet
-	// (#592: operator-declared). REQUIRED — ValidateRailSet rejects an empty one.
+	// gateway-id, Stripe acct_…, CCBill clientAccnum-clientSubacc (dash-joined,
+	// e.g. 945280-0000, #697), or Solana wallet (#592: operator-declared).
+	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string `koanf:"account_id"`
 	// Environment is test|live. A deployment is all-test or all-live; ValidateRailSet
 	// rejects any account whose environment contradicts test_mode (#641). Empty →
@@ -442,6 +445,18 @@ func (p *RailMerchantAccountConfig) EffectiveAccountID() string {
 		return ""
 	}
 	return strings.TrimSpace(p.AccountID)
+}
+
+// ValidateRailAccountID rejects rail-specific malformed account_id values.
+// CCBill composite identity is dash-joined (#697): clientAccnum-clientSubacc,
+// matching CCBill's own convention — a slash would also re-embed the
+// merchant-secret path delimiter inside the id. Format-only; empty ids are
+// handled by the callers' requiredness rules.
+func ValidateRailAccountID(rail models.Rail, accountID string) error {
+	if rail == models.RailCCBill && strings.Contains(accountID, "/") {
+		return fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000 (got %q)", accountID)
+	}
+	return nil
 }
 
 // EffectiveEnvironment returns the account's declared environment (test|live), or
@@ -766,10 +781,10 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("test_mode=true is not allowed outside development")
 		}
 		// Outside development the operating mode must be declared explicitly —
-		// "I forgot to set it" must never silently pick a behavior.
-		switch cfg.GetProviderWriteMode() {
-		case ProviderWriteModeFull, ProviderWriteModeLimited, ProviderWriteModeReadOnly:
-		default:
+		// "I forgot to set it" must never silently pick a behavior. Checked on
+		// the RAW value: GetProviderWriteMode fail-closes unset to readonly,
+		// which must not satisfy this explicitness gate.
+		if providerWriteMode == "" {
 			return fmt.Errorf("provider_write_mode is required outside development: set provider_write_mode (or env PROVIDER_WRITE_MODE) to one of full, limited, readonly")
 		}
 		if cfg.DB != nil {
@@ -993,6 +1008,11 @@ func validateNMIRail(name string, proc *RailMerchantAccountConfig, isDev bool) e
 
 // validateCCBillRail validates a CCBill-type rail
 func validateCCBillRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
+	// #697: format check runs even in dev — a slash-form account_id is a config
+	// bug (it breaks secret-name paths), not a missing credential.
+	if err := ValidateRailAccountID(models.RailCCBill, proc.EffectiveAccountID()); err != nil {
+		return fmt.Errorf("rail '%s' (ccbill): %w", name, err)
+	}
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
@@ -1190,15 +1210,15 @@ func (cfg *Config) normalizedProviderWriteMode() (string, error) {
 	return providerWriteMode, nil
 }
 
-// GetProviderWriteMode returns the normalized provider write mode ("" when unset).
-// Unknown values are rejected by Validate; here they normalize to "" so a
-// pre-validation caller never misreads a typo as a real policy. Unset means
-// the dev default (full behavior) — that only ever serves development, because
-// Validate requires an explicit provider_write_mode outside it.
+// GetProviderWriteMode returns the normalized provider write mode. Unset,
+// invalid, or conflicting values all normalize to READONLY — fail closed (Paul
+// 2026-07-02): a boot that never declared its write policy (or typoed it before
+// Validate runs) must not execute provider writes. Explicit full|limited is the
+// only way to enable them.
 func (cfg *Config) GetProviderWriteMode() string {
 	mode, err := cfg.normalizedProviderWriteMode()
-	if err != nil || !ValidProviderWriteModes[mode] {
-		return ""
+	if err != nil || mode == "" || !ValidProviderWriteModes[mode] {
+		return ProviderWriteModeReadOnly
 	}
 	return mode
 }

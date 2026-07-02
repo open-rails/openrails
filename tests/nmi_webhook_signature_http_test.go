@@ -6,10 +6,12 @@ package tests
 // Full stack: real Postgres-backed merchant resolution, the seeded
 // webhook-signing secret loaded through the merchant secret store, the
 // sigverify HMAC scheme (t=<unix>,s=hex(hmac-sha256(secret, ts+"."+body))),
-// and the real webhook dispatcher applying the event.
+// and the real webhook dispatcher.
 //
-//	valid signature   ⇒ 202-path "accepted" AND the event's effect lands
-//	                    (recurring.subscription.delete cancels the local sub)
+//	valid signature   ⇒ 202-path "accepted" AND (#684) the subscription is
+//	                    marked dirty: a coalesced fetch-and-converge job is
+//	                    enqueued; the payload itself moves NO state (webhooks
+//	                    are wake-up signals, provider truth decides)
 //	tampered/foreign  ⇒ 401, no state change
 //	missing signature ⇒ 401, no state change
 
@@ -34,6 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // signNMIWebhook produces the Webhook-Signature header value NMI sends:
@@ -110,13 +113,32 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	require.Equal(t, models.StatusActive, suite.GetSubscription(sub.ID).Status,
 		"rejected webhooks must not change state")
 
-	t.Run("valid signature accepted and applied", func(t *testing.T) {
+	t.Run("valid signature accepted and converge enqueued", func(t *testing.T) {
 		w := postNMIMerchantWebhook(t, suite, body, signNMIWebhook(signingSecret, body))
 		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "accepted")
 
-		got := suite.GetSubscription(sub.ID)
-		assert.Equal(t, models.StatusCancelled, got.Status,
-			"provider-initiated delete must cancel the local subscription")
+		// #684: the handler is identity-only — the payload moved no state...
+		assert.Equal(t, models.StatusActive, suite.GetSubscription(sub.ID).Status,
+			"the webhook payload itself must not move subscription state")
+
+		// ...and the dirty mark is durably queued: ONE coalesced
+		// fetch-and-converge job for this subscription (provider truth, not the
+		// payload, will decide the transition when the worker fetches).
+		var queued int
+		require.NoError(t, suite.Pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM `+config.RiverSchema+`.river_job
+			 WHERE kind = $1 AND args->>'subscription_reference' = $2
+			   AND state IN ('available','scheduled','pending','running','retryable')`,
+			riverjobs.KindSubscriptionConverge, railSubID).Scan(&queued))
+		assert.Equal(t, 1, queued, "valid webhook must enqueue exactly one converge job")
+	})
+
+	// Don't leak a converge job that would retry against the real NMI API for
+	// the rest of the shared suite.
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(context.Background(),
+			`DELETE FROM `+config.RiverSchema+`.river_job WHERE kind = $1 AND args->>'subscription_reference' = $2`,
+			riverjobs.KindSubscriptionConverge, railSubID)
 	})
 }

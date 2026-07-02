@@ -734,7 +734,19 @@ WHERE g.merchant_id = $1::uuid
               AND e2.source_type = 'subscription'
               AND e2.source_id::text = g.source_id
               AND e2.end_at IS NULL
-              AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))))
+              AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))
+          -- #695 absent-by-overlap: a LIVE window (any source) overlapping the
+          -- grant's own [starts_at, ends_at) means MaterializeGrant deliberately
+          -- projected NO window for it (the grant is provenance-only; the window
+          -- is overlap-constrained). Mirrors derive-2's overlap no-op — detection
+          -- and repair must agree or the sweep never converges.
+          AND NOT EXISTS (
+            SELECT 1 FROM openrails.entitlements e3
+            WHERE e3.merchant_id = g.merchant_id
+              AND e3.customer_id = g.customer_id
+              AND e3.entitlement = feat
+              AND e3.revoked_at IS NULL AND e3.deleted_at IS NULL
+              AND e3.period && tstzrange(g.starts_at, COALESCE(g.ends_at, 'infinity'::timestamptz), '[)'))))
     OR
     (g.kind = 'credit' AND NOT EXISTS (
         SELECT 1 FROM openrails.ledger_transfers lt

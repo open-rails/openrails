@@ -19,11 +19,6 @@ const (
 	CancelModeExternalPortal = rails.CancelModeExternalPortal
 )
 
-// CCBillSupportPortalURL is the consumer support portal CCBill subscribers must
-// use to manage (cancel) their subscription. Legacy export; the value of record
-// is the ccbill descriptor's CancelPortalURL (equality pinned in tests).
-const CCBillSupportPortalURL = "https://support.ccbill.com"
-
 // NMIDeleteSafetyMargin is how far ahead of the paid-period end we fire the
 // deferred NMI delete_subscription (issue 216).
 //
@@ -118,8 +113,8 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 
 // CancelPortalURL returns the external consumer-portal URL a client should send
 // the user to in order to manage their subscription, when the cancel mode is
-// external_portal (CCBill). Returns nil otherwise. The URL is the rail
-// descriptor's (#686).
+// external_portal. Returns nil otherwise (every current rail since #696 moved
+// CCBill onto the DataLink SMS cancel). The URL is the rail descriptor's (#686).
 func CancelPortalURL(sub *models.Subscription, now time.Time) *string {
 	if CancelModeFor(sub, now) != CancelModeExternalPortal {
 		return nil

@@ -82,11 +82,11 @@ KV-v2 field `value`:
 | Stripe API key | `secret/openrails/merchants/cozy-art/stripe/secret_key` | yes |
 | Stripe webhook signing secret | `secret/openrails/merchants/cozy-art/stripe/webhook_signing_secret` | yes |
 | Stripe thin-event signing secret | `secret/openrails/merchants/cozy-art/stripe/webhook_signing_secret_thin` | yes |
-| NMI security key | `secret/openrails/merchants/doujins/provider_accounts/nmi/live/mobius/security_key` | yes |
-| CCBill FlexForm salt | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/salt` | yes |
-| CCBill DataLink username | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_username` | yes |
-| CCBill DataLink password | `secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_password` | yes |
-| Solana signing keypair | `secret/openrails/merchants/local-stack/provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key` | no |
+| NMI security key | `secret/openrails/merchants/doujins/rail_merchant_accounts/nmi/live/579145/security_key` | yes |
+| CCBill FlexForm salt | `secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/salt` | yes |
+| CCBill DataLink username | `secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/datalink_username` | yes |
+| CCBill DataLink password | `secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/datalink_password` | yes |
+| Solana signing keypair | `secret/openrails/merchants/local-stack/rail_merchant_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key` | no |
 
 Solana local keypairs are provider-account scoped `private_key` secrets. There is
 no broad startup seed path. Delegated admin APIs do not expose Solana private
@@ -98,10 +98,10 @@ An operator can preprovision provider credentials before a merchant ever opens a
 dashboard:
 
 ```sh
-vault kv put secret/openrails/merchants/doujins/provider_accounts/nmi/live/mobius/security_key value="$NMI_SECURITY_KEY"
-vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_username value="$CCBILL_DATALINK_USERNAME"
-vault kv put secret/openrails/merchants/doujins/provider_accounts/ccbill/live/945280%2F0000/datalink_password value="$CCBILL_DATALINK_PASSWORD"
+vault kv put secret/openrails/merchants/doujins/rail_merchant_accounts/nmi/live/579145/security_key value="$NMI_SECURITY_KEY"
+vault kv put secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/salt value="$CCBILL_SALT"
+vault kv put secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/datalink_username value="$CCBILL_DATALINK_USERNAME"
+vault kv put secret/openrails/merchants/doujins/rail_merchant_accounts/ccbill/live/945280-0000/datalink_password value="$CCBILL_DATALINK_PASSWORD"
 vault kv put secret/openrails/merchants/tensorhub/stripe/secret_key value="$STRIPE_SECRET_KEY"
 vault kv put secret/openrails/merchants/tensorhub/stripe/webhook_signing_secret value="$STRIPE_WEBHOOK_SECRET"
 ```

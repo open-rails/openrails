@@ -305,6 +305,12 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		require.Equal(t, 1, count(payMissing), "grantable product, no grant → flagged")
 		require.Equal(t, 0, count(payEmpty), "empty-spec product → not flagged")
 		require.Equal(t, 0, count(payOK), "payment with a grant → not flagged")
+		var severity, status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT severity, status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.missing' AND subject_key=$2`,
+			merchantID, "payment:"+payMissing.String()).Scan(&severity, &status))
+		require.Equal(t, "critical", severity, "#690: orphaned category (paying, no access) outranks freeloader")
+		require.Equal(t, "requires_review", status, "ADMIN surface-only")
 		return nil
 	}))
 }

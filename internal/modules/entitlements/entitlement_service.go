@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -69,7 +68,7 @@ func (s *EntitlementService) now() time.Time {
 
 // IsEntitled returns true if the user currently has an active entitlement
 func (s *EntitlementService) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -92,7 +91,7 @@ func (s *EntitlementService) IsCustomerEntitled(ctx context.Context, tenantSubje
 }
 
 func (s *EntitlementService) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -121,7 +120,7 @@ func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType mode
 }
 
 func (s *EntitlementService) LatestFiniteWindow(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +185,7 @@ func (s *EntitlementService) Insert(ctx context.Context, entitlement *models.Ent
 }
 
 func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +197,7 @@ func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]m
 }
 
 func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +305,7 @@ func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Co
 
 // ListActiveEntitlements returns a de-duplicated list of active entitlement names for a user at a point in time.
 func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -434,10 +433,10 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		// Resolve the payable merchant subject for this entitlement when the caller
 		// did not supply one (#317), so every window carries customer_id
 		// alongside the legacy user_id. Self-service user UUIDs resolve to a
-		// customers row whose id IS that UUID (see repo.EnsureCustomerID),
+		// customers row whose id IS that UUID (see db.EnsureCustomerID),
 		// converging with the credits/commerce payable identity.
 		if p.CustomerID == uuid.Nil {
-			tsid, terr := repo.EnsureCustomerID(ctx, tx, uuid.Nil, p.UserID)
+			tsid, terr := db.EnsureCustomerID(ctx, tx, uuid.Nil, p.UserID)
 			if terr != nil {
 				return terr
 			}
@@ -798,7 +797,7 @@ func (s *EntitlementService) revokeGrantsForSubscriptionSources(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	customerID, err := repo.ResolveCustomerID(userID)
+	customerID, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return err
 	}
@@ -891,7 +890,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 
 		// Filter the entitlement timeline by the payable merchant subject (#317);
 		// the lock above still serializes on the userID string key.
-		tsid, terr := repo.ResolveCustomerID(userID)
+		tsid, terr := db.ResolveCustomerID(userID)
 		if terr != nil {
 			return terr
 		}

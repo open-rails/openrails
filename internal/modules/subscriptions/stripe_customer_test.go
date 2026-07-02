@@ -14,7 +14,9 @@ import (
 )
 
 func testStripeConfig() *config.Config {
-	return &config.Config{}
+	// Empty config fail-closes to readonly at the stripeapi choke point; these
+	// tests exercise writes against a local httptest server.
+	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
 func testStripeRails() config.RailMerchantAccountSet {

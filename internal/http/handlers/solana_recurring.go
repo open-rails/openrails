@@ -9,13 +9,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -156,7 +156,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 	}
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -235,7 +235,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 	}
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -311,7 +311,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	// Authorize: the acting user must own the OLD lifecycle subscription.
 	oldSub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			return nil, http.StatusNotFound, "subscription not found"
 		}
 		return nil, http.StatusInternalServerError, "failed to retrieve subscription"
@@ -324,7 +324,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	// Load the OLD on-chain row (subscriber/merchant identifiers for the atomic tx).
-	oldRow, err := dbrepo.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
+	oldRow, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
 	if err != nil || oldRow == nil {
 		return nil, http.StatusBadRequest, "no on-chain record for this subscription"
 	}
@@ -576,7 +576,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	svc := recurring.NewConfirmTierChangeService(
 		r.State.SolanaRPC,
 		r.State.SubscriptionLifecycleService,
-		dbrepo.NewSolanaSubscriptionRepo(r.State.DB),
+		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
 		network,
 		tokens,
 	)

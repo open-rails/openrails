@@ -17,9 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -271,7 +271,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	// This must happen BEFORE the general coverage check
 	if product.TierGroup != nil && *product.TierGroup != "" {
 		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, user.ID, *product.TierGroup)
-		if err != nil && !repo.IsNotFound(err) {
+		if err != nil && !db.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to check tier group: %w", err)
 		}
 
@@ -831,7 +831,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 			return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
 		}
 		return s.nmiSubscriptionPendingResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
-	} else if !repo.IsNotFound(err) {
+	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
 
@@ -938,7 +938,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 	}
 
 	if _, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(provider), transactionID); err != nil {
-		if !repo.IsNotFound(err) {
+		if !db.IsNotFound(err) {
 			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 			return nil, fmt.Errorf("failed to check NMI subscription payment: %w", err)
 		}
@@ -1368,7 +1368,7 @@ func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, cli
 
 	// 1. Local mapping.
 	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return "", fmt.Errorf("lookup stripe customer mapping: %w", err)
 	}
 	customerID = strings.TrimSpace(customerID)
@@ -1436,7 +1436,7 @@ func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, c
 
 	// Find the customer without creating one: local mapping, then Stripe search.
 	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return false, fmt.Errorf("lookup stripe customer mapping: %w", err)
 	}
 	customerID = strings.TrimSpace(customerID)
@@ -1462,7 +1462,7 @@ func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, c
 		}
 		price, err := prices.GetByStripePriceID(ctx, stripePriceID)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				// Unknown price (e.g. legacy/manual sub) — cannot map to a tier
 				// group, so skip rather than block.
 				continue
@@ -1474,7 +1474,7 @@ func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, c
 		}
 		product, err := products.GetByID(ctx, price.ProductID)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				continue
 			}
 			return false, fmt.Errorf("load product for stripe price %s: %w", stripePriceID, err)

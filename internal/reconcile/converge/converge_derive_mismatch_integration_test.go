@@ -159,7 +159,7 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		seedSub(unknownSub, "unknown", "rd-unknown-"+suffix)
 		// Legacy-shaped LIVE windows (no grants) sourced by each sub. The dead
 		// sub's window is BOUNDED but overruns its entitled bound (#690: the
-		// standing-window shape belongs to derive.entitlement.orphan, ADMIN);
+		// standing-window shape belongs to derive.entitlement.unjustified, ADMIN);
 		// the unknown sub keeps a standing window (access intact, #664/#691).
 		seedEnt := func(id, subID uuid.UUID, feature string, endAt *time.Time) {
 			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)

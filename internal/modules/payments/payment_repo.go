@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
@@ -92,7 +91,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 }
 
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
-	if err := repo.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return err
 	}
 	params, err := paymentInsertParams(payment)
@@ -105,7 +104,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	}
 	params.MerchantID = tid.UUID()
 	if params.RailMerchantAccountID == nil {
-		params.RailMerchantAccountID = repo.ResolveRailMerchantAccountIDForStamp(ctx)
+		params.RailMerchantAccountID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
@@ -118,7 +117,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	if err := repo.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return false, err
 	}
 	params, err := paymentInsertParams(payment)
@@ -131,7 +130,7 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 	}
 	params.MerchantID = tid.UUID()
 	if params.RailMerchantAccountID == nil {
-		params.RailMerchantAccountID = repo.ResolveRailMerchantAccountIDForStamp(ctx)
+		params.RailMerchantAccountID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
@@ -197,7 +196,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +378,7 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -410,7 +409,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 
 	var tsid *uuid.UUID
 	if f.UserID != "" {
-		id, err := repo.ResolveCustomerID(f.UserID)
+		id, err := db.ResolveCustomerID(f.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -554,7 +553,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 }
 
 func (r *PaymentRepo) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +587,7 @@ func (r *PaymentRepo) CountByUserAndRail(ctx context.Context, userID string, rai
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
-	tsid, err := repo.ResolveCustomerID(userID)
+	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return 0, 0, err
 	}

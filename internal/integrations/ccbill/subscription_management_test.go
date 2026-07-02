@@ -1,0 +1,253 @@
+package ccbill
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// #696 wire-pinning tests. The SMS wire shape is PROVISIONAL (Phase 0 live
+// probe pending); these pins make any post-probe adjustment a deliberate,
+// visible diff instead of a silent drift.
+
+func newSMSTestClient(baseURL string) *DataLinkClient {
+	return &DataLinkClient{
+		BaseURL:      baseURL,
+		ClientAccNum: "900100",
+		ClientSubAcc: "0000",
+		Username:     "dluser",
+		Password:     "dlpass",
+		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
+	}
+}
+
+// Known inputs => exact encoded request (url.Values.Encode sorts keys).
+func TestSubscriptionManagementForm_WirePinning(t *testing.T) {
+	c := newSMSTestClient("https://datalink.ccbill.com")
+	form := c.subscriptionManagementForm(actionCancelSubscription, "0123456789")
+	assert.Equal(t,
+		"action=cancelSubscription&clientAccnum=900100&clientSubacc=0000&password=dlpass&returnXML=1&subscriptionId=0123456789&username=dluser",
+		form.Encode())
+
+	view := c.subscriptionManagementForm(actionViewSubscriptionStatus, "0123456789")
+	assert.Equal(t,
+		"action=viewSubscriptionStatus&clientAccnum=900100&clientSubacc=0000&password=dlpass&returnXML=1&subscriptionId=0123456789&username=dluser",
+		view.Encode())
+
+	// No subaccount configured -> clientSubacc omitted entirely.
+	c.ClientSubAcc = ""
+	assert.Equal(t,
+		"action=cancelSubscription&clientAccnum=900100&password=dlpass&returnXML=1&subscriptionId=0123456789&username=dluser",
+		c.subscriptionManagementForm(actionCancelSubscription, "0123456789").Encode())
+}
+
+// smsCapture records the last SMS request and serves a scripted body.
+type smsCapture struct {
+	hits   atomic.Int64
+	path   atomic.Value // string
+	body   atomic.Value // string (last request form body)
+	status atomic.Int64 // 0 = 200
+	answer atomic.Value // string response body
+}
+
+func newSMSServer(t *testing.T) (*smsCapture, *DataLinkClient) {
+	t.Helper()
+	cap := &smsCapture{}
+	cap.answer.Store("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cap.hits.Add(1)
+		cap.path.Store(r.URL.Path)
+		require.NoError(t, r.ParseForm())
+		cap.body.Store(r.PostForm.Encode())
+		if st := cap.status.Load(); st != 0 {
+			w.WriteHeader(int(st))
+		}
+		_, _ = w.Write([]byte(cap.answer.Load().(string)))
+	}))
+	t.Cleanup(srv.Close)
+	return cap, newSMSTestClient(srv.URL)
+}
+
+func TestViewSubscriptionStatus_ParsesCapturedStyleXML(t *testing.T) {
+	cap, c := newSMSServer(t)
+	cap.answer.Store(`<?xml version="1.0"?>
+<results>
+  <subscriptionId>0123456789</subscriptionId>
+  <clientAccnum>900100</clientAccnum>
+  <subscriptionStatus>2</subscriptionStatus>
+  <recurringSubscription>1</recurringSubscription>
+  <expirationDate>20260815</expirationDate>
+  <someFutureField>ignored-but-preserved</someFutureField>
+</results>`)
+
+	res, err := c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.NoError(t, err)
+	assert.Equal(t, "/utils/subscriptionManagement.cgi", cap.path.Load())
+	assert.Equal(t,
+		"action=viewSubscriptionStatus&clientAccnum=900100&clientSubacc=0000&password=dlpass&returnXML=1&subscriptionId=0123456789&username=dluser",
+		cap.body.Load())
+
+	assert.Equal(t, "2", res.RawStatus)
+	assert.Equal(t, "ignored-but-preserved", res.Fields["someFutureField"], "unknown fields preserved verbatim")
+	rebilling, err := res.Rebilling()
+	require.NoError(t, err)
+	assert.True(t, rebilling)
+	active, err := res.Active()
+	require.NoError(t, err)
+	assert.True(t, active)
+	exp, ok := res.ExpiresAt()
+	require.True(t, ok)
+	assert.Equal(t, time.Date(2026, 8, 15, 23, 59, 59, 0, time.UTC), exp)
+}
+
+func TestViewSubscriptionStatus_StatusVocabulary(t *testing.T) {
+	cases := []struct {
+		status        string
+		rebilling     bool
+		active        bool
+		vocabularyErr bool
+	}{
+		{"2", true, true, false},
+		{"1", false, true, false},
+		{"0", false, false, false},
+		{"7", false, false, true}, // unrecognized: error, never a guessed default (#651)
+	}
+	for _, tc := range cases {
+		res := SubscriptionStatusResult{RawStatus: tc.status}
+		rebilling, err := res.Rebilling()
+		active, aerr := res.Active()
+		if tc.vocabularyErr {
+			assert.Error(t, err, tc.status)
+			assert.Error(t, aerr, tc.status)
+			continue
+		}
+		require.NoError(t, err, tc.status)
+		require.NoError(t, aerr, tc.status)
+		assert.Equal(t, tc.rebilling, rebilling, tc.status)
+		assert.Equal(t, tc.active, active, tc.status)
+	}
+}
+
+func TestViewSubscriptionStatus_MissingStatusIsError(t *testing.T) {
+	cap, c := newSMSServer(t)
+	cap.answer.Store(`<results><subscriptionId>0123456789</subscriptionId></results>`)
+	_, err := c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing subscriptionStatus")
+}
+
+func TestViewSubscriptionStatus_BareCodeAndResultsCodeAreErrors(t *testing.T) {
+	cap, c := newSMSServer(t)
+	cap.answer.Store(`-3`)
+	_, err := c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `bare code "-3"`)
+
+	cap.answer.Store(`<results>-3</results>`)
+	_, err = c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `results="-3"`)
+}
+
+func TestViewSubscriptionStatus_AuthClasses(t *testing.T) {
+	cap, c := newSMSServer(t)
+	cap.status.Store(http.StatusUnauthorized)
+	_, err := c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrDataLinkAuth)
+
+	cap.status.Store(0)
+	cap.answer.Store(`Error: authentication failed`)
+	_, err = c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrDataLinkAuth)
+}
+
+func TestCancelSubscription_SuccessShapes(t *testing.T) {
+	cap, c := newSMSServer(t)
+	cap.answer.Store(`<results>1</results>`)
+	res, err := c.CancelSubscription(context.Background(), "0123456789")
+	require.NoError(t, err)
+	assert.Equal(t, "1", res.Results)
+	assert.Equal(t,
+		"action=cancelSubscription&clientAccnum=900100&clientSubacc=0000&password=dlpass&returnXML=1&subscriptionId=0123456789&username=dluser",
+		cap.body.Load())
+
+	// Legacy bare-token answer (returnXML ignored).
+	cap.answer.Store("1")
+	res, err = c.CancelSubscription(context.Background(), "0123456789")
+	require.NoError(t, err)
+	assert.Equal(t, "1", res.Results)
+
+	// Quoted CSV-style token.
+	cap.answer.Store(`"1"`)
+	_, err = c.CancelSubscription(context.Background(), "0123456789")
+	require.NoError(t, err)
+}
+
+func TestCancelSubscription_RejectAndAuthClasses(t *testing.T) {
+	cap, c := newSMSServer(t)
+
+	cap.answer.Store(`<results>0</results>`)
+	res, err := c.CancelSubscription(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrCancelRejected)
+	assert.Equal(t, "0", res.Results, "verbatim reject code carried")
+
+	cap.answer.Store(`-1`)
+	_, err = c.CancelSubscription(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrCancelRejected)
+
+	cap.status.Store(http.StatusForbidden)
+	_, err = c.CancelSubscription(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrDataLinkAuth)
+	cap.status.Store(0)
+
+	// Unparseable multi-line garbage: NOT a definite reject — generic error
+	// (the caller must verify, never assume).
+	cap.answer.Store("weird\nmultiline\nanswer")
+	_, err = c.CancelSubscription(context.Background(), "0123456789")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrCancelRejected)
+	assert.NotErrorIs(t, err, ErrDataLinkAuth)
+}
+
+// mode=readonly blocks the mutation at the transport: zero HTTP traffic.
+func TestCancelSubscription_ReadOnlyBlocksAtTransport(t *testing.T) {
+	cap, c := newSMSServer(t)
+	c.ReadOnly = true
+	_, err := c.CancelSubscription(context.Background(), "0123456789")
+	require.ErrorIs(t, err, ErrProviderReadOnly)
+	assert.Zero(t, cap.hits.Load(), "readonly cancel must never touch the wire")
+
+	// Reads stay available under readonly.
+	cap.answer.Store(`<results><subscriptionStatus>2</subscriptionStatus></results>`)
+	_, err = c.ViewSubscriptionStatus(context.Background(), "0123456789")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, cap.hits.Load())
+}
+
+func TestSubscriptionStatusResult_ExpiresAtFormats(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want time.Time
+	}{
+		{"20260815", time.Date(2026, 8, 15, 23, 59, 59, 0, time.UTC)},
+		{"2026-08-15", time.Date(2026, 8, 15, 23, 59, 59, 0, time.UTC)},
+		{"2026-08-15 10:30:00", time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC)},
+	}
+	for _, tc := range cases {
+		res := SubscriptionStatusResult{Fields: map[string]string{"expirationDate": tc.raw}}
+		got, ok := res.ExpiresAt()
+		require.True(t, ok, tc.raw)
+		assert.Equal(t, tc.want, got, tc.raw)
+	}
+	// Absent / unparseable -> no fabricated date.
+	_, ok := SubscriptionStatusResult{Fields: map[string]string{}}.ExpiresAt()
+	assert.False(t, ok)
+	_, ok = SubscriptionStatusResult{Fields: map[string]string{"expirationDate": "not-a-date"}}.ExpiresAt()
+	assert.False(t, ok)
+}

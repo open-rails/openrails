@@ -48,7 +48,7 @@ func TestStripeCollectInvoice_WirePinsCentsAmount(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	svc := &StripeService{Config: &config.Config{}, Rails: wirePinStripeRails()}
+	svc := &StripeService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, Rails: wirePinStripeRails()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	result, err := svc.CollectInvoice(context.Background(), StripeInvoiceCollectionParams{
@@ -80,7 +80,7 @@ func TestStripeCollectInvoice_RejectsUnderpaidInvoice(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	svc := &StripeService{Config: &config.Config{}, Rails: wirePinStripeRails()}
+	svc := &StripeService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, Rails: wirePinStripeRails()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	_, err := svc.CollectInvoice(context.Background(), StripeInvoiceCollectionParams{
@@ -119,7 +119,7 @@ func TestStripeCreateRefund_WirePinsCentsAmount(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			svc := &StripeRefundService{Config: &config.Config{}, Rails: wirePinStripeRails(), BaseURL: srv.URL}
+			svc := &StripeRefundService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, Rails: wirePinStripeRails(), BaseURL: srv.URL}
 			result, err := svc.CreateRefund(context.Background(), RefundParams{
 				ChargeID:       "ch_1",
 				Amount:         moneyutil.Cents(tc.amount),

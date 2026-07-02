@@ -14,9 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
 
 // TestCancelMembership_CascadesToSolanaCranker proves #264: cancelling a Solana
@@ -41,7 +41,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, periodStart, paidEnd)
 
 	// Linked active solana_subscriptions row, due now so it would be cranked.
-	solRepo := dbrepo.NewSolanaSubscriptionRepo(dbi)
+	solRepo := solanasubs.NewSolanaSubscriptionRepo(dbi)
 	solRow := &models.SolanaSubscription{
 		ID:                       uuid.New(),
 		MerchantID:               dbtest.TestMerchantID.UUID(),

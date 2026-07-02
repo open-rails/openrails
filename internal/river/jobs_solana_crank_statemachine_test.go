@@ -31,7 +31,7 @@ import (
 
 // ---- fakes -----------------------------------------------------------------
 
-// fakeSolanaStore is an in-memory stand-in for *dbrepo.SolanaSubscriptionRepo.
+// fakeSolanaStore is an in-memory stand-in for *solanasubs.SolanaSubscriptionRepo.
 // It records the persisted next_pull_at / status so the test can assert
 // scheduling across cranks.
 type fakeSolanaStore struct {

@@ -178,7 +178,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 
 	userID := uuid.New().String()
 	email := "checkout-session-stripe-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
 		"price_id":    priceID.String(),

@@ -8,9 +8,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/riverqueue/river"
@@ -64,7 +63,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 	if batch <= 0 {
 		batch = solanaReconcileBatchSize
 	}
-	subRepo := dbrepo.NewSolanaSubscriptionRepo(w.DB)
+	subRepo := solanasubs.NewSolanaSubscriptionRepo(w.DB)
 	rows, err := subRepo.ListActiveWithSignature(ctx, batch)
 	if err != nil {
 		return fmt.Errorf("solana reconcile: list active subscriptions: %w", err)
@@ -89,7 +88,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		if perr == nil {
 			continue // ledger is consistent for this pull
 		}
-		if !repo.IsNotFound(perr) {
+		if !db.IsNotFound(perr) {
 			// Transient lookup failure: log and move on, don't false-alarm.
 			log.WithContext(ctx).WithError(perr).WithField("signature", sig).
 				Warn("Solana reconcile: payment lookup failed; skipping row")

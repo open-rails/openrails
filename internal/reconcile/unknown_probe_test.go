@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
@@ -302,4 +303,126 @@ func TestStripeSubscriptionProber_Verdicts(t *testing.T) {
 func decideUnknown(railSub string, periodEnd *time.Time, snap *RemoteSnapshot, now time.Time, window time.Duration) Decision {
 	return Decide(SubscriptionState{Status: "unknown", RailSubscriptionID: railSub, PeriodEnd: periodEnd},
 		EvidenceBundle{Snapshot: snap}, now, window)
+}
+
+// ccbillProbeFixture fakes the DataLink SMS HTTP surface. The mutation guard
+// asserts probes only ever send action=viewSubscriptionStatus.
+type ccbillProbeFixture struct {
+	prober      *CCBillSubscriptionProber
+	answer      *atomic.Value // string response body
+	httpStatus  *atomic.Int64 // 0 = 200
+	cancelHits  *atomic.Int64
+	lastSubject *atomic.Value // string subscriptionId
+}
+
+func newCCBillProbeFixture(t *testing.T) *ccbillProbeFixture {
+	t.Helper()
+	f := &ccbillProbeFixture{
+		answer: &atomic.Value{}, httpStatus: &atomic.Int64{},
+		cancelHits: &atomic.Int64{}, lastSubject: &atomic.Value{},
+	}
+	f.answer.Store("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		if r.PostForm.Get("action") != "viewSubscriptionStatus" {
+			f.cancelHits.Add(1)
+		}
+		f.lastSubject.Store(r.PostForm.Get("subscriptionId"))
+		if st := f.httpStatus.Load(); st != 0 {
+			w.WriteHeader(int(st))
+			return
+		}
+		_, _ = w.Write([]byte(f.answer.Load().(string)))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		assert.Zero(t, f.cancelHits.Load(), "probes must never send a provider mutation")
+	})
+	f.prober = &CCBillSubscriptionProber{Client: &ccbill.DataLinkClient{
+		BaseURL: srv.URL, ClientAccNum: "900100", ClientSubAcc: "0000",
+		Username: "u", Password: "p", HTTPClient: srv.Client(),
+	}}
+	return f
+}
+
+func ccbillStatusXML(status, expiry string) string {
+	return fmt.Sprintf(`<results><subscriptionStatus>%s</subscriptionStatus><expirationDate>%s</expirationDate></results>`, status, expiry)
+}
+
+// #696: viewSubscriptionStatus snapshots + the ONE decider's verdicts.
+func TestCCBillSubscriptionProber_Verdicts(t *testing.T) {
+	now := time.Now().UTC()
+	periodEnd := now.Add(-5 * 24 * time.Hour)
+	railSub := "0123456789"
+	futureExpiry := now.Add(25 * 24 * time.Hour)
+
+	t.Run("recurring active with future expiry adopts the provider clock", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.answer.Store(ccbillStatusXML("2", futureExpiry.Format("20060102")))
+		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.NoError(t, err)
+		require.Len(t, snap.Subscriptions, 1)
+		assert.Equal(t, SubscriptionStatusActive, snap.Subscriptions[0].Status)
+		assert.Equal(t, "2", snap.Subscriptions[0].RawStatus)
+		require.NotNil(t, snap.Subscriptions[0].NextBillingAt)
+		assert.True(t, snap.Coverage.SubscriptionsExhaustive)
+		assert.Equal(t, railSub, f.lastSubject.Load(), "probe targets the rail subscription id")
+
+		v := decideUnknown(railSub, &periodEnd, snap, now, 14*24*time.Hour)
+		assert.Equal(t, TransitionAdoptPeriodEnd, v.Kind)
+	})
+
+	t.Run("active non-recurring (status 1) resolves cancelled", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.answer.Store(ccbillStatusXML("1", futureExpiry.Format("20060102")))
+		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.NoError(t, err)
+		require.Len(t, snap.Subscriptions, 1)
+		assert.Equal(t, SubscriptionStatusCancelled, snap.Subscriptions[0].Status)
+
+		v := decideUnknown(railSub, &periodEnd, snap, now, 14*24*time.Hour)
+		assert.Equal(t, TransitionCancel, v.Kind)
+		assert.True(t, v.RemoteGone, "provider-declared dead: no delete intent needed")
+	})
+
+	t.Run("inactive (status 0) resolves cancelled", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.answer.Store(ccbillStatusXML("0", ""))
+		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.NoError(t, err)
+		require.Len(t, snap.Subscriptions, 1)
+		assert.Equal(t, SubscriptionStatusExpired, snap.Subscriptions[0].Status)
+		assert.Nil(t, snap.Subscriptions[0].NextBillingAt, "no expiry field => no fabricated boundary")
+
+		v := decideUnknown(railSub, &periodEnd, snap, now, 14*24*time.Hour)
+		assert.Equal(t, TransitionCancel, v.Kind)
+		assert.True(t, v.RemoteGone)
+	})
+
+	t.Run("unrecognized status stays unknown (never a guessed transition)", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.answer.Store(ccbillStatusXML("7", ""))
+		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.NoError(t, err)
+		require.Len(t, snap.Subscriptions, 1)
+		assert.Equal(t, SubscriptionStatusUnknown, snap.Subscriptions[0].Status)
+		assert.Equal(t, "7", snap.Subscriptions[0].RawStatus, "verbatim status preserved")
+
+		v := decideUnknown(railSub, &periodEnd, snap, now, 14*24*time.Hour)
+		assert.Equal(t, TransitionNone, v.Kind)
+	})
+
+	t.Run("provider error propagates (row stays unknown, retried)", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.httpStatus.Store(http.StatusInternalServerError)
+		_, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.Error(t, err)
+	})
+
+	t.Run("error-code answer propagates (absence is never fabricated)", func(t *testing.T) {
+		f := newCCBillProbeFixture(t)
+		f.answer.Store(`<results>-3</results>`)
+		_, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		require.Error(t, err)
+	})
 }

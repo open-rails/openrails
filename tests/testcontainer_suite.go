@@ -4,7 +4,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -13,16 +12,15 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
 	"github.com/google/uuid"
@@ -34,48 +32,50 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	clickhousecontainer "github.com/testcontainers/testcontainers-go/modules/clickhouse"
-	redismodule "github.com/testcontainers/testcontainers-go/modules/redis"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// TestContainerSuite is the tests package's full-stack app harness. Postgres
-// lifecycle and migrations live in internal/dbtest; this type owns the remaining
-// Redis, ClickHouse, HTTP server, worker, and fixture-helper surface used by the
-// older tests in this package.
+// TestContainerSuite is the tests package's compat facade over the ONE blessed
+// integration stack (internal/dbtest + internal/integrationharness, #694). It
+// preserves the legacy suite surface (App/Pool/Server/seed helpers) while the
+// machinery — shared Postgres/Redis containers, the real standalone server
+// boot, in-process River workers, real minted delegated credentials, and the
+// per-test injectable clock — lives in the harness. ONE shared suite serves the
+// whole package; fresh boots remain only for construction-time divergence
+// (a Stripe rail, ClickHouse analytics).
 type TestContainerSuite struct {
 	t *testing.T
 
-	// Containers
-	redisContainer      *redismodule.RedisContainer
-	clickhouseContainer *clickhousecontainer.ClickHouseContainer
+	harness *integrationharness.Harness
+	surface *integrationharness.Surface
 
-	// Application and database connections
-	App         *app.App
+	// App/Server are the real standalone graph (serverboot.NewServer — the
+	// cmd/openrails run-server composition root) with workers running.
+	App    *app.App
+	Server *server.Server
+	// Pool is the PRIVILEGED fixture pool over the shared DSN (raw-SQL helpers).
 	Pool        *pgxpool.Pool
 	RedisClient *redis.Client
+	// Config is the app's live *config.Config (tests mutate e.g. APIURL).
+	Config *config.Config
+	Rails  config.RailMerchantAccountSet
+	// ServerURL is a real HTTP base URL (httptest-owned port).
+	ServerURL string
 
-	// Server and configuration
-	Server     *server.Server
-	httpServer *http.Server
-	Config     *config.Config
-	Rails      config.RailMerchantAccountSet
-	ServerURL  string
-
-	// Context for container operations
 	ctx context.Context
 
-	workersCancel context.CancelFunc
-	workersErrCh  chan error
+	// clock is the construction-time SettableClock every service captured; swap
+	// its delegate for fake time — no post-boot per-service fan-out exists.
+	clock *integrationharness.SettableClock
+	// minter is the suite's registered delegated-token issuer: user credentials
+	// are REAL RS256 delegated access tokens resolved through the real control
+	// plane (issuer registry + authority intersection), per #339's default path.
+	minter *integrationharness.DelegatedIssuer
 
-	clock clockwork.Clock
-	port  int
-
-	// stripeSecretKey, when set (WithSuiteStripeRail), adds a Stripe rail to the
-	// suite's RailMerchantAccountSet before boot. Kept out of the default set so
-	// the shared suite never grows a Stripe surface other tests don't expect.
+	// construction options
+	initialClock    clockwork.Clock
 	stripeSecretKey string
+	clickhouse      bool
+	persistent      bool
 }
 
 // TestSuiteOption customizes an integration test suite before it boots.
@@ -83,175 +83,115 @@ type TestSuiteOption func(*TestContainerSuite)
 
 const testNMIRailMerchantAccountID = "OpenRails Test Merchant <billing@test.example>"
 
-// WithSuiteClock injects a clock before the runtime, services, workers, and
-// seed helpers are created. Prefer this over SetMockClock for new tests.
+// WithSuiteClock injects the initial clock before the runtime, services,
+// workers, and seed helpers are created. On the shared suite this simply swaps
+// the settable clock's delegate for the test's duration.
 func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
 	return func(suite *TestContainerSuite) {
-		suite.clock = clock
-	}
-}
-
-// WithSuitePort sets the HTTP listen port for isolated suites.
-func WithSuitePort(port int) TestSuiteOption {
-	return func(suite *TestContainerSuite) {
-		suite.port = port
+		suite.initialClock = clock
 	}
 }
 
 // WithSuiteStripeRail adds an active Stripe rail (construction-time config,
 // like the mobius/ccbill/solana defaults) so the hosted Stripe checkout path
 // is reachable. Pair with stripeapi.SetTestBaseTransport so no request ever
-// leaves the process.
+// leaves the process. Forces a fresh (non-shared) suite boot.
 func WithSuiteStripeRail(secretKey string) TestSuiteOption {
 	return func(suite *TestContainerSuite) {
 		suite.stripeSecretKey = secretKey
 	}
 }
 
-// NewTestContainerSuite creates a new test container suite
-func NewTestContainerSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
-	suite := &TestContainerSuite{
-		t:   t,
-		ctx: context.Background(),
+// WithSuiteClickHouse opts the suite into analytics: the shared ClickHouse
+// (dbtest.SharedClickHouse) is wired + migrated so EventLogService runs.
+// Forces a fresh (non-shared) suite boot.
+func WithSuiteClickHouse() TestSuiteOption {
+	return func(suite *TestContainerSuite) {
+		suite.clickhouse = true
 	}
+}
+
+// NewTestContainerSuite boots a FRESH suite bound to t (resources torn down by
+// t.Cleanup). Prefer setupTestSuite/getSharedTestSuite, which pool onto the
+// package-shared suite whenever construction-time options allow.
+func NewTestContainerSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
+	suite := &TestContainerSuite{t: t, ctx: context.Background()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(suite)
 		}
 	}
-
-	suite.SetupSuite()
+	suite.harness = integrationharness.New(t, suite.ctx)
+	suite.boot()
 	return suite
 }
 
-// SetupSuite initializes all test containers and services
-func (suite *TestContainerSuite) SetupSuite() {
+// newPersistentSuite boots the package-shared suite: resource lifetimes are
+// owned by CleanupSharedSuite (TestMain), not the creating test.
+func newPersistentSuite(t *testing.T) *TestContainerSuite {
+	suite := &TestContainerSuite{t: t, ctx: context.Background(), persistent: true}
+	suite.harness = integrationharness.NewPersistent(t, suite.ctx)
+	suite.boot()
+	return suite
+}
+
+func (suite *TestContainerSuite) boot() {
 	suite.t.Helper()
 
-	// Set log level to reduce noise during tests
+	// Reduce noise during tests.
 	logrus.SetLevel(logrus.WarnLevel)
 
-	// Postgres is process-shared through internal/dbtest; this suite owns only
-	// the extra services its full-stack tests still need.
-	suite.startRedisContainer()
-	suite.startClickHouseContainer()
+	suite.clock = integrationharness.NewSettableClock(suite.initialClock)
+	suite.Rails = defaultSuiteRails(suite.stripeSecretKey)
 
-	// Initialize config with container connection details
-	suite.initializeDatabaseConnections()
-
-	// Run non-Postgres migrations and seed the merchant before app connects.
-	suite.prepareDatastores()
-
-	// Initialize server (bootstraps the app and sets up DB connection)
-	suite.initializeServer()
-
-	// Wait for server to be ready
-	suite.waitForServerReady()
-}
-
-// startRedisContainer starts a Redis test container
-func (suite *TestContainerSuite) startRedisContainer() {
-	suite.t.Helper()
-
-	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_REDIS_ADDR")) != "" {
-		return
+	opts := []integrationharness.StandaloneOption{
+		integrationharness.WithWorkers(),
+		integrationharness.WithClock(suite.clock),
+		integrationharness.WithRails(suite.Rails),
+		integrationharness.WithConfiguredMerchant(dbtest.TestMerchantID),
+		// User routes authenticate the SAME real delegated tokens the self
+		// surface uses: real signature/expiry/registry resolution via the control
+		// plane, mapped to a UserContext. Claim control (tests choose subject
+		// UUIDs) is exactly the production delegated model — hosts pick
+		// delegated_sub.
+		integrationharness.WithAuthenticator(&suiteDelegatedUserAuthenticator{suite: suite}),
+	}
+	if suite.clickhouse {
+		httpAddr, nativeAddr := dbtest.SharedClickHouse(suite.t)
+		opts = append(opts, integrationharness.WithClickHouse(&config.ClickHouseConfig{
+			HTTPAddr:   httpAddr,
+			ClientAddr: nativeAddr,
+			Database:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
+			Username:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_USERNAME", "test_user"),
+			Password:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
+		}))
 	}
 
-	container, err := redismodule.Run(suite.ctx,
-		"redis:7-alpine",
-		dbtest.WithRedisLimits(),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("Ready to accept connections").
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(suite.t, err)
+	// Super DSN: the legacy tests/ fixtures and direct service calls predate
+	// merchant-pinned contexts; RLS enforcement is covered by the harness's
+	// StartStandalone consumers (cross-merchant isolation + rls suites).
+	suite.surface = suite.harness.StartStandaloneSuper("usd", opts...)
+	suite.App = suite.surface.App()
+	suite.Server = suite.surface.Server()
+	suite.Pool = suite.harness.Pool()
+	suite.RedisClient = suite.harness.Redis
+	suite.Config = suite.App.Config
+	suite.ServerURL = suite.surface.BaseURL
 
-	suite.redisContainer = container
+	suite.seedRailMerchantAccountFixtures()
+
+	// One real delegated issuer per suite (unique slug: suites share one DB and
+	// an upsert on a shared slug would rotate a live suite's keys mid-run).
+	suite.minter = suite.surface.RegisterDelegatedIssuer("tests-host-"+uuid.NewString()[:8], dbtest.TestMerchantSlug)
 }
 
-// startClickHouseContainer starts a ClickHouse test container
-func (suite *TestContainerSuite) startClickHouseContainer() {
-	suite.t.Helper()
-
-	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) != "" ||
-		strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_URL")) != "" {
-		return
-	}
-
-	container, err := clickhousecontainer.Run(suite.ctx,
-		"clickhouse/clickhouse-server:25.8-alpine",
-		clickhousecontainer.WithUsername("test_user"),
-		clickhousecontainer.WithPassword("test_password"),
-		clickhousecontainer.WithDatabase("test_analytics"),
-		dbtest.WithClickHouseLimits(),
-		testcontainers.WithWaitStrategy(
-			wait.ForHTTP("/ping").
-				WithPort("8123/tcp").
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	require.NoError(suite.t, err)
-
-	suite.clickhouseContainer = container
-}
-
-// initializeDatabaseConnections sets up database connections
-func (suite *TestContainerSuite) initializeDatabaseConnections() {
-	suite.t.Helper()
-
-	postgresConnStr := dbtest.SharedPostgresDSN(suite.t)
-
-	// Get Redis connection details
-	redisAddr, err := suite.redisAddress()
-	require.NoError(suite.t, err)
-
-	// Get ClickHouse connection details
-	clickhouseHTTPAddr, clickhouseClientAddr, err := suite.clickhouseAddresses()
-	require.NoError(suite.t, err)
-
-	// Create configuration
-	// Use "dev" to skip NMI/CCBill validation in config.Validate()
-	suite.Config = &config.Config{
-		Env: "dev",
-		// Sandbox semantics MUST be explicit (#355): the dev default is now
-		// live credentials + mode=full, so the suite sets test_mode=true to keep
-		// rails on their sandbox environments (and the NMI demo-key boot
-		// probe working).
-		TestMode: true,
-		Host:     "localhost",
-		Port:     8080, // Fixed port for shared test suite
-		DB: &config.DBConfig{
-			URL: postgresConnStr,
-		},
-		Redis: &config.RedisConfig{
-			Addr:     redisAddr,
-			Password: "",
-			DB:       0,
-		},
-		ClickHouse: &config.ClickHouseConfig{
-			HTTPAddr:   clickhouseHTTPAddr,
-			ClientAddr: clickhouseClientAddr,
-			Database:   envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
-			Username:   envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
-			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
-		},
-		Auth: &config.AuthConfig{
-			// HARDCUT (#312/#537): admin authority is LIVE merchant-local AuthKit
-			// merchant permission-group state (control-plane evaluated), or a
-			// deployment-minted admin API key - NOT a claim-based operator
-			// merchant. Admin-route integration tests therefore require the embedded
-			// control plane wired with the test admin granted the operator role, so
-			// the suite enables it here exactly like a production standalone boot.
-			Issuer: "https://controlplane.openrails.test",
-		},
-	}
-	// Payment rail credentials are construction-time merchant/provider
-	// state, not infrastructure config.yaml state.
-	suite.Rails = config.RailMerchantAccountSet{
+// defaultSuiteRails is the construction-time payment-rail merchant-account
+// state (not infrastructure config.yaml state) every suite boots with.
+func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
+	rails := config.RailMerchantAccountSet{
 		"ccbill": {
 			Rail:      models.RailCCBill,
-			AccountID: "945280/0000",
+			AccountID: "945280-0000",
 			CCBill: &config.CCBillRailConfig{
 				ClientAccNum: "945280",
 				ClientSubAcc: "0000",
@@ -275,43 +215,16 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			},
 		},
 	}
-	if suite.stripeSecretKey != "" {
-		suite.Rails["stripe"] = &config.RailMerchantAccountConfig{
+	if stripeSecretKey != "" {
+		rails["stripe"] = &config.RailMerchantAccountConfig{
 			Rail:      models.RailStripe,
 			AccountID: "acct_openrails_test",
 			Stripe: &config.StripeRailConfig{
-				SecretKey: suite.stripeSecretKey,
+				SecretKey: stripeSecretKey,
 			},
 		}
 	}
-	if suite.port != 0 {
-		suite.Config.Port = config.FlexiblePort(suite.port)
-	}
-
-	// Initialize Redis connection
-	suite.RedisClient = redis.NewClient(&redis.Options{
-		Addr:     suite.Config.Redis.Addr,
-		Password: suite.Config.Redis.Password,
-		DB:       suite.Config.Redis.DB,
-	})
-
-	// Test Redis connection
-	err = suite.RedisClient.Ping(suite.ctx).Err()
-	require.NoError(suite.t, err)
-}
-
-func (suite *TestContainerSuite) prepareDatastores() {
-	suite.t.Helper()
-
-	err := migrate.RunClickHouse(suite.ctx, suite.Config)
-	require.NoError(suite.t, err)
-
-	// #336: no default merchant — seed the merchant this suite's engine binds to,
-	// then configure it (slug) so ResolveMerchant pins it.
-	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
-	require.NoError(suite.t, perr)
-	defer seedPool.Close()
-	dbtest.EnsureTestMerchant(suite.ctx, suite.t, seedPool)
+	return rails
 }
 
 func envOrDefault(key, fallback string) string {
@@ -321,127 +234,45 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-func firstNonEmptyEnv(keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			return value
-		}
-	}
-	return ""
+// suiteDelegatedUserAuthenticator adapts the real control-plane delegated-token
+// resolver to billingauth.Authenticator for the user-route surface, so ONE real
+// credential works across /v1/* and /v1/me/*. No claims are trusted unverified:
+// resolution is signature + expiry + issuer-registry + authority intersection.
+type suiteDelegatedUserAuthenticator struct {
+	suite *TestContainerSuite
 }
 
-func (suite *TestContainerSuite) redisAddress() (string, error) {
-	if addr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_REDIS_ADDR")); addr != "" {
-		return addr, nil
+func (a *suiteDelegatedUserAuthenticator) Authenticate(ctx context.Context, r *http.Request) (billingauth.UserContext, error) {
+	if a == nil || a.suite == nil || a.suite.App == nil {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	if suite.redisContainer == nil {
-		return "", fmt.Errorf("redis test container is not initialized")
+	cp := embcp.Get(a.suite.App)
+	if cp == nil {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	host, err := suite.redisContainer.Host(suite.ctx)
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+	}
+	resolved, err := cp.ResolveDelegated(ctx, strings.TrimSpace(header[len(prefix):]), r.Header.Get("Origin"))
 	if err != nil {
-		return "", err
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	port, err := suite.redisContainer.MappedPort(suite.ctx, "6379")
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s:%s", host, port.Port()), nil
+	return billingauth.UserContext{
+		UserID:        resolved.DelegatedSubject,
+		Email:         resolved.Email,
+		EmailVerified: resolved.EmailVerified,
+		Username:      resolved.Username,
+	}, nil
 }
 
-func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
-	if httpAddr := firstNonEmptyEnv("OPENRAILS_TEST_CH_HTTP_ADDR", "OPENRAILS_TEST_CH_HTTP_URL"); httpAddr != "" {
-		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", envOrDefault("OPENRAILS_TEST_CH_NATIVE_ADDR", "localhost:9003")), nil
-	}
-	if suite.clickhouseContainer == nil {
-		return "", "", fmt.Errorf("clickhouse test container is not initialized")
-	}
-	host, err := suite.clickhouseContainer.Host(suite.ctx)
-	if err != nil {
-		return "", "", err
-	}
-	httpPort, err := suite.clickhouseContainer.MappedPort(suite.ctx, "8123")
-	if err != nil {
-		return "", "", err
-	}
-	nativePort, err := suite.clickhouseContainer.MappedPort(suite.ctx, "9000")
-	if err != nil {
-		return "", "", err
-	}
-	return fmt.Sprintf("http://%s:%s", host, httpPort.Port()), fmt.Sprintf("%s:%s", host, nativePort.Port()), nil
-}
-
-// initializeServer starts the billing server for testing
-func (suite *TestContainerSuite) initializeServer() {
+// MintUserToken mints a REAL delegated access token for userID (a UUID string,
+// #364) carrying email via the attributes escape hatch. It authenticates both
+// the user-route and self-service surfaces.
+func (suite *TestContainerSuite) MintUserToken(userID, email string) string {
 	suite.t.Helper()
-
-	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
-	assembled, err := serverboot.NewServer(suite.Config, &serverboot.Options{
-		Clock:                  suite.clock,
-		ConfiguredMerchant:     dbtest.TestMerchantID,
-		Rails:                  suite.Rails,
-		Authenticator:          suiteTestAuthenticator{},
-		DelegatedAuthenticator: suiteTestDelegatedAuthenticator{},
-	})
-	require.NoError(suite.t, err)
-	suite.App = assembled.App
-
-	// Get the pgx pool from the app runtime
-	suite.Pool = assembled.App.Runtime.DB.Pool()
-	suite.Server = assembled.Server
-	suite.seedRailMerchantAccountFixtures()
-
-	// Bootstrap the control plane exactly like the standalone serve path (#312):
-	// ensure the test merchant's merchant permission-group exists with the operator role holding
-	// the concrete merchant-local permission catalog, so admin identities created by the
-	// test helpers carry LIVE merchant-local permission-group authority. Idempotent; runs after
-	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
-	// pinned to an explicit merchant slug (no default merchant).
-	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
-		BootstrapMerchantSlug: dbtest.TestMerchantSlug,
-		MintInitialAPIKey:     false,
-	})
-	require.NoError(suite.t, err, "control plane bootstrap")
-
-	// Start workers in-process for the integration suite (separate from HTTP server).
-	workersCtx, cancel := context.WithCancel(context.Background())
-	suite.workersCancel = cancel
-	suite.workersErrCh = make(chan error, 1)
-	go func() {
-		suite.workersErrCh <- suite.App.Runtime.RunWorkers(workersCtx)
-	}()
-
-	// Wait for the River client: tests assume workers are up, and RunWorkers
-	// initialises River asynchronously. (The bun-era double database init was
-	// slow enough to mask this race; the pgx-only boot is faster and loses it.)
-	riverDeadline := time.Now().Add(30 * time.Second)
-	for suite.App.Runtime.RiverClient == nil {
-		select {
-		case werr := <-suite.workersErrCh:
-			suite.workersErrCh <- werr
-			require.NoError(suite.t, werr, "RunWorkers exited before River init")
-			require.Fail(suite.t, "RunWorkers returned before River init")
-		default:
-		}
-		require.True(suite.t, time.Now().Before(riverDeadline), "timed out waiting for River client")
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	// Create HTTP server
-	httpServer := &http.Server{
-		Handler: suite.Server.Handler(),
-		Addr:    fmt.Sprintf("%s:%d", suite.Config.Host, suite.Config.Port),
-	}
-
-	// Start server in a goroutine
-	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			suite.t.Logf("Server failed to start: %v", err)
-		}
-	}()
-
-	// Store the HTTP server for cleanup
-	suite.httpServer = httpServer
-	suite.ServerURL = fmt.Sprintf("http://localhost:%d", suite.Config.Port)
+	return suite.minter.Mint(userID, email, "", nil)
 }
 
 func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
@@ -459,7 +290,7 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	// CCBill must be sandbox-posture (#668): the webhook IP-allowlist bypass is
 	// refused while ANY environment=live CCBill row exists, and the test_mode
 	// webhook path resolves accounts under environment=test.
-	ccbillAccountID := "945280/0000"
+	ccbillAccountID := "945280-0000"
 	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	suite.seedRailMerchantAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
 	ccbillSecret, err := merchants.RailMerchantAccountSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
@@ -494,71 +325,12 @@ func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context
 	require.NoError(suite.t, tx.Commit(ctx))
 }
 
-// waitForServerReady waits for the server to be ready to accept requests
-func (suite *TestContainerSuite) waitForServerReady() {
-	suite.t.Helper()
-
-	// Wait for server to start
-	maxRetries := 30
-	for i := 0; i < maxRetries; i++ {
-		resp, err := http.Get(suite.ServerURL + "/health/live")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	suite.t.Log("Server ready (or timeout reached)")
-}
-
-// Cleanup cleans up all test containers and resources
+// Cleanup tears down the suite. Fresh suites are torn down by t.Cleanup
+// automatically (harness-registered); the shared suite is closed here via
+// CleanupSharedSuite from TestMain.
 func (suite *TestContainerSuite) Cleanup() {
-	suite.t.Helper()
-
-	if suite.workersCancel != nil {
-		suite.workersCancel()
-	}
-	if suite.workersErrCh != nil {
-		select {
-		case <-suite.workersErrCh:
-		case <-time.After(2 * time.Second):
-		}
-	}
-
-	// Stop HTTP server
-	if suite.httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		suite.httpServer.Shutdown(ctx)
-	}
-
-	// Stop billing server
-	if suite.Server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		suite.Server.Close(ctx)
-	}
-
-	// Close application (handles DB, Redis, cache, etc.)
-	if suite.App != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		suite.App.Close(ctx)
-	}
-
-	if suite.redisContainer != nil {
-		if err := suite.redisContainer.Terminate(suite.ctx); err != nil {
-			suite.t.Logf("Failed to terminate redis container: %v", err)
-		}
-	}
-
-	if suite.clickhouseContainer != nil {
-		if err := suite.clickhouseContainer.Terminate(suite.ctx); err != nil {
-			suite.t.Logf("Failed to terminate clickhouse container: %v", err)
-		}
+	if suite.persistent && suite.harness != nil {
+		suite.harness.Close()
 	}
 }
 
@@ -567,35 +339,9 @@ func (suite *TestContainerSuite) ExecuteSQL(query string, args ...interface{}) (
 	return suite.Pool.Exec(suite.ctx, query, args...)
 }
 
-// ResetDatabase clears all data from test tables for clean test state
-func (suite *TestContainerSuite) ResetDatabase() {
-	suite.t.Helper()
-
-	// List of tables to truncate (in dependency order)
-	tables := []string{
-		"openrails.subscriptions",
-		"openrails.payments",
-		"openrails.payment_methods",
-		"openrails.prices",
-		"openrails.products",
-	}
-
-	for _, table := range tables {
-		_, err := suite.Pool.Exec(suite.ctx, fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s CASCADE", table))
-		if err != nil {
-			// Log but don't fail - table might not exist
-			suite.t.Logf("Failed to truncate table %s: %v", table, err)
-		}
-	}
-}
-
-// SetMockClock replaces the runtime's clock with a mock clock and returns the mock.
-// This allows tests to control time for testing time-dependent logic.
-// It also updates the clock on services that use time-dependent logic.
-//
-// Deprecated: new tests should prefer NewTestContainerSuite(t, WithSuiteClock(clock))
-// or setupTestSuite(t, WithSuiteClock(clock)) so fake time is installed before
-// runtime construction and seed data.
+// SetMockClock swaps the runtime's construction-time SettableClock delegate to
+// a fake clock and returns the fake. Every service captured the SettableClock
+// at boot, so the swap is process-wide — no per-service fan-out.
 func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClock {
 	suite.t.Helper()
 	var clock *clockwork.FakeClock
@@ -605,13 +351,15 @@ func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClo
 		// Default to a fixed time for reproducible tests
 		clock = clockwork.NewFakeClockAt(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
 	}
-	suite.setClock(clock)
+	suite.clock.Set(clock)
 	return clock
 }
 
+// ResetMutableRuntimeState restores real time and re-derives the NMI clients
+// from the suite's rail config (tests swap transports/keys on them).
 func (suite *TestContainerSuite) ResetMutableRuntimeState() {
 	suite.t.Helper()
-	suite.setClock(clockwork.NewRealClock())
+	suite.clock.Set(nil)
 	suite.resetNMIClients()
 }
 
@@ -653,73 +401,10 @@ func (suite *TestContainerSuite) resetNMIClients() {
 	}
 }
 
-func (suite *TestContainerSuite) setClock(clock clockwork.Clock) {
-	if suite == nil || suite.App == nil || suite.App.Runtime == nil || clock == nil {
-		return
-	}
-	suite.App.Runtime.Clock = clock
-	// Set the clock on all services that use time-dependent logic
-	rt := suite.App.Runtime
-
-	// High priority services (core billing logic)
-	if rt.SubscriptionLifecycleService != nil {
-		rt.SubscriptionLifecycleService.SetClock(clock)
-	}
-	if rt.SubscriptionService != nil {
-		rt.SubscriptionService.SetClock(clock)
-	}
-	if rt.EntitlementService != nil {
-		rt.EntitlementService.SetClock(clock)
-	}
-	if rt.PaymentService != nil {
-		rt.PaymentService.SetClock(clock)
-	}
-	if rt.MoneyService != nil {
-		rt.MoneyService.SetClock(clock)
-	}
-
-	// Vault and payment method services
-	if rt.VaultService != nil {
-		rt.VaultService.SetClock(clock)
-	}
-	if rt.UserSubscriptionService != nil {
-		rt.UserSubscriptionService.SetClock(clock)
-	}
-	if rt.AdminSubscriptionService != nil {
-		rt.AdminSubscriptionService.SetClock(clock)
-	}
-	if rt.CheckoutService != nil {
-		rt.CheckoutService.SetClock(clock)
-	}
-	if rt.CheckoutSessionService != nil {
-		rt.CheckoutSessionService.SetClock(clock)
-	}
-	if rt.SolanaPayService != nil {
-		rt.SolanaPayService.SetClock(clock)
-	}
-	if rt.SolanaTransactionService != nil {
-		rt.SolanaTransactionService.SetClock(clock)
-	}
-
-	// Webhook services
-	if rt.WebhookDispatcher != nil {
-		rt.WebhookDispatcher.Clock = clock
-	}
-
-	// Email service (if it has a clock)
-	if rt.EmailService != nil {
-		rt.EmailService.SetClock(clock)
-	}
-
-	// Event log service (ClickHouse audit logging)
-	if rt.EventLogService != nil {
-		rt.EventLogService.SetClock(clock)
-	}
-}
-
-// GetClock returns the current clock from the runtime (real or mock).
+// GetClock returns the clock services currently observe (the settable clock's
+// delegate: real, or the installed fake).
 func (suite *TestContainerSuite) GetClock() clockwork.Clock {
-	return suite.App.Runtime.Clock
+	return suite.clock.Get()
 }
 
 // GetRiverClient returns the River client for job enqueueing and inspection.

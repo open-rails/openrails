@@ -13,13 +13,13 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -71,7 +71,7 @@ func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Pric
 
 func (suite *TestContainerSuite) InsertSubscription(ctx context.Context, s *models.Subscription) {
 	suite.t.Helper()
-	require.NoError(suite.t, dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).Create(ctx, s), "Failed to insert subscription")
+	require.NoError(suite.t, subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).Create(ctx, s), "Failed to insert subscription")
 }
 
 func (suite *TestContainerSuite) InsertPaymentMethod(ctx context.Context, pm *models.PaymentMethod) {
@@ -101,7 +101,7 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 	if _, err := merchant.Require(ctx); err != nil {
 		ctx = dbtest.WithTestMerchant(ctx)
 	}
-	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
+	require.NoError(suite.t, subscriptions.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
 }
 
 // insertMoneyCreditLot seeds a credit lot — a #514 credit grant — and
@@ -224,7 +224,7 @@ func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *mode
 	}
 	require.NoError(suite.t, err, "Failed to look up subscription by rail id %s", railSubID)
 
-	sub, err := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	if err != nil {
 		return nil
 	}

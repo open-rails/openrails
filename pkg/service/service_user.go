@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,8 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -310,15 +309,7 @@ func (s *Service) CancelSubscription(ctx context.Context, userID string, req Can
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	err = userSubscriptions.CancelUserSubscription(ctx, userID, req.Feedback)
-	if err != nil {
-		var ccbillErr *subscriptions.CCBillCancelError
-		if errors.As(err, &ccbillErr) {
-			return &CancelSubscriptionResult{
-				Success: false,
-				Message: ccbillErr.Message,
-			}, nil
-		}
+	if err := userSubscriptions.CancelUserSubscription(ctx, userID, req.Feedback); err != nil {
 		return nil, err
 	}
 
@@ -357,7 +348,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 	// subscription first (active/cancelled-in-window), then fall back to recent
 	// cancelled history.
 	resp, err := userSubscriptions.GetUserSubscription(ctx, userID)
-	if err != nil && !repo.IsNotFound(err) {
+	if err != nil && !db.IsNotFound(err) {
 		return nil, fmt.Errorf("resume subscription: %w", err)
 	}
 

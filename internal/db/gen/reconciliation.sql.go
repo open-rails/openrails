@@ -275,6 +275,58 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 	return result.RowsAffected(), nil
 }
 
+const countErrorEpisodeTotals = `-- name: CountErrorEpisodeTotals :one
+SELECT fl.total::bigint            AS freeloader_total,
+       fl.open_count::bigint       AS freeloader_open,
+       fl.unsanctioned::bigint     AS freeloader_unsanctioned,
+       fl.days::double precision   AS freeloader_days,
+       o.total::bigint             AS orphaned_total,
+       o.open_count::bigint        AS orphaned_open,
+       o.days::double precision    AS orphaned_days
+FROM (SELECT count(*) AS total,
+             count(*) FILTER (WHERE open) AS open_count,
+             count(*) FILTER (WHERE cause = 'unsanctioned') AS unsanctioned,
+             COALESCE(sum(days), 0) AS days
+        FROM openrails.freeloader_episodes
+       WHERE merchant_id = $1::uuid) fl
+CROSS JOIN (SELECT count(*) AS total,
+                   count(*) FILTER (WHERE open) AS open_count,
+                   COALESCE(sum(days), 0) AS days
+              FROM openrails.orphaned_episodes
+             WHERE merchant_id = $1::uuid) o
+`
+
+type CountErrorEpisodeTotalsRow struct {
+	FreeloaderTotal        int64
+	FreeloaderOpen         int64
+	FreeloaderUnsanctioned int64
+	FreeloaderDays         float64
+	OrphanedTotal          int64
+	OrphanedOpen           int64
+	OrphanedDays           float64
+}
+
+// #690 episode analytics totals: one compact pass over the two episode views
+// (migration 067) for the gauges header. Freeloader episodes split out the
+// `unsanctioned` cause (the failure class — sanctioned_dunning and
+// awaiting_verification are policy, never failure); open = the span still
+// accrues at now(). Days carry the views' documented approximations
+// (paid-through snapshot, uncovered-tail-only measurement).
+func (q *Queries) CountErrorEpisodeTotals(ctx context.Context, merchantID uuid.UUID) (CountErrorEpisodeTotalsRow, error) {
+	row := q.db.QueryRow(ctx, countErrorEpisodeTotals, merchantID)
+	var i CountErrorEpisodeTotalsRow
+	err := row.Scan(
+		&i.FreeloaderTotal,
+		&i.FreeloaderOpen,
+		&i.FreeloaderUnsanctioned,
+		&i.FreeloaderDays,
+		&i.OrphanedTotal,
+		&i.OrphanedOpen,
+		&i.OrphanedDays,
+	)
+	return i, err
+}
+
 const countOpenReconciliationFindingsByTypeSeverity = `-- name: CountOpenReconciliationFindingsByTypeSeverity :many
 SELECT finding_type, severity, count(*) AS open_count
 FROM openrails.reconciliation_findings
@@ -690,6 +742,14 @@ CROSS JOIN LATERAL (
           AND e.start_at < s.current_period_ends_at
           AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
+    AND NOT EXISTS (
+        SELECT 1 FROM openrails.entitlements eo
+        WHERE eo.merchant_id = s.merchant_id
+          AND eo.customer_id = s.customer_id
+          AND eo.entitlement = feat
+          AND eo.revoked_at IS NULL AND eo.deleted_at IS NULL
+          AND eo.period && tstzrange(COALESCE(s.current_period_starts_at, s.started_at), s.current_period_ends_at, '[)')
+    )
 ) missing
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
@@ -730,8 +790,12 @@ type ListActiveSubsMissingEntitlementProjectionRow struct {
 // this period (no subscription-sourced window — live OR revoked — overlapping
 // it; a recorded revoke is a recorded decision, never re-granted, spec §6).
 // Excludes no-grant subs (owned by derive.subscription.missing) so the two
-// checks never double-fire. Returns the missing features as a spec blob so the
-// repair (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
+// checks never double-fire. #695 absent-by-overlap: a LIVE window of ANY source
+// overlapping the running period also counts as projected — derive-2 would
+// deliberately project NO window over it (the repair records provenance only),
+// so detection must mirror the repair's no-op or the finding re-fires forever.
+// Returns the missing features as a spec blob so the repair
+// (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
 // nullable: NULL = merchant-wide sweep.
 func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context, arg ListActiveSubsMissingEntitlementProjectionParams) ([]ListActiveSubsMissingEntitlementProjectionRow, error) {
 	rows, err := q.db.Query(ctx, listActiveSubsMissingEntitlementProjection, arg.MerchantID, arg.CustomerID, arg.Now)
@@ -814,8 +878,8 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 // Partition (#690, one condition = one finding type):
 //
 //	bounded window past the bound, sub row present  -> HERE (AUTO closure)
-//	STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.orphan (ADMIN)
-//	sub row missing entirely                        -> derive.entitlement.orphan (ADMIN)
+//	STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.unjustified (ADMIN)
+//	sub row missing entirely                        -> derive.entitlement.unjustified (ADMIN)
 //	terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
 //
 // customer_id nullable: NULL = merchant-wide sweep.
@@ -986,154 +1050,6 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 	return items, nil
 }
 
-const listOrphanEntitlementWindows = `-- name: ListOrphanEntitlementWindows :many
-SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
-       e.source_type, e.source_id, e.start_at, e.end_at,
-       COALESCE(s.status::text, '') AS sub_status,
-       s.product_id AS sub_product_id,
-       s.current_period_ends_at AS sub_period_ends_at,
-       s.ended_at AS sub_ended_at,
-       pay.id AS payment_id,
-       pr.product_id AS payment_product_id,
-       CASE
-           WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
-           WHEN e.source_type = 'subscription' THEN 'terminal_subscription_standing'
-           ELSE 'refunded_payment'
-       END::text AS cause
-FROM openrails.entitlements e
-LEFT JOIN openrails.subscriptions s
-       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
-LEFT JOIN openrails.payments pay
-       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
-LEFT JOIN openrails.prices pr
-       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
-WHERE e.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
-  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-  AND e.start_at <= $3::timestamptz
-  AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
-  AND e.source_type IN ('subscription', 'one_off')
-  -- no live un-terminated entitlement grant covering now justifies the window
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
-      WHERE g.merchant_id = e.merchant_id
-        AND g.customer_id = e.customer_id
-        AND g.event = 'grant' AND g.kind = 'entitlement'
-        AND (g.id = e.grant_id
-             OR (g.source_id = e.source_id::text
-                 AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
-        AND g.starts_at <= $3::timestamptz
-        AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
-        AND NOT EXISTS (
-            SELECT 1 FROM openrails.grants t
-            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-              AND t.event IN ('revoke', 'expire', 'supersede'))
-  )
-  -- a TERMINATED backing grant means derive.grant_effect.excess owns the retraction
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tg
-      JOIN openrails.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
-                             AND t.event IN ('revoke', 'expire', 'supersede')
-      WHERE tg.merchant_id = e.merchant_id AND tg.id = e.grant_id
-  )
-  AND (
-      (e.source_type = 'subscription' AND s.id IS NULL)
-      OR (e.source_type = 'subscription'
-          AND s.status IN ('cancelled', 'expired', 'failed')
-          AND e.end_at IS NULL)
-      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
-  )
-ORDER BY e.id
-`
-
-type ListOrphanEntitlementWindowsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-}
-
-type ListOrphanEntitlementWindowsRow struct {
-	EntitlementID    uuid.UUID
-	CustomerID       uuid.UUID
-	Entitlement      string
-	SourceType       string
-	SourceID         uuid.UUID
-	StartAt          time.Time
-	EndAt            *time.Time
-	SubStatus        *string
-	SubProductID     *uuid.UUID
-	SubPeriodEndsAt  *time.Time
-	SubEndedAt       *time.Time
-	PaymentID        *uuid.UUID
-	PaymentProductID *uuid.UUID
-	Cause            string
-}
-
-// #690 DERIVE `derive.entitlement.orphan` — the FREELOADER detector. A LIVE
-// window (not revoked/deleted, started, unbounded or ending in the future)
-// whose justification chain is PROVEN broken. Post-#691 fail-open, "live
-// window past paid-through" is NORMAL for a standing auto-renew projection
-// (stale ≠ freeloader) — a freeloader's SOURCE is proven dead or absent:
-//
-//	missing_subscription           - source_type=subscription, no sub row at all
-//	terminal_subscription_standing - STANDING (end_at NULL) window whose sub is
-//	                                 terminal: the #691 closure event should
-//	                                 have bounded it and never did
-//	refunded_payment               - one_off window whose payment was refunded,
-//	                                 with no live grant justifying the access
-//
-// Grant-justification guard: never fires when a live un-terminated entitlement
-// grant covers now (matches MaterializeGrant's standing-access projection:
-// per-period grants of a live sub lapse while the standing window persists —
-// that is verification pressure, not freeloading), and never when the window's
-// backing grant is TERMINATED (derive.grant_effect.excess owns that
-// retraction). Non-live windows with dangling sub sources stay with
-// consistency.reference.source_reference. ADMIN surface-only — revoking access
-// is an operator decision, never auto (policy, #690).
-//
-// Verification SQL (2026-07-01 doujins analysis, measured ZERO on the full
-// re-import): (1) grant-justification by source — live windows LEFT JOIN live
-// grants on (customer, source) counting NULLs per source_type; (2)
-// window-vs-paid-through by status — live windows joined to subscriptions
-// grouped by status comparing end_at against GREATEST(current_period_ends_at,
-// ended_at). This query is the union of both, restricted to proven-dead
-// sources. customer_id nullable: NULL = merchant-wide sweep.
-func (q *Queries) ListOrphanEntitlementWindows(ctx context.Context, arg ListOrphanEntitlementWindowsParams) ([]ListOrphanEntitlementWindowsRow, error) {
-	rows, err := q.db.Query(ctx, listOrphanEntitlementWindows, arg.MerchantID, arg.CustomerID, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListOrphanEntitlementWindowsRow
-	for rows.Next() {
-		var i ListOrphanEntitlementWindowsRow
-		if err := rows.Scan(
-			&i.EntitlementID,
-			&i.CustomerID,
-			&i.Entitlement,
-			&i.SourceType,
-			&i.SourceID,
-			&i.StartAt,
-			&i.EndAt,
-			&i.SubStatus,
-			&i.SubProductID,
-			&i.SubPeriodEndsAt,
-			&i.SubEndedAt,
-			&i.PaymentID,
-			&i.PaymentProductID,
-			&i.Cause,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
 SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
@@ -1271,6 +1187,156 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnjustifiedEntitlementWindows = `-- name: ListUnjustifiedEntitlementWindows :many
+SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
+       e.source_type, e.source_id, e.start_at, e.end_at,
+       COALESCE(s.status::text, '') AS sub_status,
+       s.product_id AS sub_product_id,
+       s.current_period_ends_at AS sub_period_ends_at,
+       s.ended_at AS sub_ended_at,
+       pay.id AS payment_id,
+       pr.product_id AS payment_product_id,
+       CASE
+           WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
+           WHEN e.source_type = 'subscription' THEN 'terminal_subscription_standing'
+           ELSE 'refunded_payment'
+       END::text AS cause
+FROM openrails.entitlements e
+LEFT JOIN openrails.subscriptions s
+       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
+LEFT JOIN openrails.payments pay
+       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
+LEFT JOIN openrails.prices pr
+       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
+WHERE e.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
+  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+  AND e.start_at <= $3::timestamptz
+  AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
+  AND e.source_type IN ('subscription', 'one_off')
+  -- no live un-terminated entitlement grant covering now justifies the window
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = e.merchant_id
+        AND g.customer_id = e.customer_id
+        AND g.event = 'grant' AND g.kind = 'entitlement'
+        AND (g.id = e.grant_id
+             OR (g.source_id = e.source_id::text
+                 AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
+                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+        AND g.starts_at <= $3::timestamptz
+        AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
+        AND NOT EXISTS (
+            SELECT 1 FROM openrails.grants t
+            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+              AND t.event IN ('revoke', 'expire', 'supersede'))
+  )
+  -- a TERMINATED backing grant means derive.grant_effect.excess owns the retraction
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants tg
+      JOIN openrails.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
+                             AND t.event IN ('revoke', 'expire', 'supersede')
+      WHERE tg.merchant_id = e.merchant_id AND tg.id = e.grant_id
+  )
+  AND (
+      (e.source_type = 'subscription' AND s.id IS NULL)
+      OR (e.source_type = 'subscription'
+          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND e.end_at IS NULL)
+      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+  )
+ORDER BY e.id
+`
+
+type ListUnjustifiedEntitlementWindowsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+type ListUnjustifiedEntitlementWindowsRow struct {
+	EntitlementID    uuid.UUID
+	CustomerID       uuid.UUID
+	Entitlement      string
+	SourceType       string
+	SourceID         uuid.UUID
+	StartAt          time.Time
+	EndAt            *time.Time
+	SubStatus        *string
+	SubProductID     *uuid.UUID
+	SubPeriodEndsAt  *time.Time
+	SubEndedAt       *time.Time
+	PaymentID        *uuid.UUID
+	PaymentProductID *uuid.UUID
+	Cause            string
+}
+
+// #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector
+// (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
+// reserved for the paying-without-access category). A LIVE
+// window (not revoked/deleted, started, unbounded or ending in the future)
+// whose justification chain is PROVEN broken. Post-#691 fail-open, "live
+// window past paid-through" is NORMAL for a standing auto-renew projection
+// (stale ≠ freeloader) — a freeloader's SOURCE is proven dead or absent:
+//
+//	missing_subscription           - source_type=subscription, no sub row at all
+//	terminal_subscription_standing - STANDING (end_at NULL) window whose sub is
+//	                                 terminal: the #691 closure event should
+//	                                 have bounded it and never did
+//	refunded_payment               - one_off window whose payment was refunded,
+//	                                 with no live grant justifying the access
+//
+// Grant-justification guard: never fires when a live un-terminated entitlement
+// grant covers now (matches MaterializeGrant's standing-access projection:
+// per-period grants of a live sub lapse while the standing window persists —
+// that is verification pressure, not freeloading), and never when the window's
+// backing grant is TERMINATED (derive.grant_effect.excess owns that
+// retraction). Non-live windows with dangling sub sources stay with
+// consistency.reference.source_reference. ADMIN surface-only — revoking access
+// is an operator decision, never auto (policy, #690).
+//
+// Verification SQL (2026-07-01 doujins analysis, measured ZERO on the full
+// re-import): (1) grant-justification by source — live windows LEFT JOIN live
+// grants on (customer, source) counting NULLs per source_type; (2)
+// window-vs-paid-through by status — live windows joined to subscriptions
+// grouped by status comparing end_at against GREATEST(current_period_ends_at,
+// ended_at). This query is the union of both, restricted to proven-dead
+// sources. customer_id nullable: NULL = merchant-wide sweep.
+func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg ListUnjustifiedEntitlementWindowsParams) ([]ListUnjustifiedEntitlementWindowsRow, error) {
+	rows, err := q.db.Query(ctx, listUnjustifiedEntitlementWindows, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnjustifiedEntitlementWindowsRow
+	for rows.Next() {
+		var i ListUnjustifiedEntitlementWindowsRow
+		if err := rows.Scan(
+			&i.EntitlementID,
+			&i.CustomerID,
+			&i.Entitlement,
+			&i.SourceType,
+			&i.SourceID,
+			&i.StartAt,
+			&i.EndAt,
+			&i.SubStatus,
+			&i.SubProductID,
+			&i.SubPeriodEndsAt,
+			&i.SubEndedAt,
+			&i.PaymentID,
+			&i.PaymentProductID,
+			&i.Cause,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

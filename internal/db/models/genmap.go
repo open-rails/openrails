@@ -326,3 +326,18 @@ func EntitlementsFromGen(rows []gen.OpenrailsEntitlement) []Entitlement {
 	}
 	return out
 }
+
+// NotificationFromGen maps a generated notification_queue row onto the model.
+func NotificationFromGen(n gen.OpenrailsNotificationQueue) (*NotificationQueue, error) {
+	m := &NotificationQueue{
+		ID:         n.ID,
+		CustomerID: n.CustomerID,
+		EventType:  NotificationEventType(n.EventType),
+		Seen:       n.Seen,
+		CreatedAt:  n.CreatedAt,
+	}
+	if err := FromJSONB(n.Data, &m.Data, "notification_queue.data"); err != nil {
+		return nil, err
+	}
+	return m, nil
+}

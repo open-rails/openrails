@@ -12,12 +12,12 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
-	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -245,7 +245,7 @@ func New(deps Dependencies) (*Server, error) {
 				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network, solanaTokens)
 				enrollSvc := recurring.NewEnrollService(
 					deps.Runtime.SubscriptionLifecycleService,
-					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
+					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
 					deps.Runtime.SolanaRPC,
 					submitter,
 					network,
@@ -257,7 +257,7 @@ func New(deps Dependencies) (*Server, error) {
 				// cancel_subscription tx the subscriber signs to trustlessly revoke a
 				// recurring subscription on-chain (additive to the soft cancel #264).
 				deps.Runtime.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
-					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
+					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
 					deps.Runtime.SolanaRPC,
 				))
 
@@ -290,7 +290,7 @@ func New(deps Dependencies) (*Server, error) {
 					// confirm services (mirrors) for the reference poller to invoke on
 					// confirmation. This extends the existing Solana Pay machinery to the
 					// solana_cancel / solana_tier_change modes — no parallel protocol.
-					solanaSubRepo := dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB)
+					solanaSubRepo := solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB)
 					confirmCancelSvc := recurring.NewConfirmCancelService(
 						deps.Runtime.SolanaRPC,
 						deps.Runtime.SubscriptionLifecycleService,

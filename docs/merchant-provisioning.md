@@ -62,17 +62,20 @@ Merchant credentials are addressed by `(merchant_id, name)`. Provider credential
 use provider-account-scoped names:
 
 ```text
-provider_accounts/<rail>/<environment>/<provider_account_id>/<secret_key>
+rail_merchant_accounts/<rail>/<environment>/<account_id>/<secret_key>
 ```
 
 Examples:
 
-- `provider_accounts/stripe/live/acct_123/secret_key`
-- `provider_accounts/stripe/live/acct_123/webhook_signing_secret`
-- `provider_accounts/nmi/live/mobius-profile-id/security_key`
-- `provider_accounts/ccbill/live/900000%2F0000/salt`
-- `provider_accounts/ccbill/live/900000%2F0000/datalink_username`
-- `provider_accounts/ccbill/live/900000%2F0000/datalink_password`
+- `rail_merchant_accounts/stripe/live/acct_123/secret_key`
+- `rail_merchant_accounts/stripe/live/acct_123/webhook_signing_secret`
+- `rail_merchant_accounts/nmi/live/579145/security_key`
+- `rail_merchant_accounts/ccbill/live/900000-0000/salt`
+- `rail_merchant_accounts/ccbill/live/900000-0000/datalink_username`
+- `rail_merchant_accounts/ccbill/live/900000-0000/datalink_password`
+
+CCBill's composite identity is dash-joined (`clientAccnum-clientSubacc`, #697),
+so no account_id embeds the `/` name delimiter.
 
 Secret stores:
 

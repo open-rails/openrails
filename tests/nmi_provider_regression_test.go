@@ -30,7 +30,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 
 	userID := uuid.New().String()
 	email := "checkout-nmi-" + uuid.NewString() + "@test.example.com"
-	token := getTestIssuer().CreateToken(userID, email)
+	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
 		"price_id": priceID.String(),

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
@@ -40,7 +39,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	userID := uuid.NewString()
-	customerID, err := repo.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID)
+	customerID, err := db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID)
 	require.NoError(t, err)
 
 	sharedVault := "vault-shared-" + uuid.NewString()[:8]

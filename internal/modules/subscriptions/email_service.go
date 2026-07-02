@@ -13,8 +13,8 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -444,10 +444,10 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	// Get the user's active subscription or last known subscription as fallback
 	subscription, err := s.subscriptionService.GetActiveSubscription(ctx, userID)
 	if err != nil {
-		if repo.IsNotFound(err) {
+		if db.IsNotFound(err) {
 			subscription, err = s.subscriptionService.GetByUserID(ctx, userID)
 			if err != nil {
-				if repo.IsNotFound(err) {
+				if db.IsNotFound(err) {
 					return nil, errUserEmailUnavailable
 				}
 				return nil, fmt.Errorf("failed to get subscription for user %s: %w", userID, err)

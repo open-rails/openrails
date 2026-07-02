@@ -43,6 +43,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
 	authtesting "github.com/open-rails/authkit/authtest"
 	authcore "github.com/open-rails/authkit/embedded"
@@ -57,9 +58,12 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -78,6 +82,35 @@ type Harness struct {
 	Redis *redis.Client
 
 	pool *pgxpool.Pool
+
+	// persistent harnesses collect resource cleanups for an explicit Close()
+	// instead of t.Cleanup — for package-shared suites that outlive the test
+	// that booted them (the tests/ compat suite).
+	persistent bool
+	cleanups   []func()
+}
+
+// cleanup registers fn for teardown: on t for per-test harnesses, on Close()
+// for persistent ones.
+func (h *Harness) cleanup(fn func()) {
+	if h.persistent {
+		h.cleanups = append(h.cleanups, fn)
+		return
+	}
+	h.t.Cleanup(fn)
+}
+
+// SetT refreshes the testing handle so helper assertions fail the CURRENT test
+// (persistent harnesses are handed across tests).
+func (h *Harness) SetT(t *testing.T) { h.t = t }
+
+// Close tears down a persistent harness's resources, newest-first. No-op for
+// per-test harnesses (t.Cleanup owns those).
+func (h *Harness) Close() {
+	for i := len(h.cleanups) - 1; i >= 0; i-- {
+		h.cleanups[i]()
+	}
+	h.cleanups = nil
 }
 
 // sharedPool lazily opens a privileged pgx pool over the shared DSN for fixture
@@ -88,7 +121,7 @@ func (h *Harness) sharedPool() *pgxpool.Pool {
 		p, err := pgxpool.New(h.ctx, h.DSN)
 		require.NoError(h.t, err, "open shared pgx pool")
 		h.pool = p
-		h.t.Cleanup(p.Close)
+		h.cleanup(p.Close)
 	}
 	return h.pool
 }
@@ -115,6 +148,8 @@ type Surface struct {
 	// Nil for the embedded host.
 	h   *Harness
 	app *app.App
+	// server is the standalone *server.Server (nil for the embedded host).
+	server *server.Server
 
 	// rt is the embedded surface's runtime (nil for standalone): the source of
 	// the #685 unified in-process client (rt.Client()).
@@ -127,6 +162,13 @@ type Surface struct {
 // standalone). Runtime().Client() is the #685 unified client over the
 // in-process transport — the embedded side of the conformance contract.
 func (s *Surface) Runtime() *embed.Runtime { return s.rt }
+
+// App returns the booted standalone app graph (nil for the embedded host).
+func (s *Surface) App() *app.App { return s.app }
+
+// Server returns the standalone HTTP server (nil for the embedded host) — for
+// in-process Handler().ServeHTTP tests that skip the network hop.
+func (s *Surface) Server() *server.Server { return s.server }
 
 // Client returns a fresh openrails.Client (NewRemote) for this surface, carrying
 // its token + currency. opts append/override.
@@ -150,6 +192,20 @@ func New(t *testing.T, ctx context.Context) *Harness {
 	rdb, _ := dbtest.SharedRedisClient(t)
 
 	return &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb}
+}
+
+// NewPersistent is New for a package-shared harness: resource lifetimes are NOT
+// bound to the creating test — call Close() (e.g. from TestMain teardown) and
+// SetT() per test instead. It does not flush shared Redis.
+func NewPersistent(t *testing.T, ctx context.Context) *Harness {
+	t.Helper()
+
+	dsn := dbtest.SharedPostgresDSN(t)
+	rdb := dbtest.NewSharedRedisClient(t)
+
+	h := &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb, persistent: true}
+	h.cleanup(func() { _ = rdb.Close() })
+	return h
 }
 
 // trustingResolver is the embedded no-auth host's API-key resolver: it
@@ -191,7 +247,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 		Options: embedded.Options{Config: cfg, Redis: h.Redis},
 	})
 	require.NoError(h.t, err, "embed.New")
-	h.t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	h.cleanup(func() { _ = rt.Close(context.Background()) })
 	// Bind the engine to the test merchant — what embed provisioning
 	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
@@ -210,7 +266,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 		},
 	)
 	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID)))
-	h.t.Cleanup(srv.Close)
+	h.cleanup(srv.Close)
 
 	return &Surface{
 		Name:     "embedded",
@@ -229,18 +285,88 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // authenticates with that real token. The /v1/merchant/* path is authenticated by
 // the real service-credential gate -> ResolveAPIKey -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
+// StandaloneOption customizes a standalone surface before it boots.
+type StandaloneOption func(*standaloneConfig)
+
+type standaloneConfig struct {
+	workers                bool
+	clock                  clockwork.Clock
+	rails                  config.RailMerchantAccountSet
+	clickhouse             *config.ClickHouseConfig
+	configuredMerchant     merchant.ID
+	authenticator          billingauth.Authenticator
+	delegatedAuthenticator billingauth.DelegatedAuthenticator
+}
+
+// WithWorkers boots the in-process River workers (Runtime.RunWorkers) and waits
+// for the River client before returning — for tests that exercise async jobs.
+func WithWorkers() StandaloneOption {
+	return func(c *standaloneConfig) { c.workers = true }
+}
+
+// WithClock injects the runtime clock at construction. Pass a *SettableClock to
+// swap fake time per test on a shared suite without any per-service fan-out.
+func WithClock(clock clockwork.Clock) StandaloneOption {
+	return func(c *standaloneConfig) { c.clock = clock }
+}
+
+// WithRails supplies construction-time payment-rail merchant-account config.
+func WithRails(rails config.RailMerchantAccountSet) StandaloneOption {
+	return func(c *standaloneConfig) { c.rails = rails }
+}
+
+// WithClickHouse opts the surface into analytics: sets cfg.ClickHouse and runs
+// the ClickHouse migrations before boot (dbtest.SharedClickHouse supplies the
+// shared container's addresses).
+func WithClickHouse(ch *config.ClickHouseConfig) StandaloneOption {
+	return func(c *standaloneConfig) { c.clickhouse = ch }
+}
+
+// WithConfiguredMerchant pins the runtime's configured merchant (#336: no
+// default merchant) so ResolveMerchant binds it for unauthenticated routes.
+func WithConfiguredMerchant(id merchant.ID) StandaloneOption {
+	return func(c *standaloneConfig) { c.configuredMerchant = id }
+}
+
+// WithAuthenticator overrides the user-route authenticator. Prefer the real
+// control-plane default; use this only when a test genuinely needs claim control.
+func WithAuthenticator(a billingauth.Authenticator) StandaloneOption {
+	return func(c *standaloneConfig) { c.authenticator = a }
+}
+
+// WithDelegatedAuthenticator overrides the self-service delegated seam (#339).
+func WithDelegatedAuthenticator(a billingauth.DelegatedAuthenticator) StandaloneOption {
+	return func(c *standaloneConfig) { c.delegatedAuthenticator = a }
+}
+
 // StartStandalone boots the standalone server for an integration test. The server
 // connects as the unprivileged openrails_app role (NOBYPASSRLS), so the per-merchant
 // RLS policies enforce exactly as in production — every integration test exercises
 // real RLS, never a privileged bypass. Fixtures are still seeded via the super pool
 // (h.sharedPool), which bypasses RLS for cross-merchant setup an admin does out of band.
-func (h *Harness) StartStandalone(currency string) *Surface {
+func (h *Harness) StartStandalone(currency string, opts ...StandaloneOption) *Surface {
 	_, appDSN := dbtest.SharedRLSPostgres(h.t)
-	return h.startStandalone(currency, appDSN, "standalone")
+	return h.startStandalone(currency, appDSN, "standalone", opts...)
 }
 
-func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
+// StartStandaloneSuper boots the same real standalone graph over the PRIVILEGED
+// DSN (no RLS app role). It exists for the tests/ compat suite, whose legacy
+// fixtures/service calls predate merchant-pinned contexts; RLS enforcement is
+// covered by StartStandalone consumers (cross-merchant isolation + rls tests).
+// New tests should prefer StartStandalone.
+func (h *Harness) StartStandaloneSuper(currency string, opts ...StandaloneOption) *Surface {
+	return h.startStandalone(currency, h.DSN, "standalone-super", opts...)
+}
+
+func (h *Harness) startStandalone(currency, appDSN, name string, opts ...StandaloneOption) *Surface {
 	h.t.Helper()
+
+	var sc standaloneConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sc)
+		}
+	}
 
 	// The merchant directory row must exist before bootstrap links permission_group_id
 	// onto it (#480: no default merchant).
@@ -260,11 +386,21 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
+	if sc.clickhouse != nil {
+		cfg.ClickHouse = sc.clickhouse
+		require.NoError(h.t, migrate.RunClickHouse(h.ctx, cfg), "clickhouse migrations")
+	}
 
-	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{})
+	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{
+		Clock:                  sc.clock,
+		Rails:                  sc.rails,
+		ConfiguredMerchant:     sc.configuredMerchant,
+		Authenticator:          sc.authenticator,
+		DelegatedAuthenticator: sc.delegatedAuthenticator,
+	})
 	require.NoError(h.t, err, "serverboot.NewServer (real standalone)")
 	app := assembled.App
-	h.t.Cleanup(func() { _ = app.Close(context.Background()) })
+	h.cleanup(func() { _ = app.Close(context.Background()) })
 
 	// Real control-plane bootstrap: ensures the merchant permission-group, links
 	// the merchant's permission_group_id to it, and mints a REAL admin API key
@@ -291,12 +427,37 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	require.NoError(h.t, rerr, "real API key must resolve through AuthKit core")
 	require.Equal(h.t, dbtest.TestMerchantID, resolved.MerchantID)
 
-	// Workers: the conformance script does not need background workers, but River
-	// must be initialised for the runtime to be healthy. The standalone server
-	// graph does not start workers itself here; the service routes used by the
-	// script (credits/admit/windows) are synchronous, so we serve without workers.
+	// Workers are opt-in (WithWorkers): the conformance script's service routes
+	// (credits/admit/windows) are synchronous, but the tests/ suite exercises
+	// async River jobs and needs the in-process worker loop.
+	if sc.workers {
+		workersCtx, cancel := context.WithCancel(context.Background())
+		workersErr := make(chan error, 1)
+		go func() { workersErr <- app.Runtime.RunWorkers(workersCtx) }()
+		h.cleanup(func() {
+			cancel()
+			select {
+			case <-workersErr:
+			case <-time.After(2 * time.Second):
+			}
+		})
+		// RunWorkers initialises River asynchronously; tests assume workers are up.
+		deadline := time.Now().Add(30 * time.Second)
+		for app.Runtime.RiverClient == nil {
+			select {
+			case werr := <-workersErr:
+				workersErr <- werr
+				require.NoError(h.t, werr, "RunWorkers exited before River init")
+				require.Fail(h.t, "RunWorkers returned before River init")
+			default:
+			}
+			require.True(h.t, time.Now().Before(deadline), "timed out waiting for River client")
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
 	srv := httptest.NewServer(assembled.Server.Handler())
-	h.t.Cleanup(srv.Close)
+	h.cleanup(srv.Close)
 
 	return &Surface{
 		Name:     name,
@@ -304,6 +465,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 		Token:    token,
 		h:        h,
 		app:      app,
+		server:   assembled.Server,
 		currency: currency,
 	}
 }
@@ -463,7 +625,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	// The principal's own signing key. AuthKit rejects loopback HTTP JWKS URLs
 	// now, so integration tests register the same key through static public_keys.
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
-	h.t.Cleanup(issuer.Close)
+	h.cleanup(issuer.Close)
 
 	// #567: a remote_application is nested under its controlling merchant
 	// permission-group (PermissionGroupID carries the permission_group_id).
@@ -498,6 +660,77 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	return RemoteAppCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
 
+// DelegatedIssuer is a registered remote_application issuer for a merchant that
+// mints delegated access tokens for ANY subject — the production model where a
+// merchant's host frontend mints tokens for each logged-in end-user. Register
+// once per suite; Mint per test user.
+type DelegatedIssuer struct {
+	h      *Harness
+	Slug   string
+	Issuer string
+	issuer *authtesting.TestIssuer
+}
+
+// RegisterDelegatedIssuer registers a merchant-owned delegated-token issuer
+// (owner role: minted tokens may carry any merchant-perm subset) and returns a
+// reusable minter. Real keys, real registry — tokens resolve through the real
+// control-plane delegated path.
+func (s *Surface) RegisterDelegatedIssuer(slug, ownerMerchantSlug string) *DelegatedIssuer {
+	h := s.h
+	h.t.Helper()
+	require.NotNil(h.t, s.app, "RegisterDelegatedIssuer requires the standalone surface")
+	cp := embcp.Get(s.app)
+	require.NotNil(h.t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(h.t, core, "authkit core")
+
+	issuer := authtesting.NewTestIssuerWithAudience("openrails")
+	h.cleanup(issuer.Close)
+
+	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
+	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
+		Slug:              slug,
+		PermissionGroupID: groupID,
+		Issuer:            issuer.URL(),
+		Mode:              authkit.RemoteAppModeStatic,
+		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
+		Enabled:           true,
+	})
+	require.NoError(h.t, err, "register delegated issuer")
+	require.NoError(h.t, core.AssignGroupRole(h.ctx, controlplane.MerchantType, ownerMerchantSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
+		"assign merchant owner role to delegated issuer")
+	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
+
+	return &DelegatedIssuer{h: h, Slug: slug, Issuer: issuer.URL(), issuer: issuer}
+}
+
+// Mint mints a delegated access token for subject. email/username ride the
+// attributes escape hatch (resolved into ResolvedDelegated.Email/.Username);
+// permissions must be within the issuer's stored authority (owner ⇒ any
+// merchant perm).
+func (di *DelegatedIssuer) Mint(subject, email, username string, permissions []string) string {
+	h := di.h
+	h.t.Helper()
+	attrs := map[string]any{}
+	if email != "" {
+		attrs["email"] = email
+		attrs["email_verified"] = true
+	}
+	if username != "" {
+		attrs["username"] = username
+	}
+	token, err := authcore.MintDelegatedAccessToken(h.ctx, di.issuer.Signer(), authkit.DelegatedAccessParams{
+		Issuer:           di.issuer.URL(),
+		Audiences:        []string{"openrails"},
+		DelegatedSubject: subject,
+		Permissions:      append([]string(nil), permissions...),
+		Attributes:       attrs,
+		TTL:              time.Hour,
+	})
+	require.NoError(h.t, err, "mint delegated access token")
+	return token
+}
+
 // RegisterDelegatedCaller registers an AuthKit remote_application issuer for a
 // merchant permission-group and mints a delegated access token from it. The
 // token's issuer maps to the OpenRails merchant through the remote_application
@@ -513,7 +746,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 	require.NotNil(h.t, core, "authkit core")
 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
-	h.t.Cleanup(issuer.Close)
+	h.cleanup(issuer.Close)
 
 	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
@@ -559,7 +792,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 	require.NotNil(h.t, core, "authkit core")
 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
-	h.t.Cleanup(issuer.Close)
+	h.cleanup(issuer.Close)
 
 	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{

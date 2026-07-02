@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -185,13 +184,13 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	} else {
 		// Fallback to active subscription lookup
-		tsid, terr := repo.ResolveCustomerID(userID)
+		tsid, terr := db.ResolveCustomerID(userID)
 		if terr != nil {
 			return terr
 		}
-		sub, err = repo.NewSubscriptionRepo(w.DB).GetLatestResumableCancelled(ctx, tsid, now)
+		sub, err = subscriptions.NewSubscriptionRepo(w.DB).GetLatestResumableCancelled(ctx, tsid, now)
 		if err != nil {
-			if repo.IsNotFound(err) {
+			if db.IsNotFound(err) {
 				log.WithContext(ctx).WithField("user_id", userID).Info("no cancellable subscription to resume")
 				return nil
 			}

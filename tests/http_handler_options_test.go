@@ -92,7 +92,7 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	asm := embedhttp.FromApp(suite.App)
 	require.NotNil(t, asm)
 	// Default route sets include checkout/customer, which require an authenticator.
-	asm.Authenticator = suiteTestAuthenticator{}
+	asm.Authenticator = &suiteDelegatedUserAuthenticator{suite: suite}
 
 	embeddedDefault := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{}))
 	t.Cleanup(embeddedDefault.Close)

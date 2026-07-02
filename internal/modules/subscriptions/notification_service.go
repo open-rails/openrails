@@ -10,14 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
 // NotificationService handles notification storage, retrieval, and delivery.
 // It combines DB operations with email delivery logic.
 type NotificationService struct {
-	repo         *repo.NotificationQueueRepo
+	repo         *NotificationQueueRepo
 	emailService *EmailService
 }
 
@@ -25,7 +24,7 @@ type NotificationService struct {
 // emailService can be nil and set later via SetEmailService.
 func NewNotificationService(database *db.DB, emailService *EmailService) *NotificationService {
 	return &NotificationService{
-		repo:         repo.NewNotificationQueueRepo(database),
+		repo:         NewNotificationQueueRepo(database),
 		emailService: emailService,
 	}
 }
@@ -81,13 +80,13 @@ func (s *NotificationService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *NotificationService) GetNotifications(ctx context.Context, queryOpts query.QueryOptions[GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
-	repoFilters := repo.NotificationFilters{
+	repoFilters := NotificationFilters{
 		UserID:    queryOpts.Filters.UserID,
 		EventType: models.NotificationEventType(queryOpts.Filters.EventType),
 		Seen:      queryOpts.Filters.Seen,
 	}
 
-	repoOpts := query.QueryOptions[repo.NotificationFilters]{
+	repoOpts := query.QueryOptions[NotificationFilters]{
 		Filters:  repoFilters,
 		Limit:    queryOpts.Limit,
 		Offset:   queryOpts.Offset,

@@ -11,9 +11,8 @@ import (
 )
 
 // TestMain runs the integration suite and then tears down the process-shared
-// infra. CleanupSharedSuite handles the legacy full-stack suite's Redis and
-// ClickHouse containers; dbtest.TerminateShared handles the shared Postgres
-// container used by both harnesses.
+// infra: the package-shared suite (harness resources) and the dbtest-shared
+// Postgres/Redis/ClickHouse containers.
 func TestMain(m *testing.M) {
 	// pgx decodes timestamptz into time.Local, whereas the bun/database-sql era
 	// returned UTC. Pin the process zone to UTC so time.Time equality
@@ -23,5 +22,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	CleanupSharedSuite()
 	dbtest.TerminateShared()
+	dbtest.TerminateSharedRedis()
+	dbtest.TerminateSharedClickHouse()
 	os.Exit(code)
 }
