@@ -282,6 +282,22 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "test_mode=true is not allowed outside development")
 	})
 
+	t.Run("prod env rejects a plaintext-http auth issuer", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.ProviderWriteMode = ProviderWriteModeReadOnly
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.ClickHouse.Username = "prod_analytics"
+		cfg.ClickHouse.Password = "production-clickhouse-password"
+		assembleDBURL(cfg)
+		cfg.Auth.Issuer = "http://auth.internal:8080"
+		assert.ErrorContains(t, Validate(cfg), "must use https outside development")
+
+		cfg.Auth.Issuer = "https://auth.example.com"
+		assert.NoError(t, Validate(cfg))
+	})
+
 	t.Run("prod env requires an explicit provider_write_mode", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
