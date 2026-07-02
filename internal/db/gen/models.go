@@ -255,7 +255,7 @@ type OpenrailsCheckoutSession struct {
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	// Provider account selected for this provider checkout/session.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 }
 
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
@@ -328,24 +328,6 @@ type OpenrailsEntitlementFeature struct {
 	Metadata   []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-}
-
-// Append-only operator history for external provider mutations executed from provider intents/convergence (#533).
-type OpenrailsExternalProviderMutationLog struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	Provider          string
-	ProviderAccountID *uuid.UUID
-	ProviderIntentID  *uuid.UUID
-	IntentType        *string
-	IdempotencyKey    *string
-	Attempt           int32
-	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
-	Phase  string
-	Reason *string
-	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
-	Evidence  []byte
-	CreatedAt time.Time
 }
 
 // #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.
@@ -447,7 +429,7 @@ type OpenrailsInvoicePayment struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	// Provider account used for this invoice payment attempt or settled provider payment.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -687,7 +669,7 @@ type OpenrailsPayment struct {
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
 	// Provider account that produced this payment/charge mirror row.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -705,34 +687,12 @@ type OpenrailsPaymentMethod struct {
 	MerchantID           uuid.UUID
 	CustomerID           uuid.UUID
 	// Provider account that produced this vaulted payment method mirror row.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customers (Stripe).
 	RailCustomerRef string
 	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
 	RailMethodRef string
-}
-
-// Merchant payment-provider account registry. A row is one merchant-owned account on one rail.
-type OpenrailsPaymentProviderAccount struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
-	Rail string
-	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
-	Environment string
-	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
-	AccountID      string
-	DisplayName    *string
-	Evidence       []byte
-	FirstSeenAt    time.Time
-	LastVerifiedAt *time.Time
-	ReplacedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
-	Owner string
-	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
-	Archived bool
+	RebillDriver  string
 }
 
 // Pricing tiers for products with rail-specific identifiers
@@ -835,8 +795,20 @@ type OpenrailsProductUsageLimitBinding struct {
 	UpdatedAt     time.Time
 }
 
+type OpenrailsRailCustomerAccount struct {
+	ID         uuid.UUID
+	Rail       string
+	AccountID  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	// Provider account that produced this rail customer mirror row.
+	RailMerchantAccountID *uuid.UUID
+}
+
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
-type OpenrailsProviderIntent struct {
+type OpenrailsRailIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Rail the mutation targets (e.g. 'nmi', 'stripe').
@@ -867,17 +839,58 @@ type OpenrailsProviderIntent struct {
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
 	// Provider account row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+}
+
+// Merchant payment-provider account registry. A row is one merchant-owned account on one rail.
+type OpenrailsRailMerchantAccount struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
+	Rail string
+	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
+	Environment string
+	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
+	AccountID      string
+	DisplayName    *string
+	Evidence       []byte
+	FirstSeenAt    time.Time
+	LastVerifiedAt *time.Time
+	ReplacedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
+	Owner string
+	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
+	Archived bool
+}
+
+// Append-only operator history for external provider mutations executed from provider intents/convergence (#533).
+type OpenrailsRailMutationLog struct {
+	ID                    uuid.UUID
+	MerchantID            uuid.UUID
+	Provider              string
+	RailMerchantAccountID *uuid.UUID
+	ProviderIntentID      *uuid.UUID
+	IntentType            *string
+	IdempotencyKey        *string
+	Attempt               int32
+	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
+	Phase  string
+	Reason *string
+	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
+	Evidence  []byte
+	CreatedAt time.Time
 }
 
 // Durable Provider Refresh watermarks. A failed or partial provider read records last_error but never advances watermark_at.
-type OpenrailsProviderRefreshWatermark struct {
+type OpenrailsRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Provider   string
 	// Current provider account row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
-	ProviderAccountID  *uuid.UUID
-	ProviderAccountKey *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+	ProviderAccountKey    *uuid.UUID
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
 	// Exclusive lower bound for the next successful bounded provider event refresh window.
@@ -887,18 +900,6 @@ type OpenrailsProviderRefreshWatermark struct {
 	LastError       *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-}
-
-type OpenrailsRailCustomer struct {
-	ID             uuid.UUID
-	Rail           string
-	RailCustomerID string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	// Provider account that produced this rail customer mirror row.
-	ProviderAccountID *uuid.UUID
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
@@ -1003,7 +1004,7 @@ type OpenrailsSubscription struct {
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
 	// Provider account that produced this remote subscription mirror row.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 }
 
 // Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.
@@ -1044,6 +1045,19 @@ type OpenrailsUsageEvent struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
+}
+
+// #678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); only completed marks live here.
+type OpenrailsWebhookEvent struct {
+	MerchantID uuid.UUID
+	Rail       string
+	// Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.
+	Op      string
+	EventID string
+	// Always completed: pending coordination is Redis-only; a row here means effects are durably applied.
+	Status      string
+	CreatedAt   time.Time
+	CompletedAt time.Time
 }
 
 type ProfilesUser struct {

@@ -104,51 +104,51 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 
 	// provider accounts (identity + lifecycle + secret references).
-	var accounts []gen.OpenrailsPaymentProviderAccount
+	var accounts []gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
-		accounts, lerr = database.Gen(ctx).ListProviderAccountsForMerchant(ctx, gen.ListProviderAccountsForMerchantParams{
+		accounts, lerr = database.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
 			MerchantID: mid.UUID(),
 		})
 		return lerr
 	}); err != nil {
 		return nil, fmt.Errorf("list provider accounts: %w", err)
 	}
-	secretValuesByAccount, err := providerAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
+	secretValuesByAccount, err := railMerchantAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
 	if err != nil {
 		return nil, err
 	}
-	mt.ProviderAccounts = map[string]ProviderAccountConfig{}
+	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{}
 	for _, a := range accounts {
 		localKey := ""
 		if a.DisplayName != nil {
 			localKey = strings.TrimSpace(*a.DisplayName)
 		}
 		if localKey == "" {
-			localKey = providerAccountDumpKey(a.Rail, a.Environment, a.AccountID)
+			localKey = railMerchantAccountDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
 		account := ProviderRailAccountConfig{
 			Environment: a.Environment,
 			AccountID:   a.AccountID,
 			Archived:    a.Archived,
 		}
-		if signer := providerAccountSignerFromEvidence(a.Evidence); signer != nil {
+		if signer := railMerchantAccountSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
 		}
-		if settings := providerAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
+		if settings := railMerchantAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
 			account.Settings = settings
 		}
-		key := providerAccountSecretGroupKey(a.Rail, a.Environment, a.AccountID)
+		key := railMerchantAccountSecretGroupKey(a.Rail, a.Environment, a.AccountID)
 		if values := secretValuesByAccount[key]; len(values) > 0 {
 			account.Secrets = values
 		}
-		mt.ProviderAccounts[localKey] = ProviderAccountConfig{a.Rail: account}
+		mt.RailMerchantAccounts[localKey] = RailMerchantAccountConfig{a.Rail: account}
 	}
 
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
 }
 
-func providerAccountSignerFromEvidence(raw []byte) *ProviderAccountSignerConfig {
+func railMerchantAccountSignerFromEvidence(raw []byte) *RailMerchantAccountSignerConfig {
 	var evidence struct {
 		Signer struct {
 			Mode string `json:"mode"`
@@ -162,13 +162,13 @@ func providerAccountSignerFromEvidence(raw []byte) *ProviderAccountSignerConfig 
 	if mode == "" || mode == "local_keypair" {
 		return nil
 	}
-	return &ProviderAccountSignerConfig{
+	return &RailMerchantAccountSignerConfig{
 		Mode: mode,
 		Key:  strings.TrimSpace(evidence.Signer.Key),
 	}
 }
 
-func providerAccountSettingsFromEvidence(raw []byte) map[string]any {
+func railMerchantAccountSettingsFromEvidence(raw []byte) map[string]any {
 	var evidence struct {
 		Settings map[string]any `json:"settings"`
 	}
@@ -183,11 +183,11 @@ func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-// providerAccountSecrets lists the merchant's provider-account secret VALUES
+// railMerchantAccountSecrets lists the merchant's provider-account secret VALUES
 // grouped by (rail, environment, account_id). It returns nothing unless
 // includeValues is set: a redacted dump omits secret fields entirely rather than
 // emitting a placeholder that a re-apply (--overwrite) could store as the real value.
-func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
 		return nil, nil
 	}
@@ -197,7 +197,7 @@ func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantS
 	}
 	out := map[string]map[string]string{}
 	for _, name := range names {
-		rail, environment, accountID, key, ok, perr := merchants.ParseProviderAccountSecretName(name)
+		rail, environment, accountID, key, ok, perr := merchants.ParseRailMerchantAccountSecretName(name)
 		if perr != nil || !ok {
 			continue
 		}
@@ -205,7 +205,7 @@ func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantS
 		if err != nil {
 			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
 		}
-		gk := providerAccountSecretGroupKey(rail, environment, accountID)
+		gk := railMerchantAccountSecretGroupKey(rail, environment, accountID)
 		if out[gk] == nil {
 			out[gk] = map[string]string{}
 		}
@@ -214,11 +214,11 @@ func providerAccountSecrets(ctx context.Context, secretStore merchants.MerchantS
 	return out, nil
 }
 
-func providerAccountSecretGroupKey(rail, environment, accountID string) string {
+func railMerchantAccountSecretGroupKey(rail, environment, accountID string) string {
 	return strings.ToLower(rail) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
-func providerAccountDumpKey(rail, environment, accountID string) string {
+func railMerchantAccountDumpKey(rail, environment, accountID string) string {
 	parts := []string{rail, environment, accountID}
 	var b strings.Builder
 	for i, p := range parts {

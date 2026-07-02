@@ -30,6 +30,12 @@ type IdempotencyRecord struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
+// IdempotencyService is a Redis-backed pending/success/failed record store,
+// with a per-process in-memory fallback when no Redis client is configured.
+// For webhook dedup it is COORDINATION + CACHE only — the replay truth lives
+// in Postgres (openrails.webhook_events, #678) — so losing Redis (or falling
+// back to the memStore) costs duplicate work coordination, never correctness
+// there. Other consumers (e.g. checkout) still use it as their sole store.
 type IdempotencyService struct {
 	client *redis.Client
 	ttl    time.Duration

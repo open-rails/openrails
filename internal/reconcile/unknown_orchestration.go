@@ -30,7 +30,7 @@ func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
 		o.MaxPerRail = 500
 	}
 	if o.DunningWindow <= 0 {
-		o.DunningWindow = 14 * 24 * time.Hour
+		o.DunningWindow = DefaultDunningWindow
 	}
 	if o.LookbackCap <= 0 {
 		o.LookbackCap = 3 * 365 * 24 * time.Hour
@@ -44,11 +44,13 @@ func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
 // UnknownReconcileResult summarizes one pass.
 type UnknownReconcileResult struct {
 	Renewed       int
+	Adopted       int // remote period end adopted without a charge (#367 doctrine)
 	PastDue       int
 	Cancelled     int
 	StillUnknown  int
+	Probed        int                 // per-subscription probe fallbacks attempted (#665)
 	Backfilled    int                 // payments imported (#634)
-	RailCustomers int                 // rail_customers materialized from a remote customer id (#635)
+	RailCustomers int                 // rail_customer_accounts materialized from a remote customer id (#635)
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
 }
 
@@ -58,7 +60,7 @@ type UnknownReconcileResult struct {
 func reconcilableRails() []string {
 	var out []string
 	for _, d := range rails.All() {
-		if d.HasProviderAccounts {
+		if d.HasRailMerchantAccounts {
 			out = append(out, string(d.Rail))
 		}
 	}
@@ -66,15 +68,18 @@ func reconcilableRails() []string {
 }
 
 // ReconcileUnknownCohort resolves the `unknown` subscription cohort (#632) against
-// provider truth using ONE windowed bulk fetch PER RAIL (#633) — never a
-// per-subscription fan-out. For each rail it pulls [oldestPeriodEnd-slack, now]
-// (clamped to LookbackCap), matches every unknown sub locally
-// (ResolveUnknownFromSnapshot), applies the resolution (ResolveUnknownSubscription),
-// and backfills the provider's missing charges (#634, idempotent by transaction id,
-// declines recorded as failed). A rail whose fetch fails is recorded in RailErrors
-// and its subs are LEFT unknown — the caller (a River job) retries with exponential
-// backoff. Must run inside a merchant-scoped connection.
-func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, fetchers map[Provider]RailFetcher, merchantID merchant.ID, now time.Time, opts UnknownReconcileOptions) (UnknownReconcileResult, error) {
+// provider truth using ONE windowed bulk fetch PER RAIL (#633) — plus a targeted
+// per-subscription probe (#665) ONLY for rows the bulk snapshot could not decide
+// (NULL period end, evidence outside the window, non-exhaustive roster). For each
+// rail it pulls [oldestPeriodEnd-slack, now] (clamped to LookbackCap), feeds
+// every unknown sub to the ONE decider (Decide), applies the transition
+// (ApplyDecision), and backfills the provider's missing charges (#634,
+// idempotent by transaction id, declines recorded as failed). A rail whose
+// fetch fails is recorded in RailErrors and its subs are LEFT unknown — the
+// caller (a River job) retries with exponential backoff, and no per-sub probes
+// are fanned out against a rail that just failed a bulk read. Must run inside a
+// merchant-scoped connection.
+func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, fetchers map[Provider]RailFetcher, probers map[Provider]SubscriptionProber, merchantID merchant.ID, now time.Time, opts UnknownReconcileOptions) (UnknownReconcileResult, error) {
 	opts = opts.withDefaults()
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
@@ -82,6 +87,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	for _, rail := range reconcilableRails() {
 		provider := Provider(rail)
 		fetcher := fetchers[provider]
+		prober := probers[provider]
 		railArg := rail
 		rows, err := q.ListUnknownSubscriptions(ctx, gen.ListUnknownSubscriptionsParams{
 			MerchantID: merchantID.UUID(), Rail: &railArg, MaxRows: int32(opts.MaxPerRail),
@@ -92,7 +98,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		if len(rows) == 0 {
 			continue
 		}
-		if fetcher == nil {
+		if fetcher == nil && prober == nil {
 			// No configured fetcher (missing creds / rail disabled) — leave unknown.
 			res.RailErrors[provider] = "no fetcher configured"
 			res.StillUnknown += len(rows)
@@ -100,34 +106,51 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		}
 
 		// One windowed bulk pull covering every unknown sub of this rail.
-		since := now
-		for _, r := range rows {
-			if r.CurrentPeriodEndsAt != nil && r.CurrentPeriodEndsAt.Before(since) {
-				since = *r.CurrentPeriodEndsAt
+		var snap *RemoteSnapshot
+		if fetcher != nil {
+			since := now
+			for _, r := range rows {
+				if r.CurrentPeriodEndsAt != nil && r.CurrentPeriodEndsAt.Before(since) {
+					since = *r.CurrentPeriodEndsAt
+				}
 			}
-		}
-		since = since.Add(-opts.WindowSlack)
-		if floor := now.Add(-opts.LookbackCap); since.Before(floor) {
-			since = floor
-		}
-		snap, err := fetcher.Fetch(ctx, FetchParams{Since: since, Until: now})
-		if err != nil {
-			// Provider unreachable: subs stay unknown, caller backs off.
-			res.RailErrors[provider] = err.Error()
-			res.StillUnknown += len(rows)
-			continue
+			since = since.Add(-opts.WindowSlack)
+			if floor := now.Add(-opts.LookbackCap); since.Before(floor) {
+				since = floor
+			}
+			snap, err = fetcher.Fetch(ctx, FetchParams{Since: since, Until: now})
+			if err != nil {
+				// Provider unreachable: subs stay unknown, caller backs off.
+				res.RailErrors[provider] = err.Error()
+				res.StillUnknown += len(rows)
+				continue
+			}
 		}
 
 		for _, r := range rows {
-			periodEnd := now
-			if r.CurrentPeriodEndsAt != nil {
-				periodEnd = *r.CurrentPeriodEndsAt
+			state := SubscriptionState{
+				Status:             string(models.StatusUnknown),
+				Rail:               rail,
+				RailSubscriptionID: r.RailSubscriptionID,
+				PeriodEnd:          r.CurrentPeriodEndsAt,
 			}
-			verdict := ResolveUnknownFromSnapshot(
-				UnknownSubject{RailSubscriptionID: r.RailSubscriptionID, PeriodEnd: periodEnd},
-				snap, now, opts.DunningWindow,
-			)
-			if err := applyUnknownVerdict(ctx, database, lc, q, r.ID, verdict, now, opts.LookbackCap, &res); err != nil {
+			decision := Decide(state, EvidenceBundle{Snapshot: snap}, now, opts.DunningWindow)
+			if decision.Kind == TransitionNone && prober != nil && r.RailSubscriptionID != "" {
+				// #665: the bulk window couldn't decide this row — ONE targeted
+				// per-sub probe, fed to the SAME decider. A probe failure keeps
+				// the row unknown (retried next pass).
+				res.Probed++
+				if psnap, perr := prober.ProbeSubscription(ctx, ProbeSubject{
+					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodEnd: r.CurrentPeriodEndsAt,
+				}); perr != nil {
+					log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
+						"subscription_id": r.ID, "rail": rail,
+					}).Warn("reconcile unknown: per-subscription probe failed; staying unknown")
+				} else {
+					decision = Decide(state, EvidenceBundle{Snapshot: psnap}, now, opts.DunningWindow)
+				}
+			}
+			if err := applyUnknownDecision(ctx, database, lc, q, r.ID, decision, now, opts.LookbackCap, &res); err != nil {
 				return res, err
 			}
 		}
@@ -135,8 +158,8 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	return res, nil
 }
 
-// applyUnknownVerdict applies one resolution + its payment backfill.
-func applyUnknownVerdict(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, q *gen.Queries, subID uuid.UUID, v UnknownVerdict, now time.Time, lookbackCap time.Duration, res *UnknownReconcileResult) error {
+// applyUnknownDecision applies one decider transition + its payment backfill.
+func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, q *gen.Queries, subID uuid.UUID, d Decision, now time.Time, lookbackCap time.Duration, res *UnknownReconcileResult) error {
 	sub, err := repo.NewSubscriptionRepo(database).GetByID(ctx, subID)
 	if err != nil {
 		return fmt.Errorf("reconcile unknown: load subscription %s: %w", subID, err)
@@ -144,51 +167,43 @@ func applyUnknownVerdict(ctx context.Context, database *db.DB, lc *subscriptions
 
 	// Backfill the provider's missing charges first (#634) so a renewed sub's
 	// confirming payment exists before/with the status flip.
-	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, v.Backfill, now, lookbackCap)
+	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, d.Backfill, now, lookbackCap)
 	if err != nil {
 		return fmt.Errorf("reconcile unknown: backfill %s: %w", subID, err)
 	}
 	res.Backfilled += backfilled
 
-	// #635: materialize a rail_customers row when the provider exposed a real
+	// #635: materialize a rail_customer_accounts row when the provider exposed a real
 	// card-independent customer id (Stripe cus_*, NMI vault) for this sub. Guarded to
 	// stripe/nmi — CCBill/Solana/vault-less never fabricate one. Idempotent upsert.
-	if v.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
-		if err := q.UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
-			ID:             uuid.New(),
-			CustomerID:     sub.CustomerID,
-			Rail:           string(sub.Rail),
-			RailCustomerID: v.RemoteCustomerID,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-			MerchantID:     sub.MerchantID,
+	if d.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
+		if err := q.UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
+			ID:         uuid.New(),
+			CustomerID: sub.CustomerID,
+			Rail:       string(sub.Rail),
+			AccountID:  d.RemoteCustomerID,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			MerchantID: sub.MerchantID,
 		}); err != nil {
 			return fmt.Errorf("reconcile unknown: materialize rail_customer %s: %w", subID, err)
 		}
 		res.RailCustomers++
 	}
 
-	switch v.Outcome {
-	case UnknownOutcomeRenewed:
-		if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolveRenewed, v.NewPeriodEnd, now); err != nil {
-			return err
-		}
+	if _, err := ApplyDecision(ctx, database, lc, sub, d, now); err != nil {
+		return err
+	}
+	switch d.Kind {
+	case TransitionRenew:
 		res.Renewed++
-	case UnknownOutcomePastDue:
-		grace := now
-		if sub.CurrentPeriodEndsAt != nil {
-			grace = *sub.CurrentPeriodEndsAt
-		}
-		if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, grace); err != nil {
-			return err
-		}
+	case TransitionAdoptPeriodEnd:
+		res.Adopted++
+	case TransitionPastDue:
 		res.PastDue++
-	case UnknownOutcomeCancelled:
-		if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolveCancelled, nil, now); err != nil {
-			return err
-		}
+	case TransitionCancel:
 		res.Cancelled++
-	default: // UnknownOutcomeUnreachable
+	default: // TransitionNone: no conclusive evidence — stays unknown
 		res.StillUnknown++
 	}
 	return nil

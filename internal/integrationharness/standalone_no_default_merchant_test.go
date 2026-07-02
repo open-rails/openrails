@@ -42,14 +42,14 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	const whsec = "whsec_no_default_merchant"
 	const accountID = "acct_no_default_merchant"
 	_, err = fixturePool.Exec(ctx, `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, 'stripe', 'live', $2, false)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
 		SET archived = false, updated_at = now()
-		WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
+		WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.String(), accountID)
 	require.NoError(t, err)
-	secretName, err := merchants.ProviderAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
+	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, whsec)
 	require.NoError(t, err)

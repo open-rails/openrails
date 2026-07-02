@@ -33,7 +33,7 @@ type FetcherOptions struct {
 // BuildFetchersWithOptions is the strict builder used by operator commands.
 // It respects active rail selection and returns config errors instead of
 // silently picking an arbitrary account.
-func BuildFetchersWithOptions(cfg *config.Config, rails config.ProviderAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
+func BuildFetchersWithOptions(cfg *config.Config, rails config.RailMerchantAccountSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]RailFetcher, error) {
 	fetchers := map[Provider]RailFetcher{}
 
 	if key, c, err := selectNMIClient(rails, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
@@ -79,7 +79,7 @@ func (o FetcherOptions) providerKey(provider Provider) string {
 	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
 }
 
-func selectRailByType(rails config.ProviderAccountSet, rail models.Rail, explicitKey string) (string, *config.ProviderAccountConfig, error) {
+func selectRailByType(rails config.RailMerchantAccountSet, rail models.Rail, explicitKey string) (string, *config.RailMerchantAccountConfig, error) {
 	if explicitKey != "" {
 		proc := rails.GetRail(explicitKey)
 		if proc == nil {
@@ -93,7 +93,7 @@ func selectRailByType(rails config.ProviderAccountSet, rail models.Rail, explici
 	return rails.ActiveRailByType(rail)
 }
 
-func selectNMIClient(rails config.ProviderAccountSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
+func selectNMIClient(rails config.RailMerchantAccountSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
 	if explicitKey != "" {
 		c := clients[explicitKey]
 		if c == nil {
@@ -141,7 +141,10 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) 
 		Store:    &PGStore{DB: d},
 		Local:    &PGLocalStateLoader{DB: d},
 		Writer:   &PGLocalWriter{DB: d},
-		Intents:  &PGStuckIntentSource{DB: d},
+		// #665: subscription transitions route through the decider. No
+		// deferred-delete scheduler here (CLI pulls log the wiring gap);
+		// the river provider-refresh worker injects its own.
+		Decisions: NewDecisionApplier(d, nil),
 	}
 	if cfg != nil {
 		// Third dunning-forensics evidence source: OpenRails' own ClickHouse

@@ -45,16 +45,16 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	require.NoError(t, err)
 	evil, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "evil", PermissionGroupID: "group-evil"})
 	require.NoError(t, err)
-	seedProviderAccount(t, pool, acme.ID.String(), "stripe", "acct_acme")
-	seedProviderAccount(t, pool, evil.ID.String(), "stripe", "acct_evil")
-	seedProviderAccount(t, pool, acme.ID.String(), "nmi", "nmi_acme_account")
-	seedProviderAccount(t, pool, evil.ID.String(), "nmi", "nmi_evil_account")
-	seedArchivedProviderAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_archived")
-	seedProviderAccount(t, pool, acme.ID.String(), "ccbill", "945280/0000")
-	seedProviderAccount(t, pool, evil.ID.String(), "ccbill", "945281/0000")
-	seedProviderAccountEnv(t, pool, acme.ID.String(), "stripe", "test", "acct_acme_test")
-	seedProviderAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_test")
-	seedProviderAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282/0000")
+	seedRailMerchantAccount(t, pool, acme.ID.String(), "stripe", "acct_acme")
+	seedRailMerchantAccount(t, pool, evil.ID.String(), "stripe", "acct_evil")
+	seedRailMerchantAccount(t, pool, acme.ID.String(), "nmi", "nmi_acme_account")
+	seedRailMerchantAccount(t, pool, evil.ID.String(), "nmi", "nmi_evil_account")
+	seedArchivedRailMerchantAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_archived")
+	seedRailMerchantAccount(t, pool, acme.ID.String(), "ccbill", "945280/0000")
+	seedRailMerchantAccount(t, pool, evil.ID.String(), "ccbill", "945281/0000")
+	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "stripe", "test", "acct_acme_test")
+	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "nmi", "test", "nmi_acme_test")
+	seedRailMerchantAccountEnv(t, pool, acme.ID.String(), "ccbill", "test", "945282/0000")
 	putProviderSecret(t, ctx, secrets, acme.ID, "stripe", "acct_acme", "webhook_signing_secret", "whsec_acme")
 	putProviderSecret(t, ctx, secrets, evil.ID, "stripe", "acct_evil", "webhook_signing_secret", "whsec_evil")
 	putProviderSecret(t, ctx, secrets, acme.ID, "nmi", "nmi_acme_account", "webhook_signing_secret", "nmi_acme")
@@ -111,27 +111,27 @@ func postMerchantWebhookWithHeader(t *testing.T, url string, body []byte, header
 	return resp.StatusCode
 }
 
-func seedProviderAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
-	seedProviderAccountEnv(t, pool, merchantID, provider, "live", accountID)
+func seedRailMerchantAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedRailMerchantAccountEnv(t, pool, merchantID, provider, "live", accountID)
 }
 
-func seedArchivedProviderAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
-	seedArchivedProviderAccountEnv(t, pool, merchantID, provider, "live", accountID)
+func seedArchivedRailMerchantAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedArchivedRailMerchantAccountEnv(t, pool, merchantID, provider, "live", accountID)
 }
 
-func seedArchivedProviderAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
+func seedArchivedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, true)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
 }
 
-func seedProviderAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
+func seedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, false)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func putProviderSecret(t *testing.T, ctx context.Context, store merchants.Mercha
 
 func putProviderSecretEnv(t *testing.T, ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, provider, environment, accountID, key, value string) {
 	t.Helper()
-	name, err := merchants.ProviderAccountSecretName(provider, environment, accountID, key)
+	name, err := merchants.RailMerchantAccountSecretName(provider, environment, accountID, key)
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, name, value)
 	require.NoError(t, err)
@@ -229,7 +229,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
 			deleted_at timestamptz
 		);
-		CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
+		CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE CASCADE,
 			rail text NOT NULL,
@@ -245,7 +245,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
 			owner text NOT NULL DEFAULT 'merchant'
 		);
-		CREATE UNIQUE INDEX uq_payment_provider_accounts_identity ON openrails.payment_provider_accounts (rail, environment, account_id);
+		CREATE UNIQUE INDEX uq_rail_merchant_accounts_identity ON openrails.rail_merchant_accounts (rail, environment, account_id);
 	`)
 	require.NoError(t, err)
 }

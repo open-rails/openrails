@@ -79,11 +79,8 @@ func mutationRecordsForFinding(provider Provider, findingID uuid.UUID, f *Findin
 	a := f.Apply
 	var out []MutationRecord
 	switch {
-	case a.CancelLocal != nil:
-		out = add(out, "subscriptions", "update", a.CancelLocal.SubscriptionID.String(), "", "cancelled_locally", 1)
-		out = add(out, "entitlements", "update", "", "", "entitlements_revoked", 0)
-	case a.AdoptStatus != nil:
-		out = add(out, "subscriptions", "update", a.AdoptStatus.SubscriptionID.String(), "", "adopted_status", 1)
+	case a.Decide != nil:
+		out = add(out, "subscriptions", "update", a.Decide.SubscriptionID.String(), "", "transition", 1)
 	case a.BackfillPayment != nil:
 		out = add(out, "payments", "insert", "", a.BackfillPayment.TransactionID, "payment_backfilled", 1)
 		if a.BackfillPayment.Grant != nil {
@@ -102,10 +99,6 @@ func mutationRecordsForFinding(provider Provider, findingID uuid.UUID, f *Findin
 		out = add(out, "payments", op, rowID, a.RecordRefund.TransactionID, key, 1)
 	case a.AdoptVault != nil:
 		out = add(out, "payment_methods", "update", a.AdoptVault.PaymentMethodID.String(), "", "vault_adopted", 1)
-	case a.GrantEntitlements != nil:
-		out = add(out, "entitlements", "insert", "", a.GrantEntitlements.SubscriptionID.String(), "entitlements_granted", len(a.GrantEntitlements.Entitlements))
-	case a.RevokeEntitlements != nil:
-		out = add(out, "entitlements", "update", "", a.RevokeEntitlements.SubscriptionID.String(), "entitlements_revoked", 0)
 	case a.Materialize != nil:
 		rowID := ""
 		if phase == "applied" {

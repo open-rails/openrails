@@ -146,7 +146,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", customerID)
@@ -192,7 +192,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	}
 }
 
-func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsProviderIntent {
+func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),

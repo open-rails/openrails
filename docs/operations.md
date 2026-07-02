@@ -324,7 +324,7 @@ over 2 weeks — same span, more attempts; ours is sparser because each NMI
 decline costs a per-transaction fee. Stripe-billed subscriptions use Stripe's
 dunning; this section governs NMI-backed manual dunning.)
 
-## Provider Refresh (#574), subscription liveness (#367), and renewal grace (#368)
+## Provider Refresh (#574), the unknown-cohort reconcile (#632/#665), and renewal grace (#368)
 
 `pull-provider` is the manual full-batch/operator command. **Provider
 Refresh** is the always-on provider-read system: a 4-hourly River worker
@@ -334,7 +334,7 @@ or outage does not wait for the first 4-hour tick). It has three lanes:
 | Lane | Purpose |
 |---|---|
 | Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, and CCBill using durable per-merchant/provider/account/domain watermarks |
-| Subscription Liveness Refresh | the former subscription liveness worker; probes stale/silent active NMI/Stripe subscriptions |
+| Unknown-cohort Reconcile | resolves `unknown` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
 | CCBill DataLink Refresh | scheduled DataLink active-member bulk refresh, because CCBill has no cheap per-subscription liveness API |
 
 Provider Event Refresh advances a watermark only after the provider/window
@@ -345,28 +345,30 @@ truth through the existing idempotent reconciliation writers, then runs scoped
 convergence so entitlements/grants/derived state follow the refreshed provider
 facts. It never mutates a provider.
 
-Dunning owns `past_due` (we SAW the failure). The **silence cohort** —
-`active` subscriptions whose period lapsed with NO webhook either way — is the
-Subscription Liveness Refresh lane. Per silent subscription it READS provider
-truth (NMI: the period's sale transactions by order reference + the recurring
-record; Stripe: `GET /v1/subscriptions/{id}` + latest invoice) and converges
-through the normal lifecycle services:
+Dunning owns `past_due` (we SAW the failure). The **silence cohort** — lapsed
+subscriptions with NO webhook either way — is parked as `unknown` by the LIFE
+convergence plane (#664) and resolved by the Unknown-cohort Reconcile lane. It
+READS provider truth (one bulk snapshot per rail; per-subscription probes —
+NMI: the period's sale transactions by order reference + the recurring record;
+Stripe: `GET /v1/subscriptions/{id}` + latest invoice — only when the bulk pull
+can't cover a row, e.g. NULL period end) and applies ONE verdict set:
 
-| Probe says | Convergence |
+| Provider evidence | Resolution |
 |---|---|
-| charged | `RenewMembership` repair — payment + entitlements backfilled exactly once, never a second charge |
-| declined | `FailMembership` + #359 schedule — **dunning owns it from here** |
-| no attempt, remote alive w/ future next billing | adopt the remote period end (clock misalignment); adoption alone grants no access |
+| verified renewal charge | renewed — period advanced, the charge backfilled exactly once, never a second charge |
+| declined / roster stalled, within dunning window | `past_due` — **dunning owns it from here** |
+| declined / stalled, beyond the window | cancelled; the remote record may still exist, so the deferred NMI delete is queued (#679) |
+| no charge, remote alive w/ future next billing | adopt the remote period end (clock misalignment); adoption alone grants no access |
 | remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
-| unreachable | nothing changes; the next pass re-derives the cohort and retries (no read-queue; the intent ledger stays mutations-only) |
+| no conclusive evidence / unreachable | stays `unknown`; the next pass re-derives the cohort and retries (no read-queue; the intent ledger stays mutations-only) |
 
 It never charges — charging stays inside dunning, whose derived staleness
 window cancels months-stale subscriptions instead of surprise-charging.
 Mode gating: Provider Refresh runs under `full` AND `limited` (provider reads
 plus local convergence — consistent with #366 materialize); skipped under
-`readonly`. Each pass logs one Provider Refresh heartbeat across lanes plus the
-lane-specific liveness summary (`cohort/repaired/failed/adopted/cancelled/
-unreachable`).
+`readonly`. Each pass logs one Provider Refresh heartbeat across lanes plus a
+per-merchant unknown-reconcile summary (`renewed/adopted/past_due/cancelled/
+still_unknown/probed/backfilled/rail_errors`).
 
 While the probe resolves the silence, the user keeps access through the
 **renewal grace window** (#368): activation and every renewal pre-append a
@@ -386,8 +388,8 @@ for routine catch-up, but does not replace manual investigation. A
 to the same state by idempotency. Note: NMI charge detection correlates by the
 order reference OpenRails stamps at signup (the local subscription id).
 Legacy-imported subscriptions whose NMI `orderid` predates OpenRails won't
-match the liveness charge probe; the Provider Event Refresh lane is what
-backfills those missed provider events from the durable watermark.
+match the per-subscription charge probe; the Provider Event Refresh lane is
+what backfills those missed provider events from the durable watermark.
 
 ## Safety levers (recap — full details in README "Operating modes")
 

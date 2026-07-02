@@ -39,24 +39,19 @@ const (
 	// with the rail vault. Enforce: adopt the rail record.
 	FindingVaultMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
-	// active subscriptions. Always requires_review — the fix (cancel+refund at
+	// live REMOTE subscriptions. Only the provider snapshot can see this
+	// (local duplicates are schema-blocked), so it is a PULL-plane finding
+	// (#665 single-writer rule; renamed from consistency.duplicate.subscription
+	// by migration 058). Always requires_review — the fix (cancel+refund at
 	// the rail) is remote and human.
-	FindingDuplicateSubscriptions FindingType = "consistency.duplicate.subscription"
-	// FindingEntitlementMismatch (PS-9): entitlements disagree with the
-	// subscription, either direction. Enforce: grant/revoke
-	// SUBSCRIPTION-sourced entitlements only.
-	FindingEntitlementMismatch FindingType = "derive.grant_effect.mismatch"
-	// FindingStuckIntent (PS-10): a provider intent (#358 ledger) sat
-	// non-terminal beyond the hardcoded stuck thresholds (pending/
-	// failed_retryable > 24h; in_flight/unknown_needs_verify > 2h).
-	// Provider-independent: emitted on EVERY run from the local ledger alone,
-	// regardless of provider filters; no provider calls. Mode/kill-switch
-	// parks are informational (the executor drains them when the blocker
-	// lifts); everything else is requires_review — it means provider failures,
-	// bad credentials, or a dead worker. Neither check nor fix ever touches
-	// the intent itself: the executor/verifier own it.
-	FindingStuckIntent FindingType = "life.provider_intent.stuck"
+	FindingDuplicateSubscriptions FindingType = "pull.subscription.duplicate"
 )
+
+// #665 single-writer-per-invariant: the legacy PS-9 entitlement check
+// (derive.grant_effect.mismatch) moved into the Convergence Engine's DERIVE
+// pass and PS-10 (life.provider_intent.stuck) into its LIFE pass — see
+// internal/reconcile/converge/converge_passes.go. The pull engine emits
+// pull.* findings only.
 
 // Severity of a finding.
 type Severity string
@@ -116,15 +111,24 @@ type Finding struct {
 
 // ApplyAction is one idempotent LOCAL write the enforce mode performs for a
 // finding. Exactly one field is set. No ApplyAction ever touches a rail.
+// Mirror writes (payments / refunds / vault metadata / subscription
+// materialization) are direct appliers; subscription STATE transitions are a
+// Decide action — the #665 decider is the only thing that moves lifecycle state.
 type ApplyAction struct {
-	CancelLocal        *CancelLocalAction
-	AdoptStatus        *AdoptStatusAction
-	BackfillPayment    *BackfillPaymentAction
-	RecordRefund       *RecordRefundAction
-	AdoptVault         *AdoptVaultAction
-	GrantEntitlements  *GrantEntitlementsAction
-	RevokeEntitlements *RevokeEntitlementsAction
-	Materialize        *MaterializeSubscriptionAction
+	Decide          *DecideAction
+	BackfillPayment *BackfillPaymentAction
+	RecordRefund    *RecordRefundAction
+	AdoptVault      *AdoptVaultAction
+	Materialize     *MaterializeSubscriptionAction
+}
+
+// DecideAction carries a decider transition computed at diff time from the
+// snapshot evidence (#665 mirror-writer refactor: the pull engine invokes the
+// decider instead of writing domain state). Applied through the engine's
+// DecisionApplier under the same mutation-policy gate the legacy appliers had.
+type DecideAction struct {
+	SubscriptionID uuid.UUID
+	Decision       Decision
 }
 
 // MaterializeSubscriptionAction creates the local subscription for a PS-1
@@ -138,9 +142,9 @@ type ApplyAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// ProviderAccountID is openrails.payment_provider_accounts.id for account-bound
+	// RailMerchantAccountID is openrails.rail_merchant_accounts.id for account-bound
 	// provider-pull materialization.
-	ProviderAccountID *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
 	// "stripe"), so the new row joins the same roster future reconciles load.
@@ -171,36 +175,20 @@ type MaterializeResult struct {
 	PaymentBackfilled   bool
 }
 
-// CancelLocalAction cancels a local subscription (PS-2) and revokes its
-// subscription-sourced entitlements.
-type CancelLocalAction struct {
-	SubscriptionID uuid.UUID
-	CancelType     string // models.CancelTypeExpired
-	Reason         string
-}
-
-// AdoptStatusAction adopts the rail's status/periods (PS-3).
-type AdoptStatusAction struct {
-	SubscriptionID uuid.UUID
-	Status         string // openrails.subscription_status value
-	PeriodStartsAt *time.Time
-	PeriodEndsAt   *time.Time
-}
-
 // BackfillPaymentAction inserts the missing local payment for a rail
 // charge (PS-4), deduped on (tenant, rail, transaction_id), and grants
 // the subscription's entitlements when the period is current.
 type BackfillPaymentAction struct {
-	ProviderAccountID *uuid.UUID
-	Rail              string
-	TransactionID     string
-	AmountCents       int64
-	Currency          string
-	PurchasedAt       time.Time
-	PriceID           uuid.UUID
-	SubscriptionID    *uuid.UUID
-	CustomerID        uuid.UUID
-	Metadata          map[string]any
+	RailMerchantAccountID *uuid.UUID
+	Rail                  string
+	TransactionID         string
+	AmountCents           int64
+	Currency              string
+	PurchasedAt           time.Time
+	PriceID               uuid.UUID
+	SubscriptionID        *uuid.UUID
+	CustomerID            uuid.UUID
+	Metadata              map[string]any
 	// Grant, when non-nil, grants entitlements for the current period after
 	// the backfill (charge covers a period that is still running).
 	Grant *GrantEntitlementsAction
@@ -209,17 +197,17 @@ type BackfillPaymentAction struct {
 // RecordRefundAction records a rail refund locally (PS-5) as a
 // negative-amount payment row linked to the refunded payment.
 type RecordRefundAction struct {
-	ProviderAccountID *uuid.UUID
-	Rail              string
-	TransactionID     string
-	AmountCents       int64 // positive remote amount; recorded negative
-	Currency          string
-	PurchasedAt       time.Time
-	PriceID           uuid.UUID
-	SubscriptionID    *uuid.UUID
-	RefundedPaymentID *uuid.UUID
-	CustomerID        uuid.UUID
-	Metadata          map[string]any
+	RailMerchantAccountID *uuid.UUID
+	Rail                  string
+	TransactionID         string
+	AmountCents           int64 // positive remote amount; recorded negative
+	Currency              string
+	PurchasedAt           time.Time
+	PriceID               uuid.UUID
+	SubscriptionID        *uuid.UUID
+	RefundedPaymentID     *uuid.UUID
+	CustomerID            uuid.UUID
+	Metadata              map[string]any
 	// MarkRefundedOnly skips inserting a refund row and only flips the
 	// original payment's status to refunded — used when the refund shares the
 	// original transaction id (NMI refund actions ride the original
@@ -236,21 +224,13 @@ type AdoptVaultAction struct {
 }
 
 // GrantEntitlementsAction grants subscription-sourced entitlement windows
-// (PS-9 grant direction / PS-4 current-period grant).
+// (PS-4 current-period grant / PS-1 materialization).
 type GrantEntitlementsAction struct {
 	SubscriptionID uuid.UUID
 	CustomerID     uuid.UUID
 	Entitlements   []string
 	StartAt        time.Time
 	EndAt          *time.Time
-}
-
-// RevokeEntitlementsAction revokes the LIVE subscription-sourced entitlements
-// of one subscription (PS-9 revoke direction). Admin grants and grace windows
-// are different source types and are never touched.
-type RevokeEntitlementsAction struct {
-	SubscriptionID uuid.UUID
-	Reason         string
 }
 
 // stateRosterFindingTypes are the finding types whose subjects are fully
@@ -264,7 +244,6 @@ var stateRosterFindingTypes = []FindingType{
 	FindingStatusMismatch,
 	FindingVaultMismatch,
 	FindingDuplicateSubscriptions,
-	FindingEntitlementMismatch,
 }
 
 func severityRank(s Severity) int {

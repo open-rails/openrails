@@ -111,7 +111,7 @@ WHERE resolved_at IS NULL
 `
 
 // Operational job state: catalog drift events (reconciliation). Manual rebill
-// attempts were folded into openrails.provider_intents (#358 phase C).
+// attempts were folded into openrails.rail_intents (#358 phase C).
 func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCatalogDriftEvent, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftEvents)
 	if err != nil {

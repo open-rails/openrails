@@ -30,9 +30,9 @@ func newTestNMIClient(t *testing.T, url string) *nmi.NMIClient {
 	return client
 }
 
-func nmiDeleteIntent() gen.OpenrailsProviderIntent {
+func nmiDeleteIntent() gen.OpenrailsRailIntent {
 	subID := uuid.New()
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     TypeNMIDeleteSubscription,
 		Provider:       "mobius",

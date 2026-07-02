@@ -210,11 +210,11 @@ func New(deps Dependencies) (*Server, error) {
 			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.CheckoutService.SetProviderAccountSecretResolver(tsvc)
+				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
 			if deps.Runtime.VaultService != nil {
 				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.VaultService.SetProviderAccountSecretResolver(tsvc)
+				deps.Runtime.VaultService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
 		}
 
@@ -227,7 +227,7 @@ func New(deps Dependencies) (*Server, error) {
 			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
-			solanaSigner := recurring.NewSignerFromProviderAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
+			solanaSigner := recurring.NewSignerFromRailMerchantAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
 			submitter := recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
 			network := "mainnet"
 			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {

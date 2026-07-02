@@ -184,8 +184,8 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	}
 }
 
-func TestProviderAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
-	if _, err := ProviderAccountSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
+func TestRailMerchantAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
+	if _, err := RailMerchantAccountSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
 		t.Fatal("NMI tokenization_key is public provider settings, not a secret")
 	}
 }
@@ -207,7 +207,7 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	}
 
 	// Broad merchant-level NMI secrets are no longer runtime credential sources;
-	// the loader needs a payment_provider_accounts row so it can read provider
+	// the loader needs a rail_merchant_accounts row so it can read provider
 	// settings.
 }
 

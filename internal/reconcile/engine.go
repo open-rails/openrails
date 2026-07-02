@@ -12,12 +12,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Engine is the #107 phase-2 diff engine: it fetches each provider's declared
-// state, diffs it against local billing state, persists PS-1..PS-9 findings
-// with stable identity, and (in enforce mode) applies idempotent LOCAL
-// convergence writes. It NEVER mutates a rail — remote actions are
-// findings in the admin queue (requires_admin), and the fetchers are
-// read-only by construction.
+// Engine is the PULL-plane engine (#107 phase 2, #665 mirror-writer): it
+// fetches each provider's declared state, diffs it against the local mirror,
+// persists pull.* findings with stable identity, and (in enforce mode) applies
+// idempotent LOCAL MIRROR writes plus decider invocations — subscription state
+// transitions go through the ONE decider (Decide/DecisionApplier), never a
+// bespoke applier. It NEVER mutates a rail — remote actions are findings in
+// the admin queue (requires_admin), and the fetchers are read-only by
+// construction. Internal-plane checks (derive.*/life.*/consistency.*) belong
+// to the Convergence Engine, never here (#665).
 //
 // The caller must run the engine on a merchant-scoped context (a pinned merchant
 // connection / merchant in context) so every read and write is RLS-constrained
@@ -26,13 +29,12 @@ type Engine struct {
 	Fetchers map[Provider]RailFetcher
 	Store    Store
 	Local    LocalStateLoader
-	// Writer applies enforce-mode local writes. May be nil for advisory-only
-	// engines.
+	// Writer applies enforce-mode local mirror writes. May be nil for
+	// advisory-only engines.
 	Writer LocalWriter
-	// Intents is the PS-10 stuck-intent source (#358 provider intent ledger,
-	// LOCAL read only). The pass runs on every run regardless of provider
-	// filters; nil skips it (unit-test engines without a ledger).
-	Intents StuckIntentSource
+	// Decisions applies decider transitions (PS-2/PS-3 demotion, #665). May be
+	// nil for advisory-only engines.
+	Decisions DecisionApplier
 	// History is the THIRD dunning-forensics evidence source (OpenRails'
 	// own ClickHouse analytics events, incl. imported legacy history). May be
 	// nil / unconfigured: the forensics report then carries a note instead —
@@ -60,10 +62,10 @@ type RunParams struct {
 	Mutations *LocalMutationPolicy
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
-	// ProviderAccounts optionally binds each provider section to one
+	// RailMerchantAccounts optionally binds each provider section to one
 	// merchant-scoped provider account. When set, the engine scopes local mirror
 	// reads and local materialization writes to that account id.
-	ProviderAccounts map[Provider]ProviderAccountBinding
+	RailMerchantAccounts map[Provider]RailMerchantAccountBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
@@ -87,17 +89,17 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 	switch f.Type {
 	case FindingRemoteSubMissingLocal, FindingChargeMissingLocal, FindingRefundUnrecorded:
 		return p.Insert
-	case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingVaultMismatch, FindingEntitlementMismatch:
+	case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingVaultMismatch:
 		return p.Overwrite
 	default:
 		return false
 	}
 }
 
-// ProviderAccountBinding is the account row a provider-pull is authorized to
-// treat as authoritative. ID is openrails.payment_provider_accounts.id; AccountID is
+// RailMerchantAccountBinding is the account row a provider-pull is authorized to
+// treat as authoritative. ID is openrails.rail_merchant_accounts.id; AccountID is
 // the raw provider-returned account identifier.
-type ProviderAccountBinding struct {
+type RailMerchantAccountBinding struct {
 	ID        uuid.UUID `json:"id"`
 	Rail      string    `json:"rail"`
 	AccountID string    `json:"account_id"`
@@ -105,35 +107,33 @@ type ProviderAccountBinding struct {
 
 // ProviderReport is one provider's section of the run summary.
 type ProviderReport struct {
-	Provider            Provider          `json:"provider"`
-	ProviderAccountID   string            `json:"provider_account_id,omitempty"`
-	Aborted             bool              `json:"aborted,omitempty"`
-	Error               string            `json:"error,omitempty"`
-	RemoteSubscriptions int               `json:"remote_subscriptions"`
-	RemoteTransactions  int               `json:"remote_transactions"`
-	RemoteVaultEntries  int               `json:"remote_vault_entries"`
-	LocalSubscriptions  int               `json:"local_subscriptions"`
-	FindingsByType      map[string]int    `json:"findings_by_type,omitempty"`
-	FindingsBySeverity  map[string]int    `json:"findings_by_severity,omitempty"`
-	NewFindings         int               `json:"new_findings"`
-	UpdatedFindings     int               `json:"updated_findings"`
-	RequiresReview      int               `json:"requires_review"`
-	AdminRequired       int               `json:"-"`
-	AutoResolved        int64             `json:"auto_resolved"`
-	AutoFixed           int               `json:"auto_fixed"`
-	ApplySkipped        int               `json:"apply_skipped,omitempty"`
-	ApplyErrors         []string          `json:"apply_errors,omitempty"`
-	Dunning             *DunningForensics `json:"dunning_forensics,omitempty"`
+	Provider              Provider          `json:"provider"`
+	RailMerchantAccountID string            `json:"rail_merchant_account_id,omitempty"`
+	Aborted               bool              `json:"aborted,omitempty"`
+	Error                 string            `json:"error,omitempty"`
+	Coverage              SnapshotCoverage  `json:"coverage"`
+	RemoteSubscriptions   int               `json:"remote_subscriptions"`
+	RemoteTransactions    int               `json:"remote_transactions"`
+	RemoteVaultEntries    int               `json:"remote_vault_entries"`
+	LocalSubscriptions    int               `json:"local_subscriptions"`
+	FindingsByType        map[string]int    `json:"findings_by_type,omitempty"`
+	FindingsBySeverity    map[string]int    `json:"findings_by_severity,omitempty"`
+	NewFindings           int               `json:"new_findings"`
+	UpdatedFindings       int               `json:"updated_findings"`
+	RequiresReview        int               `json:"requires_review"`
+	AdminRequired         int               `json:"-"`
+	AutoResolved          int64             `json:"auto_resolved"`
+	AutoFixed             int               `json:"auto_fixed"`
+	ApplySkipped          int               `json:"apply_skipped,omitempty"`
+	ApplyErrors           []string          `json:"apply_errors,omitempty"`
+	Dunning               *DunningForensics `json:"dunning_forensics,omitempty"`
 }
 
 // RunSummary is the persisted summary jsonb of a run.
 type RunSummary struct {
 	Mode      Mode                       `json:"mode"`
 	Providers map[string]*ProviderReport `json:"providers"`
-	// StuckIntents is the provider-independent PS-10 section (one per run,
-	// not per provider). Nil when the engine has no intent source.
-	StuckIntents *StuckIntentReport `json:"stuck_intents,omitempty"`
-	Totals       SummaryTotals      `json:"totals"`
+	Totals    SummaryTotals              `json:"totals"`
 }
 
 // SummaryTotals aggregates across providers.
@@ -279,22 +279,6 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		summary.Totals.AutoFixed += rep.AutoFixed
 	}
 
-	// PS-10 stuck provider intents: provider-independent, every run, local
-	// ledger only — it runs even when --provider narrowed the sections above,
-	// and identically in check and fix (no applier exists for it).
-	stuckRep, stuckErr := e.runStuckIntents(ctx, runID, result)
-	summary.StuckIntents = stuckRep
-	if stuckErr != nil {
-		providerErrs = append(providerErrs, fmt.Sprintf("stuck-intents: %v", stuckErr))
-		log.WithError(stuckErr).Error("reconcile: stuck-intent pass failed")
-	}
-	if stuckRep != nil {
-		summary.Totals.Findings += stuckRep.Total
-		summary.Totals.RequiresReview += stuckRep.RequiresReview
-		summary.Totals.AdminRequired += stuckRep.AdminRequired
-		summary.Totals.AutoResolved += stuckRep.AutoResolved
-	}
-
 	status := "completed"
 	runErr := ""
 	if len(providerErrs) > 0 {
@@ -328,28 +312,29 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	fetcher := e.Fetchers[provider]
-	binding := params.ProviderAccounts[provider]
+	binding := params.RailMerchantAccounts[provider]
 	if binding.ID != uuid.Nil {
-		rep.ProviderAccountID = binding.ID.String()
+		rep.RailMerchantAccountID = binding.ID.String()
 	}
 	snap, err := fetcher.Fetch(ctx, FetchParams{
-		Since:             params.Since,
-		Until:             params.Until,
-		ProviderAccountID: binding.ID.String(),
-		Rail:              binding.Rail,
-		AccountID:         binding.AccountID,
+		Since:                 params.Since,
+		Until:                 params.Until,
+		RailMerchantAccountID: binding.ID.String(),
+		Rail:                  binding.Rail,
+		AccountID:             binding.AccountID,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	if binding.ID != uuid.Nil {
-		snap.ProviderAccountID = binding.ID.String()
+		snap.RailMerchantAccountID = binding.ID.String()
 	}
+	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemoteVaultEntries = len(snap.VaultEntries)
 
-	local, err := e.Local.Load(ctx, provider, nullableProviderAccountID(binding))
+	local, err := e.Local.Load(ctx, provider, nullableRailMerchantAccountID(binding))
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local state: %w", err)
 	}
@@ -380,14 +365,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// Local payments are looked up by the snapshot's transaction identity
 	// set (plus refund->charge links) rather than a date window.
 	txnIDs := collectTxnLookupIDs(snap)
-	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, nullableProviderAccountID(binding), txnIDs)
+	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, nullableRailMerchantAccountID(binding), txnIDs)
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
 
 	now := e.now()
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce && params.Mutations.allowsInsert()})
-	bindApplyActions(findings, nullableProviderAccountID(binding))
+	bindApplyActions(findings, nullableRailMerchantAccountID(binding))
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
@@ -535,15 +520,15 @@ func (e *Engine) coveredWindow(provider Provider, params RunParams, now time.Tim
 	return since, until
 }
 
-func nullableProviderAccountID(binding ProviderAccountBinding) *uuid.UUID {
+func nullableRailMerchantAccountID(binding RailMerchantAccountBinding) *uuid.UUID {
 	if binding.ID == uuid.Nil {
 		return nil
 	}
 	return &binding.ID
 }
 
-func bindApplyActions(findings []Finding, providerAccountID *uuid.UUID) {
-	if providerAccountID == nil {
+func bindApplyActions(findings []Finding, railMerchantAccountID *uuid.UUID) {
+	if railMerchantAccountID == nil {
 		return
 	}
 	for i := range findings {
@@ -552,15 +537,15 @@ func bindApplyActions(findings []Finding, providerAccountID *uuid.UUID) {
 			continue
 		}
 		if a.BackfillPayment != nil {
-			a.BackfillPayment.ProviderAccountID = providerAccountID
+			a.BackfillPayment.RailMerchantAccountID = railMerchantAccountID
 		}
 		if a.RecordRefund != nil {
-			a.RecordRefund.ProviderAccountID = providerAccountID
+			a.RecordRefund.RailMerchantAccountID = railMerchantAccountID
 		}
 		if a.Materialize != nil {
-			a.Materialize.ProviderAccountID = providerAccountID
+			a.Materialize.RailMerchantAccountID = railMerchantAccountID
 			if a.Materialize.Backfill != nil {
-				a.Materialize.Backfill.ProviderAccountID = providerAccountID
+				a.Materialize.Backfill.RailMerchantAccountID = railMerchantAccountID
 			}
 		}
 	}
@@ -588,28 +573,21 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 	a := f.Apply
 	evidence := map[string]any{"applied_at": e.now().Format(time.RFC3339)}
 	switch {
-	case a.CancelLocal != nil:
-		changed, err := e.Writer.CancelSubscriptionLocal(ctx, *a.CancelLocal)
+	case a.Decide != nil:
+		// #665: subscription state transitions route through the ONE decider
+		// applier (park + resolve via the shared lifecycle), never a bespoke
+		// SQL applier.
+		if e.Decisions == nil {
+			return nil, false, fmt.Errorf("no decision applier wired (enforce with subscription transitions requires Engine.Decisions)")
+		}
+		changed, err := e.Decisions.ApplyDecision(ctx, a.Decide.SubscriptionID, a.Decide.Decision)
 		if err != nil {
 			return nil, false, err
 		}
-		evidence["cancelled_locally"] = changed
-		revoked, err := e.Writer.RevokeSubscriptionEntitlements(ctx, RevokeEntitlementsAction{
-			SubscriptionID: a.CancelLocal.SubscriptionID,
-			Reason:         a.CancelLocal.Reason,
-		})
-		if err != nil {
-			return nil, changed, err
+		evidence["transition"] = a.Decide.Decision.Kind.String()
+		if a.Decide.Decision.Reason != "" {
+			evidence["transition_reason"] = a.Decide.Decision.Reason
 		}
-		evidence["entitlements_revoked"] = revoked
-		return evidence, changed || revoked > 0, nil
-
-	case a.AdoptStatus != nil:
-		changed, err := e.Writer.AdoptSubscriptionStatus(ctx, *a.AdoptStatus)
-		if err != nil {
-			return nil, false, err
-		}
-		evidence["adopted_status"] = a.AdoptStatus.Status
 		return evidence, changed, nil
 
 	case a.BackfillPayment != nil:
@@ -639,14 +617,6 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		evidence["vault_adopted"] = changed
 		return evidence, changed, nil
 
-	case a.GrantEntitlements != nil:
-		granted, err := e.Writer.GrantEntitlements(ctx, *a.GrantEntitlements)
-		if err != nil {
-			return nil, false, err
-		}
-		evidence["entitlements_granted"] = granted
-		return evidence, granted > 0, nil
-
 	case a.Materialize != nil:
 		res, err := e.Writer.MaterializeSubscription(ctx, *a.Materialize)
 		if err != nil {
@@ -665,14 +635,6 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 			evidence["backfill_transaction_id"] = a.Materialize.Backfill.TransactionID
 		}
 		return evidence, true, nil
-
-	case a.RevokeEntitlements != nil:
-		revoked, err := e.Writer.RevokeSubscriptionEntitlements(ctx, *a.RevokeEntitlements)
-		if err != nil {
-			return nil, false, err
-		}
-		evidence["entitlements_revoked"] = revoked
-		return evidence, revoked > 0, nil
 	}
 	return nil, false, fmt.Errorf("finding %s/%s has an empty apply action", f.Type, f.SubjectKey)
 }

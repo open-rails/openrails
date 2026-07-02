@@ -328,13 +328,13 @@ func TestProductionTestModeValidation(t *testing.T) {
 	})
 }
 
-// stripeTestModeConfig builds a minimal Config plus in-memory ProviderAccountSet with a
+// stripeTestModeConfig builds a minimal Config plus in-memory RailMerchantAccountSet with a
 // single Stripe rail carrying the given secret key and test_mode setting.
-func stripeTestModeConfig(secretKey string, testMode bool) (*Config, ProviderAccountSet) {
+func stripeTestModeConfig(secretKey string, testMode bool) (*Config, RailMerchantAccountSet) {
 	return &Config{
 			ProviderWriteMode: ProviderWriteModeFull,
 			TestMode:          testMode,
-		}, ProviderAccountSet{
+		}, RailMerchantAccountSet{
 			"stripe": {
 				Rail:   models.RailStripe,
 				Stripe: &StripeRailConfig{SecretKey: secretKey},
@@ -393,7 +393,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 
 	t.Run("validates every stripe rail", func(t *testing.T) {
 		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
-		rails := ProviderAccountSet{
+		rails := RailMerchantAccountSet{
 			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
 			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
 		}
@@ -404,7 +404,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 }
 
 func TestActiveRailByType(t *testing.T) {
-	rails := ProviderAccountSet{
+	rails := RailMerchantAccountSet{
 		"stripe_old": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_old"}},
 		"stripe_new": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_new"}},
 		"mobius":     {Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec"}},
@@ -415,19 +415,19 @@ func TestActiveRailByType(t *testing.T) {
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
 	require.Equal(t, proc, rails.GetStripeRail())
 
-	rails["stripe_other"] = &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
+	rails["stripe_other"] = &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
 	key, proc, err = rails.ActiveRailByType(models.RailStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
-	require.NoError(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
+	require.NoError(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, RailMerchantAccountSet{
 		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}))
 
 	// Two accounts on a rail without account_id is rejected: the made-up map name
 	// can't be the provider identity (#641).
-	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, ProviderAccountSet{
+	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, RailMerchantAccountSet{
 		"stripe_a": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}), "must declare account_id")
@@ -436,7 +436,7 @@ func TestActiveRailByType(t *testing.T) {
 // TestCatalogTargetSelectors covers active account selection plus
 // FindByAccountID (resolve a specific account by gateway-id).
 func TestCatalogTargetSelectors(t *testing.T) {
-	rails := ProviderAccountSet{
+	rails := RailMerchantAccountSet{
 		"mobius":   {Rail: models.RailNMI, AccountID: "100001", NMI: &NMIRailConfig{SecurityKey: "a"}},
 		"paykings": {Rail: models.RailNMI, AccountID: "100002", NMI: &NMIRailConfig{SecurityKey: "b"}},
 		"old-nmi":  {Rail: models.RailNMI, AccountID: "100003", Archived: true, NMI: &NMIRailConfig{SecurityKey: "c"}},
@@ -463,27 +463,27 @@ func TestCatalogTargetSelectors(t *testing.T) {
 // a matching or unset (derived) environment passes.
 func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
 	// test_mode=true (sandbox) rejects a live-declared account.
-	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}, ProviderAccountSet{
+	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
 	})
 	require.ErrorContains(t, err, "requires environment=test")
 
 	// test_mode=false (production) rejects a test-declared account.
 	cfgLive := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
-	require.ErrorContains(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+	require.ErrorContains(t, ValidateRailSet(cfgLive, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "test", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}), "requires environment=live")
 
 	// A garbage environment is rejected.
-	require.ErrorContains(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+	require.ErrorContains(t, ValidateRailSet(cfgLive, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "staging", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}), "unknown environment")
 
 	// Matching environment passes; unset (derived from test_mode) passes.
-	require.NoError(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+	require.NoError(t, ValidateRailSet(cfgLive, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}))
-	require.NoError(t, ValidateRailSet(cfgLive, ProviderAccountSet{
+	require.NoError(t, ValidateRailSet(cfgLive, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}))
 }
@@ -492,7 +492,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.TestMode = true
-	rails := ProviderAccountSet{
+	rails := RailMerchantAccountSet{
 		"stripe": {Rail: "stripe", Stripe: &StripeRailConfig{SecretKey: "sk_live_abc123"}},
 	}
 	require.Error(t, ValidateRailSet(cfg, rails))
@@ -505,7 +505,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg2 := GetDefaultBillingConfig()
 	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg2.ProviderWriteMode = ProviderWriteModeLimited
-	rails2 := ProviderAccountSet{
+	rails2 := RailMerchantAccountSet{
 		"stripe": {
 			Rail:   "stripe",
 			Stripe: &StripeRailConfig{SecretKey: "sk_test_abc123"},
@@ -517,7 +517,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 
 func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 	cfg := &Config{}
-	rails := ProviderAccountSet{
+	rails := RailMerchantAccountSet{
 		"mobius": {
 			Rail: models.RailNMI,
 			NMI: &NMIRailConfig{
@@ -540,7 +540,7 @@ func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 }
 
 func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
-	err := ValidateRailSet(&Config{}, ProviderAccountSet{
+	err := ValidateRailSet(&Config{}, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, NMI: &NMIRailConfig{SecurityKey: "sec"}},
 	})
 	require.ErrorContains(t, err, "type stripe must use stripe block")
@@ -549,8 +549,8 @@ func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
 func TestSolanaRPCProviderValidation(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.Env = "production"
-	base := func(solana *SolanaRailConfig) ProviderAccountSet {
-		return ProviderAccountSet{"solana": {Rail: models.RailSolana, Solana: solana}}
+	base := func(solana *SolanaRailConfig) RailMerchantAccountSet {
+		return RailMerchantAccountSet{"solana": {Rail: models.RailSolana, Solana: solana}}
 	}
 
 	require.NoError(t, ValidateRailSet(cfg, base(&SolanaRailConfig{RPCProvider: "helius", RPCAPIKey: "key"})))
@@ -579,52 +579,52 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       *Config
-		rail      *ProviderAccountConfig
+		rail      *RailMerchantAccountConfig
 		wantError bool
 	}{
 		// Stripe: missing webhook_secret
 		{
 			name:      "stripe/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSecret: ""}},
 			wantError: false,
 		},
 		{
 			name:      "stripe/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: ""}},
 			wantError: true,
 		},
 		{
 			name:      "stripe/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
 		// NMI: missing webhook_secret (security_key also required outside dev)
 		{
 			name:      "nmi/missing webhook_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
 			wantError: false,
 		},
 		{
 			name:      "nmi/missing webhook_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
 			wantError: true,
 		},
 		{
 			name:      "nmi/present webhook_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &ProviderAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRailSet(tt.cfg, ProviderAccountSet{"p": tt.rail})
+			err := ValidateRailSet(tt.cfg, RailMerchantAccountSet{"p": tt.rail})
 			if tt.wantError {
 				require.Error(t, err)
 			} else {

@@ -17,11 +17,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-func manualRebillIntent(t *testing.T, payload ManualRebillPayload) gen.OpenrailsProviderIntent {
+func manualRebillIntent(t *testing.T, payload ManualRebillPayload) gen.OpenrailsRailIntent {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     TypeManualRebill,
 		Provider:       "mobius",

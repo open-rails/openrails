@@ -8,29 +8,20 @@ import (
 )
 
 // CancelMode describes how a subscription's cancellation behaves for a given
-// rail (and, for NMI, the subscription's current lifecycle state). It is a
-// capability classification — NOT a rail-name check — so that callers can
-// reason about "can this be undone" uniformly across rails.
-type CancelMode string
+// rail (and, for NMI, the subscription's current lifecycle state). Registry-
+// owned since #686 (rails.CancelMode); aliased here for the existing exported
+// surface (handlers, pkg/service).
+type CancelMode = rails.CancelMode
 
 const (
-	// CancelModeReversible: cancellation can be undone in-place before the paid
-	// period ends (Stripe's cancel_at_period_end; NMI while a deferred delete is
-	// still pending — see issue 216).
-	CancelModeReversible CancelMode = "reversible"
-
-	// CancelModeDestructive: cancellation tears down the rail-side
-	// subscription immediately and cannot be undone (NMI delete_subscription
-	// once executed, Solana).
-	CancelModeDestructive CancelMode = "destructive"
-
-	// CancelModeExternalPortal: we cannot cancel or resume from our system; the
-	// user must use the rail's own consumer portal (CCBill).
-	CancelModeExternalPortal CancelMode = "external_portal"
+	CancelModeReversible     = rails.CancelModeReversible
+	CancelModeDestructive    = rails.CancelModeDestructive
+	CancelModeExternalPortal = rails.CancelModeExternalPortal
 )
 
 // CCBillSupportPortalURL is the consumer support portal CCBill subscribers must
-// use to manage (cancel) their subscription. Mirrors CCBillCancelError.SupportURL.
+// use to manage (cancel) their subscription. Legacy export; the value of record
+// is the ccbill descriptor's CancelPortalURL (equality pinned in tests).
 const CCBillSupportPortalURL = "https://support.ccbill.com"
 
 // NMIDeleteSafetyMargin is how far ahead of the paid-period end we fire the
@@ -71,59 +62,13 @@ func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bo
 	return deleteAt, true
 }
 
-// CancelModeFor returns the cancellation capability for a subscription.
-//
-// It takes the full subscription (not just the rail) because NMI is
-// conditionally reversible: while the subscription is cancelled, its deferred
-// delete_subscription has not yet executed, and the paid period is still in the
-// future (issue 216), the cancellation can be undone. Once the delete fires
-// (DeletionScheduledAt cleared by the finalizer, or period elapsed) it is
-// destructive like before.
-//
-// A nil subscription yields CancelModeDestructive (the safe default).
+// CancelModeFor returns the cancellation capability for a subscription — each
+// rail's answer lives in its #669 descriptor (rails.Descriptor.CancelMode; NMI
+// is state-conditional: reversible only while its deferred delete is pending,
+// issue 216). A nil subscription or unknown rail yields CancelModeDestructive
+// (the safe default).
 func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
-	if sub == nil {
-		return CancelModeDestructive
-	}
-
-	switch {
-	case sub.Rail == models.RailStripe:
-		return CancelModeReversible
-	case sub.Rail == models.RailCCBill:
-		return CancelModeExternalPortal
-	case rails.IsNMI(sub.Rail):
-		// NMI is reversible only while a deferred delete is still pending and the
-		// paid-through window is in the future. nmiDeletePending encapsulates that.
-		if nmiDeletePending(sub, now) {
-			return CancelModeReversible
-		}
-		return CancelModeDestructive
-	default:
-		// Solana and any other self-contained rail: destructive.
-		return CancelModeDestructive
-	}
-}
-
-// nmiDeletePending reports whether an NMI-backed subscription has been cancelled
-// with a deferred delete that has not yet executed and whose paid period is
-// still in the future. This is the window during which an NMI cancellation can
-// be resumed (issue 216).
-//
-// The deferred delete is finalized by clearing DeletionScheduledAt (the River
-// finalizer sets it to nil after calling DeleteRecurringSubscription), so a
-// cancelled NMI subscription with a non-nil DeletionScheduledAt and a future
-// period end is still recoverable.
-func nmiDeletePending(sub *models.Subscription, now time.Time) bool {
-	if sub == nil {
-		return false
-	}
-	if sub.Status != models.StatusCancelled {
-		return false
-	}
-	if sub.DeletionScheduledAt == nil || sub.DeletionScheduledAt.IsZero() {
-		return false
-	}
-	return periodEndsInFuture(sub, now)
+	return rails.CancelModeFor(sub, now)
 }
 
 // periodEndsInFuture reports whether the subscription's current paid period ends
@@ -173,11 +118,15 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 
 // CancelPortalURL returns the external consumer-portal URL a client should send
 // the user to in order to manage their subscription, when the cancel mode is
-// external_portal (CCBill). Returns nil otherwise.
+// external_portal (CCBill). Returns nil otherwise. The URL is the rail
+// descriptor's (#686).
 func CancelPortalURL(sub *models.Subscription, now time.Time) *string {
 	if CancelModeFor(sub, now) != CancelModeExternalPortal {
 		return nil
 	}
-	url := CCBillSupportPortalURL
+	url := rails.CancelPortalURL(sub.Rail)
+	if url == "" {
+		return nil
+	}
 	return &url
 }

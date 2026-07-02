@@ -474,11 +474,11 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
 	}
 
-	// CCBill doesn't have a public API for merchant-initiated cancellation
-	// Users must cancel through CCBill's consumer support portal
-	if subscription.Rail == models.RailCCBill {
+	// External-portal rails (CCBill) have no merchant-initiated cancellation
+	// API; users must cancel through the rail's own consumer portal.
+	if CancelModeFor(subscription, s.now()) == CancelModeExternalPortal {
 		return &CCBillCancelError{
-			SupportURL: "https://support.ccbill.com",
+			SupportURL: rails.CancelPortalURL(subscription.Rail),
 			Message:    "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
 		}
 	}

@@ -181,7 +181,7 @@ func postSelfCheckout(t *testing.T, router http.Handler, body map[string]any) se
 
 func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
 	t.Helper()
-	suite.Rails[nmiE2EProvider] = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
+	suite.Rails[nmiE2EProvider] = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
 		Name:        nmiE2EProvider,
@@ -198,7 +198,7 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	// The checkout money path resolves the NMI client from MERCHANT SECRETS
 	// first (production posture); the suite seeds a placeholder key there, so
 	// overwrite it with the real sandbox key or every charge 401s at NMI.
-	secretName, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "security_key")
+	secretName, err := merchants.RailMerchantAccountSecretName("nmi", "live", testNMIRailMerchantAccountID, "security_key")
 	require.NoError(t, err)
 	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
 	require.NoError(t, err)

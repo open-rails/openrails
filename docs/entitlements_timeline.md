@@ -55,8 +55,9 @@ Three producers use the primitive:
   death revokes grace with the cancellation; a **deliberate cancel deletes
   the scheduled grace at cancel time** (access ends at the period end the
   user expects — no generosity for explicit cancellation); still-silence past
-  the slack lapses fail-closed while the #367 liveness sync keeps probing and
-  can still repair later. Months-stale period ends (imported subscriptions)
+  the slack lapses fail-closed while the unknown-cohort reconcile (#632/#665)
+  keeps verifying against the provider and can still repair later.
+  Months-stale period ends (imported subscriptions)
   get no resurrection grace — the push is skipped once `period_end + slack`
   is already in the past.
 - **CCBill retry grace.** The paid subscription window still ends at

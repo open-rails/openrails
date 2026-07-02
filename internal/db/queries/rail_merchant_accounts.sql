@@ -1,7 +1,7 @@
--- openrails.payment_provider_accounts: merchant-scoped provider account registry (#518).
+-- openrails.rail_merchant_accounts: merchant-scoped provider account registry (#518).
 
--- name: UpsertProviderAccount :one
-INSERT INTO openrails.payment_provider_accounts (
+-- name: UpsertRailMerchantAccount :one
+INSERT INTO openrails.rail_merchant_accounts (
     merchant_id, rail, environment, account_id, display_name,
     archived, evidence, last_verified_at
 ) VALUES (
@@ -15,47 +15,47 @@ INSERT INTO openrails.payment_provider_accounts (
     COALESCE(sqlc.narg(last_verified_at)::timestamptz, now())
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
-    display_name = COALESCE(EXCLUDED.display_name, openrails.payment_provider_accounts.display_name),
+    display_name = COALESCE(EXCLUDED.display_name, openrails.rail_merchant_accounts.display_name),
     archived = EXCLUDED.archived,
     replaced_at = CASE
-        WHEN EXCLUDED.archived THEN COALESCE(openrails.payment_provider_accounts.replaced_at, now())
+        WHEN EXCLUDED.archived THEN COALESCE(openrails.rail_merchant_accounts.replaced_at, now())
         ELSE NULL
     END,
-    evidence = COALESCE(EXCLUDED.evidence, openrails.payment_provider_accounts.evidence),
+    evidence = COALESCE(EXCLUDED.evidence, openrails.rail_merchant_accounts.evidence),
     last_verified_at = EXCLUDED.last_verified_at,
     updated_at = now()
-WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
+WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
 
--- name: GetProviderAccount :one
-SELECT * FROM openrails.payment_provider_accounts
+-- name: GetRailMerchantAccount :one
+SELECT * FROM openrails.rail_merchant_accounts
 WHERE id = $1;
 
--- name: GetProviderAccountByIdentity :one
-SELECT * FROM openrails.payment_provider_accounts
+-- name: GetRailMerchantAccountByIdentity :one
+SELECT * FROM openrails.rail_merchant_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
--- name: GetProviderAccountByRailIdentity :one
-SELECT * FROM openrails.payment_provider_accounts
+-- name: GetRailMerchantAccountByRailIdentity :one
+SELECT * FROM openrails.rail_merchant_accounts
 WHERE rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
--- name: ListProviderAccountsForMerchant :many
-SELECT * FROM openrails.payment_provider_accounts
+-- name: ListRailMerchantAccountsForMerchant :many
+SELECT * FROM openrails.rail_merchant_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(rail)::text IS NULL OR rail = lower(sqlc.narg(rail)::text))
 ORDER BY rail, environment, archived, created_at, id;
 
--- name: GetActiveProviderAccountForNewWork :one
+-- name: GetActiveRailMerchantAccountForNewWork :one
 -- The newest non-archived account on a rail+environment. Existing provider-bound
--- work must use its recorded provider_account_id instead of this selector.
-SELECT * FROM openrails.payment_provider_accounts
+-- work must use its recorded rail_merchant_account_id instead of this selector.
+SELECT * FROM openrails.rail_merchant_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
@@ -63,15 +63,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
--- name: CountActiveProviderAccountsForNewWork :one
-SELECT count(*)::bigint FROM openrails.payment_provider_accounts
+-- name: CountActiveRailMerchantAccountsForNewWork :one
+SELECT count(*)::bigint FROM openrails.rail_merchant_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND archived = false;
 
--- name: CountProviderAccountsForRailEnvironment :one
-SELECT count(*)::bigint FROM openrails.payment_provider_accounts
+-- name: CountRailMerchantAccountsForRailEnvironment :one
+SELECT count(*)::bigint FROM openrails.rail_merchant_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live');

@@ -1458,7 +1458,8 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 			"newRenewalDate":     parsed,
 		}).Info("Updated subscription billing date successfully")
 
-		return nil
+		// #678: dedup mark commits atomically with the billing-date effect.
+		return MarkWebhookProcessedInTx(ctx, tx)
 	}); err != nil {
 		return err
 	}
@@ -1539,7 +1540,8 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 			"railSubscriptionID": pSubscriptionID,
 		}).Info("Processed customer data update successfully")
 
-		return nil
+		// #678: dedup mark commits atomically with the customer-data effect.
+		return MarkWebhookProcessedInTx(ctx, tx)
 	}); err != nil {
 		return err
 	}

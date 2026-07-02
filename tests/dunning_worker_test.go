@@ -454,7 +454,7 @@ func queryManualRebillIntent(t *testing.T, suite *TestContainerSuite, subID uuid
 	t.Helper()
 	err := suite.Pool.QueryRow(context.Background(), `
 		SELECT COUNT(*), COALESCE(MAX(status), ''), COALESCE(MAX(origin), '')
-		FROM openrails.provider_intents
+		FROM openrails.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2`,
 		intents.TypeManualRebill, subID).Scan(&count, &status, &origin)
 	require.NoError(t, err)

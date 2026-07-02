@@ -27,32 +27,32 @@ func NewStore(d *db.DB) *Store { return &Store{db: d} }
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
-	MerchantID        uuid.UUID
-	Provider          string
-	IntentType        string
-	SubscriptionID    *uuid.UUID
-	PaymentID         *uuid.UUID
-	PriceID           *uuid.UUID
-	ProviderAccountID *uuid.UUID
-	Payload           any
-	IdempotencyKey    string
-	NextAttemptAt     time.Time
-	Origin            Origin
-	OriginReason      string
-	ExpiresAt         *time.Time
+	MerchantID            uuid.UUID
+	Provider              string
+	IntentType            string
+	SubscriptionID        *uuid.UUID
+	PaymentID             *uuid.UUID
+	PriceID               *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+	Payload               any
+	IdempotencyKey        string
+	NextAttemptAt         time.Time
+	Origin                Origin
+	OriginReason          string
+	ExpiresAt             *time.Time
 }
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
-func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error) {
+func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	if p.IntentType == "" || p.IdempotencyKey == "" {
-		return gen.OpenrailsProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
 	var payload []byte
 	if p.Payload != nil {
 		b, err := json.Marshal(p.Payload)
 		if err != nil {
-			return gen.OpenrailsProviderIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
+			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
 		}
 		payload = b
 	}
@@ -60,22 +60,22 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
-	// provider_account_id is stamped only when the producer already has observed
+	// rail_merchant_account_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
-	return s.db.Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
-		MerchantID:        p.MerchantID,
-		Provider:          p.Provider,
-		IntentType:        p.IntentType,
-		SubscriptionID:    p.SubscriptionID,
-		PaymentID:         p.PaymentID,
-		PriceID:           p.PriceID,
-		Payload:           payload,
-		IdempotencyKey:    p.IdempotencyKey,
-		NextAttemptAt:     p.NextAttemptAt.UTC(),
-		Origin:            string(p.Origin),
-		OriginReason:      originReason,
-		ExpiresAt:         p.ExpiresAt,
-		ProviderAccountID: p.ProviderAccountID,
+	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
+		MerchantID:            p.MerchantID,
+		Provider:              p.Provider,
+		IntentType:            p.IntentType,
+		SubscriptionID:        p.SubscriptionID,
+		PaymentID:             p.PaymentID,
+		PriceID:               p.PriceID,
+		Payload:               payload,
+		IdempotencyKey:        p.IdempotencyKey,
+		NextAttemptAt:         p.NextAttemptAt.UTC(),
+		Origin:                string(p.Origin),
+		OriginReason:          originReason,
+		ExpiresAt:             p.ExpiresAt,
+		RailMerchantAccountID: p.RailMerchantAccountID,
 	})
 }
 
@@ -84,7 +84,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 // in_flight rows are left to their executor, whose relevance re-check is the
 // authoritative guard.
 func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subscriptionID uuid.UUID, reason string) (int64, error) {
-	return s.db.Gen(ctx).SupersedeProviderIntentsBySubject(ctx, gen.SupersedeProviderIntentsBySubjectParams{
+	return s.db.Gen(ctx).SupersedeRailIntentsBySubject(ctx, gen.SupersedeRailIntentsBySubjectParams{
 		IntentType:     intentType,
 		SubscriptionID: &subscriptionID,
 		Reason:         &reason,
@@ -94,29 +94,29 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ClaimByID leases ONE specific intent for the synchronous execute path.
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
-func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsProviderIntent, bool, error) {
-	row, err := s.db.Gen(ctx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
+func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+	row, err := s.db.Gen(ctx).ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
 		ID:         id,
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsProviderIntent{}, false, nil
+			return gen.OpenrailsRailIntent{}, false, nil
 		}
-		return gen.OpenrailsProviderIntent{}, false, err
+		return gen.OpenrailsRailIntent{}, false, err
 	}
 	return row, true, nil
 }
 
 // Get returns the intent row by id.
-func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error) {
-	return s.db.Gen(ctx).GetProviderIntent(ctx, id)
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+	return s.db.Gen(ctx).GetRailIntent(ctx, id)
 }
 
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
-func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error) {
-	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
+func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	return s.db.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
 		BatchSize:  batch,
@@ -124,17 +124,22 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 }
 
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents.
-func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error) {
-	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
+func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	return s.db.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
 		BatchSize:  batch,
 	})
 }
 
-// ExpireOverdue expires every live intent whose relevance window elapsed.
+// ExpireOverdue expires every live intent whose relevance window elapsed —
+// except destructive intents whose merchant has an OPEN held_bulk finding
+// (#679): breaker-held intents never expire out from under the operator.
 func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error) {
-	return s.db.Gen(ctx).ExpireOverdueProviderIntents(ctx, now.UTC())
+	return s.db.Gen(ctx).ExpireOverdueRailIntents(ctx, gen.ExpireOverdueRailIntentsParams{
+		Now:              now.UTC(),
+		BreakerHeldTypes: DestructiveIntentTypes(),
+	})
 }
 
 func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error {
@@ -146,7 +151,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 		}
 		ev = b
 	}
-	return one(s.db.Gen(ctx).MarkProviderIntentSucceeded(ctx, gen.MarkProviderIntentSucceededParams{
+	return one(s.db.Gen(ctx).MarkRailIntentSucceeded(ctx, gen.MarkRailIntentSucceededParams{
 		ID: id, Now: now.UTC(), ResultEvidence: ev,
 	}))
 }
@@ -189,7 +194,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		// Drop the payload only; leave result_evidence intact for the handler's
 		// post-success readers.
 		_, err := qx.Exec(ctx,
-			`UPDATE openrails.provider_intents
+			`UPDATE openrails.rail_intents
 			    SET payload = NULL, updated_at = now()
 			  WHERE id = $1 AND status = 'succeeded'`, id)
 		return err
@@ -204,13 +209,13 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	}
 	if keepPayload {
 		_, err := qx.Exec(ctx,
-			`UPDATE openrails.provider_intents
+			`UPDATE openrails.rail_intents
 			    SET result_evidence = $2, updated_at = now()
 			  WHERE id = $1 AND status = 'succeeded'`, id, ev)
 		return err
 	}
 	_, err := qx.Exec(ctx,
-		`UPDATE openrails.provider_intents
+		`UPDATE openrails.rail_intents
 		    SET payload = NULL, result_evidence = $2, updated_at = now()
 		  WHERE id = $1 AND status = 'succeeded'`, id, ev)
 	return err
@@ -251,7 +256,7 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 		return fmt.Errorf("intents: marshal progress evidence: %w", err)
 	}
 	_, err = s.db.Qx(ctx).Exec(ctx,
-		`UPDATE openrails.provider_intents
+		`UPDATE openrails.rail_intents
 		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || $2::jsonb,
 		        updated_at = now()
 		  WHERE id = $1
@@ -260,13 +265,13 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 }
 
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return one(s.db.Gen(ctx).MarkProviderIntentFailedRetryable(ctx, gen.MarkProviderIntentFailedRetryableParams{
+	return one(s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 	}))
 }
 
 func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return one(s.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
+	return one(s.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 	}))
 }
@@ -283,19 +288,19 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 		}
 		ev = b
 	}
-	return one(s.db.Gen(ctx).MarkProviderIntentFailedTerminal(ctx, gen.MarkProviderIntentFailedTerminalParams{
+	return one(s.db.Gen(ctx).MarkRailIntentFailedTerminal(ctx, gen.MarkRailIntentFailedTerminalParams{
 		ID: id, Reason: &reason, ResultEvidence: ev,
 	}))
 }
 
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return one(s.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
+	return one(s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 	}))
 }
 
 func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error {
-	return one(s.db.Gen(ctx).MarkProviderIntentSuperseded(ctx, gen.MarkProviderIntentSupersededParams{
+	return one(s.db.Gen(ctx).MarkRailIntentSuperseded(ctx, gen.MarkRailIntentSupersededParams{
 		ID: id, Reason: &reason,
 	}))
 }

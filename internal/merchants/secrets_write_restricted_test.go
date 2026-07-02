@@ -8,11 +8,11 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-const restrictedSolanaPrivateKey = "provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
+const restrictedSolanaPrivateKey = "rail_merchant_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
 
 func TestWriteRestrictedSecretStoreBlocksRestrictedPut(t *testing.T) {
 	store := NewWriteRestrictedSecretStore(NewMemorySecretStore(), map[string]string{
-		"provider_accounts/solana/*/*/private_key": "encryption required",
+		"rail_merchant_accounts/solana/*/*/private_key": "encryption required",
 	})
 
 	_, err := store.Put(context.Background(), dbtest.TestMerchantID, restrictedSolanaPrivateKey, "secret")
@@ -26,7 +26,7 @@ func TestWriteRestrictedSecretStoreBlocksRestrictedPut(t *testing.T) {
 
 func TestWriteRestrictedSecretStoreAllowsOtherSecrets(t *testing.T) {
 	store := NewWriteRestrictedSecretStore(NewMemorySecretStore(), map[string]string{
-		"provider_accounts/solana/*/*/private_key": "encryption required",
+		"rail_merchant_accounts/solana/*/*/private_key": "encryption required",
 	})
 
 	const value = "sk_test_123"
@@ -49,7 +49,7 @@ func TestWriteRestrictedSecretStoreAllowsExistingReads(t *testing.T) {
 		t.Fatalf("pre-put: %v", err)
 	}
 	store := NewWriteRestrictedSecretStore(inner, map[string]string{
-		"provider_accounts/solana/*/*/private_key": "encryption required",
+		"rail_merchant_accounts/solana/*/*/private_key": "encryption required",
 	})
 
 	got, err := store.Get(context.Background(), dbtest.TestMerchantID, restrictedSolanaPrivateKey)

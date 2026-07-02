@@ -210,7 +210,7 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	//    params the checkout upgrade branch passes.
 	svc := &StripeService{
 		Config: &config.Config{},
-		Rails: config.ProviderAccountSet{
+		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, SecretKey: key},
 		},
 	}

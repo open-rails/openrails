@@ -18,14 +18,14 @@ type PaymentProvider struct {
 	Name string
 	// Config is the provider-account credential/config payload. Set Config.Rail
 	// for non-reserved names and for generated names.
-	Config config.ProviderAccountConfig
+	Config config.RailMerchantAccountConfig
 }
 
 // ApplyPaymentProviders converts host-supplied embedded provider credentials
-// into an in-memory ProviderAccountSet. Local names are not durable identity;
+// into an in-memory RailMerchantAccountSet. Local names are not durable identity;
 // provider account rows store the provider-returned account id.
-func ApplyPaymentProviders(providers []PaymentProvider) (config.ProviderAccountSet, error) {
-	set := config.ProviderAccountSet{}
+func ApplyPaymentProviders(providers []PaymentProvider) (config.RailMerchantAccountSet, error) {
+	set := config.RailMerchantAccountSet{}
 	if len(providers) == 0 {
 		return set, nil
 	}
@@ -52,7 +52,7 @@ func ApplyPaymentProviders(providers []PaymentProvider) (config.ProviderAccountS
 	return set, nil
 }
 
-func generatedProviderName(existing map[string]*config.ProviderAccountConfig, seen map[string]struct{}, rail models.Rail) string {
+func generatedProviderName(existing map[string]*config.RailMerchantAccountConfig, seen map[string]struct{}, rail models.Rail) string {
 	base := strings.ToLower(strings.TrimSpace(string(rail)))
 	if base == "" {
 		base = "provider"
@@ -72,7 +72,7 @@ func generatedProviderName(existing map[string]*config.ProviderAccountConfig, se
 	}
 }
 
-func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
+func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantAccountConfig {
 	if in == nil {
 		return nil
 	}

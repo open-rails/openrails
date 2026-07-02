@@ -141,14 +141,14 @@ type RemoteVaultEntry struct {
 
 // RemoteSnapshot is the normalized result of one fetch against one provider.
 type RemoteSnapshot struct {
-	Provider          Provider             `json:"provider"`
-	ProviderAccountID string               `json:"provider_account_id,omitempty"`
-	FetchedAt         time.Time            `json:"fetched_at"`
-	Subscriptions     []RemoteSubscription `json:"subscriptions"`
-	Transactions      []RemoteTransaction  `json:"transactions"`
-	VaultEntries      []RemoteVaultEntry   `json:"vault_entries"`
-	Capabilities      Capabilities         `json:"capabilities"`
-	Coverage          SnapshotCoverage     `json:"coverage"`
+	Provider              Provider             `json:"provider"`
+	RailMerchantAccountID string               `json:"rail_merchant_account_id,omitempty"`
+	FetchedAt             time.Time            `json:"fetched_at"`
+	Subscriptions         []RemoteSubscription `json:"subscriptions"`
+	Transactions          []RemoteTransaction  `json:"transactions"`
+	VaultEntries          []RemoteVaultEntry   `json:"vault_entries"`
+	Capabilities          Capabilities         `json:"capabilities"`
+	Coverage              SnapshotCoverage     `json:"coverage"`
 }
 
 // SnapshotCoverage says which provider domains were exhaustively covered by a
@@ -185,12 +185,12 @@ type FetchParams struct {
 	Until          time.Time
 	SubscriptionID string
 	CustomerID     string
-	// ProviderAccountID is the OpenRails payment_provider_accounts.id being pulled.
+	// RailMerchantAccountID is the OpenRails rail_merchant_accounts.id being pulled.
 	// Fetchers do not usually need it for API calls, but it is carried for
 	// evidence and for account-bound provider-pull wiring.
-	ProviderAccountID string
-	Rail              string
-	AccountID         string
+	RailMerchantAccountID string
+	Rail                  string
+	AccountID             string
 }
 
 // RailFetcher pulls a provider's declared state into a RemoteSnapshot.

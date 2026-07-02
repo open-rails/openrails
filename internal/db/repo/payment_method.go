@@ -36,25 +36,26 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	if err != nil {
 		return err
 	}
-	providerAccountID := m.ProviderAccountID
-	if providerAccountID == nil {
-		providerAccountID = resolveProviderAccountIDForStamp(ctx)
+	railMerchantAccountID := m.RailMerchantAccountID
+	if railMerchantAccountID == nil {
+		railMerchantAccountID = resolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID:                   m.ID,
-		MerchantID:           tid.UUID(),
-		CustomerID:           m.CustomerID,
-		Rail:                 string(m.Rail),
-		ProviderAccountID:    providerAccountID,
-		RailCustomerRef:      m.RailCustomerRef,
-		RailMethodRef:        m.RailMethodRef,
-		InitialTransactionID: m.InitialTransactionID,
-		LastFour:             m.LastFour,
-		CardType:             m.CardType,
-		ExpiryDate:           m.ExpiryDate,
-		Metadata:             meta,
-		CreatedAt:            m.CreatedAt,
-		UpdatedAt:            m.UpdatedAt,
+		ID:                    m.ID,
+		MerchantID:            tid.UUID(),
+		CustomerID:            m.CustomerID,
+		Rail:                  string(m.Rail),
+		RailMerchantAccountID: railMerchantAccountID,
+		RailCustomerRef:       m.RailCustomerRef,
+		RailMethodRef:         m.RailMethodRef,
+		RebillDriver:          m.RebillDriver, // "" -> DB default 'provider'
+		InitialTransactionID:  m.InitialTransactionID,
+		LastFour:              m.LastFour,
+		CardType:              m.CardType,
+		ExpiryDate:            m.ExpiryDate,
+		Metadata:              meta,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -191,6 +192,17 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 		return nil, 0, err
 	}
 	return methods, total, nil
+}
+
+// CountSharingCustomerRef reports how many OTHER payment methods share this
+// rail customer-scope handle (#682 shared-vault guard — e.g. an imported
+// multi-card NMI vault whose sibling cards a whole-vault delete would destroy).
+func (r *PaymentMethodRepo) CountSharingCustomerRef(ctx context.Context, rail, customerRef string, excludeID uuid.UUID) (int64, error) {
+	return r.db.Gen(ctx).CountPaymentMethodsSharingCustomerRef(ctx, gen.CountPaymentMethodsSharingCustomerRefParams{
+		Rail:            rail,
+		RailCustomerRef: customerRef,
+		ExcludeID:       excludeID,
+	})
 }
 
 func (r *PaymentMethodRepo) GetByRailMethodRef(ctx context.Context, rail, methodRef string) (*models.PaymentMethod, error) {

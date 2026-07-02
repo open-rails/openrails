@@ -97,7 +97,7 @@ func (h *NMISubscriptionCreateIntentHandler) PrunePolicy() (keepPayload, keepEvi
 	return false, true
 }
 
-func decodeNMISubscriptionCreatePayload(intent gen.OpenrailsProviderIntent) (NMISubscriptionCreatePayload, error) {
+func decodeNMISubscriptionCreatePayload(intent gen.OpenrailsRailIntent) (NMISubscriptionCreatePayload, error) {
 	var p NMISubscriptionCreatePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("nmi subscription create intent has no payload")
@@ -114,11 +114,11 @@ func decodeNMISubscriptionCreatePayload(intent gen.OpenrailsProviderIntent) (NMI
 
 // CheckRelevance: registration (finalize) is idempotent and a decline is
 // terminal, so the intent never goes stale on its own.
-func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen.OpenrailsProviderIntent) (intents.Relevance, error) {
+func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) intents.Outcome {
+func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	if h.Checkout == nil {
 		return intents.Parked("checkout service not wired")
 	}
@@ -184,7 +184,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 }
 
 // Verify resolves an ambiguous create via provider READS.
-func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) intents.Outcome {
+func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	p, err := decodeNMISubscriptionCreatePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())

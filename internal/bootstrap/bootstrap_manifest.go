@@ -49,8 +49,8 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
 			return err
 		}
-		for key, account := range t.ProviderAccounts {
-			if err := validateManifestProviderAccount(slug, key, account); err != nil {
+		for key, account := range t.RailMerchantAccounts {
+			if err := validateManifestRailMerchantAccount(slug, key, account); err != nil {
 				return err
 			}
 		}
@@ -140,25 +140,25 @@ func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 	return nil
 }
 
-func validateManifestProviderAccount(slug string, key string, account ProviderAccountConfig) error {
+func validateManifestRailMerchantAccount(slug string, key string, account RailMerchantAccountConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return fmt.Errorf("merchant %q provider_accounts key is required", slug)
+		return fmt.Errorf("merchant %q rail_merchant_accounts key is required", slug)
 	}
 	if len(account) != 1 {
-		return fmt.Errorf("merchant %q provider_accounts.%s must set exactly one rail block", slug, key)
+		return fmt.Errorf("merchant %q rail_merchant_accounts.%s must set exactly one rail block", slug, key)
 	}
 	for rail, cfg := range account {
 		rail = strings.ToLower(strings.TrimSpace(rail))
 		if rail == "" {
-			return fmt.Errorf("merchant %q provider_accounts.%s rail is required", slug, key)
+			return fmt.Errorf("merchant %q rail_merchant_accounts.%s rail is required", slug, key)
 		}
 		if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
-			return fmt.Errorf("merchant %q provider_accounts.%s.%s.%w", slug, key, rail, err)
+			return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.%w", slug, key, rail, err)
 		}
 		for secretKey := range cfg.Secrets {
-			if _, err := merchants.NormalizeProviderAccountSecretKey(rail, secretKey); err != nil {
-				return fmt.Errorf("merchant %q provider_accounts.%s.%s: %w", slug, key, rail, err)
+			if _, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, secretKey); err != nil {
+				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s: %w", slug, key, rail, err)
 			}
 		}
 		if rail == "solana" {
@@ -166,12 +166,12 @@ func validateManifestProviderAccount(slug string, key string, account ProviderAc
 			// public key, and a declared value is ignored (warned at apply). A signer
 			// is required so there is a key to derive from.
 			if !solanaSignerConfigured(cfg) {
-				return fmt.Errorf("merchant %q provider_accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
+				return fmt.Errorf("merchant %q rail_merchant_accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
 			}
 			continue
 		}
 		if strings.TrimSpace(cfg.AccountID) == "" {
-			return fmt.Errorf("merchant %q provider_accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
+			return fmt.Errorf("merchant %q rail_merchant_accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
 		}
 	}
 	return nil

@@ -67,15 +67,15 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 }
 
-// ProviderAccountSecretName returns the canonical secret-store name for a
+// RailMerchantAccountSecretName returns the canonical secret-store name for a
 // provider-account-owned credential. The merchant id still namespaces the store;
 // this path adds provider identity so one merchant can rotate or run multiple
 // accounts of the same provider without credential collisions.
-func ProviderAccountSecretName(rail, environment, accountID, key string) (string, error) {
+func RailMerchantAccountSecretName(rail, environment, accountID, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
-	key, err := NormalizeProviderAccountSecretKey(rail, key)
+	key, err := NormalizeRailMerchantAccountSecretKey(rail, key)
 	if err != nil {
 		return "", err
 	}
@@ -88,14 +88,19 @@ func ProviderAccountSecretName(rail, environment, accountID, key string) (string
 	if accountID == "" {
 		return "", fmt.Errorf("provider account secret requires account id")
 	}
-	return path.Join("provider_accounts", rail, environment, url.PathEscape(accountID), key), nil
+	// #683: the prefix is part of the DURABLE canonical secret-name shape
+	// (persisted in the merchant-secret store, including HashiCorp Vault KV
+	// paths). Renaming it again means migrating stored names in EVERY
+	// deployment (SQL for DB-backed, a KV move for Vault-backed) — treat it
+	// with stripeapi.APIVersion discipline: never float it casually.
+	return path.Join("rail_merchant_accounts", rail, environment, url.PathEscape(accountID), key), nil
 }
 
-// ParseProviderAccountSecretName parses a provider-account-scoped secret name.
-func ParseProviderAccountSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
+// ParseRailMerchantAccountSecretName parses a provider-account-scoped secret name.
+func ParseRailMerchantAccountSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
 	name = cleanSecretName(name)
 	parts := strings.Split(name, "/")
-	if len(parts) != 5 || parts[0] != "provider_accounts" {
+	if len(parts) != 5 || parts[0] != "rail_merchant_accounts" {
 		return "", "", "", "", false, nil
 	}
 	rail = normalizeProviderSecretType(parts[1])
@@ -104,7 +109,7 @@ func ParseProviderAccountSecretName(name string) (rail, environment, accountID, 
 	if err != nil {
 		return "", "", "", "", true, fmt.Errorf("invalid provider account id escape: %w", err)
 	}
-	key, err = NormalizeProviderAccountSecretKey(rail, parts[4])
+	key, err = NormalizeRailMerchantAccountSecretKey(rail, parts[4])
 	if err != nil {
 		return "", "", "", "", true, err
 	}
@@ -120,7 +125,7 @@ func SecretWritable(name string) bool {
 	if def, ok := SecretDefinitionFor(name); ok {
 		return def.MerchantWritable
 	}
-	rail, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+	rail, _, _, key, ok, err := ParseRailMerchantAccountSecretName(name)
 	if !ok || err != nil {
 		return false
 	}
@@ -130,10 +135,10 @@ func SecretWritable(name string) bool {
 	return known && k.MerchantWritable
 }
 
-// NormalizeProviderAccountSecretKey canonicalizes manifest/admin secret keys for
+// NormalizeRailMerchantAccountSecretKey canonicalizes manifest/admin secret keys for
 // a provider account against the rail's registry-declared slots (#669). It
 // deliberately returns key fragments, not legacy broad merchant secret names.
-func NormalizeProviderAccountSecretKey(rail, key string) (string, error) {
+func NormalizeRailMerchantAccountSecretKey(rail, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
 	key = strings.ToLower(strings.TrimSpace(key))
 	if k, ok := rails.CredentialKeyFor(models.Rail(rail), key); ok {
@@ -213,15 +218,15 @@ type MerchantSecretReader interface {
 	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
 }
 
-// ProviderAccountSecretResolver resolves the canonical secret name for the
+// RailMerchantAccountSecretResolver resolves the canonical secret name for the
 // active provider account a merchant should use.
-type ProviderAccountSecretResolver interface {
-	ActiveProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
+type RailMerchantAccountSecretResolver interface {
+	ActiveRailMerchantAccountSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
 }
 
-// ProviderAccountScope is the configured provider account selected for a
+// RailMerchantAccountScope is the configured provider account selected for a
 // merchant rail/environment.
-type ProviderAccountScope struct {
+type RailMerchantAccountScope struct {
 	ID          uuid.UUID
 	Rail        string
 	Environment string
@@ -229,10 +234,10 @@ type ProviderAccountScope struct {
 	Settings    map[string]any
 }
 
-// ProviderAccountScopeResolver resolves the selected provider account without
+// RailMerchantAccountScopeResolver resolves the selected provider account without
 // requiring a particular secret key.
-type ProviderAccountScopeResolver interface {
-	ActiveProviderAccountScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (ProviderAccountScope, bool, error)
+type RailMerchantAccountScopeResolver interface {
+	ActiveRailMerchantAccountScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (RailMerchantAccountScope, bool, error)
 }
 
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every

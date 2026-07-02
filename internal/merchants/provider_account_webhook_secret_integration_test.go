@@ -20,11 +20,11 @@ func TestLoadNMIWebhookSigningSecretForAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Two NMI accounts on one merchant (mobius primary, paykings secondary).
-	seedProviderAccount(t, svc, tn.ID, "nmi", "live", "100001")
-	seedProviderAccount(t, svc, tn.ID, "nmi", "live", "100002")
+	seedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", "100001")
+	seedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", "100002")
 
 	putSecret := func(accountID, secret string) {
-		name, err := ProviderAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
+		name, err := RailMerchantAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
 		require.NoError(t, err)
 		_, err = svc.secrets.Put(ctx, tn.ID, name, secret)
 		require.NoError(t, err)
@@ -57,10 +57,10 @@ func TestLoadStripeCredentialsForAccount(t *testing.T) {
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
-	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_new")
-	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_old")
+	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_new")
+	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_old")
 	put := func(accountID, val string) {
-		name, err := ProviderAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
+		name, err := RailMerchantAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
 		require.NoError(t, err)
 		_, err = svc.secrets.Put(ctx, tn.ID, name, val)
 		require.NoError(t, err)

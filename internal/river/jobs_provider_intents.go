@@ -54,7 +54,11 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 		Logger:   w.MutationLogger,
 		Registry: w.Registry,
 		Config:   w.Config,
-		Clock:    w.Clock,
+		// #679: destructive types (nmi_delete_subscription) are volume-gated
+		// per merchant; over-budget intents park until an operator resolves
+		// the life.provider_intent.held_bulk finding.
+		Breaker: intents.NewVolumeBreaker(w.DB),
+		Clock:   w.Clock,
 	}
 	stats, err := runner.RunExecuteOnce(ctx)
 	if err != nil {

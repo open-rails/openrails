@@ -42,9 +42,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	// Provider Refresh (#574): always-on provider truth refresh. It wraps the
-	// subscription liveness lane (#367), bounded provider event pulls, CCBill
-	// DataLink, and scoped convergence after local refresh writes.
+	// Provider Refresh (#574): always-on provider truth refresh. It wraps
+	// bounded provider event pulls, the unknown-cohort reconcile (#632/#665 —
+	// the one per-subscription verification path; the #367 liveness worker is
+	// retired), CCBill DataLink, and scoped convergence after refresh writes.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderRefreshWorker{
 		DB:                  r.DB,
 		Config:              r.Config,
@@ -58,19 +59,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NotificationService: r.NotificationService,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
-	}
-	// Keep the old narrow worker registered so any queued/manual
-	// openrails.subscription_liveness jobs from older deploys still run.
-	if err := river.AddWorkerSafely(workers, &riverjobs.SubscriptionLivenessWorker{
-		DB:              r.DB,
-		Config:          r.Config,
-		Rails:           r.Rails,
-		Clock:           clock,
-		NMIClients:      r.NMIClients,
-		EventLogService: r.EventLogService,
-		DeferDelete:     r.DeferredDeletes,
-	}); err != nil {
-		return fmt.Errorf("add subscription liveness worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
 		return fmt.Errorf("add ccbill reconcile worker: %w", err)
@@ -287,6 +275,7 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Store:    intents.NewStore(r.DB),
 		Logger:   intents.NewAnalyticsMutationLogger(r.EventLogService),
 		Registry: registry,
+		Breaker:  intents.NewVolumeBreaker(r.DB), // #679: gate destructive types everywhere
 		Clock:    clock,
 	}
 	if r.Config != nil {
@@ -373,7 +362,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 4 hours: Provider Refresh (#574) — refresh provider truth via
-	// bounded event windows, Subscription Liveness Refresh, and CCBill DataLink.
+	// bounded event windows, the unknown-cohort reconcile, and CCBill DataLink.
 	// RunOnStart=true: startup after a stale dump/outage should not wait for
 	// the first 4-hour tick.
 	jobs = append(jobs, river.NewPeriodicJob(

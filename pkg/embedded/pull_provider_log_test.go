@@ -65,7 +65,7 @@ func TestPullProviderLogWritesOneLineMutationEvents(t *testing.T) {
 
 	path, err := writePullProviderLog(t.TempDir(), run, res, applied, []pullProviderPruneLog{{
 		Provider: reconcile.ProviderNMI,
-		Binding:  reconcile.ProviderAccountBinding{ID: uuid.New(), AccountID: "acct_1"},
+		Binding:  reconcile.RailMerchantAccountBinding{ID: uuid.New(), AccountID: "acct_1"},
 		Result:   reconcile.PruneResult{SkippedSubscriptionIDs: []uuid.UUID{skippedID}},
 	}}, &pullProviderConvergeLog{Findings: 2, AutoFixed: 1, ReconcileRequired: 1}, pullProviderMutationFlags{Overwrite: true})
 	require.NoError(t, err)

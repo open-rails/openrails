@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -233,7 +233,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
-		var vaultErr *vault.VaultError
+		var vaultErr *paymentmethods.VaultError
 		if errors.As(err, &vaultErr) {
 			code := api.CodePaymentFailed
 			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
@@ -249,7 +249,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(paymentMethodToAPI(pm, nil))
 }
 
-func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *vault.CreateVaultRequest {
+func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreateVaultRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
@@ -280,7 +280,7 @@ func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest,
 	setMetadata("billing_state", req.State)
 	setMetadata("billing_company", req.Company)
 
-	return &vault.CreateVaultRequest{
+	return &paymentmethods.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
@@ -337,10 +337,10 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	pm, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), methodID, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, vault.ErrPaymentMethodNotFound):
+		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
-		case errors.Is(err, vault.ErrPaymentMethodAccessDenied):
+		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
 			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
 			return
 		default:
@@ -355,7 +355,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	updateReq := &vault.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdateVaultRequest{
 		PaymentToken: &trimmedToken,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
@@ -492,11 +492,11 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, vault.ErrPaymentMethodNotFound):
+		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found for deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
-		case errors.Is(err, vault.ErrPaymentMethodAccessDenied):
+		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Unauthorized payment method deletion attempt")
 			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
 			return
@@ -516,7 +516,7 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	}
 
 	if err := r.State.PaymentMethodService.Delete(r.Request.Context(), id); err != nil {
-		if errors.Is(err, vault.ErrPaymentMethodNotFound) {
+		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found during deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return

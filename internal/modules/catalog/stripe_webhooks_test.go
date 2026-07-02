@@ -112,7 +112,7 @@ func newWebhookTestSvc(t *testing.T, fake *fakeStripeWebhooks) *StripeCatalogSer
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 	return &StripeCatalogService{
-		Rails:   config.ProviderAccountSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
+		Rails:   config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
 		BaseURL: srv.URL,
 	}
 }

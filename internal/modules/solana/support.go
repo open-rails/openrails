@@ -63,7 +63,7 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 	return uint64(math.Ceil((usd / priceUSD) * scale))
 }
 
-func RequireSolanaRailConfig(rails config.ProviderAccountSet) (*config.ProviderAccountConfig, error) {
+func RequireSolanaRailConfig(rails config.RailMerchantAccountSet) (*config.RailMerchantAccountConfig, error) {
 	if rails == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}

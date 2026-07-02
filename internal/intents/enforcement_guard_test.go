@@ -59,7 +59,7 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 			"pkg/service/service_user.go":                                  "embedded-surface twin of the handler above",
 		},
 		".DeleteCustomerVault(": {
-			"internal/modules/vault/vault_service.go": "vault ops choke through VaultService (single call site); intent migration deferred",
+			"internal/modules/paymentmethods/vault_service.go": "vault ops choke through VaultService (single call site); intent migration deferred",
 		},
 		"solanaint.BuildSignSubmit": {
 			"internal/modules/solana/recurring/plan_service.go": "the Submitter implementation — the single Solana sign+submit choke; pulls route through the solana_pull intent handler",

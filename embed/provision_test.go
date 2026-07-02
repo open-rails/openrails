@@ -13,7 +13,7 @@ func TestParseMerchantConfig(t *testing.T) {
 display_name: Cozy Art
 profile:
   from_email: billing@example.com
-provider_accounts:
+rail_merchant_accounts:
   mobius:
     nmi:
       environment: live
@@ -25,7 +25,7 @@ provider_accounts:
 	require.NoError(t, err)
 	require.Equal(t, "Cozy Art", m.DisplayName)
 	require.Equal(t, "billing@example.com", m.Profile.FromEmail)
-	require.Len(t, m.ProviderAccounts, 2)
-	require.Equal(t, "579145", m.ProviderAccounts["mobius"]["nmi"].AccountID)
-	require.Equal(t, "945280/0000", m.ProviderAccounts["ccbill"]["ccbill"].AccountID)
+	require.Len(t, m.RailMerchantAccounts, 2)
+	require.Equal(t, "579145", m.RailMerchantAccounts["mobius"]["nmi"].AccountID)
+	require.Equal(t, "945280/0000", m.RailMerchantAccounts["ccbill"]["ccbill"].AccountID)
 }

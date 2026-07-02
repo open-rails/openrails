@@ -1686,3 +1686,67 @@ from provider is never proof of funding — the v1 got this right, keep it).
 - Route creation THROUGH the checkout flow this time (v1's create/get session routes were never wired — build
   the wiring first, provider adapters second).
 - Provider writes go through the intents log per #674's design decision.
+
+---
+
+# #687: revision counters (optimistic CAS) on OpenRails-authoritative records
+
+**Completed:** no — FUTURE (2026-07-01, Paul). From the payload-apply/versioning design discussion: per-object
+monotonic version numbers are the clean ordering mechanism (k8s resourceVersion / DynamoDB sequence numbers /
+Solana slots), and Solana is the one rail where OpenRails already uses exactly this (minContextSlot /
+ReadUntilConsistent). Stripe/NMI expose no object versions, so this issue applies the mechanism ONLY where the
+counter can actually mean something: records WE own and control.
+
+## Metadata
+- Category: architecture
+- Status: future
+- Passes: false
+
+## Scope rule (the whole point — Paul 2026-07-01)
+Version counters go on records where OPENRAILS IS THE STATE MACHINE driving the record forward. They must NOT
+be treated as a freshness signal on records that merely MIRROR a provider's state machine (Stripe/NMI-driven
+subscriptions): our revision orders OUR writes, not the provider's mutations — revision 7 of a mirror can carry
+older information than a later fetch would; only a fetch (#684) learns newness for mirrors. (On mirrors, CAS
+could still guard our own concurrent writers against each other, but #675's row locks already do that and #684
+makes it moot — so mirrors are OUT of scope.)
+
+## Why (Paul, 2026-07-01) — consumers first, consistency second
+This exists primarily for OPENRAILS' OWN CONSUMERS: when openrails is more widely used and emits its own
+events/webhooks (and on every API response), the object's revision rides along — so hosts get the ordering
+primitive Stripe never gave us (order, dedupe, reject-stale trivially; no consumer ever rebuilds the #675
+watermark machinery against US). Secondarily it keeps our own state consistent under concurrent writers.
+Be the provider Stripe wasn't: expose the counter.
+
+## Mechanism
+- `revision BIGINT NOT NULL DEFAULT 1` on each in-scope table; MONOTONIC-ONLY is a hard invariant — every
+  UPDATE goes `SET revision = revision + 1 ... WHERE id = $1 AND revision = $expected`; zero rows ⇒
+  concurrent-modification ⇒ reload-and-retry or surface a conflict error (per call site). Backstop the
+  monotonicity structurally (the CAS pattern guarantees it; a BEFORE UPDATE trigger asserting new.revision =
+  old.revision + 1 is the belt-and-suspenders option if any non-CAS write path survives).
+- Readers carry the revision they read; writers CAS against it. Optimistic — replaces/augments FOR UPDATE where
+  retry loops beat lock waits; KEEP pessimistic locks on hot money paths where a retry loop is worse
+  (LockCustomerForSpend stays).
+- CONSUMER SURFACE (the point): revision appears on API responses for in-scope objects and on any future
+  OpenRails-emitted events for them; document the contract "never apply revision N after N+1" for hosts.
+  ETag/If-Match on admin/config mutation endpoints falls out of the same field (concurrent admin edits
+  conflict visibly instead of last-write-wins).
+- Vector clocks (considered, REJECTED): vector clocks solve multi-master causality — concurrent independent
+  writers on partitioned replicas (Dynamo-style). OpenRails has ONE writer authority per record (single
+  Postgres, serialized by locks/CAS), so causality is already total-ordered; a scalar monotonic counter is
+  sufficient and strictly simpler. Revisit only if openrails ever goes multi-master (it should not).
+
+## Candidate record classes (verify authority per table when picked up)
+- OpenRails-driven subscription state: solana recurring subs (we crank), NMI vaulted-dunning lifecycle fields
+  (retry counts, schedules) — careful: the NMI REMOTE recurring record stays a mirror.
+- checkout_sessions (our state machine end-to-end).
+- provider_intents (has its own status machine; CAS may already be implicit in claim/lease — verify, don't
+  double-guard).
+- merchant configuration / credit-account settings / tier schedules (admin last-write-wins today).
+- invoices (status transitions).
+- NOT: grants + ledger transfers (append-only — immutability is stronger than versioning); NOT provider
+  mirrors (rule above); NOT entitlements (derived projection — re-derivable from grants).
+
+## Acceptance
+Every in-scope table's UPDATE path is CAS-guarded (no silent lost updates under concurrent writers, proven by
+a concurrency test per class); mirrors carry NO revision-as-freshness semantics anywhere; hot money paths keep
+their existing lock discipline unchanged.

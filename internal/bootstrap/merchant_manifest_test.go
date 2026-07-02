@@ -37,7 +37,7 @@ merchants:
       logo_url: https://cdn.example/logo.png
       from_email: billing@example.com
       support_url: https://example.com/support
-    provider_accounts:
+    rail_merchant_accounts:
       stripe:
         stripe:
           environment: test
@@ -61,8 +61,8 @@ merchants:
 	require.NotNil(t, m.RemoteApplication)
 	require.Equal(t, "https://auth.cozy.art", m.RemoteApplication.Issuer)
 	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
-	require.Len(t, m.ProviderAccounts, 2)
-	require.Equal(t, "acct_test_123", m.ProviderAccounts["stripe"]["stripe"].AccountID)
+	require.Len(t, m.RailMerchantAccounts, 2)
+	require.Equal(t, "acct_test_123", m.RailMerchantAccounts["stripe"]["stripe"].AccountID)
 }
 
 func TestExampleMerchantConfigManifestParses(t *testing.T) {
@@ -99,7 +99,7 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// #641/#646/#655/#660: multiple accounts per rail, each with a human name,
 	// account_id identity, lifecycle, and explicit signer/destination split for
 	// Solana.
-	accts := m.ProviderAccounts
+	accts := m.RailMerchantAccounts
 	require.Len(t, accts, 8)
 	type key struct{ name, env string }
 	byName := map[key]ProviderRailAccountConfig{}
@@ -149,13 +149,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 
 	// A declared account_id is IGNORED (warned), never an error — derived from the key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", exampleAccountID, ProviderRailAccountConfig{
-		Signer: &ProviderAccountSignerConfig{Mode: "local_keypair"},
+		Signer: &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
 	}, secrets, nil)
 	require.NoError(t, err)
 	require.Equal(t, exampleAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
 
 	_, _, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, secrets, fakeTransit{pub: pub})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot also set secrets.private_key")
@@ -164,13 +164,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	require.NoError(t, err)
 	// vault_transit with a declared account_id: ignored (warned); derives from the Transit key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
-		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, accountID, gotAccountID, "declared account_id ignored; derived from the Transit key")
 
 	got, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &ProviderAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
@@ -268,37 +268,37 @@ merchants:
 		},
 		{
 			name: "provider account routing removed",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
+			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
 			want: "unknown field \"routing\"",
 		},
 		{
 			name: "provider account mode removed",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
+			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
 			want: "unknown field \"mode\"",
 		},
 		{
 			name: "provider account role removed",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
+			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
 			want: "unknown field \"role\"",
 		},
 		{
 			name: "invalid provider account environment",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
+			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
 			want: "environment must be live or test",
 		},
 		{
 			name: "solana network is not a provider-account knob",
-			body: base("    provider_accounts:\n      solana:\n        solana:\n          network: devnet\n"),
+			body: base("    rail_merchant_accounts:\n      solana:\n        solana:\n          network: devnet\n"),
 			want: "unknown field \"network\"",
 		},
 		{
 			name: "invalid provider secret alias",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
+			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
 			want: "unknown provider account secret",
 		},
 		{
 			name: "nmi tokenization key is a setting",
-			body: base("    provider_accounts:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
+			body: base("    rail_merchant_accounts:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
 			want: "unknown provider account secret",
 		},
 	} {
@@ -317,11 +317,11 @@ func TestParseMerchantConfigManifestSolanaAccountIDIgnored(t *testing.T) {
 	base := func(fragment string) string {
 		return "version: 1\nmerchants:\n  cozy-art:\n    display_name: Cozy Art\n" + fragment
 	}
-	withAccountID := base("    provider_accounts:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
+	withAccountID := base("    rail_merchant_accounts:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
 	_, err := ParseMerchantConfigManifest([]byte(withAccountID))
 	require.NoError(t, err, "declared solana account_id is ignored, not a parse error")
 
-	noSigner := base("    provider_accounts:\n      solana:\n        solana:\n          environment: live\n")
+	noSigner := base("    rail_merchant_accounts:\n      solana:\n        solana:\n          environment: live\n")
 	_, err = ParseMerchantConfigManifest([]byte(noSigner))
 	require.ErrorContains(t, err, "requires a signer", "solana with no signer has no key to derive account_id from")
 }

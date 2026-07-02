@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
+func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
-	var accountA gen.OpenrailsPaymentProviderAccount
-	var accountB gen.OpenrailsPaymentProviderAccount
+	var accountA gen.OpenrailsRailMerchantAccount
+	var accountB gen.OpenrailsRailMerchantAccount
 	var customerA uuid.UUID
 	var customerB uuid.UUID
 
@@ -31,14 +31,14 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 		q := appDB.Gen(ctx)
 		now := time.Now().UTC()
 		var err error
-		accountA, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		accountA, err = q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Rail:           "nmi",
 			AccountID:      "nmi-account-a",
 			LastVerifiedAt: &now,
 		})
 		require.NoError(t, err)
-		accountB, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		accountB, err = q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Rail:           "nmi",
 			AccountID:      "nmi-account-b",
@@ -65,7 +65,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
-		seedMirrorRows := func(account gen.OpenrailsPaymentProviderAccount, customerID uuid.UUID, marker string) {
+		seedMirrorRows := func(account gen.OpenrailsRailMerchantAccount, customerID uuid.UUID, marker string) {
 			t.Helper()
 			pmID := uuid.New()
 			subID := uuid.New()
@@ -73,7 +73,7 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 			end := now.Add(29 * 24 * time.Hour)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payment_methods
-				   (id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, provider_account_id)
+				   (id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, rail_merchant_account_id)
 				 VALUES ($1, 'nmi', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
 				pmID, marker, marker, dbtest.TestMerchantID.UUID(), customerID, account.ID)
 			require.NoError(t, err)
@@ -81,21 +81,15 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 				`INSERT INTO openrails.subscriptions
 				   (id, price_id, product_id, status, rail, rail_subscription_id,
 				    payment_method_id, current_period_starts_at, current_period_ends_at, started_at,
-				    entitlements_spec_snapshot, customer_id, merchant_id, provider_account_id)
+				    entitlements_spec_snapshot, customer_id, merchant_id, rail_merchant_account_id)
 				 VALUES ($1, $2, $3, 'active', 'nmi', 'sub-shared',
 				    $4, $5, $6, $5, jsonb_build_object('premium', null), $7, $8, $9)`,
 				subID, priceID, productID, pmID, start, end, customerID, dbtest.TestMerchantID.UUID(), account.ID)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.entitlements
-				   (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
-				 VALUES ($1, $2, 'premium', $3, $4, $5, 'subscription', $6)`,
-				uuid.New(), customerID, start, end, subID, dbtest.TestMerchantID.UUID())
-			require.NoError(t, err)
-			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payments
 				   (id, price_id, rail, transaction_id, amount, list_amount, currency,
-				    status, subscription_id, purchased_at, customer_id, merchant_id, provider_account_id)
+				    status, subscription_id, purchased_at, customer_id, merchant_id, rail_merchant_account_id)
 				 VALUES ($1, $2, 'nmi', 'txn-shared', 999, 999, 'usd',
 				    'completed', $3, $4, $5, $6, $7)`,
 				uuid.New(), priceID, subID, now, customerID, dbtest.TestMerchantID.UUID(), account.ID)
@@ -112,8 +106,6 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 		require.NoError(t, err)
 		require.Len(t, stateA.Subscriptions, 1)
 		require.Equal(t, customerA, stateA.Subscriptions[0].CustomerID)
-		require.Len(t, stateA.Entitlements, 1)
-		require.Equal(t, customerA, stateA.Entitlements[0].CustomerID)
 		require.Len(t, stateA.PaymentMethods, 1)
 		require.Equal(t, "1111", stateA.PaymentMethods[0].LastFour)
 
@@ -126,8 +118,6 @@ func TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *test
 		require.NoError(t, err)
 		require.Len(t, stateB.Subscriptions, 1)
 		require.Equal(t, customerB, stateB.Subscriptions[0].CustomerID)
-		require.Len(t, stateB.Entitlements, 1)
-		require.Equal(t, customerB, stateB.Entitlements[0].CustomerID)
 		require.Len(t, stateB.PaymentMethods, 1)
 		require.Equal(t, "2222", stateB.PaymentMethods[0].LastFour)
 

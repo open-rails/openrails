@@ -22518,3 +22518,271 @@ touch), the **checkout key** is the PUBLIC client-side key (Payment Component / 
 Acceptance (MET): the NMI rail runs sale/vault/plan-create/subscription-delete/liveness/reconcile-rosters
 on v5 JSON with the existing `security_key`; classic Direct Post remains ONLY for the five live-verified
 survivors and `query.php` ONLY for transaction search; live sandbox E2E + live invoice collection green.
+
+---
+
+# #683: remote-identity renaming — one `rail_` family for everything provider-facing (rail_merchant_accounts / rail_customer_accounts)
+
+**Completed:** yes
+**Status:** COMPLETED 2026-07-01 (Claude; uncommitted at archive time). Migration 059 + full code/config
+sweep; unit suite green; full integration suite green for everything in this issue's surface (75 packages
+ok; residuals baselined to clean HEAD or concurrent in-flight work — see #682's status note). Follows the
+#682 identity-alignment review and anticipates the two-party platform direction (openrails.com users
+creating "merchant accounts" and "customer accounts", Link/Shop-Pay-style).
+
+## EXECUTED DECISIONS (2026-07-01)
+- Start-state correction: the audit batch's migration 050 had ALREADY done provider_accounts ->
+  payment_provider_accounts (+ provider_type -> rail, constraint renames) — #652's rename did land after
+  all, in commit 4875ba6d. 059 continues from there. #588 (migration 030) had likewise already renamed
+  payment_methods.vault_id/billing_id -> rail_customer_ref/rail_method_ref, so that item was already done.
+- SECRET-NAME POSTURE: FULL HARD CUT, posture (a) everywhere (Paul, 2026-07-01: "we haven't launched
+  yet; I can always change this in any live production system"). The canonical secret-name prefix is now
+  'rail_merchant_accounts/<rail>/<env>/<account>/<key>'; migration 059 rewrites DB-backed stored names
+  (merchant_secrets + merchant_credential_audit); Vault-backed deployments move KV entries
+  provider_accounts/* -> rail_merchant_accounts/* at upgrade (operator step; none exist pre-launch).
+  secrets.go carries a stripeapi.APIVersion-style don't-float-casually note on the new prefix. Everything
+  human-facing likewise hard-cut: Go identifiers, YAML key (`rail_merchant_accounts:`), env spans
+  (BILLING_MERCHANTS_<m>_RAIL_MERCHANT_ACCOUNTS_...), examples, docs.
+- HOST IMPACT (coordinated bump at next upgrade): merchant manifests + env rename the
+  `provider_accounts:` block / `..._PROVIDER_ACCOUNTS_...` spans to `rail_merchant_accounts` /
+  `..._RAIL_MERCHANT_ACCOUNTS_...`; Vault-backed secret KV entries move to the new prefix (DB-backed ones
+  migrate automatically via 059). No HTTP API paths changed (none embedded the old names).
+
+## Why
+The remote-facing axis is currently spelled THREE ways (`provider_*`, `rail_*`, `external_provider_*`),
+and the two identity tables hide that they are mirror images of one another:
+- `provider_accounts` = the MERCHANT's account at a rail (`acct_...`, NMI Gateway ID,
+  `clientAccnum/subacc`, recipient wallet). "Provider account" reads equally as "an account belonging to
+  the provider" — and "merchant account" is the exact industry term for this object (NMI documents the
+  Gateway ID as "the merchant ID").
+- `rail_customers` = the CUSTOMER's record at a rail (`cus_...` — Stripe-only in practice post-#682).
+Renaming both under one prefix makes the mirror explicit: every row answers "WHOSE account at WHICH rail".
+
+HISTORY: #652/#654 (2026-06-30) already decided `provider_accounts` -> `payment_provider_accounts` and
+claim "complete (uncommitted)" — but the rename is NOT in the tree (001_schema still says
+`provider_accounts`; zero references to `payment_provider_accounts` in live schema). That work evaporated
+before landing. This issue SUPERSEDES that naming decision — go straight to the `rail_` family, once.
+
+PLATFORM RESERVATION: with the two-party platform, bare "merchant account" / "customer account" become
+PLATFORM-tier nouns (a registered openrails.com user's roles). The `rail_` prefix is what keeps the two
+axes apart — land this rename BEFORE the platform tier exists, and reserve the `platform_*` family
+(e.g. `platform_users`, `customers.platform_user_id`) for that later work. Identity ladder:
+platform person -> merchant-scoped customer (projection) -> rail handles (leaf artifacts).
+
+GROUNDED IN THE SAAS PLANS (~/openrails-saas, reviewed 2026-07-01):
+- Roadmap v0.2 is explicit: openrails.com gets BOTH a "customer login/registration" and a "merchant
+  login/registration" — the platform nouns are coming; this rename must precede them.
+- `payments-multi-merchant-wallet-and-payfac.md` (2026-06-14) already designed the wallet layer as "a new
+  cross-merchant wallet/global-customer entity ABOVE per-merchant customer rows" — identical ladder to the
+  reservation above. Its Rank-1 path (Stripe-Connect saved-PM reuse: customer + card held on the OpenRails
+  PLATFORM Stripe account, charged on behalf of connected merchants) implies a future wrinkle for
+  `rail_merchant_accounts`: the PLATFORM's own gateway account (the Connect master) is a
+  rail-merchant-account-shaped row owned by NO merchant — anticipate platform-owned rows
+  (nullable merchant_id or a platform pseudo-merchant) as a documented future extension, NOT part of this
+  rename.
+- Cross-repo note: ~/openrails-saas/agents/progress.md #0 still uses the DEPRECATED "tenant / tenant
+  subject" vocabulary (pre-rename); its glossary needs syncing to merchant/customer + the reserved
+  platform nouns when that repo becomes active.
+
+## Rename map (hard cut, one migration, no aliases — #649/#652 discipline)
+Tables:
+| current | new |
+|---|---|
+| `provider_accounts` | `rail_merchant_accounts` |
+| `rail_customers` | `rail_customer_accounts` |
+| `provider_intents` | `rail_intents` |
+| `external_provider_mutation_logs` | `rail_mutation_logs` |
+| `provider_refresh_watermarks` | `rail_refresh_watermarks` |
+
+Columns:
+- `provider_account_id` FK (56 references across the schema: payment_methods, rail_customers,
+  subscriptions, payments, webhooks/routing, ...) -> `rail_merchant_account_id`.
+- `payment_methods.vault_id` / `billing_id` -> `rail_customer_ref` / `rail_method_ref` (align the DB to
+  the Go field names; today NMI vault jargon leaks into the generic table).
+- `rail_customers.rail_customer_id` -> `rail_customer_accounts.account_id` — symmetric with
+  `rail_merchant_accounts.account_id`: both tables read `(merchant_id, rail, environment?, account_id)`.
+
+Code/type sweep (regenerate sqlc; rename structs/DTOs/params to match): `ProviderAccountConfig`,
+`ProviderAccountSet`, repo/query names, route params, YAML keys in merchant config
+(`provider_accounts:` blocks), docs + CLAUDE.md + the billing-naming-vocabulary conventions.
+
+Module rename (the "vault" triple-collision): `internal/modules/vault` (our payment-method service) ->
+`internal/modules/paymentmethods`; reserve the word "vault" for the two external systems that own it
+(NMI Customer Vault, HashiCorp Vault #648/#661).
+
+## DO-NOT-RENAME trap classes (wire vs local — sed-sweep traps)
+- Provider WIRE fields stay verbatim: NMI `customer_vault_id`/`billing_id`/`customer_vault` form+JSON
+  fields, Stripe/CCBill payload fields, v5 request/response structs in `internal/integrations/*` — these
+  are the provider's spelling, not ours (#651 record-verbatim rule).
+- `rail_subscription_id`, `rail_customer_ref`, `rail_method_ref` field SEMANTICS unchanged.
+- AuthKit/org vocabulary untouched (org = controller; merchant = controlled resource).
+
+## THE ONE BLOCKING DECISION: secret-name shapes
+"provider account" is baked into DURABLE identifiers, not just code: #653 canonical secret names
+(`merchants.ProviderAccountSecretName` -> `...provider_accounts...` name shapes in the DB/Vault-backed
+secret store) and host env spans (`BILLING_MERCHANTS_<m>_PROVIDER_ACCOUNTS_<key>_<RAIL>_<FIELD>`) that
+doujins / hentai0 / cozy-art deployments already carry. Two coherent postures — pick ONE before starting:
+(a) HARD CUT NOW (recommended; the window is still open — greenfield migrations, no external adopters):
+    rename stored secret names in the same migration + coordinated host env bump (doujins, hentai0,
+    cozy-art) in the same release train, like the authkit v0.42.0 chain; or
+(b) FREEZE the secret-name shape as wire format forever (stripeapi.APIVersion discipline) and accept the
+    permanent code-vs-secret-name naming split.
+
+## Considered tradeoffs (recorded, not blockers)
+- "account" is the most overloaded noun in the repo (`ledger_accounts`, credit/spend accounts); the
+  `rail_`/`ledger_` prefixes are what disambiguate — acceptable.
+- `rail_customer_accounts` is Stripe-only in practice after #682 (NMI/CCBill/Solana have no person-level
+  remote identity). The name describes what a row IS, not how many rails populate it — acceptable.
+- COORDINATION: #674 (universal write-ahead provider-intents log) is actively reworking
+  `provider_intents`; land or sequence this rename WITH that work, not across it. Same for any in-flight
+  #650/#653 consumers.
+
+## Tasks
+- [x] Decision gate resolved: FULL hard cut (a), including stored secret names — Paul waived the
+      frozen-prefix compromise pre-launch (see EXECUTED DECISIONS); merchants/merchantsecrets/bootstrap/
+      checkout/vault-integration suites green on the new prefix.
+- [x] Migration 059 (catalog-introspection-generated): 5 table renames, provider_account_id ->
+      rail_merchant_account_id in 9 tables, rail_customer_accounts.rail_customer_id -> account_id
+      (symmetric with rail_merchant_accounts.account_id), every constraint/index renamed by exact
+      inventory (RLS policies are all `merchant_isolation`, follow their tables); applies clean on a
+      fresh DB (sqlc vet DB rebuilt through 059); sqlc regenerated.
+- [x] Code sweep, zero-alias: query files renamed + rewritten (tables/columns/`-- name:` methods);
+      gen types (OpenrailsRailIntent, OpenrailsRailMerchantAccount, OpenrailsRailCustomerAccount,
+      OpenrailsRailMutationLog, OpenrailsRailRefreshWatermark) + all Params/Row variants; repo-wide
+      identifier sweep (ProviderAccountID -> RailMerchantAccountID, ProviderAccountConfig/Set ->
+      RailMerchantAccountConfig/Set, merchants.*ProviderAccount* -> *RailMerchantAccount*); raw-SQL and
+      table-name string literals in Go (incl. merchants/delete.go table list, intents store, tests).
+      NMI/Stripe/CCBill WIRE fields untouched (trap classes held).
+- [x] `internal/modules/vault` -> `internal/modules/paymentmethods` (package + importers); "vault" now
+      means only NMI Customer Vault or HashiCorp Vault. (Service method names like CreateVault/DeleteVault
+      kept — they name the NMI vault operation, which is legitimate vocabulary.)
+- [x] Posture executed (full cut): 059 migrates DB-backed stored names; env-span/YAML rename + Vault KV
+      move land with the next openrails version bump — doujins/hentai0/cozy-art update manifests/env at
+      upgrade (documented in HOST IMPACT).
+- [x] Docs: CLAUDE.md (rail_merchant_accounts), merchants_config.example.yaml, migration 059 header
+      records the `rail_` = remote-facing / `platform_` = reserved convention + the frozen secret prefix.
+- [x] Tests: full unit suite GREEN; full integration suite GREEN across the rename surface (schema-shape/
+      RLS suites, example-config parse/dump, querytest contracts, intents/river/reconcile-converge/money/
+      merchants all ok against the renamed schema); the #674 write-guard allowlist path updated for the
+      module move.
+
+Acceptance: one prefix (`rail_`) for every remote-facing table; `rail_merchant_accounts` /
+`rail_customer_accounts` mirror pair landed; `provider_*` / `external_provider_*` spellings gone from the
+schema; "vault" means only NMI-Customer-Vault or HashiCorp; secret-name posture decided and executed (or
+frozen and documented); trackers/docs/vocabulary updated; no aliases anywhere.
+
+---
+
+# #682: NMI vault identity honesty — per-card vaults are instruments, not customers
+
+**Completed:** yes
+**Status:** COMPLETED 2026-07-01 (Claude; uncommitted at archive time). Migration 058; unit + integration
+green (full suite: 75 packages ok; the residual failures were baselined against clean HEAD in a worktree
+and belong to concurrent in-flight work — the #679 queue-always FailMembership rewrite and two
+pre-existing internal/http / integrationharness failures — none in #682's surface). The
+IF-a-multi-card-import-lands task below (billing-entry-scoped delete + sale billing-targeting) is a
+documented future trigger, deliberately not built now.
+
+## Provider identity reality (verified against live gateways, 2026-07-01)
+- **Stripe**: real person-level customer (`cus_...`) distinct from instruments (`pm_...`). Correctly
+  modeled: `rail_customers` holds `cus_...`; `payment_methods.rail_method_ref` holds `pm_...`;
+  `rail_customer_ref` empty.
+- **CCBill**: NO customer identifier of any kind — subscription id is the only handle (upgrade lineage via
+  `originalSubscriptionId`). Correctly excluded from `rail_customers`. (`provider_accounts` is unrelated —
+  that is the MERCHANT gateway-account catalog and is populated for CCBill.)
+- **NMI**: no person concept. The vault "customer" (`customer_vault_id`, v5 `/customers`) is a CONTAINER of
+  stored cards (billing entries, `billing[].id`); it survives card updates but carries no identity.
+  `customerid` on transactions is merchant-defined free text (we stamp it on non-vaulted signups only;
+  nothing reads it back).
+- **Solana** (for completeness): no customer AND no payment-method rows — the signed pull authorization
+  (subscription PDA derived from plan+subscriber, + token delegation to the authority PDA) is bound to ONE
+  subscription, not a reusable instrument, so it lives on `solana_subscriptions` (+ subscription PDA as
+  `rail_subscription_id`), like CCBill's subscription-scoped identity. The subscriber wallet pubkey is a
+  funding-source address — matching EVIDENCE (person↔wallet is many-to-many, self-custodied), never
+  person identity. Correctly excluded from `rail_customers` (#635).
+
+## The misalignment (usage, not schema)
+The two-handle schema is RIGHT (`rail_customer_ref` = customer-scope, `rail_method_ref` =
+instrument-scope). But for NMI:
+1. We mint ONE VAULT CUSTOMER PER CARD (`vault_service.CreateVault` -> `CreateCustomerVault` per method),
+   so `customer_vault_id` behaves as an instrument id. A person with N cards = N unrelated NMI "customers".
+2. #635's reconcile materializer imports NMI vault ids into `rail_customers` (the person-level table),
+   where they are NOT person-unique — one person can accumulate N NMI rows.
+3. `rail_method_ref` (NMI `billing_id`) is never captured for OpenRails-native vaults (the v5 create
+   response returns `billing[].id`; we discard it). Only legacy doujins-imported methods carry one — and
+   that EMPTINESS IS LOAD-BEARING: `subscriptionProviderAutoBilled` (jobs_dunning.go) reads "no billing id"
+   as "NMI's own recurring engine bills this" and "billing id present" as "OpenRails drives manual
+   rebills". Capturing billing ids naively would silently flip every new NMI subscription into the
+   manual-rebill lane.
+
+## Decision: KEEP one-vault-per-card; make the model honest about it
+Considered and REJECTED (2026-07-01): the Stripe-isomorphic grouping (one vault customer per person,
+cards as billing entries, vault ≈ `cus_...`, `billing_id` ≈ `pm_...`). It is the structurally faithful
+mapping — NMI has billing priorities, billing CRUD sub-resources, and rebill-by-billing_id — but it buys
+almost nothing here (multi-card users are rare; person-resolution already works exactly via
+`payment_methods.vault_id` -> local customer) and costs real risk:
+- requires the mode-flag decoupling FIRST (item 3 above);
+- unverified gateway semantics: whether v5 `customer_vault:{id}` sale can select a billing entry is
+  exactly the kind of thing docs.nmi.com asserts and the live gateway contradicts (see #663's divergence
+  list); card-switch becomes priority-juggling on a shared vault vs today's clean repoint;
+- a data migration over provider-owned vault state we cannot freely move (card-lapse-then-recapture is
+  the only migration primitive — #655/#657 posture);
+- larger blast radius (today delete-method == delete-vault, total and simple).
+Per-card vaults also fit the deplatforming/recapture posture: small vaults die and re-mint naturally.
+If N-cards-per-person ever becomes product scope, revisit grouping — the write-up above is the map.
+
+RATIFIED BY THE SAAS WALLET STRATEGY (~/openrails-saas/payments-multi-merchant-wallet-and-payfac.md,
+2026-06-14): "The NMI seam: NMI vaults are per-merchant and won't go cross-merchant cleanly — plan to
+consolidate billable merchants onto the Connect wallet rather than trying to share NMI vaults." The
+Shop-Pay-style platform tier puts NO pressure on NMI vault grouping — cross-merchant instrument reuse
+happens on the Stripe-Connect platform account (or non-custodial Solana), never by restructuring NMI
+vaults. Per-card NMI vaults remain a leaf artifact under any platform future.
+
+LEGACY PRECEDENT (verified in ~/doujins-legacy, `CustomersVault::initializeVault`): the legacy system kept
+ONE vault per user containing ONE card, and on card change DELETED the whole vault at NMI and re-minted —
+so the vault-wraps-a-single-card invariant held there too (replace-in-place vs our N-vault history).
+Legacy also GENERATED its own `billing_id` and passed it into `add_customer` (NMI accepts merchant-supplied
+billing ids) because its rebill flow needs one — which is exactly why imported methods carry
+`rail_method_ref` and OpenRails-native ones don't.
+
+## Imported/shared-vault contract (importers that did NOT follow one-card-per-vault)
+An import encountering a genuinely multi-card vault materializes ONE `payment_methods` row PER billing
+entry — shared `rail_customer_ref` (vault id), distinct `rail_method_ref` (billing id) — and STILL no
+`rail_customers` row (the vault layer stays invisible to identity; the local `customer_id` UUID is the
+only person). Two operational rules that current code would violate:
+1. DELETE must be billing-entry-scoped when the vault is shared: `DeleteCustomerVault` today deletes the
+   WHOLE vault, which would kill sibling cards. Rule: if another payment-method row shares the vault id,
+   delete the billing entry (v5 `DELETE /customers/{id}/billing-addresses/{id}`); only the last entry's
+   removal deletes the vault (NMI refuses zero-billing vaults, which matches).
+2. CHARGES must target the billing entry: sale against a multi-entry vault hits priority-1 unless
+   specified. Classic sale/rebill accept `billing_id`; whether the v5 `customer_vault:{id}` sale can
+   select a billing entry is UNVERIFIED — live-probe before accepting any such import (#663 precedent:
+   docs assert, live gateway decides).
+3. The importer sets the rebill-driver mode EXPLICITLY (never inferred from billing-id presence).
+
+## Tasks
+- [x] `models.PaymentMethod.RailCustomerRef` doc + vault-service minting comment: for NMI this is an
+      instrument-scoped handle in OUR usage (one vault customer per card, deliberately); NMI has NO
+      person-level remote identity in our model.
+- [x] #635 materializer: NMI dropped from the rails registry's HasRemoteCustomer (the #669 registry
+      replaced the old switches; both call sites — rail_customer_service + unknown_orchestration — flow
+      through it). Verified nothing reads NMI rows from the table (only the Stripe collection path reads
+      it); existing NMI rows LEFT IN PLACE, documented in migration 058's disposition note.
+- [x] Rebill-driver mode decoupled: migration 058 adds `payment_methods.rebill_driver`
+      ('provider'|'openrails', default 'provider') backfilled EXACTLY from the old inferred rule
+      (nmi/mobius + rail_method_ref <> ''); the rails registry's nmiAutoBilled now reads the column
+      (models.RebillDriver* constants); capturing billing[].id is now SAFE whenever an importer needs it.
+- [x] Tests: registry pinned-facts updated (NMI remoteCustomer=false; AutoBilled by mode column incl.
+      the two new decoupling cases: ref-without-mode stays provider-billed, mode-without-ref flips);
+      dunning/liveness/materialize fixtures set the mode explicitly (mirroring the 058 backfill);
+      #635 fixture-snapshot expects zero NMI rail-customer materializations.
+- [x] Shared-vault safety guard: `DeleteVault` refuses the whole-vault delete when another payment-method
+      row shares the vault id (CountPaymentMethodsSharingCustomerRef; runs BEFORE any provider call);
+      integration test TestDeleteVaultRefusesSharedVault green.
+- [ ] IF a multi-card import ever lands: billing-entry-scoped delete + sale billing-targeting per the
+      shared-vault contract above, with the v5 billing-selection question live-probed first.
+
+Acceptance: NMI identity semantics are explicit in code and docs (vault = instrument container, no person
+identity), `rail_customers` holds only genuinely person-unique remote ids (Stripe), the rebill-driver mode
+has its own field with the identity handles free to be captured accurately, and the grouped-vault
+alternative is recorded here as considered-and-rejected with its revisit conditions.

@@ -17,7 +17,7 @@ import (
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
-func requireStripeRailConfig(rails config.ProviderAccountSet) (*config.ProviderAccountConfig, error) {
+func requireStripeRailConfig(rails config.RailMerchantAccountSet) (*config.RailMerchantAccountConfig, error) {
 	proc := rails.GetStripeRail()
 	if proc == nil {
 		return nil, fmt.Errorf("stripe configuration is not available")
@@ -25,7 +25,7 @@ func requireStripeRailConfig(rails config.ProviderAccountSet) (*config.ProviderA
 	return proc, nil
 }
 
-func RequireStripeSecretKey(rails config.ProviderAccountSet) (*config.ProviderAccountConfig, string, error) {
+func RequireStripeSecretKey(rails config.RailMerchantAccountSet) (*config.RailMerchantAccountConfig, string, error) {
 	proc, err := requireStripeRailConfig(rails)
 	if err != nil {
 		return nil, "", err
@@ -54,7 +54,7 @@ func ParseStripeAPIError(body []byte) string {
 
 type StripeService struct {
 	Config *config.Config
-	Rails  config.ProviderAccountSet
+	Rails  config.RailMerchantAccountSet
 
 	// baseURL overrides the Stripe API root. Empty means the production Stripe
 	// API (https://api.stripe.com). Tests set this to an httptest server.

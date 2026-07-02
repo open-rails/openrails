@@ -517,20 +517,21 @@ of slack (14 days for monthly subs, 3 days for weekly, zero for daily). Anything
 is cancelled + downgraded **without** a charge — a card that failed months ago is never
 surprise-charged by a catch-up run.
 
-**Silence is owned too (#367/#368).** Dunning covers the failures we *saw*; an active
+**Silence is owned too (#632/#665/#368).** Dunning covers the failures we *saw*; a
 subscription whose period lapses with NO webhook either way (lost success webhook,
 provider billing on its own day boundary, dead webhook pipe) is covered by two
 mechanisms working together. First, access doesn't cut off at the period-end second:
 every activation/renewal pre-appends a bounded, revocable **grace window** (half the
 billing cycle, capped at 72h; 12h for daily — not a knob) that any resolution revokes,
 and that a deliberate cancel deletes (no generosity for explicit cancellation). Second,
-a 4-hourly **subscription liveness sync** probes the provider per silent subscription
-(read-only — it never charges) and converges: provider charged → membership repaired
-and the payment backfilled exactly once; declined → routed into dunning; remote alive
-with a future billing date → the remote period end is adopted (no access granted);
-remote gone → cancelled locally with entitlements revoked. Unreachable providers just
-leave state for the next pass. Runs under `full` and `limited`; skipped under
-`readonly`. Details in docs/operations.md.
+convergence parks the evidence-less row as `unknown` (access intact, #664) and the
+4-hourly **unknown-cohort reconcile** verifies it against the provider (read-only —
+it never charges): verified charge → renewed and the payment backfilled exactly once;
+declined/stalled → routed into dunning (or cancelled with a deferred provider delete
+once past the window); remote alive with a future billing date → the remote period end
+is adopted (no access granted); remote gone → cancelled locally with entitlements
+revoked. Unreachable providers just leave rows `unknown` for the next pass. Runs under
+`full` and `limited`; skipped under `readonly`. Details in docs/operations.md.
 
 ### Safe boot with production credentials
 
@@ -654,11 +655,11 @@ against months-old charges, but review is cheap and irreversible mistakes aren't
 
 **2. What never fires automatically — the admin findings queue.** Findings whose
 fix requires a *remote* mutation or a judgment call (`pull.subscription.missing`
-ghost subscriptions, `pull.dispute.chargeback`, `consistency.duplicate.subscription`
+ghost subscriptions, `pull.dispute.chargeback`, `pull.subscription.duplicate`
 needing cancel + refund at the rail, a `derive.grant.excess` refunded-payment
-grant) are queued for a human and stay `admin_pending` (or `held`, behind the
-confirmed-absence gate) until acted on. Raising the mode does nothing to this
-queue — that is the safety design, not an oversight:
+grant) are queued for a human and stay `requires_review` (or `reconcile_required`
+behind the confirmed-absence gate) until acted on. Raising the mode does nothing
+to this queue — that is the safety design, not an oversight:
 
 ```bash
 openrails pull-provider report --merchant=<slug>   # open + admin-pending + held findings of the latest run

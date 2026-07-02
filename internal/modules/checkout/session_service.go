@@ -23,11 +23,11 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -95,7 +95,7 @@ type CheckoutSessionService struct {
 	repo                     *repo.CheckoutSessionRepo
 	priceService             *catalog.PriceService
 	productService           *catalog.ProductService
-	paymentMethodService     *vault.PaymentMethodService
+	paymentMethodService     *paymentmethods.PaymentMethodService
 	idempotencyService       sessionIdempotencyStore
 	checkoutService          checkoutSessionExecutor
 	solanaPayService         solanaPaymentService
@@ -103,7 +103,7 @@ type CheckoutSessionService struct {
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
 	config                   *config.Config
-	rails                    config.ProviderAccountSet
+	rails                    config.RailMerchantAccountSet
 	clock                    clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
@@ -224,7 +224,7 @@ func NewCheckoutSessionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	paymentMethodService *vault.PaymentMethodService,
+	paymentMethodService *paymentmethods.PaymentMethodService,
 	idempotencyService sessionIdempotencyStore,
 	checkoutService checkoutSessionExecutor,
 	solanaPayService solanaPaymentService,
@@ -232,7 +232,7 @@ func NewCheckoutSessionService(
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
-	rails config.ProviderAccountSet,
+	rails config.RailMerchantAccountSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
@@ -399,24 +399,24 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ttl = redirectCheckoutSessionTTL
 	}
 	session := &models.CheckoutSession{
-		ID:                uuidutil.NewV7(),
-		CustomerID:        identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:           price.ID,
-		Mode:              mode,
-		Rail:              models.Rail(rail),
-		Status:            models.CheckoutSessionStatusCreated,
-		Amount:            price.Amount,
-		Currency:          price.Currency,
-		ExpiresAt:         timePtr(now.Add(ttl)),
-		Metadata:          normalizeMetadata(req.Metadata),
-		RailFields:        s.buildRailFields(rail, &req.Payment),
-		RailState:         map[string]any{},
-		CreatedAt:         now,
-		UpdatedAt:         now,
-		ProviderAccountID: nil,
-		LastFour:          &req.Payment.LastFour,
-		CardType:          &req.Payment.CardType,
-		ExpiryDate:        &req.Payment.ExpiryDate,
+		ID:                    uuidutil.NewV7(),
+		CustomerID:            identity.CustomerIDFromString(user.ID).UUID(),
+		PriceID:               price.ID,
+		Mode:                  mode,
+		Rail:                  models.Rail(rail),
+		Status:                models.CheckoutSessionStatusCreated,
+		Amount:                price.Amount,
+		Currency:              price.Currency,
+		ExpiresAt:             timePtr(now.Add(ttl)),
+		Metadata:              normalizeMetadata(req.Metadata),
+		RailFields:            s.buildRailFields(rail, &req.Payment),
+		RailState:             map[string]any{},
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		RailMerchantAccountID: nil,
+		LastFour:              &req.Payment.LastFour,
+		CardType:              &req.Payment.CardType,
+		ExpiryDate:            &req.Payment.ExpiryDate,
 	}
 
 	if strings.TrimSpace(req.IdempotencyKey) != "" {

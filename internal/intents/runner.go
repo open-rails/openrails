@@ -14,11 +14,11 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
-	Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error)
-	Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error)
-	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsProviderIntent, bool, error)
-	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
-	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
+	Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error)
+	Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error)
+	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error)
+	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
+	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
@@ -53,9 +53,12 @@ type Runner struct {
 	Registry *Registry
 	// Config gates execution by origin x operating mode. nil (tests) = full.
 	Config ModeView
-	Clock  clockwork.Clock
-	Lease  time.Duration
-	Batch  int64
+	// Breaker halts destructive intent execution on merchant-level volume
+	// anomalies (#679). nil = ungated (unit tests, non-destructive-only runners).
+	Breaker *VolumeBreaker
+	Clock   clockwork.Clock
+	Lease   time.Duration
+	Batch   int64
 }
 
 func (r *Runner) now() time.Time {
@@ -117,7 +120,7 @@ func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderIntent, stats *Stats) {
+func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent, stats *Stats) {
 	logEntry := log.WithContext(ctx).WithFields(log.Fields{
 		"intent_id":   intent.ID,
 		"intent_type": intent.IntentType,
@@ -161,6 +164,21 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 		return
 	}
 
+	// #679 volume breaker: destructive types park (stay pending) while the
+	// merchant is over its rolling execution budget or an operator finding is
+	// open. Fails closed — a breaker error parks rather than executing unexamined.
+	if r.Breaker != nil && IsDestructiveIntentType(intent.IntentType) {
+		held, reason, err := r.Breaker.Check(ctx, intent, now)
+		if err != nil {
+			r.park(ctx, logEntry, stats, intent.ID, now, "destructive-volume breaker check failed: "+err.Error())
+			return
+		}
+		if held {
+			r.park(ctx, logEntry, stats, intent.ID, now, reason)
+			return
+		}
+	}
+
 	if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
 		r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
 		return
@@ -186,10 +204,10 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 // (succeeded, terminal, mid-lease, expired) the row is returned UNTOUCHED so
 // the caller can act on the durable prior outcome (e.g. the dunning worker's
 // repair-from-successful-rebill path).
-func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error) {
+func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
-		return gen.OpenrailsProviderIntent{}, err
+		return gen.OpenrailsRailIntent{}, err
 	}
 	switch row.Status {
 	case StatusPending, StatusFailedRetryable:
@@ -201,7 +219,7 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Op
 	now := r.now()
 	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
 	if err != nil {
-		return gen.OpenrailsProviderIntent{}, err
+		return gen.OpenrailsRailIntent{}, err
 	}
 	if !ok {
 		// Raced into an unclaimable state (another executor's lease, expiry
@@ -262,7 +280,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 // the verifier's interpretation of OutcomeAmbiguous (still inconclusive ->
 // backoff the next verify) vs the executor's (fresh ambiguity -> first verify
 // soon).
-func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsProviderIntent, outcome Outcome, verifying bool) {
+func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, verifying bool) {
 	now := r.now()
 	var err error
 	switch outcome.Class {
@@ -349,7 +367,7 @@ func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id
 	logEntry.WithField("reason", reason).Warn("intent parked (stays pending)")
 }
 
-func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
+func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
 	intentID := intent.ID
 	logger := r.Logger
 	if logger == nil {
@@ -361,16 +379,16 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsPr
 		return nil
 	}
 	return logger.LogExternalMutation(ctx, MutationLogParams{
-		MerchantID:        intent.MerchantID,
-		Provider:          intent.Provider,
-		ProviderAccountID: intent.ProviderAccountID,
-		ProviderIntentID:  &intentID,
-		IntentType:        intent.IntentType,
-		IdempotencyKey:    intent.IdempotencyKey,
-		Attempt:           intent.Attempts,
-		Phase:             phase,
-		Reason:            reason,
-		Evidence:          mutationLogEvidence(intent, evidence),
+		MerchantID:            intent.MerchantID,
+		Provider:              intent.Provider,
+		RailMerchantAccountID: intent.RailMerchantAccountID,
+		ProviderIntentID:      &intentID,
+		IntentType:            intent.IntentType,
+		IdempotencyKey:        intent.IdempotencyKey,
+		Attempt:               intent.Attempts,
+		Phase:                 phase,
+		Reason:                reason,
+		Evidence:              mutationLogEvidence(intent, evidence),
 	})
 }
 
@@ -387,7 +405,7 @@ func mutationLogPhase(outcome Outcome) MutationLogPhase {
 	}
 }
 
-func mutationLogEvidence(intent gen.OpenrailsProviderIntent, evidence map[string]any) map[string]any {
+func mutationLogEvidence(intent gen.OpenrailsRailIntent, evidence map[string]any) map[string]any {
 	out := map[string]any{}
 	if intent.SubscriptionID != nil {
 		out["subscription_id"] = intent.SubscriptionID.String()

@@ -32,7 +32,7 @@ func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.U
 		SELECT COUNT(*),
 		       COALESCE(MAX(status), ''),
 		       COALESCE(MAX(next_attempt_at), '0001-01-01'::timestamptz)
-		FROM openrails.provider_intents
+		FROM openrails.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2`,
 		intents.TypeNMIDeleteSubscription, subID).Scan(&count, &status, &nextAttemptAt)
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func countLiveNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uu
 	ctx := dbtest.WithTestMerchant(context.Background())
 	var count int
 	err := suite.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM openrails.provider_intents
+		SELECT COUNT(*) FROM openrails.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2
 		  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')`,
 		intents.TypeNMIDeleteSubscription, subID).Scan(&count)
@@ -195,7 +195,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 
 	var origin string
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
-		SELECT origin FROM openrails.provider_intents
+		SELECT origin FROM openrails.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2`,
 		intents.TypeNMIDeleteSubscription, sub.ID).Scan(&origin))
 	assert.Equal(t, string(intents.OriginSystem), origin, "dunning-exhaustion deletes are system-origin")
@@ -403,7 +403,7 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 
 	var origin string
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
-		SELECT origin FROM openrails.provider_intents
+		SELECT origin FROM openrails.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2`,
 		intents.TypeNMIDeleteSubscription, sub.ID).Scan(&origin))
 	assert.Equal(t, string(intents.OriginUser), origin, "user cancels are user-origin (execute under limited)")

@@ -64,6 +64,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailNMI),
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
+		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
@@ -81,7 +82,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -127,13 +128,13 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	// The decision is on the ledger: pending, system-origin, window-bounded.
 	// (#592 ripped out the #365/#518 provider-account binding/identity resolution,
-	// so the materialized intent carries no provider_account_id.)
+	// so the materialized intent carries no rail_merchant_account_id.)
 	var status, origin, intentType string
 	var providerAccountID *uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, origin, intent_type, provider_account_id, expires_at
-		 FROM openrails.provider_intents WHERE subscription_id = $1`, subID).
+		`SELECT status, origin, intent_type, rail_merchant_account_id, expires_at
+		 FROM openrails.rail_intents WHERE subscription_id = $1`, subID).
 		Scan(&status, &origin, &intentType, &providerAccountID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
@@ -156,7 +157,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.provider_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
+		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
 	assert.Equal(t, 1, intentCount)
 }
 
@@ -205,7 +206,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

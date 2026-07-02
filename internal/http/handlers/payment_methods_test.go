@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/stretchr/testify/require"
 )
 
@@ -188,5 +188,5 @@ func TestCreateVaultRequestDoesNotStoreRawProviderPayload(t *testing.T) {
 	require.NotContains(t, got.Metadata, "raw_tokenization_payload")
 	require.NotContains(t, got.Metadata, "pan")
 	require.NotContains(t, got.Metadata, "cvv")
-	require.IsType(t, &vault.CreateVaultRequest{}, got)
+	require.IsType(t, &paymentmethods.CreateVaultRequest{}, got)
 }

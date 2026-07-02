@@ -18,9 +18,9 @@ import (
 // DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
 const DefaultNMICollectJSURL = "https://secure.networkmerchants.com/token/Collect.js"
 
-// ErrNoActiveProviderAccount means the merchant has provider accounts on the
+// ErrNoActiveRailMerchantAccount means the merchant has provider accounts on the
 // requested rail/environment, but all are archived and therefore drain-only.
-var ErrNoActiveProviderAccount = errors.New("merchants: no non-archived provider account available for new work")
+var ErrNoActiveRailMerchantAccount = errors.New("merchants: no non-archived provider account available for new work")
 
 // StripeCredentials are a merchant's rail credentials, loaded by merchant id at
 // request time (NOT injected process-wide). Empty fields mean "not configured".
@@ -51,7 +51,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if s.pool == nil {
 		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin)
 	}
-	scope, ok, err := s.activeProviderAccountSecretScope(ctx, id, "stripe", "live")
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "stripe", "live")
 	if err != nil {
 		return creds, err
 	}
@@ -83,7 +83,7 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 	if s.pool == nil {
 		return s.secretValue(ctx, id, SecretNMIWebhookSigning)
 	}
-	scope, ok, err := s.activeProviderAccountSecretScope(ctx, id, "nmi", "live")
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", "live")
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 			cfg.CollectJSURL = DefaultNMICollectJSURL
 			return cfg, nil
 		}
-		scope, ok, err := s.activeProviderAccountSecretScope(ctx, id, "nmi", "live")
+		scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, "nmi", "live")
 		if err != nil {
 			return cfg, err
 		}
@@ -160,7 +160,7 @@ func (s *Service) secretValue(ctx context.Context, id merchant.ID, name string) 
 	return sec.Value, nil
 }
 
-type providerAccountSecretScope struct {
+type railMerchantAccountSecretScope struct {
 	id          uuid.UUID
 	rail        string
 	environment string
@@ -168,11 +168,11 @@ type providerAccountSecretScope struct {
 	settings    map[string]any
 }
 
-func (s providerAccountSecretScope) secretName(key string) (string, error) {
-	return ProviderAccountSecretName(s.rail, s.environment, s.accountID, key)
+func (s railMerchantAccountSecretScope) secretName(key string) (string, error) {
+	return RailMerchantAccountSecretName(s.rail, s.environment, s.accountID, key)
 }
 
-func (s providerAccountSecretScope) setting(key string) string {
+func (s railMerchantAccountSecretScope) setting(key string) string {
 	if len(s.settings) == 0 {
 		return ""
 	}
@@ -184,7 +184,7 @@ func (s providerAccountSecretScope) setting(key string) string {
 	}
 }
 
-func (s providerAccountSecretScope) exported() ProviderAccountScope {
+func (s railMerchantAccountSecretScope) exported() RailMerchantAccountScope {
 	settings := map[string]any(nil)
 	if len(s.settings) > 0 {
 		settings = make(map[string]any, len(s.settings))
@@ -192,7 +192,7 @@ func (s providerAccountSecretScope) exported() ProviderAccountScope {
 			settings[k] = v
 		}
 	}
-	return ProviderAccountScope{
+	return RailMerchantAccountScope{
 		ID:          s.id,
 		Rail:        s.rail,
 		Environment: s.environment,
@@ -201,11 +201,11 @@ func (s providerAccountSecretScope) exported() ProviderAccountScope {
 	}
 }
 
-// ActiveProviderAccountSecretName resolves the active provider account for a
+// ActiveRailMerchantAccountSecretName resolves the active provider account for a
 // merchant rail/environment and returns that account's scoped secret
 // name for key.
-func (s *Service) ActiveProviderAccountSecretName(ctx context.Context, id merchant.ID, rail, environment, key string) (string, bool, error) {
-	scope, ok, err := s.activeProviderAccountSecretScope(ctx, id, rail, environment)
+func (s *Service) ActiveRailMerchantAccountSecretName(ctx context.Context, id merchant.ID, rail, environment, key string) (string, bool, error) {
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, rail, environment)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -216,29 +216,29 @@ func (s *Service) ActiveProviderAccountSecretName(ctx context.Context, id mercha
 	return name, true, nil
 }
 
-// ActiveProviderAccountScope resolves the active provider account for a merchant
+// ActiveRailMerchantAccountScope resolves the active provider account for a merchant
 // rail/environment.
-func (s *Service) ActiveProviderAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (ProviderAccountScope, bool, error) {
-	scope, ok, err := s.activeProviderAccountSecretScope(ctx, id, rail, environment)
+func (s *Service) ActiveRailMerchantAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (RailMerchantAccountScope, bool, error) {
+	scope, ok, err := s.activeRailMerchantAccountSecretScope(ctx, id, rail, environment)
 	if err != nil || !ok {
-		return ProviderAccountScope{}, ok, err
+		return RailMerchantAccountScope{}, ok, err
 	}
 	return scope.exported(), true, nil
 }
 
-func (s *Service) activeProviderAccountSecretScope(ctx context.Context, id merchant.ID, rail, environment string) (providerAccountSecretScope, bool, error) {
+func (s *Service) activeRailMerchantAccountSecretScope(ctx context.Context, id merchant.ID, rail, environment string) (railMerchantAccountSecretScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
-		return providerAccountSecretScope{}, false, nil
+		return railMerchantAccountSecretScope{}, false, nil
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return providerAccountSecretScope{}, false, fmt.Errorf("provider account environment must be live or test")
+		return railMerchantAccountSecretScope{}, false, fmt.Errorf("provider account environment must be live or test")
 	}
 	rail = normalizeProviderSecretType(rail)
-	var row gen.OpenrailsPaymentProviderAccount
+	var row gen.OpenrailsRailMerchantAccount
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		count, err := q.CountActiveProviderAccountsForNewWork(ctx, gen.CountActiveProviderAccountsForNewWorkParams{
+		count, err := q.CountActiveRailMerchantAccountsForNewWork(ctx, gen.CountActiveRailMerchantAccountsForNewWorkParams{
 			MerchantID:  id.UUID(),
 			Rail:        rail,
 			Environment: &environment,
@@ -255,7 +255,7 @@ func (s *Service) activeProviderAccountSecretScope(ctx context.Context, id merch
 			}).Warn("multiple active provider accounts configured; using newest for new work")
 		}
 		if count == 0 {
-			total, err := q.CountProviderAccountsForRailEnvironment(ctx, gen.CountProviderAccountsForRailEnvironmentParams{
+			total, err := q.CountRailMerchantAccountsForRailEnvironment(ctx, gen.CountRailMerchantAccountsForRailEnvironmentParams{
 				MerchantID:  id.UUID(),
 				Rail:        rail,
 				Environment: &environment,
@@ -264,10 +264,10 @@ func (s *Service) activeProviderAccountSecretScope(ctx context.Context, id merch
 				return err
 			}
 			if total > 0 {
-				return ErrNoActiveProviderAccount
+				return ErrNoActiveRailMerchantAccount
 			}
 		}
-		row, err = q.GetActiveProviderAccountForNewWork(ctx, gen.GetActiveProviderAccountForNewWorkParams{
+		row, err = q.GetActiveRailMerchantAccountForNewWork(ctx, gen.GetActiveRailMerchantAccountForNewWorkParams{
 			MerchantID:  id.UUID(),
 			Rail:        rail,
 			Environment: &environment,
@@ -275,38 +275,38 @@ func (s *Service) activeProviderAccountSecretScope(ctx context.Context, id merch
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return providerAccountSecretScope{}, false, nil
+		return railMerchantAccountSecretScope{}, false, nil
 	}
-	if errors.Is(err, ErrNoActiveProviderAccount) {
-		return providerAccountSecretScope{}, false, err
+	if errors.Is(err, ErrNoActiveRailMerchantAccount) {
+		return railMerchantAccountSecretScope{}, false, err
 	}
 	if err != nil {
-		return providerAccountSecretScope{}, false, fmt.Errorf("load active provider account %s/%s: %w", rail, environment, err)
+		return railMerchantAccountSecretScope{}, false, fmt.Errorf("load active provider account %s/%s: %w", rail, environment, err)
 	}
-	scope := providerAccountSecretScope{
+	scope := railMerchantAccountSecretScope{
 		id:          row.ID,
 		rail:        row.Rail,
 		environment: row.Environment,
 		accountID:   row.AccountID,
-		settings:    providerAccountSettings(row.Evidence),
+		settings:    railMerchantAccountSettings(row.Evidence),
 	}
 	return scope, true, nil
 }
 
-// providerAccountSecretScopeByAccountID resolves the secret scope for a specific
+// railMerchantAccountSecretScopeByAccountID resolves the secret scope for a specific
 // account by its account_id (#641). Archived accounts remain addressable for
 // inbound webhooks and existing provider-bound obligations.
-func (s *Service) providerAccountSecretScopeByAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (providerAccountSecretScope, bool, error) {
+func (s *Service) railMerchantAccountSecretScopeByAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (railMerchantAccountSecretScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
-		return providerAccountSecretScope{}, false, nil
+		return railMerchantAccountSecretScope{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
-	var scope providerAccountSecretScope
+	var scope railMerchantAccountSecretScope
 	var evidence []byte
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 				SELECT rail, environment, account_id, evidence
-				  FROM openrails.payment_provider_accounts
+				  FROM openrails.rail_merchant_accounts
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND account_id = $3
@@ -314,16 +314,16 @@ func (s *Service) providerAccountSecretScopeByAccountID(ctx context.Context, id 
 			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &evidence)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return providerAccountSecretScope{}, false, nil
+		return railMerchantAccountSecretScope{}, false, nil
 	}
 	if err != nil {
-		return providerAccountSecretScope{}, false, fmt.Errorf("load provider account %s/%s: %w", rail, accountID, err)
+		return railMerchantAccountSecretScope{}, false, fmt.Errorf("load provider account %s/%s: %w", rail, accountID, err)
 	}
-	scope.settings = providerAccountSettings(evidence)
+	scope.settings = railMerchantAccountSettings(evidence)
 	return scope, true, nil
 }
 
-func providerAccountSettings(raw []byte) map[string]any {
+func railMerchantAccountSettings(raw []byte) map[string]any {
 	var evidence struct {
 		Settings map[string]any `json:"settings"`
 	}
@@ -339,7 +339,7 @@ func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id 
 	if s.secrets == nil || id.IsZero() {
 		return "", false, nil
 	}
-	scope, ok, err := s.providerAccountSecretScopeByAccountID(ctx, id, string(models.RailNMI), accountID)
+	scope, ok, err := s.railMerchantAccountSecretScopeByAccountID(ctx, id, string(models.RailNMI), accountID)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -358,7 +358,7 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	if s.secrets == nil {
 		return creds, false, nil
 	}
-	scope, ok, err := s.providerAccountSecretScopeByAccountID(ctx, id, "stripe", accountID)
+	scope, ok, err := s.railMerchantAccountSecretScopeByAccountID(ctx, id, "stripe", accountID)
 	if err != nil || !ok {
 		return creds, ok, err
 	}
@@ -378,9 +378,9 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	return c, true, err
 }
 
-// ResolveProviderAccountID returns the row id of an account by account_id
+// ResolveRailMerchantAccountID returns the row id of an account by account_id
 // (#641), to stamp records from a per-account webhook. ok=false when none matches.
-func (s *Service) ResolveProviderAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (uuid.UUID, bool, error) {
+func (s *Service) ResolveRailMerchantAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (uuid.UUID, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
 		return uuid.Nil, false, nil
 	}
@@ -388,7 +388,7 @@ func (s *Service) ResolveProviderAccountID(ctx context.Context, id merchant.ID, 
 	var pid uuid.UUID
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			SELECT id FROM openrails.payment_provider_accounts
+			SELECT id FROM openrails.rail_merchant_accounts
 			 WHERE merchant_id = $1::uuid
 			   AND rail = lower($2)
 			   AND account_id = $3
@@ -404,9 +404,9 @@ func (s *Service) ResolveProviderAccountID(ctx context.Context, id merchant.ID, 
 	return pid, true, nil
 }
 
-// PaymentProviderAccountIdentity is the globally unique rail-native provider
+// RailMerchantAccountIdentity is the globally unique rail-native provider
 // account identity plus the merchant that owns it.
-type PaymentProviderAccountIdentity struct {
+type RailMerchantAccountIdentity struct {
 	ID          uuid.UUID
 	MerchantID  merchant.ID
 	Rail        string
@@ -414,20 +414,20 @@ type PaymentProviderAccountIdentity struct {
 	AccountID   string
 }
 
-// ErrProviderAccountOwnedByAnotherMerchant signals that a (rail, environment,
+// ErrRailMerchantAccountOwnedByAnotherMerchant signals that a (rail, environment,
 // account_id) is already registered to a DIFFERENT merchant. Provider accounts
 // are globally unique to one merchant (#650) and are never shared or moved; the
 // upsert rejects a cross-merchant claim, but with an opaque no-rows /
 // unique-violation error — this names the conflict instead.
-var ErrProviderAccountOwnedByAnotherMerchant = errors.New("provider account is already owned by another merchant")
+var ErrRailMerchantAccountOwnedByAnotherMerchant = errors.New("provider account is already owned by another merchant")
 
-// AssertProviderAccountUnowned is a clear-error preflight for the
-// global-uniqueness upsert: it returns ErrProviderAccountOwnedByAnotherMerchant
+// AssertRailMerchantAccountUnowned is a clear-error preflight for the
+// global-uniqueness upsert: it returns ErrRailMerchantAccountOwnedByAnotherMerchant
 // (wrapped with the conflicting identity) when (rail, environment, account_id)
 // already belongs to a merchant other than merchantID, and nil when the account
 // is unclaimed or already this merchant's. q MUST be a privileged (non-RLS)
 // querier so it can see accounts across merchants.
-func AssertProviderAccountUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rail, environment, accountID string) error {
+func AssertRailMerchantAccountUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rail, environment, accountID string) error {
 	accountID = strings.TrimSpace(accountID)
 	if q == nil || accountID == "" {
 		return nil
@@ -437,7 +437,7 @@ func AssertProviderAccountUnowned(ctx context.Context, q *gen.Queries, merchantI
 	if environment == "" {
 		environment = "live"
 	}
-	row, err := q.GetProviderAccountByRailIdentity(ctx, gen.GetProviderAccountByRailIdentityParams{
+	row, err := q.GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
 		Rail:        rail,
 		Environment: &environment,
 		AccountID:   accountID,
@@ -449,36 +449,36 @@ func AssertProviderAccountUnowned(ctx context.Context, q *gen.Queries, merchantI
 		return err
 	}
 	if row.MerchantID != merchantID {
-		return fmt.Errorf("provider account %s:%s (%s): %w", row.Rail, row.AccountID, row.Environment, ErrProviderAccountOwnedByAnotherMerchant)
+		return fmt.Errorf("provider account %s:%s (%s): %w", row.Rail, row.AccountID, row.Environment, ErrRailMerchantAccountOwnedByAnotherMerchant)
 	}
 	return nil
 }
 
-// ResolvePaymentProviderAccountByIdentity resolves an account globally by
+// ResolveRailMerchantAccountByIdentity resolves an account globally by
 // its rail-native identity. Use this at webhook/callback boundaries where the
 // provider payload or route carries account_id and the merchant should be derived
 // from the account row.
-func (s *Service) ResolvePaymentProviderAccountByIdentity(ctx context.Context, rail, environment, accountID string) (PaymentProviderAccountIdentity, bool, error) {
+func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
-		return PaymentProviderAccountIdentity{}, false, nil
+		return RailMerchantAccountIdentity{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
 		environment = "live"
 	}
-	row, err := gen.New(s.pool).GetProviderAccountByRailIdentity(ctx, gen.GetProviderAccountByRailIdentityParams{
+	row, err := gen.New(s.pool).GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
 		Rail:        rail,
 		Environment: &environment,
 		AccountID:   strings.TrimSpace(accountID),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return PaymentProviderAccountIdentity{}, false, nil
+		return RailMerchantAccountIdentity{}, false, nil
 	}
 	if err != nil {
-		return PaymentProviderAccountIdentity{}, false, err
+		return RailMerchantAccountIdentity{}, false, err
 	}
-	return PaymentProviderAccountIdentity{
+	return RailMerchantAccountIdentity{
 		ID:          row.ID,
 		MerchantID:  merchant.ID(row.MerchantID),
 		Rail:        row.Rail,
@@ -487,12 +487,12 @@ func (s *Service) ResolvePaymentProviderAccountByIdentity(ctx context.Context, r
 	}, true, nil
 }
 
-// HasLiveProviderAccounts reports whether ANY merchant declares a provider
+// HasLiveRailMerchantAccounts reports whether ANY merchant declares a provider
 // account on rail with environment=live (global, cross-merchant — same trust
-// boundary as ResolvePaymentProviderAccountByIdentity). Webhook ingestion uses
+// boundary as ResolveRailMerchantAccountByIdentity). Webhook ingestion uses
 // it (#668): CCBill has no HMAC, so its test_mode IP-allowlist bypass is
 // refused while a live CCBill account exists anywhere in the catalog.
-func (s *Service) HasLiveProviderAccounts(ctx context.Context, rail string) (bool, error) {
+func (s *Service) HasLiveRailMerchantAccounts(ctx context.Context, rail string) (bool, error) {
 	if s == nil || s.pool == nil {
 		return false, errors.New("merchants: pgx pool is required")
 	}
@@ -500,7 +500,7 @@ func (s *Service) HasLiveProviderAccounts(ctx context.Context, rail string) (boo
 	var exists bool
 	err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM openrails.payment_provider_accounts
+			SELECT 1 FROM openrails.rail_merchant_accounts
 			 WHERE rail = lower($1) AND environment = 'live'
 		)`, rail).Scan(&exists)
 	if err != nil {

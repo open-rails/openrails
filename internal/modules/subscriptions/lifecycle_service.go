@@ -1471,10 +1471,16 @@ const (
 	// ResolveUnreachable: the provider was not reachable (no creds / down / rate
 	// limited). The sub STAYS unknown and is retried with exponential backoff (#633).
 	ResolveUnreachable UnknownResolution = iota
-	// ResolveRenewed: the provider confirms a current/renewed billing relationship
-	// (a charge landed for the new period, or the remote sub is active). Advance the
-	// local period to the provider's period end and return to `active`.
+	// ResolveRenewed: the provider confirms a VERIFIED renewal charge for the new
+	// period. Advance the local period to the provider's period end and return to
+	// `active` (the backfilled payment is the charge that justifies it).
 	ResolveRenewed
+	// ResolveAdopted (#367 doctrine, ported by #665): the remote sub is alive with
+	// a FUTURE next billing but NO verified charge (provider clock misalignment).
+	// Re-anchor the period END to the provider's clock and return to `active`;
+	// the period START is untouched so no new entitlement window is derived —
+	// adoption alone never grants access.
+	ResolveAdopted
 	// ResolvePastDue: the provider confirms the renewal payment FAILED but the sub is
 	// still recoverable within the dunning window. Enter `past_due` so dunning/grace
 	// runs (an our-rebill sub) or grace_exhausted terminates it.
@@ -1482,6 +1488,12 @@ const (
 	// ResolveCancelled: the provider deleted/cancelled the remote subscription.
 	// Terminal: cancel locally and revoke the access window as-of the period end.
 	ResolveCancelled
+	// ResolveCancelledRemoteAlive (#679): terminal cancel where the REMOTE
+	// subscription may still exist and keep retrying (stale-decline resolution —
+	// the roster did not confirm it gone). Same local transition as
+	// ResolveCancelled, plus the deferred NMI delete is durably queued
+	// (DeletionScheduledAt marker + nmi_delete intent; execution mode-gated).
+	ResolveCancelledRemoteAlive
 )
 
 // ResolveUnknownSubscription applies a provider-confirmed outcome to an `unknown`
@@ -1522,6 +1534,19 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
 		}
 		return nil
+	case ResolveAdopted:
+		// Period END only — start untouched, no entitlement windows written
+		// (adoption alone never grants access; a real charge renews).
+		sub.Status = models.StatusActive
+		if newPeriodEnd != nil {
+			end := *newPeriodEnd
+			sub.CurrentPeriodEndsAt = &end
+		}
+		sub.ClearRetrySchedule()
+		if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+			return fmt.Errorf("resolve unknown (adopted) %s: %w", sub.ID, err)
+		}
+		return nil
 	case ResolvePastDue:
 		sub.Status = models.StatusPastDue
 		if sub.GraceEndsAt == nil {
@@ -1532,20 +1557,53 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
 		}
 		return nil
-	case ResolveCancelled:
+	case ResolveCancelled, ResolveCancelledRemoteAlive:
 		asOf := now
 		if sub.CurrentPeriodEndsAt != nil {
 			asOf = *sub.CurrentPeriodEndsAt
 		}
 		fb := "cancelled at provider (converged from unknown)"
-		return s.ApplyLocalCancellation(ctx, dbb, sub, LocalCancellation{
+		// #679 queue-always: the remote sub may still exist and keep retrying
+		// (stale decline, roster didn't confirm gone) — durably record the
+		// deferred NMI delete like FailMembership. Marker persists with the
+		// cancellation UPDATE; a failed enqueue is healed by the startup
+		// marker sweep (ConvertDeferredDeleteMarkersToIntents).
+		scheduleDelete := false
+		if res == ResolveCancelledRemoteAlive {
+			fb = "renewal declined beyond dunning window (converged from unknown)"
+			if rails.RemoteDeleteOnTerminalCancel(sub.Rail) && sub.RailSubscriptionID != "" {
+				if s.deferDelete != nil {
+					sub.DeletionScheduledAt = &now
+					scheduleDelete = true
+				} else {
+					log.WithContext(ctx).WithFields(log.Fields{
+						"subscription_id":      sub.ID,
+						"rail":                 sub.Rail,
+						"rail_subscription_id": sub.RailSubscriptionID,
+					}).Warn("no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription may still be retrying (wiring gap)")
+				}
+			}
+		}
+		if err := s.ApplyLocalCancellation(ctx, dbb, sub, LocalCancellation{
 			EndedAt:       now,
 			CancelType:    models.CancelTypeExpired,
 			Feedback:      &fb,
 			RevokeReason:  models.EntitlementRevokeDunning,
 			RevokeAsOf:    asOf,
 			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		})
+		}); err != nil {
+			return err
+		}
+		if scheduleDelete {
+			if err := s.deferDelete.ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
+				// Marker committed with the cancellation keeps the pending
+				// delete discoverable (startup marker sweep) — log, don't fail.
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": sub.ID,
+				}).Error("failed to enqueue deferred NMI delete for unknown-resolution cancel; startup marker sweep will convert the marker")
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
 	}
@@ -1866,22 +1924,22 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// subscription, or NMI keeps retrying it monthly forever. The
 		// DeletionScheduledAt marker AND the nmi_delete intent are both
 		// written inside this transaction (atomic — no crash window between
-		// marker and intent). The intent executor plus the #344 client-level
-		// kill switch then govern actual execution.
+		// marker and intent). #679 queue-always: the desired provider action is
+		// recorded UNCONDITIONALLY — provider_write_mode / credentials / the
+		// volume breaker gate EXECUTION at the intent executor, never queuing
+		// (limited mode parks system-origin intents until mode=full).
 		if subscription.Status == models.StatusCancelled &&
-			rails.IsNMI(subscription.Rail) &&
+			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
-			if s.Config != nil && s.Config.IsLimitedMode() {
-				// Limited mode (#345): no proactive provider action — leave the
-				// remote subscription for reconciliation.
+			if s.deferDelete != nil {
+				subscription.DeletionScheduledAt = &now
+				scheduleDeferredDelete = true
+			} else {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id":      subscription.ID,
 					"rail":                 subscription.Rail,
 					"rail_subscription_id": subscription.RailSubscriptionID,
-				}).Warn("Limited mode: remote rail subscription left alive for reconciliation (no proactive provider action)")
-			} else if s.deferDelete != nil {
-				subscription.DeletionScheduledAt = &now
-				scheduleDeferredDelete = true
+				}).Warn("no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription left alive (wiring gap)")
 			}
 		}
 

@@ -124,9 +124,9 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		deletionScheduledAt.UTC(), fx.userID, tenantID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.external_provider_mutation_logs
-			WHERE provider_intent_id IN (SELECT id FROM openrails.provider_intents WHERE subscription_id = $1)`, fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
+			WHERE provider_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -134,7 +134,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 	return fx
 }
 
-func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.OpenrailsProviderIntent {
+func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.OpenrailsRailIntent {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
@@ -151,9 +151,9 @@ func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Ti
 	return row
 }
 
-func (fx intentFixture) intent(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
+func (fx intentFixture) intent(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
+	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
 	require.NoError(t, err)
 	return row
 }
@@ -205,7 +205,7 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 
 	rows, err := fx.db.Pool().Query(context.Background(), `
 		SELECT phase, attempt, evidence::text
-		FROM openrails.external_provider_mutation_logs
+		FROM openrails.rail_mutation_logs
 		WHERE provider_intent_id = $1
 		ORDER BY created_at, id`, row.ID)
 	require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestAmbiguousOutcomeRoutesThroughVerifier(t *testing.T) {
 	// the intent due now and run the verifier.
 	fake.present.Store(false)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 
 	stats, err := fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
@@ -298,7 +298,7 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intent(t, row.ID).Status)
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -311,7 +311,7 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	// Gateway recovers; pull the backoff in and re-run the executor.
 	fake.deleteStatus.Store(0)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -347,7 +347,7 @@ func TestLimitedModeOriginGating(t *testing.T) {
 
 		// Mode lifts to full -> drains.
 		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
 		_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 		require.NoError(t, err)
@@ -438,7 +438,7 @@ func TestIdempotentEnqueue(t *testing.T) {
 
 	var count int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID).Scan(&count))
+		"SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID).Scan(&count))
 	assert.Equal(t, 1, count)
 }
 
@@ -471,10 +471,10 @@ type pruneTestHandler struct{ calls *atomic.Int64 }
 const typePruneTest = "prune_test_intent"
 
 func (h *pruneTestHandler) Type() string { return typePruneTest }
-func (h *pruneTestHandler) CheckRelevance(context.Context, gen.OpenrailsProviderIntent) (Relevance, error) {
+func (h *pruneTestHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
-func (h *pruneTestHandler) Execute(context.Context, gen.OpenrailsProviderIntent) Outcome {
+func (h *pruneTestHandler) Execute(context.Context, gen.OpenrailsRailIntent) Outcome {
 	h.calls.Add(1)
 	return Succeeded(map[string]any{
 		"transaction_id": "txn-abc-123",
@@ -483,13 +483,13 @@ func (h *pruneTestHandler) Execute(context.Context, gen.OpenrailsProviderIntent)
 		"auth_code":      "XYZ789",
 	})
 }
-func (h *pruneTestHandler) Verify(context.Context, gen.OpenrailsProviderIntent) Outcome {
+func (h *pruneTestHandler) Verify(context.Context, gen.OpenrailsRailIntent) Outcome {
 	return Ambiguous("unused")
 }
 func (h *pruneTestHandler) Backoff(int32) time.Duration { return time.Minute }
 
 // TestSucceededIntentIsPrunedToSlimTombstone (#607): after a successful
-// execute the provider_intents row STILL EXISTS (it is the effectively-once
+// execute the rail_intents row STILL EXISTS (it is the effectively-once
 // dedupe tombstone) but its heavy payload is dropped and result_evidence is
 // reduced to the pointer keys. A re-enqueue + re-execute with the same
 // idempotency key returns the same succeeded row WITHOUT re-charging, proving
@@ -506,7 +506,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 	}
 
 	idemKey := "prune-test-" + uuid.NewString()
-	enqueue := func() gen.OpenrailsProviderIntent {
+	enqueue := func() gen.OpenrailsRailIntent {
 		t.Helper()
 		row, err := fx.store.Enqueue(ctx, EnqueueParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
@@ -559,7 +559,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 
 	var count int
 	require.NoError(t, fx.db.Pool().QueryRow(ctx,
-		"SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1 AND idempotency_key = $2",
+		"SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1 AND idempotency_key = $2",
 		dbtest.TestMerchantID.UUID(), idemKey).Scan(&count))
 	assert.Equal(t, 1, count, "tombstone row retained (dedupe guard)")
 
@@ -598,7 +598,7 @@ func readRaw(t *testing.T, fx intentFixture, id uuid.UUID) (status string, paylo
 	t.Helper()
 	err := fx.db.Pool().QueryRow(context.Background(),
 		`SELECT status, payload::text, result_evidence::text
-		   FROM openrails.provider_intents WHERE id = $1`, id).Scan(&status, &payload, &evidence)
+		   FROM openrails.rail_intents WHERE id = $1`, id).Scan(&status, &payload, &evidence)
 	require.NoError(t, err)
 	return status, payload, evidence
 }
@@ -606,7 +606,7 @@ func readRaw(t *testing.T, fx intentFixture, id uuid.UUID) (status string, paylo
 // manualRebillEvidenceStringForTest mirrors the dunning repair path's read of
 // one string key off result_evidence, proving the slim tombstone still answers
 // it.
-func manualRebillEvidenceStringForTest(intent gen.OpenrailsProviderIntent, key string) string {
+func manualRebillEvidenceStringForTest(intent gen.OpenrailsRailIntent, key string) string {
 	if len(intent.ResultEvidence) == 0 {
 		return ""
 	}
@@ -656,7 +656,7 @@ func TestClaimLeaseReclaim(t *testing.T) {
 
 	// Simulate a crashed executor: claimed long ago, lease elapsed.
 	_, err := fx.db.Pool().Exec(context.Background(),
-		`UPDATE openrails.provider_intents
+		`UPDATE openrails.rail_intents
 		 SET status = 'in_flight', claimed_until = now() - interval '1 minute', attempts = 1
 		 WHERE id = $1`, row.ID)
 	require.NoError(t, err)

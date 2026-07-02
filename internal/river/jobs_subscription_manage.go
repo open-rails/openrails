@@ -44,7 +44,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.ProviderAccountSet
+	Rails                        config.RailMerchantAccountSet
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -143,7 +143,7 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.ProviderAccountSet
+	Rails                        config.RailMerchantAccountSet
 	EntitlementService           *entitlements.EntitlementService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService

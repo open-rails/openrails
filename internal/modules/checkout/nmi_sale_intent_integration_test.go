@@ -127,7 +127,7 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		Amount: 5_000_000, Currency: "USD", CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE intent_type = 'nmi_sale' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'nmi_sale' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -166,7 +166,7 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	}
 }
 
-func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsProviderIntent {
+func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),

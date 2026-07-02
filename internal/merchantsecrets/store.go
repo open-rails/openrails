@@ -183,7 +183,7 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	// plaintext is refused even where dev deliberately allows it for the rest.
 	if !enc.Enabled() {
 		store = merchants.NewWriteRestrictedSecretStore(store, map[string]string{
-			"provider_accounts/solana/*/*/private_key": "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
+			"rail_merchant_accounts/solana/*/*/private_key": "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
 		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil

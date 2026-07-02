@@ -97,7 +97,7 @@ type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
 	cfg                *config.Config
-	rails              config.ProviderAccountSet
+	rails              config.RailMerchantAccountSet
 	clock              clockwork.Clock
 	priceService       *catalog.PriceService
 	productService     *catalog.ProductService
@@ -111,7 +111,7 @@ func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	railSet config.ProviderAccountSet,
+	railSet config.RailMerchantAccountSet,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,

@@ -127,7 +127,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", userID)
@@ -177,9 +177,9 @@ func (fx rebillFixture) subscription(t *testing.T) gen.OpenrailsSubscription {
 	return row
 }
 
-func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
+func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
+	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
 	require.NoError(t, err)
 	return row
 }
@@ -225,7 +225,7 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	// The charge actually landed at NMI.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -305,7 +305,7 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)

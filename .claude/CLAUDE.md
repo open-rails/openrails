@@ -19,8 +19,8 @@ identifiers OUT of committed files (code, trackers, this file).
   webhook-endpoint registration. Bump it deliberately (re-run the breaking-change audit); don't float.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
 
-## Provider account identity
-- `openrails.provider_accounts` is an OPERATOR-DECLARED catalog (manifest `account_id`). There is
+## Rail merchant-account identity
+- `openrails.rail_merchant_accounts` (#683; was provider_accounts) is an OPERATOR-DECLARED catalog (manifest `account_id`). There is
   NO runtime "whoami"/identity resolution and NO account-mismatch guard — that whole subsystem was
   ripped out (#592). `account_id` is an opaque, operator-declared label.
 - Per rail, the declared `account_id` is:

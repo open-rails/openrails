@@ -403,7 +403,7 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		if _, err := adapter.AutoCreate(ctx, sctx); err != nil && !errors.Is(err, errPendingManualLink) {
 			log.WithContext(ctx).WithError(err).
 				WithField("rail", rail).
-				WithField("provider_account_id", sctx.TargetAccountID).
+				WithField("rail_merchant_account_id", sctx.TargetAccountID).
 				Warn("secondary catalog sync failed (best-effort); drift surfaces on reconcile")
 		}
 	}

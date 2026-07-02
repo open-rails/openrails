@@ -30,7 +30,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	subscriptionID := uuid.New()
 
 	display := "CCBill Test"
-	account, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+	account, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 		MerchantID:  merchantID,
 		Rail:        "ccbill",
 		Environment: strptr("test"),
@@ -149,17 +149,17 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, subscriptionID, activeSub.ID)
 
-	err = q.UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
-		ID:             uuid.New(),
-		CustomerID:     customerID,
-		Rail:           "ccbill",
-		RailCustomerID: "rail_customer_" + customerID.String(),
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		MerchantID:     merchantID,
+	err = q.UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
+		ID:         uuid.New(),
+		CustomerID: customerID,
+		Rail:       "ccbill",
+		AccountID:  "rail_customer_" + customerID.String(),
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		MerchantID: merchantID,
 	})
 	require.NoError(t, err)
-	railCustomerID, err := q.GetRailCustomerIDForMerchant(ctx, gen.GetRailCustomerIDForMerchantParams{
+	railCustomerID, err := q.GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
 		MerchantID: merchantID,
 		CustomerID: customerID,
 		Rail:       "ccbill",
@@ -345,27 +345,27 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Len(t, usageDims, 1)
 	require.Equal(t, int64(3), usageDims[0].Total)
 
-	intent, err := q.EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
-		MerchantID:        merchantID,
-		Provider:          "ccbill",
-		IntentType:        "nmi_delete_subscription",
-		SubscriptionID:    &subscriptionID,
-		PriceID:           &priceID,
-		Payload:           []byte(`{"contract":true}`),
-		IdempotencyKey:    "intent-" + subscriptionID.String(),
-		NextAttemptAt:     now,
-		Origin:            "system",
-		ProviderAccountID: &account.ID,
+	intent, err := q.EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
+		MerchantID:            merchantID,
+		Provider:              "ccbill",
+		IntentType:            "nmi_delete_subscription",
+		SubscriptionID:        &subscriptionID,
+		PriceID:               &priceID,
+		Payload:               []byte(`{"contract":true}`),
+		IdempotencyKey:        "intent-" + subscriptionID.String(),
+		NextAttemptAt:         now,
+		Origin:                "system",
+		RailMerchantAccountID: &account.ID,
 	})
 	require.NoError(t, err)
-	claimed, err := q.ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
+	claimed, err := q.ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
 		LeaseUntil: now.Add(time.Minute),
 		ID:         intent.ID,
 		Now:        now,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "in_flight", claimed.Status)
-	intents, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
+	intents, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
 		Provider:       strptr("ccbill"),
 		SubscriptionID: &subscriptionID,
 		PageLimit:      10,
@@ -385,7 +385,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Empty(t, stalled)
 }
 
-func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
+func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -399,7 +399,7 @@ func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
 	require.NoError(t, err)
 
 	accountID := "acct-global-" + uuid.NewString()
-	first, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+	first, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -407,7 +407,7 @@ func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	same, err := q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+	same, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -416,7 +416,7 @@ func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, same.ID)
 
-	_, err = q.UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+	_, err = q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 		MerchantID:  otherMerchantID,
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -424,7 +424,7 @@ func TestPaymentProviderAccountIdentityIsGlobal(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	byIdentity, err := q.GetProviderAccountByRailIdentity(ctx, gen.GetProviderAccountByRailIdentityParams{
+	byIdentity, err := q.GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
 		Rail:        "stripe",
 		Environment: strptr("test"),
 		AccountID:   accountID,

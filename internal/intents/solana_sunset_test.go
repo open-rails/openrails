@@ -62,13 +62,13 @@ func encodePlanAccount(owner solanago.PublicKey, status uint8) []byte {
 	return blob
 }
 
-func sunsetIntent(t *testing.T, pda string) gen.OpenrailsProviderIntent {
+func sunsetIntent(t *testing.T, pda string) gen.OpenrailsRailIntent {
 	t.Helper()
 	payload, err := json.Marshal(SolanaSunsetPayload{PlanPDA: pda})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "solana",

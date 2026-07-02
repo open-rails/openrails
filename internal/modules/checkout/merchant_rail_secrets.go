@@ -30,7 +30,7 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretR
 	}
 }
 
-func (s *CheckoutService) SetProviderAccountSecretResolver(resolver merchants.ProviderAccountSecretResolver) {
+func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchants.RailMerchantAccountSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -67,7 +67,7 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, envi
 	if err != nil {
 		return "", false, err
 	}
-	name, ok, err := s.ProviderSecrets.ActiveProviderAccountSecretName(ctx, tid, rail, environment, key)
+	name, ok, err := s.ProviderSecrets.ActiveRailMerchantAccountSecretName(ctx, tid, rail, environment, key)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -78,9 +78,9 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
-// providerAccountEnvironment is the environment provider-account rows carry in
+// railMerchantAccountEnvironment is the environment provider-account rows carry in
 // this deployment: test under test_mode, live otherwise (#641).
-func (s *CheckoutService) providerAccountEnvironment() string {
+func (s *CheckoutService) railMerchantAccountEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
 }
 
@@ -96,7 +96,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		} else if ok {
 			proc := cloneRailConfig(s.activeNMIConfig())
 			if proc == nil {
-				proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
+				proc = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
 			}
 			proc.Rail = models.RailNMI
 			if proc.NMI == nil {
@@ -154,7 +154,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 }
 
 func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
-	scopeResolver, ok := s.ProviderSecrets.(merchants.ProviderAccountScopeResolver)
+	scopeResolver, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver)
 	if !ok {
 		return nil, errors.New("missing scoped merchant CCBill provider account resolver")
 	}
@@ -165,8 +165,8 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	// Environment follows test_mode (#641/#668): sandbox deployments declare
 	// environment=test rows (ValidateRailSet enforces it), so a hardcoded
 	// "live" here can never resolve under test_mode.
-	env := s.providerAccountEnvironment()
-	scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailCCBill), env)
+	env := s.railMerchantAccountEnvironment()
+	scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailCCBill), env)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func providerSettingStrings(settings map[string]any, key string) []string {
 	}
 }
 
-func (s *CheckoutService) railConfig(name string) *config.ProviderAccountConfig {
+func (s *CheckoutService) railConfig(name string) *config.RailMerchantAccountConfig {
 	if s == nil || s.Rails == nil {
 		return nil
 	}
@@ -247,7 +247,7 @@ func (s *CheckoutService) railConfig(name string) *config.ProviderAccountConfig 
 }
 
 // activeNMIConfig returns the configured active NMI provider account, if any.
-func (s *CheckoutService) activeNMIConfig() *config.ProviderAccountConfig {
+func (s *CheckoutService) activeNMIConfig() *config.RailMerchantAccountConfig {
 	if s == nil || s.Rails == nil {
 		return nil
 	}
@@ -255,7 +255,7 @@ func (s *CheckoutService) activeNMIConfig() *config.ProviderAccountConfig {
 	return proc
 }
 
-func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
+func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantAccountConfig {
 	if in == nil {
 		return nil
 	}

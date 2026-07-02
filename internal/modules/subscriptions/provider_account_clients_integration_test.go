@@ -24,9 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-const providerAccountClientSchema = `
+const railMerchantAccountClientSchema = `
 CREATE SCHEMA IF NOT EXISTS openrails;
-CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
+CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
 );
 `
 
-func newProviderAccountClientDB(t *testing.T) *db.DB {
+func newRailMerchantAccountClientDB(t *testing.T) *db.DB {
 	t.Helper()
 	ctx := context.Background()
 	var pool *pgxpool.Pool
@@ -89,28 +89,28 @@ func newProviderAccountClientDB(t *testing.T) *db.DB {
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
 	}
-	_, err := pool.Exec(ctx, providerAccountClientSchema)
+	_, err := pool.Exec(ctx, railMerchantAccountClientSchema)
 	require.NoError(t, err)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
 	return appDB
 }
 
-func TestExistingSubscriptionUsesArchivedProviderAccountClient(t *testing.T) {
+func TestExistingSubscriptionUsesArchivedRailMerchantAccountClient(t *testing.T) {
 	ctx := context.Background()
-	appDB := newProviderAccountClientDB(t)
+	appDB := newRailMerchantAccountClientDB(t)
 	merchantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 
 	const archivedAccountID = "archived-nmi-account"
 	const activeAccountID = "active-nmi-account"
 	var archivedProviderRowID uuid.UUID
 	require.NoError(t, appDB.Pool().QueryRow(ctx, `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1, 'nmi', 'live', $2, true)
 		RETURNING id
 	`, merchantID, archivedAccountID).Scan(&archivedProviderRowID))
 	_, err := appDB.Pool().Exec(ctx, `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1, 'nmi', 'live', $2, false)
 	`, merchantID, activeAccountID)
 	require.NoError(t, err)
@@ -124,8 +124,8 @@ func TestExistingSubscriptionUsesArchivedProviderAccountClient(t *testing.T) {
 	}
 
 	client, key, ok, err := NMIClientForExistingSubscription(ctx, appDB, clients, &models.Subscription{
-		Rail:              models.RailNMI,
-		ProviderAccountID: &archivedProviderRowID,
+		Rail:                  models.RailNMI,
+		RailMerchantAccountID: &archivedProviderRowID,
 	})
 	require.NoError(t, err)
 	require.True(t, ok)

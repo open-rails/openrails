@@ -158,16 +158,16 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		// created_at DESC and cap at limit. For a single concrete status (or
 		// --status=all) this is exactly one round trip.
 		var total int64
-		var rows []gen.OpenrailsProviderIntent
+		var rows []gen.OpenrailsRailIntent
 		for _, statusFilter := range statusFilters {
-			n, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
+			n, err := q.CountRailIntents(ctx, gen.CountRailIntentsParams{
 				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
 			})
 			if err != nil {
 				return fmt.Errorf("count provider intents: %w", err)
 			}
 			total += n
-			part, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
+			part, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
 				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
 				PageLimit: int64(limit), PageOffset: 0,
 			})
@@ -189,22 +189,22 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			items := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
 				item := map[string]any{
-					"id":                  row.ID,
-					"type":                row.IntentType,
-					"origin":              row.Origin,
-					"executes_under":      executesUnder(row.Origin),
-					"rail":                row.Provider,
-					"subscription_id":     row.SubscriptionID,
-					"payment_id":          row.PaymentID,
-					"status":              row.Status,
-					"attempts":            row.Attempts,
-					"next_attempt_at":     row.NextAttemptAt,
-					"failure_reason":      row.LastFailureReason,
-					"origin_reason":       row.OriginReason,
-					"expires_at":          row.ExpiresAt,
-					"executed_at":         row.ExecutedAt,
-					"created_at":          row.CreatedAt,
-					"provider_account_id": row.ProviderAccountID,
+					"id":                       row.ID,
+					"type":                     row.IntentType,
+					"origin":                   row.Origin,
+					"executes_under":           executesUnder(row.Origin),
+					"rail":                     row.Provider,
+					"subscription_id":          row.SubscriptionID,
+					"payment_id":               row.PaymentID,
+					"status":                   row.Status,
+					"attempts":                 row.Attempts,
+					"next_attempt_at":          row.NextAttemptAt,
+					"failure_reason":           row.LastFailureReason,
+					"origin_reason":            row.OriginReason,
+					"expires_at":               row.ExpiresAt,
+					"executed_at":              row.ExecutedAt,
+					"created_at":               row.CreatedAt,
+					"rail_merchant_account_id": row.RailMerchantAccountID,
 				}
 				if len(row.Payload) > 0 {
 					item["payload"] = json.RawMessage(row.Payload)
@@ -233,8 +233,8 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 				reason = *row.LastFailureReason
 			}
 			account := ""
-			if row.ProviderAccountID != nil {
-				account = row.ProviderAccountID.String()
+			if row.RailMerchantAccountID != nil {
+				account = row.RailMerchantAccountID.String()
 			}
 			if row.Status == intents.StatusPending {
 				byMode[executesUnder(row.Origin)]++
@@ -309,12 +309,12 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 			return err
 		}
 		filter := analytics.ProviderMutationEventFilter{
-			MerchantID:        merchantID.String(),
-			Provider:          providerFilter,
-			ProviderIntentID:  intentFilter,
-			ProviderAccountID: accountFilter,
-			Phase:             phaseFilter,
-			Limit:             limit,
+			MerchantID:            merchantID.String(),
+			Provider:              providerFilter,
+			ProviderIntentID:      intentFilter,
+			RailMerchantAccountID: accountFilter,
+			Phase:                 phaseFilter,
+			Limit:                 limit,
 		}
 		total, err := svc.CountProviderMutationEvents(ctx, filter)
 		if err != nil {
@@ -329,17 +329,17 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 			items := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
 				item := map[string]any{
-					"id":                  row.EventID,
-					"merchant_id":         row.MerchantID,
-					"provider":            row.Provider,
-					"provider_account_id": row.ProviderAccountID,
-					"provider_intent_id":  row.ProviderIntentID,
-					"intent_type":         row.IntentType,
-					"idempotency_key":     row.IdempotencyKey,
-					"attempt":             row.Attempt,
-					"phase":               row.Phase,
-					"reason":              row.Reason,
-					"created_at":          row.Timestamp,
+					"id":                       row.EventID,
+					"merchant_id":              row.MerchantID,
+					"provider":                 row.Provider,
+					"rail_merchant_account_id": row.RailMerchantAccountID,
+					"provider_intent_id":       row.ProviderIntentID,
+					"intent_type":              row.IntentType,
+					"idempotency_key":          row.IdempotencyKey,
+					"attempt":                  row.Attempt,
+					"phase":                    row.Phase,
+					"reason":                   row.Reason,
+					"created_at":               row.Timestamp,
 				}
 				if row.Evidence != "" {
 					item["evidence"] = json.RawMessage(row.Evidence)
@@ -356,8 +356,8 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
 		for _, row := range rows {
 			account := ""
-			if row.ProviderAccountID != nil {
-				account = row.ProviderAccountID.String()
+			if row.RailMerchantAccountID != nil {
+				account = row.RailMerchantAccountID.String()
 			}
 			intent := ""
 			if row.ProviderIntentID != nil {

@@ -63,10 +63,10 @@ type Subscription struct {
 	// Payment rail information
 	Rail               Rail   `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
-	// ProviderAccountID is the provider account that owns this subscription (#641).
-	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
-	UserEmail         *string    `json:"user_email,omitempty"`
-	PaymentMethodID   *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
+	// RailMerchantAccountID is the provider account that owns this subscription (#641).
+	RailMerchantAccountID *uuid.UUID `json:"rail_merchant_account_id,omitempty"`
+	UserEmail             *string    `json:"user_email,omitempty"`
+	PaymentMethodID       *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
 
 	// Manual rebill attempt fields for NMI
 	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt

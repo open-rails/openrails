@@ -215,11 +215,11 @@ func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi 
 	var lastErr *string
 	err := dbi.Qx(ctx).QueryRow(ctx, `
 SELECT watermark_at, last_error
-  FROM openrails.provider_refresh_watermarks
+  FROM openrails.rail_refresh_watermarks
  WHERE merchant_id = $1::uuid
    AND provider = 'stripe'
    AND event_domain = 'events'
-   AND provider_account_id IS NULL
+   AND rail_merchant_account_id IS NULL
 `, merchantID).Scan(&watermark, &lastErr)
 	require.NoError(t, err)
 	return watermark.UTC(), lastErr

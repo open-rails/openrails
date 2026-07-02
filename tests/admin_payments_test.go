@@ -739,7 +739,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	// The durable intent records the execution.
 	var intentStatus string
 	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
-		"SELECT status FROM openrails.provider_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
+		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "succeeded", intentStatus)
 

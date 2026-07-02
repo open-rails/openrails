@@ -223,7 +223,19 @@ absence during import — it usually just means *not imported yet*.
 
 The gate is **per source domain** (subscriptions / payments / admin grants): an
 `EXCESS` repair does not fire as AUTO until that domain is marked **fully reconciled**
-for the merchant. Until then it accumulates as a held finding for triage.
+for the merchant. Until then it accumulates as a held finding for triage
+(`reconcile_required` with the gate as cause — §8).
+
+The gate flips **automatically** (#665): after a COMPLETED mutating pull,
+`reconcile.MarkReconciledSourceDomains` marks exactly the domains the pull
+**proved** — exhaustive coverage per the fetcher's `SnapshotCoverage` contract
+(never mere event-window watermark freshness, which cannot prove absence),
+covering EVERY account in the merchant's declared rail-account catalog for the
+rails that could hold that domain's sources. Multi-account rails and undeclared
+catalogs prove nothing. `subscriptions` needs exhaustive rosters;
+`payments` needs full-history transaction coverage; `grants` (admin-sourced)
+is never pull-provable and stays a manual/bulk-import decision. The flag is a
+ratchet — proven domains flip true, nothing auto-unsets.
 
 ---
 
@@ -289,7 +301,7 @@ polymorphic/non-FK references. They are the Convergence Engine/runtime surface.
 | Refunds / chargebacks | Every provider refund/chargeback is mirrored; every mirrored refund links to a real original payment; `sum(refunds) <= original charge` after the charge/refund domain is fully pulled. | `pull.refund.*`, `pull.dispute.*`, `consistency.amount_mismatch.refund_math` |
 | Payment amount explanation | A provider-observed payment amount must be explained by the checkout session, invoice, discount, tax, proration, historical price snapshot, or explicit operator/off-channel record. It is not compared to the current live catalog price. | `consistency.amount_mismatch.payment_amount` |
 | Subscription lifecycle | Active periods advance, failed periods enter dunning, grace exhaustion terminates, and pending sessions do not sit forever. Missing rebill/failure webhooks past the expected period boundary are lifecycle drift, not catalog drift. | `life.subscription.*`, `life.checkout_session.stale` |
-| Remote recurring subscriptions | OpenRails expects one effective active billable remote subscription for a customer/merchant/product/tier group. Extra active remote subscriptions, including cross-provider duplicates, are duplicate facts. If no duplicate money has been collected yet, the finding is `consistency.duplicate.subscription` and the repair is a provider action to cancel/disable the extra remote subscription. If duplicate money was already collected, the primary integrity finding is `consistency.duplicate.provider_charge`, with the same provider-side cancellation linked as remediation while the extra remote subscription remains active. | `consistency.duplicate.subscription` + provider action |
+| Remote recurring subscriptions | OpenRails expects one effective active billable remote subscription for a customer/merchant/product/tier group. Extra active remote subscriptions, including cross-provider duplicates, are duplicate facts. Only the provider snapshot can see them (local duplicates are schema-blocked), so detection is PULL-plane (#665 single-writer rule): if no duplicate money has been collected yet, the finding is `pull.subscription.duplicate` and the repair is a provider action to cancel/disable the extra remote subscription. If duplicate money was already collected, the primary integrity finding is `consistency.duplicate.provider_charge`, with the same provider-side cancellation linked as remediation while the extra remote subscription remains active. | `pull.subscription.duplicate` + provider action |
 | Scheduled provider decisions: `provider_intents`, `subscriptions.deletion_scheduled_at`, `scheduled_price_id` | Not-yet-due provider lag is consistent. Past-due local decisions must either be reflected at the provider, re-enqueued, or surfaced once automatic retry is abandoned. | provider action while retryable; `life.provider_intent.abandoned` once abandoned |
 | Provider catalog objects | Local catalog is desired state. Provider product/plan/price objects must match the OpenRails catalog amount/cadence/provider metadata and OpenRails ownership markers. Drift is a catalog amount mismatch; repair is a provider catalog push or manual provider action. | `consistency.amount_mismatch.provider_catalog` + provider action |
 | Grant ledger derivation | Each source event that should create access/credits has the right grant; each grant's source still exists and justifies it; grant windows/spec snapshots match the source event. | `derive.grant.*` |
@@ -385,17 +397,20 @@ and should be handled conservatively.
 > **Implementation status (2026-06-18).** `derive.grant_effect.missing` and
 > `derive.grant_effect.excess` are implemented; `derive.grant.excess` is implemented
 > for the refunded-payment case (a live grant whose backing payment was refunded →
-> ADMIN surface-only). The two **`*.mismatch`** rows above are **NOT runtime checks
-> and intentionally so** — they are *guaranteed by construction* (the §9 category),
-> not pending work: `MaterializeGrant` is the sole writer of grant effects and writes
-> them to match the grant, grants are immutable snapshots, and revocation now flows
-> through the ledger too. So an effect cannot drift from its grant through normal
-> operation — the only remaining mutation path is the admin `ExtendActiveBySubscription`
-> (legitimately lengthens a window), against which a strict effect==grant check would
-> merely *false-positive*. (`derive.grant.mismatch` — "grant matches its source" — is
-> likewise not a drift check: a grant is a historical snapshot that is *supposed* to
-> diverge from the evolving source.) These become real runtime checks only if a future
-> architecture introduces an independent effect-mutation path. `derive.grant.missing`
+> ADMIN surface-only). Grant↔effect ATTRIBUTE equality is **guaranteed by
+> construction** (the §9 category): `MaterializeGrant` is the sole writer of grant
+> effects and writes them to match the grant, grants are immutable snapshots, and
+> revocation flows through the ledger — the only mutation path, the admin
+> `ExtendActiveBySubscription`, legitimately lengthens a window, so a strict
+> effect==grant check would merely *false-positive*. **`derive.grant_effect.mismatch`
+> IS a runtime check for the SOURCE↔projection drift shape** (#665, moved from the
+> legacy pull engine's PS-9): an `active` sub whose promised features were never
+> projected for the running period (AUTO — derive-1 fills exactly the gap; revoked
+> windows are recorded decisions and never re-granted, §6), and a terminally-dead sub
+> still projecting live subscription-sourced windows (AUTO — grants terminated +
+> windows retracted; `unknown` keeps access, #664). (`derive.grant.mismatch` — "grant
+> matches its source" — is not a drift check: a grant is a historical snapshot that is
+> *supposed* to diverge from the evolving source.) `derive.grant.missing`
 > IS implemented (spec-aware): the positive "this payment should grant X" signal is the
 > product's own grant spec via `payment → price → product`, so a completed one-off
 > payment for a product whose `entitlements_spec`/`credits_spec` promises grants but that
@@ -445,8 +460,9 @@ stop future billing. `consistency.duplicate.*` also covers duplicate invoice/usa
 Duplicate local rows for the same provider transaction are structurally blocked by
 `uq_payments_merchant_rail_transaction`; if a legacy/import path still
 materializes one, it is a local mirror repair, not a normal recurring finding.
-Initial subtypes: `provider_charge`, `subscription`, `invoice_usage`,
-`invoice_payment`.
+Initial subtypes: `provider_charge`, `invoice_usage`, `invoice_payment`.
+(Duplicate remote subscriptions are `pull.subscription.duplicate` — snapshot-
+dependent, so PULL-plane, #665.)
 
 `consistency.amount_mismatch.*` is the generic arithmetic/explainability class. Examples: provider-observed
 refund totals exceed the original charge after pull; a provider-observed payment
@@ -531,21 +547,39 @@ each invariant has exactly one implementation.
 
 ## 8. Findings ledger & finding states
 
-All findings share `openrails.reconciliation_findings` (extended: `finding_type`
-admits qualified finding types; `provider` admits a `self` sentinel for derive/life/consistency
-findings; severity lowercase). States:
+All findings share `openrails.reconciliation_findings` (`finding_type` is the
+qualified slug; internal-plane findings carry a `self` provider sentinel in
+evidence; severity lowercase). The IMPLEMENTED states
+(`chk_reconciliation_findings_status`) are:
 
-- `open` → `auto_fixed` | `admin_pending` | `resolved` | `dismissed`; disappearance
-  on a later run auto-resolves (`auto_vanished`); `requires_admin` rows are the admin
-  queue.
-- `held` — an `EXCESS` repair blocked by the confirmed-absence gate (§3.2); carries
-  `held_pending_source_reconciliation` so triage sees *why* a destructive repair has
-  not fired.
-- `indeterminate` — the engine could not evaluate the invariant because the authority
-  was **unreachable** (provider down / pull failed) or the evidence was **ambiguous**
-  (two identity matches; an in-flight intent of unknown outcome). Resolution: gather
-  more evidence (re-pull, verifier); only a genuinely-ambiguous residue escalates to
-  an operator to pick. This is always evidence-limited, never model-limited.
+- `reconcile_required` — open, the engine may still converge it: an AUTO repair
+  that has not applied yet, an informational row (e.g. a mode-parked intent),
+  or a **held** destructive repair (below).
+- `requires_review` — open, needs a human: the ADMIN/OPERATOR queue
+  (surface-only findings, remote-action repairs, ambiguous evidence).
+- `auto_fixed` — the engine applied the repair (`resolution = enforced`).
+- `fixed` — resolved without an engine repair: an operator acked it
+  (`resolution = admin_fixed`) or the drift disappeared from a later run /
+  its subject recovered (`resolution = auto_vanished`).
+- `ignored` — an operator silenced this identity (`resolution = ignored`);
+  re-runs refresh but never reopen it.
+
+Two CONCEPTS from the design map onto these states rather than being states
+themselves (decision: document reality, add no DB states):
+
+- **Held** — an `EXCESS` repair blocked by the confirmed-absence gate (§3.2)
+  stays `reconcile_required`; its evidence carries `source_domain` naming the
+  unproven domain, so triage sees *why* a destructive repair has not fired. It
+  proceeds automatically once the domain is proven (no operator transition).
+- **Indeterminate** — the engine could not evaluate the invariant because the
+  authority was **unreachable** or the evidence was **ambiguous**. Never a
+  finding state: an unreachable provider fails that provider's run/pass
+  WITHOUT mutating findings (nothing is asserted from missing evidence);
+  ambiguous evidence (two identity matches, an in-flight intent of unknown
+  outcome) surfaces as `requires_review` with the ambiguity documented; an
+  unverifiable lapsed subscription parks in subscription status `unknown`
+  (#632/#664, access intact) awaiting provider verification. Always
+  evidence-limited, never model-limited.
 
 ---
 
@@ -587,7 +621,9 @@ Excluded to avoid redundancy — the schema makes these impossible:
   (a ledger transfer under the double-entry ledger reorg); migrate
   existing rows; implement derive-1 / derive-2 as the sole writers.
 - Replace the old `PS-*`/`P-E-*` codes with qualified finding types under `pull.*`, `derive.*`, `life.*`, and `consistency.*`; extend the ledger
-  CHECK + add the `self` provider, the `held` status, and the `indeterminate` status.
+  CHECK + the `self` provider sentinel (DONE — the held/indeterminate CONCEPTS
+  map onto the implemented states + the `unknown` subscription park, §8; no
+  extra DB states).
 - **`Converge(scope)`** as the single idempotent engine / sole grant-effect writer.
 - **Import mode:** per-source-domain "fully reconciled" flags gating every `EXCESS`
   repair (§3.2); bulk-sweep entry point; converge-not-replay for LIFE.

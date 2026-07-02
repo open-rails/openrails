@@ -64,7 +64,7 @@ type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB                 *db.DB
 	Config             *config.Config
-	Rails              config.ProviderAccountSet
+	Rails              config.RailMerchantAccountSet
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
@@ -320,11 +320,11 @@ func (w *DunningWorker) processSubscription(
 		}
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
-			MerchantID:        genSub.MerchantID,
-			Provider:          providerKey,
-			IntentType:        intents.TypeManualRebill,
-			SubscriptionID:    &sub.ID,
-			ProviderAccountID: sub.ProviderAccountID,
+			MerchantID:            genSub.MerchantID,
+			Provider:              providerKey,
+			IntentType:            intents.TypeManualRebill,
+			SubscriptionID:        &sub.ID,
+			RailMerchantAccountID: sub.RailMerchantAccountID,
 			Payload: intents.ManualRebillPayload{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
@@ -393,11 +393,11 @@ func (w *DunningWorker) processSubscription(
 	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:        genSub.MerchantID,
-		Provider:          providerKey,
-		IntentType:        intents.TypeManualRebill,
-		SubscriptionID:    &sub.ID,
-		ProviderAccountID: sub.ProviderAccountID,
+		MerchantID:            genSub.MerchantID,
+		Provider:              providerKey,
+		IntentType:            intents.TypeManualRebill,
+		SubscriptionID:        &sub.ID,
+		RailMerchantAccountID: sub.RailMerchantAccountID,
 		Payload: intents.ManualRebillPayload{
 			SubscriptionID: sub.ID,
 			PeriodEnd:      periodEnd,
@@ -469,7 +469,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	rail models.Rail,
-	intent gen.OpenrailsProviderIntent,
+	intent gen.OpenrailsRailIntent,
 ) dunningOutcome {
 	reason := normalize.FromPtr(intent.LastFailureReason)
 	if reason == "" {
@@ -510,7 +510,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 
 // manualRebillEvidenceString reads one string field off the intent's
 // result_evidence.
-func manualRebillEvidenceString(intent gen.OpenrailsProviderIntent, key string) string {
+func manualRebillEvidenceString(intent gen.OpenrailsRailIntent, key string) string {
 	if len(intent.ResultEvidence) == 0 {
 		return ""
 	}
@@ -524,7 +524,7 @@ func manualRebillEvidenceString(intent gen.OpenrailsProviderIntent, key string) 
 
 // manualRebillEvidenceResponseCode reads the gateway decline code off the
 // intent's result_evidence (0 when absent — classified soft).
-func manualRebillEvidenceResponseCode(intent gen.OpenrailsProviderIntent) int {
+func manualRebillEvidenceResponseCode(intent gen.OpenrailsRailIntent) int {
 	if len(intent.ResultEvidence) == 0 {
 		return 0
 	}

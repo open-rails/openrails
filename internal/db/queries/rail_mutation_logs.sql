@@ -1,8 +1,8 @@
--- name: InsertExternalProviderMutationLog :exec
-INSERT INTO openrails.external_provider_mutation_logs (
+-- name: InsertRailMutationLog :exec
+INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
     provider,
-    provider_account_id,
+    rail_merchant_account_id,
     provider_intent_id,
     intent_type,
     idempotency_key,

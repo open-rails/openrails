@@ -29,12 +29,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -52,7 +52,7 @@ type Runtime struct {
 
 	// Rails is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
-	Rails config.ProviderAccountSet
+	Rails config.RailMerchantAccountSet
 
 	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
 	// actually do (#661), used to gate the provider route surface. Nil means
@@ -74,9 +74,9 @@ type Runtime struct {
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
 	NotificationService  *subscriptions.NotificationService
-	PaymentMethodService *vault.PaymentMethodService
+	PaymentMethodService *paymentmethods.PaymentMethodService
 	PaymentService       *payments.PaymentService
-	VaultService         *vault.VaultService
+	VaultService         *paymentmethods.VaultService
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService

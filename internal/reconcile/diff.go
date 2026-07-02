@@ -12,25 +12,23 @@ import (
 
 // localIndex precomputes the lookups the diff checks share.
 type localIndex struct {
-	byPSID       map[string]*LocalSubscription
-	byID         map[uuid.UUID]*LocalSubscription
-	byEmail      map[string][]*LocalSubscription
-	bySubject    map[uuid.UUID][]*LocalSubscription
-	entsBySource map[uuid.UUID][]*LocalEntitlement
-	pmByVault    map[string]*LocalPaymentMethod
-	pmByID       map[uuid.UUID]*LocalPaymentMethod
-	prices       []LocalPrice
+	byPSID    map[string]*LocalSubscription
+	byID      map[uuid.UUID]*LocalSubscription
+	byEmail   map[string][]*LocalSubscription
+	bySubject map[uuid.UUID][]*LocalSubscription
+	pmByVault map[string]*LocalPaymentMethod
+	pmByID    map[uuid.UUID]*LocalPaymentMethod
+	prices    []LocalPrice
 }
 
 func buildLocalIndex(local *LocalState) *localIndex {
 	idx := &localIndex{
-		byPSID:       map[string]*LocalSubscription{},
-		byID:         map[uuid.UUID]*LocalSubscription{},
-		byEmail:      map[string][]*LocalSubscription{},
-		bySubject:    map[uuid.UUID][]*LocalSubscription{},
-		entsBySource: map[uuid.UUID][]*LocalEntitlement{},
-		pmByVault:    map[string]*LocalPaymentMethod{},
-		pmByID:       map[uuid.UUID]*LocalPaymentMethod{},
+		byPSID:    map[string]*LocalSubscription{},
+		byID:      map[uuid.UUID]*LocalSubscription{},
+		byEmail:   map[string][]*LocalSubscription{},
+		bySubject: map[uuid.UUID][]*LocalSubscription{},
+		pmByVault: map[string]*LocalPaymentMethod{},
+		pmByID:    map[uuid.UUID]*LocalPaymentMethod{},
 	}
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
@@ -46,10 +44,6 @@ func buildLocalIndex(local *LocalState) *localIndex {
 		if email := strings.ToLower(strings.TrimSpace(s.UserEmail)); email != "" {
 			idx.byEmail[email] = append(idx.byEmail[email], s)
 		}
-	}
-	for i := range local.Entitlements {
-		ent := &local.Entitlements[i]
-		idx.entsBySource[ent.SourceID] = append(idx.entsBySource[ent.SourceID], ent)
 	}
 	for i := range local.PaymentMethods {
 		pm := &local.PaymentMethods[i]
@@ -374,9 +368,10 @@ type diffOptions struct {
 	Materialize bool
 }
 
-// diffProvider runs every capability-gated check of the PS-1..PS-9 taxonomy
-// for one provider snapshot vs local state and returns the findings, each
-// carrying its enforce instruction where one is safe.
+// diffProvider runs every capability-gated PULL-plane check for one provider
+// snapshot vs local state and returns the findings, each carrying its enforce
+// instruction where one is safe. Internal-plane checks (DERIVE/LIFE/CON) live
+// in the Convergence Engine, never here (#665 single-writer rule).
 func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, localPayments []LocalPayment, now time.Time, opts diffOptions) []Finding {
 	idx := buildLocalIndex(local)
 	ridx := buildRemoteIndex(snap)
@@ -402,9 +397,6 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 	if caps.Vault {
 		findings = append(findings, diffVault(provider, local, ridx, traits)...)
 	}
-	// PS-9 is local<->local consistency scoped to this provider's
-	// subscriptions; it needs no remote capability.
-	findings = append(findings, diffEntitlements(provider, local, idx, now)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Type != findings[j].Type {
@@ -434,7 +426,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 		}
 
 		// Matched pair: status comparison.
-		findings = append(findings, compareStatuses(provider, localSub, r, now)...)
+		findings = append(findings, compareStatuses(provider, snap, localSub, r, now)...)
 	}
 
 	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
@@ -460,12 +452,10 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 					"absent_from_recurring_report": true,
 					"rail_subscription_id":         s.RailSubscriptionID,
 				},
-				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements",
-				Apply: &ApplyAction{CancelLocal: &CancelLocalAction{
-					SubscriptionID: s.ID,
-					CancelType:     "expired",
-					Reason:         "reconcile: absent from " + string(provider) + " recurring report",
-				}},
+				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
+				// absenceMeansCancelled: the provider's live-only roster IS
+				// exhaustive for this subject — coverage-absence proof (#665).
+				Apply: decideApply(s, snap, true, now),
 			}
 			if intent := deletionIntent(s); intent != nil {
 				f.IntentEvidence = intent
@@ -664,9 +654,60 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 	return best
 }
 
+// perSubscriptionSnapshot narrows a bulk snapshot to one subscription's
+// evidence slice (roster entry + linked charge events + coverage), the shape
+// the decider consumes. forceExhaustive stamps SubscriptionsExhaustive for
+// providers whose live-only roster is exhaustive by construction
+// (traits.absenceMeansCancelled) even when a fixture omitted the coverage flag.
+func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string, forceExhaustive bool) *RemoteSnapshot {
+	out := &RemoteSnapshot{
+		Provider:     snap.Provider,
+		FetchedAt:    snap.FetchedAt,
+		Capabilities: snap.Capabilities,
+		Coverage:     snap.Coverage,
+	}
+	if forceExhaustive {
+		out.Coverage.SubscriptionsExhaustive = true
+	}
+	for i := range snap.Subscriptions {
+		if snap.Subscriptions[i].RailSubscriptionID == psid {
+			out.Subscriptions = append(out.Subscriptions, snap.Subscriptions[i])
+		}
+	}
+	for i := range snap.Transactions {
+		if snap.Transactions[i].SubscriptionID == psid {
+			out.Transactions = append(out.Transactions, snap.Transactions[i])
+		}
+	}
+	return out
+}
+
+// decideApply computes the decider transition for one local subscription from
+// its per-subscription snapshot slice and wraps it as the finding's apply
+// action (#665: the pull engine invokes the decider; no applier writes domain
+// state). Nil when the decider has no evidence-justified move.
+func decideApply(s *LocalSubscription, snap *RemoteSnapshot, forceExhaustive bool, now time.Time) *ApplyAction {
+	state := SubscriptionState{
+		Status:             s.Status,
+		Rail:               s.Rail,
+		Vaulted:            s.PaymentMethodID != nil,
+		RailSubscriptionID: s.RailSubscriptionID,
+		PeriodEnd:          s.CurrentPeriodEndsAt,
+		NextRetryScheduled: s.NextRetryAt != nil,
+	}
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID, forceExhaustive)}, now, 0)
+	if d.Kind == TransitionNone {
+		return nil
+	}
+	// The pull path never imports charges through the decider — PS-4 owns
+	// charge backfill with full correlation.
+	d.Backfill = nil
+	return &ApplyAction{Decide: &DecideAction{SubscriptionID: s.ID, Decision: d}}
+}
+
 // compareStatuses diffs one matched (local, remote) subscription pair into
-// PS-2/PS-3 findings.
-func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscription, now time.Time) []Finding {
+// PS-2/PS-3 findings; the enforce instruction is a decider invocation.
+func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscription, r *RemoteSubscription, now time.Time) []Finding {
 	if r.Status == SubscriptionStatusUnknown {
 		return nil // the provider declared nothing comparable
 	}
@@ -676,8 +717,8 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 
 	switch {
 	case localLive && remoteDead:
-		// PS-2: rail terminated it, local still bills/grants.
-		cancelType := "expired"
+		// PS-2: rail terminated it, local still bills/grants. Decider:
+		// provider-confirmed dead → cancel-with-certainty.
 		f := Finding{
 			Provider:          provider,
 			Type:              FindingLocalActiveRemoteDead,
@@ -687,11 +728,7 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "rail reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
-			Apply: &ApplyAction{CancelLocal: &CancelLocalAction{
-				SubscriptionID: s.ID,
-				CancelType:     cancelType,
-				Reason:         fmt.Sprintf("reconcile: %s reports %s", provider, r.Status),
-			}},
+			Apply:             decideApply(s, snap, false, now),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -723,21 +760,12 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 		return []Finding{f}
 
 	case localLive && remoteLive(r.Status) && string(r.Status) != s.Status:
-		// PS-3: both live, different flavor (active vs past_due, pending vs
-		// active). Adopt the rail's status; past_due adoption needs a
-		// period end (DB constraint), guarded here.
-		adopt := &AdoptStatusAction{
-			SubscriptionID: s.ID,
-			Status:         string(r.Status),
-			PeriodEndsAt:   r.NextBillingAt,
-			PeriodStartsAt: r.LastBilledAt,
-		}
-		var apply *ApplyAction
-		if r.Status == SubscriptionStatusPastDue && r.NextBillingAt == nil && s.CurrentPeriodEndsAt == nil {
-			apply = nil // cannot satisfy chk_past_due_has_period_end
-		} else {
-			apply = &ApplyAction{AdoptStatus: adopt}
-		}
+		// PS-3: both live, different flavor (active vs past_due). The decider
+		// chooses the transition: roster alive w/ future boundary → adopt the
+		// period END only; verified charge → renew; declared failure →
+		// dunning within the window, cancel-with-certainty beyond. A pending
+		// local row has no decider transition (the signup/confirm path or
+		// pending_stale owns it) — the divergence is still surfaced.
 		f := Finding{
 			Provider:          provider,
 			Type:              FindingStatusMismatch,
@@ -746,8 +774,8 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			Status:            FindingStatusReconcileRequired,
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
-			RecommendedAction: fmt.Sprintf("adopt rail status %q (local %q) and its period timestamps", r.Status, s.Status),
-			Apply:             apply,
+			RecommendedAction: fmt.Sprintf("rail status %q vs local %q; enforce applies the evidence-gated transition", r.Status, s.Status),
+			Apply:             decideApply(s, snap, false, now),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -770,13 +798,8 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 					Status:            FindingStatusReconcileRequired,
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
-					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; adopt the rail's period timestamps", drift.Hours()),
-					Apply: &ApplyAction{AdoptStatus: &AdoptStatusAction{
-						SubscriptionID: s.ID,
-						Status:         s.Status,
-						PeriodStartsAt: r.LastBilledAt,
-						PeriodEndsAt:   r.NextBillingAt,
-					}},
+					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", drift.Hours()),
+					Apply:             decideApply(s, snap, false, now),
 				}}
 			}
 		}
@@ -1165,93 +1188,4 @@ func normalizeExpiry(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// diffEntitlements covers PS-9 in both directions, restricted to
-// SUBSCRIPTION-sourced entitlements (admin grants are untouchable comps;
-// grace windows are their own source type and are left alone).
-func diffEntitlements(provider Provider, local *LocalState, idx *localIndex, now time.Time) []Finding {
-	var findings []Finding
-	for i := range local.Subscriptions {
-		s := &local.Subscriptions[i]
-		liveEnts := map[string]bool{}
-		var liveCount int
-		for _, ent := range idx.entsBySource[s.ID] {
-			if ent.StartAt.After(now) {
-				continue
-			}
-			if ent.EndAt != nil && !ent.EndAt.After(now) {
-				continue
-			}
-			liveEnts[ent.Entitlement] = true
-			liveCount++
-		}
-
-		switch {
-		case s.Status == "active" && len(s.EntitlementNames) > 0:
-			var missing []string
-			for _, name := range s.EntitlementNames {
-				if !liveEnts[name] {
-					missing = append(missing, name)
-				}
-			}
-			if len(missing) == 0 {
-				continue
-			}
-			sort.Strings(missing)
-			start := now
-			if s.CurrentPeriodStartsAt != nil {
-				start = *s.CurrentPeriodStartsAt
-			}
-			findings = append(findings, Finding{
-				Provider:   provider,
-				Type:       FindingEntitlementMismatch,
-				SubjectKey: s.ID.String(),
-				Severity:   SeverityHigh,
-				Status:     FindingStatusReconcileRequired,
-				LocalEvidence: map[string]any{
-					"subscription_id":      s.ID.String(),
-					"customer_id":          s.CustomerID.String(),
-					"status":               s.Status,
-					"missing_entitlements": missing,
-					"direction":            "grant",
-				},
-				RecommendedAction: "active subscription is missing subscription-sourced entitlements; enforce grants them for the current period",
-				Apply: &ApplyAction{GrantEntitlements: &GrantEntitlementsAction{
-					SubscriptionID: s.ID,
-					CustomerID:     s.CustomerID,
-					Entitlements:   missing,
-					StartAt:        start,
-					EndAt:          s.CurrentPeriodEndsAt,
-				}},
-			})
-
-		case !s.IsLive() && liveCount > 0:
-			names := make([]string, 0, len(liveEnts))
-			for name := range liveEnts {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			findings = append(findings, Finding{
-				Provider:   provider,
-				Type:       FindingEntitlementMismatch,
-				SubjectKey: s.ID.String(),
-				Severity:   SeverityHigh,
-				Status:     FindingStatusReconcileRequired,
-				LocalEvidence: map[string]any{
-					"subscription_id":   s.ID.String(),
-					"customer_id":       s.CustomerID.String(),
-					"status":            s.Status,
-					"live_entitlements": names,
-					"direction":         "revoke",
-				},
-				RecommendedAction: "subscription is not live but still grants live subscription-sourced entitlements; enforce revokes them (admin grants and grace windows untouched)",
-				Apply: &ApplyAction{RevokeEntitlements: &RevokeEntitlementsAction{
-					SubscriptionID: s.ID,
-					Reason:         "reconcile: subscription " + s.Status + ", entitlement source not live",
-				}},
-			})
-		}
-	}
-	return findings
 }

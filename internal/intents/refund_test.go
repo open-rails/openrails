@@ -19,11 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.OpenrailsProviderIntent {
+func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.OpenrailsRailIntent {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     intentType,
 		Provider:       "mobius",
@@ -231,8 +231,8 @@ func stripeTestConfig() *config.Config {
 	return &config.Config{}
 }
 
-func stripeTestRails() config.ProviderAccountSet {
-	return config.ProviderAccountSet{
+func stripeTestRails() config.RailMerchantAccountSet {
+	return config.RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }

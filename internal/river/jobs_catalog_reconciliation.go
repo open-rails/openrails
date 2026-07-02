@@ -48,7 +48,7 @@ type CatalogReconciliationPullWorker struct {
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
 	DB         *db.DB
 	Config     *config.Config
-	Rails      config.ProviderAccountSet
+	Rails      config.RailMerchantAccountSet
 	NMIClients map[string]*nmi.NMIClient
 }
 

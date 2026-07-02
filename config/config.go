@@ -347,13 +347,13 @@ var ReservedAccountRails = map[string]models.Rail{
 	"solana": models.RailSolana,
 }
 
-// ProviderAccountConfig is one configured provider account: the rail (gateway) it
-// is on plus that rail's credentials. The map key in a ProviderAccountSet is the
+// RailMerchantAccountConfig is one configured provider account: the rail (gateway) it
+// is on plus that rail's credentials. The map key in a RailMerchantAccountSet is the
 // operator-chosen account NAME (e.g. "mobius", "paykings" on rail nmi).
 //
 // For an account named after a self-contained gateway (ccbill, stripe, solana) the
 // rail is inferred from the name; other names (e.g. "mobius") must set Rail.
-type ProviderAccountConfig struct {
+type RailMerchantAccountConfig struct {
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail `koanf:"rail"`
@@ -415,15 +415,15 @@ type SolanaRailConfig struct {
 	Network string `koanf:"-"`
 }
 
-// ProviderAccountSet is an in-memory set of payment-provider credential entries. It
+// RailMerchantAccountSet is an in-memory set of payment-provider credential entries. It
 // is not part of config.yaml/.env; private standalone installs seed provider
 // credentials through merchant bootstrap/Vault state, and embedded hosts may
 // pass a set programmatically during construction.
-type ProviderAccountSet map[string]*ProviderAccountConfig
+type RailMerchantAccountSet map[string]*RailMerchantAccountConfig
 
 // EffectiveRail returns the account's rail (gateway), inferring it from a reserved
 // account name when Rail is unset.
-func (p *ProviderAccountConfig) EffectiveRail(name string) models.Rail {
+func (p *RailMerchantAccountConfig) EffectiveRail(name string) models.Rail {
 	if p.Rail != "" {
 		return models.Rail(strings.ToLower(string(p.Rail)))
 	}
@@ -437,7 +437,7 @@ func (p *ProviderAccountConfig) EffectiveRail(name string) models.Rail {
 // EffectiveAccountID is the account's operator-declared rail-native identity
 // (#641). ValidateRailSet requires account_id — there is NO fallback to the
 // config map name (an account is never indexed by a name we made up).
-func (p *ProviderAccountConfig) EffectiveAccountID() string {
+func (p *RailMerchantAccountConfig) EffectiveAccountID() string {
 	if p == nil {
 		return ""
 	}
@@ -447,7 +447,7 @@ func (p *ProviderAccountConfig) EffectiveAccountID() string {
 // EffectiveEnvironment returns the account's declared environment (test|live), or
 // the test_mode-derived default when unset (#641). An explicitly-set value that
 // contradicts test_mode is rejected by ValidateRailSet.
-func (p *ProviderAccountConfig) EffectiveEnvironment(testMode bool) string {
+func (p *RailMerchantAccountConfig) EffectiveEnvironment(testMode bool) string {
 	if p != nil {
 		if env := strings.ToLower(strings.TrimSpace(p.Environment)); env != "" {
 			return env
@@ -456,7 +456,7 @@ func (p *ProviderAccountConfig) EffectiveEnvironment(testMode bool) string {
 	return ExpectedProviderEnvironment(testMode)
 }
 
-func (p *ProviderAccountConfig) normalizeTypedBlock(name string) error {
+func (p *RailMerchantAccountConfig) normalizeTypedBlock(name string) error {
 	if p == nil {
 		return nil
 	}
@@ -504,28 +504,28 @@ func (p *ProviderAccountConfig) normalizeTypedBlock(name string) error {
 }
 
 // IsNMI returns true if this rail config is for an NMI-backed rail.
-func (p *ProviderAccountConfig) IsNMI(name string) bool {
+func (p *RailMerchantAccountConfig) IsNMI(name string) bool {
 	return p.EffectiveRail(name) == models.RailNMI
 }
 
 // IsCCBill returns true if this rail config is for CCBill.
-func (p *ProviderAccountConfig) IsCCBill(name string) bool {
+func (p *RailMerchantAccountConfig) IsCCBill(name string) bool {
 	return p.EffectiveRail(name) == models.RailCCBill
 }
 
 // IsStripe returns true if this rail config is for Stripe.
-func (p *ProviderAccountConfig) IsStripe(name string) bool {
+func (p *RailMerchantAccountConfig) IsStripe(name string) bool {
 	return p.EffectiveRail(name) == models.RailStripe
 }
 
 // IsSolana returns true if this rail config is for Solana.
-func (p *ProviderAccountConfig) IsSolana(name string) bool {
+func (p *RailMerchantAccountConfig) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
 }
 
 // ToNMIProviderSettings converts the rail config to NMI provider settings.
 // Only valid for NMI-type rails.
-func (p *ProviderAccountConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
+func (p *RailMerchantAccountConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
 	s := &NMIProviderSettings{Name: strings.ToLower(strings.TrimSpace(name))}
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
@@ -537,7 +537,7 @@ func (p *ProviderAccountConfig) ToNMIProviderSettings(name string) *NMIProviderS
 
 // ToCCBillConfig converts the rail config to CCBillConfig.
 // Only valid for CCBill-type rails.
-func (p *ProviderAccountConfig) ToCCBillConfig() *CCBillConfig {
+func (p *RailMerchantAccountConfig) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
 	if p.CCBill != nil {
 		c.Salt = p.CCBill.Salt
@@ -860,7 +860,7 @@ func validateEncryption(cfg *EncryptionConfig) error {
 // test_mode axis. If there's a mismatch, it logs a warning and clears the key to
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
-func ValidateRailSet(cfg *Config, rails ProviderAccountSet) error {
+func ValidateRailSet(cfg *Config, rails RailMerchantAccountSet) error {
 	if len(rails) == 0 {
 		return nil
 	}
@@ -874,7 +874,7 @@ func ValidateRailSet(cfg *Config, rails ProviderAccountSet) error {
 	return validateStripeKeyForTestMode(cfg, rails)
 }
 
-func validateStripeKeyForTestMode(cfg *Config, rails ProviderAccountSet) error {
+func validateStripeKeyForTestMode(cfg *Config, rails RailMerchantAccountSet) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
@@ -909,7 +909,7 @@ func validateStripeKeyForTestMode(cfg *Config, rails ProviderAccountSet) error {
 }
 
 // validateRails validates all rails in the new Rails map
-func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
+func validateRails(cfg *Config, rails RailMerchantAccountSet, isDev bool) error {
 	// Count accounts per rail: with more than one, each must declare account_id
 	// (the made-up map name can't be the provider identity, #641).
 	countByRail := map[models.Rail]int{}
@@ -971,7 +971,7 @@ func validateRails(cfg *Config, rails ProviderAccountSet, isDev bool) error {
 }
 
 // validateNMIRail validates an NMI-type rail
-func validateNMIRail(name string, proc *ProviderAccountConfig, isDev bool) error {
+func validateNMIRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
@@ -992,7 +992,7 @@ func validateNMIRail(name string, proc *ProviderAccountConfig, isDev bool) error
 }
 
 // validateCCBillRail validates a CCBill-type rail
-func validateCCBillRail(name string, proc *ProviderAccountConfig, isDev bool) error {
+func validateCCBillRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
 	if isDev {
 		return nil // Skip strict validation in dev
 	}
@@ -1019,7 +1019,7 @@ func validateCCBillRail(name string, proc *ProviderAccountConfig, isDev bool) er
 }
 
 // validateStripeRail validates a Stripe-type rail
-func validateStripeRail(name string, proc *ProviderAccountConfig, isDev bool) error {
+func validateStripeRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
 	stripe := proc.Stripe
 	if stripe == nil {
 		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
@@ -1041,7 +1041,7 @@ func validateStripeRail(name string, proc *ProviderAccountConfig, isDev bool) er
 // validateSolanaRail validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaRail.
-func validateSolanaRail(name string, proc *ProviderAccountConfig, isDev bool) error {
+func validateSolanaRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
 	solana := proc.Solana
 	if solana == nil {
 		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
@@ -1061,8 +1061,8 @@ func validateSolanaRail(name string, proc *ProviderAccountConfig, isDev bool) er
 }
 
 // ByRail returns all provider accounts on the given rail, keyed by account name.
-func (set ProviderAccountSet) ByRail(rail models.Rail) map[string]*ProviderAccountConfig {
-	result := make(map[string]*ProviderAccountConfig)
+func (set RailMerchantAccountSet) ByRail(rail models.Rail) map[string]*RailMerchantAccountConfig {
+	result := make(map[string]*RailMerchantAccountConfig)
 	if set == nil {
 		return result
 	}
@@ -1076,7 +1076,7 @@ func (set ProviderAccountSet) ByRail(rail models.Rail) map[string]*ProviderAccou
 
 // RailKeysByType returns configured account names on the given rail,
 // sorted for deterministic diagnostics and selection.
-func (set ProviderAccountSet) RailKeysByType(rail models.Rail) []string {
+func (set RailMerchantAccountSet) RailKeysByType(rail models.Rail) []string {
 	if set == nil {
 		return nil
 	}
@@ -1098,7 +1098,7 @@ func (set ProviderAccountSet) RailKeysByType(rail models.Rail) []string {
 // rail. Database-backed new-work selection uses created_at to pick the newest
 // active account; config-only callers do not have that timestamp, so they use
 // sorted config keys.
-func (set ProviderAccountSet) ActiveRailByType(rail models.Rail) (string, *ProviderAccountConfig, error) {
+func (set RailMerchantAccountSet) ActiveRailByType(rail models.Rail) (string, *RailMerchantAccountConfig, error) {
 	keys := set.RailKeysByType(rail)
 	for _, key := range keys {
 		proc := set[key]
@@ -1111,7 +1111,7 @@ func (set ProviderAccountSet) ActiveRailByType(rail models.Rail) (string, *Provi
 }
 
 // ActiveRailKeysByType returns the sorted names of non-archived accounts on a rail.
-func (set ProviderAccountSet) ActiveRailKeysByType(rail models.Rail) []string {
+func (set RailMerchantAccountSet) ActiveRailKeysByType(rail models.Rail) []string {
 	var out []string
 	for _, key := range set.RailKeysByType(rail) {
 		if !set[key].Archived {
@@ -1123,7 +1123,7 @@ func (set ProviderAccountSet) ActiveRailKeysByType(rail models.Rail) []string {
 
 // FindByAccountID returns the configured account on a rail whose EffectiveAccountID
 // matches accountID (#641), used to target a specific provider account.
-func (set ProviderAccountSet) FindByAccountID(rail models.Rail, accountID string) (*ProviderAccountConfig, bool) {
+func (set RailMerchantAccountSet) FindByAccountID(rail models.Rail, accountID string) (*RailMerchantAccountConfig, bool) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return nil, false
@@ -1137,25 +1137,25 @@ func (set ProviderAccountSet) FindByAccountID(rail models.Rail, accountID string
 }
 
 // GetCCBillRail returns the configured active CCBill rail.
-func (set ProviderAccountSet) GetCCBillRail() *ProviderAccountConfig {
+func (set RailMerchantAccountSet) GetCCBillRail() *RailMerchantAccountConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailCCBill)
 	return proc
 }
 
 // GetStripeRail returns the configured active Stripe rail.
-func (set ProviderAccountSet) GetStripeRail() *ProviderAccountConfig {
+func (set RailMerchantAccountSet) GetStripeRail() *RailMerchantAccountConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailStripe)
 	return proc
 }
 
 // GetSolanaRail returns the configured active Solana rail.
-func (set ProviderAccountSet) GetSolanaRail() *ProviderAccountConfig {
+func (set RailMerchantAccountSet) GetSolanaRail() *RailMerchantAccountConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
 }
 
 // GetRail returns a rail config by name.
-func (set ProviderAccountSet) GetRail(name string) *ProviderAccountConfig {
+func (set RailMerchantAccountSet) GetRail(name string) *RailMerchantAccountConfig {
 	if set == nil {
 		return nil
 	}
@@ -1167,7 +1167,7 @@ func (set ProviderAccountSet) GetRail(name string) *ProviderAccountConfig {
 }
 
 // RailOf returns the rail of the named provider account, or "" if not found.
-func (set ProviderAccountSet) RailOf(name string) models.Rail {
+func (set RailMerchantAccountSet) RailOf(name string) models.Rail {
 	proc := set.GetRail(name)
 	if proc == nil {
 		return ""
@@ -1544,7 +1544,7 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest")
 	}
 	if ignoredRails {
-		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")
+		log.Warn("ignoring retired rails config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].rail_merchant_accounts")
 	}
 	if ignoredControlPlaneLegacy {
 		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")

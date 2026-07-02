@@ -75,7 +75,7 @@ func TestAutoTopupWorker_NoMerchantContext_TopsUpSeededMerchant(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM openrails.provider_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
+			"DELETE FROM openrails.rail_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
 	})
 	err = riverjobs.AutoTopupWorker{DB: dbi, Money: svc, Intents: runner}.Work(context.Background(), &river.Job[riverjobs.AutoTopupArgs]{})
 	require.NoError(t, err)

@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
-// TestUpsertMerchantConfig_SeedsProviderAccounts verifies the #593 public
+// TestUpsertMerchantConfig_SeedsRailMerchantAccounts verifies the #593 public
 // provisioning API: an embedded host declares its merchant's rail provider
 // accounts via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
 // land bound to the merchant, and re-running it is idempotent. This is the call
 // doujins #426 makes from `migrate legacy`.
-func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
+func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	appDB := dbtest.OpenAppDB(t, dsn)
@@ -37,7 +37,7 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 
 	m := embed.MerchantConfig{
 		DisplayName: slug,
-		ProviderAccounts: map[string]embed.ProviderAccountConfig{
+		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
 			"mobius": {
 				"nmi": {Environment: "live", AccountID: "579145"},
 			},
@@ -50,9 +50,9 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 
-	// payment_provider_accounts is RLS-scoped: read it on a connection pinned to the
+	// rail_merchant_accounts is RLS-scoped: read it on a connection pinned to the
 	// merchant so the policy admits its rows.
-	countProviderAccounts := func() int {
+	countRailMerchantAccounts := func() int {
 		t.Helper()
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
@@ -61,14 +61,14 @@ func TestUpsertMerchantConfig_SeedsProviderAccounts(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, conn.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payment_provider_accounts WHERE rail = ANY($1)`,
+			`SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = ANY($1)`,
 			[]string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}
-	require.Equal(t, 2, countProviderAccounts(), "both declared provider accounts are seeded")
+	require.Equal(t, 2, countRailMerchantAccounts(), "both declared provider accounts are seeded")
 
 	// Re-running is idempotent — no error, no duplicate rows.
 	_, err = rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
-	require.Equal(t, 2, countProviderAccounts(), "re-run does not duplicate provider accounts")
+	require.Equal(t, 2, countRailMerchantAccounts(), "re-run does not duplicate provider accounts")
 }

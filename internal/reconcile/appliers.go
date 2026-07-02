@@ -14,18 +14,17 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// LocalWriter performs enforce mode's idempotent LOCAL writes. No method ever
-// calls a rail — that is the design invariant that lets enforce run
-// under mode=readonly. Every method reports whether it changed anything, so
-// a second enforce run is observably a no-op.
+// LocalWriter performs enforce mode's idempotent LOCAL MIRROR writes (#665:
+// provider-fact rows only — payments, refunds, vault metadata, subscription
+// materialization; subscription state transitions go through the decider's
+// DecisionApplier instead). No method ever calls a rail — that is the design
+// invariant that lets enforce run under mode=readonly. Every method reports
+// whether it changed anything, so a second enforce run is observably a no-op.
 type LocalWriter interface {
-	CancelSubscriptionLocal(ctx context.Context, a CancelLocalAction) (bool, error)
-	AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error)
 	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
 	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
 	AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error)
 	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
-	RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
 
@@ -43,34 +42,6 @@ func (w *PGLocalWriter) now() time.Time {
 		return w.Now()
 	}
 	return time.Now().UTC()
-}
-
-func (w *PGLocalWriter) CancelSubscriptionLocal(ctx context.Context, a CancelLocalAction) (bool, error) {
-	cancelType := a.CancelType
-	if cancelType == "" {
-		cancelType = "expired"
-	}
-	reason := a.Reason
-	if reason == "" {
-		reason = "reconcile: rail reports subscription terminated"
-	}
-	n, err := w.DB.Gen(ctx).ReconcileCancelSubscriptionLocal(ctx, gen.ReconcileCancelSubscriptionLocalParams{
-		Now:        w.now(),
-		CancelType: cancelType,
-		Reason:     reason,
-		ID:         a.SubscriptionID,
-	})
-	return n > 0, err
-}
-
-func (w *PGLocalWriter) AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error) {
-	n, err := w.DB.Gen(ctx).ReconcileAdoptSubscriptionStatus(ctx, gen.ReconcileAdoptSubscriptionStatusParams{
-		Status:         gen.OpenrailsSubscriptionStatus(a.Status),
-		PeriodStartsAt: a.PeriodStartsAt,
-		PeriodEndsAt:   a.PeriodEndsAt,
-		ID:             a.SubscriptionID,
-	})
-	return n > 0, err
 }
 
 func metadataJSON(m map[string]any) []byte {
@@ -94,17 +65,17 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		MerchantID:        tid.UUID(),
-		PriceID:           a.PriceID,
-		Rail:              string(a.Rail),
-		TransactionID:     a.TransactionID,
-		Amount:            moneyutil.CentsToMicros(a.AmountCents),
-		Currency:          currency,
-		SubscriptionID:    a.SubscriptionID,
-		Metadata:          metadataJSON(a.Metadata),
-		PurchasedAt:       a.PurchasedAt,
-		CustomerID:        a.CustomerID,
-		ProviderAccountID: a.ProviderAccountID,
+		MerchantID:            tid.UUID(),
+		PriceID:               a.PriceID,
+		Rail:                  string(a.Rail),
+		TransactionID:         a.TransactionID,
+		Amount:                moneyutil.CentsToMicros(a.AmountCents),
+		Currency:              currency,
+		SubscriptionID:        a.SubscriptionID,
+		Metadata:              metadataJSON(a.Metadata),
+		PurchasedAt:           a.PurchasedAt,
+		CustomerID:            a.CustomerID,
+		RailMerchantAccountID: a.RailMerchantAccountID,
 	})
 	if err != nil {
 		return false, err
@@ -138,18 +109,18 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
-		MerchantID:        tid.UUID(),
-		PriceID:           a.PriceID,
-		Rail:              string(a.Rail),
-		TransactionID:     a.TransactionID,
-		Amount:            amount,
-		Currency:          currency,
-		SubscriptionID:    a.SubscriptionID,
-		RefundedPaymentID: a.RefundedPaymentID,
-		Metadata:          metadataJSON(a.Metadata),
-		PurchasedAt:       a.PurchasedAt,
-		CustomerID:        a.CustomerID,
-		ProviderAccountID: a.ProviderAccountID,
+		MerchantID:            tid.UUID(),
+		PriceID:               a.PriceID,
+		Rail:                  string(a.Rail),
+		TransactionID:         a.TransactionID,
+		Amount:                amount,
+		Currency:              currency,
+		SubscriptionID:        a.SubscriptionID,
+		RefundedPaymentID:     a.RefundedPaymentID,
+		Metadata:              metadataJSON(a.Metadata),
+		PurchasedAt:           a.PurchasedAt,
+		CustomerID:            a.CustomerID,
+		RailMerchantAccountID: a.RailMerchantAccountID,
 	})
 	if err != nil {
 		return false, err
@@ -212,18 +183,18 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, err
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		MerchantID:         tid.UUID(),
-		Status:             gen.OpenrailsSubscriptionStatus(a.Status),
-		Rail:               a.Rail,
-		RailSubscriptionID: a.RailSubscriptionID,
-		UserEmail:          emailPtr,
-		PeriodStartsAt:     a.PeriodStartsAt,
-		PeriodEndsAt:       a.PeriodEndsAt,
-		StartedAt:          a.StartedAt,
-		CustomerID:         a.CustomerID,
-		PriceID:            a.PriceID,
-		Rails:              localRailNames(a.Provider),
-		ProviderAccountID:  a.ProviderAccountID,
+		MerchantID:            tid.UUID(),
+		Status:                gen.OpenrailsSubscriptionStatus(a.Status),
+		Rail:                  a.Rail,
+		RailSubscriptionID:    a.RailSubscriptionID,
+		UserEmail:             emailPtr,
+		PeriodStartsAt:        a.PeriodStartsAt,
+		PeriodEndsAt:          a.PeriodEndsAt,
+		StartedAt:             a.StartedAt,
+		CustomerID:            a.CustomerID,
+		PriceID:               a.PriceID,
+		Rails:                 localRailNames(a.Provider),
+		RailMerchantAccountID: a.RailMerchantAccountID,
 	})
 	if err != nil {
 		return MaterializeResult{}, err
@@ -276,17 +247,4 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		res.PaymentBackfilled = backfilled
 	}
 	return res, nil
-}
-
-func (w *PGLocalWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {
-	reason := a.Reason
-	if reason == "" {
-		reason = "reconcile: subscription not active at rail"
-	}
-	n, err := w.DB.Gen(ctx).ReconcileRevokeSubscriptionEntitlements(ctx, gen.ReconcileRevokeSubscriptionEntitlementsParams{
-		Now:            w.now(),
-		Reason:         reason,
-		SubscriptionID: a.SubscriptionID,
-	})
-	return int(n), err
 }

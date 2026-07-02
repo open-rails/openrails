@@ -7,8 +7,8 @@ const MerchantBillingEnvPrefix = "BILLING_"
 // MerchantBillingEnvKey maps a BILLING_ env var to a koanf key for BillingConfig.
 // It is schema-aware so single underscores can be used without array indexes:
 //
-//	BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
-//	-> merchants.doujins.provider_accounts.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
+//	-> merchants.doujins.rail_merchant_accounts.mobius.nmi.secrets.security_key
 //
 // Map-key spans are lower-kebab-cased. Keep merchant/provider account keys
 // lowercase and avoid underscores in the YAML keys.
@@ -41,7 +41,7 @@ func MerchantBillingEnvKey(envName string) string {
 		if len(rest) > 0 {
 			return base + "." + strings.ToLower(strings.Join(rest, "_"))
 		}
-	case "provider_accounts":
+	case "rail_merchant_accounts":
 		return providerAccountEnvKey(base, rest)
 	}
 	return ""
@@ -56,7 +56,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		{"ISSUER", "issuer"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
-		{"PROVIDER_ACCOUNTS", "provider_accounts"},
+		{"RAIL_MERCHANT_ACCOUNTS", "rail_merchant_accounts"},
 		{"DELEGATED_INVOKER_WASTED_SPEND_WINDOWS", "delegated_invoker_wasted_spend_windows"},
 	}
 	for i := range tokens {

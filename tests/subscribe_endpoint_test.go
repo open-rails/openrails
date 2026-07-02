@@ -248,12 +248,12 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 	}
 	if suite.App.Runtime.VaultService != nil {
 		suite.App.Runtime.VaultService.SetMerchantSecretStore(nil)
-		suite.App.Runtime.VaultService.SetProviderAccountSecretResolver(nil)
+		suite.App.Runtime.VaultService.SetRailMerchantAccountSecretResolver(nil)
 		suite.App.Runtime.VaultService.NMIClients = suite.App.Runtime.NMIClients
 	}
 	if suite.App.Runtime.CheckoutService != nil {
 		suite.App.Runtime.CheckoutService.SetMerchantSecretStore(nil)
-		suite.App.Runtime.CheckoutService.SetProviderAccountSecretResolver(nil)
+		suite.App.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(nil)
 		suite.App.Runtime.CheckoutService.NMIClients = suite.App.Runtime.NMIClients
 		if suite.App.Runtime.CheckoutService.NMISaleService != nil {
 			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients

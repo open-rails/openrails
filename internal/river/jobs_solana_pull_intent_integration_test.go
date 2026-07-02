@@ -121,7 +121,7 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	}
 	require.NoError(t, dbrepo.NewSolanaSubscriptionRepo(dbi).Upsert(ctx, row))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)

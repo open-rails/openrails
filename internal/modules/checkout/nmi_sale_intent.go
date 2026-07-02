@@ -87,7 +87,7 @@ func (h *NMISaleIntentHandler) Backoff(attempts int32) time.Duration { return h.
 // row (both inline and when answering a replayed request).
 func (h *NMISaleIntentHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return false, true }
 
-func decodeNMISalePayload(intent gen.OpenrailsProviderIntent) (NMISalePayload, error) {
+func decodeNMISalePayload(intent gen.OpenrailsRailIntent) (NMISalePayload, error) {
 	var p NMISalePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("nmi sale intent has no payload")
@@ -103,11 +103,11 @@ func decodeNMISalePayload(intent gen.OpenrailsProviderIntent) (NMISalePayload, e
 
 // CheckRelevance: a checkout sale never goes stale on its own — a decline is
 // terminal, success is success. (Expiry, when set, is enforced by the sweep.)
-func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsProviderIntent) (intents.Relevance, error) {
+func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("checkout sale service not wired")
 	}
@@ -172,7 +172,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 // the intent's order id means the charge landed (finalize registers it); a
 // clean read with no sale means no money moved and the executor may resend
 // with the SAME order id.
-func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	p, err := decodeNMISalePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())

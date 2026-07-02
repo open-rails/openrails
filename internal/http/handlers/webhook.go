@@ -78,7 +78,7 @@ func Webhook(r *httprequest.Request) {
 	// to the per-merchant surface rather than letting a downstream merchant.Require
 	// surface a generic error (audit OR-API-C2).
 	if _, err := merchant.Require(r.Request.Context()); err != nil {
-		if handled, accepted := processProviderAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
+		if handled, accepted := processRailMerchantAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 			if accepted {
 				r.SuccessJSON(map[string]string{"status": "accepted"})
 			}
@@ -178,8 +178,8 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 			return
 		}
 		if err == nil && found {
-			if pid, ok, rerr := r.State.Merchants.ResolveProviderAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(repo.WithProviderAccountID(r.Request.Context(), pid))
+			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(repo.WithRailMerchantAccountID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -244,7 +244,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
-func processProviderAccountWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
+func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
 	if r.State == nil || r.State.Merchants == nil {
 		return false, false
 	}
@@ -260,7 +260,7 @@ func processProviderAccountWebhook(r *httprequest.Request, rail, routeAccountID,
 			r.ErrorJSON(http.StatusBadRequest, "NMI webhook payload is missing merchant account identity")
 			return true, false
 		}
-		account, ok := resolveWebhookPaymentProviderAccount(r, string(models.RailNMI), environment, accountID)
+		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailNMI), environment, accountID)
 		if !ok {
 			return true, false
 		}
@@ -278,13 +278,13 @@ func processProviderAccountWebhook(r *httprequest.Request, rail, routeAccountID,
 		if !ok {
 			return true, false
 		}
-		account, ok := resolveWebhookPaymentProviderAccount(r, subscriptions.RailCCBill, environment, accountID)
+		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailCCBill, environment, accountID)
 		if !ok {
 			return true, false
 		}
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, ok := resolveWebhookPaymentProviderAccount(r, subscriptions.RailStripe, environment, routeAccountID)
+		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {
 			return true, false
 		}
@@ -337,22 +337,22 @@ var ccbillLiveAccountsExist = func(r *httprequest.Request) (bool, error) {
 	if r.State.Merchants == nil {
 		return false, errors.New("merchants service unavailable")
 	}
-	return r.State.Merchants.HasLiveProviderAccounts(r.Request.Context(), subscriptions.RailCCBill)
+	return r.State.Merchants.HasLiveRailMerchantAccounts(r.Request.Context(), subscriptions.RailCCBill)
 }
 
-func resolveWebhookPaymentProviderAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.PaymentProviderAccountIdentity, bool) {
-	account, ok, err := r.State.Merchants.ResolvePaymentProviderAccountByIdentity(r.Request.Context(), rail, environment, accountID)
+func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, bool) {
+	account, ok, err := r.State.Merchants.ResolveRailMerchantAccountByIdentity(r.Request.Context(), rail, environment, accountID)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")
-		return merchants.PaymentProviderAccountIdentity{}, false
+		return merchants.RailMerchantAccountIdentity{}, false
 	}
 	if !ok {
 		r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
-		return merchants.PaymentProviderAccountIdentity{}, false
+		return merchants.RailMerchantAccountIdentity{}, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
-	ctx = repo.WithProviderAccountID(ctx, account.ID)
+	ctx = repo.WithRailMerchantAccountID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
 	return account, true
 }
@@ -380,8 +380,8 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		// Pin the routed account so records this event creates are stamped with it
 		// (overriding the repo's primary-default stamping).
 		if err == nil && found {
-			if pid, ok, rerr := r.State.Merchants.ResolveProviderAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(repo.WithProviderAccountID(r.Request.Context(), pid))
+			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(repo.WithRailMerchantAccountID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -419,16 +419,16 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Rail:              prepared.Rail,
-		EventID:           prepared.EventID,
-		EventType:         prepared.EventType,
-		Payload:           prepared.Body,
-		IPAddress:         r.GetRemoteIP(),
-		Signature:         prepared.Signature,
-		SigningSecret:     signingKey,
-		SignatureValid:    &signatureVerified,
-		ReceivedAt:        time.Now(),
-		ProviderAccountID: accountID,
+		Rail:                  prepared.Rail,
+		EventID:               prepared.EventID,
+		EventType:             prepared.EventType,
+		Payload:               prepared.Body,
+		IPAddress:             r.GetRemoteIP(),
+		Signature:             prepared.Signature,
+		SigningSecret:         signingKey,
+		SignatureValid:        &signatureVerified,
+		ReceivedAt:            time.Now(),
+		RailMerchantAccountID: accountID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
@@ -508,7 +508,7 @@ func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accoun
 		ReceivedAt: time.Now(),
 	}
 	if accountID != "" {
-		msg.ProviderAccountID = accountID
+		msg.RailMerchantAccountID = accountID
 	}
 	return msg
 }

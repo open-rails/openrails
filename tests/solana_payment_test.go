@@ -63,9 +63,9 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 
 	// Add Solana configuration to the construction-time rail set.
 	if suite.Rails == nil {
-		suite.Rails = make(config.ProviderAccountSet)
+		suite.Rails = make(config.RailMerchantAccountSet)
 	}
-	suite.Rails["solana"] = &config.ProviderAccountConfig{
+	suite.Rails["solana"] = &config.RailMerchantAccountConfig{
 		Rail: models.RailSolana,
 		Solana: &config.SolanaRailConfig{
 			Tokens: solanatokens.DefaultDevnetTokens(),

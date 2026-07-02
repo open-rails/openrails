@@ -14,15 +14,15 @@ func TestPaymentMethodMatchesSubscriptionProvider(t *testing.T) {
 	accountB := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 
 	require.True(t, PaymentMethodMatchesSubscriptionProvider(
-		&models.PaymentMethod{ProviderAccountID: &accountA},
-		&models.Subscription{ProviderAccountID: &accountA},
+		&models.PaymentMethod{RailMerchantAccountID: &accountA},
+		&models.Subscription{RailMerchantAccountID: &accountA},
 	))
 	require.False(t, PaymentMethodMatchesSubscriptionProvider(
-		&models.PaymentMethod{ProviderAccountID: &accountB},
-		&models.Subscription{ProviderAccountID: &accountA},
+		&models.PaymentMethod{RailMerchantAccountID: &accountB},
+		&models.Subscription{RailMerchantAccountID: &accountA},
 	))
 	require.True(t, PaymentMethodMatchesSubscriptionProvider(
 		&models.PaymentMethod{},
-		&models.Subscription{ProviderAccountID: &accountA},
+		&models.Subscription{RailMerchantAccountID: &accountA},
 	))
 }

@@ -31,7 +31,7 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return ChargeResult{}, fmt.Errorf("stripe payment method missing reusable payment_method id")
 	}
-	customerID, err := a.DB.Gen(ctx).GetRailCustomerIDForMerchant(ctx, gen.GetRailCustomerIDForMerchantParams{
+	customerID, err := a.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
 		MerchantID: method.MerchantID,
 		CustomerID: method.CustomerID,
 		Rail:       string(models.RailStripe),

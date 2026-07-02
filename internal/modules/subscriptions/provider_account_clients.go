@@ -20,11 +20,11 @@ func NMIClientForExistingSubscription(ctx context.Context, database *db.DB, clie
 		return nil, "", false, errors.New("subscription is nil")
 	}
 	key := strings.ToLower(string(sub.Rail))
-	if sub.ProviderAccountID != nil {
+	if sub.RailMerchantAccountID != nil {
 		if database == nil {
 			return nil, "", false, errors.New("provider account lookup unavailable")
 		}
-		account, err := database.Gen(ctx).GetProviderAccount(ctx, *sub.ProviderAccountID)
+		account, err := database.Gen(ctx).GetRailMerchantAccount(ctx, *sub.RailMerchantAccountID)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -41,8 +41,8 @@ func NMIClientForExistingSubscription(ctx context.Context, database *db.DB, clie
 }
 
 func PaymentMethodMatchesSubscriptionProvider(pm *models.PaymentMethod, sub *models.Subscription) bool {
-	if pm == nil || sub == nil || pm.ProviderAccountID == nil || sub.ProviderAccountID == nil {
+	if pm == nil || sub == nil || pm.RailMerchantAccountID == nil || sub.RailMerchantAccountID == nil {
 		return true
 	}
-	return *pm.ProviderAccountID == *sub.ProviderAccountID
+	return *pm.RailMerchantAccountID == *sub.RailMerchantAccountID
 }

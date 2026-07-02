@@ -1,5 +1,5 @@
 -- Operational job state: catalog drift events (reconciliation). Manual rebill
--- attempts were folded into openrails.provider_intents (#358 phase C).
+-- attempts were folded into openrails.rail_intents (#358 phase C).
 
 -- name: ListOpenCatalogDriftEvents :many
 SELECT * FROM openrails.catalog_drift_events

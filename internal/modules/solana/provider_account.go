@@ -16,28 +16,28 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type activeSolanaProviderAccount struct {
+type activeSolanaRailMerchantAccount struct {
 	AccountID       string
 	RecipientWallet string
 }
 
-func resolveActiveSolanaProviderAccount(ctx context.Context, database *db.DB, cfg *config.Config) (activeSolanaProviderAccount, bool, error) {
+func resolveActiveSolanaRailMerchantAccount(ctx context.Context, database *db.DB, cfg *config.Config) (activeSolanaRailMerchantAccount, bool, error) {
 	if database == nil {
-		return activeSolanaProviderAccount{}, false, nil
+		return activeSolanaRailMerchantAccount{}, false, nil
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return activeSolanaProviderAccount{}, false, nil
+		return activeSolanaRailMerchantAccount{}, false, nil
 	}
 	environment := config.ExpectedProviderEnvironment(false)
 	if cfg != nil {
 		environment = config.ExpectedProviderEnvironment(cfg.IsTestMode())
 	}
 
-	var row gen.OpenrailsPaymentProviderAccount
+	var row gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
 		var qerr error
-		row, qerr = database.Gen(ctx).GetActiveProviderAccountForNewWork(ctx, gen.GetActiveProviderAccountForNewWorkParams{
+		row, qerr = database.Gen(ctx).GetActiveRailMerchantAccountForNewWork(ctx, gen.GetActiveRailMerchantAccountForNewWorkParams{
 			MerchantID:  tid.UUID(),
 			Rail:        string(models.RailSolana),
 			Environment: &environment,
@@ -45,24 +45,24 @@ func resolveActiveSolanaProviderAccount(ctx context.Context, database *db.DB, cf
 		return qerr
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return activeSolanaProviderAccount{}, false, nil
+			return activeSolanaRailMerchantAccount{}, false, nil
 		}
-		return activeSolanaProviderAccount{}, false, fmt.Errorf("solana: load active provider account: %w", err)
+		return activeSolanaRailMerchantAccount{}, false, fmt.Errorf("solana: load active provider account: %w", err)
 	}
 
 	accountID := strings.TrimSpace(row.AccountID)
 	if accountID == "" {
-		return activeSolanaProviderAccount{}, false, fmt.Errorf("solana: active provider account has empty account_id")
+		return activeSolanaRailMerchantAccount{}, false, fmt.Errorf("solana: active provider account has empty account_id")
 	}
-	recipient := strings.TrimSpace(solanaProviderAccountSettings(row.Evidence)["recipient_wallet"])
+	recipient := strings.TrimSpace(solanaRailMerchantAccountSettings(row.Evidence)["recipient_wallet"])
 	if recipient == "" {
 		recipient = accountID
 	}
-	return activeSolanaProviderAccount{AccountID: accountID, RecipientWallet: recipient}, true, nil
+	return activeSolanaRailMerchantAccount{AccountID: accountID, RecipientWallet: recipient}, true, nil
 }
 
 func ResolveRecipientWallet(ctx context.Context, database *db.DB, cfg *config.Config) (string, error) {
-	if account, ok, err := resolveActiveSolanaProviderAccount(ctx, database, cfg); err != nil || ok {
+	if account, ok, err := resolveActiveSolanaRailMerchantAccount(ctx, database, cfg); err != nil || ok {
 		if err != nil {
 			return "", err
 		}
@@ -71,7 +71,7 @@ func ResolveRecipientWallet(ctx context.Context, database *db.DB, cfg *config.Co
 	return "", fmt.Errorf("merchant wallet not configured")
 }
 
-func solanaProviderAccountSettings(raw []byte) map[string]string {
+func solanaRailMerchantAccountSettings(raw []byte) map[string]string {
 	var evidence struct {
 		Settings map[string]any `json:"settings"`
 	}

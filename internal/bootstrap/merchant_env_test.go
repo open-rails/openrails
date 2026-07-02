@@ -10,13 +10,13 @@ import (
 
 func TestMerchantBillingEnvKey(t *testing.T) {
 	tests := map[string]string{
-		"BILLING_VERSION":                                                                          "version",
-		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                                   "merchants.doujins.display_name",
-		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                             "merchants.doujins.profile.from_email",
-		"BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.provider_accounts.mobius.nmi.secrets.security_key",
-		"BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.provider_accounts.mobius-sandbox.nmi.settings.tokenization_url",
-		"BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.provider_accounts.mobius-sandbox.nmi.settings.tokenization_key",
-		"BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.provider_accounts.solana.solana.signer.mode",
+		"BILLING_VERSION":                              "version",
+		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":       "merchants.doujins.display_name",
+		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL": "merchants.doujins.profile.from_email",
+		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.rail_merchant_accounts.mobius.nmi.secrets.security_key",
+		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.rail_merchant_accounts.mobius-sandbox.nmi.settings.tokenization_url",
+		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.rail_merchant_accounts.mobius-sandbox.nmi.settings.tokenization_key",
+		"BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.rail_merchant_accounts.solana.solana.signer.mode",
 	}
 	for envName, want := range tests {
 		t.Run(envName, func(t *testing.T) {
@@ -35,7 +35,7 @@ version: 1
 merchants:
   cozy-art:
     display_name: Cozy Art
-    provider_accounts:
+    rail_merchant_accounts:
       mobius:
         nmi:
           environment: live
@@ -46,7 +46,7 @@ merchants:
 	require.NoError(t, os.WriteFile(overlay, []byte(`
 merchants:
   cozy-art:
-    provider_accounts:
+    rail_merchant_accounts:
       mobius:
         nmi:
           secrets:
@@ -58,21 +58,21 @@ merchants:
 
 	manifest, err := LoadMerchantConfigManifestFiles(base, overlay)
 	require.NoError(t, err)
-	account := manifest.Merchants["cozy-art"].ProviderAccounts["mobius"]["nmi"]
+	account := manifest.Merchants["cozy-art"].RailMerchantAccounts["mobius"]["nmi"]
 	require.Equal(t, "private-overlay-value", account.Secrets["security_key"])
 	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", account.Settings["tokenization_url"])
 	require.Equal(t, "public-tokenization-key", account.Settings["tokenization_key"])
 }
 
 func TestLoadMerchantConfigManifestBytesMergesEnvOverlay(t *testing.T) {
-	t.Setenv("BILLING_MERCHANTS_COHOST_PROVIDER_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
+	t.Setenv("BILLING_MERCHANTS_COHOST_RAIL_MERCHANT_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
 
 	manifest, err := LoadMerchantConfigManifestBytes([]byte(`
 version: 1
 merchants:
   cohost:
     display_name: Cohost
-    provider_accounts:
+    rail_merchant_accounts:
       mobius-sandbox:
         nmi:
           environment: test
@@ -81,6 +81,6 @@ merchants:
             security_key: public-placeholder
 `))
 	require.NoError(t, err)
-	account := manifest.Merchants["cohost"].ProviderAccounts["mobius-sandbox"]["nmi"]
+	account := manifest.Merchants["cohost"].RailMerchantAccounts["mobius-sandbox"]["nmi"]
 	require.Equal(t, "private-env-value", account.Secrets["security_key"])
 }

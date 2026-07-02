@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -156,10 +155,11 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	store := &PGStore{DB: appDB}
 	newEngine := func(snap *RemoteSnapshot) *Engine {
 		return &Engine{
-			Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
-			Store:    store,
-			Local:    &PGLocalStateLoader{DB: appDB},
-			Writer:   &PGLocalWriter{DB: appDB},
+			Fetchers:  map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
+			Store:     store,
+			Local:     &PGLocalStateLoader{DB: appDB},
+			Writer:    &PGLocalWriter{DB: appDB},
+			Decisions: NewDecisionApplier(appDB, nil),
 		}
 	}
 
@@ -408,10 +408,11 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	newEngine := func() *Engine {
 		return &Engine{
-			Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
-			Store:    store,
-			Local:    &PGLocalStateLoader{DB: appDB},
-			Writer:   &PGLocalWriter{DB: appDB},
+			Fetchers:  map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
+			Store:     store,
+			Local:     &PGLocalStateLoader{DB: appDB},
+			Writer:    &PGLocalWriter{DB: appDB},
+			Decisions: NewDecisionApplier(appDB, nil),
 		}
 	}
 
@@ -517,163 +518,6 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	}))
 }
 
-// TestReconcileStuckIntentIntegration proves the PS-10 stuck-intent finding
-// type end to end against real Postgres under RLS: non-terminal
-// openrails.provider_intents rows older than the hardcoded thresholds surface as
-// findings on a run with ZERO providers configured (PS-10 is
-// provider-independent and reads only the local ledger), mode/kill-switch
-// parks stay informational, fresh intents stay invisible, enforce never
-// touches the intent rows, and a recovered intent's finding auto-resolves.
-func TestReconcileStuckIntentIntegration(t *testing.T) {
-	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	store := &PGStore{DB: appDB}
-
-	suffix := uuid.NewString()[:8]
-	oldPending := uuid.New()    // pending 26h, genuine failure -> requires-review
-	parkedPending := uuid.New() // pending 26h, kill-switch park -> informational
-	freshPending := uuid.New()  // pending 1h -> no finding
-	oldUnknown := uuid.New()    // unknown_needs_verify 3h -> requires-review
-	subscriptionID := uuid.New()
-
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seed := func(id uuid.UUID, status string, age time.Duration, reason *string) {
-			t.Helper()
-			_, err := appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.provider_intents
-				   (id, provider, intent_type, subscription_id, idempotency_key,
-				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, merchant_id)
-				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6), $7)`,
-				id, subscriptionID, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),
-				status, reason, int(age.Minutes()), dbtest.TestMerchantID.UUID())
-			require.NoError(t, err)
-		}
-		failure := "nmi error: connection refused"
-		park := "nmi client is read-only (mode=readonly)"
-		ambiguous := "ambiguous: timeout after send"
-		seed(oldPending, "pending", 26*time.Hour, &failure)
-		seed(parkedPending, "pending", 26*time.Hour, &park)
-		seed(freshPending, "pending", time.Hour, nil)
-		seed(oldUnknown, "unknown_needs_verify", 3*time.Hour, &ambiguous)
-		return nil
-	}))
-
-	// Engine with NO fetchers: the PS-10 pass runs regardless of providers.
-	newEngine := func() *Engine {
-		return &Engine{
-			Fetchers: map[Provider]RailFetcher{},
-			Store:    store,
-			Local:    &PGLocalStateLoader{DB: appDB},
-			Writer:   &PGLocalWriter{DB: appDB},
-			Intents:  &PGStuckIntentSource{DB: appDB},
-		}
-	}
-
-	// ---- check: stuck intents surface, fresh ones do not --------------------
-	var check *RunResult
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
-		check = res
-		return err
-	}))
-	require.NotNil(t, check)
-	assert.Equal(t, "completed", check.Status)
-
-	bySubject := map[string]FindingRecord{}
-	for _, f := range check.Findings {
-		if f.Type == FindingStuckIntent {
-			bySubject[f.SubjectKey] = f
-		}
-	}
-	require.Len(t, bySubject, 3, "old pending + parked + old unknown")
-	assert.NotContains(t, bySubject, freshPending.String(), "a fresh pending intent is not stuck")
-
-	rec := bySubject[oldPending.String()]
-	assert.Equal(t, FindingStatusAdminRequired, rec.Status)
-	assert.True(t, rec.RequiresAdmin)
-	assert.Equal(t, SeverityHigh, rec.Severity)
-	assert.Equal(t, Provider("mobius"), rec.Provider)
-	assert.Equal(t, "nmi_delete_subscription", rec.IntentEvidence["intent_type"])
-	assert.Equal(t, subscriptionID.String(), rec.IntentEvidence["subscription_id"])
-	assert.Equal(t, "nmi error: connection refused", rec.IntentEvidence["last_failure_reason"])
-
-	parked := bySubject[parkedPending.String()]
-	assert.Equal(t, FindingStatusReconcileRequired, parked.Status)
-	assert.False(t, parked.RequiresAdmin, "kill-switch park is informational")
-	assert.Equal(t, SeverityLow, parked.Severity)
-
-	unknown := bySubject[oldUnknown.String()]
-	assert.Equal(t, FindingStatusAdminRequired, unknown.Status)
-	assert.True(t, unknown.RequiresAdmin)
-
-	stuckRep := check.Summary.StuckIntents
-	require.NotNil(t, stuckRep)
-	assert.Equal(t, 3, stuckRep.Total)
-	assert.Equal(t, 2, stuckRep.AdminRequired)
-	assert.Equal(t, 1, stuckRep.ModeParked)
-	assert.Equal(t, 3, stuckRep.ByIntentType["nmi_delete_subscription"])
-
-	// Admin queue carries the genuine stuck intents, not the parked one.
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		queue, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), OnlyAdminQueue: true})
-		require.NoError(t, err)
-		assert.Len(t, queue, 2)
-		return nil
-	}))
-
-	// ---- fix: identical emission, intents untouched --------------------------
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce})
-		require.NoError(t, err)
-		require.NotNil(t, res.Summary.StuckIntents)
-		assert.Equal(t, 3, res.Summary.StuckIntents.Total, "fix emits/refreshes identically")
-
-		// fix mode never touches the ledger: statuses and attempts unchanged.
-		var status string
-		var attempts int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, attempts FROM openrails.provider_intents WHERE id = $1`, oldPending).Scan(&status, &attempts))
-		assert.Equal(t, "pending", status)
-		assert.Equal(t, 2, attempts)
-
-		// Stable identity: one row per intent, seen again on the second run.
-		all, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Limit: 50})
-		require.NoError(t, err)
-		assert.Len(t, all, 3)
-		for _, f := range all {
-			assert.Equal(t, check.RunID, f.FirstSeenRun)
-			assert.Equal(t, res.RunID, f.LastSeenRun)
-		}
-		return nil
-	}))
-
-	// ---- recovery: succeeded/superseded intents auto-resolve -----------------
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := appDB.Qx(ctx).Exec(ctx,
-			`UPDATE openrails.provider_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, oldPending)
-		require.NoError(t, err)
-		_, err = appDB.Qx(ctx).Exec(ctx,
-			`UPDATE openrails.provider_intents SET status = 'superseded' WHERE id = $1`, oldUnknown)
-		require.NoError(t, err)
-		return nil
-	}))
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
-		require.NoError(t, err)
-		require.NotNil(t, res.Summary.StuckIntents)
-		assert.Equal(t, 1, res.Summary.StuckIntents.Total, "only the parked intent is still stuck")
-		assert.Equal(t, int64(2), res.Summary.StuckIntents.AutoResolved)
-
-		recovered, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Status: string(FindingStatusFixed), Limit: 50})
-		require.NoError(t, err)
-		require.Len(t, recovered, 2)
-		for _, f := range recovered {
-			assert.Equal(t, "auto_vanished", f.Resolution)
-		}
-		return nil
-	}))
-}
-
 // TestReconcileRunRecordsFailure proves a fetch failure persists a failed run
 // with its error instead of half-applying.
 func TestReconcileRunRecordsFailure(t *testing.T) {
@@ -706,11 +550,11 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 // TestReconcileAdoptPreservesScheduledProviderActions covers #511 Phase H
 // schedule-awareness: a pull that observes a subscription still LIVE at the
 // provider (because a cancel/downgrade is scheduled for the FUTURE, not yet
-// effective — "Jun 15 cancel / Jun 28 delete / Jun 17 pull is consistent") adopts
-// the provider-observed status/period but MUST NOT clobber the standing local
-// provider-action intents. The adopt applier writes only status + period, so
-// deletion_scheduled_at / scheduled_price_id survive by construction; this locks
-// that in against a regression that widens the UPDATE.
+// effective — "Jun 15 cancel / Jun 28 delete / Jun 17 pull is consistent")
+// re-anchors the provider-observed period END but MUST NOT clobber the standing
+// local provider-action intents. Post-#665 the transition goes through the
+// decider applier (park + ResolveAdopted); this locks in that the round-trip
+// preserves deletion_scheduled_at / scheduled_price_id.
 func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -750,19 +594,21 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 	})
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		newEnd := time.Now().UTC().Add(40 * 24 * time.Hour)
-		_, err := appDB.Gen(ctx).ReconcileAdoptSubscriptionStatus(ctx, gen.ReconcileAdoptSubscriptionStatusParams{
-			ID: subID, Status: gen.OpenrailsSubscriptionStatus("active"), PeriodEndsAt: &newEnd,
-		})
+		newEnd := time.Now().UTC().Add(40 * 24 * time.Hour).Truncate(time.Second)
+		applier := NewDecisionApplier(appDB, nil)
+		changed, err := applier.ApplyDecision(ctx, subID, Decision{Kind: TransitionAdoptPeriodEnd, NewPeriodEnd: &newEnd})
 		require.NoError(t, err)
+		require.True(t, changed)
 
-		var delAt *time.Time
+		var delAt, gotEnd *time.Time
 		var schedPrice *uuid.UUID
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT deletion_scheduled_at, scheduled_price_id, status::text FROM openrails.subscriptions WHERE id=$1`, subID).
-			Scan(&delAt, &schedPrice, &status))
+			`SELECT deletion_scheduled_at, scheduled_price_id, status::text, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subID).
+			Scan(&delAt, &schedPrice, &status, &gotEnd))
 		require.Equal(t, "active", status)
+		require.NotNil(t, gotEnd)
+		require.WithinDuration(t, newEnd, *gotEnd, time.Second, "period END re-anchored")
 		require.NotNil(t, delAt, "scheduled delete must survive the adopt")
 		require.WithinDuration(t, deleteAt, *delAt, time.Second)
 		require.NotNil(t, schedPrice, "scheduled downgrade must survive the adopt")

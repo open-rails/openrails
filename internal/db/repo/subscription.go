@@ -63,7 +63,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		EntitlementsSpecSnapshot: entSnap,
 		CreditsSpecSnapshot:      credSnap,
 		Status:                   string(s.Status),
-		ProviderAccountID:        s.ProviderAccountID,
+		RailMerchantAccountID:    s.RailMerchantAccountID,
 		StartedAt:                s.StartedAt,
 		EndedAt:                  s.EndedAt,
 		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
@@ -99,8 +99,8 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.ProviderAccountID == nil {
-		params.ProviderAccountID = resolveProviderAccountIDForStamp(ctx)
+	if params.RailMerchantAccountID == nil {
+		params.RailMerchantAccountID = resolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
@@ -623,26 +623,6 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 		out = append(out, *s)
 	}
 	return out, nil
-}
-
-// ListSilentLapsed returns the #367 silent-lapsed cohort: active
-// subscriptions on the given rails whose current period ended at or
-// before cutoff with no recorded payment at/after the lapsed boundary (Price
-// + PaymentMethod relations attached) — the subscription liveness sync's work
-// list. past_due rows are excluded by the query; that cohort is dunning's.
-func (r *SubscriptionRepo) ListSilentLapsed(ctx context.Context, rails []string, cutoff time.Time) ([]models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListSilentLapsedSubscriptions(ctx, gen.ListSilentLapsedSubscriptionsParams{
-		Rails:  rails,
-		Cutoff: cutoff,
-	})
-	if err != nil {
-		return nil, err
-	}
-	subs, err := r.manyWithDetails(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	return derefSubs(subs), nil
 }
 
 // ListPendingDeletionScheduled returns cancelled subscriptions that still

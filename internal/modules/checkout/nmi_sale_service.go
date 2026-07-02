@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -34,7 +34,7 @@ type checkoutIdempotencyStore interface {
 // EnqueueAndExecute posts the durable intent and executes it inline; anything
 // not finished inline is drained by the scheduled executor/verifier.
 type intentExecutor interface {
-	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsProviderIntent, error)
+	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsRailIntent, error)
 }
 
 // ErrCheckoutProcessing is returned when the provider write's outcome is not
@@ -47,7 +47,7 @@ var ErrCheckoutProcessing = errors.New("payment is processing; retry with the sa
 type CheckoutNMISaleService struct {
 	PurchaseService  *CheckoutPurchaseService
 	VaultResolver    *CheckoutVaultService
-	VaultService     *vault.VaultService
+	VaultService     *paymentmethods.VaultService
 	IdempotencyStore checkoutIdempotencyStore
 	NMIClients       map[string]*nmi.NMIClient
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
@@ -59,7 +59,7 @@ type CheckoutNMISaleService struct {
 func NewCheckoutNMISaleService(
 	purchaseService *CheckoutPurchaseService,
 	vaultResolver *CheckoutVaultService,
-	vaultService *vault.VaultService,
+	vaultService *paymentmethods.VaultService,
 	idempotencyStore checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
 ) *CheckoutNMISaleService {
@@ -186,7 +186,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 
 // saleResultFromIntent reads the producer-facing evidence off a succeeded
 // sale intent.
-func saleResultFromIntent(intent gen.OpenrailsProviderIntent) (checkoutSaleIdempotencyResult, error) {
+func saleResultFromIntent(intent gen.OpenrailsRailIntent) (checkoutSaleIdempotencyResult, error) {
 	var out checkoutSaleIdempotencyResult
 	var evidence struct {
 		TransactionID string `json:"transaction_id"`

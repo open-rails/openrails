@@ -15,7 +15,7 @@ import (
 func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
 	err := svc.ProcessWebhook(
@@ -58,7 +58,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
 	err := svc.ProcessWebhook(
@@ -98,7 +98,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -153,7 +153,7 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 	svc.pendingLease = 100 * time.Millisecond
 
 	started := make(chan struct{})
@@ -196,7 +196,7 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 	svc.pendingLease = 50 * time.Millisecond
 
 	// Simulate a crashed holder: claim pending, never heartbeat or complete.

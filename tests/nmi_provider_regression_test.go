@@ -152,7 +152,7 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	suite.Rails[provider] = &config.ProviderAccountConfig{
+	suite.Rails[provider] = &config.RailMerchantAccountConfig{
 		Rail: models.RailNMI,
 		NMI:  &config.NMIRailConfig{SecurityKey: "test-security-key-" + provider},
 	}

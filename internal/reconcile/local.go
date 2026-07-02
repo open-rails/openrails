@@ -82,16 +82,6 @@ type LocalPayment struct {
 	PurchasedAt       time.Time
 }
 
-// LocalEntitlement is one LIVE subscription-sourced entitlement window.
-type LocalEntitlement struct {
-	ID          uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	SourceID    uuid.UUID
-	StartAt     time.Time
-	EndAt       *time.Time
-}
-
 // LocalPaymentMethod is the slice of openrails.payment_methods the diff engine
 // consumes.
 type LocalPaymentMethod struct {
@@ -122,7 +112,6 @@ type LocalPrice struct {
 // LocalState is one provider's local billing state, loaded merchant-scoped.
 type LocalState struct {
 	Subscriptions  []LocalSubscription
-	Entitlements   []LocalEntitlement
 	PaymentMethods []LocalPaymentMethod
 	// Prices are the billable prices carrying provider links (all providers;
 	// the diff filters by the provider's local rail names).
@@ -153,8 +142,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	state := &LocalState{}
 
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
-		Rails:             names,
-		ProviderAccountID: providerAccountID,
+		Rails:                 names,
+		RailMerchantAccountID: providerAccountID,
 	})
 	if err != nil {
 		return nil, err
@@ -201,24 +190,6 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 
-	ents, err := q.ReconcileListSubscriptionEntitlements(ctx, gen.ReconcileListSubscriptionEntitlementsParams{
-		Rails:             names,
-		ProviderAccountID: providerAccountID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range ents {
-		state.Entitlements = append(state.Entitlements, LocalEntitlement{
-			ID:          row.ID,
-			CustomerID:  row.CustomerID,
-			Entitlement: row.Entitlement,
-			SourceID:    row.SourceID,
-			StartAt:     row.StartAt,
-			EndAt:       row.EndAt,
-		})
-	}
-
 	prices, err := q.ReconcileListPricesWithRails(ctx)
 	if err != nil {
 		return nil, err
@@ -247,8 +218,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	}
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
-		Rails:             names,
-		ProviderAccountID: providerAccountID,
+		Rails:                 names,
+		RailMerchantAccountID: providerAccountID,
 	})
 	if err != nil {
 		return nil, err
@@ -280,9 +251,9 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
-		Rails:             localRailNames(provider),
-		ProviderAccountID: providerAccountID,
-		TransactionIds:    transactionIDs,
+		Rails:                 localRailNames(provider),
+		RailMerchantAccountID: providerAccountID,
+		TransactionIds:        transactionIDs,
 	})
 	if err != nil {
 		return nil, err

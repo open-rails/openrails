@@ -3,9 +3,29 @@ package rails
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+)
+
+// CancelMode classifies how a subscriber-facing cancellation behaves on a rail.
+type CancelMode string
+
+const (
+	// CancelModeReversible: cancellation can be undone in-place before the paid
+	// period ends (Stripe's cancel_at_period_end; NMI while a deferred delete is
+	// still pending — issue 216).
+	CancelModeReversible CancelMode = "reversible"
+
+	// CancelModeDestructive: cancellation tears down the rail-side subscription
+	// immediately and cannot be undone (NMI delete_subscription once executed,
+	// Solana).
+	CancelModeDestructive CancelMode = "destructive"
+
+	// CancelModeExternalPortal: we cannot cancel or resume from our system; the
+	// user must use the rail's own consumer portal (CCBill).
+	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
 // CredentialKey is one provider-account secret slot on a rail.
@@ -26,14 +46,16 @@ type Descriptor struct {
 	// DisplayName is the subscriber-facing name (emails).
 	DisplayName string
 
-	// HasProviderAccounts: the rail participates in the operator-declared
-	// provider-account catalog (openrails.payment_provider_accounts).
-	HasProviderAccounts bool
+	// HasRailMerchantAccounts: the rail participates in the operator-declared
+	// provider-account catalog (openrails.rail_merchant_accounts).
+	HasRailMerchantAccounts bool
 
-	// HasRemoteCustomer: the rail exposes a card-independent remote CUSTOMER
-	// object worth materializing into rail_customers (#635) — Stripe cus_*,
-	// NMI customer_vault_id. CCBill keys on subscription_id and Solana on the
-	// wallet address; neither is a customer.
+	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer
+	// object worth materializing into rail_customer_accounts (#635) — Stripe cus_*
+	// only. NMI's vault "customer" is an instrument container that OpenRails
+	// deliberately mints PER CARD (#682), so it is not person-unique and does
+	// not qualify; CCBill keys on subscription_id and Solana on the wallet
+	// address — none of these is a customer.
 	HasRemoteCustomer bool
 
 	// SupportsChargeSavedMethod: invoice collection may charge a saved method
@@ -51,6 +73,13 @@ type Descriptor struct {
 	// Solana is pull-based (no webhook silence to bridge).
 	RenewalGraceEligible bool
 
+	// RemoteDeleteOnTerminalCancel: a terminal cancellation must durably queue
+	// deletion of the rail-side recurring schedule or the provider keeps
+	// rebilling it (#344/#679). NMI only: Stripe/CCBill drive their own
+	// lifecycle; Solana recurring is pulled by our cranker (stopped by the
+	// local cancel cascade).
+	RemoteDeleteOnTerminalCancel bool
+
 	// AutoBilled reports whether the provider rebills this subscription on its
 	// own side, so OpenRails must not manual-rebill or terminate it (#635), AS
 	// CONSULTED BY THE DUNNING WORKER: CCBill always; NMI only when vault-less
@@ -60,6 +89,16 @@ type Descriptor struct {
 	// the historical switch returned false; preserved deliberately (#669 note B).
 	AutoBilled func(pm *models.PaymentMethod) bool
 
+	// CancelMode classifies how a cancellation of a subscription on this rail
+	// behaves. Takes the full subscription (never nil — callers guard) because
+	// NMI is state-conditional: reversible only while its deferred delete is
+	// still pending (issue 216). Never nil.
+	CancelMode func(sub *models.Subscription, now time.Time) CancelMode
+
+	// CancelPortalURL is the rail's external consumer portal for subscription
+	// management, set only for CancelModeExternalPortal rails. "" = none.
+	CancelPortalURL string
+
 	// CredentialKeys are the rail's provider-account secret slots, in display
 	// order. Nil = the rail holds no provider-account secrets.
 	CredentialKeys []CredentialKey
@@ -68,10 +107,36 @@ type Descriptor struct {
 func autoBilledNever(*models.PaymentMethod) bool  { return false }
 func autoBilledAlways(*models.PaymentMethod) bool { return true }
 
-// nmiAutoBilled: vault-less NMI recurring subs are provider-billed; a sub WITH
-// a stored vault is our-rebill.
+func cancelReversible(*models.Subscription, time.Time) CancelMode  { return CancelModeReversible }
+func cancelDestructive(*models.Subscription, time.Time) CancelMode { return CancelModeDestructive }
+func cancelExternalPortal(*models.Subscription, time.Time) CancelMode {
+	return CancelModeExternalPortal
+}
+
+// nmiCancelMode: reversible only while the subscription is cancelled, its
+// deferred delete_subscription has not yet executed (DeletionScheduledAt is
+// cleared by the River finalizer), and the paid period is still in the future
+// (issue 216). Once the delete fires or the period lapses it is destructive.
+func nmiCancelMode(sub *models.Subscription, now time.Time) CancelMode {
+	if sub.Status != models.StatusCancelled {
+		return CancelModeDestructive
+	}
+	if sub.DeletionScheduledAt == nil || sub.DeletionScheduledAt.IsZero() {
+		return CancelModeDestructive
+	}
+	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() || !sub.CurrentPeriodEndsAt.After(now) {
+		return CancelModeDestructive
+	}
+	return CancelModeReversible
+}
+
+// nmiAutoBilled: reads the EXPLICIT rebill-driver mode (#682) — previously
+// inferred from RailMethodRef emptiness, which made the identity field a
+// behavior flag and blocked capturing billing ids for native vaults (#663).
+// Migration 058 backfilled 'openrails' exactly where the old rule inferred it
+// (legacy-imported methods carrying a billing id).
 func nmiAutoBilled(pm *models.PaymentMethod) bool {
-	return pm == nil || strings.TrimSpace(pm.RailMethodRef) == ""
+	return pm == nil || pm.RebillDriver != models.RebillDriverOpenRails
 }
 
 // descriptors is the compile-time-complete registry: UNKEYED struct literals,
@@ -81,56 +146,71 @@ var descriptors = []Descriptor{
 	{
 		models.RailNMI,
 		"Credit Card", // DisplayName
-		true,          // HasProviderAccounts
-		true,          // HasRemoteCustomer (customer_vault_id)
+		true,          // HasRailMerchantAccounts
+		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
 		true,          // SupportsChargeSavedMethod
 		true,          // OpenRailsDrivenDunning
 		true,          // RenewalGraceEligible
+		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
 		nmiAutoBilled,
+		nmiCancelMode,
+		"", // CancelPortalURL
 		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}},
 	},
 	{
 		models.RailCCBill,
 		"Credit Card", // DisplayName
-		true,          // HasProviderAccounts
+		true,          // HasRailMerchantAccounts
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RenewalGraceEligible (grace from CCBill nextRetryDate)
+		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
+		cancelExternalPortal,
+		"https://support.ccbill.com", // CancelPortalURL (consumer support portal)
 		[]CredentialKey{{"salt", true}, {"datalink_username", true}, {"datalink_password", true}},
 	},
 	{
 		models.RailStripe,
 		"Stripe", // DisplayName
-		true,     // HasProviderAccounts
+		true,     // HasRailMerchantAccounts
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
 		true,     // RenewalGraceEligible
+		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
 		autoBilledNever,
+		cancelReversible, // cancel_at_period_end
+		"",               // CancelPortalURL
 		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}},
 	},
 	{
 		models.RailSolana,
 		"Solana", // DisplayName
-		true,     // HasProviderAccounts
+		true,     // HasRailMerchantAccounts
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RenewalGraceEligible (pull-based)
+		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
+		cancelDestructive,
+		"",                                      // CancelPortalURL
 		[]CredentialKey{{"private_key", false}}, // operator-only signer
 	},
 	{
 		models.RailPayPal,
 		"PayPal", // DisplayName
-		false,    // HasProviderAccounts (no integration; display-only vestige)
+		false,    // HasRailMerchantAccounts (no integration; display-only vestige)
 		false,    // HasRemoteCustomer
 		false,    // SupportsChargeSavedMethod
 		false,    // OpenRailsDrivenDunning
 		false,    // RenewalGraceEligible
+		false,    // RemoteDeleteOnTerminalCancel
 		autoBilledNever,
+		cancelDestructive,
+		"", // CancelPortalURL
 		nil,
 	},
 }
@@ -167,11 +247,11 @@ func HasRemoteCustomer(rail models.Rail) bool {
 	return ok && d.HasRemoteCustomer
 }
 
-// SupportsProviderAccounts reports whether the rail participates in the
+// SupportsRailMerchantAccounts reports whether the rail participates in the
 // provider-account catalog. Unknown rails: false.
-func SupportsProviderAccounts(rail models.Rail) bool {
+func SupportsRailMerchantAccounts(rail models.Rail) bool {
 	d, ok := Lookup(rail)
-	return ok && d.HasProviderAccounts
+	return ok && d.HasRailMerchantAccounts
 }
 
 // AutoBilled reports whether the provider rebills the subscription itself
@@ -186,6 +266,32 @@ func AutoBilled(rail models.Rail, pm *models.PaymentMethod) bool {
 func RenewalGraceEligible(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.RenewalGraceEligible
+}
+
+// RemoteDeleteOnTerminalCancel reports whether a terminal cancellation on this
+// rail must durably queue deletion of the rail-side recurring schedule
+// (#344/#679). Unknown rails: false.
+func RemoteDeleteOnTerminalCancel(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.RemoteDeleteOnTerminalCancel
+}
+
+// CancelModeFor returns the cancellation capability for a subscription. Nil
+// subscriptions and unknown rails yield the safe default: destructive.
+func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
+	if sub == nil {
+		return CancelModeDestructive
+	}
+	if d, ok := Lookup(sub.Rail); ok {
+		return d.CancelMode(sub, now)
+	}
+	return CancelModeDestructive
+}
+
+// CancelPortalURL returns the rail's external consumer-portal URL ("" = none).
+func CancelPortalURL(rail models.Rail) string {
+	d, _ := Lookup(rail)
+	return d.CancelPortalURL
 }
 
 // DisplayName returns the subscriber-facing rail name. Unknown non-empty rails

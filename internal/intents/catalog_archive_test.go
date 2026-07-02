@@ -86,13 +86,13 @@ func stubCatalog(products []*models.Product, prices []*models.Price) catalogRows
 	}
 }
 
-func archiveIntent(t *testing.T, intentType, objectID, markerKey string) gen.OpenrailsProviderIntent {
+func archiveIntent(t *testing.T, intentType, objectID, markerKey string) gen.OpenrailsRailIntent {
 	t.Helper()
 	payload, err := json.Marshal(StripeArchivePayload{ObjectID: objectID, MarkerKey: markerKey})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		Provider:       "stripe",
 		IntentType:     intentType,
@@ -269,7 +269,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 
 func TestStripeArchive_MalformedPayloadSupersedes(t *testing.T) {
 	h := newProductArchiveHandler(newFakeStripeCatalogAPI(), stubCatalog(nil, nil))
-	rel, err := h.CheckRelevance(context.Background(), gen.OpenrailsProviderIntent{
+	rel, err := h.CheckRelevance(context.Background(), gen.OpenrailsRailIntent{
 		IntentType: TypeStripeArchiveProduct,
 		Payload:    []byte(`{}`),
 	})

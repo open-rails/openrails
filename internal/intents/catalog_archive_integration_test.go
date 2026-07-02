@@ -29,8 +29,8 @@ func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	// The archive intents reference TestMerchant (provider_intents +
-	// external_provider_mutation_logs FK into openrails.merchants), so the merchant
+	// The archive intents reference TestMerchant (rail_intents +
+	// rail_mutation_logs FK into openrails.merchants), so the merchant
 	// row must exist.
 	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
 	return &archiveFixture{db: dbi, store: NewStore(dbi), api: newFakeStripeCatalogAPI()}
@@ -64,14 +64,14 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.provider_intents WHERE id = $1", row.ID)
+			"DELETE FROM openrails.rail_intents WHERE id = $1", row.ID)
 	})
 	return row.ID
 }
 
 func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, reason string) {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
+	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
 	require.NoError(t, err)
 	if row.LastFailureReason != nil {
 		reason = *row.LastFailureReason
@@ -82,7 +82,7 @@ func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, rea
 func (fx *archiveFixture) makeDue(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	_, err := fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", id)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", id)
 	require.NoError(t, err)
 }
 
@@ -143,7 +143,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	require.NoError(t, err, "a parked archive is not an error")
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.provider_intents WHERE id = $1", row.ID)
+			"DELETE FROM openrails.rail_intents WHERE id = $1", row.ID)
 	})
 	assert.Equal(t, StatusPending, row.Status)
 	require.NotNil(t, row.LastFailureReason)

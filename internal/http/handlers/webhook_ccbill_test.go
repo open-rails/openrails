@@ -102,7 +102,7 @@ func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 
 	msg := ccbillWebhookMessage("64.38.212.5", prepared, "900000/0000")
 	require.Nil(t, msg.SignatureValid)
-	require.Equal(t, "900000/0000", msg.ProviderAccountID)
+	require.Equal(t, "900000/0000", msg.RailMerchantAccountID)
 
 	// River path: an unverified Prepared must enqueue with SignatureValid nil.
 	require.Nil(t, prepared.QueueArgs("64.38.212.5").SignatureValid)

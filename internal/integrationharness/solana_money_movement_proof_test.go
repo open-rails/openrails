@@ -86,7 +86,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	environment := "test"
 	now := time.Now().UTC()
 	require.NoError(t, surface.app.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, dbtest.TestMerchantID), func(ctx context.Context) error {
-		_, err := surface.app.Runtime.DB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		_, err := surface.app.Runtime.DB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Rail:           "solana",
 			Environment:    &environment,
@@ -96,12 +96,12 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		})
 		return err
 	}))
-	secretName, err := merchants.ProviderAccountSecretName("solana", environment, merchantPub.String(), "private_key")
+	secretName, err := merchants.RailMerchantAccountSecretName("solana", environment, merchantPub.String(), "private_key")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, base58Key)
 	require.NoError(t, err, "inject provider-account private_key secret")
 
-	signer := recurring.NewSignerFromProviderAccounts(secretStore, nil, surface.app.Runtime.DB, 0, environment)
+	signer := recurring.NewSignerFromRailMerchantAccounts(secretStore, nil, surface.app.Runtime.DB, 0, environment)
 	signerPub, err := signer.PublicKey(ctx, dbtest.TestMerchantID)
 	require.NoError(t, err, "production signer must resolve the provider-account key from the secret store")
 	require.Equal(t, merchantPub, signerPub, "secret-store-backed signer derives the merchant wallet")

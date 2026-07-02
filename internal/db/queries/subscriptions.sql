@@ -9,7 +9,7 @@ INSERT INTO openrails.subscriptions (
     rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
-    created_at, updated_at, provider_account_id
+    created_at, updated_at, rail_merchant_account_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot), sqlc.narg(credits_spec_snapshot),
@@ -23,7 +23,7 @@ INSERT INTO openrails.subscriptions (
     sqlc.narg(deletion_scheduled_at), sqlc.narg(gateway_response),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(provider_account_id)
+    sqlc.narg(rail_merchant_account_id)
 );
 
 -- name: UpdateSubscriptionAt :execrows
@@ -221,32 +221,6 @@ WHERE id = $1
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.status = 'cancelled'
   AND sub.deletion_scheduled_at IS NOT NULL;
-
--- name: ListSilentLapsedSubscriptions :many
--- Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
--- subscriptions on provider-truth-probeable rails whose period lapsed
--- past the probe slack, or whose imported period evidence is missing, with NO
--- signal either way: no renewal (the period would have advanced), no failure
--- webhook (status would be past_due — that cohort is dunning's, excluded here),
--- and no payment recorded at/after the period end when a period end exists.
--- Re-derived every pass, so an unreachable provider needs no durable read-queue:
--- unchanged state simply reappears next cycle.
-SELECT * FROM openrails.subscriptions sub
-WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
-  AND sub.status = 'active'
-  AND (
-    sub.current_period_ends_at IS NULL
-    OR sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM openrails.payments p
-    WHERE p.subscription_id = sub.id
-      AND p.status = 'completed'
-      AND (
-        sub.current_period_ends_at IS NULL
-        OR p.purchased_at >= sub.current_period_ends_at
-      )
-  );
 
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM openrails.subscriptions sub

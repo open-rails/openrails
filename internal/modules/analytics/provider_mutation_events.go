@@ -9,12 +9,12 @@ import (
 )
 
 type ProviderMutationEventFilter struct {
-	MerchantID        string
-	Provider          *string
-	ProviderIntentID  *uuid.UUID
-	ProviderAccountID *uuid.UUID
-	Phase             *string
-	Limit             int
+	MerchantID            string
+	Provider              *string
+	ProviderIntentID      *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+	Phase                 *string
+	Limit                 int
 }
 
 func (s *EventLogService) CountProviderMutationEvents(ctx context.Context, f ProviderMutationEventFilter) (uint64, error) {
@@ -52,7 +52,7 @@ func (s *EventLogService) ListProviderMutationEvents(ctx context.Context, f Prov
 		return nil, err
 	}
 	rows, err := s.clickhouseConn.Query(ctx, `
-		SELECT event_id, merchant_id, provider, provider_account_id, provider_intent_id,
+		SELECT event_id, merchant_id, provider, rail_merchant_account_id, provider_intent_id,
 		       intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp
 		FROM provider_mutation_events
 		`+where+`
@@ -70,7 +70,7 @@ func (s *EventLogService) ListProviderMutationEvents(ctx context.Context, f Prov
 			&event.EventID,
 			&event.MerchantID,
 			&event.Provider,
-			&event.ProviderAccountID,
+			&event.RailMerchantAccountID,
 			&event.ProviderIntentID,
 			&event.IntentType,
 			&event.IdempotencyKey,
@@ -101,9 +101,9 @@ func providerMutationWhere(f ProviderMutationEventFilter) (string, []any, error)
 		clauses = append(clauses, "provider_intent_id = ?")
 		args = append(args, *f.ProviderIntentID)
 	}
-	if f.ProviderAccountID != nil {
-		clauses = append(clauses, "provider_account_id = ?")
-		args = append(args, *f.ProviderAccountID)
+	if f.RailMerchantAccountID != nil {
+		clauses = append(clauses, "rail_merchant_account_id = ?")
+		args = append(args, *f.RailMerchantAccountID)
 	}
 	if f.Phase != nil {
 		clauses = append(clauses, "phase = ?")

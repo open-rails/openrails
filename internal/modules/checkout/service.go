@@ -27,10 +27,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -95,12 +95,12 @@ type CheckoutService struct {
 	PurchaseService      *CheckoutPurchaseService
 	VaultResolver        *CheckoutVaultService
 	NMISaleService       *CheckoutNMISaleService
-	PaymentMethodService *vault.PaymentMethodService
-	VaultService         *vault.VaultService
+	PaymentMethodService *paymentmethods.PaymentMethodService
+	VaultService         *paymentmethods.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.ProviderAccountSecretResolver
+	ProviderSecrets      merchants.RailMerchantAccountSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
@@ -113,7 +113,7 @@ type CheckoutService struct {
 	Intents intentExecutor
 	clock   clockwork.Clock
 	Config  *config.Config
-	Rails   config.ProviderAccountSet
+	Rails   config.RailMerchantAccountSet
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -142,13 +142,13 @@ func NewCheckoutService(
 	priceService *catalog.PriceService,
 	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
-	paymentMethodService *vault.PaymentMethodService,
-	vaultService *vault.VaultService,
+	paymentMethodService *paymentmethods.PaymentMethodService,
+	vaultService *paymentmethods.VaultService,
 	idempotencyService checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
-	railSet config.ProviderAccountSet,
+	railSet config.RailMerchantAccountSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
@@ -737,7 +737,7 @@ func (s *CheckoutService) processNMISubscription(
 		}
 		var failErr error = errors.New(reason)
 		if locID := terminalEvidenceLocalization(intent); locID != "" {
-			failErr = &vault.VaultError{Err: failErr, LocalizationID: locID, Message: reason}
+			failErr = &paymentmethods.VaultError{Err: failErr, LocalizationID: locID, Message: reason}
 		}
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
@@ -751,7 +751,7 @@ func (s *CheckoutService) processNMISubscription(
 
 // nmiSubscriptionResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
-func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsProviderIntent) (*CheckoutResponse, error) {
+func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
 	var evidence struct {
 		SubscriptionID string `json:"subscription_id"`
 		TransactionID  string `json:"transaction_id"`
@@ -792,7 +792,7 @@ func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsProviderIntent) (*Che
 
 // terminalEvidenceLocalization reads the decline localization id off a
 // terminally-failed intent's evidence (for client-facing error rendering).
-func terminalEvidenceLocalization(intent gen.OpenrailsProviderIntent) string {
+func terminalEvidenceLocalization(intent gen.OpenrailsRailIntent) string {
 	if len(intent.ResultEvidence) == 0 {
 		return ""
 	}
@@ -1809,7 +1809,7 @@ func (s *CheckoutService) processUpgrade(
 		subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			subErr = &vault.VaultError{
+			subErr = &paymentmethods.VaultError{
 				Err:            subErr,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        subErr.Error(),

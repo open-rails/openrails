@@ -16,14 +16,26 @@ type PaymentMethod struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	Rail       Rail      `json:"rail"` // Rail: nmi, ccbill, solana
 
-	// ProviderAccountID is the provider account that vaulted this method (#641).
-	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
+	// RailMerchantAccountID is the provider account that vaulted this method (#641).
+	RailMerchantAccountID *uuid.UUID `json:"rail_merchant_account_id,omitempty"`
 
 	// Two-slot rail handle (#588): the customer-scope ref and the instrument-scope
 	// ref, replacing the overloaded vault_id (+ NMI-ism billing_id).
-	RailCustomerRef      string `json:"-"` // customer-scope handle (NMI customer_vault_id; "" for Stripe — see rail_customers)
-	RailMethodRef        string `json:"-"` // instrument-scope handle (NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token)
+	//
+	// #682 honesty note: for NMI the "customer-scope" ref is INSTRUMENT-scoped in
+	// our usage — OpenRails deliberately mints ONE vault customer PER CARD, so a
+	// person with N cards is N unrelated NMI vault ids. NMI has no person-level
+	// remote identity in our model; the person is the local customer_id UUID.
+	RailCustomerRef      string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see rail_customer_accounts)
+	RailMethodRef        string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only, see RebillDriver; Stripe pm_, Spreedly/HyperSwitch token)
 	InitialTransactionID string `json:"-"` // Transaction that created this vault
+
+	// RebillDriver (#682) is the EXPLICIT rebill-driver mode, decoupled from
+	// identity: RebillDriverProvider = the rail's own recurring engine bills the
+	// subscription; RebillDriverOpenRails = the OpenRails dunning worker drives
+	// manual rebills. Previously inferred from RailMethodRef emptiness on NMI,
+	// which made an identity field load-bearing as a behavior flag.
+	RebillDriver string `json:"-"`
 
 	// Payment method metadata
 	LastFour   *string        `json:"last_four"`   // Last 4 digits of card
@@ -37,6 +49,12 @@ type PaymentMethod struct {
 	// Relationships
 	Subscriptions []*Subscription `json:"subscriptions,omitempty"`
 }
+
+// RebillDriver values (#682).
+const (
+	RebillDriverProvider  = "provider"
+	RebillDriverOpenRails = "openrails"
+)
 
 // PaymentMethodCharge is the DERIVED last-charge health for a payment method
 // (#589) — computed at query time from openrails.payments, never a stored column.

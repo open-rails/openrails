@@ -11,9 +11,9 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -110,7 +110,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		// repeated failures escalate to captcha/block (and feed site-wide
 		// attack-mode detection). Best-effort + nil-safe; never affects the
 		// response.
-		var vErr *vault.VaultError
+		var vErr *paymentmethods.VaultError
 		if errors.As(err, &vErr) {
 			r.State.CardAbuseGuard.RecordChargeFailure(
 				r.Request.Context(),
@@ -140,7 +140,7 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if !ok {
 		return false
 	}
-	_, ok, err := r.State.Merchants.ActiveProviderAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
+	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), "live", "security_key")
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {
@@ -218,7 +218,7 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
-	var vaultErr *vault.VaultError
+	var vaultErr *paymentmethods.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
 		if strings.TrimSpace(vaultErr.LocalizationID) != "" {

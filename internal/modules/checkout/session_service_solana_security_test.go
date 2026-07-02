@@ -304,8 +304,8 @@ func testSolanaCheckoutConfig() *config.Config {
 	}
 }
 
-func testSolanaCheckoutRails() config.ProviderAccountSet {
-	return config.ProviderAccountSet{
+func testSolanaCheckoutRails() config.RailMerchantAccountSet {
+	return config.RailMerchantAccountSet{
 		"solana": {
 			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{

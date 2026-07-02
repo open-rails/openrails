@@ -159,21 +159,21 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	if len(src.DelegatedInvokerWastedSpendWindows) > 0 {
 		dst.DelegatedInvokerWastedSpendWindows = src.DelegatedInvokerWastedSpendWindows
 	}
-	if len(src.ProviderAccounts) > 0 {
-		if dst.ProviderAccounts == nil {
-			dst.ProviderAccounts = map[string]ProviderAccountConfig{}
+	if len(src.RailMerchantAccounts) > 0 {
+		if dst.RailMerchantAccounts == nil {
+			dst.RailMerchantAccounts = map[string]RailMerchantAccountConfig{}
 		}
-		for key, srcRails := range src.ProviderAccounts {
-			dstRails := dst.ProviderAccounts[key]
+		for key, srcRails := range src.RailMerchantAccounts {
+			dstRails := dst.RailMerchantAccounts[key]
 			if dstRails == nil {
-				dstRails = ProviderAccountConfig{}
+				dstRails = RailMerchantAccountConfig{}
 			}
 			for rail, srcAccount := range srcRails {
 				dstAccount := dstRails[rail]
 				mergeProviderRailAccountConfig(&dstAccount, srcAccount)
 				dstRails[rail] = dstAccount
 			}
-			dst.ProviderAccounts[key] = dstRails
+			dst.RailMerchantAccounts[key] = dstRails
 		}
 	}
 }
@@ -251,8 +251,8 @@ type MerchantConfig struct {
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers (#646): per-window spend ceilings on wasted (failed/abused)
 	// generation. Empty leaves the service-default windows (burst 15m/$5, sustained 5h/$20).
-	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig             `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
-	ProviderAccounts                   map[string]ProviderAccountConfig `yaml:"provider_accounts,omitempty" koanf:"provider_accounts"`
+	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig                 `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
+	RailMerchantAccounts               map[string]RailMerchantAccountConfig `yaml:"rail_merchant_accounts,omitempty" koanf:"rail_merchant_accounts"`
 }
 
 // InvoiceConfig is the merchant invoice/collection policy block, mirroring
@@ -323,18 +323,18 @@ type MerchantProfileConfig struct {
 	SupportURL  string `yaml:"support_url,omitempty" koanf:"support_url"`
 }
 
-type ProviderAccountConfig map[string]ProviderRailAccountConfig
+type RailMerchantAccountConfig map[string]ProviderRailAccountConfig
 
 type ProviderRailAccountConfig struct {
-	Environment string                       `yaml:"environment,omitempty" koanf:"environment"`
-	AccountID   string                       `yaml:"account_id,omitempty" koanf:"account_id"`
-	Archived    bool                         `yaml:"archived,omitempty" koanf:"archived"`
-	Signer      *ProviderAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
-	Secrets     map[string]string            `yaml:"secrets,omitempty" koanf:"secrets"`
-	Settings    map[string]any               `yaml:"settings,omitempty" koanf:"settings"`
+	Environment string                           `yaml:"environment,omitempty" koanf:"environment"`
+	AccountID   string                           `yaml:"account_id,omitempty" koanf:"account_id"`
+	Archived    bool                             `yaml:"archived,omitempty" koanf:"archived"`
+	Signer      *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
+	Secrets     map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
+	Settings    map[string]any                   `yaml:"settings,omitempty" koanf:"settings"`
 }
 
-type ProviderAccountSignerConfig struct {
+type RailMerchantAccountSignerConfig struct {
 	Mode string `yaml:"mode,omitempty" koanf:"mode"`
 	Key  string `yaml:"key,omitempty" koanf:"key"`
 }
@@ -364,7 +364,7 @@ type MerchantManifestReconcileOptions struct {
 }
 
 type ManifestProviderIdentityResolver interface {
-	ResolveManifestProviderAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error)
+	ResolveManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error)
 }
 
 type manifestProviderIdentity struct {
@@ -592,19 +592,19 @@ func sortedMerchantKeys(in map[string]MerchantConfig) []string {
 	return keys
 }
 
-type providerAccountEntry struct {
+type railMerchantAccountEntry struct {
 	key    string
 	rail   string
 	config ProviderRailAccountConfig
 }
 
-func providerAccountEntries(in map[string]ProviderAccountConfig) []providerAccountEntry {
+func railMerchantAccountEntries(in map[string]RailMerchantAccountConfig) []railMerchantAccountEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	out := make([]providerAccountEntry, 0, len(in))
+	out := make([]railMerchantAccountEntry, 0, len(in))
 	for _, key := range keys {
 		rails := make([]string, 0, len(in[key]))
 		for rail := range in[key] {
@@ -612,7 +612,7 @@ func providerAccountEntries(in map[string]ProviderAccountConfig) []providerAccou
 		}
 		sort.Strings(rails)
 		for _, rail := range rails {
-			out = append(out, providerAccountEntry{key: key, rail: rail, config: in[key][rail]})
+			out = append(out, railMerchantAccountEntry{key: key, rail: rail, config: in[key][rail]})
 		}
 	}
 	return out
@@ -672,11 +672,11 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		}
 	}
 
-	for _, entry := range providerAccountEntries(mt.ProviderAccounts) {
+	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
 		}
-		if err := reconcileManifestProviderAccount(ctx, cfg, database, merchantID, slug, entry.key, entry.rail, entry.config, secretStore, transit, opts); err != nil {
+		if err := reconcileManifestRailMerchantAccount(ctx, cfg, database, merchantID, slug, entry.key, entry.rail, entry.config, secretStore, transit, opts); err != nil {
 			return err
 		}
 	}
@@ -696,7 +696,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // file. Names are derived exactly as Put derives them.
 func pruneManifestSecrets(ctx context.Context, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore) error {
 	declared := map[string]struct{}{}
-	for _, entry := range providerAccountEntries(mt.ProviderAccounts) {
+	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
 		rail := normalizeManifestRail(entry.rail)
 		environment, err := normalizeProviderEnvironment(entry.config.Environment)
 		if err != nil {
@@ -723,7 +723,7 @@ func pruneManifestSecrets(ctx context.Context, merchantID merchant.ID, mt Mercha
 			}
 		}
 		for key := range entry.config.Secrets {
-			name, err := merchants.ProviderAccountSecretName(rail, environment, accountID, key)
+			name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
 			if err != nil {
 				return err
 			}
@@ -753,7 +753,7 @@ func hasManifestProfile(p MerchantProfileConfig) bool {
 		strings.TrimSpace(p.SupportURL) != ""
 }
 
-func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	rail = normalizeManifestRail(rail)
 	if rail == "" {
 		return fmt.Errorf("provider account rail is required")
@@ -770,7 +770,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	if resolver == nil {
 		resolver = defaultManifestProviderIdentityResolver{}
 	}
-	identity, err := resolver.ResolveManifestProviderAccount(ctx, cfg, rail, environment, account, secrets)
+	identity, err := resolver.ResolveManifestRailMerchantAccount(ctx, cfg, rail, environment, account, secrets)
 	if err != nil {
 		return err
 	}
@@ -788,7 +788,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 		return fmt.Errorf("provider account %q requires account_id", rail)
 	}
 	for key, value := range account.Secrets {
-		name, err := merchants.ProviderAccountSecretName(rail, environment, accountID, key)
+		name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
 		if err != nil {
 			return err
 		}
@@ -816,13 +816,13 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 			return nil
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			Config:              cfg,
-			SecretStore:         secretStore,
-			MerchantID:          merchantID,
-			MerchantSlug:        merchantSlug,
-			ProviderEnvironment: environment,
-			ProviderAccountID:   accountID,
-			EnabledEvents:       webhooks.HandledStripeEventTypes,
+			Config:                cfg,
+			SecretStore:           secretStore,
+			MerchantID:            merchantID,
+			MerchantSlug:          merchantSlug,
+			ProviderEnvironment:   environment,
+			RailMerchantAccountID: accountID,
+			EnabledEvents:         webhooks.HandledStripeEventTypes,
 		})
 		if err != nil {
 			return fmt.Errorf("reconcile stripe webhook endpoint: %w", err)
@@ -841,7 +841,7 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 
 	found := false
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		_, err := database.Gen(ctx).GetProviderAccountByIdentity(ctx, gen.GetProviderAccountByIdentityParams{
+		_, err := database.Gen(ctx).GetRailMerchantAccountByIdentity(ctx, gen.GetRailMerchantAccountByIdentityParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        rail,
 			Environment: stringPtrIfNotEmpty(environment),
@@ -885,12 +885,12 @@ func reconcileManifestProviderAccount(ctx context.Context, cfg *config.Config, d
 	// #650: a provider account belongs to exactly one merchant. Fail with a clear
 	// error if another merchant already owns this identity, rather than letting the
 	// global-uniqueness upsert reject it with an opaque unique-violation under RLS.
-	if err := merchants.AssertProviderAccountUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
+	if err := merchants.AssertRailMerchantAccountUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
 		return err
 	}
 	mctx := merchant.WithID(ctx, merchantID)
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		_, err := database.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		_, err := database.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        rail,
 			Environment: stringPtrIfNotEmpty(environment),
@@ -1024,7 +1024,7 @@ func newManifestSecretValues(rail string, sources map[string]string) (manifestSe
 		values:  map[string]string{},
 	}
 	for key, value := range sources {
-		canonical, err := merchants.NormalizeProviderAccountSecretKey(rail, key)
+		canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, key)
 		if err != nil {
 			return out, err
 		}
@@ -1041,7 +1041,7 @@ func newManifestSecretValues(rail string, sources map[string]string) (manifestSe
 }
 
 func (v manifestSecretValues) Resolve(key string, fallback string) (string, error) {
-	canonical, err := merchants.NormalizeProviderAccountSecretKey(v.rail, key)
+	canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(v.rail, key)
 	if err != nil {
 		return "", err
 	}
@@ -1061,7 +1061,7 @@ func (v manifestSecretValues) Resolve(key string, fallback string) (string, erro
 }
 
 func (v manifestSecretValues) ResolveIfPresent(key string) (string, bool, error) {
-	canonical, err := merchants.NormalizeProviderAccountSecretKey(v.rail, key)
+	canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(v.rail, key)
 	if err != nil {
 		return "", false, err
 	}
@@ -1078,7 +1078,7 @@ func (v manifestSecretValues) ResolveIfPresent(key string) (string, bool, error)
 
 type defaultManifestProviderIdentityResolver struct{}
 
-func (defaultManifestProviderIdentityResolver) ResolveManifestProviderAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error) {
+func (defaultManifestProviderIdentityResolver) ResolveManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
 		return manifestProviderIdentity{
 			AccountID: accountID,

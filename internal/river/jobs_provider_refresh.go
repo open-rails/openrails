@@ -41,14 +41,14 @@ func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 
 // ProviderRefreshWorker (#574) is the always-on provider-read umbrella. It keeps
 // provider truth fresh without remote mutations: bounded event pulls with
-// durable watermarks, the existing subscription-liveness lane, and the CCBill
-// DataLink bulk lane. Provider outages leave watermarks in place for the next
-// scheduled/startup pass.
+// durable watermarks, the unknown-cohort reconcile (#632/#633/#665 — the ONE
+// per-subscription verification path), and the CCBill DataLink bulk lane.
+// Provider outages leave watermarks in place for the next scheduled/startup pass.
 type ProviderRefreshWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
 	DB                  *db.DB
 	Config              *config.Config
-	Rails               config.ProviderAccountSet
+	Rails               config.RailMerchantAccountSet
 	Clock               clockwork.Clock
 	NMIClients          map[string]*nmi.NMIClient
 	CCBillDataLink      *ccbill.DataLinkClient
@@ -84,11 +84,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	logger := log.WithContext(ctx).WithField("worker", KindProviderRefresh)
 	stats := providerRefreshStats{}
 
-	if err := w.runSubscriptionLiveness(ctx); err != nil {
-		stats.LaneErrors++
-		logger.WithError(err).Error("Provider Refresh: subscription liveness lane failed")
-	}
-
 	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("provider refresh: list merchants: %w", err)
@@ -104,6 +99,10 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		stats.LaneErrors++
 		logger.WithError(fetcherErr).Warn("Provider Refresh: event lane unavailable")
 	}
+	// #665: per-subscription probe fallbacks for rows the bulk pull can't decide
+	// (NULL period end / evidence outside the window). Snapshot sources only —
+	// the unknown-reconcile core stays the one decider.
+	probers := reconcile.BuildSubscriptionProbers(w.Rails, w.NMIClients)
 
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
@@ -115,6 +114,17 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 			if fetcherErr == nil {
 				res := w.runEventRefresh(tctx, mid, fetchers)
 				stats.add(res)
+				// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
+				// PROVES a source domain — flip reconciliation_state before the
+				// convergence pass so held EXCESS repairs can proceed.
+				if len(res.Proofs) > 0 {
+					if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
+						stats.LaneErrors++
+						logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
+					} else if len(flipped) > 0 {
+						logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
+					}
+				}
 				if res.Changed {
 					if err := w.runConvergence(tctx, mid); err != nil {
 						stats.ConvergeErrors++
@@ -123,9 +133,10 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 				}
 			}
 			// #633: reconcile the `unknown` cohort against provider truth (one
-			// windowed bulk pull per rail). Tolerant of missing/failed fetchers —
-			// those rails' subs stay `unknown` and are retried next pass (backoff).
-			if err := w.runUnknownReconcile(tctx, mid, fetchers); err != nil {
+			// windowed bulk pull per rail + targeted per-sub probe fallbacks).
+			// Tolerant of missing/failed fetchers — those rails' subs stay
+			// `unknown` and are retried next pass (backoff).
+			if err := w.runUnknownReconcile(tctx, mid, fetchers, probers); err != nil {
 				stats.LaneErrors++
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
 			}
@@ -152,19 +163,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	return nil
 }
 
-func (w *ProviderRefreshWorker) runSubscriptionLiveness(ctx context.Context) error {
-	worker := &SubscriptionLivenessWorker{
-		DB:              w.DB,
-		Config:          w.Config,
-		Rails:           w.Rails,
-		Clock:           w.Clock,
-		NMIClients:      w.NMIClients,
-		EventLogService: w.EventLogService,
-		DeferDelete:     w.DeferDelete,
-	}
-	return worker.Work(ctx, &river.Job[SubscriptionLivenessArgs]{})
-}
-
 func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context) error {
 	worker := CCBillReconcileWorker{
 		DB:                  w.DB,
@@ -178,20 +176,27 @@ func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context) error
 // against provider truth via one windowed bulk pull per rail (#633), backfilling
 // missing charges (#634). The lifecycle service is built with nil deps (like the
 // converge engine): the resolver only needs local-state writes + the entitlement
-// service it constructs internally for revokes. Best-effort: a rail whose pull
-// fails leaves its subs `unknown` for the next scheduled pass (River backoff).
-func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher) error {
+// service it constructs internally for revokes — plus the deferred-delete
+// scheduler (#679) so stale-decline cancels queue the NMI delete intent.
+// Best-effort: a rail whose pull fails leaves its subs `unknown` for the next
+// scheduled pass (River backoff).
+func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher, probers map[reconcile.Provider]reconcile.SubscriptionProber) error {
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
 	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, w.EventLogService, clock)
-	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
-	if res.Renewed+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
+	if w.DeferDelete != nil {
+		// #679: a stale-decline cancel must durably queue the deferred NMI
+		// delete; without this the lifecycle WARNs and the remote keeps retrying.
+		lc.SetDeferredDeleteScheduler(w.DeferDelete)
+	}
+	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
+	if res.Renewed+res.Adopted+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": mid, "renewed": res.Renewed, "past_due": res.PastDue,
-			"cancelled": res.Cancelled, "still_unknown": res.StillUnknown,
-			"backfilled": res.Backfilled, "rail_customers": res.RailCustomers, "rail_errors": len(res.RailErrors),
+			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
+			"cancelled": res.Cancelled, "still_unknown": res.StillUnknown, "probed": res.Probed,
+			"backfilled": res.Backfilled, "rail_customer_accounts": res.RailCustomers, "rail_errors": len(res.RailErrors),
 		}).Info("Provider Refresh: unknown-cohort reconcile")
 	}
 	return err
@@ -233,7 +238,7 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	return providers
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.ProviderAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.RailMerchantAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())
@@ -253,6 +258,11 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 
 	engine := reconcile.NewEngine(w.DB, w.Config, fetchers)
 	engine.Now = func() time.Time { return now }
+	if w.DeferDelete != nil {
+		// #679: a decider stale-decline cancel from the pull path must durably
+		// queue the deferred NMI delete, same as unknown-resolution.
+		engine.Decisions = reconcile.NewDecisionApplier(w.DB, w.DeferDelete)
+	}
 	maxWindows := w.maxWindows()
 	for i := 0; i < maxWindows && since.Before(horizon); i++ {
 		until := since.Add(w.window())
@@ -263,12 +273,12 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			break
 		}
 		res, err := engine.Run(ctx, reconcile.RunParams{
-			Mode:             reconcile.ModeEnforce,
-			Mutations:        &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
-			Providers:        []reconcile.Provider{provider},
-			ProviderAccounts: bindings,
-			Since:            since,
-			Until:            until,
+			Mode:                 reconcile.ModeEnforce,
+			Mutations:            &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
+			Providers:            []reconcile.Provider{provider},
+			RailMerchantAccounts: bindings,
+			Since:                since,
+			Until:                until,
 		})
 		if err != nil {
 			out.ProviderErrors++
@@ -288,6 +298,8 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			out.NewFindings += rep.NewFindings
 			out.UpdatedFindings += rep.UpdatedFindings
 		}
+		// Completed enforce window: its coverage is a pull proof (#665 gate).
+		out.Proofs = res.PullProofs()
 		out.AppliedChanges += len(res.AppliedChanges)
 		out.Changed = out.Changed || len(res.AppliedChanges) > 0
 		if err := w.recordWatermarkSuccess(ctx, mid, provider, accountID, until, now); err != nil {
@@ -304,7 +316,7 @@ func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID
 	var watermark time.Time
 	err := w.DB.Qx(ctx).QueryRow(ctx, `
 SELECT watermark_at
-  FROM openrails.provider_refresh_watermarks
+  FROM openrails.rail_refresh_watermarks
  WHERE merchant_id = $1::uuid
    AND provider = $2::text
    AND event_domain = $3::text
@@ -321,11 +333,11 @@ SELECT watermark_at
 
 func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time) error {
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.provider_refresh_watermarks (
-    merchant_id, provider, provider_account_id, event_domain, watermark_at,
+INSERT INTO openrails.rail_refresh_watermarks (
+    merchant_id, provider, rail_merchant_account_id, event_domain, watermark_at,
     last_attempted_at, last_succeeded_at, last_error
 ) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, $6::timestamptz, NULL)
-ON CONFLICT ON CONSTRAINT provider_refresh_watermarks_identity_key
+ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
 DO UPDATE SET
     watermark_at = EXCLUDED.watermark_at,
     last_attempted_at = EXCLUDED.last_attempted_at,
@@ -339,11 +351,11 @@ DO UPDATE SET
 func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time, cause error) error {
 	errText := cause.Error()
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.provider_refresh_watermarks (
-    merchant_id, provider, provider_account_id, event_domain, watermark_at,
+INSERT INTO openrails.rail_refresh_watermarks (
+    merchant_id, provider, rail_merchant_account_id, event_domain, watermark_at,
     last_attempted_at, last_succeeded_at, last_error
 ) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, NULL, $7::text)
-ON CONFLICT ON CONSTRAINT provider_refresh_watermarks_identity_key
+ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
 DO UPDATE SET
     last_attempted_at = EXCLUDED.last_attempted_at,
     last_error = EXCLUDED.last_error,
@@ -417,6 +429,12 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 	r.WatermarkErrors += p.WatermarkErrors
 	r.ProviderErrors += p.ProviderErrors
 	r.Changed = r.Changed || p.Changed
+	if len(p.Proofs) > 0 {
+		if r.Proofs == nil {
+			r.Proofs = reconcile.PullProofs{}
+		}
+		r.Proofs.Merge(p.Proofs)
+	}
 }
 
 type providerRefreshProviderResult struct {
@@ -428,4 +446,6 @@ type providerRefreshProviderResult struct {
 	WatermarkErrors int
 	ProviderErrors  int
 	Changed         bool
+	// Proofs carries the completed pull's coverage for the #665 gate.
+	Proofs reconcile.PullProofs
 }

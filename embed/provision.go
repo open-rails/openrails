@@ -16,9 +16,9 @@ import (
 type BillingConfig = boot.BillingConfig
 type MerchantConfig = boot.MerchantConfig
 type MerchantProfileConfig = boot.MerchantProfileConfig
-type ProviderAccountConfig = boot.ProviderAccountConfig
+type RailMerchantAccountConfig = boot.RailMerchantAccountConfig
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
-type ProviderAccountSignerConfig = boot.ProviderAccountSignerConfig
+type RailMerchantAccountSignerConfig = boot.RailMerchantAccountSignerConfig
 type RemoteApplicationConfig = boot.RemoteApplicationConfig
 type StaticJWKSConfig = boot.StaticJWKSConfig
 type StaticJWKConfig = boot.StaticJWKConfig
@@ -55,7 +55,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		Merchant: m,
 		Options:  boot.MerchantManifestReconcileOptions{Insert: true},
 	}
-	if len(m.ProviderAccounts) > 0 {
+	if len(m.RailMerchantAccounts) > 0 {
 		backend, err := merchantsecrets.Build(ctx, conf, database.DataPool())
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: build secret store: %w", err)

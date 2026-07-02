@@ -78,7 +78,7 @@ func (r refundReservations) payments() *payments.PaymentService {
 	return payments.NewPaymentService(r.DB, r.Clock)
 }
 
-func decodeRefundPayload(intent gen.OpenrailsProviderIntent) (RefundPayload, error) {
+func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
 	var p RefundPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("refund intent has no payload")
@@ -95,7 +95,7 @@ func decodeRefundPayload(intent gen.OpenrailsProviderIntent) (RefundPayload, err
 // checkRelevance: a refund intent applies while its local reservation is
 // still open (pending). A completed reservation means the refund already
 // finalized; a released/failed or deleted one means it was abandoned.
-func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
+func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
@@ -193,11 +193,11 @@ func (h *NMIRefundHandler) Backoff(attempts int32) time.Duration { return h.Poli
 // intent, is the source of truth post-success.
 func (h *NMIRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
-func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
+func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
@@ -253,7 +253,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 // refund/credit action of the intent's amount against the original
 // transaction means the money moved (finalize + succeed); a clean read with
 // no such action means it definitively did not (the executor may retry).
-func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
@@ -339,12 +339,12 @@ type stripeRefundAPI interface {
 type StripeRefundHandler struct {
 	refundReservations
 	Config *config.Config
-	Rails  config.ProviderAccountSet
+	Rails  config.RailMerchantAccountSet
 	Stripe stripeRefundAPI
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.ProviderAccountSet, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, clock clockwork.Clock) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
@@ -362,11 +362,11 @@ func (h *StripeRefundHandler) Backoff(attempts int32) time.Duration { return h.P
 // detect a double-refund conflict (admin_payments.go).
 func (h *StripeRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
-func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
+func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -418,7 +418,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsP
 	return Succeeded(map[string]any{"provider_refund_id": result.ID, "refund_status": result.Status})
 }
 
-func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())

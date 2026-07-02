@@ -94,7 +94,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	recipientWallet := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
-	suite.seedProviderAccountWithEvidence(
+	suite.seedRailMerchantAccountWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
@@ -141,7 +141,7 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	accountID := "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
-	suite.seedProviderAccountWithEvidence(
+	suite.seedRailMerchantAccountWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),

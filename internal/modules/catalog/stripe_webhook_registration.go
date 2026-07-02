@@ -15,16 +15,16 @@ import (
 )
 
 type ManagedStripeWebhookParams struct {
-	Config              *config.Config
-	Rails               config.ProviderAccountSet
-	SecretStore         merchants.MerchantSecretStore
-	MerchantID          merchant.ID
-	MerchantSlug        string
-	ProviderEnvironment string
-	ProviderAccountID   string
-	SecretKey           string
-	EnabledEvents       []string
-	StripeBaseURL       string
+	Config                *config.Config
+	Rails                 config.RailMerchantAccountSet
+	SecretStore           merchants.MerchantSecretStore
+	MerchantID            merchant.ID
+	MerchantSlug          string
+	ProviderEnvironment   string
+	RailMerchantAccountID string
+	SecretKey             string
+	EnabledEvents         []string
+	StripeBaseURL         string
 }
 
 type ManagedStripeWebhookResult struct {
@@ -76,7 +76,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	if p.Config != nil && p.Config.IsLimitedMode() {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
 	}
-	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.MerchantSlug, p.ProviderAccountID)
+	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.MerchantSlug, p.RailMerchantAccountID)
 	if err != nil {
 		return ManagedStripeWebhookResult{}, err
 	}
@@ -87,12 +87,12 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	secretKey := strings.TrimSpace(p.SecretKey)
 	var secretName string
 	haveSecret := false
-	if p.SecretStore != nil && !p.MerchantID.IsZero() && strings.TrimSpace(p.ProviderAccountID) != "" {
-		keyName, err := merchants.ProviderAccountSecretName("stripe", p.ProviderEnvironment, p.ProviderAccountID, "secret_key")
+	if p.SecretStore != nil && !p.MerchantID.IsZero() && strings.TrimSpace(p.RailMerchantAccountID) != "" {
+		keyName, err := merchants.RailMerchantAccountSecretName("stripe", p.ProviderEnvironment, p.RailMerchantAccountID, "secret_key")
 		if err != nil {
 			return ManagedStripeWebhookResult{}, err
 		}
-		secretName, err = merchants.ProviderAccountSecretName("stripe", p.ProviderEnvironment, p.ProviderAccountID, "webhook_signing_secret")
+		secretName, err = merchants.RailMerchantAccountSecretName("stripe", p.ProviderEnvironment, p.RailMerchantAccountID, "webhook_signing_secret")
 		if err != nil {
 			return ManagedStripeWebhookResult{}, err
 		}
@@ -120,7 +120,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
 	}
 
-	rails := config.ProviderAccountSet{"stripe": &config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
+	rails := config.RailMerchantAccountSet{"stripe": &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
 		URL:           webhookURL,

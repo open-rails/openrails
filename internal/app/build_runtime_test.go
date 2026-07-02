@@ -16,7 +16,7 @@ func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
 	cfg.TestMode = true
-	rails := config.ProviderAccountSet{
+	rails := config.RailMerchantAccountSet{
 		"ccbill": {
 			Rail: models.RailCCBill,
 			CCBill: &config.CCBillRailConfig{
@@ -66,12 +66,12 @@ func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
 // feed check. These tests pin the degrade-not-die policy matrix.
 // ----------------------------------------------------------------------------
 
-func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.ProviderAccountSet) {
+func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.RailMerchantAccountSet) {
 	t.Helper()
 	cfg := config.GetDefaultBillingConfig()
 	cfg.Mode = config.ModeFull
 	cfg.TestMode = testMode
-	rails := config.ProviderAccountSet{
+	rails := config.RailMerchantAccountSet{
 		"solana": {Rail: models.RailSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},
 	}
 	return cfg, rails

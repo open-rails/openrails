@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_credential_audit (
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
-CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
+CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -93,21 +93,21 @@ CREATE TABLE IF NOT EXISTS openrails.payment_provider_accounts (
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    provider_account_id uuid,
+    rail_merchant_account_id uuid,
     status text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.payments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    provider_account_id uuid,
+    rail_merchant_account_id uuid,
     status text NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS openrails.provider_intents (
+CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    provider_account_id uuid,
+    rail_merchant_account_id uuid,
     status text NOT NULL
 );
 
@@ -190,41 +190,41 @@ func newSvc(t *testing.T) *Service {
 	return svc
 }
 
-func seedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, false)
 		ON CONFLICT (rail, environment, account_id) DO NOTHING
 	`, merchantID.String(), rail, environment, accountID)
 	require.NoError(t, err)
 }
 
-func seedArchivedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.payment_provider_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, true)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = true
 	`, merchantID.String(), rail, environment, accountID)
 	require.NoError(t, err)
 }
 
-func TestArchivedProviderAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
+func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
 	require.NoError(t, err)
 
 	const accountID = "archived-nmi-account"
-	seedArchivedProviderAccount(t, svc, tn.ID, "nmi", "live", accountID)
-	secretName, err := ProviderAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
+	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	secretName, err := RailMerchantAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
-	_, ok, err := svc.ActiveProviderAccountSecretName(ctx, tn.ID, "nmi", "live", "security_key")
-	require.ErrorIs(t, err, ErrNoActiveProviderAccount)
+	_, ok, err := svc.ActiveRailMerchantAccountSecretName(ctx, tn.ID, "nmi", "live", "security_key")
+	require.ErrorIs(t, err, ErrNoActiveRailMerchantAccount)
 	require.False(t, ok)
 
 	got, ok, err := svc.LoadNMIWebhookSigningSecretForAccount(ctx, tn.ID, accountID)
@@ -233,14 +233,14 @@ func TestArchivedProviderAccountRejectsNewWorkButResolvesByAccountID(t *testing.
 	require.Equal(t, "archived-webhook-secret", got)
 }
 
-func TestArchivedProviderAccountDrainState(t *testing.T) {
+func TestArchivedRailMerchantAccountDrainState(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
 	require.NoError(t, err)
 
 	const accountID = "draining-nmi-account"
-	seedArchivedProviderAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
 
 	items, err := svc.ListPaymentProviderConfigs(ctx, tn.ID, "nmi", "live", "archived")
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestArchivedProviderAccountDrainState(t *testing.T) {
 	require.Equal(t, int64(0), items[0].OpenObligations)
 
 	_, err = svc.pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, provider_account_id, status)
+		INSERT INTO openrails.subscriptions (merchant_id, rail_merchant_account_id, status)
 		VALUES ($1::uuid, $2::uuid, 'active')
 	`, tn.ID.String(), items[0].ID)
 	require.NoError(t, err)
@@ -331,14 +331,14 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.True(t, errors.Is(err, ErrMerchantNotFound))
 }
 
-func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
+func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
-	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
-	secretName, err := ProviderAccountSecretName("stripe", "live", "acct_test", "secret_key")
+	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
+	secretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_test", "secret_key")
 	require.NoError(t, err)
 	sec, err := svc.secrets.Put(ctx, tn.ID, secretName, "sk_1")
 	require.NoError(t, err)
@@ -372,8 +372,8 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 
 	// After resolution the caller loads THAT merchant's signing secret (the trust
 	// boundary), which is namespaced to the merchant.
-	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
-	secretName, err := ProviderAccountSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
+	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
+	secretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "whsec_acme")
 	require.NoError(t, err)

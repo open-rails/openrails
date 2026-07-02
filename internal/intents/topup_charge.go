@@ -72,7 +72,7 @@ func (h *TopupChargeHandler) money() *money.MoneyService {
 	return money.NewMoneyService(h.DB, h.Clock)
 }
 
-func decodeTopupChargePayload(intent gen.OpenrailsProviderIntent) (TopupChargePayload, error) {
+func decodeTopupChargePayload(intent gen.OpenrailsRailIntent) (TopupChargePayload, error) {
 	var p TopupChargePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("topup charge intent has no payload")
@@ -90,7 +90,7 @@ func decodeTopupChargePayload(intent gen.OpenrailsProviderIntent) (TopupChargePa
 // configuration (settings removed, payment method gone) is superseded; the
 // balance level is deliberately NOT re-checked — once the episode was cut, its
 // charge either happened (must be deposited) or is cheap to complete.
-func (h *TopupChargeHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
+func (h *TopupChargeHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	p, err := decodeTopupChargePayload(intent)
 	if err != nil {
 		return SupersededBy("unusable topup charge intent: " + err.Error()), nil
@@ -104,7 +104,7 @@ func (h *TopupChargeHandler) CheckRelevance(ctx context.Context, intent gen.Open
 	return StillRelevant(), nil
 }
 
-func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	if h.Charger == nil {
 		return Parked("off-session charger not configured")
 	}
@@ -190,7 +190,7 @@ func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsPr
 // Verify resolves an ambiguous top-up charge via reads: the local deposit row
 // first, then the provider (NMI order-id sale search). Stripe needs no read —
 // the wire ref is the Stripe Idempotency-Key, so re-execution replays safely.
-func (h *TopupChargeHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
+func (h *TopupChargeHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeTopupChargePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())

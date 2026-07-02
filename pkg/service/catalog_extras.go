@@ -497,7 +497,7 @@ func isAllLowerAlpha(s string) bool {
 // intentExecutor is the ledger surface the archive pass drives (interface for
 // unit tests; satisfied by *intents.Runner).
 type intentExecutor interface {
-	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsProviderIntent, error)
+	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsRailIntent, error)
 }
 
 // ArchiveCatalogExtras archives (never deletes) the OWNED extras from a
@@ -620,7 +620,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 // outcome vocabulary: succeeded -> archived (with evidence), still-live
 // states -> parked (durable; the executor/verifier drains them), terminal ->
 // failed, superseded -> nothing to do.
-func archiveOutcomeFromIntent(e CatalogExtra, row gen.OpenrailsProviderIntent) CatalogExtraArchiveOutcome {
+func archiveOutcomeFromIntent(e CatalogExtra, row gen.OpenrailsRailIntent) CatalogExtraArchiveOutcome {
 	out := CatalogExtraArchiveOutcome{Extra: e, IntentID: row.ID.String()}
 	reason := ""
 	if row.LastFailureReason != nil {

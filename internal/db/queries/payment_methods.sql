@@ -4,14 +4,15 @@
 INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
-    metadata, created_at, updated_at, provider_account_id
+    metadata, created_at, updated_at, rail_merchant_account_id, rebill_driver
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
     sqlc.arg(initial_transaction_id), sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(provider_account_id)
+    sqlc.narg(rail_merchant_account_id),
+    COALESCE(NULLIF(sqlc.arg(rebill_driver)::text, ''), 'provider')
 );
 
 -- name: GetPaymentMethodByID :one
@@ -95,3 +96,13 @@ FROM openrails.subscriptions s
 JOIN openrails.payments p ON p.subscription_id = s.id
 WHERE s.payment_method_id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY s.payment_method_id, p.purchased_at DESC;
+
+-- name: CountPaymentMethodsSharingCustomerRef :one
+-- #682 shared-vault guard: how many OTHER stored methods share this rail
+-- customer-scope handle (e.g. an imported multi-card NMI vault). RLS scopes to
+-- the merchant.
+SELECT count(*) FROM openrails.payment_methods
+WHERE rail = $1
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)
+  AND rail_customer_ref <> ''
+  AND id <> sqlc.arg(exclude_id);

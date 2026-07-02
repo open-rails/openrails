@@ -1,25 +1,25 @@
 -- #511 pull-provider --prune: account-bound EXCESS detection + safe deletion.
--- "Excess" = a local row attributed to the pulled provider_account_id whose
+-- "Excess" = a local row attributed to the pulled rail_merchant_account_id whose
 -- provider key is ABSENT from the freshly fetched provider snapshot. Only rows
 -- stamped with the provider account are considered; legacy NULL-binding import
 -- rows are never pruned (NULL <> arg).
 
--- name: ListExcessSubscriptionsForProviderAccount :many
+-- name: ListExcessSubscriptionsForRailMerchantAccount :many
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND provider_account_id = sqlc.arg(provider_account_id)::uuid
+  AND rail_merchant_account_id = sqlc.arg(rail_merchant_account_id)::uuid
   AND rail_subscription_id <> ''
   AND (
     COALESCE(cardinality(sqlc.arg(present_ids)::text[]), 0) = 0
     OR rail_subscription_id <> ALL(sqlc.arg(present_ids)::text[])
   );
 
--- name: ListExcessPaymentsForProviderAccount :many
+-- name: ListExcessPaymentsForRailMerchantAccount :many
 -- Windowed: only payments inside the pulled [since, until] window are eligible
 -- (a snapshot only proves absence within the window it covered).
 SELECT id FROM openrails.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND provider_account_id = sqlc.arg(provider_account_id)::uuid
+  AND rail_merchant_account_id = sqlc.arg(rail_merchant_account_id)::uuid
   AND (
     COALESCE(cardinality(sqlc.arg(present_txns)::text[]), 0) = 0
     OR transaction_id <> ALL(sqlc.arg(present_txns)::text[])

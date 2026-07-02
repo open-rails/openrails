@@ -112,6 +112,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		Rail:                 models.RailNMI,
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
+		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -123,6 +124,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		Rail:                 string(paymentMethod.Rail),
 		RailCustomerRef:      paymentMethod.RailCustomerRef,
 		RailMethodRef:        paymentMethod.RailMethodRef,
+		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: paymentMethod.InitialTransactionID,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -272,6 +274,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
+		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
 	})
@@ -299,7 +302,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		`{"subscription_id":%q,"period_end":%q,"rail":"nmi","order_reference":%q,"attempt":0}`,
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.provider_intents
+		INSERT INTO openrails.rail_intents
 		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
 		VALUES ('nmi', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
@@ -308,7 +311,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)

@@ -29,28 +29,28 @@ func TestPublicStripeWebhookURL(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestReconcileManagedStripeWebhookStoresProviderAccountSecret(t *testing.T) {
+func TestReconcileManagedStripeWebhookStoresRailMerchantAccountSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
 	store := merchants.NewMemorySecretStore()
 	merchantID := merchant.ID(uuid.New())
-	secretKeyName, err := merchants.ProviderAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	secretKeyName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
-	webhookName, err := merchants.ProviderAccountSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
+	webhookName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:              &config.Config{APIURL: "https://billing.example.com"},
-		SecretStore:         store,
-		MerchantID:          merchantID,
-		MerchantSlug:        "acme",
-		ProviderEnvironment: "live",
-		ProviderAccountID:   "acct_123",
-		EnabledEvents:       []string{"invoice.paid"},
-		StripeBaseURL:       svc.BaseURL,
+		Config:                &config.Config{APIURL: "https://billing.example.com"},
+		SecretStore:           store,
+		MerchantID:            merchantID,
+		MerchantSlug:          "acme",
+		ProviderEnvironment:   "live",
+		RailMerchantAccountID: "acct_123",
+		EnabledEvents:         []string{"invoice.paid"},
+		StripeBaseURL:         svc.BaseURL,
 	})
 	require.NoError(t, err)
 	require.False(t, res.Skipped)
@@ -66,8 +66,8 @@ func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	rail := &config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
-	rails := config.ProviderAccountSet{"stripe": rail}
+	rail := &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
+	rails := config.RailMerchantAccountSet{"stripe": rail}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		Config:        &config.Config{APIURL: "https://billing.example.com"},

@@ -20,8 +20,8 @@ import (
 var merchantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments",
-	"notification_queue", "rail_customers",
-	"checkout_sessions", "external_provider_mutation_logs", "provider_intents",
+	"notification_queue", "rail_customer_accounts",
+	"checkout_sessions", "rail_mutation_logs", "rail_intents",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here.
@@ -47,13 +47,13 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsPayments(ctx, id)
 	case "notification_queue":
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
-	case "rail_customers":
+	case "rail_customer_accounts":
 		return q.CountMerchantRowsRailCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.CountMerchantRowsCheckoutSessions(ctx, id)
-	case "external_provider_mutation_logs":
+	case "rail_mutation_logs":
 		return q.CountMerchantRowsExternalProviderMutationLogs(ctx, id)
-	case "provider_intents":
+	case "rail_intents":
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
@@ -81,13 +81,13 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsPayments(ctx, id)
 	case "notification_queue":
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
-	case "rail_customers":
+	case "rail_customer_accounts":
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
-	case "external_provider_mutation_logs":
+	case "rail_mutation_logs":
 		return q.PurgeMerchantRowsExternalProviderMutationLogs(ctx, id)
-	case "provider_intents":
+	case "rail_intents":
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)

@@ -240,22 +240,17 @@ func BillingCycleHoursOf(price *models.Price) int {
 // revocable `grace` entitlement window trailing the paid window, so a missed
 // success webhook, a provider billing on its own day boundary, or a merely
 // late webhook never gates a paying user. Paid windows stay truthful (end_at
-// = period end, immutable); generosity is a SEPARATE window that the #367
-// liveness sync (or any renewal/terminal resolution) revokes the moment truth
-// arrives. NOT a config knob — cadence-derived and hardcoded, like the
-// dunning schedule.
+// = period end, immutable); generosity is a SEPARATE window that any
+// renewal/terminal resolution (webhook, dunning, unknown-cohort reconcile)
+// revokes the moment truth arrives. NOT a config knob — cadence-derived and
+// hardcoded, like the dunning schedule.
 const (
 	// graceSlackCap bounds the trailing grace window: at most 48h of silence
 	// generosity (Paul, 2026-06-12). This grace exists for provider-side
 	// schedule rounding and late webhooks — NOT for dunning, which has its
-	// own rail-driven grace; anything a rounding error can't explain
-	// within two days is the #367 prober's and dunning's problem.
+	// own rail-driven grace; anything a rounding error can't explain within
+	// two days is the unknown-cohort reconciler's and dunning's problem.
 	graceSlackCap = 48 * time.Hour
-	// LivenessProbeSlack is how long past current_period_ends_at a silent
-	// active subscription must be before the #367 liveness sync treats it as
-	// part of the silent-lapsed cohort. One day tolerates provider-side day
-	// boundaries and late webhooks before any provider probe fires.
-	LivenessProbeSlack = 24 * time.Hour
 )
 
 // GraceSlack returns the duration of the trailing renewal grace window for a

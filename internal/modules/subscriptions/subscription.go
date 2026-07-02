@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -46,8 +46,8 @@ type SubscriptionService struct {
 	ProductService       *catalog.ProductService
 	CCBillRESTClient     *ccbill.RESTClient
 	NMIClients           map[string]*nmi.NMIClient
-	PaymentMethodService *vault.PaymentMethodService
-	VaultService         *vault.VaultService
+	PaymentMethodService *paymentmethods.PaymentMethodService
+	VaultService         *paymentmethods.VaultService
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
@@ -168,7 +168,7 @@ func NewSubscriptionService(
 	productService *catalog.ProductService,
 	ccbillRESTClient *ccbill.RESTClient,
 	nmiClients map[string]*nmi.NMIClient,
-	paymentMethodService *vault.PaymentMethodService,
+	paymentMethodService *paymentmethods.PaymentMethodService,
 	clocks ...clockwork.Clock,
 ) *SubscriptionService {
 	return &SubscriptionService{

@@ -129,7 +129,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	fx.reservationID = reservation.ID
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE payment_id = $1", fx.paymentID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE payment_id = $1", fx.paymentID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1 OR refunded_payment_id = $1", fx.paymentID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -176,9 +176,9 @@ func (fx refundFixture) reservation(t *testing.T) (status, transactionID string,
 	return row.Status, row.TransactionID, row.Metadata
 }
 
-func (fx refundFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
+func (fx refundFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
+	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
 	require.NoError(t, err)
 	return row
 }
@@ -230,7 +230,7 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 
 	// Mode lifts; the scheduled executor pass drains the queue.
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 
 		fake.refunded.Store(true) // the refund actually landed
 		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
 		_, err = fx.refundRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 		require.NoError(t, err)
@@ -283,7 +283,7 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 
 		// Verifier: no refund at the provider -> verified not executed.
 		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
 		_, err = fx.refundRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 		require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 		fake.refundStatus.Store(0)
 		queryCallsBefore := fake.queryCalls.Load()
 		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
 		_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 		require.NoError(t, err)
@@ -408,8 +408,8 @@ func stripeIntegrationConfig(mode string) *config.Config {
 	}
 }
 
-func stripeIntegrationRails() config.ProviderAccountSet {
-	return config.ProviderAccountSet{
+func stripeIntegrationRails() config.RailMerchantAccountSet {
+	return config.RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }
@@ -470,7 +470,7 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 	stripe.created.Store(true)
 	stripe.gotMetadata.Store(StripeRefundIntentIdempotencyKey("ch_1", 500, ""))
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunVerifyOnce(context.Background())
 	require.NoError(t, err)

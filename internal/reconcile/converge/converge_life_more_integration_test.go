@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -91,14 +92,14 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID)
 		// a provider action that failed terminally and won't auto-retry
-		exec(`INSERT INTO openrails.provider_intents (id, merchant_id, provider, intent_type, idempotency_key, status, origin, subscription_id)
+		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, provider, intent_type, idempotency_key, status, origin, subscription_id)
 		      VALUES ($1,$2,'nmi','cancel_subscription',$3,'failed_terminal','system',$4)`, intentID, merchantID, "pi-key-"+suffix, subID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "provider_intent:"+intentID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.provider_intents WHERE id=$1`, intentID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_intents WHERE id=$1`, intentID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
@@ -121,7 +122,7 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 
 		// surface-only: the intent itself is untouched
 		var istatus string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.provider_intents WHERE id=$1`, intentID).Scan(&istatus))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.rail_intents WHERE id=$1`, intentID).Scan(&istatus))
 		require.Equal(t, "failed_terminal", istatus)
 		return nil
 	}))
@@ -182,7 +183,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text, grace_ends_at FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status, &graceEnds))
 		require.Equal(t, "past_due", status)
 		require.NotNil(t, graceEnds)
-		require.WithinDuration(t, periodEnd.Add(periodGrace), *graceEnds, time.Second, "grace dated to period end + cap")
+		require.WithinDuration(t, periodEnd.Add(reconcile.PeriodGrace), *graceEnds, time.Second, "grace dated to period end + cap")
 		return nil
 	}))
 	// Second pass: the sub is now past_due with a future grace window but no retry

@@ -19,7 +19,7 @@ func TestGetSolanaConfig(t *testing.T) {
 	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
 		runtime := &app.Runtime{
 			Config: &config.Config{},
-			Rails: config.ProviderAccountSet{
+			Rails: config.RailMerchantAccountSet{
 				"solana": {
 					Rail: models.RailSolana,
 					Solana: &config.SolanaRailConfig{
@@ -48,7 +48,7 @@ func TestGetSolanaConfig(t *testing.T) {
 
 	runtime := &app.Runtime{
 		Config: &config.Config{},
-		Rails: config.ProviderAccountSet{
+		Rails: config.RailMerchantAccountSet{
 			"solana": {
 				Rail: models.RailSolana,
 				Solana: &config.SolanaRailConfig{

@@ -10,9 +10,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 )
 
 func (s *Service) moneyService() *money.MoneyService {
@@ -102,7 +102,7 @@ func (s *Service) requireUserSubscriptionService() (*subscriptions.UserSubscript
 	return rt.UserSubscriptionService, nil
 }
 
-func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.SubscriptionService, *vault.PaymentMethodService, error) {
+func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.SubscriptionService, *paymentmethods.PaymentMethodService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, nil, err
@@ -113,7 +113,7 @@ func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.
 	return rt.SubscriptionService, rt.PaymentMethodService, nil
 }
 
-func (s *Service) requirePaymentMethodService() (*vault.PaymentMethodService, error) {
+func (s *Service) requirePaymentMethodService() (*paymentmethods.PaymentMethodService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func (s *Service) requirePaymentMethodService() (*vault.PaymentMethodService, er
 	return rt.PaymentMethodService, nil
 }
 
-func (s *Service) requireVaultService() (*vault.VaultService, error) {
+func (s *Service) requireVaultService() (*paymentmethods.VaultService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (s *Service) requireVaultService() (*vault.VaultService, error) {
 	return rt.VaultService, nil
 }
 
-func (s *Service) requireVaultAndPaymentMethodServices() (*vault.VaultService, *vault.PaymentMethodService, error) {
+func (s *Service) requireVaultAndPaymentMethodServices() (*paymentmethods.VaultService, *paymentmethods.PaymentMethodService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, nil, err

@@ -24,16 +24,16 @@ const (
 )
 
 type MutationLogParams struct {
-	MerchantID        uuid.UUID
-	Provider          string
-	ProviderAccountID *uuid.UUID
-	ProviderIntentID  *uuid.UUID
-	IntentType        string
-	IdempotencyKey    string
-	Attempt           int32
-	Phase             MutationLogPhase
-	Reason            string
-	Evidence          map[string]any
+	MerchantID            uuid.UUID
+	Provider              string
+	RailMerchantAccountID *uuid.UUID
+	ProviderIntentID      *uuid.UUID
+	IntentType            string
+	IdempotencyKey        string
+	Attempt               int32
+	Phase                 MutationLogPhase
+	Reason                string
+	Evidence              map[string]any
 }
 
 type MutationLogger interface {
@@ -71,16 +71,16 @@ func (l *AnalyticsMutationLogger) LogExternalMutation(ctx context.Context, p Mut
 		evidence = string(b)
 	}
 	return l.Events.LogProviderMutationEvent(ctx, analytics.ProviderMutationEventData{
-		MerchantID:        p.MerchantID.String(),
-		Provider:          p.Provider,
-		ProviderAccountID: p.ProviderAccountID,
-		ProviderIntentID:  p.ProviderIntentID,
-		IntentType:        p.IntentType,
-		IdempotencyKey:    p.IdempotencyKey,
-		Attempt:           p.Attempt,
-		Phase:             string(p.Phase),
-		Reason:            reason,
-		Evidence:          evidence,
+		MerchantID:            p.MerchantID.String(),
+		Provider:              p.Provider,
+		RailMerchantAccountID: p.RailMerchantAccountID,
+		ProviderIntentID:      p.ProviderIntentID,
+		IntentType:            p.IntentType,
+		IdempotencyKey:        p.IdempotencyKey,
+		Attempt:               p.Attempt,
+		Phase:                 string(p.Phase),
+		Reason:                reason,
+		Evidence:              evidence,
 	})
 }
 
@@ -108,17 +108,17 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	}
 	intentType := emptyStringNil(p.IntentType)
 	idempotencyKey := emptyStringNil(p.IdempotencyKey)
-	return s.db.Gen(ctx).InsertExternalProviderMutationLog(ctx, gen.InsertExternalProviderMutationLogParams{
-		MerchantID:        p.MerchantID,
-		Provider:          p.Provider,
-		ProviderAccountID: p.ProviderAccountID,
-		ProviderIntentID:  p.ProviderIntentID,
-		IntentType:        intentType,
-		IdempotencyKey:    idempotencyKey,
-		Attempt:           p.Attempt,
-		Phase:             string(p.Phase),
-		Reason:            reason,
-		Evidence:          evidence,
+	return s.db.Gen(ctx).InsertRailMutationLog(ctx, gen.InsertRailMutationLogParams{
+		MerchantID:            p.MerchantID,
+		Provider:              p.Provider,
+		RailMerchantAccountID: p.RailMerchantAccountID,
+		ProviderIntentID:      p.ProviderIntentID,
+		IntentType:            intentType,
+		IdempotencyKey:        idempotencyKey,
+		Attempt:               p.Attempt,
+		Phase:                 string(p.Phase),
+		Reason:                reason,
+		Evidence:              evidence,
 	})
 }
 

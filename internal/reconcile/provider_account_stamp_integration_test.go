@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TestRepoCreateStampsOnlyExplicitProviderAccount proves provider_account_id is
+// TestRepoCreateStampsOnlyExplicitRailMerchantAccount proves rail_merchant_account_id is
 // provenance: repo writes do not invent it from primary routing.
-func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
+func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbtest.EnsureTestMerchant(context.Background(), t, appDB.Pool())
@@ -28,7 +28,7 @@ func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 		now := time.Now().UTC()
 		suffix := uuid.NewString()[:8]
 
-		account, err := appDB.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		account, err := appDB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Rail:           "nmi",
 			AccountID:      "nmi-account-" + suffix,
@@ -50,7 +50,7 @@ func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
-		// Create a payment via the repo WITHOUT setting ProviderAccountID.
+		// Create a payment via the repo WITHOUT setting RailMerchantAccountID.
 		pmt := &models.Payment{
 			ID:            uuid.New(),
 			CustomerID:    customerID,
@@ -68,11 +68,11 @@ func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 
 		got, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
 		require.NoError(t, err)
-		require.Nil(t, got.ProviderAccountID, "payment must not invent provider_account_id from primary routing")
+		require.Nil(t, got.RailMerchantAccountID, "payment must not invent rail_merchant_account_id from primary routing")
 
 		// #641: a context-pinned account (the per-account inbound webhook path)
 		// records observed external-account provenance.
-		pinnedCtx := repo.WithProviderAccountID(ctx, account.ID)
+		pinnedCtx := repo.WithRailMerchantAccountID(ctx, account.ID)
 		pmt2 := &models.Payment{
 			ID: uuid.New(), CustomerID: customerID, PriceID: priceID, Rail: models.RailNMI,
 			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "usd",
@@ -81,8 +81,8 @@ func TestRepoCreateStampsOnlyExplicitProviderAccount(t *testing.T) {
 		require.NoError(t, repo.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))
 		got2, err := repo.NewPaymentRepo(appDB).GetByID(ctx, pmt2.ID)
 		require.NoError(t, err)
-		require.NotNil(t, got2.ProviderAccountID)
-		require.Equal(t, account.ID, *got2.ProviderAccountID, "pinned account is observed provenance")
+		require.NotNil(t, got2.RailMerchantAccountID)
+		require.Equal(t, account.ID, *got2.RailMerchantAccountID, "pinned account is observed provenance")
 		return nil
 	}))
 }

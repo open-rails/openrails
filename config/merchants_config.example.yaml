@@ -2,7 +2,7 @@ version: 1
 
 # Store real secrets in Hashicorp Vault and overlay them into this manifest.
 # Solana runtime rail config lives in normal OpenRails runtime config, for example:
-# provider_accounts:
+# rail_merchant_accounts:
 #   solana:
 #     rail: solana
 #     environment: live
@@ -38,7 +38,7 @@ merchants:
       - { key: burst, window: 15m, limit: 5_000_000 }
       - { key: sustained, window: 5h, limit: 20_000_000 }
 
-    provider_accounts:
+    rail_merchant_accounts:
       mobius:
         nmi:
           environment: live

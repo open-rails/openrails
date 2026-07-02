@@ -40,13 +40,13 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -75,7 +75,7 @@ type runtimeOverrides struct {
 	DB    *db.DB
 	Redis *redis.Client
 	Clock clockwork.Clock
-	Rails config.ProviderAccountSet
+	Rails config.RailMerchantAccountSet
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -102,7 +102,7 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 //     keeps working.
 //
 // The error return is retained for signature stability; it is always nil.
-func configureSolanaRail(cfg *config.Config, rails config.ProviderAccountSet) error {
+func configureSolanaRail(cfg *config.Config, rails config.RailMerchantAccountSet) error {
 	proc := rails.GetSolanaRail()
 	if proc == nil {
 		return nil
@@ -179,7 +179,7 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 	return 1.0, nil
 }
 
-func createPythPriceProvider(cfg *config.Config, rails config.ProviderAccountSet) (solanamodule.TokenPriceProvider, error) {
+func createPythPriceProvider(cfg *config.Config, rails config.RailMerchantAccountSet) (solanamodule.TokenPriceProvider, error) {
 	if rails.GetSolanaRail() == nil {
 		return nil, nil
 	}
@@ -209,7 +209,7 @@ func createPythPriceProvider(cfg *config.Config, rails config.ProviderAccountSet
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
-	var railSet config.ProviderAccountSet
+	var railSet config.RailMerchantAccountSet
 	if overrides != nil {
 		railSet = overrides.Rails
 	}
@@ -517,7 +517,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	return nil
 }
 
-func createNMIClients(cfg *config.Config, rails config.ProviderAccountSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
+func createNMIClients(cfg *config.Config, rails config.RailMerchantAccountSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
 	clients := make(map[string]*nmi.NMIClient)
 
 	nmiRails := rails.ByRail(models.RailNMI)
@@ -639,34 +639,34 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	return client, nil
 }
 
-// enforceWebhookDedupPosture (#678): without Redis, webhook dedup silently
-// falls back to a PER-PROCESS memory store — a multi-replica standalone
-// deployment loses cross-replica replay protection entirely. Fail startup in
-// standalone non-development mode; development and single-process embedded
-// hosts keep the fallback with a loud warning.
+// enforceWebhookDedupPosture (#678): dedup TRUTH now lives in Postgres
+// (openrails.webhook_events), so running without Redis is CORRECT in any
+// topology — a replica can never replay effects. It is merely wasteful: the
+// pending-lease coordination degrades to per-process (concurrent duplicate
+// deliveries burn work; #675 row locks keep them safe) and every dedup check
+// pays a Postgres round-trip. The old hard boot-refusal existed because the
+// memStore was per-process TRUTH; that reason is gone, so this is a loud
+// warning now. Always returns nil (kept as error-shaped for the call site).
 func enforceWebhookDedupPosture(cfg *config.Config, hasRedis, embeddedHost bool) error {
 	if hasRedis {
 		return nil
 	}
-	if err := webhookDedupPostureError(cfg, embeddedHost); err != nil {
-		return err
-	}
-	log.Warn("redis not configured: webhook dedup degrades to a per-process memory store — no cross-replica replay protection (#678); acceptable only in development or single-process embedded hosts")
+	log.Warn(webhookDedupPostureWarning(cfg, embeddedHost))
 	return nil
 }
 
-// webhookDedupPostureError is pure (no redis/db) so the decision is unit testable.
-func webhookDedupPostureError(cfg *config.Config, embeddedHost bool) error {
+// webhookDedupPostureWarning is pure (no redis/db) so the message choice is unit testable.
+func webhookDedupPostureWarning(cfg *config.Config, embeddedHost bool) string {
 	if embeddedHost || cfg == nil || cfg.IsDev() {
-		return nil
+		return "redis not configured: webhook dedup truth stays in Postgres (safe); lease coordination and the completed-key cache degrade to per-process memory (#678)"
 	}
-	return fmt.Errorf(
-		"redis is required in non-development standalone mode (env %q): webhook dedup would fall back to a per-process memory store with no cross-replica replay protection (#678); configure redis",
+	return fmt.Sprintf(
+		"redis not configured in standalone mode (env %q): webhook dedup truth stays in Postgres (safe), but multi-replica deployments lose cross-replica lease coordination and the fast-path cache — expect wasted duplicate processing attempts; configure redis (#678)",
 		cfg.Env,
 	)
 }
 
-func createCCBillClient(cfg *config.Config, rails config.ProviderAccountSet) *ccbill.CCBillClient {
+func createCCBillClient(cfg *config.Config, rails config.RailMerchantAccountSet) *ccbill.CCBillClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		log.Info("CCBill config missing; CCBill integration disabled")
@@ -676,7 +676,7 @@ func createCCBillClient(cfg *config.Config, rails config.ProviderAccountSet) *cc
 	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
 }
 
-func createCCBillRESTClient(rails config.ProviderAccountSet) *ccbill.RESTClient {
+func createCCBillRESTClient(rails config.RailMerchantAccountSet) *ccbill.RESTClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
@@ -684,7 +684,7 @@ func createCCBillRESTClient(rails config.ProviderAccountSet) *ccbill.RESTClient 
 	return ccbill.NewRESTClient(ccbillProc.ToCCBillConfig())
 }
 
-func createCCBillDataLinkClient(cfg *config.Config, rails config.ProviderAccountSet) *ccbill.DataLinkClient {
+func createCCBillDataLinkClient(cfg *config.Config, rails config.RailMerchantAccountSet) *ccbill.DataLinkClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
 		return nil
@@ -710,12 +710,12 @@ type servicesInstances struct {
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
 	NotificationService      *subscriptions.NotificationService
-	PaymentMethodService     *vault.PaymentMethodService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	FeatureService           *entitlements.FeatureService
 	ProductAccessService     *productaccess.Service
-	VaultService             *vault.VaultService
+	VaultService             *paymentmethods.VaultService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -742,12 +742,12 @@ type servicesInstances struct {
 	RailCustomerService    *payments.RailCustomerService
 }
 
-func createServices(database *db.DB, cfg *config.Config, railSet config.ProviderAccountSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerchantAccountSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
 	notificationService := subscriptions.NewNotificationService(database, nil)
-	paymentMethodService := vault.NewPaymentMethodService(database)
+	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	featureService := entitlements.NewFeatureService(database, clock)
@@ -815,7 +815,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 		clock,
 	)
 
-	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
+	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
@@ -848,7 +848,8 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railSet}
 
-	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService)
+	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
+	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
 	webhookDispatcher := &webhooks.WebhookDispatcher{
 		Config:                       cfg,
 		DB:                           database,

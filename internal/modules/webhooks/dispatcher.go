@@ -43,9 +43,9 @@ type WebhookMessage struct {
 	SigningSecret  string
 	SignatureValid *bool
 	ReceivedAt     time.Time
-	// ProviderAccountID (#641) is the account_id the event was routed to, so
+	// RailMerchantAccountID (#641) is the account_id the event was routed to, so
 	// dispatch selects that account's rail client. Empty = primary.
-	ProviderAccountID string
+	RailMerchantAccountID string
 }
 
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.
@@ -138,8 +138,8 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	var client *nmi.NMIClient
 	if d.NMIClients != nil {
 		// #641: per-account client if routed, else the rail-key (primary) alias.
-		if event.ProviderAccountID != "" {
-			client = d.NMIClients[event.ProviderAccountID]
+		if event.RailMerchantAccountID != "" {
+			client = d.NMIClients[event.RailMerchantAccountID]
 		}
 		if client == nil {
 			client = d.NMIClients[event.Rail]

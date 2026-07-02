@@ -10,9 +10,10 @@ import (
 )
 
 // Read-only liveness probes over the NMI Query API (query.php). Shared by the
-// dunning manual-rebill verifier (#358) and the subscription liveness sync
-// (#367): both answer "what does the provider believe happened?" by READS —
-// no direct-post mutation is reachable from this file.
+// dunning manual-rebill verifier (#358) and the unknown-cohort per-subscription
+// probe (#665, reconcile.NMISubscriptionProber): both answer "what does the
+// provider believe happened?" by READS — no direct-post mutation is reachable
+// from this file.
 
 // saleQueryResponse mirrors the slice of the Query API transaction report the
 // probes read (search by order_id).
@@ -21,7 +22,9 @@ type saleQueryResponse struct {
 	Transactions []struct {
 		TransactionID string `xml:"transaction_id"`
 		OrderID       string `xml:"order_id"`
+		Currency      string `xml:"currency"`
 		Actions       []struct {
+			Amount       string `xml:"amount"`
 			ActionType   string `xml:"action_type"`
 			Success      string `xml:"success"`
 			Date         string `xml:"date"`
@@ -42,21 +45,30 @@ const queryAPITimeFormat = "20060102150405"
 // declines.
 type SaleProbeResult struct {
 	// SuccessFound + SuccessTransactionID: a successful sale exists.
+	// SuccessAt/SuccessAmount/SuccessCurrency carry that action's verbatim
+	// evidence (zero/empty when the report omitted or garbled them).
 	SuccessFound         bool
 	SuccessTransactionID string
+	SuccessAt            time.Time
+	SuccessAmount        string
+	SuccessCurrency      string
 	// DeclineFound + decline evidence: at least one failed sale exists (the
-	// latest one's response code/text is carried for hard/soft
-	// classification).
-	DeclineFound        bool
-	DeclineResponseCode int
-	DeclineReason       string
+	// latest one's id/time/amount and response code/text are carried for
+	// hard/soft classification and payment backfill).
+	DeclineFound         bool
+	DeclineTransactionID string
+	DeclineAt            time.Time
+	DeclineAmount        string
+	DeclineCurrency      string
+	DeclineResponseCode  int
+	DeclineReason        string
 }
 
 // ProbeSalesByOrderID queries NMI for transactions carrying the given order
 // reference and classifies the sale actions found. since (optional, zero =
-// unbounded) restricts the probe to actions on/after that instant — the #367
-// liveness prober uses it to ask "was THIS period charged?" without matching
-// the signup-time sale that shares the subscription's order reference.
+// unbounded) restricts the probe to actions on/after that instant — the
+// unknown-cohort prober uses it to ask "was THIS period charged?" without
+// matching the signup-time sale that shares the subscription's order reference.
 func (c *NMIClient) ProbeSalesByOrderID(orderID string, since time.Time) (SaleProbeResult, error) {
 	var result SaleProbeResult
 	if strings.TrimSpace(orderID) == "" {
@@ -102,10 +114,17 @@ func (c *NMIClient) ProbeSalesByOrderID(orderID string, since time.Time) (SalePr
 			if strings.TrimSpace(action.Success) == "1" {
 				result.SuccessFound = true
 				result.SuccessTransactionID = strings.TrimSpace(txn.TransactionID)
+				result.SuccessAt = actionAt // zero when unparseable
+				result.SuccessAmount = strings.TrimSpace(action.Amount)
+				result.SuccessCurrency = strings.TrimSpace(txn.Currency)
 				return result, nil
 			}
 			if !result.DeclineFound || !dateOK || actionAt.After(latestDecline) {
 				result.DeclineFound = true
+				result.DeclineTransactionID = strings.TrimSpace(txn.TransactionID)
+				result.DeclineAt = actionAt // zero when unparseable
+				result.DeclineAmount = strings.TrimSpace(action.Amount)
+				result.DeclineCurrency = strings.TrimSpace(txn.Currency)
 				result.DeclineReason = strings.TrimSpace(action.ResponseText)
 				result.DeclineResponseCode, _ = strconv.Atoi(strings.TrimSpace(action.ResponseCode))
 				if dateOK {

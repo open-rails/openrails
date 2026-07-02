@@ -151,7 +151,7 @@ func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.Strip
 	// StripeCatalogService resolves THAT account's secret key.
 	return &catalog.StripeCatalogService{
 		Config: a.svc.rt.Config,
-		Rails:  config.ProviderAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
+		Rails:  config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
 	}, true
 }
 

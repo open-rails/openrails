@@ -47,7 +47,7 @@ type HTTPStripeSubscriptionLister struct {
 
 // NewStripeSubscriptionLister builds a lister from the OpenRails rail set,
 // reusing RequireStripeSecretKey for auth.
-func NewStripeSubscriptionLister(rails config.ProviderAccountSet) (*HTTPStripeSubscriptionLister, error) {
+func NewStripeSubscriptionLister(rails config.RailMerchantAccountSet) (*HTTPStripeSubscriptionLister, error) {
 	_, secretKey, err := RequireStripeSecretKey(rails)
 	if err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ type HTTPStripeChargeLister struct {
 
 // NewStripeChargeLister builds a charge lister from the OpenRails rail set,
 // reusing RequireStripeSecretKey for auth.
-func NewStripeChargeLister(rails config.ProviderAccountSet) (*HTTPStripeChargeLister, error) {
+func NewStripeChargeLister(rails config.RailMerchantAccountSet) (*HTTPStripeChargeLister, error) {
 	_, secretKey, err := RequireStripeSecretKey(rails)
 	if err != nil {
 		return nil, err

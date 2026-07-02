@@ -7,9 +7,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-func solanaRails() config.ProviderAccountSet {
-	return config.ProviderAccountSet{
-		"solana": &config.ProviderAccountConfig{Rail: models.RailSolana, Solana: &config.SolanaRailConfig{}},
+func solanaRails() config.RailMerchantAccountSet {
+	return config.RailMerchantAccountSet{
+		"solana": &config.RailMerchantAccountConfig{Rail: models.RailSolana, Solana: &config.SolanaRailConfig{}},
 	}
 }
 

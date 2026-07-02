@@ -1,4 +1,4 @@
-package vault
+package paymentmethods
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -28,10 +29,10 @@ type VaultService struct {
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.ProviderAccountSecretResolver
-	ProviderScopes       merchants.ProviderAccountScopeResolver
+	ProviderSecrets      merchants.RailMerchantAccountSecretResolver
+	ProviderScopes       merchants.RailMerchantAccountScopeResolver
 	Config               *config.Config
-	Rails                config.ProviderAccountSet
+	Rails                config.RailMerchantAccountSet
 	DB                   *db.DB
 	clock                clockwork.Clock
 	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
@@ -63,12 +64,12 @@ func (s *VaultService) SetMerchantSecretStore(store merchants.MerchantSecretRead
 	s.MerchantSecrets = store
 }
 
-func (s *VaultService) SetProviderAccountSecretResolver(resolver merchants.ProviderAccountSecretResolver) {
+func (s *VaultService) SetRailMerchantAccountSecretResolver(resolver merchants.RailMerchantAccountSecretResolver) {
 	if s == nil {
 		return
 	}
 	s.ProviderSecrets = resolver
-	if scopes, ok := resolver.(merchants.ProviderAccountScopeResolver); ok {
+	if scopes, ok := resolver.(merchants.RailMerchantAccountScopeResolver); ok {
 		s.ProviderScopes = scopes
 	}
 }
@@ -143,7 +144,7 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.ProviderAccountSet, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
@@ -162,7 +163,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		return nil, errors.New("provider is required")
 	}
 
-	client, providerAccountID, err := s.resolveNMIClient(ctx, rail)
+	client, railMerchantAccountID, err := s.resolveNMIClient(ctx, rail)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -198,10 +199,17 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	}
 
 	pm := &models.PaymentMethod{
-		ID:                   uuidutil.NewV7(),
-		CustomerID:           identity.CustomerIDFromString(userID).UUID(),
-		Rail:                 models.Rail(rail),
-		RailCustomerRef:      nmiResponse.CustomerVaultID, // NMI customer vault; the billing record (rail_method_ref) is added later
+		ID:         uuidutil.NewV7(),
+		CustomerID: identity.CustomerIDFromString(userID).UUID(),
+		Rail:       models.Rail(rail),
+		// #682 minting policy (deliberate): ONE NMI vault customer PER CARD —
+		// the vault id is an instrument-scoped handle, never a person. NMI has
+		// no person-level identity in our model (see rails registry
+		// HasRemoteCustomer=false); the person is the local customer_id UUID.
+		// rail_method_ref (billing id) stays uncaptured for native vaults until
+		// an importer needs it — RebillDriver (not ref-emptiness) now carries
+		// the rebill-driver mode, defaulting to 'provider'.
+		RailCustomerRef:      nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
@@ -210,8 +218,8 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		CardType:             stringPtrOrNil(sanitizeCardType(req.CardType)),
 		Metadata:             req.Metadata,
 	}
-	if providerAccountID != nil {
-		pm.ProviderAccountID = providerAccountID
+	if railMerchantAccountID != nil {
+		pm.RailMerchantAccountID = railMerchantAccountID
 	}
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
@@ -225,24 +233,24 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	return pm, nil
 }
 
-func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, providerAccountID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
+func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, railMerchantAccountID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, nil, errors.New("rail is required")
 	}
 
-	if len(providerAccountID) > 0 && providerAccountID[0] != nil {
+	if len(railMerchantAccountID) > 0 && railMerchantAccountID[0] != nil {
 		if s == nil || s.DB == nil {
 			return nil, nil, errors.New("provider account lookup unavailable")
 		}
-		row, err := s.DB.Gen(ctx).GetProviderAccount(ctx, *providerAccountID[0])
+		row, err := s.DB.Gen(ctx).GetRailMerchantAccount(ctx, *railMerchantAccountID[0])
 		if err != nil {
 			return nil, nil, err
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
 			return nil, nil, fmt.Errorf("provider account %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
 		}
-		client, err := s.resolveNMIClientForScope(ctx, merchants.ProviderAccountScope{
+		client, err := s.resolveNMIClientForScope(ctx, merchants.RailMerchantAccountScope{
 			ID:          row.ID,
 			Rail:        row.Rail,
 			Environment: row.Environment,
@@ -251,11 +259,11 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, pr
 		return client, &row.ID, err
 	}
 
-	var scopeResolver merchants.ProviderAccountScopeResolver
+	var scopeResolver merchants.RailMerchantAccountScopeResolver
 	if s != nil {
 		scopeResolver = s.ProviderScopes
 		if scopeResolver == nil {
-			if resolver, ok := s.ProviderSecrets.(merchants.ProviderAccountScopeResolver); ok {
+			if resolver, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver); ok {
 				scopeResolver = resolver
 			}
 		}
@@ -265,7 +273,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, pr
 		if err != nil {
 			return nil, nil, err
 		}
-		scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailNMI), "live")
+		scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailNMI), "live")
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
@@ -293,7 +301,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, pr
 	return nil, nil, errors.New("missing client")
 }
 
-func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.ProviderAccountScope) (*nmi.NMIClient, error) {
+func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.RailMerchantAccountScope) (*nmi.NMIClient, error) {
 	provider := strings.TrimSpace(scope.AccountID)
 	if provider == "" {
 		return nil, errors.New("provider account_id required")
@@ -310,7 +318,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	if err != nil {
 		return nil, err
 	}
-	secretName, err := merchants.ProviderAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
+	secretName, err := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +338,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 		proc = cloneRailConfig(s.activeNMIConfig())
 	}
 	if proc == nil {
-		proc = &config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
+		proc = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
 	}
 	proc.Rail = models.RailNMI
 	if proc.NMI == nil {
@@ -348,7 +356,7 @@ func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSe
 	return nmi.NewClient(provider, cfg, testMode)
 }
 
-func (s *VaultService) railConfig(name string) *config.ProviderAccountConfig {
+func (s *VaultService) railConfig(name string) *config.RailMerchantAccountConfig {
 	if s == nil {
 		return nil
 	}
@@ -356,7 +364,7 @@ func (s *VaultService) railConfig(name string) *config.ProviderAccountConfig {
 }
 
 // activeNMIConfig returns the configured active NMI provider account, if any.
-func (s *VaultService) activeNMIConfig() *config.ProviderAccountConfig {
+func (s *VaultService) activeNMIConfig() *config.RailMerchantAccountConfig {
 	if s == nil {
 		return nil
 	}
@@ -364,7 +372,7 @@ func (s *VaultService) activeNMIConfig() *config.ProviderAccountConfig {
 	return proc
 }
 
-func cloneRailConfig(in *config.ProviderAccountConfig) *config.ProviderAccountConfig {
+func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantAccountConfig {
 	if in == nil {
 		return nil
 	}
@@ -454,7 +462,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, errors.New("payment method rail is required")
 	}
 
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.ProviderAccountID)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -563,7 +571,22 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return errors.New("payment method rail is required")
 	}
 
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.ProviderAccountID)
+	// #682 shared-vault guard: deleting the remote vault customer destroys EVERY
+	// billing entry in it. Our minting policy is one vault per card, so sharing
+	// only happens if an importer materialized a multi-card vault as several
+	// payment-method rows — in that case refuse the whole-vault delete (a
+	// billing-entry-scoped delete is the correct future path, see #682).
+	if s.DB != nil && strings.TrimSpace(pm.RailCustomerRef) != "" {
+		shared, err := repo.NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check vault sharing: %w", err)
+		}
+		if shared > 0 {
+			return fmt.Errorf("cannot delete vault: %d other stored payment method(s) share vault %s (imported multi-card vault; delete the billing entry instead)", shared, pm.RailCustomerRef)
+		}
+	}
+
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
 	if err != nil {
 		return fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}

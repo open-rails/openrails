@@ -618,18 +618,18 @@ type ChargebackEventData struct {
 }
 
 type ProviderMutationEventData struct {
-	EventID           uuid.UUID  `json:"event_id"`
-	MerchantID        string     `json:"merchant_id"`
-	Provider          string     `json:"provider"`
-	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
-	ProviderIntentID  *uuid.UUID `json:"provider_intent_id,omitempty"`
-	IntentType        string     `json:"intent_type"`
-	IdempotencyKey    string     `json:"idempotency_key"`
-	Attempt           int32      `json:"attempt"`
-	Phase             string     `json:"phase"`
-	Reason            string     `json:"reason"`
-	Evidence          string     `json:"evidence"`
-	Timestamp         time.Time  `json:"timestamp"`
+	EventID               uuid.UUID  `json:"event_id"`
+	MerchantID            string     `json:"merchant_id"`
+	Provider              string     `json:"provider"`
+	RailMerchantAccountID *uuid.UUID `json:"rail_merchant_account_id,omitempty"`
+	ProviderIntentID      *uuid.UUID `json:"provider_intent_id,omitempty"`
+	IntentType            string     `json:"intent_type"`
+	IdempotencyKey        string     `json:"idempotency_key"`
+	Attempt               int32      `json:"attempt"`
+	Phase                 string     `json:"phase"`
+	Reason                string     `json:"reason"`
+	Evidence              string     `json:"evidence"`
+	Timestamp             time.Time  `json:"timestamp"`
 }
 
 // Basic PII redaction for free-form strings
@@ -1309,13 +1309,13 @@ func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []Char
 func (s *EventLogService) insertProviderMutation(ctx context.Context, data ProviderMutationEventData) error {
 	return s.clickhouseConn.Exec(ctx, `
 		INSERT INTO provider_mutation_events (
-			event_id, merchant_id, provider, provider_account_id, provider_intent_id,
+			event_id, merchant_id, provider, rail_merchant_account_id, provider_intent_id,
 			intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		data.EventID,
 		data.MerchantID,
 		data.Provider,
-		nullableUUID(data.ProviderAccountID),
+		nullableUUID(data.RailMerchantAccountID),
 		nullableUUID(data.ProviderIntentID),
 		data.IntentType,
 		data.IdempotencyKey,
@@ -1328,12 +1328,12 @@ func (s *EventLogService) insertProviderMutation(ctx context.Context, data Provi
 }
 
 func (s *EventLogService) insertProviderMutationBatch(ctx context.Context, rows []ProviderMutationEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO provider_mutation_events (event_id, merchant_id, provider, provider_account_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO provider_mutation_events (event_id, merchant_id, provider, rail_merchant_account_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.MerchantID, d.Provider, nullableUUID(d.ProviderAccountID), nullableUUID(d.ProviderIntentID), d.IntentType, d.IdempotencyKey, d.Attempt, d.Phase, d.Reason, d.Evidence, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.Provider, nullableUUID(d.RailMerchantAccountID), nullableUUID(d.ProviderIntentID), d.IntentType, d.IdempotencyKey, d.Attempt, d.Phase, d.Reason, d.Evidence, d.Timestamp); err != nil {
 			return err
 		}
 	}

@@ -126,42 +126,6 @@ func renderSummaryTable(w io.Writer, summary *RunSummary) {
 			renderForensics(w, rep.Dunning)
 		}
 	}
-
-	if summary.StuckIntents != nil && summary.StuckIntents.Total > 0 {
-		renderStuckIntents(w, summary.StuckIntents)
-	}
-}
-
-// renderStuckIntents renders the provider-independent PS-10 section: count by
-// intent type, then one line per stuck intent. Callers skip it entirely when
-// nothing is stuck.
-func renderStuckIntents(w io.Writer, rep *StuckIntentReport) {
-	fmt.Fprintf(w, "\nStuck provider intents (%d): %d requires-review, %d mode-parked (informational), %d auto-resolved\n",
-		rep.Total, rep.AdminRequired, rep.ModeParked, rep.AutoResolved)
-	if len(rep.ByIntentType) > 0 {
-		types := make([]string, 0, len(rep.ByIntentType))
-		for t := range rep.ByIntentType {
-			types = append(types, t)
-		}
-		sort.Strings(types)
-		parts := make([]string, 0, len(types))
-		for _, t := range types {
-			parts = append(parts, fmt.Sprintf("%s=%d", t, rep.ByIntentType[t]))
-		}
-		fmt.Fprintf(w, "  by intent type: %s\n", strings.Join(parts, " "))
-	}
-	for _, line := range rep.Intents {
-		note := ""
-		if line.ModeParked {
-			note = " [mode-parked: informational]"
-		}
-		fmt.Fprintf(w, "  %s %s/%s status=%s origin=%s attempts=%d age=%s%s\n",
-			line.IntentID, line.Provider, line.IntentType, line.Status,
-			line.Origin, line.Attempts, line.Age, note)
-		if line.LastFailureReason != "" {
-			fmt.Fprintf(w, "    last failure reason: %s\n", truncate(line.LastFailureReason, 120))
-		}
-	}
 }
 
 func renderForensics(w io.Writer, d *DunningForensics) {

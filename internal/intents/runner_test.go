@@ -18,9 +18,9 @@ import (
 // fakeLedger is an in-memory ledger recording the transition the Runner
 // applied to each intent.
 type fakeLedger struct {
-	due        []gen.OpenrailsProviderIntent
-	dueVerify  []gen.OpenrailsProviderIntent
-	accounts   map[uuid.UUID]gen.OpenrailsPaymentProviderAccount
+	due        []gen.OpenrailsRailIntent
+	dueVerify  []gen.OpenrailsRailIntent
+	accounts   map[uuid.UUID]gen.OpenrailsRailMerchantAccount
 	transition map[uuid.UUID]string // id -> applied transition
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
@@ -31,7 +31,7 @@ type fakeLedger struct {
 
 	// Synchronous-path state: Enqueue returns enqueued (scripted conflict
 	// row); ClaimByID claims it unless claimByIDRefused.
-	enqueued        gen.OpenrailsProviderIntent
+	enqueued        gen.OpenrailsRailIntent
 	claimByIDRefuse bool
 	enqueueCalls    int
 	claimByIDCalls  int
@@ -40,27 +40,27 @@ type fakeLedger struct {
 func newFakeLedger() *fakeLedger {
 	return &fakeLedger{
 		transition: map[uuid.UUID]string{},
-		accounts:   map[uuid.UUID]gen.OpenrailsPaymentProviderAccount{},
+		accounts:   map[uuid.UUID]gen.OpenrailsRailMerchantAccount{},
 		reasons:    map[uuid.UUID]string{},
 		nextAt:     map[uuid.UUID]time.Time{},
 		evidence:   map[uuid.UUID]map[string]any{},
 	}
 }
 
-func (f *fakeLedger) GetProviderAccount(_ context.Context, id uuid.UUID) (gen.OpenrailsPaymentProviderAccount, error) {
+func (f *fakeLedger) GetRailMerchantAccount(_ context.Context, id uuid.UUID) (gen.OpenrailsRailMerchantAccount, error) {
 	account, ok := f.accounts[id]
 	if !ok {
-		return gen.OpenrailsPaymentProviderAccount{}, pgx.ErrNoRows
+		return gen.OpenrailsRailMerchantAccount{}, pgx.ErrNoRows
 	}
 	return account, nil
 }
 
-func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.OpenrailsProviderIntent, error) {
+func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	f.enqueueCalls++
 	return f.enqueued, nil
 }
 
-func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error) {
+func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
 	row := f.enqueued
 	row.ID = id
 	if status, ok := f.transition[id]; ok {
@@ -73,10 +73,10 @@ func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.OpenrailsProvider
 	return row, nil
 }
 
-func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.OpenrailsProviderIntent, bool, error) {
+func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.OpenrailsRailIntent, bool, error) {
 	f.claimByIDCalls++
 	if f.claimByIDRefuse {
-		return gen.OpenrailsProviderIntent{}, false, nil
+		return gen.OpenrailsRailIntent{}, false, nil
 	}
 	row := f.enqueued
 	row.ID = id
@@ -85,10 +85,10 @@ func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) 
 	return row, true, nil
 }
 
-func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsProviderIntent, error) {
+func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
 	return f.due, nil
 }
-func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsProviderIntent, error) {
+func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
 	return f.dueVerify, nil
 }
 func (f *fakeLedger) ExpireOverdue(context.Context, time.Time) (int64, error) { return 0, nil }
@@ -150,14 +150,14 @@ type fakeHandler struct {
 }
 
 func (h *fakeHandler) Type() string { return h.typ }
-func (h *fakeHandler) CheckRelevance(context.Context, gen.OpenrailsProviderIntent) (Relevance, error) {
+func (h *fakeHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
 	return h.relevance, h.relErr
 }
-func (h *fakeHandler) Execute(context.Context, gen.OpenrailsProviderIntent) Outcome {
+func (h *fakeHandler) Execute(context.Context, gen.OpenrailsRailIntent) Outcome {
 	h.executed++
 	return h.execute
 }
-func (h *fakeHandler) Verify(context.Context, gen.OpenrailsProviderIntent) Outcome {
+func (h *fakeHandler) Verify(context.Context, gen.OpenrailsRailIntent) Outcome {
 	h.verified++
 	return h.verify
 }
@@ -165,8 +165,8 @@ func (h *fakeHandler) Backoff(attempts int32) time.Duration {
 	return time.Duration(attempts) * time.Minute
 }
 
-func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsProviderIntent {
-	return gen.OpenrailsProviderIntent{
+func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsRailIntent {
+	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		MerchantID:     uuid.New(),
 		IntentType:     typ,
@@ -203,7 +203,7 @@ func TestRunnerOutcomeClassification(t *testing.T) {
 			ledger := newFakeLedger()
 			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: tc.outcome}
 			intent := testIntent("t", OriginUser, 1)
-			ledger.due = []gen.OpenrailsProviderIntent{intent}
+			ledger.due = []gen.OpenrailsRailIntent{intent}
 
 			runOnce(t, ledger, h, modeFull())
 			assert.Equal(t, tc.wantTransition, ledger.transition[intent.ID])
@@ -218,7 +218,7 @@ func TestRunnerRetryableUsesHandlerBackoff(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Retryable("provider down")}
 	intent := testIntent("t", OriginUser, 3)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	r := &Runner{Store: ledger, Registry: NewRegistry(h)}
 	before := time.Now()
@@ -234,7 +234,7 @@ func TestRunnerRelevanceSupersedes(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relevance: SupersededBy("subscription resumed"), execute: Succeeded(nil)}
 	intent := testIntent("t", OriginUser, 1)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	stats := runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusSuperseded, ledger.transition[intent.ID])
@@ -247,7 +247,7 @@ func TestRunnerRelevanceErrorParksWithoutExecuting(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relErr: assert.AnError, execute: Succeeded(nil)}
 	intent := testIntent("t", OriginUser, 1)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusPending, ledger.transition[intent.ID], "relevance read failure keeps the intent pending")
@@ -276,7 +276,7 @@ func TestRunnerModeGating(t *testing.T) {
 			ledger := newFakeLedger()
 			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
 			intent := testIntent("t", tc.origin, 1)
-			ledger.due = []gen.OpenrailsProviderIntent{intent}
+			ledger.due = []gen.OpenrailsRailIntent{intent}
 
 			runOnce(t, ledger, h, tc.mode)
 			if tc.executes {
@@ -294,7 +294,7 @@ func TestRunnerModeGating(t *testing.T) {
 func TestRunnerMissingHandlerParks(t *testing.T) {
 	ledger := newFakeLedger()
 	intent := testIntent("from_a_newer_build", OriginUser, 1)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	r := &Runner{Store: ledger, Registry: NewRegistry()}
 	_, err := r.RunExecuteOnce(context.Background())
@@ -319,7 +319,7 @@ func TestRunnerVerifyResolution(t *testing.T) {
 			h := &fakeHandler{typ: "t", relevance: StillRelevant(), verify: tc.verify}
 			intent := testIntent("t", OriginSystem, 2)
 			intent.Status = StatusUnknownNeedsVerify
-			ledger.dueVerify = []gen.OpenrailsProviderIntent{intent}
+			ledger.dueVerify = []gen.OpenrailsRailIntent{intent}
 
 			// readonly mode: verification is reads-only and must still run.
 			r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeReadonly()}
@@ -336,7 +336,7 @@ func TestRunnerVerifySupersedesIrrelevant(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relevance: SupersededBy("resumed"), verify: Succeeded(nil)}
 	intent := testIntent("t", OriginUser, 2)
-	ledger.dueVerify = []gen.OpenrailsProviderIntent{intent}
+	ledger.dueVerify = []gen.OpenrailsRailIntent{intent}
 
 	r := &Runner{Store: ledger, Registry: NewRegistry(h)}
 	_, err := r.RunVerifyOnce(context.Background())
@@ -451,7 +451,7 @@ func TestRunnerTerminalEvidencePersisted(t *testing.T) {
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(),
 		execute: TerminalWithEvidence("rebill declined", map[string]any{"response_code": 252})}
 	intent := testIntent("t", OriginSystem, 1)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusFailedTerminal, ledger.transition[intent.ID])
@@ -463,7 +463,7 @@ func TestRunnerLogsExternalMutationAttemptsAppendOnly(t *testing.T) {
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(),
 		execute: Succeeded(map[string]any{"remote_id": "sub_123"})}
 	intent := testIntent("t", OriginUser, 2)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	runOnce(t, ledger, h, modeFull())
 
@@ -482,7 +482,7 @@ func TestRunnerDoesNotLogReadOnlyVerify(t *testing.T) {
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), verify: Succeeded(nil)}
 	intent := testIntent("t", OriginUser, 2)
 	intent.Status = StatusUnknownNeedsVerify
-	ledger.dueVerify = []gen.OpenrailsProviderIntent{intent}
+	ledger.dueVerify = []gen.OpenrailsRailIntent{intent}
 
 	r := &Runner{Store: ledger, Registry: NewRegistry(h)}
 	_, err := r.RunVerifyOnce(context.Background())
@@ -497,7 +497,7 @@ func TestRunnerDoesNotExecuteWhenAttemptLogFails(t *testing.T) {
 	ledger.logErr = errors.New("write failed")
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
 	intent := testIntent("t", OriginUser, 1)
-	ledger.due = []gen.OpenrailsProviderIntent{intent}
+	ledger.due = []gen.OpenrailsRailIntent{intent}
 
 	runOnce(t, ledger, h, modeFull())
 

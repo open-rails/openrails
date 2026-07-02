@@ -668,11 +668,14 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           tenantSubjectID,
-		Rail:                 models.RailNMI,
-		RailCustomerRef:      "vault-" + uuid.New().String()[:8],
-		RailMethodRef:        "billing-" + uuid.New().String()[:8],
+		ID:              uuid.New(),
+		CustomerID:      tenantSubjectID,
+		Rail:            models.RailNMI,
+		RailCustomerRef: "vault-" + uuid.New().String()[:8],
+		RailMethodRef:   "billing-" + uuid.New().String()[:8],
+		// #682: legacy-shaped fixture (billing id present) — the explicit mode
+		// mirrors migration 058's backfill so dunning routes to manual rebill.
+		RebillDriver:         models.RebillDriverOpenRails,
 		InitialTransactionID: "txn-" + uuid.New().String()[:8],
 		LastFour:             strPtr("4242"),
 		CardType:             strPtr("Visa"),
@@ -716,12 +719,21 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 		opts.InitialTransactionID = "txn-" + uuid.New().String()[:8]
 	}
 
+	// #682: mirror migration 058's backfill rule for fixtures — an NMI method
+	// seeded WITH a billing id is the legacy-imported shape whose rebills
+	// OpenRails drives; everything else defaults to provider-billed.
+	rebillDriver := models.RebillDriverProvider
+	if opts.Rail == models.RailNMI && opts.BillingID != "" {
+		rebillDriver = models.RebillDriverOpenRails
+	}
+
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		CustomerID:           tenantSubjectID,
 		Rail:                 opts.Rail,
 		RailCustomerRef:      opts.VaultID,
 		RailMethodRef:        opts.BillingID,
+		RebillDriver:         rebillDriver,
 		InitialTransactionID: opts.InitialTransactionID,
 		LastFour:             strPtrOrNil(opts.LastFour),
 		CardType:             strPtrOrNil(opts.CardType),

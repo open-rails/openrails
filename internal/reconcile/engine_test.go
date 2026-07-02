@@ -35,12 +35,25 @@ func (f *fakeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSna
 	return f.snap, nil
 }
 
+// localEntitlement is TEST-ONLY bookkeeping for the fake writer's entitlement
+// grant/revoke side effects (the PULL engine no longer loads entitlements —
+// the DERIVE converge pass owns that check, #665).
+type localEntitlement struct {
+	ID          uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	SourceID    uuid.UUID
+	StartAt     time.Time
+	EndAt       *time.Time
+}
+
 // fakeLocal serves LocalState and the payment lookup from in-memory slices;
 // the fakeWriter mutates the same slices so enforce convergence is visible to
 // the next run.
 type fakeLocal struct {
 	mu       sync.Mutex
 	state    LocalState
+	ents     []localEntitlement
 	payments []LocalPayment
 }
 
@@ -49,11 +62,16 @@ func (l *fakeLocal) Load(ctx context.Context, provider Provider, _ *uuid.UUID) (
 	defer l.mu.Unlock()
 	cp := LocalState{
 		Subscriptions:  append([]LocalSubscription(nil), l.state.Subscriptions...),
-		Entitlements:   append([]LocalEntitlement(nil), l.state.Entitlements...),
 		PaymentMethods: append([]LocalPaymentMethod(nil), l.state.PaymentMethods...),
 		Prices:         append([]LocalPrice(nil), l.state.Prices...),
 	}
 	return &cp, nil
+}
+
+func (l *fakeLocal) entsSnapshot() []localEntitlement {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]localEntitlement(nil), l.ents...)
 }
 
 func (l *fakeLocal) PaymentsByTransactionIDs(ctx context.Context, provider Provider, _ *uuid.UUID, ids []string) ([]LocalPayment, error) {
@@ -190,33 +208,6 @@ func (s *memStore) AutoResolveVanished(ctx context.Context, provider Provider, r
 	return n, nil
 }
 
-func (s *memStore) AutoResolveVanishedAllProviders(ctx context.Context, runID uuid.UUID, types []FindingType) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	typeSet := map[FindingType]bool{}
-	for _, t := range types {
-		typeSet[t] = true
-	}
-	var n int64
-	now := time.Now()
-	for _, rec := range s.findings {
-		if !typeSet[rec.Type] {
-			continue
-		}
-		if rec.Status != FindingStatusReconcileRequired && rec.Status != FindingStatusAdminRequired {
-			continue
-		}
-		if rec.LastSeenRun == runID {
-			continue
-		}
-		rec.Status = FindingStatusFixed
-		rec.Resolution = "auto_vanished"
-		rec.ResolvedAt = &now
-		n++
-	}
-	return n, nil
-}
-
 func (s *memStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -276,48 +267,79 @@ func (w *fakeWriter) totalCalls() int {
 	return n
 }
 
-func (w *fakeWriter) CancelSubscriptionLocal(ctx context.Context, a CancelLocalAction) (bool, error) {
-	w.calls["cancel"]++
-	w.local.mu.Lock()
-	defer w.local.mu.Unlock()
-	for i := range w.local.state.Subscriptions {
-		s := &w.local.state.Subscriptions[i]
-		if s.ID == a.SubscriptionID && s.IsLive() {
-			now := time.Now()
-			s.Status = "cancelled"
-			s.CancelType = a.CancelType
-			s.CancelledAt = &now
-			return true, nil
-		}
-	}
-	return false, nil
+// fakeDecisions applies decider transitions onto the fakeLocal state,
+// mirroring reconcile.ApplyDecision's guards. It SHARES the fakeWriter's call
+// counter so totalCalls() still means "any enforce write happened".
+type fakeDecisions struct {
+	local *fakeLocal
+	calls map[string]int
 }
 
-func (w *fakeWriter) AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error) {
-	w.calls["adopt_status"]++
-	w.local.mu.Lock()
-	defer w.local.mu.Unlock()
-	for i := range w.local.state.Subscriptions {
-		s := &w.local.state.Subscriptions[i]
-		if s.ID != a.SubscriptionID || s.Status == "cancelled" {
-			continue
+func (fd *fakeDecisions) ApplyDecision(ctx context.Context, subscriptionID uuid.UUID, d Decision) (bool, error) {
+	fd.local.mu.Lock()
+	defer fd.local.mu.Unlock()
+	var s *LocalSubscription
+	for i := range fd.local.state.Subscriptions {
+		if fd.local.state.Subscriptions[i].ID == subscriptionID {
+			s = &fd.local.state.Subscriptions[i]
+			break
 		}
-		changed := false
-		if s.Status != a.Status {
-			s.Status = a.Status
-			changed = true
-		}
-		if a.PeriodEndsAt != nil && (s.CurrentPeriodEndsAt == nil || !s.CurrentPeriodEndsAt.Equal(*a.PeriodEndsAt)) {
-			s.CurrentPeriodEndsAt = a.PeriodEndsAt
-			changed = true
-		}
-		if a.PeriodStartsAt != nil && (s.CurrentPeriodStartsAt == nil || !s.CurrentPeriodStartsAt.Equal(*a.PeriodStartsAt)) {
-			s.CurrentPeriodStartsAt = a.PeriodStartsAt
-			changed = true
-		}
-		return changed, nil
 	}
-	return false, nil
+	if s == nil {
+		return false, fmt.Errorf("no subscription %s", subscriptionID)
+	}
+	transitional := s.Status == "active" || s.Status == "past_due" || s.Status == "unknown"
+	switch d.Kind {
+	case TransitionParkUnknown:
+		if s.Status != "active" && s.Status != "past_due" {
+			return false, nil
+		}
+		fd.calls["park"]++
+		s.Status = "unknown"
+		return true, nil
+	case TransitionPastDue:
+		if !transitional || s.Status == "past_due" {
+			return false, nil
+		}
+		fd.calls["past_due"]++
+		s.Status = "past_due"
+		return true, nil
+	case TransitionRenew, TransitionAdoptPeriodEnd:
+		if !transitional {
+			return false, nil
+		}
+		fd.calls["adopt_status"]++
+		if d.Kind == TransitionRenew && d.NewPeriodEnd != nil {
+			s.CurrentPeriodStartsAt = s.CurrentPeriodEndsAt
+		}
+		s.Status = "active"
+		if d.NewPeriodEnd != nil {
+			s.CurrentPeriodEndsAt = d.NewPeriodEnd
+		}
+		return true, nil
+	case TransitionCancel:
+		if !transitional {
+			return false, nil
+		}
+		fd.calls["cancel"]++
+		now := time.Now()
+		s.Status = "cancelled"
+		s.CancelType = "expired"
+		s.CancelledAt = &now
+		// ResolveCancelled revokes subscription-sourced entitlements.
+		var kept []localEntitlement
+		for _, ent := range fd.local.ents {
+			if ent.SourceID == s.ID {
+				fd.calls["revoke"]++
+				continue
+			}
+			kept = append(kept, ent)
+		}
+		fd.local.ents = kept
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func (w *fakeWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
@@ -406,7 +428,7 @@ func (w *fakeWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsA
 	granted := 0
 	for _, name := range a.Entitlements {
 		exists := false
-		for _, ent := range w.local.state.Entitlements {
+		for _, ent := range w.local.ents {
 			if ent.SourceID == a.SubscriptionID && ent.Entitlement == name {
 				exists = true
 				break
@@ -415,7 +437,7 @@ func (w *fakeWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsA
 		if exists {
 			continue
 		}
-		w.local.state.Entitlements = append(w.local.state.Entitlements, LocalEntitlement{
+		w.local.ents = append(w.local.ents, localEntitlement{
 			ID: uuid.New(), CustomerID: a.CustomerID, Entitlement: name,
 			SourceID: a.SubscriptionID, StartAt: a.StartAt, EndAt: a.EndAt,
 		})
@@ -487,23 +509,6 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 	return res, nil
 }
 
-func (w *fakeWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {
-	w.calls["revoke"]++
-	w.local.mu.Lock()
-	defer w.local.mu.Unlock()
-	var kept []LocalEntitlement
-	revoked := 0
-	for _, ent := range w.local.state.Entitlements {
-		if ent.SourceID == a.SubscriptionID {
-			revoked++
-			continue
-		}
-		kept = append(kept, ent)
-	}
-	w.local.state.Entitlements = kept
-	return revoked, nil
-}
-
 // --- helpers ----------------------------------------------------------------
 
 func tp(t time.Time) *time.Time { return &t }
@@ -514,11 +519,12 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 	store := newMemStore()
 	writer := newFakeWriter(local)
 	eng := &Engine{
-		Fetchers: map[Provider]RailFetcher{provider: &fakeFetcher{provider: provider, snap: snap}},
-		Store:    store,
-		Local:    local,
-		Writer:   writer,
-		Now:      func() time.Time { return testNow },
+		Fetchers:  map[Provider]RailFetcher{provider: &fakeFetcher{provider: provider, snap: snap}},
+		Store:     store,
+		Local:     local,
+		Writer:    writer,
+		Decisions: &fakeDecisions{local: local, calls: writer.calls},
+		Now:       func() time.Time { return testNow },
 	}
 	return eng, store, writer
 }
@@ -541,7 +547,7 @@ func liveLocalSub(provider Provider, psid string) LocalSubscription {
 }
 
 func withLiveEntitlement(local *fakeLocal, s *LocalSubscription) {
-	local.state.Entitlements = append(local.state.Entitlements, LocalEntitlement{
+	local.ents = append(local.ents, localEntitlement{
 		ID: uuid.New(), CustomerID: s.CustomerID, Entitlement: "premium",
 		SourceID: s.ID, StartAt: testNow.Add(-10 * 24 * time.Hour), EndAt: s.CurrentPeriodEndsAt,
 	})
@@ -672,7 +678,7 @@ func TestDiffTaxonomy(t *testing.T) {
 				assert.Equal(t, "expired", s.CancelType)
 			}
 		}
-		for _, ent := range st.Entitlements {
+		for _, ent := range local.entsSnapshot() {
 			assert.NotEqual(t, dead.ID, ent.SourceID, "the dead subscription's entitlements must be revoked")
 		}
 	})
@@ -807,9 +813,9 @@ func TestDiffTaxonomy(t *testing.T) {
 		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-1001"})
 		require.Len(t, payments, 1)
 		assert.Equal(t, sub.CustomerID, payments[0].CustomerID)
-		st, _ := local.Load(ctx, ProviderNMI, nil)
-		require.Len(t, st.Entitlements, 1)
-		assert.Equal(t, "premium", st.Entitlements[0].Entitlement)
+		ents := local.entsSnapshot()
+		require.Len(t, ents, 1)
+		assert.Equal(t, "premium", ents[0].Entitlement)
 	})
 
 	t.Run("PS-4 ambiguous identity goes to the admin queue, never guesses", func(t *testing.T) {
@@ -997,39 +1003,41 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Zero(t, writer.calls["cancel"]) // duplicates are never auto-resolved
 	})
 
-	t.Run("PS-9 grants missing entitlements and revokes orphans", func(t *testing.T) {
-		local := &fakeLocal{}
-		missing := liveLocalSub(ProviderNMI, "ps9-grant")
-		orphan := liveLocalSub(ProviderNMI, "ps9-revoke")
-		orphan.Status = "cancelled"
-		orphan.CancelType = "user"
-		local.state.Subscriptions = []LocalSubscription{missing, orphan}
-		withLiveEntitlement(local, &orphan) // cancelled sub still grants premium
-		snap := &RemoteSnapshot{
-			Provider:     ProviderNMI,
-			Capabilities: Capabilities{Subscriptions: true},
-			Subscriptions: []RemoteSubscription{
-				{RailSubscriptionID: "ps9-grant", Status: SubscriptionStatusActive, NextBillingAt: tp(*missing.CurrentPeriodEndsAt)},
-			},
-		}
-		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
-		require.NoError(t, err)
-
-		ps9 := findByType(res.Findings, FindingEntitlementMismatch)
-		require.Len(t, ps9, 2)
-		assert.Equal(t, 1, writer.calls["grant"])
-		assert.Equal(t, 1, writer.calls["revoke"])
-		assert.Equal(t, FindingStatusAutoFixed, store.record(ProviderNMI, FindingEntitlementMismatch, missing.ID.String()).Status)
-		assert.Equal(t, FindingStatusAutoFixed, store.record(ProviderNMI, FindingEntitlementMismatch, orphan.ID.String()).Status)
-
-		st, _ := local.Load(ctx, ProviderNMI, nil)
-		require.Len(t, st.Entitlements, 1)
-		assert.Equal(t, missing.ID, st.Entitlements[0].SourceID)
-	})
+	// PS-9 (subscription ↔ entitlement drift) moved to the Convergence Engine's
+	// DERIVE pass (#665) — see converge_derive_mismatch_integration_test.go.
 }
 
 // --- engine semantics ---------------------------------------------------------
+
+// #665: a completed provider section's coverage is a pull proof; failed or
+// breaker-aborted sections prove nothing (their coverage must never feed the
+// confirmed-absence gate).
+func TestPullProofsOnlyFromCompletedProviders(t *testing.T) {
+	ctx := context.Background()
+	local := &fakeLocal{}
+	sub := liveLocalSub(ProviderNMI, "nmi-proof")
+	local.state.Subscriptions = []LocalSubscription{sub}
+	okSnap := &RemoteSnapshot{
+		Provider:     ProviderNMI,
+		Capabilities: Capabilities{Subscriptions: true},
+		Subscriptions: []RemoteSubscription{
+			{RailSubscriptionID: "nmi-proof", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+		},
+		Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
+	}
+	eng, _, _ := newTestEngine(ProviderNMI, okSnap, local)
+	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, err: fmt.Errorf("stripe down")}
+
+	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory})
+	require.Error(t, err, "the failed provider fails the run")
+	require.NotNil(t, res)
+
+	proofs := res.PullProofs()
+	require.Len(t, proofs, 1, "only the completed provider proves anything")
+	assert.True(t, proofs[ProviderNMI].Coverage.SubscriptionsExhaustive)
+	_, hasStripe := proofs[ProviderStripe]
+	assert.False(t, hasStripe)
+}
 
 func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 	ctx := context.Background()
@@ -1193,7 +1201,6 @@ func TestCapabilityGating(t *testing.T) {
 	eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 	require.NoError(t, err)
-	withLiveEntitlement(local, &sub) // silence PS-9 noise after the fact (not asserted)
 
 	assert.Empty(t, findByType(res.Findings, FindingChargebackActiveSub), "PS-6 must be capability-gated")
 	assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded), "PS-5 must be capability-gated")
@@ -1425,8 +1432,9 @@ func TestMaterializePS1(t *testing.T) {
 		// …the snapshot charge is backfilled and entitlements granted.
 		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-mat-1"})
 		require.Len(t, payments, 1)
-		require.Len(t, st.Entitlements, 1)
-		assert.Equal(t, created.ID, st.Entitlements[0].SourceID)
+		ents := local.entsSnapshot()
+		require.Len(t, ents, 1)
+		assert.Equal(t, created.ID, ents[0].SourceID)
 
 		// Re-run: converged, no duplicate, no second materialize write.
 		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})

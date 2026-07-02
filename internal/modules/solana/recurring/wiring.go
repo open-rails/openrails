@@ -30,14 +30,14 @@ type secretStoreGetter struct {
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
 	if name == "private_key" && g.database != nil {
 		var (
-			account gen.OpenrailsPaymentProviderAccount
+			account gen.OpenrailsRailMerchantAccount
 			ok      bool
 			err     error
 		)
 		if strings.TrimSpace(g.accountID) != "" {
-			account, ok, err = solanaProviderAccountByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
+			account, ok, err = solanaRailMerchantAccountByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
 		} else {
-			account, ok, err = primarySolanaProviderAccount(ctx, g.database, merchantID, g.environment)
+			account, ok, err = primarySolanaRailMerchantAccount(ctx, g.database, merchantID, g.environment)
 		}
 		if err != nil {
 			return "", err
@@ -45,7 +45,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 		if !ok {
 			return "", fmt.Errorf("solana: no active provider account for signing key")
 		}
-		secretName, err := merchants.ProviderAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
+		secretName, err := merchants.RailMerchantAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
 		if err != nil {
 			return "", err
 		}
@@ -62,12 +62,12 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 	return sec.Value, nil
 }
 
-func NewSignerFromProviderAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment ...string) solanaint.Signer {
+func NewSignerFromRailMerchantAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment ...string) solanaint.Signer {
 	env := "live"
 	if len(environment) > 0 && strings.TrimSpace(environment[0]) != "" {
 		env = strings.TrimSpace(environment[0])
 	}
-	return providerAccountSigner{
+	return railMerchantAccountSigner{
 		keypair:     solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database, environment: env}, ttl),
 		store:       store,
 		transit:     transit,
@@ -77,7 +77,7 @@ func NewSignerFromProviderAccounts(store merchants.MerchantSecretReader, transit
 	}
 }
 
-type providerAccountSigner struct {
+type railMerchantAccountSigner struct {
 	keypair     solanaint.Signer
 	store       merchants.MerchantSecretReader
 	transit     solanaint.TransitClient
@@ -86,7 +86,7 @@ type providerAccountSigner struct {
 	ttl         time.Duration
 }
 
-func (s providerAccountSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
+func (s railMerchantAccountSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
 	signer, err := s.resolve(ctx, merchantID)
 	if err != nil {
 		return solanago.PublicKey{}, err
@@ -94,7 +94,7 @@ func (s providerAccountSigner) PublicKey(ctx context.Context, merchantID merchan
 	return signer.PublicKey(ctx, merchantID)
 }
 
-func (s providerAccountSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
+func (s railMerchantAccountSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
 	signer, err := s.resolve(ctx, merchantID)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -102,7 +102,7 @@ func (s providerAccountSigner) SignMessage(ctx context.Context, merchantID merch
 	return signer.SignMessage(ctx, merchantID, message)
 }
 
-func (s providerAccountSigner) SignMessageForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error) {
+func (s railMerchantAccountSigner) SignMessageForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error) {
 	signer, err := s.resolveForPublicKey(ctx, merchantID, publicKey.String())
 	if err != nil {
 		return solanago.Signature{}, err
@@ -110,8 +110,8 @@ func (s providerAccountSigner) SignMessageForPublicKey(ctx context.Context, merc
 	return signer.SignMessage(ctx, merchantID, message)
 }
 
-func (s providerAccountSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
-	account, ok, err := primarySolanaProviderAccount(ctx, s.db, merchantID, s.environment)
+func (s railMerchantAccountSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
+	account, ok, err := primarySolanaRailMerchantAccount(ctx, s.db, merchantID, s.environment)
 	if err != nil {
 		return nil, err
 	}
@@ -132,8 +132,8 @@ func (s providerAccountSigner) resolve(ctx context.Context, merchantID merchant.
 	return nil, fmt.Errorf("solana: no active provider account for signer")
 }
 
-func (s providerAccountSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey string) (solanaint.Signer, error) {
-	account, ok, err := solanaProviderAccountByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
+func (s railMerchantAccountSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey string) (solanaint.Signer, error) {
+	account, ok, err := solanaRailMerchantAccountByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -174,18 +174,18 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPaymentProviderAccount, bool, error) {
+func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsRailMerchantAccount, bool, error) {
 	if database == nil || merchantID.IsZero() {
-		return gen.OpenrailsPaymentProviderAccount{}, false, nil
+		return gen.OpenrailsRailMerchantAccount{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
 		environment = "live"
 	}
-	var row gen.OpenrailsPaymentProviderAccount
+	var row gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		row, err = database.Gen(ctx).GetActiveProviderAccountForNewWork(ctx, gen.GetActiveProviderAccountForNewWorkParams{
+		row, err = database.Gen(ctx).GetActiveRailMerchantAccountForNewWork(ctx, gen.GetActiveRailMerchantAccountForNewWorkParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        "solana",
 			Environment: &environment,
@@ -193,25 +193,25 @@ func primarySolanaProviderAccount(ctx context.Context, database *db.DB, merchant
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPaymentProviderAccount{}, false, nil
+			return gen.OpenrailsRailMerchantAccount{}, false, nil
 		}
-		return gen.OpenrailsPaymentProviderAccount{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
+		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
 	}
 	return row, true, nil
 }
 
-func solanaProviderAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPaymentProviderAccount, bool, error) {
+func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsRailMerchantAccount, bool, error) {
 	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
-		return gen.OpenrailsPaymentProviderAccount{}, false, nil
+		return gen.OpenrailsRailMerchantAccount{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
 		environment = "live"
 	}
-	var row gen.OpenrailsPaymentProviderAccount
+	var row gen.OpenrailsRailMerchantAccount
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		row, err = database.Gen(ctx).GetProviderAccountByIdentity(ctx, gen.GetProviderAccountByIdentityParams{
+		row, err = database.Gen(ctx).GetRailMerchantAccountByIdentity(ctx, gen.GetRailMerchantAccountByIdentityParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        "solana",
 			Environment: &environment,
@@ -220,9 +220,9 @@ func solanaProviderAccountByIdentity(ctx context.Context, database *db.DB, merch
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPaymentProviderAccount{}, false, nil
+			return gen.OpenrailsRailMerchantAccount{}, false, nil
 		}
-		return gen.OpenrailsPaymentProviderAccount{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
+		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
 	}
 	return row, true, nil
 }

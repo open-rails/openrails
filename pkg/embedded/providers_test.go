@@ -11,9 +11,9 @@ import (
 
 func TestApplyPaymentProvidersGeneratesLocalSelectors(t *testing.T) {
 	rails, err := ApplyPaymentProviders([]PaymentProvider{
-		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, AccountID: "acct_a", Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
-		{Config: config.ProviderAccountConfig{Rail: models.RailStripe, AccountID: "acct_b", Archived: true, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
-		{Config: config.ProviderAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: "sec"}}},
+		{Config: config.RailMerchantAccountConfig{Rail: models.RailStripe, AccountID: "acct_a", Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}}},
+		{Config: config.RailMerchantAccountConfig{Rail: models.RailStripe, AccountID: "acct_b", Archived: true, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}}},
+		{Config: config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: "sec"}}},
 	})
 	require.NoError(t, err)
 	require.NoError(t, config.ValidateRailSet(&config.Config{}, rails))
@@ -29,11 +29,11 @@ func TestApplyPaymentProvidersAcceptsExplicitLocalSelectors(t *testing.T) {
 	rails, err := ApplyPaymentProviders([]PaymentProvider{
 		{
 			Name:   "stripe_primary",
-			Config: config.ProviderAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}},
+			Config: config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_a"}},
 		},
 		{
 			Name:   "stripe_archived",
-			Config: config.ProviderAccountConfig{Rail: models.RailStripe, Archived: true, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}},
+			Config: config.RailMerchantAccountConfig{Rail: models.RailStripe, Archived: true, Stripe: &config.StripeRailConfig{SecretKey: "sk_live_b"}},
 		},
 	})
 	require.NoError(t, err)

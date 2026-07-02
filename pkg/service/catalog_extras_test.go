@@ -218,19 +218,19 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 // returned intent row per intent type.
 type fakeIntentExecutor struct {
 	calls  []intents.EnqueueParams
-	script func(p intents.EnqueueParams) gen.OpenrailsProviderIntent
+	script func(p intents.EnqueueParams) gen.OpenrailsRailIntent
 	err    error
 }
 
-func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.EnqueueParams) (gen.OpenrailsProviderIntent, error) {
+func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	f.calls = append(f.calls, p)
 	if f.err != nil {
-		return gen.OpenrailsProviderIntent{}, f.err
+		return gen.OpenrailsRailIntent{}, f.err
 	}
 	if f.script != nil {
 		return f.script(p), nil
 	}
-	return gen.OpenrailsProviderIntent{
+	return gen.OpenrailsRailIntent{
 		ID:         uuid.New(),
 		IntentType: p.IntentType,
 		Provider:   p.Provider,
@@ -238,15 +238,15 @@ func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.Enqu
 	}, nil
 }
 
-func succeededRow(p intents.EnqueueParams, evidence string) gen.OpenrailsProviderIntent {
-	return gen.OpenrailsProviderIntent{
+func succeededRow(p intents.EnqueueParams, evidence string) gen.OpenrailsRailIntent {
+	return gen.OpenrailsRailIntent{
 		ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
 		Status: intents.StatusSucceeded, ResultEvidence: []byte(evidence),
 	}
 }
 
 func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
-	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsProviderIntent {
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsRailIntent {
 		return succeededRow(p, `{"archived":true}`)
 	}}
 	extras := []CatalogExtra{
@@ -354,8 +354,8 @@ func TestArchiveCatalogExtrasVia_ForeignNeverTouchedEvenOnExhaustive(t *testing.
 // drains the queue later.
 func TestArchiveCatalogExtrasVia_ParkedIsDurableNotError(t *testing.T) {
 	reason := "mode=readonly blocks all provider writes"
-	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsProviderIntent {
-		return gen.OpenrailsProviderIntent{
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsRailIntent {
+		return gen.OpenrailsRailIntent{
 			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
 			Status: intents.StatusPending, LastFailureReason: &reason,
 		}
@@ -383,8 +383,8 @@ func TestArchiveCatalogExtrasVia_ParkedIsDurableNotError(t *testing.T) {
 
 func TestArchiveCatalogExtrasVia_TerminalFailuresAggregate(t *testing.T) {
 	reason := "stripe refused"
-	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsProviderIntent {
-		return gen.OpenrailsProviderIntent{
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsRailIntent {
+		return gen.OpenrailsRailIntent{
 			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
 			Status: intents.StatusFailedTerminal, LastFailureReason: &reason,
 		}
@@ -492,7 +492,7 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 	if key == "" {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
-	rails := config.ProviderAccountSet{
+	rails := config.RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 	}
 	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}

@@ -17,8 +17,8 @@ func testStripeConfig() *config.Config {
 	return &config.Config{}
 }
 
-func testStripeRails() config.ProviderAccountSet {
-	return config.ProviderAccountSet{
+func testStripeRails() config.RailMerchantAccountSet {
+	return config.RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }

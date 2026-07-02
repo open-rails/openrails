@@ -52,7 +52,7 @@ type UpsertPaymentProviderConfigRequest struct {
 	Credentials  map[string]string `json:"credentials"`
 }
 
-type providerAccountEvidence struct {
+type railMerchantAccountEvidence struct {
 	PublicConfig map[string]string `json:"public_config,omitempty"`
 }
 
@@ -65,14 +65,14 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	environment = normalizeProviderSecretEnvironment(environment)
 	status = strings.ToLower(strings.TrimSpace(status))
 
-	var rows []gen.OpenrailsPaymentProviderAccount
+	var rows []gen.OpenrailsRailMerchantAccount
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var providerFilter *string
 		if rail != "" {
 			providerFilter = &rail
 		}
 		var err error
-		rows, err = gen.New(tx).ListProviderAccountsForMerchant(ctx, gen.ListProviderAccountsForMerchantParams{
+		rows, err = gen.New(tx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
 			MerchantID: id.UUID(),
 			Rail:       providerFilter,
 		})
@@ -90,7 +90,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	for _, row := range rows {
 		accountIDs = append(accountIDs, row.ID)
 	}
-	openObligations, err := s.providerAccountOpenObligations(ctx, id, accountIDs)
+	openObligations, err := s.railMerchantAccountOpenObligations(ctx, id, accountIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		if environment != "" && row.Environment != environment {
 			continue
 		}
-		if status != "" && !providerAccountLifecycleMatches(row.Archived, status) {
+		if status != "" && !railMerchantAccountLifecycleMatches(row.Archived, status) {
 			continue
 		}
 		cfg := paymentProviderConfigFromRow(row, statuses)
@@ -150,7 +150,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 
 	secretNames := make(map[string]string, len(req.Credentials))
 	for key, value := range req.Credentials {
-		name, err := ProviderAccountSecretName(rail, environment, accountID, key)
+		name, err := RailMerchantAccountSecretName(rail, environment, accountID, key)
 		if err != nil {
 			return PaymentProviderConfig{}, err
 		}
@@ -160,7 +160,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		secretNames[name] = value
 	}
 
-	row, err := s.upsertPaymentProviderAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig)
+	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -174,7 +174,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		return PaymentProviderConfig{}, err
 	}
 	cfg := paymentProviderConfigFromRow(row, statuses)
-	openObligations, err := s.providerAccountOpenObligations(ctx, id, []uuid.UUID{row.ID})
+	openObligations, err := s.railMerchantAccountOpenObligations(ctx, id, []uuid.UUID{row.ID})
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -192,7 +192,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	row, err := s.disablePaymentProviderAccount(ctx, id, current.ID)
+	row, err := s.disableRailMerchantAccount(ctx, id, current.ID)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -201,7 +201,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 		return PaymentProviderConfig{}, err
 	}
 	cfg := paymentProviderConfigFromRow(row, statuses)
-	openObligations, err := s.providerAccountOpenObligations(ctx, id, []uuid.UUID{row.ID})
+	openObligations, err := s.railMerchantAccountOpenObligations(ctx, id, []uuid.UUID{row.ID})
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -209,21 +209,21 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return cfg, nil
 }
 
-func (s *Service) upsertPaymentProviderAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string) (gen.OpenrailsPaymentProviderAccount, error) {
+func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string) (gen.OpenrailsRailMerchantAccount, error) {
 	evidence, err := marshalProviderEvidence(publicConfig)
 	if err != nil {
-		return gen.OpenrailsPaymentProviderAccount{}, err
+		return gen.OpenrailsRailMerchantAccount{}, err
 	}
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation under RLS).
-	if err := AssertProviderAccountUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
-		return gen.OpenrailsPaymentProviderAccount{}, err
+	if err := AssertRailMerchantAccountUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
+		return gen.OpenrailsRailMerchantAccount{}, err
 	}
 	archived := !enabled
-	var row gen.OpenrailsPaymentProviderAccount
+	var row gen.OpenrailsRailMerchantAccount
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		row, err = gen.New(tx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
+		row, err = gen.New(tx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
 			MerchantID:  id.UUID(),
 			Rail:        rail,
 			Environment: &environment,
@@ -236,11 +236,11 @@ func (s *Service) upsertPaymentProviderAccount(ctx context.Context, id merchant.
 	return row, err
 }
 
-func (s *Service) disablePaymentProviderAccount(ctx context.Context, id merchant.ID, accountID uuid.UUID) (gen.OpenrailsPaymentProviderAccount, error) {
-	var row gen.OpenrailsPaymentProviderAccount
+func (s *Service) disableRailMerchantAccount(ctx context.Context, id merchant.ID, accountID uuid.UUID) (gen.OpenrailsRailMerchantAccount, error) {
+	var row gen.OpenrailsRailMerchantAccount
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-				UPDATE openrails.payment_provider_accounts
+				UPDATE openrails.rail_merchant_accounts
 				   SET archived = true,
 				       replaced_at = COALESCE(replaced_at, now()),
 				       updated_at = now()
@@ -256,7 +256,7 @@ func (s *Service) disablePaymentProviderAccount(ctx context.Context, id merchant
 	return row, err
 }
 
-func (s *Service) providerAccountOpenObligations(ctx context.Context, id merchant.ID, accountIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (s *Service) railMerchantAccountOpenObligations(ctx context.Context, id merchant.ID, accountIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := make(map[uuid.UUID]int64, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return out, nil
@@ -269,21 +269,21 @@ func (s *Service) providerAccountOpenObligations(ctx context.Context, id merchan
 			         SELECT count(*)::bigint
 			           FROM openrails.subscriptions sub
 			          WHERE sub.merchant_id = $2::uuid
-			            AND sub.provider_account_id = target.id
+			            AND sub.rail_merchant_account_id = target.id
 			            AND sub.status IN ('active', 'pending', 'past_due')
 			       ) +
 			       (
 			         SELECT count(*)::bigint
 			           FROM openrails.payments payment
 			          WHERE payment.merchant_id = $2::uuid
-			            AND payment.provider_account_id = target.id
+			            AND payment.rail_merchant_account_id = target.id
 			            AND payment.status = 'pending'
 			       ) +
 			       (
 			         SELECT count(*)::bigint
-			           FROM openrails.provider_intents intent
+			           FROM openrails.rail_intents intent
 			          WHERE intent.merchant_id = $2::uuid
-			            AND intent.provider_account_id = target.id
+			            AND intent.rail_merchant_account_id = target.id
 			            AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
 			       ) AS open_obligations
 			  FROM target
@@ -318,7 +318,7 @@ func isUndefinedTable(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }
 
-func paymentProviderConfigFromRow(row gen.OpenrailsPaymentProviderAccount, statuses []MerchantSecretStatus) PaymentProviderConfig {
+func paymentProviderConfigFromRow(row gen.OpenrailsRailMerchantAccount, statuses []MerchantSecretStatus) PaymentProviderConfig {
 	configured := map[string]struct{}{}
 	for _, st := range statuses {
 		if st.Configured {
@@ -327,7 +327,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPaymentProviderAccount, statu
 	}
 	credentials := make(map[string]PaymentProviderCredentialStatus)
 	for _, key := range paymentProviderCredentialKeys(row.Rail) {
-		name, err := ProviderAccountSecretName(row.Rail, row.Environment, row.AccountID, key)
+		name, err := RailMerchantAccountSecretName(row.Rail, row.Environment, row.AccountID, key)
 		if err != nil {
 			continue
 		}
@@ -353,7 +353,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPaymentProviderAccount, statu
 	}
 }
 
-func providerAccountLifecycleMatches(archived bool, status string) bool {
+func railMerchantAccountLifecycleMatches(archived bool, status string) bool {
 	switch status {
 	case "active", "enabled", "available", "not_archived":
 		return !archived
@@ -367,7 +367,7 @@ func providerAccountLifecycleMatches(archived bool, status string) bool {
 // supportedPaymentProvider is registry-backed (#669): the rail participates in
 // the provider-account catalog.
 func supportedPaymentProvider(provider string) bool {
-	return rails.SupportsProviderAccounts(models.Rail(provider))
+	return rails.SupportsRailMerchantAccounts(models.Rail(provider))
 }
 
 // paymentProviderCredentialKeys returns the MERCHANT-visible credential slots
@@ -381,18 +381,18 @@ func marshalProviderEvidence(publicConfig map[string]string) ([]byte, error) {
 	if len(publicConfig) == 0 {
 		return nil, nil
 	}
-	b, err := json.Marshal(providerAccountEvidence{PublicConfig: publicConfig})
+	b, err := json.Marshal(railMerchantAccountEvidence{PublicConfig: publicConfig})
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider config evidence: %w", err)
 	}
 	return b, nil
 }
 
-func unmarshalProviderEvidence(raw []byte) providerAccountEvidence {
+func unmarshalProviderEvidence(raw []byte) railMerchantAccountEvidence {
 	if len(raw) == 0 {
-		return providerAccountEvidence{}
+		return railMerchantAccountEvidence{}
 	}
-	var out providerAccountEvidence
+	var out railMerchantAccountEvidence
 	_ = json.Unmarshal(raw, &out)
 	return out
 }

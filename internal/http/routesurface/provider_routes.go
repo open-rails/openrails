@@ -34,7 +34,7 @@ func AllProviderRoutes() ProviderRoutes {
 // ProviderRoutesFromRails derives the surface from configured rails WITHOUT
 // capability gating — signing + write are left enabled (back-compat for callers
 // that have no probed capabilities). Prefer ProviderRoutesFromRailsWithCapabilities.
-func ProviderRoutesFromRails(rails config.ProviderAccountSet) ProviderRoutes {
+func ProviderRoutesFromRails(rails config.RailMerchantAccountSet) ProviderRoutes {
 	r := providerRoutesFromRails(rails)
 	r.SolanaSigning = r.Solana
 	r.SecretWrite = true
@@ -44,14 +44,14 @@ func ProviderRoutesFromRails(rails config.ProviderAccountSet) ProviderRoutes {
 // ProviderRoutesFromRailsWithCapabilities derives the surface from configured
 // rails AND probed capabilities: Solana-signing routes and the secret-write
 // surface only mount when OpenRails can actually perform them (#661).
-func ProviderRoutesFromRailsWithCapabilities(rails config.ProviderAccountSet, caps RuntimeCapabilities) ProviderRoutes {
+func ProviderRoutesFromRailsWithCapabilities(rails config.RailMerchantAccountSet, caps RuntimeCapabilities) ProviderRoutes {
 	r := providerRoutesFromRails(rails)
 	r.SolanaSigning = r.Solana && caps.SolanaCanSign
 	r.SecretWrite = caps.SecretWrite
 	return r
 }
 
-func providerRoutesFromRails(rails config.ProviderAccountSet) ProviderRoutes {
+func providerRoutesFromRails(rails config.RailMerchantAccountSet) ProviderRoutes {
 	return ProviderRoutes{
 		StripePortal: rails.GetStripeRail() != nil,
 		Solana:       rails.GetSolanaRail() != nil,

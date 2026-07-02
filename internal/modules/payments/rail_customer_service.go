@@ -35,12 +35,13 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	if userID == "" || rail == "" || customerID == "" {
 		return fmt.Errorf("invalid rail customer args")
 	}
-	// #635: only rails with a real card-independent remote CUSTOMER object get a
-	// rail_customers row — Stripe (cus_*) and NMI (customer_vault_id). CCBill
-	// keys on subscription_id and Solana on the wallet address; neither is a
-	// customer, so a row there would conflate a subscription/wallet with a customer.
-	// No-op for those rails: their durable handle is the subscription's
-	// rail_subscription_id, not a fabricated rail_customer.
+	// #635/#682: only rails with a PERSON-level remote customer object get a
+	// rail_customer_accounts row — Stripe (cus_*) only. NMI vault ids are per-card
+	// instrument containers (deliberately minted one per card, #682), CCBill
+	// keys on subscription_id, Solana on the wallet address; a row for any of
+	// those would conflate an instrument/subscription/wallet with a person.
+	// No-op for those rails: their durable handles live on payment_methods
+	// (rail_customer_ref) and subscriptions (rail_subscription_id).
 	if !railHasRemoteCustomer(rail) {
 		return nil
 	}
@@ -57,19 +58,19 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	}
 	// id is generated explicitly: the upsert targets the merchant-scoped
 	// (merchant_id, customer_id, rail) unique, not the pk.
-	return s.DB.Gen(ctx).UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
-		ID:             uuidutil.NewV7(),
-		MerchantID:     tid.UUID(),
-		CustomerID:     customerRowID,
-		Rail:           rail,
-		RailCustomerID: customerID,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	return s.DB.Gen(ctx).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
+		ID:         uuidutil.NewV7(),
+		MerchantID: tid.UUID(),
+		CustomerID: customerRowID,
+		Rail:       rail,
+		AccountID:  customerID,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	})
 }
 
 // railHasRemoteCustomer reports whether a rail exposes a card-independent remote
-// customer object worth materializing into rail_customers (#635). Registry-backed (#669).
+// customer object worth materializing into rail_customer_accounts (#635). Registry-backed (#669).
 func railHasRemoteCustomer(rail string) bool {
 	return rails.HasRemoteCustomer(models.Rail(rail))
 }
@@ -87,7 +88,7 @@ func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail st
 	if err != nil {
 		return "", err
 	}
-	return s.DB.Gen(ctx).GetRailCustomerID(ctx, gen.GetRailCustomerIDParams{
+	return s.DB.Gen(ctx).GetRailCustomerAccountID(ctx, gen.GetRailCustomerAccountIDParams{
 		CustomerID: tsid, Rail: rail,
 	})
 }
@@ -104,7 +105,7 @@ func (s *RailCustomerService) GetUserIDByCustomerID(ctx context.Context, rail, c
 	if rail == "" || customerID == "" {
 		return "", fmt.Errorf("invalid rail customer args")
 	}
-	return s.DB.Gen(ctx).GetRailCustomerSubject(ctx, gen.GetRailCustomerSubjectParams{
-		RailCustomerID: customerID, Rail: rail,
+	return s.DB.Gen(ctx).GetRailCustomerAccountSubject(ctx, gen.GetRailCustomerAccountSubjectParams{
+		AccountID: customerID, Rail: rail,
 	})
 }

@@ -172,17 +172,17 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	require.NoError(t, gen.New(pool).UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
-		ID:             uuidutil.NewV7(),
-		MerchantID:     dbtest.TestMerchantID.UUID(),
-		CustomerID:     payer.UUID(),
-		Rail:           rail,
-		RailCustomerID: railCustomerID,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	require.NoError(t, gen.New(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
+		ID:         uuidutil.NewV7(),
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		CustomerID: payer.UUID(),
+		Rail:       rail,
+		AccountID:  railCustomerID,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customers WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), rail)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customer_accounts WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), rail)
 	})
 }
 
@@ -269,7 +269,7 @@ func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, clients 
 	}
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.provider_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
+			"DELETE FROM openrails.rail_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
 	})
 	return &topupHarness{svc: svc, runner: runner, ch: ch}
 }
@@ -282,11 +282,11 @@ func (h *topupHarness) advance(d time.Duration) {
 
 // runOnce mirrors AutoTopupWorker.Work for one merchant pass and returns the
 // post-execution intents.
-func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.Duration) []gen.OpenrailsProviderIntent {
+func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.Duration) []gen.OpenrailsRailIntent {
 	t.Helper()
 	candidates, err := h.svc.ListDueAutoTopups(ctx, cooldown)
 	require.NoError(t, err)
-	out := make([]gen.OpenrailsProviderIntent, 0, len(candidates))
+	out := make([]gen.OpenrailsRailIntent, 0, len(candidates))
 	for _, c := range candidates {
 		intent, err := h.runner.EnqueueAndExecute(ctx, intents.EnqueueParams{
 			MerchantID: c.MerchantID,
@@ -764,7 +764,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
-		Rails: config.ProviderAccountSet{
+		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}
@@ -858,7 +858,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{},
-		Rails: config.ProviderAccountSet{
+		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}

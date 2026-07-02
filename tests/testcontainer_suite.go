@@ -60,7 +60,7 @@ type TestContainerSuite struct {
 	Server     *server.Server
 	httpServer *http.Server
 	Config     *config.Config
-	Rails      config.ProviderAccountSet
+	Rails      config.RailMerchantAccountSet
 	ServerURL  string
 
 	// Context for container operations
@@ -76,7 +76,7 @@ type TestContainerSuite struct {
 // TestSuiteOption customizes an integration test suite before it boots.
 type TestSuiteOption func(*TestContainerSuite)
 
-const testNMIProviderAccountID = "OpenRails Test Merchant <billing@test.example>"
+const testNMIRailMerchantAccountID = "OpenRails Test Merchant <billing@test.example>"
 
 // WithSuiteClock injects a clock before the runtime, services, workers, and
 // seed helpers are created. Prefer this over SetMockClock for new tests.
@@ -233,7 +233,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	}
 	// Payment rail credentials are construction-time merchant/provider
 	// state, not infrastructure config.yaml state.
-	suite.Rails = config.ProviderAccountSet{
+	suite.Rails = config.RailMerchantAccountSet{
 		"ccbill": {
 			Rail:      models.RailCCBill,
 			AccountID: "945280/0000",
@@ -364,7 +364,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	// Get the pgx pool from the app runtime
 	suite.Pool = assembled.App.Runtime.DB.Pool()
 	suite.Server = assembled.Server
-	suite.seedProviderAccountFixtures()
+	suite.seedRailMerchantAccountFixtures()
 
 	// Bootstrap the control plane exactly like the standalone serve path (#312):
 	// ensure the test merchant's merchant permission-group exists with the operator role holding
@@ -420,12 +420,12 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.ServerURL = fmt.Sprintf("http://localhost:%d", suite.Config.Port)
 }
 
-func (suite *TestContainerSuite) seedProviderAccountFixtures() {
+func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	suite.seedProviderAccount(ctx, "nmi", testNMIProviderAccountID)
-	nmiSecret, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "security_key")
+	suite.seedRailMerchantAccount(ctx, "nmi", testNMIRailMerchantAccountID)
+	nmiSecret, err := merchants.RailMerchantAccountSecretName("nmi", "live", testNMIRailMerchantAccountID, "security_key")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
 	require.NoError(suite.t, err)
@@ -435,20 +435,20 @@ func (suite *TestContainerSuite) seedProviderAccountFixtures() {
 	// webhook path resolves accounts under environment=test.
 	ccbillAccountID := "945280/0000"
 	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	suite.seedProviderAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
-	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
+	suite.seedRailMerchantAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
+	ccbillSecret, err := merchants.RailMerchantAccountSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
 
-	suite.seedProviderAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
+	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
 }
 
-func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, rail, accountID string) {
-	suite.seedProviderAccountWithEvidence(ctx, rail, "live", accountID, `{"source":"test_fixture"}`)
+func (suite *TestContainerSuite) seedRailMerchantAccount(ctx context.Context, rail, accountID string) {
+	suite.seedRailMerchantAccountWithEvidence(ctx, rail, "live", accountID, `{"source":"test_fixture"}`)
 }
 
-func (suite *TestContainerSuite) seedProviderAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
+func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
 	suite.t.Helper()
 	if evidence == "" {
 		evidence = `{"source":"test_fixture"}`
@@ -458,7 +458,7 @@ func (suite *TestContainerSuite) seedProviderAccountWithEvidence(ctx context.Con
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.payment_provider_accounts
+		INSERT INTO openrails.rail_merchant_accounts
 		    (merchant_id, rail, environment, account_id, archived, evidence, last_verified_at)
 		VALUES ($1::uuid, $2, $3, $4, false, $5::jsonb, now())
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
@@ -466,7 +466,7 @@ func (suite *TestContainerSuite) seedProviderAccountWithEvidence(ctx context.Con
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
 		       updated_at = now()
-		 WHERE openrails.payment_provider_accounts.merchant_id = EXCLUDED.merchant_id
+		 WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.UUID(), rail, environment, accountID, evidence)
 	require.NoError(suite.t, err)
 	require.NoError(suite.t, tx.Commit(ctx))

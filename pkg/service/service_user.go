@@ -16,10 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -590,7 +590,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user.ID, &vault.CreateVaultRequest{
+	pm, err := vaults.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -640,7 +640,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &vault.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdateVaultRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -876,7 +876,7 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
-	var solanaProc *config.ProviderAccountConfig
+	var solanaProc *config.RailMerchantAccountConfig
 	if s.rt != nil {
 		solanaProc = s.rt.Rails.GetSolanaRail()
 	}

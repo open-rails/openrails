@@ -7,235 +7,215 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 684
+next_id: 688
 
 ---
 
-# #683: remote-identity renaming — one `rail_` family for everything provider-facing (rail_merchant_accounts / rail_customer_accounts)
+# #686: decompose the subscriptions module along the #669 registry seam
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01, Paul) — follows the #682 identity-alignment review and anticipates the
-two-party platform direction (openrails.com users creating "merchant accounts" and "customer accounts",
-Link/Shop-Pay-style).
+**Status:** IN_PROGRESS (2026-07-01, approved by Paul) — rail-specific lifecycle behavior moves out of giant
+per-rail branches inside internal/modules/subscriptions and into the #669 rail descriptor registry (function
+fields), leaving lifecycle orchestration rail-agnostic.
 
-## Why
-The remote-facing axis is currently spelled THREE ways (`provider_*`, `rail_*`, `external_provider_*`),
-and the two identity tables hide that they are mirror images of one another:
-- `provider_accounts` = the MERCHANT's account at a rail (`acct_...`, NMI Gateway ID,
-  `clientAccnum/subacc`, recipient wallet). "Provider account" reads equally as "an account belonging to
-  the provider" — and "merchant account" is the exact industry term for this object (NMI documents the
-  Gateway ID as "the merchant ID").
-- `rail_customers` = the CUSTOMER's record at a rail (`cus_...` — Stripe-only in practice post-#682).
-Renaming both under one prefix makes the mirror explicit: every row answers "WHOSE account at WHICH rail".
+## Metadata
+- Category: architecture
+- Status: in_progress
+- Passes: false
 
-HISTORY: #652/#654 (2026-06-30) already decided `provider_accounts` -> `payment_provider_accounts` and
-claim "complete (uncommitted)" — but the rename is NOT in the tree (001_schema still says
-`provider_accounts`; zero references to `payment_provider_accounts` in live schema). That work evaporated
-before landing. This issue SUPERSEDES that naming decision — go straight to the `rail_` family, once.
+## Problem
+internal/modules/subscriptions (~9k lines) carries rail-conditional behavior inline: lifecycle
+create/renew/fail/cancel paths branch per rail (NMI remote-delete scheduling, CCBill
+provider-auto-billed/no-retry semantics, Stripe-specific sources), which means every new rail edits the
+module's core files and every reader must hold all four rails in their head at once. #669 built the registry
+(predicates + metadata already collapsed); behavior hooks are the remaining half.
 
-PLATFORM RESERVATION: with the two-party platform, bare "merchant account" / "customer account" become
-PLATFORM-tier nouns (a registered openrails.com user's roles). The `rail_` prefix is what keeps the two
-axes apart — land this rename BEFORE the platform tier exists, and reserve the `platform_*` family
-(e.g. `platform_users`, `customers.platform_user_id`) for that later work. Identity ladder:
-platform person -> merchant-scoped customer (projection) -> rail handles (leaf artifacts).
+## Inventory (2026-07-01, every rail-conditional branch in internal/modules/subscriptions, non-test)
+(a) = existing/new registry consult, (b) = new descriptor field, (c) = genuinely inline (justification given).
+1. cancel_mode.go:89-104 CancelModeFor rail switch (stripe reversible / ccbill external-portal / nmi
+   state-conditional via nmiDeletePending / default destructive) → (b) descriptor func field `CancelMode`
+   (CancelMode type + constants move to rails; subscriptions keeps type/const ALIASES so the exported surface —
+   used by handlers/subscription_lifecycle.go:162 + pkg/service/service_user.go:1058 — is signature-stable).
+2. cancel_mode.go:177-183 CancelPortalURL (hardcoded CCBill support URL) → (b) descriptor metadata field
+   `CancelPortalURL string` ("" = none).
+3. lifecycle_service.go:1574 ResolveCancelledRemoteAlive → `rails.IsNMI && RailSubscriptionID != ""` gates the
+   deferred NMI delete queue → (b) descriptor bool `RemoteDeleteOnTerminalCancel` (nmi true, all others false).
+   deferDelete!=nil gating + #679 queue-always + marker/intent atomicity UNTOUCHED — only the rail-name test
+   moves to the registry.
+4. lifecycle_service.go:1932 FailMembership terminal cancel, same `rails.IsNMI` gate → same (b) predicate.
+5. user_service.go:479 CCBill guard in CancelUserSubscription (portal error) → (a) consult the new registry
+   cancel mode (external_portal ⇒ CCBillCancelError, URL from descriptor); message text preserved.
+6. user_service.go:487-530 NMI-only user-cancel executor (deferred/immediate rail-side delete, NMI clients) →
+   (c) single-rail machinery needing injected NMIClients; a hook would have exactly one implementer and drag
+   client deps into the dependency-free descriptor.
+7. admin_service.go:180 cancelWithNMI guard → (c) NMI-only helper's own early return, not orchestration.
+8. admin_service.go:218-235 admin cancel executor switch (NMI client delete / StripeService cancel / others
+   rejected) → (c) per-rail EXECUTORS over injected clients; #669 deliberately left executors out of the
+   descriptor (dependency-free metadata), no second dependency-free implementer exists.
+9. lifecycle_service.go:1402 Solana cancel cascade inside ApplyLocalCancellation (#264 cranker stop) → (c)
+   single-rail machinery with one implementer requiring db/repo handles; a hook inverts layering (rails would
+   import internal/db/repo) for zero orchestration gain.
+10. email_service.go:244 `isSolana` one-off receipt copy (keyed on a free-string payment method, not
+    models.Rail) → (c) content templating for one rail; no orchestration.
+11. dunning.go ClassifyNMIDecline + hardDeclineNMICodes → (c) NMI decline taxonomy consumed only by the NMI
+    dunning worker (river/jobs_dunning.go:479); no other rail has NMI response codes.
+12. dunning.go:275 RenewalGraceEligibleRail → already (a), registry delegate since #669.
+13. email_service.go:576 railDisplayName → already (a), registry delegate since #669.
+14. lifecycle_service.go:157 + :1888 (RenewalGraceEligibleRail / rails.OpenRailsDrivenDunning consults) →
+    already (a) registry-backed.
+15. subscription.go:72-73 RailCCBill/RailStripe string consts → not branches; consumed by
+    internal/http/handlers; left.
+16. provider_account_clients.go:31 rails.SameRail → normalization, not per-rail dispatch; left.
+Candidates from the brief verified ABSENT in this module: payment-method-update remote propagation (no such
+code here); dunning/retry participation + renewal grace semantics already registry predicates.
+Webhooks-surface check: internal/modules/webhooks consumes subscriptions.{Notification,Subscription,
+SubscriptionLifecycle}Service, New*Service ctors, {Create,Renew,Cancel,Fail,Reactivate}MembershipParams,
+IsTerminalTransitionBlocked, RemoveCancelledSubscriptionsForActivation, PremiumEndReason*, DunningInterval,
+TerminalCancelReason; internal/app consumes DeferredDeleteScheduler + SetDeferredDeleteScheduler. NONE of these
+change shape (CancelMode aliasing is additive); no webhooks-side edits required, nothing deferred.
 
-GROUNDED IN THE SAAS PLANS (~/openrails-saas, reviewed 2026-07-01):
-- Roadmap v0.2 is explicit: openrails.com gets BOTH a "customer login/registration" and a "merchant
-  login/registration" — the platform nouns are coming; this rename must precede them.
-- `payments-multi-merchant-wallet-and-payfac.md` (2026-06-14) already designed the wallet layer as "a new
-  cross-merchant wallet/global-customer entity ABOVE per-merchant customer rows" — identical ladder to the
-  reservation above. Its Rank-1 path (Stripe-Connect saved-PM reuse: customer + card held on the OpenRails
-  PLATFORM Stripe account, charged on behalf of connected merchants) implies a future wrinkle for
-  `rail_merchant_accounts`: the PLATFORM's own gateway account (the Connect master) is a
-  rail-merchant-account-shaped row owned by NO merchant — anticipate platform-owned rows
-  (nullable merchant_id or a platform pseudo-merchant) as a documented future extension, NOT part of this
-  rename.
-- Cross-repo note: ~/openrails-saas/agents/progress.md #0 still uses the DEPRECATED "tenant / tenant
-  subject" vocabulary (pre-rename); its glossary needs syncing to merchant/customer + the reserved
-  platform nouns when that repo becomes active.
-
-## Rename map (hard cut, one migration, no aliases — #649/#652 discipline)
-Tables:
-| current | new |
-|---|---|
-| `provider_accounts` | `rail_merchant_accounts` |
-| `rail_customers` | `rail_customer_accounts` |
-| `provider_intents` | `rail_intents` |
-| `external_provider_mutation_logs` | `rail_mutation_logs` |
-| `provider_refresh_watermarks` | `rail_refresh_watermarks` |
-
-Columns:
-- `provider_account_id` FK (56 references across the schema: payment_methods, rail_customers,
-  subscriptions, payments, webhooks/routing, ...) -> `rail_merchant_account_id`.
-- `payment_methods.vault_id` / `billing_id` -> `rail_customer_ref` / `rail_method_ref` (align the DB to
-  the Go field names; today NMI vault jargon leaks into the generic table).
-- `rail_customers.rail_customer_id` -> `rail_customer_accounts.account_id` — symmetric with
-  `rail_merchant_accounts.account_id`: both tables read `(merchant_id, rail, environment?, account_id)`.
-
-Code/type sweep (regenerate sqlc; rename structs/DTOs/params to match): `ProviderAccountConfig`,
-`ProviderAccountSet`, repo/query names, route params, YAML keys in merchant config
-(`provider_accounts:` blocks), docs + CLAUDE.md + the billing-naming-vocabulary conventions.
-
-Module rename (the "vault" triple-collision): `internal/modules/vault` (our payment-method service) ->
-`internal/modules/paymentmethods`; reserve the word "vault" for the two external systems that own it
-(NMI Customer Vault, HashiCorp Vault #648/#661).
-
-## DO-NOT-RENAME trap classes (wire vs local — sed-sweep traps)
-- Provider WIRE fields stay verbatim: NMI `customer_vault_id`/`billing_id`/`customer_vault` form+JSON
-  fields, Stripe/CCBill payload fields, v5 request/response structs in `internal/integrations/*` — these
-  are the provider's spelling, not ours (#651 record-verbatim rule).
-- `rail_subscription_id`, `rail_customer_ref`, `rail_method_ref` field SEMANTICS unchanged.
-- AuthKit/org vocabulary untouched (org = controller; merchant = controlled resource).
-
-## THE ONE BLOCKING DECISION: secret-name shapes
-"provider account" is baked into DURABLE identifiers, not just code: #653 canonical secret names
-(`merchants.ProviderAccountSecretName` -> `...provider_accounts...` name shapes in the DB/Vault-backed
-secret store) and host env spans (`BILLING_MERCHANTS_<m>_PROVIDER_ACCOUNTS_<key>_<RAIL>_<FIELD>`) that
-doujins / hentai0 / cozy-art deployments already carry. Two coherent postures — pick ONE before starting:
-(a) HARD CUT NOW (recommended; the window is still open — greenfield migrations, no external adopters):
-    rename stored secret names in the same migration + coordinated host env bump (doujins, hentai0,
-    cozy-art) in the same release train, like the authkit v0.42.0 chain; or
-(b) FREEZE the secret-name shape as wire format forever (stripeapi.APIVersion discipline) and accept the
-    permanent code-vs-secret-name naming split.
-
-## Considered tradeoffs (recorded, not blockers)
-- "account" is the most overloaded noun in the repo (`ledger_accounts`, credit/spend accounts); the
-  `rail_`/`ledger_` prefixes are what disambiguate — acceptable.
-- `rail_customer_accounts` is Stripe-only in practice after #682 (NMI/CCBill/Solana have no person-level
-  remote identity). The name describes what a row IS, not how many rails populate it — acceptable.
-- COORDINATION: #674 (universal write-ahead provider-intents log) is actively reworking
-  `provider_intents`; land or sequence this rename WITH that work, not across it. Same for any in-flight
-  #650/#653 consumers.
+## Target
+- Registry descriptors gain lifecycle FUNCTION FIELDS for genuinely rail-divergent behavior (e.g. terminal-
+  cancel remote cleanup, dunning/retry policy shape, renewal semantics) — behavior lives with the rail.
+- lifecycle_service.go and friends become rail-agnostic orchestration: consult the descriptor, never switch on
+  the rail string.
+- Doctrine preserved EXACTLY: cancellation-last-resort / evidence-gating (#664), NMI remote delete only on the
+  certainty path (converge side-effect deps stay nil), #679 circuit-breaker semantics untouched.
 
 ## Tasks
-- [ ] Decision gate: secret-name posture (a) hard-cut vs (b) freeze — Paul signs off before any code.
-- [ ] One forward-only migration (002+): all table + column renames above (constraints, indexes, FKs,
-      RLS policies, comments); regenerate sqlc/gen.
-- [ ] Code sweep: structs/DTOs/route params/YAML keys/queries to the new names; delete zero-alias
-      (no compatibility views, columns, or shims).
-- [ ] `internal/modules/vault` -> `internal/modules/paymentmethods` (package + service naming).
-- [ ] If posture (a): secret-name migration + env-span rename + coordinated doujins/hentai0/cozy-art bump.
-- [ ] Docs: CLAUDE.md rails section, merchant-config examples, billing-naming vocabulary note (record the
-      `rail_` = remote-facing / `platform_` = reserved convention and the wire-field trap classes).
-- [ ] Tests: schema-shape tests (merchant_aware/RLS suites pick up new table names), example-config
-      parse/dump, full integration suite green.
+- [x] Inventory rail-conditional branches in internal/modules/subscriptions (grep rail switches/IsNMI/case
+      strings); classify each: registry predicate (exists), new behavior hook, or genuinely-inline.
+      → DONE, see Inventory above (16 sites: 3 new descriptor fields, 2 registry-consult ports, 6 justified
+      inline, rest already registry-backed or not branches).
+- [x] Add the behavior hooks to the #669 descriptors; port branches; keep exported call surfaces used by the
+      webhooks module STABLE (concurrent work in webhooks).
+      → Descriptor gains `RemoteDeleteOnTerminalCancel bool` (nmi only), `CancelMode func(sub, now) CancelMode`
+      (type + reversible/destructive/external_portal constants moved to rails; NMI's is the issue-216
+      state-conditional nmiCancelMode), `CancelPortalURL string` (ccbill support portal). subscriptions keeps
+      CancelMode/constants as ALIASES + CancelModeFor/CancelPortalURL as registry delegates — handlers,
+      pkg/service, webhooks untouched. lifecycle_service.go:1574/:1932 deferred-delete gates and
+      user_service.go:479 external-portal guard consult the registry; nmiDeletePending deleted (lives in the
+      nmi descriptor func). #664/#679 doctrine untouched: deferDelete nil-gating, queue-always,
+      marker+intent same-tx atomicity all byte-identical; converge still constructs lifecycle with nil deps.
+- [x] Registry completeness test extended to the new function fields.
+      → TestRegistryCompleteness forces CancelMode non-nil per rail + portal-URL-implies-external-portal;
+      TestRegistryPinnedFacts pins per-rail RemoteDeleteOnTerminalCancel + active-sub cancel mode + ccbill
+      portal URL + NMI's pending/executed/lapsed cancel-mode window; TestLookupNormalizes pins unknown-rail
+      destructive default + nil-sub destructive + empty portal URL.
+- [ ] Existing subscriptions + webhooks + tests/ suites green as the behavior-preservation net.
 
-Acceptance: one prefix (`rail_`) for every remote-facing table; `rail_merchant_accounts` /
-`rail_customer_accounts` mirror pair landed; `provider_*` / `external_provider_*` spellings gone from the
-schema; "vault" means only NMI-Customer-Vault or HashiCorp; secret-name posture decided and executed (or
-frozen and documented); trackers/docs/vocabulary updated; no aliases anywhere.
+## Acceptance
+No rail-string switches remain in subscription lifecycle orchestration; adding a rail's lifecycle behavior =
+filling descriptor fields; all existing suites green with no behavior change.
 
 ---
 
-# #682: NMI vault identity honesty — per-card vaults are instruments, not customers
+# #685: unify embedded and remote modes — one client, pluggable transport
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the post-#663 customer-identifier alignment review of CCBill /
-Stripe / NMI identity models.
+**Status:** PLANNED (2026-07-01) — direction set by Paul: embedded mode is a KEPT product feature (removal
+considered in the 2026-07-01 design review and REJECTED); the fix for dual-mode cost is further consolidation,
+not removal. Successor in spirit to the deferred #338/#468 unified-SDK work; unblocked by #670 (one neutral
+HTTP stack).
 
-## Provider identity reality (verified against live gateways, 2026-07-01)
-- **Stripe**: real person-level customer (`cus_...`) distinct from instruments (`pm_...`). Correctly
-  modeled: `rail_customers` holds `cus_...`; `payment_methods.rail_method_ref` holds `pm_...`;
-  `rail_customer_ref` empty.
-- **CCBill**: NO customer identifier of any kind — subscription id is the only handle (upgrade lineage via
-  `originalSubscriptionId`). Correctly excluded from `rail_customers`. (`provider_accounts` is unrelated —
-  that is the MERCHANT gateway-account catalog and is populated for CCBill.)
-- **NMI**: no person concept. The vault "customer" (`customer_vault_id`, v5 `/customers`) is a CONTAINER of
-  stored cards (billing entries, `billing[].id`); it survives card updates but carries no identity.
-  `customerid` on transactions is merchant-defined free text (we stamp it on non-vaulted signups only;
-  nothing reads it back).
-- **Solana** (for completeness): no customer AND no payment-method rows — the signed pull authorization
-  (subscription PDA derived from plan+subscriber, + token delegation to the authority PDA) is bound to ONE
-  subscription, not a reusable instrument, so it lives on `solana_subscriptions` (+ subscription PDA as
-  `rail_subscription_id`), like CCBill's subscription-scoped identity. The subscriber wallet pubkey is a
-  funding-source address — matching EVIDENCE (person↔wallet is many-to-many, self-custodied), never
-  person identity. Correctly excluded from `rail_customers` (#635).
+## Metadata
+- Category: architecture
+- Status: planned
+- Passes: false
 
-## The misalignment (usage, not schema)
-The two-handle schema is RIGHT (`rail_customer_ref` = customer-scope, `rail_method_ref` =
-instrument-scope). But for NMI:
-1. We mint ONE VAULT CUSTOMER PER CARD (`vault_service.CreateVault` -> `CreateCustomerVault` per method),
-   so `customer_vault_id` behaves as an instrument id. A person with N cards = N unrelated NMI "customers".
-2. #635's reconcile materializer imports NMI vault ids into `rail_customers` (the person-level table),
-   where they are NOT person-unique — one person can accumulate N NMI rows.
-3. `rail_method_ref` (NMI `billing_id`) is never captured for OpenRails-native vaults (the v5 create
-   response returns `billing[].id`; we discard it). Only legacy doujins-imported methods carry one — and
-   that EMPTINESS IS LOAD-BEARING: `subscriptionProviderAutoBilled` (jobs_dunning.go) reads "no billing id"
-   as "NMI's own recurring engine bills this" and "billing id present" as "OpenRails drives manual
-   rebills". Capturing billing ids naively would silently flip every new NMI subscription into the
-   manual-rebill lane.
+## Problem
+The last real "two of everything" is `embed/client.go`: it hand-transcribes handler logic per method, while
+`remote.go` implements the same SDK interface over HTTP. Parity is maintained socially (comments citing
+"transcribes handlers.X") and by the conformance suite catching drift after the fact. A bug can exist in one
+transport and not the other; every new endpoint is written twice.
 
-## Decision: KEEP one-vault-per-card; make the model honest about it
-Considered and REJECTED (2026-07-01): the Stripe-isomorphic grouping (one vault customer per person,
-cards as billing entries, vault ≈ `cus_...`, `billing_id` ≈ `pm_...`). It is the structurally faithful
-mapping — NMI has billing priorities, billing CRUD sub-resources, and rebill-by-billing_id — but it buys
-almost nothing here (multi-card users are rare; person-resolution already works exactly via
-`payment_methods.vault_id` -> local customer) and costs real risk:
-- requires the mode-flag decoupling FIRST (item 3 above);
-- unverified gateway semantics: whether v5 `customer_vault:{id}` sale can select a billing entry is
-  exactly the kind of thing docs.nmi.com asserts and the live gateway contradicts (see #663's divergence
-  list); card-switch becomes priority-juggling on a shared vault vs today's clean repoint;
-- a data migration over provider-owned vault state we cannot freely move (card-lapse-then-recapture is
-  the only migration primitive — #655/#657 posture);
-- larger blast radius (today delete-method == delete-vault, total and simple).
-Per-card vaults also fit the deplatforming/recapture posture: small vaults die and re-mint naturally.
-If N-cards-per-person ever becomes product scope, revisit grouping — the write-up above is the map.
+## Target design
+One client implementation, transport pluggable:
+- `remote.go` stays THE client. Embedded mode becomes a custom `http.RoundTripper` that dispatches directly
+  into the in-process neutral mux (#670's handler — the same one embedded hosts already mount), no socket.
+- Two constructors: `Dial(url)` (network) and `Embed(app)` (in-process transport). Same types, errors,
+  validation, auth, envelopes — by construction.
+- Delete `embed/client.go`'s transcriptions; the conformance suite shrinks to a transport smoke test.
+- `pkg/service`'s "dual-transport parity contract" role dissolves — handlers are the single surface; keep
+  pkg/service only where it's a real facade, not a parity mirror.
+- Cost accepted: one JSON round-trip per in-process call (noise for billing ops; buys production-identical
+  request path for embedded hosts).
 
-RATIFIED BY THE SAAS WALLET STRATEGY (~/openrails-saas/payments-multi-merchant-wallet-and-payfac.md,
-2026-06-14): "The NMI seam: NMI vaults are per-merchant and won't go cross-merchant cleanly — plan to
-consolidate billable merchants onto the Connect wallet rather than trying to share NMI vaults." The
-Shop-Pay-style platform tier puts NO pressure on NMI vault grouping — cross-merchant instrument reuse
-happens on the Stripe-Connect platform account (or non-custodial Solana), never by restructuring NMI
-vaults. Per-card NMI vaults remain a leaf artifact under any platform future.
-
-LEGACY PRECEDENT (verified in ~/doujins-legacy, `CustomersVault::initializeVault`): the legacy system kept
-ONE vault per user containing ONE card, and on card change DELETED the whole vault at NMI and re-minted —
-so the vault-wraps-a-single-card invariant held there too (replace-in-place vs our N-vault history).
-Legacy also GENERATED its own `billing_id` and passed it into `add_customer` (NMI accepts merchant-supplied
-billing ids) because its rebill flow needs one — which is exactly why imported methods carry
-`rail_method_ref` and OpenRails-native ones don't.
-
-## Imported/shared-vault contract (importers that did NOT follow one-card-per-vault)
-An import encountering a genuinely multi-card vault materializes ONE `payment_methods` row PER billing
-entry — shared `rail_customer_ref` (vault id), distinct `rail_method_ref` (billing id) — and STILL no
-`rail_customers` row (the vault layer stays invisible to identity; the local `customer_id` UUID is the
-only person). Two operational rules that current code would violate:
-1. DELETE must be billing-entry-scoped when the vault is shared: `DeleteCustomerVault` today deletes the
-   WHOLE vault, which would kill sibling cards. Rule: if another payment-method row shares the vault id,
-   delete the billing entry (v5 `DELETE /customers/{id}/billing-addresses/{id}`); only the last entry's
-   removal deletes the vault (NMI refuses zero-billing vaults, which matches).
-2. CHARGES must target the billing entry: sale against a multi-entry vault hits priority-1 unless
-   specified. Classic sale/rebill accept `billing_id`; whether the v5 `customer_vault:{id}` sale can
-   select a billing entry is UNVERIFIED — live-probe before accepting any such import (#663 precedent:
-   docs assert, live gateway decides).
-3. The importer sets the rebill-driver mode EXPLICITLY (never inferred from billing-id presence).
+## What stays legitimately dual
+Boot/infra ownership (`BootstrapOptions` injected pool; posture gates keyed on it describe a REAL difference).
+cozy-art's browser surface is already unified (frontend → embedded HTTP routes with normal AuthKit bearers).
 
 ## Tasks
-- [ ] `models.PaymentMethod.RailCustomerRef` doc + `vault_service` comments: state that for NMI this is an
-      instrument-scoped handle in OUR usage (one vault customer per card, deliberately); NMI has NO
-      person-level remote identity in our model.
-- [ ] #635 materializer: stop creating `rail_customers` rows for NMI (`railExposesRemoteCustomer` drops
-      "nmi" -> like CCBill, NMI has no person-level remote customer). Decide disposition of existing NMI
-      rows in `rail_customers` (delete vs leave-and-ignore); either way document in the migration/issue.
-      Check nothing reads NMI rows from `rail_customers` before dropping (the reconcile/converge identity
-      paths resolve via `payment_methods.vault_id`).
-- [ ] Decouple the rebill-driver mode from identity: add an explicit column (e.g.
-      `subscriptions.rebill_driver` or a payment-method flag, backfilled from the current
-      `rail_method_ref != ''` rule), flip `subscriptionProviderAutoBilled` to read it, and ONLY THEN allow
-      capturing `billing[].id` into `rail_method_ref` at vault creation (the v5 create response already
-      returns it — #663 discards it deliberately today).
-- [ ] Tests: pin the minting policy (one CreateCustomerVault call per added card) and the dunning routing
-      (mode column, not ref-emptiness) so neither regresses silently.
-- [ ] Shared-vault safety guard (import-proofing, cheap now): before `DeleteCustomerVault`, check whether
-      another payment-method row shares the vault id; if so refuse (or delete the billing entry once that
-      path exists) — protects sibling cards the moment any importer violates one-card-per-vault.
-- [ ] IF a multi-card import ever lands: billing-entry-scoped delete + sale billing-targeting per the
-      shared-vault contract above, with the v5 billing-selection question live-probed first.
+- [ ] In-process RoundTripper over the neutral handler (context propagation: merchant pinning + auth principal
+      must traverse it identically to a real request).
+- [ ] `Embed(app)` constructor on the root SDK; wire pkg/embedded to hand out the unified client.
+- [ ] Migrate embed/client.go method-by-method onto it; delete transcriptions as they fall.
+- [ ] Collapse conformance suite to transport smoke tests once both constructors share one implementation.
+- [ ] Audit pkg/service for facade-vs-parity-mirror roles; retire the mirror half.
+- [ ] Host adoption notes (cozy-art, doujins): constructor swap, no behavior change expected.
 
-Acceptance: NMI identity semantics are explicit in code and docs (vault = instrument container, no person
-identity), `rail_customers` holds only genuinely person-unique remote ids (Stripe), the rebill-driver mode
-has its own field with the identity handles free to be captured accurately, and the grouped-vault
-alternative is recorded here as considered-and-rejected with its revisit conditions.
+## Acceptance
+One SDK implementation serves both modes; adding an endpoint touches handler + route + (generated/typed) client
+once; embedded and remote cannot drift because there is nothing to drift between. Boot remains dual only where
+infra ownership genuinely differs.
+
+---
+
+# #684: webhooks as wake-up signals — fetch-and-converge for fetchable rails (Stripe, NMI)
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01) — from the 2026-07-01 design review; sibling of the rescoped #665 (they feed
+the same decider — do them in sight of each other, #665's decider seam first or together).
+
+## Metadata
+- Category: architecture
+- Status: planned
+- Passes: false
+
+## Problem
+Webhook handlers APPLY the event payload to local state. Every ordering defense we built in #675 (row locks,
+`stripe_last_event_created` watermarks, stale-event rejection, terminal-transition guards) exists because two
+events about one subscription are two competing snapshots whose write order matters. That entire bug class is
+structural to payload-apply and cannot be closed, only patched.
+
+## Target design
+For rails with a read API (Stripe; NMI v5), a verified webhook means only: "this object is dirty — fetch
+current provider truth and converge to it." The event keeps four jobs: signature verification, dedup key,
+identifying the dirty object(s), carrying the event timestamp. It stops being a state source.
+
+- Ordering becomes meaningless: N events about one subscription (any order, duplicated, delayed) collapse to
+  "fetch, converge" — idempotent by construction; replay = redundant fetch = no-op.
+- Dirty-flag coalescing: burst of events about one sub ⇒ one fetch (debounce window), FEWER provider calls
+  under dunning storms than per-event processing.
+- Degrades safely: provider API down ⇒ row stays dirty, retry later, access intact (#664 posture). Fetch 404
+  IS evidence (provider-confirmed dead) feeding the certainty ladder.
+- Historical facts (decline codes, charge amounts) come from fetchable records (Stripe invoices/charges, NMI
+  v5 payment queries), not event payloads — the payload only hints where to look.
+- Stripe thin-event hydration already does fetch-on-event; classic snapshot events are the legacy shape. This
+  issue makes fetch-first the ONLY shape for fetchable rails.
+- CCBill stays payload-apply (nothing to fetch) — the documented exception; the #675 ordering machinery
+  remains earning its keep there only.
+
+## Read-after-write lag
+A provider read API can briefly trail its own event. Converging to slightly-old truth is self-healing (next
+event/pull converges again) and never corrupting; if a specific NMI read is known-laggy, gate on the event
+timestamp (fetch until object updated_at >= event created, bounded retries) — same pattern as Solana
+ReadUntilConsistent.
+
+## Tasks
+- [ ] Dirty-mark + coalesced fetch worker (River; per-subscription debounce; UniqueOpts on the sub id).
+- [ ] Stripe: reduce snapshot-event handlers to dirty-marks; converge from fetched objects (reuse the
+      thin-event hydration path + #665 decider seam). Keep payment-record writes fetch-sourced.
+- [ ] NMI: same, via the v5 read surface (#663) + `unknown_probe.go` sources.
+- [ ] Delete the then-dead payload-apply machinery for those rails (the #675 watermark/lock code retires where
+      fetch-first makes it unreachable; keep for CCBill).
+- [ ] Out-of-order/burst integration tests become trivial-by-construction — port the #675 ordering tests to
+      assert convergence instead.
+
+## Acceptance
+For Stripe and NMI: no webhook handler writes subscription/payment state from an event payload; all state
+writes flow through fetch → decider (#665). The #675 ordering tests pass with the ordering machinery deleted
+for those rails. CCBill behavior unchanged.
 
 ---
 
@@ -278,15 +258,15 @@ lookup hardcodes an environment literal.
 # #679: destructive provider-intent circuit breaker — mass NMI deletes must halt and ask
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from Paul's #664 post-mortem question: the 1,672 wrongful cancellations queued
-ZERO nmi_delete intents (lucky, see Findings), but the legitimate delete path has no volume guard. NMI has no
-read-only keys, so a bug that mass-cancels through the REAL path (FailMembership) would mass-delete real
-production subscriptions.
+**Status:** IMPLEMENTED (2026-07-01, uncommitted) — was PLANNED, from Paul's #664 post-mortem question: the
+1,672 wrongful cancellations queued ZERO nmi_delete intents (lucky, see Findings), but the legitimate delete
+path had no volume guard. NMI has no read-only keys, so a bug that mass-cancels through the REAL path
+(FailMembership) would mass-delete real production subscriptions.
 
 ## Metadata
 - Category: safety
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Findings (why the incident queued no provider intents)
 
@@ -322,19 +302,61 @@ asks permission.
 
 ## Tasks
 
-- [ ] Queue-always for terminal cancels (Paul's model, 2026-07-01: queue the delete intent even without
+- [x] Queue-always for terminal cancels (Paul's model, 2026-07-01: queue the delete intent even without
       credentials/mode to execute — execution waits, the decision is durable): (a) `FailMembership` under
       `provider_write_mode=limited` currently SKIPS queuing the delete entirely (inconsistent — the dunning
       CHARGE path under limited materializes its intent "for the executor to drain when the mode allows");
       (b) unknown-resolution's stale-decline → cancelled path queues nothing though the remote may be alive.
       Both should durably record the desired delete unconditionally; mode/credentials/breaker govern execution
       only. Aligns with #674 (all external writes post a durable intent first).
-- [ ] Budget check in the provider-intent executor for destructive types, per (merchant, rail), rolling window;
+- [x] Budget check in the provider-intent executor for destructive types, per (merchant, rail), rolling window;
       threshold `max(K, pct of active subs)` — constants, not config knobs, until someone needs tuning.
-- [ ] Breach → halt destructive execution for that merchant + OPERATOR finding (`life.provider_intent.held_bulk`
+      (Implemented per-merchant across all destructive types — one budget + ONE standing finding per merchant;
+      the only destructive type today is nmi_delete_subscription, so per-(merchant,rail) is currently identical.)
+- [x] Breach → halt destructive execution for that merchant + OPERATOR finding (`life.provider_intent.held_bulk`
       or similar); non-destructive intents unaffected; explicit ack resumes.
-- [ ] Intents held by the breaker stay pending (never expire into `abandoned` while held).
-- [ ] Tests: N deletes under budget execute; N+1 halts + finding; ack resumes; other merchants unaffected.
+- [x] Intents held by the breaker stay pending (never expire into `abandoned` while held).
+- [x] Tests: N deletes under budget execute; N+1 halts + finding; ack resumes; other merchants unaffected.
+
+## Progress
+
+- 2026-07-01 IMPLEMENTED (uncommitted). What was built:
+  - Queue-always: `FailMembership` no longer skips delete scheduling under `provider_write_mode=limited` —
+    marker + nmi_delete intent are queued unconditionally (atomic in the cancellation tx); if no scheduler is
+    wired it WARNs loudly. Execution was ALREADY executor-gated (`intents.GateExecution` parks system-origin
+    under limited/readonly) — verified by test.
+  - Unknown-resolution stale-decline gap: `UnknownVerdict.RemoteGone` (false only for the stale-decline cancel;
+    true for roster cancelled/expired or absent-from-exhaustive-roster). Apply path maps Cancelled+!RemoteGone
+    to new `ResolveCancelledRemoteAlive`, which cancels locally AND queues the deferred NMI delete
+    (DeletionScheduledAt + intent, FailMembership shape). `jobs_provider_refresh.runUnknownReconcile` now
+    injects the DeferredDeleteScheduler (embedded uses the same Runtime registration — no separate wiring).
+    The production scheduler moved from internal/app to exported `intents.NMIDeleteScheduler` (app keeps a
+    shim) so the reconcile path/tests construct the real thing.
+  - Volume breaker: `intents.VolumeBreaker` in the executor, gating a destructive-types set
+    (`nmi_delete_subscription`). Budget `max(25, 1% of merchant's active subs)` per rolling 24h (package
+    consts). Executed count from the provider_intents ledger (executed_at, plus unresolved attempt statuses;
+    in_flight excluded — batch claims would self-count). Over budget → intent PARKS (stays pending) + ONE
+    `life.provider_intent.held_bulk` requires_review finding per merchant (stable subject_key
+    `destructive_volume`, evidence: executed_count/budget/window_hours/active_subscriptions). Open finding =
+    halted; operator ACK (fixed) resumes with the count window restarted at resolved_at; DISMISS (ignored)
+    permanently silences the breaker for that merchant (findings upsert keeps ignored ignored — documented).
+    `ExpireOverdueProviderIntents` now refuses to expire breaker-held destructive intents while the finding is
+    open. New sqlc queries live in the intents query file (now rail_intents.sql after the concurrent
+    provider_intents→rail_intents rename; NOT reconciliation.sql). Non-destructive intents untouched; the
+    verifier (read-only) is not gated. NOTE: implemented concurrently with the rail-identity rename sweep
+    (provider_intents→rail_intents etc.) — that agent adapted this code in place; #679 semantics unchanged.
+  - Tests: verdict RemoteGone table cases (unit, green); breaker budget math (unit, green); integration —
+    limited-mode FailMembership queues + executor parks under limited + drains under full
+    (TestFailMembershipLimitedModeQueuesDeleteIntent), breaker end-to-end with dedicated merchants: 25 execute,
+    26th halts + finding, open finding keeps halting, held intent survives ExpireOverdue, other merchant
+    unaffected, ack resumes (TestBreakerHaltsBulkDestructiveExecution), stale-decline queues the delete /
+    roster-gone queues nothing (TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete). Full
+    internal/intents integration package green; `go build ./...` + `go test ./...` green; targeted river
+    integration (dunning materialize + provider refresh) green. Incidental rename-completion fixes made while
+    validating (rail-identity sweep leftovers in files #679 owns): jobs_provider_refresh.go watermark upserts'
+    `ON CONFLICT ON CONSTRAINT` now uses rail_refresh_watermarks_identity_key, and
+    unknown_orchestration_integration_test.go finished the #682 half-edit (account_id column; NMI vault now
+    asserts NO rail_customer_accounts row, matching the test's own #682 tail assertion).
 
 ## Out of scope
 
@@ -962,10 +984,12 @@ ledger cannot record the same accrual/clawback twice (app lock + DB backstop).
 # #678: webhook dedup is Redis-only, fail-open, non-transactional
 
 **Completed:** no
-**Status:** IMPLEMENTED (2026-07-01) — posture gate + lease heartbeat + dead-code removal in-tree; unit +
-targeted integration (testcontainers Redis + Postgres) green. Postgres-truth dedup deliberately deferred
-(design note below). Awaiting review/commit. (Originally from the 2026-07-01 money-path audit; #675's
-row locks/watermarks are the apply-layer half.)
+**Status:** IMPLEMENTED (2026-07-01) — ALL tasks in-tree, including the Postgres-truth follow-up Paul
+approved 2026-07-01: dedup TRUTH moved to `openrails.webhook_events` (migration 061), Redis demoted to a
+fast-path cache + lease-coordination layer (flushable with zero correctness consequences), posture gate
+downgraded to a warning. Unit + integration (webhooks, idempotency, river, app, db, querytest) green.
+Awaiting review/commit. (Originally from the 2026-07-01 money-path audit; #675's row locks/watermarks are
+the apply-layer half.)
 
 ## Metadata
 - Category: reliability
@@ -984,13 +1008,14 @@ handler must be individually replay-safe (that's #675's job). The 2-min pending-
 - [x] Refuse to start webhook processing without Redis when running multi-instance (config posture check, like
       EnforceRLSPosture) — silent memStore fallback only in dev/single-process.
 - [x] Consider moving dedup marks into Postgres inside the effect tx (then Redis is a fast-path, not the truth)
-      — DESIGN ONLY, see note below (>50 lines; collides with #675's just-landed apply layer).
+      — DONE 2026-07-01 (was design-only); see "Implementation — Postgres truth" below.
 - [x] Revisit the 2-min takeover: lease renewal for slow handlers instead of concurrent takeover.
 - [x] Delete dead IsDuplicate (fold into #666 if it lands first) — deleted here (zero callers, mismatched
       `webhook.<rail>.event` op key; verified incl. integration files).
 
 ## Implementation notes (2026-07-01)
-- **Posture gate** (`enforceWebhookDedupPosture` + pure `webhookDedupPostureError`, build_runtime.go, called
+- **Posture gate** (SUPERSEDED same day by the Postgres-truth section below: the startup error is now a
+  warning) (`enforceWebhookDedupPosture` + pure `webhookDedupPostureError`, build_runtime.go, called
   right after Redis resolution in `buildRuntimeWithOverrides`): no Redis + non-dev (`!cfg.IsDev()`, same axis
   as `RequiresRLS`) + standalone ⇒ startup error. **Standalone signal = no host-injected DB pool**
   (`overrides.DB == nil`) — the exact signal that scopes `createDatabase`'s RLS gate to the config-built path:
@@ -1009,17 +1034,64 @@ handler must be individually replay-safe (that's #675's job). The 2-min pending-
   TestStripeInvoicePaymentAlreadyRecorded integration re-run green. Full `go build ./...` blocked by another
   agent's in-flight internal/http/handlers edit (not this change); all touched packages build/vet clean.
 
-## Design note — Postgres as dedup truth (deferred)
-Goal: `Complete` written INSIDE the effect tx so Redis is a fast-path, not the truth. Sketch:
-`openrails.webhook_events(merchant_id, rail, op, event_id, status, payload_hash, processed_at,
-PRIMARY KEY (rail, op, event_id))` with RLS. ProcessWebhook order: Redis Begin (fast-path reject + lease as
-today) → handler runs and, in its OWN effect tx, INSERT … ON CONFLICT DO NOTHING the success row (conflict ⇒
-already applied ⇒ no-op) → after commit, write Redis Complete as cache. Crash between commit and Redis write
-now converges (redelivery hits the DB row) instead of double-applying. Cost: plumbing the effect tx into
-ProcessWebhook's contract (today processingFunc owns its txs internally, some handlers commit several), a
-migration, and a backfill story for the 90d Redis history — well over 50 lines and it reshapes the same
-handler seams #675 just settled. Do it as its own issue once #675 is committed; the watermark/row-lock work
-plus this heartbeat make the remaining window (wedged process >2min + same-event redelivery) narrow.
+## Implementation — Postgres truth (2026-07-01, supersedes the deferred design note)
+- **Schema**: migration `061_webhook_events.up.sql` — `openrails.webhook_events(merchant_id, rail, op,
+  event_id, status DEFAULT/CHECK 'completed', created_at, completed_at, PK (merchant_id, op, event_id))`
+  + `idx_webhook_events_completed_at` (retention scan) + FORCE/ENABLE RLS + merchant_isolation policy +
+  `GRANT SELECT,INSERT,DELETE TO openrails_app` + merchant FK. Key mirrors the Redis derivation exactly
+  (`op = webhook.<rail>.<event_type>`, event_id = rail event/transaction id); merchant_id joins the PK
+  because the table is RLS-scoped. Only COMPLETED marks live here — pending/lease stays in Redis
+  (coordination, not truth), hence the CHECK. sqlc queries in internal/db/queries/webhook_events.sql
+  (WebhookEventCompleted / MarkWebhookEventCompleted / DeleteCompletedWebhookEventsBefore), gen regenerated.
+- **ProcessWebhook order** (deduplication.go): Redis Begin (fast-path skip + pending lease, unchanged) →
+  on cache miss, Postgres truth SELECT under MerchantTx (hit ⇒ backfill Redis Complete + skip) → handler
+  (heartbeat unchanged) → on success/non-retryable, verify-or-write the truth row (INSERT … ON CONFLICT DO
+  NOTHING under MerchantTx) → Redis Complete is now CACHE-ONLY (failure = warn, not retry — the old
+  "Complete failed ⇒ retry ⇒ re-run effects" loop is gone whenever the truth row exists). Truth-row write
+  failure stays retryable (#675 replay-safety converges the redelivery). No merchant on ctx or nil DB ⇒
+  loud warn + legacy Redis/memory-only behavior (handlers' own MerchantTx calls would fail anyway).
+- **In-tx seam**: `MarkWebhookProcessedInTx(ctx, tx)` — ProcessWebhook stashes the mark identity on ctx;
+  a handler calls it inside its final MerchantTx so mark+effects commit atomically; the wrapper's
+  verify-or-write then no-ops on conflict, so the call is an atomicity upgrade, never a requirement.
+- **Per-rail mark modes**: CCBill `handleBillingDateChange` + `handleCustomerDataUpdate` = IN-TX (their
+  whole effect is one MerchantTx). Everything else = WRITE-AFTER: every Stripe handler, every NMI handler
+  and the CCBill money paths (NewSale/Renewal/Refund/Void/Chargeback/Upgrade/Cancel/Expiration) are
+  sequences of service calls each committing their own txs — no single enclosing tx exists to mark in, and
+  restructuring them is exactly the refactor this change was scoped NOT to do (#684's fetch-and-converge
+  will collapse Stripe/NMI anyway; CCBill stays payload-apply and is why the Postgres backstop matters).
+- **Posture gate decision**: DOWNGRADED to a loud warning (`webhookDedupPostureError` →
+  `webhookDedupPostureWarning`, always-nil `enforceWebhookDedupPosture`) — the boot refusal existed because
+  the memStore was per-process TRUTH; with truth in Postgres a Redis-less multi-replica boot is safe
+  (never replays), merely wasteful (no cross-replica lease coordination, no fast path), and the standalone
+  warning says exactly that.
+- **Retention**: new leg in the existing `CleanupExpiredDataWorker` (house periodic cleanup):
+  `CleanupConfig.WebhookEventRetention` default 90d = `webhooks.WebhookIdempotencyTTL` (the Redis cache
+  TTL), zero/unset falls back to the default (never "delete everything"). RLS-correct: walks
+  `ListActiveMerchantIDs` (control-plane read) and deletes per merchant under MerchantTx — the converge-
+  sweep pattern, NOT the notifications legs' bare cross-merchant DELETE (see pre-existing-issue note).
+- **idempotency memStore**: kept as-is (checkout et al. still use IdempotencyService as their sole store);
+  type doc now states that for webhooks it is coordination+cache only.
+- Tests (integration, testcontainers PG+Redis, all green): `TestWebhookDedupSurvivesRedisFlush` (headline:
+  FLUSHALL between delivery and redelivery ⇒ no reapply + cache backfilled),
+  `TestWebhookDedupTwoReplicasNoSharedRedis` (two service instances, same PG ⇒ exactly one apply),
+  `TestWebhookDedupCrashBeforeMarkConverges` (effects-committed-no-mark ⇒ redelivery re-runs replay-safe
+  handler, converges, mark lands), `TestWebhookDedupInTxMarkAtomicity` (tx rollback takes the mark with it;
+  committed in-tx mark makes verify a no-op), `TestWebhookDedupNoMerchantFallsBackToRedisOnly`,
+  `TestWebhookDedupNonRetryableWritesTruth`, `TestCleanupWebhookEventsRetention` (old deleted, recent
+  kept, zero-retention safe; pending never exists in PG by construction), posture unit matrix rewritten.
+- PRE-EXISTING issue observed, NOT fixed here (different files): the notifications/checkout cleanup legs
+  and the River `WebhookProcessWorker` path run without merchant ctx — under a real openrails_app + FORCE
+  RLS connection the bare cross-merchant DELETEs see nothing and worker-path MerchantTx would fail
+  merchant.Require; tests pass because dbtest connects privileged. Worth its own issue.
+
+## Design note — Postgres as dedup truth (SHIPPED above; kept for the record)
+Original sketch: `Complete` written INSIDE the effect tx so Redis is a fast-path, not the truth —
+`openrails.webhook_events` + RLS; Redis Begin → handler's own tx INSERT … ON CONFLICT DO NOTHING → Redis
+Complete as cache; crash between commit and Redis write converges instead of double-applying. Implemented
+2026-07-01 with one deviation: the wrapper verifies-or-writes after handler return, so the in-tx call is
+optional per handler rather than a contract change to processingFunc. No backfill of the 90d Redis history
+was done — existing completed keys keep serving from the cache until TTL; a pre-truth event redelivered
+after BOTH its cache entry expired AND a flush would re-run the handler, which #675 replay-safety absorbs.
 
 ## Acceptance
 Two replicas processing the same delivery cannot both apply effects; losing Redis degrades to slower processing,
@@ -1544,9 +1616,28 @@ no route/middleware behavior change on either deployment mode.
 # #665: consolidate the lapsed-subscription machinery — one probe, one decider, one freshness signal
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — architecture follow-up to #664, from the 2026-07-01 review of the whole
-reconcile/converge system. #664 (evidence-gated lifecycle) ships FIRST and stands alone; this issue deletes the
-accumulated duplication afterward.
+**Status:** RE-OPENED + RESCOPED 2026-07-01 (Paul): parts A-E of the original scope LANDED (see Progress — one
+probe primitive, silent-lapsed lane deleted, single writer per invariant, coverage-derived confirmed-absence
+gate, spec/states reconciled). What remains is (1) the one original open task — the mirror-writer refactor of
+`engine.go`/`diff.go` — and (2) the EXTENDED end state below (from the 2026-07-01 design review): one
+subscription state machine, everything else reduced to inputs. Webhook fetch-and-converge is the sibling issue
+#684 — do them in sight of each other; the decider they feed is the same.
+
+## Extended target (rescope 2026-07-01)
+
+The original issue consolidated the *lapsed-cohort* machinery. The end state goes further: ONE subscription
+state-machine decider whose transitions are evidence-gated (#664 doctrine), where every remaining plane is an
+INPUT, not a writer:
+
+- **Inputs (produce evidence, never move state):** bulk pull snapshots, per-sub probes
+  (`unknown_probe.go`), webhook-triggered fetches (#684), first-party billing outcomes (dunning results,
+  intents verify legs), the coverage/confirmed-absence gate.
+- **One decider (moves state):** the LIFE/`ResolveUnknownFromSnapshot` core, generalized: given (current row,
+  evidence bundle), emit the transition — active/renew, past_due+dunning, unknown-park, adopt-period-end,
+  cancel-with-certainty. Scheduler ordering structurally cannot change outcomes (any plane running first only
+  adds evidence or parks).
+- **Appliers demoted:** the legacy engine's remaining appliers/selective-apply become mirror writes + decider
+  invocations — the mirror-writer refactor IS this demotion; no plane applies domain state directly.
 
 ## Metadata
 - Category: reconciliation
@@ -1598,15 +1689,83 @@ sets it.
 
 ## Tasks
 
-- [ ] Extract the verify-subscription primitive from `jobs_subscription_liveness.go`; port
-      `unknown_reconcile.go` onto it (one probe, one outcome set).
-- [ ] Delete the silent-lapsed lane (`ListSilentLapsedSubscriptions` + the liveness cohort scan) once #664 routes
+- [x] Extract the verify-subscription primitive from `jobs_subscription_liveness.go`; port
+      `unknown_reconcile.go` onto it (one probe, one outcome set). (Landed inverted per the target:
+      `ResolveUnknownFromSnapshot` stayed THE decision core; liveness's probing became SNAPSHOT SOURCES —
+      `internal/reconcile/unknown_probe.go` — feeding it. One outcome set: UnknownOutcome, + Adopted.)
+- [x] Delete the silent-lapsed lane (`ListSilentLapsedSubscriptions` + the liveness cohort scan) once #664 routes
       the cohort through LIFE.
-- [ ] Single writer per invariant: stop emitting `derive.*`/`consistency.*` from the pull engine; move any check
+- [x] Single writer per invariant: stop emitting `derive.*`/`consistency.*` from the pull engine; move any check
       not already covered by a converge pass into one.
-- [ ] Mirror-writer refactor of `engine.go`/`diff.go`; `pull.*` findings only.
-- [ ] Watermark-derived confirmed-absence gate; retire or import-scope `reconciliation_state`.
-- [ ] Spec/code finding-state reconciliation (docs/consistency-invariants.md §8).
+- [ ] Mirror-writer refactor of `engine.go`/`diff.go`; `pull.*` findings only. (The "pull.* findings only" half
+      landed with the single-writer move; the appliers/selective-apply refactor itself is still open.)
+- [ ] RESCOPE: extract the decider seam — one function (row, evidence) → transition, called by LIFE sweep,
+      unknown-resolution, and (later) #684 webhook-triggered fetches; planes stop writing subscription state
+      directly.
+- [ ] RESCOPE: evidence bundle type unifying what the planes produce today (pull snapshot / probe result /
+      charge evidence / coverage proof) so the decider's inputs are explicit and testable as data.
+- [ ] RESCOPE: property test — for a fixed evidence bundle, ANY interleaving/ordering of plane execution yields
+      the same terminal state (the #664 acceptance, generalized to the whole machine).
+- [x] Watermark-derived confirmed-absence gate; retire or import-scope `reconciliation_state`. (Implemented
+      COVERAGE-derived, not watermark-derived — absence proofs need exhaustive pulls, not event-window freshness.)
+- [x] Spec/code finding-state reconciliation (docs/consistency-invariants.md §8).
+
+## Progress
+
+- 2026-07-01 — Parts A/B/C IMPLEMENTED, uncommitted (probe-unification + silent-lapsed-lane deletion still open,
+  sequenced after other in-flight work).
+  - **A (single writer):** the pull engine now emits `pull.*` only. PS-9 (`derive.grant_effect.mismatch`) moved
+    into the DERIVE pass as two set queries (`ListActiveSubsMissingEntitlementProjection` — repair = derive-1 for
+    exactly the missing features; `ListDeadSubsWithLiveEntitlements` — repair terminates grants + retracts
+    windows; `unknown` excluded, #664). PS-10 (`life.provider_intent.stuck`) moved into the LIFE pass (sweep
+    scope; mode-parked = informational; recovered intents auto-resolve SUBJECT-FIRST via
+    `AutoResolveRecoveredStuckIntentFindings` — converge has no run-driven vanish sweep, a pre-existing gap for
+    its other surface-only findings). PS-8 is snapshot-dependent so it stays PULL:
+    `consistency.duplicate.subscription` → `pull.subscription.duplicate` (migration 060 renames ledger rows +
+    rekeys legacy PS-9 subjects). Deleted: diffEntitlements, stuck_intents.go, entitlement local-state loading,
+    standalone Grant/Revoke apply actions, AutoResolveVanishedAllProviders. Net deletion in internal/reconcile.
+  - **B (automatic gate):** `reconcile.MarkReconciledSourceDomains` (coverage.go) flips `reconciliation_state`
+    from PROOFS: completed provider sections' `SnapshotCoverage` (exhaustive, never event-window watermarks),
+    only when EVERY declared rail account is covered (multi-account rails / empty catalog prove nothing; ratchet,
+    never unset). Wired into provider-refresh (per merchant, before the converge pass) and pull-provider
+    (replaces the blind full-head flip; --insert --overwrite full-head pull = the manual bulk-import setter).
+    `payments` needs full-history coverage so only full-head pulls prove it; `grants` is never pull-provable.
+  - **C (spec/states):** §8 rewritten to the implemented vocabulary (reconcile_required / requires_review /
+    auto_fixed / fixed / ignored + resolutions); held = reconcile_required with `source_domain` in evidence,
+    indeterminate = failed-run/requires_review/`unknown` park. NO new DB state needed — no expressiveness gap
+    found. §3.2/§5/§10 updated for the gate + rename.
+  - Tests: engine_test reworked (PS-9/PS-10 gone, PullProofs unit test), stuck-intent integration test ported to
+    converge (dedicated merchant), new converge tests for both mismatch directions + the gate
+    (held EXCESS proceeds after an exhaustive-pull flip; non-exhaustive/multi-account never flips). Full unit
+    suite + internal/reconcile, converge, river provider-refresh integration suites green; `task sqlc` clean.
+
+- 2026-07-01 — Parts D/E IMPLEMENTED, uncommitted (verify-subscription primitive + silent-lapsed lane deletion).
+  - **One decider:** `ResolveUnknownFromSnapshot` stays the decision core; the #367 liveness worker's
+    capabilities were ported INTO it as snapshot sources + doctrine, then the worker was deleted.
+    New `internal/reconcile/unknown_probe.go`: `SubscriptionProber` (NMI = query.php sales-by-order-ref +
+    v5 recurring GET; Stripe = the existing `subscriptions.StripeLivenessProber`, kept) producing per-sub
+    `RemoteSnapshot`s; the orchestration probes ONLY rows the bulk pull left unreachable (NULL period end,
+    evidence outside window, non-exhaustive roster; never fanned out when the bulk fetch failed).
+  - **Doctrine ported into the core:** new `UnknownOutcomeAdopted` + lifecycle `ResolveAdopted` — roster
+    alive w/ future next billing and NO charge re-anchors the period END only (start untouched → DERIVE
+    projects nothing): renewed now requires a VERIFIED charge (was: roster-active ⇒ Renewed, which reset
+    period start and let DERIVE grant access without a charge). Roster past_due (stalled NMI record /
+    Stripe past_due) → dunning within the window, cancel + deferred delete beyond (#679 kept green).
+    24h `renewalAlignmentSlack` on charge classification + backfill (NMI day-boundary billing).
+  - **Deleted:** `jobs_subscription_liveness.go` (+ integration test), the `runSubscriptionLiveness` lane,
+    the legacy-worker River registration (queued `openrails.subscription_liveness` jobs from old deploys
+    would now error — none scheduled, kind retired), `ListSilentLapsedSubscriptions` (+ repo
+    `ListSilentLapsed`), `LivenessProbeSlack`. `nmi.SaleProbeResult` extended (dates/amounts/decline txn id)
+    so probe evidence is verbatim. `ListUnknownSubscriptions` → `ORDER BY current_period_ends_at NULLS FIRST`
+    (NULL-period legacy rows must not starve under the LIMIT; they're only resolvable here).
+  - Deliberately dropped: charged-repair for rows with NO rail_subscription_id (liveness could order-ref-probe
+    them; unreachable in practice — signup stamps both ids) and probe-driven Stripe `incomplete`/`paused` →
+    past_due (probe uses the bulk `normalizeStripeStatus`, those park unknown until Stripe self-resolves).
+  - Tests: liveness scenarios ported (renewed+backfill exactly-once, decline→past_due, roster-gone→cancel
+    +revoke NO intent, stale-decline→cancel WITH intent, adopt-without-access, NULL-period via probe,
+    unreachable stays unknown); probe→snapshot mapping unit-tested against a fake NMI HTTP server
+    (direct-post counter stays 0). `go build ./...` + full unit suite + reconcile/converge/river
+    integration (`-tags integration -count=1`) green; net ≈ −450 lines.
 
 ## Acceptance
 

@@ -38,7 +38,7 @@ func (e *StripeAPICallError) Error() string { return e.Message }
 
 type StripeRefundService struct {
 	Config *config.Config
-	Rails  config.ProviderAccountSet
+	Rails  config.RailMerchantAccountSet
 
 	// BaseURL overrides the Stripe API root. Empty means the production
 	// Stripe API (https://api.stripe.com). Tests set this to an httptest

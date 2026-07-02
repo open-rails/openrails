@@ -12,8 +12,8 @@ type RailCustomer struct {
 	// Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	Rail       string    `json:"rail"`
-	// RailCustomerID is the rail's own external customer id (e.g. Stripe cus_*).
-	RailCustomerID string `json:"rail_customer_id"`
+	// AccountID is the rail's own external customer id (e.g. Stripe cus_*).
+	AccountID string `json:"rail_customer_id"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

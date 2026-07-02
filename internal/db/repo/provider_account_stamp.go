@@ -6,26 +6,26 @@ import (
 	"github.com/google/uuid"
 )
 
-type providerAccountIDCtxKey struct{}
+type railMerchantAccountIDCtxKey struct{}
 
-// WithProviderAccountID pins the external account that actually produced a row.
-func WithProviderAccountID(ctx context.Context, id uuid.UUID) context.Context {
+// WithRailMerchantAccountID pins the external account that actually produced a row.
+func WithRailMerchantAccountID(ctx context.Context, id uuid.UUID) context.Context {
 	if id == uuid.Nil {
 		return ctx
 	}
-	return context.WithValue(ctx, providerAccountIDCtxKey{}, id)
+	return context.WithValue(ctx, railMerchantAccountIDCtxKey{}, id)
 }
 
-func providerAccountIDFromContext(ctx context.Context) *uuid.UUID {
-	v, ok := ctx.Value(providerAccountIDCtxKey{}).(uuid.UUID)
+func railMerchantAccountIDFromContext(ctx context.Context) *uuid.UUID {
+	v, ok := ctx.Value(railMerchantAccountIDCtxKey{}).(uuid.UUID)
 	if !ok || v == uuid.Nil {
 		return nil
 	}
 	return &v
 }
 
-// resolveProviderAccountIDForStamp returns only explicitly observed provenance.
+// resolveRailMerchantAccountIDForStamp returns only explicitly observed provenance.
 // ponytail: nil is better than inventing provider-account provenance.
-func resolveProviderAccountIDForStamp(ctx context.Context) *uuid.UUID {
-	return providerAccountIDFromContext(ctx)
+func resolveRailMerchantAccountIDForStamp(ctx context.Context) *uuid.UUID {
+	return railMerchantAccountIDFromContext(ctx)
 }

@@ -65,7 +65,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: true},
-		Rails: config.ProviderAccountSet{
+		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}},
 		},
 	}

@@ -54,10 +54,10 @@ SELECT count(*) FROM openrails.notification_queue WHERE merchant_id = $1;
 DELETE FROM openrails.notification_queue WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsRailCustomers :one
-SELECT count(*) FROM openrails.rail_customers WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.rail_customer_accounts WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsRailCustomers :exec
-DELETE FROM openrails.rail_customers WHERE merchant_id = $1;
+DELETE FROM openrails.rail_customer_accounts WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsCheckoutSessions :one
 SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1;
@@ -66,16 +66,16 @@ SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1;
 DELETE FROM openrails.checkout_sessions WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.rail_mutation_logs WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1;
+DELETE FROM openrails.rail_mutation_logs WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsProviderIntents :one
-SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsProviderIntents :exec
-DELETE FROM openrails.provider_intents WHERE merchant_id = $1;
+DELETE FROM openrails.rail_intents WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsMoneyAccounts :one
 SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1;

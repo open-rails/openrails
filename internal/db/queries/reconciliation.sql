@@ -114,20 +114,26 @@ WHERE evidence->>'provider' = sqlc.arg(provider)
   AND last_seen_run <> sqlc.arg(run_id)
   AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
 
--- PS-10 stuck-intent findings are provider-independent (the subject is the
--- intent ledger; the finding carries the intent's own provider), so their
--- vanish sweep crosses providers: any actionable finding of the given types not
--- refreshed by the just-completed run recovered (the intent reached a
--- terminal-good status or no longer meets the stuck criteria).
--- name: AutoResolveVanishedReconciliationFindingsAllProviders :execrows
-UPDATE openrails.reconciliation_findings
+-- life.provider_intent.stuck findings recover subject-first: an open finding
+-- whose intent no longer meets the stuck criteria (executed, superseded, or
+-- re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
+-- detection (ListStuckRailIntents) exactly — edit together.
+-- name: AutoResolveRecoveredStuckIntentFindings :execrows
+UPDATE openrails.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     updated_at = now()
-WHERE status IN ('reconcile_required', 'requires_review')
-  AND last_seen_run <> sqlc.arg(run_id)
-  AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND f.finding_type = 'life.provider_intent.stuck'
+  AND f.status IN ('reconcile_required', 'requires_review')
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.rail_intents pi
+      WHERE pi.merchant_id = f.merchant_id
+        AND pi.id::text = f.subject_key
+        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
+          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= sqlc.arg(verify_cutoff)::timestamptz))
+  );
 
 -- name: MarkReconciliationFindingVanished :execrows
 UPDATE openrails.reconciliation_findings
@@ -177,7 +183,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
+  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, status,
@@ -185,21 +191,7 @@ SELECT id, customer_id, rail, transaction_id, amount, status,
 FROM openrails.payments
 WHERE rail::text = ANY (sqlc.arg(rails)::text[])
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
-  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
-
--- Live subscription-sourced entitlements for the provider's subscriptions.
--- Grace windows and admin grants are deliberately excluded: only
--- subscription-sourced entitlements are reconciled (PS-9).
--- name: ReconcileListSubscriptionEntitlements :many
-SELECT ent.id, ent.customer_id, ent.entitlement, ent.source_id,
-       ent.start_at, ent.end_at
-FROM openrails.entitlements ent
-JOIN openrails.subscriptions sub ON sub.id = ent.source_id
-WHERE sub.rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR sub.provider_account_id = sqlc.narg(provider_account_id)::uuid)
-  AND ent.source_type = 'subscription'
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
+  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
 
 -- name: ReconcileListPaymentMethodsByRails :many
 -- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
@@ -208,7 +200,7 @@ SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_typ
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
+  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -228,39 +220,12 @@ WHERE rails IS NOT NULL
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
 -- ============================================================================
 
--- PS-2: the rail says this subscription is dead -> cancel locally.
--- Clears the retry schedule (chk_cancelled_no_retry_schedule) and revokes via
--- the companion entitlement query. 0 rows on a re-run = already converged.
--- name: ReconcileCancelSubscriptionLocal :execrows
-UPDATE openrails.subscriptions
-SET status = 'cancelled',
-    cancelled_at = COALESCE(cancelled_at, sqlc.arg(now)::timestamptz),
-    cancel_type = COALESCE(cancel_type, sqlc.arg(cancel_type)::text),
-    cancel_feedback = COALESCE(cancel_feedback, sqlc.arg(reason)::text),
-    ended_at = COALESCE(ended_at, sqlc.arg(now)::timestamptz),
-    next_retry_at = NULL,
-    grace_ends_at = NULL,
-    deletion_scheduled_at = NULL,
-    updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND status IN ('active', 'past_due', 'pending');
+-- #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
+-- state transitions route through the ONE decider (reconcile.Decide) applied
+-- via the shared lifecycle chokepoints (reconcile.ApplyDecision).
 
--- PS-3: adopt the rail's declared status/periods. Only non-terminal
--- targets route here (terminal remote states go through the cancel applier);
--- past_due adoption requires a period end (chk_past_due_has_period_end),
--- guarded by the engine.
--- name: ReconcileAdoptSubscriptionStatus :execrows
-UPDATE openrails.subscriptions
-SET status = sqlc.arg(status)::openrails.subscription_status,
-    current_period_starts_at = COALESCE(sqlc.narg(period_starts_at)::timestamptz, current_period_starts_at),
-    current_period_ends_at = COALESCE(sqlc.narg(period_ends_at)::timestamptz, current_period_ends_at),
-    updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND status <> 'cancelled'
-  AND (status <> sqlc.arg(status)::openrails.subscription_status
-       OR current_period_ends_at IS DISTINCT FROM COALESCE(sqlc.narg(period_ends_at)::timestamptz, current_period_ends_at));
-
--- PS-2/PS-9: revoke the LIVE subscription-sourced entitlements of one
+-- DERIVE-plane derive.grant_effect.mismatch revoke
+-- repair: revoke the LIVE subscription-sourced entitlements of one
 -- subscription. Admin grants and grace windows are different source types and
 -- are untouchable by construction.
 -- name: ReconcileRevokeSubscriptionEntitlements :execrows
@@ -274,7 +239,7 @@ WHERE source_type = 'subscription'
   AND deleted_at IS NULL
   AND (end_at IS NULL OR end_at > sqlc.arg(now)::timestamptz);
 
--- PS-9/PS-4: grant one subscription-sourced entitlement window unless an
+-- PS-4/PS-1: grant one subscription-sourced entitlement window unless an
 -- equivalent live window already exists (idempotent via NOT EXISTS; the
 -- re-run inserts nothing).
 -- name: ReconcileGrantSubscriptionEntitlement :execrows
@@ -301,7 +266,7 @@ WHERE NOT EXISTS (
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
+    status, subscription_id, metadata, purchased_at, customer_id, rail_merchant_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -309,7 +274,7 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(provider_account_id)
+    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
 )
 ON CONFLICT DO NOTHING;
 
@@ -319,7 +284,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, provider_account_id
+    customer_id, rail_merchant_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -328,7 +293,7 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(provider_account_id)
+    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
 )
 ON CONFLICT DO NOTHING;
 
@@ -348,7 +313,7 @@ WHERE id = sqlc.arg(id) AND status <> 'refunded';
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, provider_account_id
+    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, rail_merchant_account_id
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
        sqlc.arg(rail), sqlc.arg(rail_subscription_id),
@@ -356,7 +321,7 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(provider_account_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
@@ -364,7 +329,7 @@ WHERE pr.id = sqlc.arg(price_id)
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.rail = ANY (sqlc.arg(rails)::text[])
-        AND (sqlc.narg(provider_account_id)::uuid IS NULL OR s.provider_account_id = sqlc.narg(provider_account_id)::uuid)
+        AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR s.rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid)
   )
 RETURNING id, entitlements_spec_snapshot;
 
@@ -379,6 +344,12 @@ WHERE id = sqlc.arg(id)
        OR expiry_date IS DISTINCT FROM NULLIF(sqlc.arg(expiry_date)::text, ''));
 
 -- #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
+-- WRITERS (#665): reconcile.MarkReconciledSourceDomains flips a domain
+-- automatically after a pull PROVES it — exhaustive coverage
+-- (SnapshotCoverage, not mere event-window watermark freshness) of EVERY
+-- configured provider account whose rail could hold that domain's sources.
+-- `grants` is admin/local-sourced, so no pull ever proves it — it stays a
+-- manual/bulk-import decision. The flag is a ratchet: never auto-unset.
 
 -- name: UpsertReconciliationState :one
 -- Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
@@ -404,20 +375,52 @@ SELECT COALESCE((
       AND source_domain = sqlc.arg(source_domain)::text
 ), false) AS fully_reconciled;
 
--- #511/#664 (life.subscription.grace_exhausted): past_due, grace elapsed, NO
--- retry scheduled — dunning stalled, outcome unknown. Parked as `unknown` for
--- provider verification; convergence never terminally cancels (FailMembership +
--- provider-confirmed outcomes own that). Pending-retry rows are dunning's;
--- in-grace no-schedule rows are dunning_overdue's.
--- name: ListGraceExhaustedSubscriptions :many
-SELECT id, customer_id, grace_ends_at FROM openrails.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
-  AND status = 'past_due'
-  AND grace_ends_at IS NOT NULL
-  AND grace_ends_at < sqlc.arg(now)::timestamptz
-  AND next_retry_at IS NULL
-ORDER BY grace_ends_at;
+-- #665: the ONE lapsed-cohort scan. Selects candidate rows — active past the
+-- period end, or past_due with grace elapsed and no retry scheduled — together
+-- with their #664 evidence legs; the decider (reconcile.Decide) chooses the
+-- transition in Go. No WHERE-clause complements to keep in sync: cohort
+-- exclusivity is structural (one query, one total decision function).
+-- Evidence legs:
+--   payment_opened_period    — a completed payment opened the current period
+--                              (ownership: OpenRails billed/observed it)
+--   renewal_payment_after_end — a completed payment at/after the period end
+--                              (billing DID happen; the advance path owns it)
+--   watermark_newer_than_period_end — provider truth synced since the lapse
+--                              and saw no renewal (ownership)
+-- name: ListLapsedSubscriptionsWithEvidence :many
+SELECT s.id, s.status, s.rail,
+       (s.payment_method_id IS NOT NULL)::bool AS vaulted,
+       s.rail_subscription_id,
+       s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
+       (s.current_period_starts_at IS NOT NULL AND EXISTS (
+            SELECT 1 FROM openrails.payments p
+            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.status = 'completed'
+              AND p.purchased_at >= s.current_period_starts_at
+       ))::bool AS payment_opened_period,
+       (s.current_period_ends_at IS NOT NULL AND EXISTS (
+            SELECT 1 FROM openrails.payments p
+            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.status = 'completed'
+              AND p.purchased_at >= s.current_period_ends_at
+       ))::bool AS renewal_payment_after_end,
+       (s.current_period_ends_at IS NOT NULL AND EXISTS (
+            SELECT 1 FROM openrails.rail_refresh_watermarks w
+            WHERE w.merchant_id = s.merchant_id
+              AND w.provider = s.rail
+              AND (w.rail_merchant_account_id IS NULL OR w.rail_merchant_account_id = s.rail_merchant_account_id)
+              AND w.watermark_at > s.current_period_ends_at
+       ))::bool AS watermark_newer_than_period_end
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (
+        (s.status = 'active' AND s.current_period_ends_at IS NOT NULL
+         AND s.current_period_ends_at < sqlc.arg(now)::timestamptz)
+     OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
+         AND s.grace_ends_at < sqlc.arg(now)::timestamptz AND s.next_retry_at IS NULL)
+      )
+ORDER BY s.current_period_ends_at;
 
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 -- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
@@ -433,7 +436,7 @@ ORDER BY created_at;
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
 -- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
 -- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, provider FROM openrails.provider_intents
+SELECT id, intent_type, status, provider FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (
@@ -443,93 +446,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       )
 ORDER BY created_at;
 
--- #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
--- current_period_ends_at that never advanced (missed rebill/failure webhook).
--- name: ListPeriodOverdueSubscriptions :many
--- #664 evidence-gated dunning entry: only vaulted NMI (the one cohort the
--- dunning worker charges) WITH ownership evidence — a completed payment opened
--- the current period, or the provider watermark is newer than the period end.
--- Everything else lapsed routes to `unknown` via
--- ListNeedsVerificationSubscriptions. INVARIANT: the two predicates are exact
--- complements — edit them together.
-SELECT s.id, s.current_period_ends_at FROM openrails.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.status = 'active'
-  AND s.current_period_ends_at IS NOT NULL
-  AND s.current_period_ends_at < sqlc.arg(now)::timestamptz
-  AND s.rail = 'nmi' AND s.payment_method_id IS NOT NULL
-  AND (
-        (s.current_period_starts_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.payments p
-            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-              AND p.status = 'completed'
-              AND p.purchased_at >= s.current_period_starts_at
-        ))
-        OR EXISTS (
-            SELECT 1 FROM openrails.provider_refresh_watermarks w
-            WHERE w.merchant_id = s.merchant_id
-              AND w.provider = s.rail
-              AND (w.provider_account_id IS NULL OR w.provider_account_id = s.provider_account_id)
-              AND w.watermark_at > s.current_period_ends_at
-        )
-      )
-ORDER BY s.current_period_ends_at;
-
--- #632/#664: active, period-elapsed (past grace slack), no confirming renewal
--- payment, and not dunning-chargeable with evidence — the exact complement of
--- ListPeriodOverdueSubscriptions (edit together). Flipped to `unknown` (access
--- intact); provider-pull (#633) resolves. A completed payment at/after the
--- period end means billing DID happen — excluded.
--- name: ListNeedsVerificationSubscriptions :many
-SELECT s.id, s.rail, s.current_period_ends_at FROM openrails.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.status = 'active'
-  AND s.current_period_ends_at IS NOT NULL
-  AND s.current_period_ends_at < sqlc.arg(cutoff)::timestamptz
-  AND NOT (
-        s.rail = 'nmi' AND s.payment_method_id IS NOT NULL
-        AND (
-              (s.current_period_starts_at IS NOT NULL AND EXISTS (
-                  SELECT 1 FROM openrails.payments p
-                  WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-                    AND p.status = 'completed'
-                    AND p.purchased_at >= s.current_period_starts_at
-              ))
-              OR EXISTS (
-                  SELECT 1 FROM openrails.provider_refresh_watermarks w
-                  WHERE w.merchant_id = s.merchant_id
-                    AND w.provider = s.rail
-                    AND (w.provider_account_id IS NULL OR w.provider_account_id = s.provider_account_id)
-                    AND w.watermark_at > s.current_period_ends_at
-              )
-            )
-      )
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.payments p
-      WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-        AND p.status = 'completed' AND p.purchased_at >= s.current_period_ends_at
-  )
-ORDER BY s.current_period_ends_at;
-
 -- #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
 -- period first, bounded per call so provider-pull (#633) windows them in batches.
+-- NULLS FIRST (#665): NULL-period rows (legacy imports without local period
+-- evidence) are resolvable only here — via the roster/per-sub probe — so they
+-- must never starve behind a large dated cohort under the LIMIT.
 -- name: ListUnknownSubscriptions :many
 SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND status = 'unknown'
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
-ORDER BY current_period_ends_at
+ORDER BY current_period_ends_at ASC NULLS FIRST
 LIMIT sqlc.arg(max_rows)::int;
-
--- #511: the period_overdue repair (active → past_due + grace window) now routes
--- through subscriptions.SubscriptionLifecycleService.ApplyLocalPastDue (the shared
--- lifecycle local-state core), so there is no bespoke SQL applier here. The
--- ReconcileCancelSubscriptionLocal / ReconcileRevokeSubscriptionEntitlements
--- appliers above remain: they are the PULL engine's local writers (apply provider
--- truth), NOT the LIFE-plane's twin.
 
 -- #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
 -- grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
@@ -548,6 +477,69 @@ ORDER BY current_period_ends_at;
 UPDATE openrails.subscriptions
 SET next_retry_at = sqlc.arg(next_retry_at)::timestamptz, updated_at = now()
 WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL;
+
+-- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
+-- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product
+-- promises entitlements, where some promised feature was NEVER projected for
+-- this period (no subscription-sourced window — live OR revoked — overlapping
+-- it; a recorded revoke is a recorded decision, never re-granted, spec §6).
+-- Excludes no-grant subs (owned by derive.subscription.missing) so the two
+-- checks never double-fire. Returns the missing features as a spec blob so the
+-- repair (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
+-- nullable: NULL = merchant-wide sweep.
+-- name: ListActiveSubsMissingEntitlementProjection :many
+SELECT s.id, s.customer_id, s.product_id, s.status,
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
+       missing.spec AS entitlements_spec
+FROM openrails.subscriptions s
+JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
+CROSS JOIN LATERAL (
+    SELECT jsonb_object_agg(feat, NULL::text) AS spec
+    FROM jsonb_object_keys(pd.entitlements_spec) AS feat
+    WHERE NOT EXISTS (
+        SELECT 1 FROM openrails.entitlements e
+        WHERE e.merchant_id = s.merchant_id
+          AND e.source_type = 'subscription' AND e.source_id = s.id
+          AND e.entitlement = feat
+          AND e.deleted_at IS NULL
+          AND e.start_at < s.current_period_ends_at
+          AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
+    )
+) missing
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.status = 'active'
+  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > sqlc.arg(now)::timestamptz
+  AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
+  AND EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
+        AND g.source_type = 'subscription' AND g.source_id = s.id::text
+  )
+  AND missing.spec IS NOT NULL
+ORDER BY s.current_period_ends_at;
+
+-- #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
+-- the legacy pull engine's PS-9. A terminally-dead sub still projecting LIVE
+-- subscription-sourced windows: propagation of a recorded terminal decision,
+-- AUTO (both facts present — NOT the confirmed-absence case). `unknown` is
+-- deliberately excluded: access stays intact while provider verification is
+-- pending (#664). customer_id nullable: NULL = merchant-wide sweep.
+-- name: ListDeadSubsWithLiveEntitlements :many
+SELECT s.id, s.customer_id, s.status
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.status IN ('cancelled', 'expired', 'failed')
+  AND EXISTS (
+      SELECT 1 FROM openrails.entitlements e
+      WHERE e.merchant_id = s.merchant_id
+        AND e.source_type = 'subscription' AND e.source_id = s.id
+        AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+        AND (e.end_at IS NULL OR e.end_at > sqlc.arg(now)::timestamptz)
+  )
+ORDER BY s.id;
 
 -- #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
 -- to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).
