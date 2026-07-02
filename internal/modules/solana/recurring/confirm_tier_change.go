@@ -70,8 +70,8 @@ type ConfirmTierChangeInput struct {
 	NewPeriodHours     uint64
 	NewPlanCreatedAt   int64
 
-	// NewFiatAmount/NewCurrency are price.Amount (cents) + currency recorded on the
-	// new membership.
+	// NewFiatAmount/NewCurrency are price.Amount (micros) + currency recorded on
+	// the new membership.
 	NewFiatAmount int64
 	NewCurrency   string
 

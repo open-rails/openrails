@@ -51,6 +51,19 @@ type CaptureHoldRequest struct {
 	RequestID string
 	Amount    int64
 
+	// Fallback payer coordinates (#676). The admit-time request→payer pointer
+	// lives in Redis and can be lost (flush/failover/TTL overrun). When the
+	// pointer resolve misses AND CustomerID+Currency are supplied, capture
+	// proceeds against them — a rendered service is always chargeable.
+	// AdmitSource must echo the Source the admit was placed with (defaults to
+	// "admit", the Admit default) so the durable idempotency coordinates match a
+	// pointer-resolved capture of the same request. All ignored when the pointer
+	// is live.
+	CustomerID  string
+	Currency    string
+	Invoker     string
+	AdmitSource string
+
 	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
 	// openrails.usage_events row linked to the capture transaction (no second
 	// debit), so the platform's /budget-usage + revenue analytics can be served
@@ -233,15 +246,29 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if err != nil {
 		return nil, err
 	}
-	// Resolve the payer coords the admit-time hold was placed under (#513): the
-	// capture wire carries only the request id.
+	// Resolve the payer coords the admit-time hold was placed under (#513); on a
+	// miss (or Redis failure) fall back to caller-supplied coordinates (#676) so
+	// capture never depends on volatile state alone.
 	gate := spendgate.New(s.rt.RedisClient)
-	ref, ok, err := gate.Resolve(ctx, mid, req.RequestID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("hold not found for request_id %q", req.RequestID)
+	ref, ok, rerr := gate.Resolve(ctx, mid, req.RequestID)
+	if !ok || rerr != nil {
+		fbCustomer := strings.TrimSpace(req.CustomerID)
+		fbCurrency := strings.TrimSpace(req.Currency)
+		if fbCustomer == "" || fbCurrency == "" {
+			if rerr != nil {
+				return nil, rerr
+			}
+			return nil, fmt.Errorf("hold not found for request_id %q", req.RequestID)
+		}
+		ref = spendgate.HoldRef{
+			Customer: fbCustomer,
+			Currency: fbCurrency,
+			Invoker:  strings.TrimSpace(req.Invoker),
+			Source:   strings.TrimSpace(req.AdmitSource),
+		}
+		if ref.Source == "" {
+			ref.Source = "admit" // Admit's default source namespace
+		}
 	}
 	payerID, err := uuid.Parse(ref.Customer)
 	if err != nil {

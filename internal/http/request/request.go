@@ -1,6 +1,7 @@
 package request
 
 import (
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/sirupsen/logrus"
@@ -19,17 +21,12 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
-// Transport is the framework backend behind a Request. The handler-facing
-// Request API is identical regardless of backend; only construction differs:
-// ginreq.New(ginCtx) for the standalone gin server, NewHTTP(w, r) for the
-// embedded net/http surface. This is what lets the same handlers serve both
-// without importing gin in the net/http path (#282/#285). It is exported so the
-// gin backend can live in the separate internal/http/request/ginreq package,
-// keeping this package gin-free.
+// Transport is the backend behind a Request. Since #670 the only production
+// backend is the net/http one (NewHTTP); the interface remains the seam that
+// keeps handlers framework-agnostic.
 type Transport interface {
 	WriteJSON(code int, body any)
 	AbortJSON(code int, body any)
@@ -47,7 +44,7 @@ type Transport interface {
 	Redirect(code int, location string)
 	PostForm(key string) string
 	FormFile(key string) (multipart.File, *multipart.FileHeader, error)
-	UserContext() (authprovider.UserContext, bool)
+	UserContext() (billingauth.UserContext, bool)
 }
 
 type Request struct {
@@ -62,14 +59,12 @@ type Request struct {
 	// the identity survives middleware reassigning r.Request — the net/http
 	// Transport caches its own *http.Request and would otherwise not see a
 	// UserContext stored only on a re-wrapped request context.
-	uc    authprovider.UserContext
+	uc    billingauth.UserContext
 	ucSet bool
 }
 
-// NewWithTransport builds a Request over an arbitrary Transport. The gin backend
-// uses it from internal/http/request/ginreq; the net/http backend uses NewHTTP.
-// Keeping construction transport-agnostic is what lets this package stay
-// gin-free (#285).
+// NewWithTransport builds a Request over an arbitrary Transport (test seam);
+// production uses NewHTTP.
 func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Request {
 	var clock clockwork.Clock
 	if runtime != nil {
@@ -215,9 +210,9 @@ func (r *Request) SetHeader(key, value string) {
 }
 
 // UserContext returns the authenticated principal, framework-neutral counterpart
-// of the former authprovider.UserContextFromGin(r.GinCtx). Works on both the gin
+// of the former billingauth.UserContextFromGin(r.GinCtx). Works on both the gin
 // and net/http backends.
-func (r *Request) UserContext() (authprovider.UserContext, bool) {
+func (r *Request) UserContext() (billingauth.UserContext, bool) {
 	if r.ucSet {
 		return r.uc, true
 	}
@@ -229,7 +224,7 @@ func (r *Request) UserContext() (authprovider.UserContext, bool) {
 // UserContext()/GetUser(). It also propagates the principal into the request
 // context (billingauth.SetUserContext) for any downstream that reads it from
 // r.Request.Context() directly.
-func (r *Request) SetUserContext(uc authprovider.UserContext) {
+func (r *Request) SetUserContext(uc billingauth.UserContext) {
 	r.uc = uc
 	r.ucSet = true
 	if r.Request != nil {
@@ -343,10 +338,7 @@ func isRequestBodyTooLarge(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }
 
-// --- net/http backend (embedded, gin-free) ---
-//
-// The gin backend (standalone) lives in internal/http/request/ginreq (#285), so
-// this package imports no gin.
+// --- net/http backend (the only backend since #670) ---
 
 type httpTransport struct {
 	w     http.ResponseWriter
@@ -412,9 +404,9 @@ func (h *httpTransport) PostForm(key string) string { return h.r.PostFormValue(k
 func (h *httpTransport) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
 	return h.r.FormFile(key)
 }
-func (h *httpTransport) UserContext() (authprovider.UserContext, bool) {
+func (h *httpTransport) UserContext() (billingauth.UserContext, bool) {
 	if h.r == nil {
-		return authprovider.UserContext{}, false
+		return billingauth.UserContext{}, false
 	}
 	return billingauth.FromContext(h.r.Context())
 }
@@ -446,7 +438,11 @@ func validateBinding(data any) error {
 }
 
 // decodeTaggedValues populates dst's fields from get(), matching them by the
-// given struct tag (gin uses "form" for query and "uri" for path params).
+// given struct tag (gin used "form" for query and "uri" for path params; the
+// neutral binder keeps those tag conventions). Like gin's form binding it
+// RECURSES into nested/embedded struct fields (e.g. query.QueryOptions[T]'s
+// Filters), parses time.Time via the `time_format` tag (default RFC3339), and
+// supports encoding.TextUnmarshaler fields (uuid.UUID etc.).
 func decodeTaggedValues(dst any, tag string, get func(string) string) error {
 	v := reflect.ValueOf(dst)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
@@ -456,30 +452,84 @@ func decodeTaggedValues(dst any, tag string, get func(string) string) error {
 	if v.Kind() != reflect.Struct {
 		return errors.New("bind target must be a struct pointer")
 	}
+	return decodeStructValues(v, tag, get)
+}
+
+var (
+	timeType            = reflect.TypeOf(time.Time{})
+	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+)
+
+func decodeStructValues(v reflect.Value, tag string, get func(string) string) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		name := field.Tag.Get(tag)
-		if name == "" || name == "-" {
+		fv := v.Field(i)
+		if !fv.CanSet() {
 			continue
 		}
+		name := field.Tag.Get(tag)
 		if idx := strings.IndexByte(name, ','); idx >= 0 {
 			name = name[:idx]
+		}
+
+		// Recurse into struct-typed fields that are not directly bindable
+		// (nested filter structs, embedded structs) — gin binding parity.
+		ft := field.Type
+		elem := ft
+		if ft.Kind() == reflect.Ptr {
+			elem = ft.Elem()
+		}
+		if elem.Kind() == reflect.Struct && elem != timeType && !reflect.PointerTo(elem).Implements(textUnmarshalerType) {
+			target := fv
+			if ft.Kind() == reflect.Ptr {
+				if fv.IsNil() {
+					fv.Set(reflect.New(elem))
+				}
+				target = fv.Elem()
+			}
+			if err := decodeStructValues(target, tag, get); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if name == "" || name == "-" {
+			continue
 		}
 		raw := get(name)
 		if raw == "" {
 			continue
 		}
-		if err := setField(v.Field(i), raw); err != nil {
+		if err := setField(fv, raw, field.Tag); err != nil {
 			return fmt.Errorf("%s: %w", field.Name, err)
 		}
 	}
 	return nil
 }
 
-func setField(fv reflect.Value, raw string) error {
+func setField(fv reflect.Value, raw string, tag reflect.StructTag) error {
 	if !fv.CanSet() {
 		return nil
+	}
+	// time.Time honors the `time_format` tag (gin convention); default RFC3339.
+	if fv.Type() == timeType {
+		layout := tag.Get("time_format")
+		if layout == "" {
+			layout = time.RFC3339
+		}
+		parsed, err := time.Parse(layout, raw)
+		if err != nil {
+			return err
+		}
+		fv.Set(reflect.ValueOf(parsed))
+		return nil
+	}
+	// encoding.TextUnmarshaler (uuid.UUID etc.), matching gin's trySetCustom.
+	if fv.CanAddr() {
+		if tu, ok := fv.Addr().Interface().(encoding.TextUnmarshaler); ok {
+			return tu.UnmarshalText([]byte(raw))
+		}
 	}
 	switch fv.Kind() {
 	case reflect.String:
@@ -512,7 +562,7 @@ func setField(fv reflect.Value, raw string) error {
 		if fv.IsNil() {
 			fv.Set(reflect.New(fv.Type().Elem()))
 		}
-		return setField(fv.Elem(), raw)
+		return setField(fv.Elem(), raw, tag)
 	default:
 		return fmt.Errorf("unsupported field kind %s", fv.Kind())
 	}

@@ -89,38 +89,33 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no provider account could be resolved from the webhook")
 		return
 	}
-	isTestMode := r.State.Config.IsTestMode()
-	if rails.IsNMI(models.Rail(provider)) {
-		if enqueueNMIWebhook(r, provider, clientIP) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
-		}
-		return
-	}
-	switch provider {
-	case subscriptions.RailCCBill:
-		if !isTestMode {
-			if !iputil.IsValidCCBillIP(clientIP) {
-				log.WithFields(log.Fields{"client_ip": clientIP, "rail": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
-				r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
-				return
-			}
-			log.WithField("client_ip", clientIP).Debug("CCBill webhook authenticated - valid IP range")
-		} else {
-			log.WithField("client_ip", clientIP).Debug("CCBill webhook authentication bypassed - test env enabled")
-		}
-		if enqueueCCBillWebhook(r, clientIP) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
-		}
-		return
-	case subscriptions.RailStripe:
-		if enqueueStripeWebhook(r, clientIP) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
-		}
-		return
-	default:
+	ingress, ok := globalWebhookIngress[models.Rail(provider)]
+	if !ok {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid provider")
 		return
 	}
+	if ingress(r, provider, clientIP) {
+		r.SuccessJSON(map[string]string{"status": "accepted"})
+	}
+}
+
+// globalWebhookIngress is the global-surface routing TABLE (#669): which
+// enqueue path handles each rail. Posture gates (#668 CCBill IP allowlist) and
+// signature verification deliberately stay inside each rail's func. The
+// provider param is already CanonicalRail-normalized. Returns accepted.
+var globalWebhookIngress = map[models.Rail]func(r *httprequest.Request, provider, clientIP string) bool{
+	models.RailNMI: enqueueNMIWebhook,
+	models.RailCCBill: func(r *httprequest.Request, _ string, clientIP string) bool {
+		if !ccbillWebhookIPAllowed(r, clientIP) {
+			log.WithFields(log.Fields{"client_ip": clientIP, "rail": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
+			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
+			return false
+		}
+		return enqueueCCBillWebhook(r, clientIP)
+	},
+	models.RailStripe: func(r *httprequest.Request, _ string, clientIP string) bool {
+		return enqueueStripeWebhook(r, clientIP)
+	},
 }
 
 func MerchantWebhook(r *httprequest.Request) {
@@ -144,23 +139,6 @@ func MerchantWebhook(r *httprequest.Request) {
 	processResolvedMerchantWebhook(r, provider, route.MerchantID, strings.TrimSpace(r.Param("account_id")))
 }
 
-// HostWebhook handles a webhook after an embedding host has resolved Host to a
-// merchant and pinned it on context. The host resolver is routing only; this
-// handler still verifies with that merchant's stored signing secret.
-func HostWebhook(r *httprequest.Request) {
-	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
-		return
-	}
-	provider := webhookutil.CanonicalRail(r.Param("provider"))
-	merchantID, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
-		return
-	}
-	processResolvedMerchantWebhook(r, provider, merchantID, strings.TrimSpace(r.Param("account_id")))
-}
-
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
@@ -170,7 +148,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	}
 	if provider == subscriptions.RailCCBill {
 		clientIP := r.GetRemoteIP()
-		if r.State.Config != nil && !r.State.Config.IsTestMode() && !iputil.IsValidCCBillIP(clientIP) {
+		if !ccbillWebhookIPAllowed(r, clientIP) {
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return
 		}
@@ -288,7 +266,7 @@ func processProviderAccountWebhook(r *httprequest.Request, rail, routeAccountID,
 		}
 		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailCCBill:
-		if r.State.Config != nil && !r.State.Config.IsTestMode() && !iputil.IsValidCCBillIP(clientIP) {
+		if !ccbillWebhookIPAllowed(r, clientIP) {
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return true, false
 		}
@@ -322,6 +300,44 @@ func webhookProviderEnvironment(r *httprequest.Request) string {
 		return "test"
 	}
 	return "live"
+}
+
+// ccbillWebhookIPAllowed is the single gate for CCBill webhook source-IP
+// authentication (#668). CCBill has no HMAC — the source-IP allowlist is its
+// ONLY authentication — so the dev bypass must never key off global test_mode
+// alone: test_mode is orthogonal to credential liveness (#355) and CCBill
+// credentials carry no intrinsic test/live marker. The bypass requires BOTH
+// test_mode AND no live CCBill provider account declared anywhere in the
+// catalog (a deployment that ran live keeps its environment=live rows after a
+// test_mode flip, so the allowlist stays enforced). Probe failure fails closed
+// to the allowlist.
+func ccbillWebhookIPAllowed(r *httprequest.Request, clientIP string) bool {
+	if iputil.IsValidCCBillIP(clientIP) {
+		return true
+	}
+	if r == nil || r.State == nil || r.State.Config == nil || !r.State.Config.IsTestMode() {
+		return false
+	}
+	hasLive, err := ccbillLiveAccountsExist(r)
+	if err != nil {
+		log.WithError(err).WithField("client_ip", clientIP).Warn("ccbill webhook: live-account probe failed; enforcing IP allowlist")
+		return false
+	}
+	if hasLive {
+		log.WithField("client_ip", clientIP).Warn("ccbill webhook: test_mode IP bypass refused - live ccbill provider account configured")
+		return false
+	}
+	log.WithField("client_ip", clientIP).Debug("CCBill webhook IP allowlist bypassed - sandbox posture (test_mode, no live ccbill account)")
+	return true
+}
+
+// ccbillLiveAccountsExist probes the provider-account catalog; a var so handler
+// tests can stub the DB-backed merchants service.
+var ccbillLiveAccountsExist = func(r *httprequest.Request) (bool, error) {
+	if r.State.Merchants == nil {
+		return false, errors.New("merchants service unavailable")
+	}
+	return r.State.Merchants.HasLiveProviderAccounts(r.Request.Context(), subscriptions.RailCCBill)
 }
 
 func resolveWebhookPaymentProviderAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.PaymentProviderAccountIdentity, bool) {
@@ -465,20 +481,7 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
 	}
-	signatureVerified := true
-	msg := &webhooks.WebhookMessage{
-		Rail:           subscriptions.RailCCBill,
-		EventID:        prepared.EventID,
-		EventType:      prepared.EventType,
-		Payload:        prepared.Body,
-		IPAddress:      clientIP,
-		Signature:      prepared.Signature,
-		SignatureValid: &signatureVerified,
-		ReceivedAt:     time.Now(),
-	}
-	if accountID != "" {
-		msg.ProviderAccountID = accountID
-	}
+	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
@@ -488,6 +491,26 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		return false
 	}
 	return true
+}
+
+// ccbillWebhookMessage builds the dispatch message for a CCBill event. CCBill
+// has no signature — authentication is the source-IP allowlist — so
+// SignatureValid is deliberately left nil (never claimed, #668), matching the
+// River path (Prepared.QueueArgs on an unverified Prepared).
+func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accountID string) *webhooks.WebhookMessage {
+	msg := &webhooks.WebhookMessage{
+		Rail:       subscriptions.RailCCBill,
+		EventID:    prepared.EventID,
+		EventType:  prepared.EventType,
+		Payload:    prepared.Body,
+		IPAddress:  clientIP,
+		Signature:  prepared.Signature,
+		ReceivedAt: time.Now(),
+	}
+	if accountID != "" {
+		msg.ProviderAccountID = accountID
+	}
+	return msg
 }
 
 func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {

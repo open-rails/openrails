@@ -22,12 +22,20 @@ type muxRouter struct {
 	rt     *app.Runtime
 	prefix string
 	mw     []Middleware
+	record func(pattern string)
 }
 
 // NewMux builds a neutral Router over a ServeMux rooted at basePrefix (e.g.
 // "/billing/v1"). basePrefix is prepended to every registered pattern.
 func NewMux(mux *http.ServeMux, basePrefix string, rt *app.Runtime) Router {
 	return &muxRouter{mux: mux, rt: rt, prefix: basePrefix}
+}
+
+// NewMuxRecorded is NewMux plus a registration recorder: record is invoked with
+// each final ServeMux pattern ("GET /v1/me/balance"). The standalone assembly
+// uses it to expose its route table for the #670 route-surface parity test.
+func NewMuxRecorded(mux *http.ServeMux, basePrefix string, rt *app.Runtime, record func(pattern string)) Router {
+	return &muxRouter{mux: mux, rt: rt, prefix: basePrefix, record: record}
 }
 
 func (m *muxRouter) Handle(method, path string, h Handler, mw ...Middleware) {
@@ -37,6 +45,9 @@ func (m *muxRouter) Handle(method, path string, h Handler, mw ...Middleware) {
 	final := Chain(h, all)
 
 	pattern := method + " " + toMuxPath(m.prefix+path)
+	if m.record != nil {
+		m.record(pattern)
+	}
 	rt := m.rt
 	m.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		final(request.NewHTTP(w, r, rt))
@@ -52,6 +63,7 @@ func (m *muxRouter) Group(prefix string, mw ...Middleware) Router {
 		rt:     m.rt,
 		prefix: m.prefix + prefix,
 		mw:     all,
+		record: m.record,
 	}
 }
 

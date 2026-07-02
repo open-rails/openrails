@@ -94,7 +94,7 @@ func newSunsetFixture() *sunsetFixture {
 	return &sunsetFixture{
 		handler: &SolanaSunsetPlanHandler{
 			Reader:      reader,
-			Plans:       recurring.NewPlanService(submitter, "devnet"),
+			Plans:       recurring.NewPlanServiceWithReader(submitter, nil, "devnet"),
 			LoadCatalog: stubCatalog(nil, nil),
 			Policy:      DefaultBackoff,
 		},

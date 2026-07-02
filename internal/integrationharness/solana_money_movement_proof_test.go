@@ -44,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	solanamod "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -184,7 +185,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	reference, err := solanaint.GenerateReference()
 	require.NoError(t, err, "generate Solana Pay reference id")
 
-	tokenUnits := solanamod.FiatMicrosToStablecoinBaseUnits(ctx, priceMicros, "USDC", nil)
+	tokenUnits := solanamod.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(priceMicros), "USDC", nil)
 	require.Equal(t, uint64(19_990_000), tokenUnits, "$19.99 in micro-USD at the $1 USDC peg = 19.99 USDC base units")
 
 	rpcClient := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Network: "devnet"})

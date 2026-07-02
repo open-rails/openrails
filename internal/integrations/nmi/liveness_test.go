@@ -21,6 +21,7 @@ func newLivenessTestClient(t *testing.T, handler http.HandlerFunc) *NMIClient {
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return client
 }
 
@@ -144,38 +145,55 @@ func TestFindSuccessfulSaleByOrderID_NoDateBound(t *testing.T) {
 }
 
 func TestGetRecurringLiveness_FoundWithNextCharge(t *testing.T) {
-	var gotSubID string
+	var gotPath string
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		gotSubID = r.Form.Get("subscription_id")
-		_, _ = w.Write([]byte(`<?xml version="1.0"?>
-<nm_response>
-  <subscription>
-    <subscription_id>sub-77</subscription_id>
-    <next_charge_date>2026-07-01</next_charge_date>
-  </subscription>
-</nm_response>`))
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","delayed_condition":"active","next_billing_date":"2026-07-01"}`))
 	})
 
 	liveness, err := client.GetRecurringLiveness("sub-77")
 	require.NoError(t, err)
 	assert.True(t, liveness.Found)
 	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), liveness.NextChargeDate)
-	assert.Equal(t, "sub-77", gotSubID)
+	assert.Equal(t, "/subscriptions/sub-77", gotPath)
+}
+
+func TestGetRecurringLiveness_ISO8601NextBilling(t *testing.T) {
+	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","next_billing_date":"2026-07-01T00:00:00.000Z"}`))
+	})
+	liveness, err := client.GetRecurringLiveness("sub-77")
+	require.NoError(t, err)
+	assert.True(t, liveness.Found)
+	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), liveness.NextChargeDate)
+}
+
+func TestGetRecurringLiveness_DeletionTombstoneIsAbsent(t *testing.T) {
+	// Live-verified 2026-07-01: the v5 GET keeps answering 200 for deleted
+	// subscriptions with delayed_condition=inactive. That tombstone must read
+	// as GONE, matching the classic report's absence-is-terminal semantics.
+	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","delayed_condition":"inactive","next_billing_date":"2026-07-29"}`))
+	})
+	liveness, err := client.GetRecurringLiveness("sub-77")
+	require.NoError(t, err)
+	assert.False(t, liveness.Found)
 }
 
 func TestGetRecurringLiveness_Absent(t *testing.T) {
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`))
 	})
 	liveness, err := client.GetRecurringLiveness("sub-gone")
 	require.NoError(t, err)
-	assert.False(t, liveness.Found, "absence from the recurring report IS terminal at NMI")
+	assert.False(t, liveness.Found, "404 from the v5 subscription GET IS terminal at NMI")
 }
 
 func TestGetRecurringLiveness_ErrorResponse(t *testing.T) {
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><error_response>boom</error_response></nm_response>`))
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"type":"internalError","error_code":"E_INTERNAL","message":"boom"}`))
 	})
 	_, err := client.GetRecurringLiveness("sub-77")
 	require.Error(t, err)

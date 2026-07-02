@@ -9,10 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNMISaleAttemptTransactionIDIsStable(t *testing.T) {
-	require.Equal(t, "nmi_sale_attempt:sale_123", nmiSaleAttemptTransactionID(" sale_123 "))
-}
-
 func TestNMISubscriptionAttemptTransactionIDIsStableAndSynthetic(t *testing.T) {
 	require.Equal(t, "nmi_sub_attempt:sub_123", nmiSubscriptionAttemptTransactionID(" sub_123 "))
 	require.NotEqual(t, "txn_123", nmiSubscriptionAttemptTransactionID("sub_123"))

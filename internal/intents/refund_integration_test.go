@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,48 +25,49 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// fakeNMIRefundGateway scripts the gateway for refund flows: the Direct Post
-// API answers type=refund, the Query API answers the transaction report.
+// fakeNMIRefundGateway scripts the v5 gateway for refund flows:
+// POST /payments/{id}/refund answers the refund, GET /payments/{id} answers
+// the verifier's transaction read (refund action present or not).
 type fakeNMIRefundGateway struct {
-	refundBody   atomic.Value // string Direct Post response
+	refundBody   atomic.Value // string JSON refund response
 	refundStatus atomic.Int64 // optional HTTP status (0 = 200)
-	refunded     atomic.Bool  // query reports the refund as present
+	refunded     atomic.Bool  // the transaction read reports the refund action
 	refundCalls  atomic.Int64
 	queryCalls   atomic.Int64
-	psid         string // original transaction id, echoed by the query
+	psid         string // original transaction id, echoed by the read
 }
 
 func newFakeNMIRefundGateway(t *testing.T, originalTxn string) (*fakeNMIRefundGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMIRefundGateway{psid: originalTxn}
-	f.refundBody.Store("response=1&transactionid=txn_refund_1&responsetext=SUCCESS")
+	f.refundBody.Store(`{"object":"transaction","id":"txn_refund_1","response":"1","response_text":"SUCCESS"}`)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("report_type") == "transaction" || r.URL.Query().Get("report_type") == "transaction" {
+		switch {
+		case r.Method == http.MethodGet:
 			f.queryCalls.Add(1)
 			if f.refunded.Load() {
-				fmt.Fprintf(w, `<nm_response>
-					<transaction><transaction_id>%s</transaction_id><action><action_type>sale</action_type><success>1</success><amount>10.00</amount></action></transaction>
-					<transaction><transaction_id>txn_refund_1</transaction_id><action><action_type>refund</action_type><success>1</success><amount>5.00</amount></action></transaction>
-				</nm_response>`, f.psid)
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","actions":[
+					{"id":"%s","type":"sale","success":true,"amount":"10.00"},
+					{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}
+				]}`, f.psid, f.psid)
 			} else {
-				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><action><action_type>sale</action_type><success>1</success><amount>10.00</amount></action></transaction></nm_response>`, f.psid)
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"10.00"}]}`, f.psid, f.psid)
 			}
-			return
-		}
-		if r.Form.Get("type") == "refund" {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund"):
 			f.refundCalls.Add(1)
 			if st := f.refundStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
+				fmt.Fprint(w, `{"type":"internalError","error_code":"E_INTERNAL","message":"gateway error"}`)
 				return
 			}
 			_, _ = w.Write([]byte(f.refundBody.Load().(string)))
-			return
+		default:
+			_, _ = w.Write([]byte(`{}`))
 		}
-		_, _ = w.Write([]byte("response=1"))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -76,6 +78,7 @@ func newFakeNMIRefundGateway(t *testing.T, originalTxn string) (*fakeNMIRefundGa
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return f, client
 }
 
@@ -138,7 +141,7 @@ func (fx refundFixture) payload(amountCents int64) RefundPayload {
 	return RefundPayload{
 		OriginalPaymentID: fx.paymentID,
 		ReservationID:     fx.reservationID,
-		AmountCents:       amountCents,
+		AmountCents:       moneyutil.Cents(amountCents),
 		ProviderTarget:    fx.originalTxn,
 	}
 }
@@ -311,7 +314,7 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 func TestNMIRefundDeclineReleasesReservation(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-	fake.refundBody.Store("response=2&responsetext=DECLINED&response_code=300")
+	fake.refundBody.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
 
 	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
 	require.NoError(t, err)

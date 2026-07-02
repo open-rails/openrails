@@ -20,6 +20,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -1060,7 +1061,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	var productID *uuid.UUID
 	var priceID *uuid.UUID
 	if subscription.Price != nil {
-		priceAmount = float64(subscription.Price.Amount) / 100.0
+		priceAmount = moneyutil.MicrosToMajorUnits(subscription.Price.Amount)
 		priceCurrency = subscription.Price.Currency
 		if cycle := subscription.Price.RecurringCycleHours(); cycle != nil {
 			billingHours, _ = safecast.Convert[uint32](*cycle)
@@ -1093,7 +1094,7 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	}
 	var amountFloat *float64
 	if amount > 0 {
-		f := float64(amount) / 100.0
+		f := moneyutil.MicrosToMajorUnits(amount)
 		amountFloat = &f
 	}
 	var txnID *string

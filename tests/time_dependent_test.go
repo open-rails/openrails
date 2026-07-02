@@ -529,7 +529,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 
 	// Create a subscription at max retries (one more failure = cancelled).
 	// Monthly billing cycle -> 5 failures total (#359).
-	retryAttempts := subscriptions.DunningMaxFailures(30) - 1 // One retry left
+	retryAttempts := subscriptions.DunningMaxFailures(30*24) - 1 // One retry left
 	nextRetry := startTime
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -29,6 +31,7 @@ func newMobiusAdapterWithServer(t *testing.T, serverURL string) *nmiAdapter {
 	}
 	client.DirectPostURL = serverURL
 	client.QueryURL = serverURL
+	client.V5BaseURL = serverURL
 	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{"nmi": client}}}
 	return &nmiAdapter{svc: svc}
 }
@@ -72,7 +75,7 @@ func TestMobiusAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 
 func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("response=1"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -88,20 +91,27 @@ func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	var addCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.Form.Get("recurring") {
-		case "add_plan":
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/plans":
 			addCalled = true
-			if got := r.Form.Get("day_frequency"); got != "30" {
-				t.Errorf("day_frequency: got %q want 30", got)
+			var req struct {
+				PlanAmount   float64 `json:"plan_amount"`
+				DayFrequency int     `json:"day_frequency"`
 			}
-			if got := r.Form.Get("plan_amount"); got != "9.99" {
-				t.Errorf("plan_amount: got %q want 9.99", got)
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.DayFrequency != 30 {
+				t.Errorf("day_frequency: got %d want 30", req.DayFrequency)
 			}
-			_, _ = w.Write([]byte("response=1"))
+			if req.PlanAmount != 9.99 {
+				t.Errorf("plan_amount: got %v want 9.99", req.PlanAmount)
+			}
+			_, _ = w.Write([]byte(`{"object":"plan","id":"x"}`))
+		case r.Method == http.MethodGet:
+			// plan lookup -> not found
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
 		default:
-			// recurring_plans query -> not found
-			_, _ = w.Write([]byte("<nm_response></nm_response>"))
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -133,13 +143,13 @@ func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
 	var primaryCalled, secondaryCalled bool
 	mkServer := func(flag *bool) *httptest.Server {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = r.ParseForm()
-			if r.Form.Get("recurring") == "add_plan" {
+			if r.Method == http.MethodPost && r.URL.Path == "/plans" {
 				*flag = true
-				_, _ = w.Write([]byte("response=1"))
+				_, _ = w.Write([]byte(`{"object":"plan","id":"x"}`))
 				return
 			}
-			_, _ = w.Write([]byte("<nm_response></nm_response>"))
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
 		}))
 		t.Cleanup(s.Close)
 		return s
@@ -154,6 +164,7 @@ func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
 		}
 		c.DirectPostURL = url
 		c.QueryURL = url
+		c.V5BaseURL = url
 		return c
 	}
 	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{
@@ -182,13 +193,11 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	priceID := uuid.New()
 	planID := nmiDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("recurring") == "add_plan" {
+		if r.Method == http.MethodPost {
 			t.Error("AddRecurringPlan should NOT be called when plan already exists")
 		}
-		// recurring_plans query -> found
-		_, _ = w.Write([]byte("<nm_response><plan><plan_id>" + planID +
-			"</plan_id><plan_name>Premium</plan_name><plan_amount>9.99</plan_amount></plan></nm_response>"))
+		// plan lookup -> found
+		_, _ = w.Write([]byte(nmiPlanQueryJSON(planID, "Premium", "9.99", "")))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -204,11 +213,10 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	}
 }
 
-// nmiPlanQueryXML renders a single-plan recurring_plans query response.
-func nmiPlanQueryXML(planID, planName, planAmount, dayFrequency string) string {
-	return "<nm_response><plan><plan_id>" + planID + "</plan_id><plan_name>" + planName +
-		"</plan_name><plan_amount>" + planAmount + "</plan_amount><day_frequency>" + dayFrequency +
-		"</day_frequency></plan></nm_response>"
+// nmiPlanQueryJSON renders a single v5 plan GET response.
+func nmiPlanQueryJSON(planID, planName, planAmount, dayFrequency string) string {
+	return `{"object":"plan","id":"` + planID + `","plan_name":"` + planName +
+		`","plan_amount":"` + planAmount + `","day_frequency":"` + dayFrequency + `"}`
 }
 
 func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
@@ -216,11 +224,10 @@ func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
 	// accepted, and Attach must never create a plan (no add_plan).
 	planID := "premium-usd-999-30"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("recurring") == "add_plan" {
+		if r.Method == http.MethodPost {
 			t.Error("Attach must not create an NMI plan when a valid link is supplied")
 		}
-		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "9.99", "30")))
+		_, _ = w.Write([]byte(nmiPlanQueryJSON(planID, "Premium", "9.99", "30")))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -242,16 +249,22 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 	var addCalled bool
 	var addedPlanID, addedFreq, addedAmount string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("recurring") == "add_plan" {
+		if r.Method == http.MethodPost && r.URL.Path == "/plans" {
 			addCalled = true
-			addedPlanID = r.Form.Get("plan_id")
-			addedFreq = r.Form.Get("day_frequency")
-			addedAmount = r.Form.Get("plan_amount")
-			_, _ = w.Write([]byte("response=1"))
+			var req struct {
+				PlanID       string          `json:"id"`
+				PlanAmount   json.RawMessage `json:"plan_amount"`
+				DayFrequency int             `json:"day_frequency"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			addedPlanID = req.PlanID
+			addedFreq = strconv.Itoa(req.DayFrequency)
+			addedAmount = string(req.PlanAmount)
+			_, _ = w.Write([]byte(`{"object":"plan","id":"premium"}`))
 			return
 		}
-		_, _ = w.Write([]byte("<nm_response></nm_response>")) // query: not found
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`)) // lookup: not found
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -277,11 +290,11 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 	// A missing plan_id with no billing cycle cannot be created (NMI plans need a
 	// frequency) -> loud, actionable error.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("recurring") == "add_plan" {
+		if r.Method == http.MethodPost {
 			t.Error("must not create an NMI plan without a billing cycle")
 		}
-		_, _ = w.Write([]byte("<nm_response></nm_response>")) // query: not found
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`)) // lookup: not found
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -298,7 +311,7 @@ func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 	planID := "premium-usd-999-30"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Remote plan bills 5.00 (500 cents) but the catalog price is 9_990_000 micros.
-		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "5.00", "30")))
+		_, _ = w.Write([]byte(nmiPlanQueryJSON(planID, "Premium", "5.00", "30")))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -315,7 +328,7 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 	planID := "premium-usd-999-30"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Remote plan bills every 365 days but the catalog price is 30-day.
-		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "9.99", "365")))
+		_, _ = w.Write([]byte(nmiPlanQueryJSON(planID, "Premium", "9.99", "365")))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -343,8 +356,7 @@ func TestMobiusAdapter_UpdateIsNoop(t *testing.T) {
 
 func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("<nm_response><plan><plan_id>p</plan_id>" +
-			"<plan_name>Remote Name</plan_name><plan_amount>5.00</plan_amount></plan></nm_response>"))
+		_, _ = w.Write([]byte(nmiPlanQueryJSON("p", "Remote Name", "5.00", "")))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
@@ -370,7 +382,8 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 
 func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("<nm_response></nm_response>"))
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)

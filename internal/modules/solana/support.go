@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -47,10 +48,9 @@ const USDCDecimals = 6
 
 // FiatMicrosToStablecoinBaseUnits converts a micro-USD amount into stablecoin
 // base units for a $1-pegged token. With 6-decimal USD micros and 6-decimal USDC
-// base units, the at-peg conversion is 1:1. The depeg failsafe matches
-// FiatCentsToStablecoinBaseUnits and rounds UP so a fractional base unit never
-// under-charges the merchant.
-func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros int64, symbol string, priceProvider TokenPriceProvider) uint64 {
+// base units, the at-peg conversion is 1:1. The depeg failsafe rounds UP so a
+// fractional base unit never under-charges the merchant.
+func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micros, symbol string, priceProvider TokenPriceProvider) uint64 {
 	if micros <= 0 {
 		return 0
 	}
@@ -60,28 +60,6 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros int64, symbol s
 	}
 	scale := math.Pow10(USDCDecimals)
 	usd := float64(micros) / scale
-	return uint64(math.Ceil((usd / priceUSD) * scale))
-}
-
-// FiatCentsToStablecoinBaseUnits converts a fiat-cent amount into stablecoin
-// base units for a $1-pegged token (#267). At the peg, 1 cent = 10_000 base
-// units (10^6 / 100). The same depeg failsafe used for quotes applies: if a
-// live feed shows the stablecoin has diverged beyond stablecoinPegTolerance, the
-// charge is scaled up by 1/price so the merchant still nets the USD amount.
-//
-// Negative cents clamp to 0. The result rounds UP (ceil) so a partial base unit
-// never under-charges the merchant.
-func FiatCentsToStablecoinBaseUnits(ctx context.Context, cents int64, symbol string, priceProvider TokenPriceProvider) uint64 {
-	if cents <= 0 {
-		return 0
-	}
-	priceUSD := stablecoinPriceUSD(ctx, symbol, priceProvider)
-	if priceUSD <= 0 {
-		priceUSD = 1.0
-	}
-	// USD value of the charge / price-per-token => token amount, then to base units.
-	usd := float64(cents) / 100.0
-	scale := math.Pow10(USDCDecimals)
 	return uint64(math.Ceil((usd / priceUSD) * scale))
 }
 
@@ -119,9 +97,10 @@ type TokenPriceProvider interface {
 	PriceUSD(ctx context.Context, symbol string) (float64, error)
 }
 
-// CalculateTokenQuote converts a fiat amount into token units based on live prices.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.TokenConfig, amountCents int64, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
-	if amountCents <= 0 {
+// CalculateTokenQuote converts a fiat amount in MICROS (millionths of a major
+// currency unit, any currency) into token units based on live prices.
+func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.TokenConfig, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
+	if amountMicros <= 0 {
 		return &TokenQuote{Units: 0, Decimal: 0, FXRate: 1.0, FXCurrency: strings.ToLower(currency), QuotedAt: time.Now()}, nil
 	}
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
@@ -135,7 +114,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	}
 
 	quotedAt := time.Now()
-	amountInCurrency := float64(amountCents) / math.Pow10(currencyMinorUnits(currency))
+	amountInCurrency := float64(amountMicros) / float64(moneyutil.MicrosPerMajorUnit)
 
 	var amountUSD float64
 	var fxRate float64
@@ -194,15 +173,4 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 		AmountUSD:     amountUSD,
 		QuotedAt:      quotedAt,
 	}, nil
-}
-
-func currencyMinorUnits(currency string) int {
-	switch strings.ToLower(strings.TrimSpace(currency)) {
-	case "bhd", "jod", "kwd", "omr", "tnd":
-		return 3
-	case "bif", "clp", "djf", "gnf", "isk", "jpy", "kmf", "krw", "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf":
-		return 0
-	default:
-		return 2
-	}
 }

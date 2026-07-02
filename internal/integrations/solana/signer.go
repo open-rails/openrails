@@ -68,6 +68,21 @@ func BuildSignSubmit(
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
 ) (solanago.Signature, error) {
+	return BuildSignSubmitPresubmit(ctx, merchantID, signer, rpc, instructions, nil)
+}
+
+// BuildSignSubmitPresubmit is BuildSignSubmit with a persistence hook invoked
+// AFTER signing and BEFORE submission: the caller durably records the tx
+// signature (#674) so a crash mid-submit resolves via a chain read instead of
+// a blind re-send. A presubmit error aborts the submit (nothing was sent).
+func BuildSignSubmitPresubmit(
+	ctx context.Context,
+	merchantID merchant.ID,
+	signer Signer,
+	rpc blockhashProvider,
+	instructions []solanago.Instruction,
+	presubmit func(solanago.Signature) error,
+) (solanago.Signature, error) {
 	if signer == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
 	}
@@ -82,9 +97,9 @@ func BuildSignSubmit(
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: resolve merchant signer public key: %w", err)
 	}
-	return BuildSignSubmitWithPayer(ctx, rpc, payer, instructions, func(message []byte) (solanago.Signature, error) {
+	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, func(message []byte) (solanago.Signature, error) {
 		return signer.SignMessage(ctx, merchantID, message)
-	})
+	}, presubmit)
 }
 
 func BuildSignSubmitWithPayer(
@@ -93,6 +108,18 @@ func BuildSignSubmitWithPayer(
 	payer solanago.PublicKey,
 	instructions []solanago.Instruction,
 	signMessage func([]byte) (solanago.Signature, error),
+) (solanago.Signature, error) {
+	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, signMessage, nil)
+}
+
+// BuildSignSubmitWithPayerPresubmit: see BuildSignSubmitPresubmit.
+func BuildSignSubmitWithPayerPresubmit(
+	ctx context.Context,
+	rpc blockhashProvider,
+	payer solanago.PublicKey,
+	instructions []solanago.Instruction,
+	signMessage func([]byte) (solanago.Signature, error),
+	presubmit func(solanago.Signature) error,
 ) (solanago.Signature, error) {
 	if signMessage == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
@@ -123,6 +150,14 @@ func BuildSignSubmitWithPayer(
 		return solanago.Signature{}, fmt.Errorf("solana: sign transaction: %w", err)
 	}
 	tx.Signatures = []solanago.Signature{sig}
+
+	// Durable write-ahead of the signature (#674): once persisted, a crash at
+	// any later point is resolvable by reading the chain for this signature.
+	if presubmit != nil {
+		if err := presubmit(sig); err != nil {
+			return solanago.Signature{}, fmt.Errorf("solana: presubmit persistence failed (transaction NOT sent): %w", err)
+		}
+	}
 
 	// Submit AND confirm: a billing pull must not be treated as success until the
 	// transaction has actually landed. SubmitAndConfirm surfaces a reverted tx via

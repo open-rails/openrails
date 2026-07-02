@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -15,10 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
-// Revoking a credit grant claws back its UNSPENT remainder to revoked_credits:
-// the lot becomes unspendable, the derived balance drops by the unspent amount,
-// the money is frozen (not refunded), conservation holds, and re-deriving is
-// idempotent. (#514, docs/consistency-invariants.md §11 decision 4.)
+// Revoking a credit grant + re-deriving it (Revoke, then MaterializeGrant —
+// the converge repair path) claws back its UNSPENT remainder to
+// revoked_credits: the lot becomes unspendable, the derived balance drops by
+// the unspent amount, the money is frozen (not refunded), conservation holds,
+// and re-deriving is idempotent. (#514, docs/consistency-invariants.md §11
+// decision 4.)
 func TestGrants_RevokeClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + short()
@@ -33,25 +36,25 @@ func TestGrants_RevokeClawback(t *testing.T) {
 	require.NoError(t, l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", "spend", "req-1"))
 	mustBal(t, ctx, ml, custAcc, 70)
 
-	clawed, err := l.RevokeGrant(ctx, lot.ID, "admin removed", false)
+	_, err = l.Revoke(ctx, lot.ID, "admin removed")
 	require.NoError(t, err)
-	require.Equal(t, int64(70), clawed, "only the unspent remainder is clawed")
+	require.NoError(t, l.MaterializeGrant(ctx, lot)) // derive-2 retracts: clawback
 
 	// The revoked lot is no longer spendable…
-	require.False(t, lotSpendable(t, ctx, l, customer, cur, lot.ID))
-	// …the derived balance drops to 0 (the 70 retracted)…
+	require.False(t, lotSpendable(t, ctx, pool, merchantID, customer, cur, lot.ID))
+	// …the derived balance drops to 0 (only the unspent 70 retracted)…
 	mustBal(t, ctx, ml, custAcc, 0)
 	// …the money is frozen in revoked_credits (NOT refunded)…
 	require.Equal(t, int64(70), sysBal(t, ctx, ml, ledger.RevokedCredits, cur))
 	// …the spent 30 stays as revenue…
 	require.Equal(t, int64(30), sysBal(t, ctx, ml, ledger.PlatformRevenue, cur))
-	requireConserved(t, ctx, ml, cur)
+	requireConserved(t, ctx, pool, merchantID, cur)
 
 	// Idempotent: re-deriving the revoked grant claws nothing more.
 	require.NoError(t, l.MaterializeGrant(ctx, lot))
 	mustBal(t, ctx, ml, custAcc, 0)
 	require.Equal(t, int64(70), sysBal(t, ctx, ml, ledger.RevokedCredits, cur))
-	requireConserved(t, ctx, ml, cur)
+	requireConserved(t, ctx, pool, merchantID, cur)
 }
 
 // The clawback is a pure reversing transfer, so it is reversible at the ledger
@@ -68,9 +71,9 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	require.NoError(t, err)
 
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
-	clawed, err := l.RevokeGrant(ctx, lot.ID, "mistake", false)
+	_, err = l.Revoke(ctx, lot.ID, "mistake")
 	require.NoError(t, err)
-	require.Equal(t, int64(100), clawed)
+	require.NoError(t, l.MaterializeGrant(ctx, lot))
 	mustBal(t, ctx, ml, custAcc, 0)
 	require.Equal(t, int64(100), sysBal(t, ctx, ml, ledger.RevokedCredits, cur))
 
@@ -85,13 +88,15 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	require.NoError(t, err)
 	mustBal(t, ctx, ml, custAcc, 100) // restored
 	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.RevokedCredits, cur))
-	requireConserved(t, ctx, ml, cur)
+	requireConserved(t, ctx, pool, merchantID, cur)
 }
 
-// RevokeGrant with refund=true also moves the clawed-back amount out of the
-// platform (revoked_credits -> processor_clearing), netting the deposit so the
-// money has truly left; the customer balance is 0 and the books conserve.
-func TestGrants_RevokeWithRefund(t *testing.T) {
+// #677: two overlapping repairs of the same terminated credit grant (each the
+// converge Repair body — a tx taking the per-customer spend lock, then
+// MaterializeGrant) produce exactly ONE clawback: the loser blocks on the lock,
+// re-reads remaining=0 and no-ops. The 057 partial unique index
+// (idx_ledger_transfers_lot_once) backstops the same invariant in the DB.
+func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + short()
 	t.Cleanup(func() {
@@ -102,18 +107,38 @@ func TestGrants_RevokeWithRefund(t *testing.T) {
 	require.NoError(t, err)
 
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
-	mustBal(t, ctx, ml, custAcc, 100)
-	// processor_clearing = -100 after the deposit.
-	require.Equal(t, int64(-100), sysBal(t, ctx, ml, ledger.RailClearing, cur))
-
-	clawed, err := l.RevokeGrant(ctx, lot.ID, "refunded", true)
+	_, err = l.Revoke(ctx, lot.ID, "admin removed")
 	require.NoError(t, err)
-	require.Equal(t, int64(100), clawed)
 
+	claw := func() error {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		gl := grants.New(gen.New(tx), merchantID)
+		if err := gl.LockCustomer(ctx, customer); err != nil {
+			return err
+		}
+		if err := gl.MaterializeGrant(ctx, lot); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	errs := make(chan error, 2)
+	go func() { errs <- claw() }()
+	go func() { errs <- claw() }()
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.ledger_transfers WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type='credit_revoke'`,
+		merchantID, lot.ID).Scan(&n))
+	require.Equal(t, 1, n, "exactly one clawback transfer")
 	mustBal(t, ctx, ml, custAcc, 0)
-	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.RevokedCredits, cur), "refund drains the frozen credits out")
-	require.Equal(t, int64(0), sysBal(t, ctx, ml, ledger.RailClearing, cur), "money returned: deposit -100 + refund +100")
-	requireConserved(t, ctx, ml, cur)
+	require.Equal(t, int64(100), sysBal(t, ctx, ml, ledger.RevokedCredits, cur))
+	requireConserved(t, ctx, pool, merchantID, cur)
 }
 
 // --- helpers ---
@@ -127,16 +152,11 @@ func sysBal(t *testing.T, ctx context.Context, ml *ledger.Ledger, at ledger.Acco
 	return b
 }
 
-func requireConserved(t *testing.T, ctx context.Context, ml *ledger.Ledger, cur string) {
+func lotSpendable(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID, customer uuid.UUID, cur string, lotID uuid.UUID) bool {
 	t.Helper()
-	net, err := ml.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net, "ledger conserves (Σ == 0)")
-}
-
-func lotSpendable(t *testing.T, ctx context.Context, l *grants.Ledger, customer uuid.UUID, cur string, lotID uuid.UUID) bool {
-	t.Helper()
-	lots, err := l.SpendableLots(ctx, customer, cur)
+	lots, err := gen.New(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+		MerchantID: merchantID, CustomerID: customer, Currency: cur, AsOf: time.Now().UTC(),
+	})
 	require.NoError(t, err)
 	for _, lot := range lots {
 		if lot.ID == lotID {

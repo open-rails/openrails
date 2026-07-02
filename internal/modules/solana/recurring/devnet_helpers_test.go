@@ -57,7 +57,7 @@ const devnetUSDCMintStr = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 // same way production wiring supplies runtime-configured tokens. Without it the
 // service has no USDC mint and PublishPlan fails with "no configured mint".
 func newDevnetPlanService(submitter Submitter) *PlanService {
-	return NewPlanService(submitter, "devnet", solanatokens.ForNetwork("devnet"))
+	return NewPlanServiceWithReader(submitter, nil, "devnet", solanatokens.ForNetwork("devnet"))
 }
 
 // newDevnetPrepareSubscribeService / newDevnetPrepareTierChangeService likewise

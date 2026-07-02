@@ -189,18 +189,6 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 	if len(summaryB) != 1 || summaryB[0].SubscriptionRevenue != 9999 {
 		t.Fatalf("GetSummary(B) = %+v, want only merchant B (9999)", summaryB)
 	}
-
-	// --- Platform-superadmin cross-merchant path sees BOTH ---
-	crossSummary, err := svc.GetSummaryCrossMerchant(ctx, rng, "usd")
-	if err != nil {
-		t.Fatalf("GetSummaryCrossMerchant: %v", err)
-	}
-	if len(crossSummary) != 1 {
-		t.Fatalf("GetSummaryCrossMerchant rows = %d, want 1 aggregated currency row", len(crossSummary))
-	}
-	if crossSummary[0].SubscriptionRevenue != 1000+9999 {
-		t.Fatalf("GetSummaryCrossMerchant subscription_revenue = %d, want %d (both merchants summed)", crossSummary[0].SubscriptionRevenue, 1000+9999)
-	}
 }
 
 func envOr(key, fallback string) string {

@@ -16,6 +16,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -357,8 +358,8 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 	return balances, solBalance, ""
 }
 
-func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.TokenConfig, amountCents int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
-	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, amountCents, currency, r.State.FXProvider, r.State.SolanaPriceProvider)
+func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.TokenConfig, amountMicros int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
+	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(amountMicros), currency, r.State.FXProvider, r.State.SolanaPriceProvider)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenSymbol).Warn("Failed to calculate token quote")
 		return nil

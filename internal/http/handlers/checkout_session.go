@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -114,7 +114,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		if errors.As(err, &vErr) {
 			r.State.CardAbuseGuard.RecordChargeFailure(
 				r.Request.Context(),
-				ginmw.SubjectKeysFromContext(r.Request.Context()),
+				middleware.SubjectKeysFromContext(r.Request.Context()),
 			)
 		}
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{

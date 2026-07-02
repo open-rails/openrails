@@ -124,6 +124,13 @@ func (s *IdempotencyService) TryTakeoverPending(ctx context.Context, operation, 
 	return s.tryTakeoverPendingMemory(fullKey, olderThan), nil
 }
 
+// RenewPending refreshes a still-pending record's CreatedAt (lease heartbeat)
+// so stale-pending takeover only fires for dead holders, not slow ones (#678).
+// No-op (false) if the record is gone or no longer pending.
+func (s *IdempotencyService) RenewPending(ctx context.Context, operation, key string) (bool, error) {
+	return s.TryTakeoverPending(ctx, operation, key, 0)
+}
+
 func (s *IdempotencyService) tryTakeoverPendingRedis(ctx context.Context, redisKey string, olderThan time.Duration) (bool, error) {
 	taken := false
 	err := s.client.Watch(ctx, func(tx *redis.Tx) error {

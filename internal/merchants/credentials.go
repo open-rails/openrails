@@ -487,6 +487,28 @@ func (s *Service) ResolvePaymentProviderAccountByIdentity(ctx context.Context, r
 	}, true, nil
 }
 
+// HasLiveProviderAccounts reports whether ANY merchant declares a provider
+// account on rail with environment=live (global, cross-merchant — same trust
+// boundary as ResolvePaymentProviderAccountByIdentity). Webhook ingestion uses
+// it (#668): CCBill has no HMAC, so its test_mode IP-allowlist bypass is
+// refused while a live CCBill account exists anywhere in the catalog.
+func (s *Service) HasLiveProviderAccounts(ctx context.Context, rail string) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, errors.New("merchants: pgx pool is required")
+	}
+	rail = normalizeProviderSecretType(rail)
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM openrails.payment_provider_accounts
+			 WHERE rail = lower($1) AND environment = 'live'
+		)`, rail).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("merchants: probe live %s provider accounts: %w", rail, err)
+	}
+	return exists, nil
+}
+
 // PutCredential stores/rotates a single per-merchant credential.
 func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
 	if s.secrets == nil {

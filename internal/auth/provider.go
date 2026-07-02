@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	authhttp "github.com/open-rails/authkit/http"
-	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -58,8 +57,8 @@ func bearerToken(header string) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
-	return authprovider.UserContext{
+func userContextFromClaims(cl authhttp.Claims) billingauth.UserContext {
+	return billingauth.UserContext{
 		UserID:          cl.UserID,
 		Email:           cl.Email,
 		EmailVerified:   cl.EmailVerified,
@@ -73,6 +72,6 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		// is a role on the merchant permission-group, evaluated live by
 		// HasAdminPermission against the merchant the route resolves — not read from the token. Merchant is
 		// left empty here; it is populated only on the in-process/delegated paths
-		// that bind an explicit merchant (see routes/ginmw).
+		// that bind an explicit merchant (see internal/http/routes + middleware).
 	}
 }

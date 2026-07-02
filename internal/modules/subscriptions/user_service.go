@@ -42,7 +42,7 @@ type UserSubscriptionService struct {
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	PaymentService      *payments.PaymentService
-	NotificationService NotificationStore
+	NotificationService *NotificationService
 	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
 	clock               clockwork.Clock
@@ -648,7 +648,7 @@ func NewUserSubscriptionService(
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	paymentService *payments.PaymentService,
-	notificationService NotificationStore,
+	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
 	nmiClients map[string]*nmi.NMIClient,
 	clocks ...clockwork.Clock,

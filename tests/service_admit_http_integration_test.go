@@ -10,14 +10,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -48,14 +47,12 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// Mount the same service surface the public server registers.
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/merchant")
+	mux := http.NewServeMux()
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate},
 	}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
 
 	post := func(path string, body any) *httptest.ResponseRecorder {
 		var rdr *bytes.Reader

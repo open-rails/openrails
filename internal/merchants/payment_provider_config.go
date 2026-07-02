@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -362,26 +364,17 @@ func providerAccountLifecycleMatches(archived bool, status string) bool {
 	}
 }
 
+// supportedPaymentProvider is registry-backed (#669): the rail participates in
+// the provider-account catalog.
 func supportedPaymentProvider(provider string) bool {
-	switch normalizeProviderSecretType(provider) {
-	case "stripe", "nmi", "ccbill", "solana":
-		return true
-	default:
-		return false
-	}
+	return rails.SupportsProviderAccounts(models.Rail(provider))
 }
 
+// paymentProviderCredentialKeys returns the MERCHANT-visible credential slots
+// (registry-backed, #669). Operator-only secrets (solana private_key) are
+// deliberately absent from the merchant credential-status view.
 func paymentProviderCredentialKeys(provider string) []string {
-	switch normalizeProviderSecretType(provider) {
-	case "stripe":
-		return []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin"}
-	case "nmi":
-		return []string{"security_key", "webhook_signing_secret"}
-	case "ccbill":
-		return []string{"salt", "datalink_username", "datalink_password"}
-	default:
-		return nil
-	}
+	return rails.MerchantCredentialKeyNames(models.Rail(provider))
 }
 
 func marshalProviderEvidence(publicConfig map[string]string) ([]byte, error) {

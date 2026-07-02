@@ -124,65 +124,79 @@ func TestNMIRefundUnusablePayloadIsTerminal(t *testing.T) {
 }
 
 // TestNMIRefundFindRefundParsesQueryShapes: the verifier read recognizes a
-// successful refund both as its own transaction and as an action on the
-// original, matched on amount; failed refund actions never count.
+// successful refund action on the original transaction (GET /v5/payments/{id}),
+// matched on amount; failed refund actions never count. The action id (the
+// refund's own transaction id) wins when NMI reports one.
 func TestNMIRefundFindRefundParsesQueryShapes(t *testing.T) {
 	payload := testRefundPayload() // 500 cents
 	cases := []struct {
 		name      string
-		xml       string
+		status    int
+		body      string
 		wantFound bool
 		wantTxnID string
+		wantErr   bool
 	}{
 		{
-			name: "refund as separate transaction",
-			xml: `<nm_response>
-				<transaction><transaction_id>txn_original</transaction_id><action><action_type>sale</action_type><success>1</success><amount>10.00</amount></action></transaction>
-				<transaction><transaction_id>txn_refund</transaction_id><action><action_type>refund</action_type><success>1</success><amount>5.00</amount></action></transaction>
-			</nm_response>`,
+			name: "refund action with its own transaction id",
+			body: `{"object":"transaction","id":"txn_original","actions":[
+				{"id":"txn_original","type":"sale","success":true,"amount":"10.00"},
+				{"id":"txn_refund","type":"refund","success":true,"amount":"5.00"}
+			]}`,
 			wantFound: true,
 			wantTxnID: "txn_refund",
 		},
 		{
-			name: "refund as action on the original",
-			xml: `<nm_response>
-				<transaction><transaction_id>txn_original</transaction_id>
-					<action><action_type>sale</action_type><success>1</success><amount>10.00</amount></action>
-					<action><action_type>refund</action_type><success>1</success><amount>-5.00</amount></action>
-				</transaction>
-			</nm_response>`,
+			name: "refund action without an id falls back to the original",
+			body: `{"object":"transaction","id":"txn_original","actions":[
+				{"type":"sale","success":true,"amount":"10.00"},
+				{"type":"refund","success":true,"amount":"-5.00"}
+			]}`,
 			wantFound: true,
 			wantTxnID: "txn_original",
 		},
 		{
 			name: "amount mismatch is not our refund",
-			xml: `<nm_response>
-				<transaction><transaction_id>txn_refund</transaction_id><action><action_type>refund</action_type><success>1</success><amount>3.00</amount></action></transaction>
-			</nm_response>`,
+			body: `{"object":"transaction","id":"txn_original","actions":[
+				{"type":"refund","success":true,"amount":"3.00"}
+			]}`,
 			wantFound: false,
 		},
 		{
 			name: "failed refund action does not count",
-			xml: `<nm_response>
-				<transaction><transaction_id>txn_refund</transaction_id><action><action_type>refund</action_type><success>0</success><amount>5.00</amount></action></transaction>
-			</nm_response>`,
+			body: `{"object":"transaction","id":"txn_original","actions":[
+				{"type":"refund","success":false,"amount":"5.00"}
+			]}`,
 			wantFound: false,
 		},
 		{
 			name:      "no refund anywhere",
-			xml:       `<nm_response><transaction><transaction_id>txn_original</transaction_id><action><action_type>sale</action_type><success>1</success><amount>10.00</amount></action></transaction></nm_response>`,
+			body:      `{"object":"transaction","id":"txn_original","actions":[{"type":"sale","success":true,"amount":"10.00"}]}`,
 			wantFound: false,
+		},
+		{
+			name:    "transaction unknown at provider is an error, not a silent no",
+			status:  http.StatusNotFound,
+			body:    `{"type":"notFound","error_code":"E_NOT_FOUND","message":"payment not found"}`,
+			wantErr: true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(w, tc.xml)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				fmt.Fprint(w, tc.body)
 			}))
 			t.Cleanup(srv.Close)
 			h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
 
 			txnID, found, err := h.findRefund(h.Clients["mobius"], payload)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantFound, found)
 			if tc.wantFound {

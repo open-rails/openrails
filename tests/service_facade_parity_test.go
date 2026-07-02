@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -18,8 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -126,10 +125,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// Build the service-credential-authenticated PUBLIC service routes (issue #222)
 	// directly, with a stub resolver granting the credit + entitlement permissions. This
 	// is the same surface registered on the public handler at /v1/merchant/*.
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/merchant")
+	mux := http.NewServeMux()
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{
 			controlplane.PermMerchantCustomerSettingsRead,
@@ -138,7 +134,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermMerchantCustomerSettingsRead,
 		},
 	}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
 
 	withServiceCredential := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -177,12 +174,11 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// 4) The same real service routes accept a resolved first-party service JWT
 	// principal; no OpenRails-generated runtime token is needed on these paths.
-	jwtRouter := gin.New()
-	jwtRouter.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	jwtGroup := jwtRouter.Group("/v1/merchant")
+	jwtMux := http.NewServeMux()
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(ginrouter.New(jwtGroup, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: jwtResolver})})
+	httproutes.RegisterServiceRoutes(httprouter.NewMux(jwtMux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: jwtResolver})})
+	jwtRouter := middleware.ChainHTTP(jwtMux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}

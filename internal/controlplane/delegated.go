@@ -89,7 +89,7 @@ func (r *ResolvedDelegated) HasPermission(perm string) bool {
 // to ResolvedDelegated. When OpenRails runs as a subsystem the embedding host is
 // TRUSTED (in process), so its supplied permissions are authoritative — no
 // allowlist (#564); merchant + subject must be explicit. Shared by the gin self
-// surface (ginmw) and the gin-free merchant routes so both gate the same way.
+// surface and the merchant routes (internal/http/middleware + routes) so both gate the same way.
 func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*ResolvedDelegated, error) {
 	if p == nil {
 		return nil, billingauth.ErrDelegatedPrincipalInvalid

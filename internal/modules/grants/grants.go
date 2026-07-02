@@ -147,11 +147,6 @@ func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason strin
 	return l.terminate(ctx, grantID, "revoke", reason, asOf)
 }
 
-// Expire appends an 'expire' event terminating the grant (derive-1).
-func (l *Ledger) Expire(ctx context.Context, grantID uuid.UUID) (gen.OpenrailsGrant, error) {
-	return l.terminate(ctx, grantID, "expire", "expired", time.Time{})
-}
-
 // terminate appends a termination event (revoke/expire) superseding the grant.
 // asOf is the effective revocation instant recorded on starts_at (valid time);
 // the zero Time falls back to now(), mirroring Grant()'s zero-StartsAt handling.
@@ -178,21 +173,6 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
 		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
 	})
-}
-
-// Materialize folds every grant for a customer into its projections (derive-2).
-// Idempotent: re-running changes nothing.
-func (l *Ledger) Materialize(ctx context.Context, customer uuid.UUID) error {
-	gs, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
-	if err != nil {
-		return fmt.Errorf("grants: list grants: %w", err)
-	}
-	for i := range gs {
-		if err := l.MaterializeGrant(ctx, gs[i]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // MaterializeGrant projects a single grant event (derive-2): entitlement windows
@@ -472,77 +452,15 @@ func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.OpenrailsGrant
 	return err
 }
 
-// RevokeGrant is the high-level revoke operation: it appends the revoke event,
-// projects it (derive-2 — for a credit lot this claws the unspent remainder to
-// revoked_credits; for an entitlement it retracts the windows; ownership drops
-// from the roster), and OPTIONALLY refunds the clawed-back amount out of the
-// platform (DR revoked_credits / CR processor_clearing). The `refund` flag is the
-// operator authorization; the actual external provider refund (Stripe/NMI/Solana)
-// is triggered by the CALLER using the returned clawed-back amount. Returns the
-// amount clawed back (0 for non-credit grants). Clawback-only is reversible; a
-// refund is not.
-func (l *Ledger) RevokeGrant(ctx context.Context, grantID uuid.UUID, reason string, refund bool) (int64, error) {
-	if _, err := l.Revoke(ctx, grantID, reason); err != nil {
-		return 0, err
-	}
-	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
-	if err != nil {
-		return 0, fmt.Errorf("grants: reload grant %s: %w", grantID, err)
-	}
-	var clawed int64
-	if Kind(g.Kind) == Credit && g.Currency != nil {
-		// Capture the unspent remainder BEFORE clawback applies (after, it's 0).
-		clawed, err = l.q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: l.merchant, GrantID: g.ID})
-		if err != nil {
-			return 0, err
-		}
-	}
-	if err := l.MaterializeGrant(ctx, g); err != nil {
-		return 0, err
-	}
-	if refund && clawed > 0 && g.Currency != nil {
-		rev, err := l.money.EnsureSystemAccount(ctx, ledger.RevokedCredits, *g.Currency)
-		if err != nil {
-			return 0, err
-		}
-		clearing, err := l.money.EnsureSystemAccount(ctx, ledger.RailClearing, *g.Currency)
-		if err != nil {
-			return 0, err
-		}
-		src, sid, lot, c := "grant_refund", g.ID.String(), g.ID, g.CustomerID
-		if _, err := l.money.Apply(ctx, ledger.Transfer{
-			Debit: rev, Credit: clearing, Amount: clawed, Currency: *g.Currency, Type: "credit_refund",
-			Source: &src, SourceID: &sid, GrantID: &lot, Customer: &c,
-		}); err != nil {
-			return 0, fmt.Errorf("grants: refund leg for %s: %w", g.ID, err)
-		}
-	}
-	return clawed, nil
-}
-
-// LiveGrants returns the customer's non-terminated grants — the ownership/access
-// roster read directly off the ledger.
-func (l *Ledger) LiveGrants(ctx context.Context, customer uuid.UUID) ([]gen.OpenrailsGrant, error) {
-	return l.q.ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
-}
-
-// RevokeBySource appends a revoke event to every LIVE grant of the customer that
-// matches `kind` + one of `sourceTypes` + `sourceID` — the write-path companion
-// to a source-keyed effect revocation. Effect revocation (entitlement-window
-// revoke / credit clawback) historically wrote the EFFECT directly while leaving
-// the grant "live", so the ledger drifted from reality and the DERIVE grant-tier
-// checks would mis-fire. Calling this alongside the effect revoke keeps the grant
-// ledger the source of truth: the grant is terminated, so DERIVE sees a terminated
-// grant with a (separately) retracted effect — consistent. Idempotent: a grant
-// that is already terminated is skipped (a grant terminates at most once). The
-// `sourceID` is compared as the grant's free-text source_id (e.g. a subscription
-// or payment UUID string).
-func (l *Ledger) RevokeBySource(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string) error {
-	return l.RevokeBySourceAsOf(ctx, customer, kind, sourceTypes, sourceID, reason, time.Time{})
-}
-
-// RevokeBySourceAsOf is RevokeBySource with an explicit effective revocation instant
-// threaded onto each termination's starts_at (valid time). The zero Time means "now".
+// RevokeBySourceAsOf appends a revoke event to every LIVE grant of the customer
+// that matches `kind` + one of `sourceTypes` + `sourceID` — the write-path
+// companion to a source-keyed effect revocation, keeping the grant ledger the
+// source of truth (the grant is terminated, so DERIVE sees a terminated grant
+// with a separately retracted effect — consistent). Idempotent: an
+// already-terminated grant is skipped. `sourceID` is compared as the grant's
+// free-text source_id (e.g. a subscription or payment UUID string). asOf is the
+// effective revocation instant threaded onto each termination's starts_at
+// (valid time); the zero Time means "now".
 func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string, asOf time.Time) error {
 	all, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
 	if err != nil {

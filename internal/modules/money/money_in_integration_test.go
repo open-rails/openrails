@@ -4,11 +4,15 @@ package money_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jonboulle/clockwork"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,11 +22,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/riverqueue/river"
@@ -60,10 +66,23 @@ func moneyInEnvWithDB(t *testing.T) (*money.MoneyService, *db.DB, *pgxpool.Pool,
 type fakeCharger struct {
 	charges    []money.ChargeRequest
 	declineAll bool
+	// ambiguous simulates a transport failure AFTER the send (timeout,
+	// connection reset): the charge may have landed, the response is lost.
+	ambiguous bool
+	// transientFailures simulates a clean pre-send failure (provider offline)
+	// for the first N attempts.
+	transientFailures int
 }
 
 func (f *fakeCharger) ChargeSavedMethod(_ context.Context, req money.ChargeRequest) (money.ChargeResult, error) {
 	f.charges = append(f.charges, req)
+	if f.transientFailures > 0 {
+		f.transientFailures--
+		return money.ChargeResult{}, errors.New("provider offline")
+	}
+	if f.ambiguous {
+		return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("timeout after send")}
+	}
 	if f.declineAll {
 		return money.ChargeResult{Declined: true}, nil
 	}
@@ -231,12 +250,70 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 	require.Equal(t, 1, al.calls)
 }
 
-// --- #239 auto-top-up ---
+// --- #239/#674 auto-top-up (write-through topup_charge intents) ---
 
-func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
-	svc, pool, payer, currency, ctx := moneyInEnv(t)
+// topupHarness drives the #674 flow the AutoTopupWorker runs in production:
+// ListDueAutoTopups → EnqueueAndExecute(topup_charge) through a real intent
+// Runner over the real ledger, with a scripted Charger.
+type topupHarness struct {
+	svc    *money.MoneyService
+	runner *intents.Runner
+	ch     *fakeCharger
+}
+
+func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, clients map[string]*nmi.NMIClient, ch *fakeCharger) *topupHarness {
+	t.Helper()
+	runner := &intents.Runner{
+		Store:    intents.NewStore(dbi),
+		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, clients, nil)),
+	}
+	t.Cleanup(func() {
+		_, _ = dbi.Pool().Exec(context.Background(),
+			"DELETE FROM openrails.provider_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
+	})
+	return &topupHarness{svc: svc, runner: runner, ch: ch}
+}
+
+// advance moves the runner's clock forward so due/verify claims see backoff
+// windows as elapsed.
+func (h *topupHarness) advance(d time.Duration) {
+	h.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(d))
+}
+
+// runOnce mirrors AutoTopupWorker.Work for one merchant pass and returns the
+// post-execution intents.
+func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.Duration) []gen.OpenrailsProviderIntent {
+	t.Helper()
+	candidates, err := h.svc.ListDueAutoTopups(ctx, cooldown)
+	require.NoError(t, err)
+	out := make([]gen.OpenrailsProviderIntent, 0, len(candidates))
+	for _, c := range candidates {
+		intent, err := h.runner.EnqueueAndExecute(ctx, intents.EnqueueParams{
+			MerchantID: c.MerchantID,
+			Provider:   c.Rail,
+			IntentType: intents.TypeTopupCharge,
+			Payload: intents.TopupChargePayload{
+				CustomerID:      c.CustomerID,
+				Currency:        c.Currency,
+				AmountNative:    c.AmountNative,
+				PaymentMethodID: c.PaymentMethodID,
+				EpisodeAnchor:   c.EpisodeAnchor,
+			},
+			IdempotencyKey: intents.TopupChargeIdempotencyKey(c.CustomerID, c.Currency, c.EpisodeAnchor),
+			NextAttemptAt:  time.Now().UTC(),
+			Origin:         intents.OriginSystem,
+			OriginReason:   "test auto-top-up",
+		})
+		require.NoError(t, err)
+		out = append(out, intent)
+	}
+	return out
+}
+
+func seedTopupAccount(t *testing.T, ctx context.Context, svc *money.MoneyService, pool *pgxpool.Pool, payer identity.CustomerID, rail string) uuid.UUID {
+	t.Helper()
 	thr, amt := int64(1000), int64(50_000_000)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
+	pm := seedPaymentMethod(t, pool, ctx, payer, rail)
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
@@ -244,48 +321,170 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
+	return pm
+}
 
-	ch := &fakeCharger{}
-	n, err := svc.RunAutoTopups(ctx, ch, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Len(t, ch.charges, 1)
+func TestAutoTopupIntent_ChargesAndDeposits(t *testing.T) {
+	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
+	pm := seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
+	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{})
+
+	done := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, done, 1)
+	require.Equal(t, intents.StatusSucceeded, done[0].Status)
+	require.Len(t, h.ch.charges, 1)
 	// auto_topup_amount is stored in native units; the rail receives cents.
-	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
-	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
+	require.Equal(t, moneyutil.Cents(5000), h.ch.charges[0].AmountCents)
+	require.Equal(t, pm, h.ch.charges[0].PaymentMethodID)
+	// #674: the provider idempotency key derives from the intent id, within
+	// NMI's 50-char order-id budget.
+	require.Equal(t, "topup:"+done[0].ID.String(), h.ch.charges[0].IdempotencyKey)
 
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
 	// Ledger uses internal units: 500 seed + configured native-unit top-up deposited.
 	require.Equal(t, int64(50_000_500), bal.Balance)
 
-	// Re-run within cooldown: no second charge.
-	n2, err := svc.RunAutoTopups(ctx, ch, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 0, n2)
-	require.Len(t, ch.charges, 1)
+	// Re-run within cooldown: not even a candidate.
+	require.Empty(t, h.runOnce(t, ctx, time.Hour))
+	require.Len(t, h.ch.charges, 1)
 }
 
-func TestRunAutoTopups_Declined(t *testing.T) {
-	svc, pool, payer, currency, ctx := moneyInEnv(t)
-	thr, amt := int64(1000), int64(50_000_000)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
-	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
-	})
-	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
-	require.NoError(t, err)
+func TestAutoTopupIntent_Declined(t *testing.T) {
+	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
+	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
+	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{declineAll: true})
 
-	ch := &fakeCharger{declineAll: true}
-	n, err := svc.RunAutoTopups(ctx, ch, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 0, n)
-	require.Len(t, ch.charges, 1, "charge attempted")
+	done := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, done, 1)
+	require.Equal(t, intents.StatusFailedTerminal, done[0].Status)
+	require.Len(t, h.ch.charges, 1, "charge attempted")
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "declined -> no deposit")
+
+	// Decline stamped the cooldown: no immediate re-charge hammering.
+	require.Empty(t, h.runOnce(t, ctx, time.Hour))
+	require.Len(t, h.ch.charges, 1)
+}
+
+// Crash injection (#674): ambiguous charge (timeout after send) parks as
+// unknown_needs_verify — never a decline, never a same-episode blind
+// re-charge. When the local deposit exists (the crash hit AFTER finalize
+// started), the verifier resolves without any provider call.
+func TestAutoTopupIntent_AmbiguousThenVerifyResolves(t *testing.T) {
+	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
+	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
+	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{ambiguous: true})
+
+	done := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, done, 1)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
+	require.Len(t, h.ch.charges, 1)
+
+	// Same episode re-scan: the candidate is still due (no stamp), maps onto
+	// the SAME intent, and the runner refuses to blind-retry an in-verify
+	// intent — zero additional charges.
+	again := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, again, 1)
+	require.Equal(t, done[0].ID, again[0].ID, "same episode = same intent")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, again[0].Status)
+	require.Len(t, h.ch.charges, 1, "no blind re-charge while unresolved")
+
+	// Simulate "the charge actually landed and the deposit was recorded just
+	// before the crash": land the deposit under the intent-derived source id.
+	require.NoError(t, svc.FinalizeAutoTopup(ctx, payer.UUID(), currency, 50_000_000, "topup:"+done[0].ID.String()))
+
+	// The verifier resolves from the local deposit — exactly one deposit, one
+	// external charge, intent succeeded.
+	h.advance(2 * time.Minute)
+	_, err := h.runner.RunVerifyOnce(ctx)
+	require.NoError(t, err)
+	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, final.Status)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
+	require.NoError(t, err)
+	require.Equal(t, int64(50_000_500), bal.Balance, "exactly one deposit")
+}
+
+// Crash injection (#674): die AFTER the external charge but BEFORE the
+// deposit. The verifier finds the sale at the provider by the intent-derived
+// order id and finalizes WITHOUT a second charge.
+func TestAutoTopupIntent_ChargeThenCrashBeforeDeposit_NoDoubleCharge(t *testing.T) {
+	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
+	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
+
+	// Fake NMI query API: reports a successful sale for the searched order id
+	// once charged=true (the first charge landed at the provider).
+	var charged atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		orderID := r.Form.Get("order_id")
+		if charged.Load() {
+			_, _ = w.Write([]byte(`<nm_response><transaction><transaction_id>txn-topup-1</transaction_id><order_id>` + orderID + `</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<nm_response></nm_response>`))
+	}))
+	t.Cleanup(srv.Close)
+	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	require.NoError(t, err)
+	client.QueryURL = srv.URL
+
+	ch := &fakeCharger{ambiguous: true} // first attempt: charge sent, response lost
+	h := newTopupHarness(t, dbi, svc, map[string]*nmi.NMIClient{string(models.RailNMI): client}, ch)
+
+	done := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, done, 1)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
+	require.Len(t, ch.charges, 1)
+	charged.Store(true) // the lost response was actually a success at the provider
+
+	// Verifier: finds the sale by the intent-derived order id, deposits, and
+	// succeeds — one charge, one deposit.
+	h.advance(2 * time.Minute)
+	_, err = h.runner.RunVerifyOnce(ctx)
+	require.NoError(t, err)
+	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, final.Status)
+	require.Len(t, ch.charges, 1, "verification never re-charges")
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
+	require.NoError(t, err)
+	require.Equal(t, int64(50_000_500), bal.Balance)
+}
+
+// Provider offline (#674): the charge attempt fails cleanly, the intent stays
+// live (failed_retryable), and once the provider returns the SAME intent (and
+// so the same wire ref) lands the charge — nothing lost, no fresh key.
+func TestAutoTopupIntent_ProviderOfflineParksThenLands(t *testing.T) {
+	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
+	// Stripe-family rail: clean transient failures re-send under the SAME
+	// Stripe idempotency key (replay-safe) without a provider read.
+	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailStripe))
+	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{transientFailures: 1})
+
+	done := h.runOnce(t, ctx, time.Hour)
+	require.Len(t, done, 1)
+	require.Equal(t, intents.StatusFailedRetryable, done[0].Status)
+	require.Len(t, h.ch.charges, 1)
+	firstWireRef := h.ch.charges[0].IdempotencyKey
+
+	// Provider is back; the scheduled executor drains the SAME intent and
+	// re-sends under the ORIGINAL derived key (the pre-send verify answers
+	// "not executed" for a clean transient failure).
+	h.advance(5 * time.Minute)
+	_, err := h.runner.RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, final.Status)
+	require.Len(t, h.ch.charges, 2)
+	require.Equal(t, firstWireRef, h.ch.charges[1].IdempotencyKey, "retry reuses the ORIGINAL derived key")
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
+	require.NoError(t, err)
+	require.Equal(t, int64(50_000_500), bal.Balance)
 }
 
 func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
@@ -355,22 +554,34 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	seen := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		require.Equal(t, "sale", r.Form.Get("type"))
-		require.Equal(t, "test-security-key", r.Form.Get("security_key"))
-		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
-		require.Equal(t, "1.23", r.Form.Get("amount"))
-		require.Equal(t, money.DefaultCurrency, r.Form.Get("currency"))
-		require.Equal(t, "nmi-scope-ok", r.Form.Get("orderid"))
-		require.Equal(t, "invoice", r.Form.Get("order_description"))
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/payments/sale", r.URL.Path)
+		require.Equal(t, "test-security-key", r.Header.Get("Authorization"))
+		var req struct {
+			Amount        json.Number `json:"amount"`
+			Currency      string      `json:"currency"`
+			CustomerVault struct {
+				ID string `json:"id"`
+			} `json:"customer_vault"`
+			OrderDetails struct {
+				ID               string `json:"id"`
+				OrderDescription string `json:"order_description"`
+			} `json:"order_details"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Equal(t, "vault_"+pm.String(), req.CustomerVault.ID)
+		require.Equal(t, "1.23", req.Amount.String())
+		require.Equal(t, money.DefaultCurrency, req.Currency)
+		require.Equal(t, "nmi-scope-ok", req.OrderDetails.ID)
+		require.Equal(t, "invoice", req.OrderDetails.OrderDescription)
 		seen <- struct{}{}
-		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&transactionid=txn_nmi_invoice_123&response_code=100"))
+		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_nmi_invoice_123","response":"1","response_text":"SUCCESS","response_code":"100"}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.DirectPostURL = server.URL
+	client.V5BaseURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
@@ -399,14 +610,13 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		_, _ = w.Write([]byte("response=2&responsetext=Do not honor&transactionid=txn_declined&response_code=201"))
+		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_declined","response":"2","response_text":"Do not honor","response_code":"201"}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.DirectPostURL = server.URL
+	client.V5BaseURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
@@ -449,19 +659,28 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 
 	seen := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		require.Equal(t, "sale", r.Form.Get("type"))
-		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
-		require.Equal(t, "0.05", r.Form.Get("amount"))
-		require.Equal(t, "invoice:"+inv.ID.String()+":50000", r.Form.Get("orderid"))
+		require.Equal(t, "/payments/sale", r.URL.Path)
+		var req struct {
+			Amount        json.Number `json:"amount"`
+			CustomerVault struct {
+				ID string `json:"id"`
+			} `json:"customer_vault"`
+			OrderDetails struct {
+				ID string `json:"id"`
+			} `json:"order_details"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Equal(t, "vault_"+pm.String(), req.CustomerVault.ID)
+		require.Equal(t, "0.05", req.Amount.String())
+		require.Equal(t, "inv:"+inv.ID.String()+":a0", req.OrderDetails.ID)
 		seen <- struct{}{}
-		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&transactionid=txn_nmi_invoice_settled&response_code=100"))
+		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_nmi_invoice_settled","response":"1","response_text":"SUCCESS","response_code":"100"}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.DirectPostURL = server.URL
+	client.V5BaseURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
@@ -521,21 +740,21 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 			require.Equal(t, "5", r.Form.Get("amount"))
 			require.Equal(t, "usd", r.Form.Get("currency"))
 			require.Equal(t, inv.ID.String(), r.Form.Get("metadata[openrails_invoice_id]"))
-			require.Equal(t, "invoice:"+inv.ID.String()+":50000:invoice_item", r.Header.Get("Idempotency-Key"))
+			require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0:invoice_item", r.Header.Get("Idempotency-Key"))
 			_, _ = w.Write([]byte(`{"id":"ii_openrails_invoice"}`))
 		case "/v1/invoices":
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "charge_automatically", r.Form.Get("collection_method"))
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("default_payment_method"))
 			require.Equal(t, "include", r.Form.Get("pending_invoice_items_behavior"))
-			require.Equal(t, "invoice:"+inv.ID.String()+":50000:invoice", r.Header.Get("Idempotency-Key"))
+			require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0:invoice", r.Header.Get("Idempotency-Key"))
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"draft"}`))
 		case "/v1/invoices/in_openrails_invoice/finalize":
-			require.Equal(t, "invoice:"+inv.ID.String()+":50000:finalize", r.Header.Get("Idempotency-Key"))
+			require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0:finalize", r.Header.Get("Idempotency-Key"))
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"open","payment_intent":"pi_openrails_invoice"}`))
 		case "/v1/invoices/in_openrails_invoice/pay":
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("payment_method"))
-			require.Equal(t, "invoice:"+inv.ID.String()+":50000:pay", r.Header.Get("Idempotency-Key"))
+			require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0:pay", r.Header.Get("Idempotency-Key"))
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice"}`))
 		default:
 			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
@@ -706,7 +925,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	require.NotNil(t, adapter.charges[0].InvoiceID)
 	require.Equal(t, inv.ID, *adapter.charges[0].InvoiceID)
 	require.Equal(t, pm, adapter.charges[0].PaymentMethodID)
-	require.Equal(t, int64(1), adapter.charges[0].AmountCents)
+	require.Equal(t, moneyutil.Cents(1), adapter.charges[0].AmountCents)
 
 	paid, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
@@ -723,7 +942,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	`, inv.ID).Scan(&paymentCount, &rail, &railPaymentID))
 	require.Equal(t, 1, paymentCount)
 	require.Equal(t, string(models.RailNMI), rail)
-	require.Equal(t, "tx_invoice:"+inv.ID.String()+":500", railPaymentID)
+	require.Equal(t, "tx_invoice:"+inv.ID.String()+":attempt:0", railPaymentID)
 
 	n, err = svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
@@ -773,7 +992,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 		LIMIT 1
 	`, inv.ID).Scan(&rail, &railPaymentID, &failureCode, &failureMessage))
 	require.Equal(t, string(models.RailNMI), rail)
-	require.Equal(t, "declined_invoice:"+inv.ID.String()+":500", railPaymentID)
+	require.Equal(t, "declined_invoice:"+inv.ID.String()+":attempt:0", railPaymentID)
 	require.Equal(t, "card_declined", failureCode)
 	require.Equal(t, "card declined", failureMessage)
 }
@@ -857,17 +1076,28 @@ func TestInvoiceWorker_UsesMerchantInvoiceThresholds(t *testing.T) {
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
+	// Count only this test's invoice: the worker now fans out over every active
+	// merchant in the shared DB (#673).
+	chargesForInvoice := func() int {
+		n := 0
+		for _, c := range adapter.charges {
+			if c.InvoiceID != nil && *c.InvoiceID == inv.ID {
+				n++
+			}
+		}
+		return n
+	}
+	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true},
 	})
 	require.NoError(t, err)
-	require.Empty(t, adapter.charges, "custom collection threshold skips the smaller invoice")
+	require.Zero(t, chargesForInvoice(), "custom collection threshold skips the smaller invoice")
 
-	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
+	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true, UseMonthlyFloor: true},
 	})
 	require.NoError(t, err)
-	require.Len(t, adapter.charges, 1)
+	require.Equal(t, 1, chargesForInvoice())
 
 	paid, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)

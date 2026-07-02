@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/vault"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -28,8 +27,22 @@ type checkoutSaleIdempotencyResult struct {
 type checkoutIdempotencyStore interface {
 	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
 	Fail(ctx context.Context, operation, key string, operationErr error) error
-	Complete(ctx context.Context, operation, key string, result any) error
+	Complete(ctx context.Context, operation, key string, result json.RawMessage) error
 }
+
+// intentExecutor is the write-through provider-intents surface (#674):
+// EnqueueAndExecute posts the durable intent and executes it inline; anything
+// not finished inline is drained by the scheduled executor/verifier.
+type intentExecutor interface {
+	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsProviderIntent, error)
+}
+
+// ErrCheckoutProcessing is returned when the provider write's outcome is not
+// yet final (transport-ambiguous charge being verified, parked on an
+// offline/misconfigured provider, or racing executor). The durable intent
+// finishes the work out-of-band; the client may retry with the SAME
+// idempotency key to observe the final result. It is never a decline.
+var ErrCheckoutProcessing = errors.New("payment is processing; retry with the same idempotency key to check the result")
 
 type CheckoutNMISaleService struct {
 	PurchaseService  *CheckoutPurchaseService
@@ -38,6 +51,9 @@ type CheckoutNMISaleService struct {
 	IdempotencyStore checkoutIdempotencyStore
 	NMIClients       map[string]*nmi.NMIClient
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
+	// Intents executes the durable write-ahead sale intent (#674). Every NMI
+	// charge in this flow goes through it — there is no direct RunSale here.
+	Intents intentExecutor
 }
 
 func NewCheckoutNMISaleService(
@@ -56,18 +72,28 @@ func NewCheckoutNMISaleService(
 	}
 }
 
+// Process runs a one-time NMI sale as a write-through provider intent (#674):
+// durable intent first (unique on the checkout idempotency key), inline
+// execution in this request, provider order id derived from the intent id.
+// A crash/timeout at ANY point leaves a pending/unknown intent the scheduled
+// executor/verifier resolves against the SAME order id — never a blind retry
+// under a fresh key, never a charged-but-unrecorded sale.
 func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, provider string) (*CheckoutResponse, error) {
 	const idempOp = "nmi_sale"
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, errors.New("rail is required")
 	}
-
-	client, err := s.nmiClient(ctx, provider)
-	if err != nil {
+	if s.Intents == nil {
+		return nil, errors.New("checkout sale intent executor not wired")
+	}
+	// Fail fast on misconfiguration instead of parking a user-facing checkout.
+	if _, err := s.nmiClient(ctx, provider); err != nil {
 		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
-	orderID := nmiSaleOrderID(idempotencyKey, req.Metadata)
+	if _, err := customerIDFromUser(user.ID); err != nil {
+		return nil, err
+	}
 
 	idempRec, alreadyExists, err := s.IdempotencyStore.Begin(ctx, idempOp, idempotencyKey)
 	if err != nil {
@@ -81,22 +107,13 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 				log.WithError(err).Warn("failed to unmarshal cached sale result, proceeding anyway")
 				return &CheckoutResponse{Status: "success", Action: "new", Message: "Purchase already completed", TransactionID: cached.TransactionID}, nil
 			}
-			var delayedStart *time.Time
-			if cached.DelayedStart != nil {
-				if t, err := time.Parse(time.RFC3339, *cached.DelayedStart); err == nil {
-					delayedStart = &t
-				}
-			}
-			return &CheckoutResponse{Status: "success", Action: "new", Message: "Purchase already completed", PaymentID: &cached.PaymentID, TransactionID: cached.TransactionID, DelayedStart: delayedStart}, nil
+			return saleResponse(cached, "Purchase already completed"), nil
 		case IdempotencyStatusPending:
 			return nil, errors.New("checkout already in progress, please wait")
 		case IdempotencyStatusFailed:
-			if s.PurchaseService != nil && s.PurchaseService.PaymentService != nil {
-				if existingAttempt, err := s.PurchaseService.PaymentService.GetByMetadataValue(ctx, "nmi_order_id", orderID); err == nil && payments.PaymentStatusCompleted(existingAttempt.Status) {
-					return s.completeNMISaleRegistration(ctx, req, user, price, provider, existingAttempt.TransactionID, idempotencyKey, idempOp, orderID)
-				}
-			}
-			return nil, errors.New("previous checkout attempt failed, please try again")
+			// Fall through: the durable intent below is the source of truth —
+			// it replays a success, reports a decline, or keeps verifying an
+			// ambiguous charge under the ORIGINAL order id.
 		}
 	}
 
@@ -106,82 +123,114 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, err
 	}
 
-	attemptMetadata := nmiSaleAttemptMetadata(idempotencyKey, orderID, req.Metadata, "pending", "")
-	attemptTransactionID := nmiSaleAttemptTransactionID(orderID)
-
-	if s.PurchaseService == nil || s.PurchaseService.PaymentService == nil {
-		err := errors.New("payment service unavailable")
+	tid, err := merchant.Require(ctx)
+	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
+	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+		MerchantID: tid.UUID(),
+		Provider:   provider,
+		IntentType: TypeNMISale,
+		PriceID:    &price.ID,
+		Payload: NMISalePayload{
+			Provider:        provider,
+			CustomerVaultID: customerVaultID,
+			AmountMicros:    price.Amount,
+			Currency:        price.Currency,
+			Description:     fmt.Sprintf("Purchase: %s", product.DisplayName),
+			UserID:          user.ID,
+			PriceID:         price.ID,
+			E2ERunID:        strings.TrimSpace(req.Metadata["e2e_run_id"]),
+		},
+		IdempotencyKey: NMISaleIdempotencyKey(idempotencyKey),
+		NextAttemptAt:  time.Now().UTC(),
+		Origin:         intents.OriginUser,
+		OriginReason:   "checkout one-time sale",
+	})
+	if err != nil {
+		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("post sale intent: %w", err)
+	}
 
-	if existingAttempt, err := s.PurchaseService.PaymentService.GetByMetadataValue(ctx, "nmi_order_id", orderID); err == nil {
-		switch strings.ToLower(strings.TrimSpace(existingAttempt.Status)) {
-		case "", payments.PaymentStatusCompletedValue:
-			return s.completeNMISaleRegistration(ctx, req, user, price, provider, existingAttempt.TransactionID, idempotencyKey, idempOp, orderID)
-		case payments.PaymentStatusPendingValue:
-			return nil, errors.New("NMI sale attempt is already pending, please wait")
-		default:
-			err := errors.New("previous NMI sale attempt failed, retry with a new idempotency key")
-			_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-			return nil, err
+	switch intent.Status {
+	case intents.StatusSucceeded:
+		cached, derr := saleResultFromIntent(intent)
+		if derr != nil {
+			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
 		}
-	} else if !repo.IsNotFound(err) {
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("load NMI sale attempt: %w", err)
-	}
-
-	customerID, err := customerIDFromUser(user.ID)
-	if err != nil {
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-	attempt, err := s.PurchaseService.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuidutil.NewV7(),
-		CustomerID:    customerID,
-		PriceID:       price.ID,
-		Rail:          models.Rail(provider),
-		TransactionID: attemptTransactionID,
-		Amount:        price.Amount,
-		ListAmount:    price.Amount,
-		Currency:      price.Currency,
-		Status:        payments.PaymentStatusPendingValue,
-		Metadata:      attemptMetadata,
-	})
-	if err != nil {
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("reserve NMI sale attempt: %w", err)
-	}
-
-	amountCents, err := moneyutil.MicrosToCentsExact(price.Amount)
-	if err != nil {
-		_ = s.PurchaseService.PaymentService.MarkFailed(ctx, attempt.ID)
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("NMI sale amount must be representable in whole cents: %w", err)
-	}
-	saleResp, err := client.RunSale(nmi.SaleParams{
-		CustomerVaultID:  customerVaultID,
-		Amount:           amountCents,
-		Currency:         price.Currency,
-		OrderDescription: fmt.Sprintf("Purchase: %s", product.DisplayName),
-		OrderID:          orderID,
-	})
-	if err != nil {
-		_ = s.PurchaseService.PaymentService.MarkFailed(ctx, attempt.ID)
+		payload, _ := json.Marshal(cached)
+		_ = s.IdempotencyStore.Complete(ctx, idempOp, idempotencyKey, payload)
+		return saleResponse(cached, "Purchase completed successfully"), nil
+	case intents.StatusFailedTerminal:
+		// Verified-clean decline/rejection: no money moved. Cleaning up a vault
+		// created for this attempt mirrors the pre-intent behavior.
 		if createdPaymentMethod != nil && s.VaultService != nil {
 			_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
 		}
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("payment failed: %w", err)
+		reason := "payment failed"
+		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
+			reason = "payment failed: " + *intent.LastFailureReason
+		}
+		failErr := errors.New(reason)
+		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, failErr)
+		return nil, failErr
+	default:
+		// pending (parked), in_flight (racing executor), unknown_needs_verify,
+		// failed_retryable: the intent ledger finishes it. Recording a redis
+		// failure lets the client's retry re-drive the SAME intent immediately.
+		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+		return nil, ErrCheckoutProcessing
 	}
-	completedAttempt, err := s.PurchaseService.PaymentService.CompleteProviderAttempt(ctx, attempt.ID, saleResp.TransactionID, nmiSaleAttemptMetadata(idempotencyKey, orderID, req.Metadata, "completed", saleResp.TransactionID))
-	if err != nil {
-		log.WithError(err).WithField("transaction_id", saleResp.TransactionID).Error("failed to complete NMI sale attempt after successful provider sale")
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("payment processed but failed to record provider transaction: %w", err)
-	}
+}
 
-	return s.completeNMISaleRegistration(ctx, req, user, price, provider, completedAttempt.TransactionID, idempotencyKey, idempOp, orderID)
+// saleResultFromIntent reads the producer-facing evidence off a succeeded
+// sale intent.
+func saleResultFromIntent(intent gen.OpenrailsProviderIntent) (checkoutSaleIdempotencyResult, error) {
+	var out checkoutSaleIdempotencyResult
+	var evidence struct {
+		TransactionID string `json:"transaction_id"`
+		PaymentID     string `json:"payment_id"`
+		DelayedStart  string `json:"delayed_start"`
+	}
+	if len(intent.ResultEvidence) == 0 {
+		return out, errors.New("no result evidence")
+	}
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return out, err
+	}
+	out.TransactionID = evidence.TransactionID
+	if evidence.PaymentID != "" {
+		if id, err := uuid.Parse(evidence.PaymentID); err == nil {
+			out.PaymentID = id
+		}
+	}
+	if evidence.DelayedStart != "" {
+		ds := evidence.DelayedStart
+		out.DelayedStart = &ds
+	}
+	return out, nil
+}
+
+func saleResponse(cached checkoutSaleIdempotencyResult, message string) *CheckoutResponse {
+	var delayedStart *time.Time
+	if cached.DelayedStart != nil {
+		if t, err := time.Parse(time.RFC3339, *cached.DelayedStart); err == nil {
+			delayedStart = &t
+		}
+	}
+	resp := &CheckoutResponse{
+		Status:        "success",
+		Action:        "new",
+		Message:       message,
+		TransactionID: cached.TransactionID,
+		DelayedStart:  delayedStart,
+	}
+	if cached.PaymentID != uuid.Nil {
+		id := cached.PaymentID
+		resp.PaymentID = &id
+	}
+	return resp
 }
 
 func (s *CheckoutNMISaleService) nmiClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
@@ -193,79 +242,4 @@ func (s *CheckoutNMISaleService) nmiClient(ctx context.Context, provider string)
 		return nil, fmt.Errorf("missing client")
 	}
 	return client, nil
-}
-
-func (s *CheckoutNMISaleService) completeNMISaleRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, provider string, transactionID string, idempotencyKey string, idempOp string, orderID string) (*CheckoutResponse, error) {
-	result, err := s.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        user.ID,
-		PriceID:       price.ID,
-		Rail:          provider,
-		TransactionID: transactionID,
-		Amount:        price.Amount,
-		Currency:      price.Currency,
-		Metadata: func() map[string]any {
-			if req.Metadata == nil {
-				return nil
-			}
-			if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-				return map[string]any{"e2e_run_id": runID, "order_id": orderID}
-			}
-			return nil
-		}(),
-	})
-	if err != nil {
-		log.WithError(err).WithField("transaction_id", transactionID).Error("failed to register purchase after successful NMI sale")
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("payment processed but failed to register: %w", err)
-	}
-
-	var delayedStartStr *string
-	if result.DelayedStart != nil {
-		str := result.DelayedStart.Format(time.RFC3339)
-		delayedStartStr = &str
-	}
-	_ = s.IdempotencyStore.Complete(ctx, idempOp, idempotencyKey, checkoutSaleIdempotencyResult{
-		TransactionID: transactionID,
-		PaymentID:     result.PaymentID,
-		DelayedStart:  delayedStartStr,
-	})
-
-	return &CheckoutResponse{
-		Status:        "success",
-		Action:        "new",
-		Message:       "Purchase completed successfully",
-		PaymentID:     &result.PaymentID,
-		TransactionID: transactionID,
-		DelayedStart:  result.DelayedStart,
-	}, nil
-}
-
-func nmiSaleAttemptTransactionID(orderID string) string {
-	return "nmi_sale_attempt:" + strings.TrimSpace(orderID)
-}
-
-func nmiSaleOrderID(idempotencyKey string, metadata map[string]string) string {
-	orderID := nmiIdempotentOrderID("sale", idempotencyKey)
-	if orderID == "" {
-		orderID = uuid.New().String()
-	}
-	if runID := strings.TrimSpace(metadata["e2e_run_id"]); runID != "" {
-		orderID = fmt.Sprintf("%s_e2e_%s", orderID, nmiOrderIDSuffix(runID))
-	}
-	return orderID
-}
-
-func nmiSaleAttemptMetadata(idempotencyKey string, orderID string, requestMetadata map[string]string, status string, transactionID string) map[string]any {
-	metadata := map[string]any{
-		"checkout_idempotency_key": strings.TrimSpace(idempotencyKey),
-		"nmi_order_id":             strings.TrimSpace(orderID),
-		"nmi_attempt_status":       status,
-	}
-	if runID := strings.TrimSpace(requestMetadata["e2e_run_id"]); runID != "" {
-		metadata["e2e_run_id"] = runID
-	}
-	if transactionID != "" {
-		metadata["provider_transaction_id"] = transactionID
-	}
-	return metadata
 }

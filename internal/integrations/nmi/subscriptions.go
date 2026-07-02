@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 type CardUserData struct {
@@ -26,11 +28,13 @@ type RecurringPaymentData struct {
 	Email           string
 	Currency        string
 	PaymentToken    string
-	Amount          float64
-	OrderID         string
-	PONumber        string
-	CustomerID      string
-	StartDate       string
+	// Amount is DECIMAL MAJOR UNITS (dollars, typed #671) — NMI classic
+	// recurring takes a decimal amount string.
+	Amount     moneyutil.MajorUnits
+	OrderID    string
+	PONumber   string
+	CustomerID string
+	StartDate  string
 }
 
 type QueryFilter struct {
@@ -88,7 +92,7 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 		return nil, errors.New("either customer vault or payment token is required")
 	}
 
-	amtStr := strconv.FormatFloat(data.Amount, 'f', 2, 64)
+	amtStr := strconv.FormatFloat(float64(data.Amount), 'f', 2, 64)
 	values := url.Values{
 		"type":              {"sale"},
 		"amount":            {amtStr},
@@ -148,54 +152,76 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	}, nil
 }
 
-// UpdateRecurringSubscription updates the money terms of a live subscription
-// via PATCH /v5/subscriptions/{id}. planAmount is a two-decimal dollar string
-// (unchanged classic signature).
+// UpdateRecurringSubscription stays on classic Direct Post DELIBERATELY
+// (#663): PATCH /v5/subscriptions/{id} is documented but the live gateway
+// answers E_ROUTE_NOT_FOUND (verified 2026-07-01) — subscription updates have
+// no working v5 route.
 func (c *NMIClient) UpdateRecurringSubscription(subscriptionID, planAmount string, planPayments int) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err
 	}
-	subID := strings.TrimSpace(subscriptionID)
-	if subID == "" || strings.TrimSpace(planAmount) == "" {
+	if strings.TrimSpace(subscriptionID) == "" || strings.TrimSpace(planAmount) == "" {
 		return "", errors.New("missing required fields: subscriptionID, planAmount")
 	}
-	amountCents, err := v5AmountToCents(planAmount)
-	if err != nil {
-		return "", fmt.Errorf("invalid plan amount %q: %w", planAmount, err)
+
+	values := url.Values{
+		"recurring":       {"update_subscription"},
+		"security_key":    {c.SecurityKey},
+		"subscription_id": {subscriptionID},
+		"plan_amount":     {planAmount},
+		"plan_payments":   {fmt.Sprintf("%d", planPayments)},
 	}
 
-	body := map[string]any{
-		"plan_amount":   centsJSONAmount(amountCents),
-		"plan_payments": planPayments,
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return "", err
 	}
-	var sub V5Subscription
-	if err := c.sendV5Request(http.MethodPatch, "/subscriptions/"+url.PathEscape(subID), body, &sub); err != nil {
-		return "", fmt.Errorf("failed to update subscription: %w", err)
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return "", err
 	}
-	return sub.ID, nil
+	if !isDirectResponseApproved(output) {
+		return "", fmt.Errorf("failed to update subscription: %s", responseText(output, response))
+	}
+
+	return response, nil
 }
 
-// UpdateSubscriptionPaymentSource repoints a subscription at a different vault
-// customer via PATCH /v5/subscriptions/{id} (payment_details.customer_vault_id).
+// UpdateSubscriptionPaymentSource stays on classic Direct Post DELIBERATELY
+// (#663): the v5 subscription-update route does not exist on the live gateway
+// (see UpdateRecurringSubscription).
 func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaultID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	subID := strings.TrimSpace(subscriptionID)
-	if subID == "" {
+	if strings.TrimSpace(subscriptionID) == "" {
 		return errors.New("subscription ID is required")
 	}
-	vaultID := strings.TrimSpace(customerVaultID)
-	if vaultID == "" {
+	if strings.TrimSpace(customerVaultID) == "" {
 		return errors.New("customer vault ID is required")
 	}
 
-	body := map[string]any{
-		"payment_details": &v5PaymentDetails{CustomerVaultID: vaultID},
+	values := url.Values{
+		"recurring":         {"update_subscription"},
+		"security_key":      {c.SecurityKey},
+		"subscription_id":   {subscriptionID},
+		"customer_vault_id": {customerVaultID},
 	}
-	if err := c.sendV5Request(http.MethodPatch, "/subscriptions/"+url.PathEscape(subID), body, nil); err != nil {
-		return fmt.Errorf("failed to update subscription payment source: %w", err)
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return err
 	}
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to update subscription payment source: %s", responseText(output, response))
+	}
+
 	return nil
 }
 
@@ -280,7 +306,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 // wire boundary. dayFrequency is the billing interval in days; planPayments is
 // the total number of payments (0 = bill forever). Frequency and payments are
 // immutable once a plan is created.
-func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents int64, dayFrequency, planPayments int) error {
+func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents moneyutil.Cents, dayFrequency, planPayments int) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -307,10 +333,12 @@ func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents in
 	return nil
 }
 
-// EditRecurringPlan updates the mutable fields of an existing NMI Recurring
-// Plan via PATCH /v5/plans/{id}. NMI only permits the plan name and amount to
+// EditRecurringPlan stays on classic Direct Post DELIBERATELY (#663): the
+// documented PATCH /v5/plans/{id} answers E_ROUTE_NOT_FOUND on the live
+// gateway (verified 2026-07-01). NMI only permits the plan name and amount to
 // change; frequency and payment count are immutable once a plan exists.
-func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents int64) error {
+// planAmountCents is converted from cents to a dollar string for NMI.
+func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents moneyutil.Cents) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -318,14 +346,40 @@ func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents i
 		return errors.New("planID is required")
 	}
 
-	body := v5PlanUpdateRequest{
-		PlanName:   strings.TrimSpace(planName),
-		PlanAmount: centsJSONAmount(planAmountCents),
+	// current_plan_id identifies the plan being edited (live-verified
+	// 2026-07-01; sending plan_id instead answers "Invalid Recurring Plan ID"
+	// — the pre-#663 code did exactly that, so plan edits had NEVER worked
+	// against the live gateway).
+	values := url.Values{
+		"recurring":       {"edit_plan"},
+		"security_key":    {c.SecurityKey},
+		"current_plan_id": {planID},
+		"plan_amount":     {centsToDollarString(planAmountCents)},
 	}
-	if err := c.sendV5Request(http.MethodPatch, "/plans/"+url.PathEscape(strings.TrimSpace(planID)), body, nil); err != nil {
-		return fmt.Errorf("failed to edit recurring plan: %w", err)
+	if name := strings.TrimSpace(planName); name != "" {
+		values.Set("plan_name", name)
 	}
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return err
+	}
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to edit recurring plan: %s", responseText(output, response))
+	}
+
 	return nil
+}
+
+// centsToDollarString converts integer cents into a fixed two-decimal dollar
+// string as required by NMI's classic plan_amount parameter.
+func centsToDollarString(cents moneyutil.Cents) string {
+	return string(centsJSONAmount(cents))
 }
 
 // RecurringPlanDetail is the parsed view of a single NMI recurring plan

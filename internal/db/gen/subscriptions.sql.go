@@ -649,6 +649,58 @@ func (q *Queries) GetSubscriptionByRailSubID(ctx context.Context, arg GetSubscri
 	return i, err
 }
 
+const getSubscriptionByRailSubIDForUpdate = `-- name: GetSubscriptionByRailSubIDForUpdate :one
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, provider_account_id FROM openrails.subscriptions sub
+WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+LIMIT 1
+FOR UPDATE
+`
+
+type GetSubscriptionByRailSubIDForUpdateParams struct {
+	Rail               string
+	RailSubscriptionID string
+}
+
+// Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
+// UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
+func (q *Queries) GetSubscriptionByRailSubIDForUpdate(ctx context.Context, arg GetSubscriptionByRailSubIDForUpdateParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByRailSubIDForUpdate, arg.Rail, arg.RailSubscriptionID)
+	var i OpenrailsSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.RailSubscriptionID,
+		&i.UserEmail,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CancelledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.CreditsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.ProviderAccountID,
+	)
+	return i, err
+}
+
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, provider_account_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.status = 'active'

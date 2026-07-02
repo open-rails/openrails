@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,7 +41,7 @@ type v5Error struct {
 
 // centsJSONAmount renders integer cents as an exact two-decimal JSON number
 // (1099 -> 10.99). Never float math: this is a money wire boundary (#671).
-func centsJSONAmount(cents int64) json.RawMessage {
+func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
 	neg := ""
 	if cents < 0 {
 		neg, cents = "-", -cents
@@ -119,9 +120,20 @@ func (c *NMIClient) sendV5Request(method, path string, body any, out any) (err e
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Non-GET = mutation: failures past the send may have executed at the
+	// gateway and are wrapped transport-ambiguous (#674). Parsed 4xx envelopes
+	// stay clean (the gateway rejected the REQUEST); 5xx / lost responses do not.
+	mutating := method != http.MethodGet
+	classify := func(err error) error {
+		if mutating {
+			return ambiguous(err)
+		}
+		return err
+	}
+
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return fmt.Errorf("send v5 request: %w", err)
+		return classify(fmt.Errorf("send v5 request: %w", err))
 	}
 	defer func() {
 		cerr := resp.Body.Close()
@@ -132,7 +144,7 @@ func (c *NMIClient) sendV5Request(method, path string, body any, out any) (err e
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read v5 response: %w", err)
+		return classify(fmt.Errorf("read v5 response: %w", err))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -145,13 +157,18 @@ func (c *NMIClient) sendV5Request(method, path string, body any, out any) (err e
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%w: %s %s: %s", ErrV5NotFound, method, path, msg)
 		}
-		return fmt.Errorf("nmi v5 %s %s: status %d (%s %s): %s",
+		err := fmt.Errorf("nmi v5 %s %s: status %d (%s %s): %s",
 			method, path, resp.StatusCode, envelope.Type, envelope.ErrorCode, msg)
+		if resp.StatusCode >= 500 {
+			return classify(err)
+		}
+		return err
 	}
 
 	if out != nil && len(bytes.TrimSpace(raw)) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("decode v5 response: %w", err)
+			// 2xx arrived: the mutation executed; only the result is unreadable.
+			return classify(fmt.Errorf("decode v5 response: %w", err))
 		}
 	}
 	return nil
@@ -167,13 +184,13 @@ func (c *NMIClient) v5BaseURL() string {
 // --- payments ---
 
 // v5PaymentDetails is the request-side payment_details object. Exactly one
-// variant: vault reference, raw card (test-mode probe only), or Collect.js /
-// Payment Component token.
+// variant: raw card (test-mode probe only) or Collect.js / Payment Component
+// token. Vault charges use the top-level customer_vault:{id} object instead
+// (the documented payment_details.customer_vault_id is rejected live).
 type v5PaymentDetails struct {
-	CustomerVaultID string `json:"customer_vault_id,omitempty"`
-	CardNumber      string `json:"card_number,omitempty"`
-	CardExp         string `json:"card_exp,omitempty"`
-	PaymentToken    string `json:"payment_token,omitempty"`
+	CardNumber   string `json:"card_number,omitempty"`
+	CardExp      string `json:"card_exp,omitempty"`
+	PaymentToken string `json:"payment_token,omitempty"`
 }
 
 type v5OrderDetails struct {
@@ -181,11 +198,20 @@ type v5OrderDetails struct {
 	OrderDescription string `json:"order_description,omitempty"`
 }
 
+// v5CustomerVaultRef charges a stored vault customer. The docs show
+// payment_details.customer_vault_id for vault sales, but the live gateway
+// rejects that as an extra parameter and wants a top-level
+// customer_vault:{id} object (verified 2026-07-01).
+type v5CustomerVaultRef struct {
+	ID string `json:"id"`
+}
+
 type v5PaymentRequest struct {
-	Amount         json.RawMessage   `json:"amount,omitempty"`
-	Currency       string            `json:"currency,omitempty"`
-	PaymentDetails *v5PaymentDetails `json:"payment_details,omitempty"`
-	OrderDetails   *v5OrderDetails   `json:"order_details,omitempty"`
+	Amount         json.RawMessage     `json:"amount,omitempty"`
+	Currency       string              `json:"currency,omitempty"`
+	PaymentDetails *v5PaymentDetails   `json:"payment_details,omitempty"`
+	CustomerVault  *v5CustomerVaultRef `json:"customer_vault,omitempty"`
+	OrderDetails   *v5OrderDetails     `json:"order_details,omitempty"`
 }
 
 // v5Transaction is the slice of TransactionResponse openrails consumes.
@@ -246,6 +272,10 @@ func newV5TransactionError(prefix string, txn *v5Transaction) error {
 // --- customers (Customer Vault) ---
 
 type v5CustomerBillingRequest struct {
+	// ID targets an existing billing entry on update; the live gateway
+	// REQUIRES it (the documented omit-for-priority-1 behavior 400s).
+	ID             string            `json:"id,omitempty"`
+	Currency       string            `json:"currency,omitempty"`
 	PaymentDetails *v5PaymentDetails `json:"payment_details,omitempty"`
 	FirstName      string            `json:"first_name,omitempty"`
 	LastName       string            `json:"last_name,omitempty"`
@@ -296,22 +326,47 @@ func (c *V5Customer) PrimaryBilling() *V5CustomerBilling {
 	return nil
 }
 
+// V5Cursor is a v5 pagination cursor. The docs declare next_cursor as a
+// nullable integer, but the live gateway returns a STRING (verified
+// 2026-07-01) — decode both, normalize to string ("" = no more pages).
+type V5Cursor string
+
+func (c *V5Cursor) UnmarshalJSON(raw []byte) error {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "null" || trimmed == `""` {
+		*c = ""
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		*c = V5Cursor(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return fmt.Errorf("unrecognized cursor %s", trimmed)
+	}
+	*c = V5Cursor(n.String())
+	return nil
+}
+
 // CustomerPage is one cursor page of the v5 customer roster.
 type CustomerPage struct {
 	Customers  []V5Customer `json:"customers"`
-	NextCursor *int         `json:"next_cursor"`
+	NextCursor V5Cursor     `json:"next_cursor"`
+	HasMore    bool         `json:"has_more"`
 }
 
 // ListCustomersPage pulls one page of the customer vault roster
 // (GET /v5/customers). id optionally filters to a single vault id.
-func (c *NMIClient) ListCustomersPage(cursor int, perPage int, id string) (CustomerPage, error) {
+func (c *NMIClient) ListCustomersPage(cursor string, perPage int, id string) (CustomerPage, error) {
 	var page CustomerPage
 	if err := c.checkConfiguration(); err != nil {
 		return page, err
 	}
 	q := url.Values{}
-	if cursor > 0 {
-		q.Set("cursor", strconv.Itoa(cursor))
+	if strings.TrimSpace(cursor) != "" {
+		q.Set("cursor", strings.TrimSpace(cursor))
 	}
 	if perPage > 0 {
 		q.Set("per_page", strconv.Itoa(perPage))
@@ -333,14 +388,24 @@ func (c *NMIClient) ListCustomersPage(cursor int, perPage int, id string) (Custo
 
 // V5Subscription is the slice of the v5 subscription resource openrails reads.
 type V5Subscription struct {
-	Object             string  `json:"object"`
-	ID                 string  `json:"id"`
-	StartDate          string  `json:"start_date"`
-	NextBillingDate    string  `json:"next_billing_date"`
-	Amount             string  `json:"amount"`
-	CustomerVaultID    string  `json:"customer_vault_id"`
-	PausedSubscription any     `json:"paused_subscription"` // 0/1 or bool per docs
+	Object          string `json:"object"`
+	ID              string `json:"id"`
+	StartDate       string `json:"start_date"`
+	NextBillingDate string `json:"next_billing_date"`
+	Amount          string `json:"amount"`
+	CustomerVaultID string `json:"customer_vault_id"`
+	// DelayedCondition is NMI's de-facto lifecycle flag (live-verified
+	// 2026-07-01): "active" on every live subscription, "inactive" after a
+	// delete. The v5 GET keeps answering 200 for deleted subscriptions (a
+	// tombstone) — only never-existed ids 404. The LIST excludes deleted ones.
+	DelayedCondition   string  `json:"delayed_condition"`
+	PausedSubscription any     `json:"paused_subscription"` // "0"/"1" string on the wire despite docs
 	Plan               *V5Plan `json:"plan"`
+}
+
+// cancelledAtNMI reports whether the record is a deletion tombstone.
+func (s *V5Subscription) cancelledAtNMI() bool {
+	return strings.EqualFold(strings.TrimSpace(s.DelayedCondition), "inactive")
 }
 
 // V5Plan mirrors the v5 plan resource (all-string serializer).
@@ -358,19 +423,20 @@ type V5Plan struct {
 // SubscriptionPage is one cursor page of the v5 subscription roster.
 type SubscriptionPage struct {
 	Subscriptions []V5Subscription `json:"subscriptions"`
-	NextCursor    *int             `json:"next_cursor"`
+	NextCursor    V5Cursor         `json:"next_cursor"`
+	HasMore       bool             `json:"has_more"`
 }
 
 // ListSubscriptionsPage pulls one page of the recurring roster
 // (GET /v5/subscriptions).
-func (c *NMIClient) ListSubscriptionsPage(cursor int, perPage int) (SubscriptionPage, error) {
+func (c *NMIClient) ListSubscriptionsPage(cursor string, perPage int) (SubscriptionPage, error) {
 	var page SubscriptionPage
 	if err := c.checkConfiguration(); err != nil {
 		return page, err
 	}
 	q := url.Values{}
-	if cursor > 0 {
-		q.Set("cursor", strconv.Itoa(cursor))
+	if strings.TrimSpace(cursor) != "" {
+		q.Set("cursor", strings.TrimSpace(cursor))
 	}
 	if perPage > 0 {
 		q.Set("per_page", strconv.Itoa(perPage))
@@ -385,8 +451,11 @@ func (c *NMIClient) ListSubscriptionsPage(cursor int, perPage int) (Subscription
 	return page, nil
 }
 
-// GetSubscription fetches one subscription by id. found=false when NMI no
-// longer knows the id (404) — at NMI that is terminal for recurring records.
+// GetSubscription fetches one subscription by id. found=false when the
+// subscription is GONE at NMI — either a 404 (never existed) or a deletion
+// tombstone (200 with delayed_condition=inactive; live-verified 2026-07-01).
+// found therefore means "live recurring record", matching the classic
+// recurring report's absence-is-terminal semantics that #664/#665 depend on.
 func (c *NMIClient) GetSubscription(subscriptionID string) (V5Subscription, bool, error) {
 	var sub V5Subscription
 	if err := c.checkConfiguration(); err != nil {
@@ -401,6 +470,9 @@ func (c *NMIClient) GetSubscription(subscriptionID string) (V5Subscription, bool
 	}
 	if err != nil {
 		return sub, false, err
+	}
+	if sub.cancelledAtNMI() {
+		return sub, false, nil
 	}
 	return sub, true, nil
 }
@@ -466,37 +538,38 @@ func (c *NMIClient) GetPaymentActions(transactionID string) ([]PaymentAction, bo
 
 // --- plans ---
 
+// v5PlanCreateRequest: the docs call the identifier `plan_id`, but the live
+// gateway rejects that as an extra parameter and wants `id` (verified
+// 2026-07-01).
 type v5PlanCreateRequest struct {
-	PlanID       string          `json:"plan_id"`
+	PlanID       string          `json:"id"`
 	PlanName     string          `json:"plan_name"`
 	PlanAmount   json.RawMessage `json:"plan_amount"`
 	PlanPayments int             `json:"plan_payments"`
 	DayFrequency int             `json:"day_frequency,omitempty"`
 }
 
-type v5PlanUpdateRequest struct {
-	PlanName   string          `json:"plan_name,omitempty"`
-	PlanAmount json.RawMessage `json:"plan_amount,omitempty"`
-}
-
 // PlanPage is one cursor page of the v5 plan list.
 type PlanPage struct {
 	Plans      []V5Plan `json:"plans"`
-	NextCursor *int     `json:"next_cursor"`
+	NextCursor V5Cursor `json:"next_cursor"`
+	HasMore    bool     `json:"has_more"`
 }
 
 // ListRecurringPlans pulls the complete plan catalog (GET /v5/plans, all
-// cursor pages).
+// cursor pages). Empty pages mid-stream are legal (observed live) — the loop
+// ends only when the gateway stops handing out a cursor.
 func (c *NMIClient) ListRecurringPlans() ([]V5Plan, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
 	var out []V5Plan
-	cursor := 0
+	cursor := ""
+	seen := map[string]bool{}
 	for {
 		q := url.Values{}
-		if cursor > 0 {
-			q.Set("cursor", strconv.Itoa(cursor))
+		if cursor != "" {
+			q.Set("cursor", cursor)
 		}
 		path := "/plans"
 		if len(q) > 0 {
@@ -507,9 +580,14 @@ func (c *NMIClient) ListRecurringPlans() ([]V5Plan, error) {
 			return nil, err
 		}
 		out = append(out, page.Plans...)
-		if page.NextCursor == nil || *page.NextCursor == 0 || len(page.Plans) == 0 {
+		next := string(page.NextCursor)
+		if !page.HasMore || next == "" {
 			return out, nil
 		}
-		cursor = *page.NextCursor
+		if seen[next] {
+			return nil, fmt.Errorf("nmi plan pagination repeated cursor %s", next)
+		}
+		seen[next] = true
+		cursor = next
 	}
 }

@@ -221,23 +221,6 @@ func DefaultDevnetTokens() map[string]config.TokenConfig {
 	}
 }
 
-func GetTokenBySymbol(symbol string, useDevnet bool) (config.TokenConfig, bool) {
-	var network string
-	if useDevnet {
-		network = "devnet"
-	} else {
-		network = "mainnet"
-	}
-	tokens := ForNetwork(network)
-	token, exists := tokens[symbol]
-	return token, exists
-}
-
-func IsValidToken(symbol string) bool {
-	_, exists := DefaultSupportedTokens()[symbol]
-	return exists
-}
-
 func ForNetwork(network string) map[string]config.TokenConfig {
 	switch strings.ToLower(network) {
 	case "devnet":

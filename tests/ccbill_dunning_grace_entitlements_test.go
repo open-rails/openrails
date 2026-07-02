@@ -37,8 +37,13 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	renewalFailTxnID := "ccbill_txn_fail_" + uuid.New().String()
 	renewalSuccessTxnID := "ccbill_txn_renew_" + uuid.New().String()
 
-	startTS := time.Now().UTC().Add(2 * time.Minute).Truncate(time.Second)
-	paidTermEnd := startTS.Add(30 * 24 * time.Hour)
+	// Timeline constraints: CreateMembership only honors a provider period end
+	// that is in the FUTURE, while renewal payments record the provider
+	// transaction time verbatim (#651) and chk_payment_not_future rejects
+	// future purchased_at. So: recent start, short first term, and the
+	// renewal-success event stamped ~now.
+	startTS := time.Now().UTC().Truncate(time.Second)
+	paidTermEnd := startTS.Add(5 * 24 * time.Hour)
 	paidTermEndTS := time.Date(paidTermEnd.Year(), paidTermEnd.Month(), paidTermEnd.Day(), 23, 59, 59, 0, time.UTC)
 
 	// 1) NewSaleSuccess creates subscription + finite entitlement window ending at nextRenewalDate.
@@ -96,13 +101,16 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	require.True(t, ent.EndAt.Equal(paidTermEndTS), "paid entitlement end_at should remain at paid term end")
 
 	// 3) RenewalSuccess clears dunning/grace and extends the paid term + entitlement window.
+	// The event is stamped ~now (verbatim provider time becomes purchased_at,
+	// which must not be in the future); the period extension comes from
+	// nextRenewalDate, interpreted as end-of-day UTC.
 	renewalSuccess := mustLoadJSONMap(t, "testdata/webhooks/ccbill/renewalsuccess.json")
 	renewalSuccess["subscriptionId"] = subID
 	renewalSuccess["transactionId"] = renewalSuccessTxnID
-	renewalSuccess["timestamp"] = nextRetryAt.Format("2006-01-02 15:04:05")
+	renewalSuccess["timestamp"] = time.Now().UTC().Format("2006-01-02 15:04:05")
 	renewalSuccess["renewalDate"] = nextRetryAt.Format("2006-01-02")
 	newPaidTermEnd := nextRetryAt.Add(30 * 24 * time.Hour)
-	newPaidTermEndTS := time.Date(newPaidTermEnd.Year(), newPaidTermEnd.Month(), newPaidTermEnd.Day(), nextRetryAt.Hour(), nextRetryAt.Minute(), nextRetryAt.Second(), 0, time.UTC)
+	newPaidTermEndTS := time.Date(newPaidTermEnd.Year(), newPaidTermEnd.Month(), newPaidTermEnd.Day(), 23, 59, 59, 0, time.UTC)
 	renewalSuccess["nextRenewalDate"] = newPaidTermEnd.Format("2006-01-02")
 	postCCBillWebhook(t, suite.ServerURL, "RenewalSuccess", renewalSuccess)
 

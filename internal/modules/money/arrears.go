@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 // Arrears transaction types (postpaid usage ledger, issue #241).
@@ -56,6 +57,18 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	// predicates, matching the bun-era plain BeginTx.
 	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+
+		// #677: per-customer spend mutex (same customers-row FOR UPDATE as
+		// lockBalance) BEFORE the check-then-insert, so concurrent accruals at the
+		// same coordinates serialize — one posts, the other replays it below.
+		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+			return err
+		}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
+			ID: payerID, MerchantID: tenantID,
+		}); err != nil {
+			return err
+		}
 
 		// Idempotency: an owed-accrual transfer at these coordinates means it ran.
 		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
@@ -252,14 +265,29 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
 		return false, nil
 	}
-	key := fmt.Sprintf("invoice:%s:%d", r.InvoiceID, snapshot)
+	// #674 hardening: key by invoice + durable attempt identity (count of recorded
+	// invoice_payments rows), NOT the mutable amount_due snapshot. A crash between
+	// provider success and the recording tx leaves the count unchanged, so a retry
+	// replays the SAME provider idempotency key instead of re-charging under a
+	// fresh one.
+	var attempts int64
+	if err := s.db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM openrails.invoice_payments WHERE merchant_id = $1 AND invoice_id = $2`,
+		r.MerchantID, r.InvoiceID).Scan(&attempts); err != nil {
+		return false, err
+	}
+	key := fmt.Sprintf("invoice:%s:attempt:%d", r.InvoiceID, attempts)
+	chargeMinor, err := NativeToRailMinor(r.Currency, snapshot)
+	if err != nil {
+		return false, err
+	}
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		MerchantID:      r.MerchantID,
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
 		InvoiceID:       &r.InvoiceID,
 		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     (snapshot + 9_999) / 10_000,
+		AmountCents:     chargeMinor,
 		Currency:        normalizeCurrency(r.Currency),
 		IdempotencyKey:  key,
 		Description:     fmt.Sprintf("invoice %s", r.InvoiceID.String()),
@@ -285,33 +313,41 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		if uerr != nil {
 			return uerr
 		}
-		if n == 0 {
-			return nil
-		}
-		if externalInvoiceID := optionalString(res.ExternalInvoiceID); externalInvoiceID != nil {
-			if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{
-				MerchantID:        r.MerchantID,
-				CustomerID:        r.CustomerID,
-				InvoiceID:         r.InvoiceID,
-				ExternalInvoiceID: externalInvoiceID,
-				Now:               now,
-			}); err != nil {
-				return err
+		// n == 0: the invoice mutated under us AFTER a successful provider charge
+		// (paid/voided/partially settled elsewhere). NEVER drop the charge (#674):
+		// unless this key was already recorded, record the settled payment below —
+		// unapplied to amount_due — and alert for repair.
+		applied := n > 0
+		if applied {
+			if externalInvoiceID := optionalString(res.ExternalInvoiceID); externalInvoiceID != nil {
+				if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{
+					MerchantID:        r.MerchantID,
+					CustomerID:        r.CustomerID,
+					InvoiceID:         r.InvoiceID,
+					ExternalInvoiceID: externalInvoiceID,
+					Now:               now,
+				}); err != nil {
+					return err
+				}
 			}
 		}
 		sid := key
 		cur := normalizeCurrency(r.Currency)
 		ml := s.moneyLedger(q, r.MerchantID)
-		// Settle the arrears liability via the external charge (idempotent on the
-		// invoice/snapshot key). InsertInvoicePayment's unique index on
-		// money_transaction_id guards a double-link, but check the transfer first.
-		storedTrx, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+		// Settle the arrears liability via the external charge. An existing
+		// owed-payment transfer at this attempt key means a previous/concurrent run
+		// already recorded this exact charge — done.
+		_, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: cur,
 			TransferType: "owed_payment", Source: "invoice_charge", SourceID: sid,
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
+		if err == nil {
+			return nil
 		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		storedTrx, err := ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
 		if err != nil {
 			return err
 		}
@@ -336,6 +372,11 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 			return err
 		}
 		charged = true
+		if !applied {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"invoice_id": r.InvoiceID, "customer_id": r.CustomerID, "amount": snapshot, "rail_payment_id": derefStr(railPaymentID),
+			}).Error("invoice charge succeeded but invoice snapshot no longer applies; payment recorded UNAPPLIED — needs repair (refund or manual allocation)")
+		}
 		return nil
 	})
 	if err != nil {

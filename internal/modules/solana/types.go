@@ -9,7 +9,7 @@ import (
 type PayResult struct {
 	URL            string
 	Reference      string
-	Amount         int64
+	Amount         int64 // micros
 	Currency       string
 	TokenAmount    string
 	TokenUnits     uint64
@@ -26,7 +26,7 @@ type PayResult struct {
 
 type TransactionBuildResponse struct {
 	TransactionBase64 string
-	Amount            int64
+	Amount            int64 // micros
 	TokenAmount       uint64
 	TokenSymbol       string
 	ExpiresAt         time.Time
@@ -42,7 +42,7 @@ type PaymentTransactionBuildRequest struct {
 	TokenAmount uint64
 	TokenMint   string
 	Recipient   string
-	Amount      int64
+	Amount      int64 // micros
 	Currency    string
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
@@ -121,7 +122,6 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 	if err != nil {
 		return err
 	}
-	period := meteredPeriodSourceID(from, to)
 	for _, rc := range rateCards {
 		includedOverride := int64(0)
 		if rc.Allowance != nil && strings.TrimSpace(rc.Allowance.AccrueFrom) != "" {
@@ -158,11 +158,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 				continue
 			}
 			source := "metered:" + rc.MeterKey + ":rate_card:" + rc.ID.String()
-			sourceID := period
-			if dimValue != "" {
-				sourceID += ":dim:" + dimValue
-			}
-			if _, err := s.AccrueOwed(ctx, payer, cur, source, sourceID, amount); err != nil {
+			if _, err := s.accrueMeteredPrefix(ctx, payer, cur, source, dimValue, from, to, amount); err != nil {
 				return err
 			}
 		}
@@ -500,8 +496,9 @@ WHERE cpm.merchant_id = $1 AND cpm.price_id = $2`,
 // written by RecordUsage) to catalog metered pricing on an invoice (#615). It
 // resolves the sidecar meter_key+kind for priceID, aggregates the payer's matching
 // usage over [from, to), and accrues the rated cost as a pending owed invoice item
-// at a DETERMINISTIC period source_id so a re-finalize of the same window never
-// double-accrues. Returns the rated amount in micros (0 when there is no usage).
+// through the #672 per-period watermark, so a re-finalize of the same window — or
+// an OVERLAPPING later close anchored at the same period start — accrues only the
+// not-yet-billed delta. Returns the newly accrued micros (0 when nothing new).
 //
 // Aggregation convention (the meter_key IS the dimension key, and equals the
 // usage event_type — RecordUsage records usage under event_type == meter_key):
@@ -564,7 +561,14 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 		return 0, nil
 	}
 
-	return s.AccrueMeteredAggregate(ctx, payer, cur, meter, meteredPeriodSourceID(from, to), aggregate, rate)
+	amount, err := RateMeteredAggregate(aggregate, rate)
+	if err != nil {
+		return 0, err
+	}
+	if amount <= 0 {
+		return 0, nil
+	}
+	return s.accrueMeteredPrefix(ctx, payer, cur, "metered:"+meter, "", from, to, amount)
 }
 
 // meteredPeriodSourceID derives a deterministic idempotency source_id for a
@@ -575,12 +579,109 @@ func meteredPeriodSourceID(from, to time.Time) string {
 	return fmt.Sprintf("period:%d-%d", from.UTC().Unix(), to.UTC().Unix())
 }
 
+// accrueMeteredPrefix accrues owed for a metered source over the period prefix
+// [periodFrom, ratedThrough), where ratedPrefix is the cost of rating the WHOLE
+// prefix once (allowances/rounding applied over the full aggregate). A durable
+// watermark row per (payer, currency, source[+dim], period start) records what
+// has already been accrued for the period; only the delta above it is accrued —
+// in the SAME transaction as the ledger transfer — so overlapping closes over
+// one period (threshold close mid-period, a later threshold close, the
+// month-end finalize) bill each unit of usage exactly once (#672). The
+// watermark is monotone: a stale or repeated close computes delta <= 0 and
+// accrues nothing. Returns the newly accrued delta in micros.
+func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.CustomerID, currency, source, dimValue string, periodFrom, ratedThrough time.Time, ratedPrefix int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeCurrency(currency)
+	if err := RequireBillingCurrency(cur); err != nil {
+		return 0, err
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return 0, fmt.Errorf("source required")
+	}
+	if ratedPrefix <= 0 {
+		return 0, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
+	payerID := payer.UUID()
+	now := s.now()
+	wmSource := source
+	sourceID := meteredPeriodSourceID(periodFrom, ratedThrough)
+	if dimValue != "" {
+		wmSource += ":dim:" + dimValue
+		sourceID += ":dim:" + dimValue
+	}
+
+	var accrued int64
+	// Privileged (no-GUC) transaction with explicit merchant_id predicates,
+	// matching AccrueOwed.
+	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
+		// and returns the current committed values, serializing concurrent sweeps.
+		var alreadyAccrued int64
+		if err := tx.QueryRow(ctx, `
+INSERT INTO openrails.metered_rating_watermarks (
+    merchant_id, customer_id, currency, source, period_from,
+    rated_through, accrued_amount, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $5, 0, $6, $6)
+ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
+DO UPDATE SET updated_at = openrails.metered_rating_watermarks.updated_at
+RETURNING accrued_amount`,
+			tenantID, payerID, cur, wmSource, periodFrom.UTC(), now).Scan(&alreadyAccrued); err != nil {
+			return err
+		}
+		delta := ratedPrefix - alreadyAccrued
+		if delta <= 0 {
+			// Everything in this prefix is already billed; just advance rated_through.
+			_, err := tx.Exec(ctx, `
+UPDATE openrails.metered_rating_watermarks
+SET rated_through = GREATEST(rated_through, $6), updated_at = $7
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AND period_from = $5`,
+				tenantID, payerID, cur, wmSource, periodFrom.UTC(), ratedThrough.UTC(), now)
+			return err
+		}
+		q := gen.New(tx)
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
+			return err
+		}
+		ml := s.moneyLedger(q, tenantID)
+		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, source, sourceID, nil); err != nil {
+			return err
+		}
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, nil, delta, now, map[string]any{
+			"source": source,
+		}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+UPDATE openrails.metered_rating_watermarks
+SET rated_through = GREATEST(rated_through, $6), accrued_amount = accrued_amount + $7, updated_at = $8
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AND period_from = $5`,
+			tenantID, payerID, cur, wmSource, periodFrom.UTC(), ratedThrough.UTC(), delta, now); err != nil {
+			return err
+		}
+		accrued = delta
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return accrued, nil
+}
+
 // sweepCatalogMeteredUsage rates every catalog metered sidecar the payer reported
 // usage for in [from, to) into pending owed invoice items, BEFORE invoice
 // finalization rolls them up. Bounded to "meters the customer actually reported
 // usage for in the period" by joining distinct reported event_types to the
-// merchant's catalog_price_metered.meter_key. Idempotent via the deterministic
-// period source_id, so re-finalize is a no-op.
+// merchant's catalog_price_metered.meter_key. Exactly-once via the #672
+// per-period watermark: re-finalizes and overlapping later closes accrue only
+// the unbilled delta.
 func (s *MoneyService) sweepCatalogMeteredUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
 	if err := s.sweepCatalogRateCardUsage(ctx, payer, currency, from, to); err != nil {
 		return err

@@ -2,11 +2,11 @@ package vault
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -91,11 +91,18 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
 
-	seen := make(chan url.Values, 1)
+	type v5CreateSeen struct {
+		auth string
+		body map[string]any
+	}
+	seen := make(chan v5CreateSeen, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		seen <- r.PostForm
-		_, _ = io.WriteString(w, "response=1&customer_vault_id=vault_123")
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/customers", r.URL.Path)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		seen <- v5CreateSeen{auth: r.Header.Get("Authorization"), body: body}
+		_, _ = io.WriteString(w, `{"object":"customer","id":"vault_123"}`)
 	}))
 	defer server.Close()
 
@@ -112,6 +119,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 				return nil, err
 			}
 			client.DirectPostURL = server.URL
+			client.V5BaseURL = server.URL
 			return client, nil
 		},
 	}
@@ -131,11 +139,16 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	require.Equal(t, "vault_123", pm.RailCustomerRef)
 	require.Len(t, pms.created, 1)
 
-	form := <-seen
-	require.Equal(t, "merchant-mobius-key", form.Get("security_key"))
-	require.Equal(t, "provider-token", form.Get("payment_token"))
-	require.Equal(t, "Ada", form.Get("first_name"))
-	require.Equal(t, "Lovelace", form.Get("last_name"))
+	got := <-seen
+	// The merchant-secret key is the ENTIRE Authorization header (v5).
+	require.Equal(t, "merchant-mobius-key", got.auth)
+	billing, ok := got.body["billing"].(map[string]any)
+	require.True(t, ok, "v5 create-customer body must carry a billing object: %v", got.body)
+	paymentDetails, ok := billing["payment_details"].(map[string]any)
+	require.True(t, ok, "billing must carry payment_details: %v", billing)
+	require.Equal(t, "provider-token", paymentDetails["payment_token"])
+	require.Equal(t, "Ada", billing["first_name"])
+	require.Equal(t, "Lovelace", billing["last_name"])
 	require.Equal(t, "4242", *pm.LastFour)
 	require.Equal(t, "Visa", *pm.CardType)
 	require.Equal(t, "12/30", *pm.ExpiryDate)

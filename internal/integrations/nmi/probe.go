@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -112,7 +113,7 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 		return false, "", "", fmt.Errorf("nmi test-mode probe amount %q: %w", amount, err)
 	}
 	req := v5PaymentRequest{
-		Amount:         centsJSONAmount(amountCents),
+		Amount:         centsJSONAmount(moneyutil.Cents(amountCents)),
 		PaymentDetails: &v5PaymentDetails{CardNumber: probeTestCard, CardExp: probeTestExpiry},
 		OrderDetails:   &v5OrderDetails{ID: probeOrderIDPrefix + probeOrderIDSuffix()},
 	}

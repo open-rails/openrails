@@ -13,7 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
+	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
@@ -351,7 +351,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.t.Helper()
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
-	assembled, err := ginboot.NewServer(suite.Config, &ginboot.Options{
+	assembled, err := serverboot.NewServer(suite.Config, &serverboot.Options{
 		Clock:                  suite.clock,
 		ConfiguredMerchant:     dbtest.TestMerchantID,
 		Rails:                  suite.Rails,
@@ -430,9 +430,13 @@ func (suite *TestContainerSuite) seedProviderAccountFixtures() {
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
 	require.NoError(suite.t, err)
 
+	// CCBill must be sandbox-posture (#668): the webhook IP-allowlist bypass is
+	// refused while ANY environment=live CCBill row exists, and the test_mode
+	// webhook path resolves accounts under environment=test.
 	ccbillAccountID := "945280/0000"
-	suite.seedProviderAccount(ctx, "ccbill", ccbillAccountID)
-	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", "live", ccbillAccountID, "salt")
+	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	suite.seedProviderAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
+	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)

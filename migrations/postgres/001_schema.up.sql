@@ -1088,31 +1088,6 @@ COMMENT ON COLUMN openrails.payer_spend_limits.policy IS 'JSONB tier money polic
 
 
 --
--- Name: payment_blocklist; Type: TABLE; Schema: openrails; Owner: -
---
-
-CREATE TABLE openrails.payment_blocklist (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid,
-    kind text NOT NULL,
-    value text NOT NULL,
-    reason text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT payment_blocklist_kind_check CHECK ((kind = ANY (ARRAY['card_fingerprint'::text, 'processor_customer'::text, 'email'::text, 'ip'::text])))
-);
-
-ALTER TABLE ONLY openrails.payment_blocklist FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE payment_blocklist; Type: COMMENT; Schema: openrails; Owner: -
---
-
-COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of known-bad payment identifiers (issue #300). customer_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.';
-
-
---
 -- Name: payment_methods; Type: TABLE; Schema: openrails; Owner: -
 --
 
@@ -2141,14 +2116,6 @@ ALTER TABLE ONLY openrails.notification_queue
 
 ALTER TABLE ONLY openrails.payer_spend_limits
     ADD CONSTRAINT payer_spend_limits_pkey PRIMARY KEY (id);
-
-
---
--- Name: payment_blocklist payment_blocklist_pkey; Type: CONSTRAINT; Schema: openrails; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_blocklist
-    ADD CONSTRAINT payment_blocklist_pkey PRIMARY KEY (id);
 
 
 --
@@ -3185,13 +3152,6 @@ CREATE UNIQUE INDEX uq_payer_spend_limits_merchant_default ON openrails.payer_sp
 
 
 --
--- Name: uq_payment_blocklist; Type: INDEX; Schema: openrails; Owner: -
---
-
-CREATE UNIQUE INDEX uq_payment_blocklist ON openrails.payment_blocklist USING btree (merchant_id, kind, value);
-
-
---
 -- Name: uq_payment_methods_customer_vault_legacy; Type: INDEX; Schema: openrails; Owner: -
 --
 
@@ -3621,14 +3581,6 @@ ALTER TABLE ONLY openrails.notification_queue
 
 ALTER TABLE ONLY openrails.payer_spend_limits
     ADD CONSTRAINT payer_spend_limits_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
-
-
---
--- Name: payment_blocklist payment_blocklist_customer_fk; Type: FK CONSTRAINT; Schema: openrails; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_blocklist
-    ADD CONSTRAINT payment_blocklist_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
 
 
 --
@@ -4134,13 +4086,6 @@ CREATE POLICY merchant_isolation ON openrails.payer_spend_limits USING ((merchan
 
 
 --
--- Name: payment_blocklist merchant_isolation; Type: POLICY; Schema: openrails; Owner: -
---
-
-CREATE POLICY merchant_isolation ON openrails.payment_blocklist USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
---
 -- Name: payment_methods merchant_isolation; Type: POLICY; Schema: openrails; Owner: -
 --
 
@@ -4275,12 +4220,6 @@ ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE openrails.payer_spend_limits ENABLE ROW LEVEL SECURITY;
-
---
--- Name: payment_blocklist; Type: ROW SECURITY; Schema: openrails; Owner: -
---
-
-ALTER TABLE openrails.payment_blocklist ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: payment_methods; Type: ROW SECURITY; Schema: openrails; Owner: -
@@ -4551,13 +4490,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openr
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payer_spend_limits TO openrails_app;
-
-
---
--- Name: TABLE payment_blocklist; Type: ACL; Schema: openrails; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_blocklist TO openrails_app;
 
 
 --

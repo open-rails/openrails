@@ -1,24 +1,8 @@
--- Admission-plane support tables: the payment blocklist (#300), per-(payer,
--- tier) money policies, and hierarchical budget-scope policies (#473). The
--- Postgres rolling-budget engine (budget_inflight_holds / budget_window_state /
--- budget_reservations + FOR UPDATE) was removed in the #513 hard cut — budget
--- accounting now lives in the Redis spendgate.
-
--- name: InsertPaymentBlockIfAbsent :exec
-INSERT INTO openrails.payment_blocklist (
-    id, merchant_id, customer_id, kind, value, reason, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (merchant_id, kind, value) DO NOTHING;
-
--- name: DeletePaymentBlock :exec
-DELETE FROM openrails.payment_blocklist
-WHERE merchant_id = $1 AND kind = $2 AND value = $3;
-
--- name: PaymentBlockExists :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.payment_blocklist
-    WHERE merchant_id = $1 AND kind = $2 AND value = $3
-);
+-- Admission-plane support tables: per-(payer, tier) money policies and
+-- hierarchical budget-scope policies (#473). The Postgres rolling-budget
+-- engine (budget_inflight_holds / budget_window_state / budget_reservations
+-- + FOR UPDATE) was removed in the #513 hard cut — budget accounting now
+-- lives in the Redis spendgate.
 
 -- name: UpsertPayerSpendLimit :exec
 -- Per-(subject, tier) limit override. ON CONFLICT targets the partial unique

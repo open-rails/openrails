@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
@@ -22,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -653,19 +653,9 @@ func rebillOrderReference(sub *models.Subscription) string {
 
 // subscriptionProviderAutoBilled reports whether the provider bills this
 // subscription on its own side, so OpenRails must not manual-rebill or terminate
-// it (#635): CCBill always (it bills independently); NMI only when there is no
-// stored vault (a vault-less recurring sub auto-charges on the remote subscription
-// id). An NMI sub WITH a vault is our-rebill — returns false. (#630: mobius is a
-// provider account on rail nmi, not a rail.)
+// it (#635). Registry-backed (#669); see rails.Descriptor.AutoBilled.
 func subscriptionProviderAutoBilled(rail string, pm *models.PaymentMethod) bool {
-	switch normalizeRail(rail) {
-	case "ccbill":
-		return true
-	case "nmi":
-		return pm == nil || strings.TrimSpace(pm.RailMethodRef) == ""
-	default:
-		return false
-	}
+	return rails.AutoBilled(models.Rail(rail), pm)
 }
 
 func resolveSubscriptionRail(sub *models.Subscription) string {

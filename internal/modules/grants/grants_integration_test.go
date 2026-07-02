@@ -207,9 +207,7 @@ func TestGrants_CreditDepositSeam(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, amount, bal, "credit grant deposited into the #512 ledger")
 
-	net, err := ml.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net)
+	requireConserved(t, ctx, pool, merchantID, cur)
 
 	// Idempotent — no double deposit.
 	require.NoError(t, l.MaterializeGrant(ctx, g))
@@ -224,22 +222,18 @@ func TestGrants_CreditDepositSeam(t *testing.T) {
 
 // Ownership needs no projection — the live grant roster IS the record.
 func TestGrants_Ownership(t *testing.T) {
-	l, _, ctx, customer, product, _ := testGrants(t)
+	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	g, err := l.Grant(ctx, grants.GrantInput{
 		Customer: customer, Product: &product, Kind: grants.Ownership, Source: grants.Purchase, SourceID: "pay_" + short(),
 	})
 	require.NoError(t, err)
 	require.NoError(t, l.MaterializeGrant(ctx, g)) // no-op
 
-	live, err := l.LiveGrants(ctx, customer)
-	require.NoError(t, err)
-	require.True(t, containsGrant(live, g.ID), "owned before revoke")
+	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, product), "owned before revoke")
 
 	_, err = l.Revoke(ctx, g.ID, "refund")
 	require.NoError(t, err)
-	live, err = l.LiveGrants(ctx, customer)
-	require.NoError(t, err)
-	require.False(t, containsGrant(live, g.ID), "not owned after revoke")
+	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, product), "not owned after revoke")
 }
 
 func TestGrants_OwnershipIncludes(t *testing.T) {
@@ -311,13 +305,15 @@ func entWindows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchant,
 	return n
 }
 
-func containsGrant(gs []gen.OpenrailsGrant, id uuid.UUID) bool {
-	for i := range gs {
-		if gs[i].ID == id {
-			return true
-		}
-	}
-	return false
+// requireConserved asserts the (merchant, currency) ledger nets to zero —
+// double-entry conservation, read straight off the maintained counters.
+func requireConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, cur string) {
+	t.Helper()
+	var net int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
+		merchantID, cur).Scan(&net))
+	require.Equal(t, int64(0), net, "ledger conserves (Σ == 0)")
 }
 
 func liveOwnershipCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchant, customer, product uuid.UUID) int {
@@ -340,9 +336,10 @@ WHERE g.merchant_id = $1
 }
 
 // TestGrants_RevokeBySource proves the #511 write-path unification: revoking an
-// effect by source also terminates the matching live grants, so the ledger
-// reflects the retraction (no "live grant, dead effect" residue). Scoped to the
-// (kind, source_types, source_id) tuple; other grants are untouched; idempotent.
+// effect by source (RevokeBySourceAsOf) also terminates the matching live
+// grants, so the ledger reflects the retraction (no "live grant, dead effect"
+// residue). Scoped to the (kind, source_types, source_id) tuple; other grants
+// are untouched; idempotent.
 func TestGrants_RevokeBySource(t *testing.T) {
 	l, pool, ctx, customer, _, merchantID := testGrants(t)
 	q := gen.New(pool)
@@ -359,8 +356,8 @@ func TestGrants_RevokeBySource(t *testing.T) {
 	gOther, err := l.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Subscription, SourceID: otherSubID.String(), Spec: &grants.Spec{Entitlements: []string{"premium"}}, StartsAt: now})
 	require.NoError(t, err)
 
-	require.NoError(t, l.RevokeBySource(ctx, customer, grants.Entitlement,
-		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked"))
+	require.NoError(t, l.RevokeBySourceAsOf(ctx, customer, grants.Entitlement,
+		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked", time.Time{}))
 
 	termd := func(id uuid.UUID) bool {
 		v, e := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: merchantID, GrantID: id})
@@ -372,7 +369,7 @@ func TestGrants_RevokeBySource(t *testing.T) {
 	require.False(t, termd(gOther.ID), "other-subscription grant untouched")
 
 	// Idempotent: a second call terminates nothing new (a grant terminates once).
-	require.NoError(t, l.RevokeBySource(ctx, customer, grants.Entitlement,
-		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked"))
+	require.NoError(t, l.RevokeBySourceAsOf(ctx, customer, grants.Entitlement,
+		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked", time.Time{}))
 	require.True(t, termd(gSub.ID))
 }

@@ -52,7 +52,7 @@ type PriceObject struct {
 
 // RecurringInfo describes the billing interval for recurring prices
 type RecurringInfo struct {
-	Interval string `json:"interval"` // e.g. "30d", "365d"
+	Interval string `json:"interval"` // hours, e.g. "720h", "8760h"
 }
 
 // SubscriptionObject represents a subscription resource

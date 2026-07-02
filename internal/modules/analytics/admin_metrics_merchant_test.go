@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -15,7 +14,7 @@ import (
 // WHERE merchant_id = ?.
 func TestMerchantFilterScopesByMerchant(t *testing.T) {
 	tid := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	filter, args := merchantFilter(tid, false)
+	filter, args := merchantFilter(tid)
 
 	if !strings.Contains(filter, "merchant_id = ?") {
 		t.Fatalf("filter = %q, want it to contain a merchant_id predicate", filter)
@@ -25,18 +24,5 @@ func TestMerchantFilterScopesByMerchant(t *testing.T) {
 	}
 	if got, ok := args[0].(string); !ok || got != tid.String() {
 		t.Fatalf("bound arg = %v, want merchant id %q", args[0], tid.String())
-	}
-}
-
-// TestMerchantFilterCrossMerchantHasNoPredicate proves the SaaS/operator
-// cross-merchant path emits NO merchant predicate, so it can read across all
-// merchants (issue #232). This path is library-only in core.
-func TestMerchantFilterCrossMerchantHasNoPredicate(t *testing.T) {
-	filter, args := merchantFilter(dbtest.TestMerchantID, true)
-	if filter != "" {
-		t.Fatalf("cross-merchant filter = %q, want empty (no merchant predicate)", filter)
-	}
-	if len(args) != 0 {
-		t.Fatalf("cross-merchant args = %v, want none", args)
 	}
 }

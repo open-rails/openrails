@@ -245,7 +245,22 @@ type AdmitResponse struct {
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
 // OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
 // usage event (a plain capture).
+//
+// It also carries OPTIONAL fallback payer coordinates (#676): the admit-time
+// request→payer pointer lives in Redis and can be lost (flush/failover/TTL
+// overrun). Supplying CustomerID+Currency lets the capture land anyway — a
+// rendered service is always chargeable. AdmitSource must echo the Source the
+// admit was placed with (defaults to "admit") so retries dedupe against a
+// pointer-resolved capture. These fields are independent of EventType.
 type CaptureUsage struct {
+	// CustomerID/Currency/Invoker/AdmitSource are the #676 capture-durability
+	// fallback coordinates (see type doc). Optional; ignored while the admit
+	// pointer is live.
+	CustomerID  string
+	Currency    string
+	Invoker     string
+	AdmitSource string
+
 	// EventType classifies the usage event (e.g. "inference", "storage"). Required
 	// for the event to be recorded; a blank EventType suppresses the usage event.
 	EventType string

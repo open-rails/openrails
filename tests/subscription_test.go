@@ -66,8 +66,9 @@ func TestGetProductsEndpoint(t *testing.T) {
 		assert.NotEmpty(t, premiumProduct.Key)
 		assert.True(t, premiumProduct.Active)
 		require.GreaterOrEqual(t, len(premiumProduct.Prices), 2, "Should have monthly and yearly USD prices")
-		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "usd", "30d")
-		require.NotNil(t, monthlyPrice, "Should find Premium 9990000 micros/month USD price")
+		// Intervals are hours since the hours-internally cut (c712299a): 720h = 30d.
+		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "usd", "720h")
+		require.NotNil(t, monthlyPrice, "Should find Premium 9990000 micros/720h USD price")
 		assert.Equal(t, "price", monthlyPrice.Object)
 	})
 
@@ -93,8 +94,8 @@ func TestGetProductsEndpoint(t *testing.T) {
 		}
 
 		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
-		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 79_990_000, "usd", "365d")
-		require.NotNil(t, yearlyPrice, "Should find Premium 79990000 micros/year USD price")
+		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 79_990_000, "usd", "8760h")
+		require.NotNil(t, yearlyPrice, "Should find Premium 79990000 micros/8760h USD price")
 	})
 }
 

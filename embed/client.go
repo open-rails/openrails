@@ -153,8 +153,8 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 
 // --- Client implementation -------------------------------------------------
 
-// Admit transcribes handlers.ServiceAdmit + admitInputFromRequest
-// (service_admission.go). All verdict outcomes — allowed, abuse (429), money
+// Admit carries the single-admit semantics of the retired handlers.ServiceAdmit
+// (#666; the batch /admissions route is the surviving HTTP surface). All verdict outcomes — allowed, abuse (429), money
 // (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	if req.EstimatedAmount < 0 {
@@ -284,6 +284,13 @@ func (c *localClient) Capture(ctx context.Context, requestID string, capturedAmo
 		return bindRequiredErr("Amount")
 	}
 	in := billingservice.CaptureHoldRequest{RequestID: requestID, Amount: capturedAmount}
+	if usage != nil {
+		// #676 fallback payer coordinates travel regardless of EventType.
+		in.CustomerID = usage.CustomerID
+		in.Currency = usage.Currency
+		in.Invoker = usage.Invoker
+		in.AdmitSource = usage.AdmitSource
+	}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		in.EventType = usage.EventType
 		in.Resource = usage.Resource
@@ -362,8 +369,8 @@ func (c *localClient) GetCreditAccount(ctx context.Context, customerID, currency
 	}, nil
 }
 
-// SetCreditAccountSettings transcribes handlers.ServiceSetCreditAccountSettings
-// (service_credits.go) and then — like the remote client — re-reads the account
+// SetCreditAccountSettings carries the semantics of the retired
+// handlers.ServiceSetCreditAccountSettings (#666) and then — like the remote client — re-reads the account
 // snapshot via the balance path.
 func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, currency string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
 	payer, err := parseCustomer(customerID, "customer_id required")
@@ -417,9 +424,8 @@ type serviceTxn struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-// ListCreditTransactions transcribes
-// handlers.ServiceListCustomerCreditTransactions (service_credits.go),
-// producing the same {"transactions":[...],"total":N} JSON the wire carries.
+// ListCreditTransactions carries the semantics of the retired
+// handlers.ServiceListCustomerCreditTransactions (#666), producing the same {"transactions":[...],"total":N} JSON the wire carries.
 func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
 	currency, err := requireCurrency(currency)
 	if err != nil {
@@ -487,7 +493,7 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID, currency stri
 	return out, nil
 }
 
-// BudgetStatus transcribes handlers.ServiceGetBudget (service_admission.go).
+// BudgetStatus carries the semantics of the retired handlers.ServiceGetBudget (#666).
 func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
@@ -728,7 +734,7 @@ func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.Wa
 	}, nil
 }
 
-// AbuseUsage transcribes handlers.ServiceAbuseUsage (#488).
+// AbuseUsage carries the semantics of the retired handlers.ServiceAbuseUsage (#488/#666).
 func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*openrails.AbuseUsageResponse, error) {
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {

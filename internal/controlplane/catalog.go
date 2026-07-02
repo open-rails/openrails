@@ -19,18 +19,9 @@
 package controlplane
 
 import (
-	"strings"
-
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/permissions"
 )
-
-// Permission is an OpenRails permission definition. AuthKit owns `root:`;
-// OpenRails defines its app resources in `merchant:*` and `customer:*`.
-type Permission struct {
-	Name        string
-	Description string
-}
 
 // Permission-group personas (#567). OpenRails declares exactly TWO flat
 // top-level group types under the intrinsic `root` type:
@@ -155,48 +146,6 @@ const (
 	PermCustomerSpendDelegationsUpdate = permissions.CustomerSpendDelegationsUpdate
 )
 
-// catalogEntries is the canonical ordered list of OpenRails permissions with
-// human-readable descriptions. Keep ordering stable so seeding is deterministic.
-var catalogEntries = []Permission{
-	{Name: PermMerchantSettingsRead, Description: "Merchant: read merchant-owned settings (display, checkout, admission policy)."},
-	{Name: PermMerchantSettingsUpdate, Description: "Merchant: update merchant-owned settings."},
-	{Name: PermMerchantPaymentProvidersRead, Description: "Merchant: read configured payment-provider status (never plaintext)."},
-	{Name: PermMerchantPaymentProvidersUpdate, Description: "Merchant: configure/disable payment providers; credentials validated before storage."},
-	{Name: PermMerchantCatalogRead, Description: "Merchant: read catalog products, prices, and drift."},
-	{Name: PermMerchantCatalogUpdate, Description: "Merchant: create/update products and prices, publish catalog, refresh drift."},
-	{Name: PermMerchantCustomerSettingsRead, Description: "Merchant: read customer support profile, balance, transactions, entitlements, product access, and saved payment-method metadata."},
-	{Name: PermMerchantCustomerSettingsUpdate, Description: "Merchant support writes: customer profile/settings, entitlement/product-access grants, balance adjustments, and credit limits."},
-	{Name: PermMerchantPaymentsRead, Description: "Merchant: search and read merchant payments."},
-	{Name: PermMerchantPaymentsRefund, Description: "Merchant: refund a payment."},
-	{Name: PermMerchantSubscriptionsRead, Description: "Merchant: search and read subscriptions."},
-	{Name: PermMerchantSubscriptionsUpdate, Description: "Merchant: cancel or update a subscription."},
-	{Name: PermMerchantAdmissionsCreate, Description: "Merchant: admission lifecycle — admit, capture, release, and report wasted spend (machine hot path)."},
-	{Name: PermMerchantUsageRead, Description: "Merchant: read usage/revenue rollups and analytics metrics."},
-	{Name: PermMerchantRepairAlertsRead, Description: "Merchant: read ledger/provider repair alerts."},
-	{Name: PermCustomerBalanceRead, Description: "Customer: read the customer's balance, transactions, usage, payments, and invoices."},
-	{Name: PermCustomerBillingUpdate, Description: "Customer: set the customer's billing mode (prepaid/arrears) and self-imposed spend caps."},
-	{Name: PermCustomerPaymentMethodsUpdate, Description: "Customer: manage the customer's saved payment methods and Stripe billing portal."},
-	{Name: PermCustomerCheckoutCreate, Description: "Customer: pre-pay / load credits onto the customer balance via checkout."},
-	{Name: PermCustomerSpendDelegationsRead, Description: "Customer: read the customer's balance-sharing (spend-delegation) policy."},
-	{Name: PermCustomerSpendDelegationsUpdate, Description: "Customer: replace the customer's balance-sharing (spend-delegation) policy."},
-}
-
-// Catalog returns a copy of the OpenRails permission catalog.
-func Catalog() []Permission {
-	out := make([]Permission, len(catalogEntries))
-	copy(out, catalogEntries)
-	return out
-}
-
-// CatalogNames returns just the permission names in catalog order.
-func CatalogNames() []string {
-	out := make([]string, len(catalogEntries))
-	for i, e := range catalogEntries {
-		out[i] = e.Name
-	}
-	return out
-}
-
 // Admin-role identity.
 //
 // HARD CUT (#567): under the permission-group model OpenRails declares the
@@ -211,16 +160,3 @@ const (
 	// ASSIGNS it (the bootstrap admin) or MINTS against it.
 	OwnerRole = authcore.OwnerRoleName
 )
-
-// MerchantOwnerRolePermissions returns the full `merchant:*` catalog permission
-// set — what the merchant `owner` role resolves to. Used by test fixtures and to
-// describe the deployment admin key's authority. See CatalogNames.
-func MerchantOwnerRolePermissions() []string {
-	out := make([]string, 0, len(catalogEntries))
-	for _, e := range catalogEntries {
-		if strings.HasPrefix(e.Name, MerchantType+":") {
-			out = append(out, e.Name)
-		}
-	}
-	return out
-}

@@ -36,6 +36,9 @@ const reqPtrSep = "\x1f"
 // are the EXACT window counter keys this admit incremented, so release can
 // decrement precisely the buckets it hit (no policy reload, no roll ambiguity).
 // '|' never appears in a key (keys are scope/id/key/bucket joined by ':').
+//
+// "<base>:holds" is a SET indexing the live hold-record keys (same hash slot), so
+// the recompute path can re-derive `held` = Σ live hold costs without SCAN.
 
 // admitScript atomically, all-or-nothing:
 //  1. idempotent no-op if this request's hold record already exists (retry safety);
@@ -52,8 +55,9 @@ const reqPtrSep = "\x1f"
 // phase is recomputable, so a Redis flush can't desync it and there is no
 // first-charge / anchor-TTL bookkeeping.
 //
-// KEYS: [1]=held [2]=hold:<reqID>. ARGV: [1]=cost [2]=floor [3]=accountBalance
-// [4]=holdTtlMs [5]=nowMs [6]=n, then per window {prefix, durMs, limit, offsetMs}.
+// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set. ARGV: [1]=cost [2]=floor
+// [3]=accountBalance [4]=holdTtlMs [5]=nowMs [6]=n, then per window
+// {prefix, durMs, limit, offsetMs}.
 // Returns {allowed(1/0), blocked}: blocked 0=ok, -1=affordability, i>0 = window i.
 var admitScript = redis.NewScript(`
 local cost  = tonumber(ARGV[1])
@@ -69,7 +73,25 @@ end
 
 local held = tonumber(redis.call('GET', KEYS[1]) or '0')
 if cbal - held - cost < floor then
-  return {0, -1}
+  -- held may include holds whose records TTL-expired (abandoned admits, #676):
+  -- recompute held = sum of LIVE hold records from the index before denying.
+  local sum = 0
+  local members = redis.call('SMEMBERS', KEYS[3])
+  for _, m in ipairs(members) do
+    local rec = redis.call('GET', m)
+    if rec then
+      local sep = string.find(rec, '|', 1, true)
+      if sep then sum = sum + (tonumber(string.sub(rec, 1, sep-1)) or 0)
+      else sum = sum + (tonumber(rec) or 0) end
+    else
+      redis.call('SREM', KEYS[3], m)
+    end
+  end
+  if sum > 0 then redis.call('SET', KEYS[1], sum) else redis.call('DEL', KEYS[1]) end
+  held = sum
+  if cbal - held - cost < floor then
+    return {0, -1}
+  end
 end
 
 -- check phase: no writes
@@ -104,6 +126,7 @@ for i=1,n do
   rec = rec .. '|' .. cntKey
 end
 redis.call('SET', KEYS[2], rec, 'PX', holdTtl)
+redis.call('SADD', KEYS[3], KEYS[2])
 return {1, 0}
 `)
 
@@ -114,15 +137,16 @@ return {1, 0}
 // by the caller against the durable #512 ledger, off this script. Idempotent: a
 // missing record (already settled / TTL-swept) is a no-op returning 0.
 //
-// KEYS: [1]=held [2]=hold:<reqID>.
+// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set.
 var captureScript = redis.NewScript(`
 local rec = redis.call('GET', KEYS[2])
 if not rec then return 0 end
 local sep = string.find(rec, '|', 1, true)
 local cost
 if sep then cost = tonumber(string.sub(rec, 1, sep-1)) else cost = tonumber(rec) end
-redis.call('INCRBY', KEYS[1], -cost)
+if redis.call('INCRBY', KEYS[1], -cost) < 0 then redis.call('SET', KEYS[1], '0') end
 redis.call('DEL', KEYS[2])
+redis.call('SREM', KEYS[3], KEYS[2])
 return 1
 `)
 
@@ -130,7 +154,7 @@ return 1
 // reservation from `held` AND from every window counter the admit recorded (the
 // request did not happen), then delete the hold record. Bills nothing. Idempotent.
 //
-// KEYS: [1]=held [2]=hold:<reqID>.
+// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set.
 var releaseScript = redis.NewScript(`
 local rec = redis.call('GET', KEYS[2])
 if not rec then return 0 end
@@ -138,12 +162,15 @@ local cost = nil
 for tok in string.gmatch(rec, '([^|]+)') do
   if cost == nil then
     cost = tonumber(tok)
-    redis.call('INCRBY', KEYS[1], -cost)
+    if redis.call('INCRBY', KEYS[1], -cost) < 0 then redis.call('SET', KEYS[1], '0') end
   else
-    redis.call('INCRBY', tok, -cost)
+    -- decrement only LIVE buckets: INCRBY on an expired bucket would recreate
+    -- it as a permanent negative key (#676)
+    if redis.call('EXISTS', tok) == 1 then redis.call('INCRBY', tok, -cost) end
   end
 end
 redis.call('DEL', KEYS[2])
+redis.call('SREM', KEYS[3], KEYS[2])
 return 1
 `)
 
@@ -152,9 +179,10 @@ return 1
 //
 // The `held` gauge is incremented on admit and decremented on capture/release. A
 // crashed in-flight request whose hold record TTL-expires leaves `held` inflated
-// (over-reserved → mild under-admission); a periodic reconciliation sweep can
-// recompute held = Σ live hold records per payer to self-heal. The drift between
-// sweeps is bounded and acceptable.
+// (over-reserved → mild under-admission) — self-healed lazily (#676): when the
+// affordability gate would deny, the admit script recomputes held = Σ live hold
+// records (via the "<base>:holds" index set) and re-checks, so an abandoned admit
+// blocks at most until the next denied admit after its hold TTL.
 type Gate struct {
 	rdb redis.Cmdable
 	now func() time.Time
@@ -207,7 +235,7 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 	if holdTTL <= 0 {
 		holdTTL = time.Hour
 	}
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID}
+	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
 	argv := make([]any, 0, 6+len(wins)*4)
 	argv = append(argv, in.Cost, -in.CreditLimit, in.AccountBalance, holdTTL.Milliseconds(), now.UnixMilli(), len(wins))
 	for _, w := range wins {
@@ -233,11 +261,14 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 		dec.BlockedWindow = &w
 	}
 	if dec.Allowed {
-		// Record the request→payer pointer so capture/release resolve coords from the
-		// request id alone. Best-effort: a lost pointer only means the hold self-heals
-		// at its TTL (bounded over-reservation), never a wrong charge.
+		// Record the request→payer pointer so capture/release resolve coords from
+		// the request id alone. REQUIRED (#676): a failed write fails the admit
+		// (caller won't render an unsettleable request); the leaked reservation
+		// self-heals via the hold TTL + blocked-admit recompute.
 		ptr := strings.Join([]string{in.Customer, in.Currency, in.Invoker, in.Source}, reqPtrSep)
-		_ = g.rdb.Set(ctx, reqPtrKey(in.Merchant, in.RequestID), ptr, holdTTL).Err()
+		if err := g.rdb.Set(ctx, reqPtrKey(in.Merchant, in.RequestID), ptr, holdTTL).Err(); err != nil {
+			return Decision{}, fmt.Errorf("spendgate: record admit pointer: %w", err)
+		}
 	}
 	return dec, nil
 }
@@ -278,7 +309,7 @@ type CaptureInput struct {
 // durable #512 ledger write are the caller's job, off the hot path. Idempotent.
 func (g *Gate) Capture(ctx context.Context, in CaptureInput) error {
 	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID}
+	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
 	if err := captureScript.Run(ctx, g.rdb, keys).Err(); err != nil {
 		return err
 	}
@@ -295,7 +326,7 @@ type ReleaseInput struct {
 // admit recorded (the request did not happen), without billing. Idempotent.
 func (g *Gate) Release(ctx context.Context, in ReleaseInput) error {
 	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID}
+	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
 	if err := releaseScript.Run(ctx, g.rdb, keys).Err(); err != nil {
 		return err
 	}

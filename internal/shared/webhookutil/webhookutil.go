@@ -217,10 +217,6 @@ func VerifyStripeSignature(secret, header string, body []byte, tolerance time.Du
 	return sigverify.VerifyStripe(secret, header, body, tolerance)
 }
 
-func ParseStripeSignatureHeader(header string) (string, []string) {
-	return sigverify.ParseStripeSignatureHeader(header)
-}
-
 // NMISignatureTolerance is the replay window the public ingestion path enforces
 // on NMI webhook timestamps.
 const NMISignatureTolerance = 5 * time.Minute
@@ -240,10 +236,6 @@ func VerifyNMISignature(secret, header string, body []byte) error {
 // truth for NMI signature verification; do not reimplement it elsewhere.
 func VerifyNMISignatureWithTolerance(secret, header string, body []byte, tolerance time.Duration) error {
 	return sigverify.VerifyNMI(secret, header, body, tolerance)
-}
-
-func ParseNMISignatureHeader(header string) (string, string, error) {
-	return sigverify.ParseNMISignatureHeader(header)
 }
 
 func ValidateNMISignature(secret string, body []byte, phpHeader string) (string, error) {

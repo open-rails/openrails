@@ -64,7 +64,7 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	}
 	merchantPub := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanService(sub, "devnet", testSolanaTokens())
+	svc := NewPlanServiceWithReader(sub, nil, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		MerchantID:      merchant.ID{},
@@ -107,7 +107,7 @@ func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	cold := coldKey.PublicKey()
 
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanService(sub, "devnet", testSolanaTokens())
+	svc := NewPlanServiceWithReader(sub, nil, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		MerchantID:      merchant.ID{},

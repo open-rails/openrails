@@ -25,6 +25,7 @@ func newTestNMIClient(t *testing.T, url string) *nmi.NMIClient {
 	if url != "" {
 		client.DirectPostURL = url
 		client.QueryURL = url
+		client.V5BaseURL = url
 	}
 	return client
 }
@@ -75,19 +76,22 @@ func TestNMIDeleteVerifyMissingClientStaysAmbiguous(t *testing.T) {
 func TestSubscriptionPresentParsesRecurringReport(t *testing.T) {
 	cases := []struct {
 		name    string
+		status  int
 		body    string
 		present bool
 		wantErr bool
 	}{
-		{"present", `<nm_response><subscription><subscription_id>sub-1</subscription_id></subscription></nm_response>`, true, false},
-		{"absent (empty report)", `<nm_response></nm_response>`, false, false},
-		{"absent (other subscription)", `<nm_response><subscription><subscription_id>other</subscription_id></subscription></nm_response>`, false, false},
-		{"error response", `<nm_response><error_response>invalid security key</error_response></nm_response>`, false, true},
-		{"garbage", `not xml at all`, false, true},
+		{"present", http.StatusOK, `{"object":"subscription","id":"sub-1","delayed_condition":"active"}`, true, false},
+		{"deletion tombstone (200 + inactive) = deleted", http.StatusOK, `{"object":"subscription","id":"sub-1","delayed_condition":"inactive"}`, false, false},
+		{"absent (404 = deleted at NMI)", http.StatusNotFound, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`, false, false},
+		{"error response", http.StatusUnauthorized, `{"type":"authenticationError","error_code":"E_AUTH","message":"invalid security key"}`, false, true},
+		{"garbage", http.StatusOK, `not json at all`, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/subscriptions/sub-1", r.URL.Path)
+				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer srv.Close()

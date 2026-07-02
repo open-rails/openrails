@@ -15,9 +15,9 @@ import (
 // Subscriptions and the vault roster read the v5 JSON API; the transaction
 // search stays on query.php (#663: v5 payments has no list/search).
 type nmiQueryClient interface {
-	ListSubscriptionsPage(cursor int, perPage int) (nmi.SubscriptionPage, error)
+	ListSubscriptionsPage(cursor string, perPage int) (nmi.SubscriptionPage, error)
 	GetSubscription(subscriptionID string) (nmi.V5Subscription, bool, error)
-	ListCustomersPage(cursor int, perPage int, id string) (nmi.CustomerPage, error)
+	ListCustomersPage(cursor string, perPage int, id string) (nmi.CustomerPage, error)
 	SearchTransactions(filter nmi.QueryFilter) (string, error)
 }
 
@@ -128,20 +128,22 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			subs = append(subs, sub)
 		}
 	} else {
-		cursor := 0
-		seenCursor := map[int]bool{}
+		// Live-verified pagination contract: next_cursor is a STRING and empty
+		// pages mid-stream are legal — stop only on has_more=false/no cursor.
+		cursor := ""
+		seenCursor := map[string]bool{}
 		for {
 			page, err := f.Client.ListSubscriptionsPage(cursor, nmiV5PageLimit)
 			if err != nil {
 				return nil, err
 			}
 			subs = append(subs, page.Subscriptions...)
-			if page.NextCursor == nil || len(page.Subscriptions) == 0 {
+			next := string(page.NextCursor)
+			if !page.HasMore || next == "" {
 				break
 			}
-			next := *page.NextCursor
 			if seenCursor[next] {
-				return nil, fmt.Errorf("nmi subscription pagination repeated cursor %d; refusing incomplete snapshot", next)
+				return nil, fmt.Errorf("nmi subscription pagination repeated cursor %s; refusing incomplete snapshot", next)
 			}
 			seenCursor[next] = true
 			cursor = next
@@ -356,20 +358,20 @@ func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]Remo
 		return nil, nil, err
 	}
 	var customers []nmi.V5Customer
-	cursor := 0
-	seenCursor := map[int]bool{}
+	cursor := ""
+	seenCursor := map[string]bool{}
 	for {
 		page, err := f.Client.ListCustomersPage(cursor, nmiV5PageLimit, params.CustomerID)
 		if err != nil {
 			return nil, nil, err
 		}
 		customers = append(customers, page.Customers...)
-		if page.NextCursor == nil || len(page.Customers) == 0 {
+		next := string(page.NextCursor)
+		if !page.HasMore || next == "" {
 			break
 		}
-		next := *page.NextCursor
 		if seenCursor[next] {
-			return nil, nil, fmt.Errorf("nmi customer pagination repeated cursor %d; refusing incomplete snapshot", next)
+			return nil, nil, fmt.Errorf("nmi customer pagination repeated cursor %s; refusing incomplete snapshot", next)
 		}
 		seenCursor[next] = true
 		cursor = next

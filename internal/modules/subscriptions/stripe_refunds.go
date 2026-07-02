@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
@@ -53,8 +54,9 @@ func (s *StripeRefundService) baseURL() string {
 }
 
 type RefundParams struct {
-	ChargeID       string
-	Amount         int64
+	ChargeID string
+	// Amount is Stripe minor units (typed Cents, #671); 0 = full refund.
+	Amount         moneyutil.Cents
 	Reason         string
 	IdempotencyKey string
 }
@@ -91,7 +93,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 		values.Set("charge", chargeID)
 	}
 	if params.Amount > 0 {
-		values.Set("amount", strconv.FormatInt(params.Amount, 10))
+		values.Set("amount", strconv.FormatInt(int64(params.Amount), 10))
 	}
 
 	reason := strings.TrimSpace(params.Reason)
@@ -106,7 +108,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 
 	idempotencyKey := strings.TrimSpace(params.IdempotencyKey)
 	if idempotencyKey == "" {
-		idempotencyKey = StripeRefundIdempotencyKey(chargeID, params.Amount, reason)
+		idempotencyKey = StripeRefundIdempotencyKey(chargeID, int64(params.Amount), reason)
 	}
 	// Metadata mirror of the idempotency key: the Idempotency-Key header
 	// dedupes the WRITE, the metadata makes the refund re-findable via reads.

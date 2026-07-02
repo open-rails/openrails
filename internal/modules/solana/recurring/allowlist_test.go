@@ -76,19 +76,3 @@ func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
 		t.Fatalf("decimals = %d, want 6", decimals)
 	}
 }
-
-func TestValidateRecurringMint(t *testing.T) {
-	goodMint, _, err := ResolveRecurringMint("USDC", "mainnet")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if err := ValidateRecurringMint("USDC", goodMint, "mainnet"); err != nil {
-		t.Errorf("matching mint should pass: %v", err)
-	}
-	if err := ValidateRecurringMint("USDC", "SomeOtherMint1111111111111111111111111111111", "mainnet"); err == nil {
-		t.Error("mismatched mint should fail")
-	}
-	if err := ValidateRecurringMint("PYUSD", goodMint, "mainnet"); err == nil {
-		t.Error("off-allowlist symbol should fail regardless of mint")
-	}
-}

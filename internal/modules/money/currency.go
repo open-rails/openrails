@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // System currency registry (#472). Currency is system-fixed, NOT merchant-scoped:
@@ -15,15 +17,16 @@ const DefaultCurrency = "USD"
 
 // Currency is a system currency code and its minor-unit scale.
 type Currency struct {
-	Code     string
-	Decimals int    // internal units per major unit = 10^Decimals
-	Kind     string // "fiat"
+	Code          string
+	Decimals      int    // internal units per major unit = 10^Decimals
+	MinorDecimals int    // ISO-4217/provider minor units per major unit = 10^MinorDecimals (0 for zero-decimal rails like JPY)
+	Kind          string // "fiat"
 }
 
 var currencies = map[string]Currency{
-	"USD": {Code: "USD", Decimals: 6, Kind: "fiat"},
-	"EUR": {Code: "EUR", Decimals: 6, Kind: "fiat"},
-	"JPY": {Code: "JPY", Decimals: 4, Kind: "fiat"},
+	"USD": {Code: "USD", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
+	"EUR": {Code: "EUR", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
+	"JPY": {Code: "JPY", Decimals: 4, MinorDecimals: 0, Kind: "fiat"},
 }
 
 // normalizeCurrency upper-cases the code, so built-in currency codes are
@@ -51,6 +54,36 @@ func ValidateCurrency(c string) error {
 func CurrencyScale(c string) (int, bool) {
 	cur, ok := currencies[normalizeCurrency(c)]
 	return cur.Decimals, ok
+}
+
+// NativeToRailMinor is THE internal->provider amount converter (#671): it
+// converts an internal native amount (10^Decimals units per major unit) into
+// the provider/rail minor unit (10^MinorDecimals per major unit — cents for
+// USD/EUR, whole yen for zero-decimal JPY; typed Cents). Rounds UP so the
+// charge always covers the internal amount (never under-charges); the
+// sub-minor remainder (< one rail minor unit) is the customer's gain. Errors
+// on an unregistered currency — callers must not guess a scale.
+func NativeToRailMinor(currency string, amount int64) (moneyutil.Cents, error) {
+	cur, ok := currencies[normalizeCurrency(currency)]
+	if !ok {
+		return 0, fmt.Errorf("money: unknown currency %q", currency)
+	}
+	if amount <= 0 {
+		return 0, nil
+	}
+	shift := cur.Decimals - cur.MinorDecimals
+	if shift <= 0 {
+		out := amount
+		for range -shift {
+			out *= 10
+		}
+		return moneyutil.Cents(out), nil
+	}
+	div := int64(1)
+	for range shift {
+		div *= 10
+	}
+	return moneyutil.Cents((amount + div - 1) / div), nil
 }
 
 // CurrencyCodes returns the registered native currencies in deterministic order.

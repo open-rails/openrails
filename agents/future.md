@@ -964,6 +964,15 @@ We bill our SaaS customers... using OpenRails itself (dogfood): usage metering (
 
 Make OpenRails' CARD billing survive a processor/vault de-platforming — the existential threat for the adult/high-risk merchants OpenRails serves (host apps). The card-side analog of the Solana rail (which is already un-de-platformable: no vault, no PCI, no acquirer).
 
+SCOPE NOTE (2026-07-01): keep this issue about DEPLATFORMING RESILIENCE only. The Link/Shop-Pay-style
+cross-merchant wallet is a DIFFERENT motivation with a different chosen path — Stripe-Connect saved-PM
+reuse on the platform account (see ~/openrails-saas/payments-multi-merchant-wallet-and-payfac.md, Rank 1:
+rented PCI, no MTL) — not this vault. If this neutral vault is ever shared across merchants, the
+wallet-integrity constraint applies (openrails-saas #23: shared vault and shared subscription state must
+be inseparable — no merchant-controlled state machine may charge shared-vault instruments). Under the
+two-party platform, vault entries here would be customer-scoped, not (customer, merchant)-scoped
+(Roadmap v0.2), which makes that constraint load-bearing.
+
 ## Strategy (decided 2026-06, after researching the vault market)
 Keep cards in a NEUTRAL, EXPORTABLE third-party vault; OpenRails stays the orchestration/billing brain and NEVER sees the PAN. Architecture:
   Browser --(vault SDK/iframe, PAN bypasses OpenRails)--> VAULT (holds card + network token)

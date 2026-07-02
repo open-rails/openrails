@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
@@ -14,15 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -33,12 +28,11 @@ type Dependencies struct {
 	Cache   cache.Cache
 	Runtime *app.Runtime
 	Redis   *redis.Client
-	// Authenticator is the framework-neutral auth boundary (gin-free). The gin
-	// Optional()/Required() middleware used by the standalone surface is
-	// reconstructed from it via ginauth.ProviderFromAuthenticator (#285).
+	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
+	// wraps it as the best-effort global middleware (#282/#670).
 	Authenticator billingauth.Authenticator
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
-	// REQUIRED (#469): the standalone gin surface always runs with a control
+	// REQUIRED (#469): the standalone surface always runs with a control
 	// plane — there is no verifier-only mode. The server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
@@ -52,22 +46,18 @@ type Dependencies struct {
 }
 
 type Server struct {
-	cfg          *config.Config
-	cache        cache.Cache
-	runtime      *app.Runtime
-	rdb          *redis.Client
-	authProvider ginauth.Provider
-	// authenticator is the framework-neutral auth boundary used by the gin-free
-	// embedded surface (issue #282). It is derived from authProvider when that
-	// provider exposes one (AuthKit-backed + ProviderFromAuthenticator do); a host
-	// may also set it explicitly. nil when neither is available — embedded
-	// auth-gated routes then fail closed with 500 (see Options.requiredMW).
+	cfg     *config.Config
+	cache   cache.Cache
+	runtime *app.Runtime
+	rdb     *redis.Client
+	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
+	// there is no gin auth provider any more; every surface uses this directly).
 	authenticator billingauth.Authenticator
 	// delegatedAuthenticator is the optional host-supplied identity seam for
 	// the self-service surface (#339); see Dependencies.DelegatedAuthenticator.
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	controlPlane           *controlplane.ControlPlane
-	delegatedResolver      ginmw.DelegatedResolver
+	delegatedResolver      middleware.DelegatedResolver
 	captchaStore           *captcha.ChallengeStore
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
@@ -83,13 +73,37 @@ type Server struct {
 	// browserCORSOriginSource is the standalone browser CORS origin source.
 	// Production leaves this nil and reads AuthKit remote_application state via
 	// controlPlane; tests can override it without a live database.
-	browserCORSOriginSource ginmw.CORSOriginSource
+	browserCORSOriginSource middleware.CORSOriginSource
 
-	// publicHandler is the single "full surface" HTTP handler. It includes
-	// health + debug (dev only) + user + admin + webhook routes AND the
-	// API-key-authenticated server-to-server service routes (issue #222). There is no
-	// separate private/service trust surface or port.
-	publicHandler *gin.Engine
+	// publicHandler is the single "full surface" HTTP handler: health + user +
+	// self/customer + merchant + control-plane auth + webhook routes AND the
+	// API-key-authenticated server-to-server service routes (issue #222). It is
+	// the framework-neutral net/http mux wrapped in the neutral middleware chain
+	// (#670 — the standalone gin stack is gone; one HTTP stack everywhere).
+	publicHandler http.Handler
+
+	// routeTable records every registered route pattern (ServeMux syntax), the
+	// standalone surface's introspectable route table for the #670 parity test.
+	routeTable []string
+}
+
+// recordRoute appends a registered pattern to the server's route table.
+func (s *Server) recordRoute(pattern string) {
+	s.routeTable = append(s.routeTable, pattern)
+}
+
+// RouteTable returns every route pattern the standalone surface registered
+// ("GET /v1/me/balance", ServeMux syntax). Used by the route-surface test.
+func (s *Server) RouteTable() []string {
+	out := make([]string, len(s.routeTable))
+	copy(out, s.routeTable)
+	return out
+}
+
+// handle registers a plain net/http handler on the mux and records it.
+func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
+	s.recordRoute(pattern)
+	mux.Handle(pattern, h)
 }
 
 func New(deps Dependencies) (*Server, error) {
@@ -155,14 +169,10 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:     deps.Config,
-		cache:   deps.Cache,
-		runtime: deps.Runtime,
-		rdb:     deps.Redis,
-		// The gin standalone surface needs Optional()/Required() middleware: build
-		// the gin provider from the framework-neutral authenticator (#285). The
-		// embedded net/http surface uses the authenticator directly.
-		authProvider:           ginauth.ProviderFromAuthenticator(deps.Authenticator),
+		cfg:                    deps.Config,
+		cache:                  deps.Cache,
+		runtime:                deps.Runtime,
+		rdb:                    deps.Redis,
 		authenticator:          deps.Authenticator,
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
 		configuredMerchant:     deps.ConfiguredMerchant,
@@ -306,69 +316,67 @@ func New(deps Dependencies) (*Server, error) {
 
 	}
 
-	// Single (standalone-friendly) HTTP surface.
-	// Standalone mode owns service-level health/debug routes.
-	s.publicHandler = s.newPublicEngine()
-	s.registerStandaloneMetaRoutes(s.publicHandler)
+	// Single (standalone-friendly) HTTP surface on the framework-neutral
+	// net/http mux (#670): the same stack the embedded surface serves.
+	mux := http.NewServeMux()
+	// Standalone mode owns service-level health/meta routes.
+	s.registerStandaloneMetaRoutes(mux)
 	// Canonical: /v1/*
-	s.registerUserRoutes(s.publicHandler)
+	s.registerUserRoutes(mux)
 	// #555/#561: merchant/support routes live only under `/v1/merchant/*`.
-	s.registerMerchantActionRoutesOn(s.publicHandler)
+	s.registerMerchantActionRoutes(mux)
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
 	// ONLY the intentional AuthKit route groups (login/session/user) under
 	// /auth — never AuthKit DefaultAPI.
-	s.registerControlPlaneAuthRoutes(s.publicHandler)
-
-	// #555 HARD CUT: the server-to-server billing routes moved from the gin
-	// `/v1/service/*` surface to the router-based `/v1/merchant/*` surface mounted
-	// by registerMerchantActionRoutesOn above. The `/v1/service` duplicate is gone.
+	s.registerControlPlaneAuthRoutes(mux)
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
-	// the SAME public engine (issue #222 browser tier). Always mounted (#469);
+	// the SAME public surface (issue #222 browser tier). Always mounted (#469);
 	// a host-supplied DelegatedAuthenticator overrides the control plane's
 	// delegated-token verifier (#339).
-	s.registerSelfServiceRoutes(s.publicHandler)
+	s.registerSelfServiceRoutes(mux)
 
 	// Canonical provider-only webhook surface (#650): /v1/webhooks/:provider for NMI/CCBill
 	// (their payloads carry account identity) and /v1/webhooks/:provider/:account_id for
 	// direct Stripe. The handler resolves the provider account from the payload/route, derives
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
-	s.registerWebhookRoutes(s.publicHandler)
+	s.registerWebhookRoutes(mux)
 	// Merchant-scoped webhook routing (issue #529): /v1/merchants/:merchant/webhooks/:provider
 	// resolves the merchant from the path slug, then loads THAT merchant's signing
 	// secret and verifies the signature AFTER merchant resolution. Kept as a transition alias
 	// alongside the canonical provider-only surface above (#650).
-	s.registerMerchantWebhookRoutes(s.publicHandler)
+	s.registerMerchantWebhookRoutes(mux)
+
+	s.publicHandler = s.wrapPublicHandler(mux)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
 }
 
-func (s *Server) newPublicEngine() *gin.Engine {
-	e := gin.New()
-	e.Use(gin.Recovery())
-	e.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
-	}))
-	e.Use(ginmw.SecurityHeaders())
-	// CORS is browser transport policy, not API authorization. Preflight has no
-	// JWT issuer. JWT signature/issuer/audience/permissions and merchant ownership
-	// remain the real request security boundary; hosts that need browser CORS wire
-	// an explicit origin source.
-	e.Use(ginmw.CORSFromSource(s.browserCORSOrigins))
-	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
-	// Resolve the merchant / billing namespace before authorization and before any
-	// merchant-owned DB access (issue #223). Pins the construction-time configured
-	// merchant resolved once at boot (#336); zero when none is configured, in
-	// which case merchant-owned operations hard-fail (there is no default merchant).
-	e.Use(ginmw.ResolveMerchant(s.configuredMerchant))
-	if s.authProvider != nil {
-		e.Use(s.authProvider.Optional())
-	}
-	e.Use(ginmw.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
-	return e
+// wrapPublicHandler applies the global middleware chain — the neutral analogue
+// (and successor, #670) of the old gin engine's global middleware, same order.
+func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
+	return middleware.ChainHTTP(mux,
+		middleware.RecoverHTTP(),
+		middleware.RequestLogHTTP("/health/live", "/health/ready", "/healthz", "/readyz", "/health"),
+		middleware.SecurityHeadersHTTP(),
+		// CORS is browser transport policy, not API authorization. Preflight has no
+		// JWT issuer. JWT signature/issuer/audience/permissions and merchant ownership
+		// remain the real request security boundary; hosts that need browser CORS wire
+		// an explicit origin source.
+		middleware.CORSFromSourceHTTP(s.browserCORSOrigins),
+		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		// Resolve the merchant / billing namespace before authorization and before any
+		// merchant-owned DB access (issue #223). Pins the construction-time configured
+		// merchant resolved once at boot (#336); zero when none is configured, in
+		// which case merchant-owned operations hard-fail (there is no default merchant).
+		middleware.ResolveMerchantHTTP(s.configuredMerchant),
+		// Best-effort auth so the rate limiter can key by user, not only IP.
+		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
+		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore),
+	)
 }
 
 func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
@@ -381,55 +389,8 @@ func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
 	return s.controlPlane.BrowserCORSOrigins(ctx)
 }
 
-// newHTTPHandlerMux delegates to the gin-free embedhttp assembler (issue
-// #282/#285), which builds the embedded billing surface as a net/http handler
-// with zero gin on the request path. The gin Server holds the standalone surface
-// (newPublicEngine); embedded hosts use this gin-free handler via pkg/embedded.
-func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
-	asm := &embedhttp.Assembler{
-		Cfg:           s.cfg,
-		Runtime:       s.runtime,
-		CaptchaStore:  s.captchaStore,
-		RDB:           s.rdb,
-		Authenticator: s.embeddedAuthenticator(),
-	}
-	// The control plane is always present on this surface (#469); it is the
-	// live admin-permission checker.
-	asm.AdminChecker = s.controlPlane
-	asm.ServiceCredentialResolver = s.controlPlane
-	if asm.Authenticator != nil || s.controlPlane != nil || s.delegatedAuthenticator != nil {
-		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
-			Authenticator:             asm.Authenticator,
-			AdminPermissionChecker:    s.controlPlane,
-			ServiceCredentialResolver: s.controlPlane,
-			DelegatedResolver:         s.controlPlane,
-			DelegatedAuthenticator:    s.delegatedAuthenticator,
-		})
-	}
-	return asm.NewHTTPHandler(embedhttp.Options{
-		RouteSets:          opts.RouteSets,
-		AdvertiseRouteSets: opts.RouteSets,
-		ProviderRoutes:     opts.ProviderRoutes,
-	})
-}
-
-// NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
-//
-// Intended for embedded hosts.
-//
-// Embedded routes live under `/billing/v1/*`.
-func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
-	return s.newHTTPHandlerMux(opts)
-}
-
-// embeddedAuthenticator returns the framework-neutral Authenticator used by the
-// embedded route surface (issue #282), or nil when none is available.
-func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
-	return s.authenticator
-}
-
-// Handler returns the full public HTTP surface: health + debug (dev only) + user
-// + admin + webhooks + API-key-authenticated server-to-server service routes
+// Handler returns the full public HTTP surface: health + user + self/customer
+// + merchant + webhooks + API-key-authenticated server-to-server service routes
 // (issue #222). There is no separate private/service handler — embedded hosts use
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.

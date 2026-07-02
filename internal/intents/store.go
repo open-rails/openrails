@@ -235,6 +235,30 @@ func slimEvidence(evidence map[string]any) map[string]any {
 	return slim
 }
 
+// RecordProgress merges keys into result_evidence on a LIVE (non-terminal)
+// intent — handlers use it to durably pin provider references (e.g. a signed
+// Solana tx signature) BEFORE the side effect is sent (#674), so a crash
+// mid-send resolves via a provider read keyed on the recorded reference.
+//
+// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
+// apply exactly as for the generated queries.
+func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return fmt.Errorf("intents: marshal progress evidence: %w", err)
+	}
+	_, err = s.db.Qx(ctx).Exec(ctx,
+		`UPDATE openrails.provider_intents
+		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || $2::jsonb,
+		        updated_at = now()
+		  WHERE id = $1
+		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`, id, b)
+	return err
+}
+
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
 	return one(s.db.Gen(ctx).MarkProviderIntentFailedRetryable(ctx, gen.MarkProviderIntentFailedRetryableParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,

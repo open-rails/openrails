@@ -10,7 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -67,15 +69,9 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 }
 
 // railHasRemoteCustomer reports whether a rail exposes a card-independent remote
-// customer object worth materializing into rail_customers (#635). Stripe (cus_*)
-// and NMI (customer_vault_id) do; CCBill, Solana, and the rest do not.
+// customer object worth materializing into rail_customers (#635). Registry-backed (#669).
 func railHasRemoteCustomer(rail string) bool {
-	switch strings.ToLower(strings.TrimSpace(rail)) {
-	case "stripe", "nmi":
-		return true
-	default:
-		return false
-	}
+	return rails.HasRemoteCustomer(models.Rail(rail))
 }
 
 func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail string) (string, error) {

@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -21,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
-	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 func main() {
@@ -161,10 +159,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if cfg.Env == "production" || cfg.Env == "prod" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
 	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
@@ -199,9 +193,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Public API server (user/admin JWT auth). The full standalone gin surface
-	// lives in the pkg/embedded/gin subpackage now (#285).
-	publicHandler, err := embgin.StandaloneHandler(embeddedApp)
+	// Public API server (user/admin JWT auth). The full standalone surface is
+	// the framework-neutral net/http stack (#670) — the same stack embedded
+	// hosts mount.
+	publicHandler, err := embedded.StandaloneHandler(embeddedApp)
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}

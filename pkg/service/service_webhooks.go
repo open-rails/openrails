@@ -11,8 +11,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
@@ -34,22 +32,28 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 		"client_ip": req.ClientIP,
 	}).Debug("Received webhook via Service API")
 
-	// Route based on provider
-	if rails.IsNMI(models.Rail(provider)) {
-		return s.handleNMIWebhook(ctx, provider, req)
-	}
-
-	switch provider {
-	case subscriptions.RailCCBill:
-		return s.handleCCBillWebhook(ctx, req)
-	case subscriptions.RailStripe:
-		return s.handleStripeWebhook(ctx, req)
-	default:
+	ingress, ok := serviceWebhookIngress[models.Rail(provider)]
+	if !ok {
 		return &WebhookResult{
 			Accepted: false,
 			Error:    fmt.Sprintf("invalid provider: %s", provider),
 		}, nil
 	}
+	return ingress(s, ctx, provider, req)
+}
+
+// serviceWebhookIngress is the embedded-surface routing TABLE (#669): which
+// handler serves each rail. Verification/posture logic stays in the handlers.
+var serviceWebhookIngress = map[models.Rail]func(s *Service, ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error){
+	models.RailNMI: func(s *Service, ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {
+		return s.handleNMIWebhook(ctx, provider, req)
+	},
+	models.RailCCBill: func(s *Service, ctx context.Context, _ string, req HandleWebhookRequest) (*WebhookResult, error) {
+		return s.handleCCBillWebhook(ctx, req)
+	},
+	models.RailStripe: func(s *Service, ctx context.Context, _ string, req HandleWebhookRequest) (*WebhookResult, error) {
+		return s.handleStripeWebhook(ctx, req)
+	},
 }
 
 func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -51,32 +52,17 @@ type UnknownReconcileResult struct {
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
 }
 
-// railExposesRemoteCustomer reports whether a rail has a card-independent remote
-// CUSTOMER object worth materializing into rail_customers (#635): Stripe (cus_*)
-// and NMI (customer_vault_id). CCBill keys on subscription_id and Solana on the
-// wallet address — neither is a customer, so no rail_customers row.
-func railExposesRemoteCustomer(rail string) bool {
-	switch rail {
-	case "stripe", "nmi":
-		return true
+// reconcilableRails returns the rails with provider accounts (registry-driven,
+// #669) in stable order; their reconcile Provider is the rail name itself
+// (#630: mobius is a provider account on rail nmi, not a rail).
+func reconcilableRails() []string {
+	var out []string
+	for _, d := range rails.All() {
+		if d.HasProviderAccounts {
+			out = append(out, string(d.Rail))
+		}
 	}
-	return false
-}
-
-// railToProvider maps a local subscription rail to its reconcile Provider.
-// (#630: mobius is a provider account on rail nmi, not a rail.)
-func railToProvider(rail string) (Provider, bool) {
-	switch rail {
-	case "nmi":
-		return ProviderNMI, true
-	case "ccbill":
-		return ProviderCCBill, true
-	case "stripe":
-		return ProviderStripe, true
-	case "solana":
-		return ProviderSolana, true
-	}
-	return "", false
+	return out
 }
 
 // ReconcileUnknownCohort resolves the `unknown` subscription cohort (#632) against
@@ -93,11 +79,8 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
 
-	for _, rail := range []string{"nmi", "ccbill", "stripe", "solana"} {
-		provider, ok := railToProvider(rail)
-		if !ok {
-			continue
-		}
+	for _, rail := range reconcilableRails() {
+		provider := Provider(rail)
 		fetcher := fetchers[provider]
 		railArg := rail
 		rows, err := q.ListUnknownSubscriptions(ctx, gen.ListUnknownSubscriptionsParams{
@@ -170,7 +153,7 @@ func applyUnknownVerdict(ctx context.Context, database *db.DB, lc *subscriptions
 	// #635: materialize a rail_customers row when the provider exposed a real
 	// card-independent customer id (Stripe cus_*, NMI vault) for this sub. Guarded to
 	// stripe/nmi — CCBill/Solana/vault-less never fabricate one. Idempotent upsert.
-	if v.RemoteCustomerID != "" && railExposesRemoteCustomer(string(sub.Rail)) {
+	if v.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
 		if err := q.UpsertRailCustomer(ctx, gen.UpsertRailCustomerParams{
 			ID:             uuid.New(),
 			CustomerID:     sub.CustomerID,

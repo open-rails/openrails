@@ -170,7 +170,7 @@ func TestPublishPlanPeriodBoundValidation(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	merchantPub := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanService(sub, "devnet", testSolanaTokens())
+	svc := NewPlanServiceWithReader(sub, nil, "devnet", testSolanaTokens())
 
 	for _, period := range []uint64{0, maxPeriodHours + 1} {
 		_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
@@ -197,7 +197,7 @@ func TestPublishPlanBillingCycleConsistency(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	merchantPub := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanService(sub, "devnet")
+	svc := NewPlanServiceWithReader(sub, nil, "devnet")
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		PlanID:            7,

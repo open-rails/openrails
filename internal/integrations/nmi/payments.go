@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 type SaleParams struct {
-	CustomerVaultID  string
-	Amount           int64
+	CustomerVaultID string
+	// Amount is CENTS (typed, #671) — rendered as a two-decimal wire amount.
+	Amount           moneyutil.Cents
 	Currency         string
 	OrderDescription string
 	OrderID          string
@@ -24,7 +27,8 @@ type SaleResponse struct {
 
 type RefundParams struct {
 	TransactionID string
-	Amount        int64
+	// Amount is CENTS (typed, #671); 0 = full refund.
+	Amount moneyutil.Cents
 }
 
 type RefundResponse struct {
@@ -32,8 +36,9 @@ type RefundResponse struct {
 	ResponseText  string
 }
 
-// RunSale charges a vaulted customer via POST /v5/payments/sale
-// (payment_details.customer_vault_id — the documented v5 vault-sale form).
+// RunSale charges a vaulted customer via POST /v5/payments/sale using the
+// top-level customer_vault:{id} object (the live-verified vault-sale form;
+// the documented payment_details.customer_vault_id is rejected).
 func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -53,12 +58,18 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	if orderDesc == "" {
 		orderDesc = "One-time purchase"
 	}
+	// v5 caps order_details.id at 50 chars (live-verified). The order id is the
+	// correlation handle evidence probes search by — refuse loudly rather than
+	// silently truncate it into an unfindable reference.
+	if len(params.OrderID) > 50 {
+		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
+	}
 
 	req := v5PaymentRequest{
-		Amount:         centsJSONAmount(params.Amount),
-		Currency:       currency,
-		PaymentDetails: &v5PaymentDetails{CustomerVaultID: params.CustomerVaultID},
-		OrderDetails:   &v5OrderDetails{ID: params.OrderID, OrderDescription: orderDesc},
+		Amount:        centsJSONAmount(params.Amount),
+		Currency:      currency,
+		CustomerVault: &v5CustomerVaultRef{ID: params.CustomerVaultID},
+		OrderDetails:  &v5OrderDetails{ID: params.OrderID, OrderDescription: orderDesc},
 	}
 
 	var txn v5Transaction

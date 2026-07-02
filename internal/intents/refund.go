@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Refund intent types (#358 phase B). The provider-side money movement of an
@@ -40,8 +41,11 @@ type RefundPayload struct {
 	// ReservationID is the local negative pending payment row the finalize
 	// completes (provider id recorded) or releases (terminal refusal).
 	ReservationID uuid.UUID `json:"reservation_id"`
-	AmountCents   int64     `json:"amount_cents"`
-	Reason        string    `json:"reason,omitempty"`
+	// AmountCents is provider minor units (typed CENTS, #671) — converted
+	// exactly from the request's micros at the admin boundary. Both the NMI
+	// wire amount and the verifier's action.AmountCents comparison are cents.
+	AmountCents moneyutil.Cents `json:"amount_cents"`
+	Reason      string          `json:"reason,omitempty"`
 	// ProviderTarget is what the provider refunds against: the Stripe charge /
 	// payment-intent id (ch_/pi_), or the NMI transaction id of the original
 	// payment.
@@ -290,7 +294,7 @@ func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (r
 		if !action.Success {
 			continue
 		}
-		if action.AmountCents != p.AmountCents {
+		if moneyutil.Cents(action.AmountCents) != p.AmountCents {
 			continue
 		}
 		return action.TransactionID, true, nil
@@ -442,15 +446,15 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsPr
 // idempotency key for refunding a payment, or an error when the rail has
 // no ledger refund path. Shared by the admin producer so handler and producer
 // can never disagree on identity.
-func RefundIntentFor(payment *models.Payment, providerTarget string, amountCents int64, reason string) (intentType, provider, idempotencyKey string, err error) {
+func RefundIntentFor(payment *models.Payment, providerTarget string, amountCents moneyutil.Cents, reason string) (intentType, provider, idempotencyKey string, err error) {
 	switch {
 	case payment == nil:
 		return "", "", "", errors.New("payment is required")
 	case payment.Rail == models.RailStripe:
 		return TypeStripeRefund, strings.ToLower(string(payment.Rail)),
-			StripeRefundIntentIdempotencyKey(providerTarget, amountCents, reason), nil
+			StripeRefundIntentIdempotencyKey(providerTarget, int64(amountCents), reason), nil
 	default:
 		return TypeNMIRefund, strings.ToLower(string(payment.Rail)),
-			NMIRefundIdempotencyKey(providerTarget, amountCents), nil
+			NMIRefundIdempotencyKey(providerTarget, int64(amountCents)), nil
 	}
 }

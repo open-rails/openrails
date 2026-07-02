@@ -6,6 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -116,4 +120,34 @@ func TestHTTPGetUserFromContext(t *testing.T) {
 	if u == nil || u.ID != "u-1" || u.Username != "ada" {
 		t.Fatalf("GetUser = %+v", u)
 	}
+}
+
+// TestHTTPBindQueryNestedFiltersTimeAndUUID pins gin-binding parity for the
+// neutral query binder (#670): nested filter structs (query.QueryOptions[T]),
+// time.Time with time_format tags, and TextUnmarshaler fields (uuid.UUID) all
+// bind from the query string. Regression: the standalone /v1/merchant/payments
+// user_id filter was silently dropped when the binder did not recurse.
+func TestHTTPBindQueryNestedFiltersTimeAndUUID(t *testing.T) {
+	type filters struct {
+		UserID  string     `form:"user_id"`
+		PriceID uuid.UUID  `form:"price_id"`
+		After   *time.Time `form:"created_after" time_format:"2006-01-02"`
+	}
+	type opts struct {
+		Limit   int     `form:"limit"`
+		Filters filters `form:",inline"`
+	}
+
+	priceID := uuid.New()
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/things?limit=7&user_id=u-1&price_id="+priceID.String()+"&created_after=2026-01-02", nil)
+	r := NewHTTP(httptest.NewRecorder(), req, nil)
+
+	var got opts
+	require.NoError(t, r.ShouldBindQuery(&got))
+	require.Equal(t, 7, got.Limit)
+	require.Equal(t, "u-1", got.Filters.UserID)
+	require.Equal(t, priceID, got.Filters.PriceID)
+	require.NotNil(t, got.Filters.After)
+	require.Equal(t, "2026-01-02", got.Filters.After.Format("2006-01-02"))
 }

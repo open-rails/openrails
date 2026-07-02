@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,6 +27,36 @@ func TestAccrueOwed_Idempotent(t *testing.T) {
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), owed, "300 (idempotent) + 200")
+}
+
+// #677: two concurrent accruals at the same coordinates serialize on the
+// per-customer spend lock — exactly one owed_accrual transfer posts; the loser
+// re-reads it under the lock and replays it (both calls succeed).
+func TestAccrueOwed_ConcurrentSameCoords(t *testing.T) {
+	svc, pool, payer, cur, ctx := moneyInEnv(t)
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
+	require.NoError(t, err)
+
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, aerr := svc.AccrueOwed(ctx, payer, cur, "usage", "race-1", 300)
+			errs <- aerr
+		}()
+	}
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.ledger_transfers
+		 WHERE customer_id=$1 AND currency=$2 AND transfer_type='owed_accrual' AND source='usage' AND source_id='race-1'`,
+		payer.UUID(), cur).Scan(&n))
+	require.Equal(t, 1, n, "the ledger carries the debt exactly once")
+
+	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(300), owed)
 }
 
 func TestChargeOutstanding_Threshold(t *testing.T) {
@@ -61,7 +92,7 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
 	// Card charge is whole cents: ceil(5_000_000 internal units / 10_000) = 500 cents.
-	require.Equal(t, int64(500), ch.charges[0].AmountCents)
+	require.Equal(t, moneyutil.Cents(500), ch.charges[0].AmountCents)
 
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.NoError(t, err)
@@ -86,7 +117,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	// Sub-cent owed rounds UP: ceil(3_000_001 internal units / 10_000) = 301 cents.
-	require.Equal(t, int64(301), ch.charges[0].AmountCents)
+	require.Equal(t, moneyutil.Cents(301), ch.charges[0].AmountCents)
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), owed)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,14 +31,14 @@ import (
 // (the retired per-user admin JWT is gone).
 
 // adminPaymentsReader mounts the delegated merchant surface with payments:read.
-func adminPaymentsReader(t *testing.T, suite *TestContainerSuite) *gin.Engine {
+func adminPaymentsReader(t *testing.T, suite *TestContainerSuite) http.Handler {
 	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000001",
 		[]string{controlplane.PermMerchantPaymentsRead})
 }
 
 // adminPaymentsWriter mounts the delegated merchant surface with refund access
 // and payments:read, which a refund operator naturally also holds.
-func adminPaymentsWriter(t *testing.T, suite *TestContainerSuite) *gin.Engine {
+func adminPaymentsWriter(t *testing.T, suite *TestContainerSuite) http.Handler {
 	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000002",
 		[]string{controlplane.PermMerchantPaymentsRead, controlplane.PermMerchantPaymentsRefund})
 }
@@ -545,17 +545,44 @@ func TestAdminRefundPayment(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for zero amount")
 	})
 
+	t.Run("returns 400 for sub-cent refund micros", func(t *testing.T) {
+		// #671: RefundPayload.AmountCents is true cents; a refund amount with a
+		// sub-cent micros remainder is rejected, never rounded.
+		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
+			UserID:  userID,
+			PriceID: priceID,
+			Rail:    models.RailNMI,
+			Amount:  10_000_000,
+		})
+
+		w := httptest.NewRecorder()
+		body := `{"amount": 5000}` // 5,000 micros = $0.005: not a whole cent
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+		req.Header.Set("X-Idempotency-Key", "refund-subcent-"+uuid.NewString())
+		admin.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, "sub-cent refund micros must be a 400")
+
+		var response map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		errorObj := response["error"].(map[string]interface{})
+		message := errorObj["message"].(string)
+		assert.Contains(t, message, "whole number of cents", "error must explain the sub-cent rejection")
+	})
+
 	t.Run("returns actionable 400 for stripe historical non-refundable id", func(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:        userID,
 			PriceID:       priceID,
 			Rail:          models.RailStripe,
 			TransactionID: "cs_test_old_checkout_" + uuid.NewString()[:8],
-			Amount:        1000,
+			Amount:        10_000_000,
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
+		body := `{"amount": 5000000}` // whole-cent micros ($5) so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -578,11 +605,11 @@ func TestAdminRefundPayment(t *testing.T) {
 			UserID:  userID,
 			PriceID: priceID,
 			Rail:    models.RailCCBill,
-			Amount:  1000,
+			Amount:  10_000_000,
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
+		body := `{"amount": 5000000}` // whole-cent micros so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -617,18 +644,18 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 		UserID:  uuid.New().String(),
 		PriceID: priceID,
 		Rail:    models.RailCCBill, // CCBill so we don't need a rail mock
-		Amount:  2000,
+		Amount:  20_000_000,
 	})
 	paymentB := suite.CreateTestPaymentWithOptions(PaymentOptions{
 		UserID:  uuid.New().String(),
 		PriceID: priceID,
 		Rail:    models.RailCCBill,
-		Amount:  3000,
+		Amount:  30_000_000,
 	})
 
 	for _, payment := range []*models.Payment{paymentA, paymentB} {
 		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
+		body := `{"amount": 5000000}` // whole-cent micros so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -664,19 +691,22 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 		PriceID:       priceID,
 		Rail:          models.RailNMI,
 		TransactionID: "txn-ledger-" + uuid.NewString()[:8],
-		Amount:        1000,
+		Amount:        10_000_000, // $10 in micros
 	})
 
-	// Fake NMI gateway approving refunds.
+	// Fake NMI gateway approving refunds (v5); records the wire body so the
+	// micros→cents conversion (#671) is pinned to the exact provider amount.
 	var refundCalls atomic.Int64
+	var refundBody atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("type") == "refund" {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund") {
 			refundCalls.Add(1)
-			_, _ = w.Write([]byte("response=1&transactionid=txn_refund_http&responsetext=SUCCESS"))
+			b, _ := io.ReadAll(r.Body)
+			refundBody.Store(string(b))
+			_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_refund_http","response":"1","response_text":"SUCCESS"}`))
 			return
 		}
-		_, _ = w.Write([]byte("response=1"))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 	nmiClient, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
@@ -686,12 +716,13 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	require.NoError(t, err)
 	nmiClient.DirectPostURL = srv.URL
 	nmiClient.QueryURL = srv.URL
+	nmiClient.V5BaseURL = srv.URL
 	suite.App.Runtime.NMIClients["nmi"] = nmiClient
 
 	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()),
-			strings.NewReader(`{"amount": 400}`))
+			strings.NewReader(`{"amount": 4000000}`)) // $4 in micros
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		req.Header.Set("X-Idempotency-Key", idempotencyKey)
@@ -702,6 +733,8 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	w := refundReq("ledger-key-1")
 	require.Equal(t, http.StatusCreated, w.Code, "synchronous ledger execution completes inline: %s", w.Body.String())
 	assert.EqualValues(t, 1, refundCalls.Load())
+	// #671: 4,000,000 micros crosses the boundary as exactly 400 cents.
+	assert.Contains(t, refundBody.Load().(string), `"amount":4.00`, "provider must see the exact cents amount")
 
 	// The durable intent records the execution.
 	var intentStatus string

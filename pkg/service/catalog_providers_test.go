@@ -306,14 +306,14 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T) {
 	var sawWrite bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("report_type") != "" {
-			// Query API: report the plan as missing.
-			w.Write([]byte(`<nm_response></nm_response>`))
+		if r.Method == http.MethodGet {
+			// v5 plan lookup: report the plan as missing.
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
 			return
 		}
-		sawWrite = true // any direct-post request would be a remote write
-		w.Write([]byte("response=1"))
+		sawWrite = true // any non-GET request would be a remote write
+		w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 

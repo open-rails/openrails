@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -122,45 +124,20 @@ func SecretWritable(name string) bool {
 	if !ok || err != nil {
 		return false
 	}
-	return !(rail == "solana" && key == "private_key")
+	// Registry-backed (#669): operator-only slots (solana private_key) are not
+	// merchant-writable.
+	k, known := rails.CredentialKeyFor(models.Rail(rail), key)
+	return known && k.MerchantWritable
 }
 
 // NormalizeProviderAccountSecretKey canonicalizes manifest/admin secret keys for
-// a provider account. It deliberately returns key fragments, not legacy broad
-// merchant secret names.
+// a provider account against the rail's registry-declared slots (#669). It
+// deliberately returns key fragments, not legacy broad merchant secret names.
 func NormalizeProviderAccountSecretKey(rail, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
 	key = strings.ToLower(strings.TrimSpace(key))
-	switch rail {
-	case "stripe":
-		switch key {
-		case "secret_key":
-			return "secret_key", nil
-		case "webhook_signing_secret":
-			return "webhook_signing_secret", nil
-		case "webhook_signing_secret_thin":
-			return "webhook_signing_secret_thin", nil
-		}
-	case "nmi":
-		switch key {
-		case "security_key":
-			return "security_key", nil
-		case "webhook_signing_secret":
-			return "webhook_signing_secret", nil
-		}
-	case "ccbill":
-		switch key {
-		case "salt":
-			return "salt", nil
-		case "datalink_username":
-			return "datalink_username", nil
-		case "datalink_password":
-			return "datalink_password", nil
-		}
-	case "solana":
-		if key == "private_key" {
-			return "private_key", nil
-		}
+	if k, ok := rails.CredentialKeyFor(models.Rail(rail), key); ok {
+		return k.Name, nil
 	}
 	return "", fmt.Errorf("unknown provider account secret %s.%s", rail, key)
 }

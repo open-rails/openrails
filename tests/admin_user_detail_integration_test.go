@@ -11,14 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
@@ -45,15 +44,14 @@ func (r testDelegatedResolver) ResolveDelegated(context.Context, string, string)
 
 // newHostSeamAdminRouter mounts the resource-named /v1/merchant support surface
 // with a host-seam delegated principal carrying the given merchant permissions.
-func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) *gin.Engine {
+func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) http.Handler {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	e := gin.New()
-	rr := ginrouter.New(e.Group("/v1/merchant"), suite.App.Runtime)
+	mux := http.NewServeMux()
+	rr := router.NewMux(mux, "/v1/merchant", suite.App.Runtime)
 	httproutes.RegisterMerchantActionRoutes(rr, suite.App.Runtime, httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedResolver: testDelegatedResolver{subject: subject, perms: perms}}),
 	})
-	return e
+	return mux
 }
 
 // TestAdminUserDetailComposite_Delegated validates the #528 delegated /v1/merchant

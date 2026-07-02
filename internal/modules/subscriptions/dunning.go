@@ -274,11 +274,9 @@ func GraceSlack(cycleHours int) time.Duration {
 	return half
 }
 
-// RenewalGraceEligibleRail reports whether a rail's subscriptions
-// get the pre-appended renewal grace window (#368): NMI-backed + Stripe.
-// CCBill keeps its own retry-driven grace (the webhook handler appends grace
-// from CCBill's nextRetryDate); Solana is pull-based — OpenRails is the only
-// puller, so there is no webhook silence to bridge.
+// RenewalGraceEligibleRail reports whether a rail's subscriptions get the
+// pre-appended renewal grace window (#368). Registry-backed (#669); see
+// rails.Descriptor.RenewalGraceEligible.
 func RenewalGraceEligibleRail(rail models.Rail) bool {
-	return rails.IsNMI(rail) || rail == models.RailStripe
+	return rails.RenewalGraceEligible(rail)
 }

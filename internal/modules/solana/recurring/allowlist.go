@@ -100,19 +100,3 @@ func firstTokenMap(tokens []map[string]config.TokenConfig) map[string]config.Tok
 	}
 	return tokens[0]
 }
-
-// ValidateRecurringMint confirms that the supplied mint matches the configured
-// mint for symbol on network AND that symbol is recurring-eligible. Use this when
-// a caller supplies both a symbol and a mint (defense against a mismatched or
-// spoofed mint at plan-create time).
-func ValidateRecurringMint(symbol, mint, network string) error {
-	want, _, err := ResolveRecurringMint(symbol, network)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(mint) != want {
-		return fmt.Errorf("recurring: mint %q does not match the configured %s mint %q on network %q",
-			mint, strings.ToUpper(strings.TrimSpace(symbol)), want, network)
-	}
-	return nil
-}

@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -31,13 +30,11 @@ func (mountTestDelegatedAuthenticator) AuthenticateDelegated(context.Context, *h
 }
 
 func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
 	// Host authenticator set: it takes precedence, so no control plane is
 	// needed to register the surface in this unit test.
 	srv := &Server{cfg: &config.Config{}, delegatedAuthenticator: mountTestDelegatedAuthenticator{}}
-	e := gin.New()
-	srv.registerSelfServiceRoutes(e)
+	mux := http.NewServeMux()
+	srv.registerSelfServiceRoutes(mux)
 
 	// A self route reaches the handler: not 401/403/404 proves the surface is
 	// mounted and the host principal was accepted without self permissions.
@@ -45,12 +42,11 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	w := httptest.NewRecorder()
 	func() {
 		defer func() { _ = recover() }()
-		e.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
-
 }
 
 type originRejectingDelegatedResolver struct {
@@ -63,17 +59,16 @@ func (r *originRejectingDelegatedResolver) ResolveDelegated(_ context.Context, _
 }
 
 func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
 	resolver := &originRejectingDelegatedResolver{}
 	srv := &Server{
 		cfg:               &config.Config{},
 		delegatedResolver: resolver,
 	}
-	e := srv.newPublicEngine()
-	srv.registerSelfServiceRoutes(e)
+	mux := http.NewServeMux()
+	srv.registerSelfServiceRoutes(mux)
+	handler := srv.wrapPublicHandler(mux)
 
-	ts := httptest.NewServer(e)
+	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 
 	preflight, err := http.NewRequest(http.MethodOptions, ts.URL+"/v1/me/status", nil)
@@ -103,8 +98,6 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 }
 
 func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
 	srv := &Server{
 		cfg: &config.Config{},
 		browserCORSOriginSource: func(context.Context) ([]string, error) {
@@ -114,10 +107,14 @@ func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
 			}, nil
 		},
 	}
-	e := srv.newPublicEngine()
-	e.GET("/probe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /probe", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	handler := srv.wrapPublicHandler(mux)
 
-	ts := httptest.NewServer(e)
+	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 
 	preflight := func(origin string) *http.Response {

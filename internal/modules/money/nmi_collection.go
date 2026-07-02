@@ -58,7 +58,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 		Amount:           req.AmountCents,
 		Currency:         currency,
 		OrderDescription: description,
-		OrderID:          strings.TrimSpace(req.IdempotencyKey),
+		OrderID:          nmiWireOrderRef(req.IdempotencyKey),
 	})
 	if err != nil {
 		var vaultErr *nmi.CustomerVaultError
@@ -78,6 +78,13 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 		Rail:          rail,
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 	}, nil
+}
+
+// nmiWireOrderRef compacts the invoice idempotency key into NMI's 50-char
+// order-id budget ("invoice:<uuid>:attempt:N" is 54+). Deterministic and
+// readable; the LOCAL idempotency identity is untouched.
+func nmiWireOrderRef(idempotencyKey string) string {
+	return strings.NewReplacer("invoice:", "inv:", ":attempt:", ":a").Replace(strings.TrimSpace(idempotencyKey))
 }
 
 func nmiFailureCode(err *nmi.CustomerVaultError) string {

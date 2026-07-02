@@ -10,7 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -108,7 +108,7 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 }
 
 func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {
-	v, ok := r.Get(ginmw.DelegatedContextKey)
+	v, ok := r.Get(middleware.DelegatedContextKey)
 	if !ok {
 		r.ErrorJSON(http.StatusUnauthorized, "delegated principal required")
 		return nil, false
@@ -126,7 +126,7 @@ func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.Res
 }
 
 func customerIDMatchesResolved(customerID string, resolved *controlplane.ResolvedDelegated) bool {
-	return ginmw.CustomerIDMatchesDelegated(customerID, resolved)
+	return middleware.CustomerIDMatchesDelegated(customerID, resolved)
 }
 
 func customerTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {

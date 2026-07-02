@@ -181,7 +181,15 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	// #567: the merchant `owner` (auto-holds `merchant:*`) effectively holds every
 	// merchant catalog permission, evaluated via the group walk-up. It never holds
 	// a platform permission.
-	for _, want := range MerchantOwnerRolePermissions() {
+	for _, want := range []string{
+		PermMerchantSettingsRead, PermMerchantSettingsUpdate,
+		PermMerchantPaymentProvidersRead, PermMerchantPaymentProvidersUpdate,
+		PermMerchantCatalogRead, PermMerchantCatalogUpdate,
+		PermMerchantCustomerSettingsRead, PermMerchantCustomerSettingsUpdate,
+		PermMerchantPaymentsRead, PermMerchantPaymentsRefund,
+		PermMerchantSubscriptionsRead, PermMerchantSubscriptionsUpdate,
+		PermMerchantAdmissionsCreate, PermMerchantUsageRead, PermMerchantRepairAlertsRead,
+	} {
 		ok, cerr := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, want)
 		require.NoError(t, cerr)
 		require.Truef(t, ok, "merchant owner should effectively hold %q", want)

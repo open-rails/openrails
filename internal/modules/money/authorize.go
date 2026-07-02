@@ -159,35 +159,3 @@ const DenyInsufficientBalance = "insufficient_balance"
 // admin-set credit line would exceed credit_limit_amount (the negative-balance
 // ceiling) by placing this hold.
 const DenyInsufficientCredit = "insufficient_credit"
-
-type accountSnapshot struct {
-	billingMode string
-	available   int64
-	outstanding int64
-}
-
-// snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
-func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.CustomerID, currency string) (accountSnapshot, error) {
-	cur := normalizeCurrency(currency)
-	bal, err := s.GetBalanceForCustomer(ctx, payer, cur)
-	if err != nil {
-		return accountSnapshot{}, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return accountSnapshot{}, err
-	}
-	outstanding, err := s.arrearsExposureTx(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), cur)
-	if err != nil {
-		return accountSnapshot{}, err
-	}
-	settings, err := s.getAccountSettings(ctx, payer, cur)
-	if err != nil {
-		return accountSnapshot{}, err
-	}
-	return accountSnapshot{
-		billingMode: settings.BillingMode,
-		available:   bal.Balance - bal.HeldBalance,
-		outstanding: outstanding,
-	}, nil
-}

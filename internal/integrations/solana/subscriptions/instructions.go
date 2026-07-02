@@ -227,11 +227,6 @@ func BuildCancelSubscription(p CancelOrResumeParams) solanago.Instruction {
 	return buildCancelResume(discCancelSubscription, p)
 }
 
-// BuildResumeSubscription builds resume_subscription (same account layout).
-func BuildResumeSubscription(p CancelOrResumeParams) solanago.Instruction {
-	return buildCancelResume(discResumeSubscription, p)
-}
-
 func buildCancelResume(disc byte, p CancelOrResumeParams) solanago.Instruction {
 	accounts := solanago.AccountMetaSlice{
 		solanago.NewAccountMeta(p.Subscriber, false, true),

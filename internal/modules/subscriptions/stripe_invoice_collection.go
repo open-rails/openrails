@@ -12,12 +12,14 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 type StripeInvoiceCollectionParams struct {
-	CustomerID          string
-	PaymentMethodID     string
-	AmountCents         int64
+	CustomerID      string
+	PaymentMethodID string
+	// AmountCents is rail minor units (typed Cents, #671).
+	AmountCents         moneyutil.Cents
 	Currency            string
 	Description         string
 	IdempotencyKey      string
@@ -110,7 +112,7 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 		return nil, err
 	}
 	if strings.EqualFold(invoice.Status, "paid") {
-		if invoice.AmountPaid < params.AmountCents {
+		if moneyutil.Cents(invoice.AmountPaid) < params.AmountCents {
 			return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
 		}
 		return invoice.result(), nil
@@ -127,7 +129,7 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 	if !strings.EqualFold(invoice.Status, "paid") {
 		return nil, fmt.Errorf("stripe invoice %s not paid after collection attempt: status=%s", invoice.ID, invoice.Status)
 	}
-	if invoice.AmountPaid < params.AmountCents {
+	if moneyutil.Cents(invoice.AmountPaid) < params.AmountCents {
 		return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
 	}
 	return invoice.result(), nil
@@ -155,7 +157,7 @@ func (p StripeInvoiceCollectionParams) validate() error {
 func (p StripeInvoiceCollectionParams) invoiceItemValues() url.Values {
 	values := url.Values{}
 	values.Set("customer", strings.TrimSpace(p.CustomerID))
-	values.Set("amount", strconv.FormatInt(p.AmountCents, 10))
+	values.Set("amount", strconv.FormatInt(int64(p.AmountCents), 10))
 	values.Set("currency", strings.ToLower(strings.TrimSpace(p.Currency)))
 	if description := strings.TrimSpace(p.Description); description != "" {
 		values.Set("description", description)

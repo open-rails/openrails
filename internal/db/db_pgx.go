@@ -214,8 +214,15 @@ func (l *lazyMerchantPgxConn) release() {
 		return
 	}
 	// Background context so release works even after request cancellation.
-	_, _ = l.conn.Exec(context.Background(),
-		"SELECT set_config($1, '', FALSE)", MerchantGUC)
+	// Self-healing (get() re-sets the GUC before any use; RLS fails closed
+	// without it), but never return a connection that may still carry a
+	// merchant GUC to the pool: on reset failure, warn and close it so the
+	// pool destroys it instead of reusing it (#668).
+	if _, err := l.conn.Exec(context.Background(),
+		"SELECT set_config($1, '', FALSE)", MerchantGUC); err != nil {
+		logrus.WithError(err).Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection")
+		_ = l.conn.Conn().Close(context.Background())
+	}
 	l.conn.Release()
 	l.conn = nil
 }

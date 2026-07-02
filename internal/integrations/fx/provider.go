@@ -39,30 +39,6 @@ type Provider interface {
 	QuoteToUSD(ctx context.Context, currency string) (*Quote, error)
 }
 
-// NoOpProvider returns rate=1.0 for all currencies. It is NOT the runtime
-// default: the real app (internal/app/build_runtime.go createServices) hardwires
-// the live, free, no-API-key ExchangeAPIProvider wrapped in caching. NoOpProvider
-// is used ONLY in tests and standalone/USD-only contexts that must avoid a
-// network call. Do not assume production runs at a flat 1.0 — it doesn't.
-type NoOpProvider struct{}
-
-// Quote always returns rate=1.0 for NoOpProvider.
-func (p *NoOpProvider) Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error) {
-	fromCurrency = normalizeCurrency(fromCurrency)
-	toCurrency = normalizeCurrency(toCurrency)
-	return &Quote{
-		FromCurrency: fromCurrency,
-		ToCurrency:   toCurrency,
-		Rate:         1.0,
-		AsOf:         time.Now(),
-	}, nil
-}
-
-// QuoteToUSD always returns rate=1.0 for NoOpProvider.
-func (p *NoOpProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return p.Quote(ctx, currency, "usd")
-}
-
 // ConvertAmount rounds a source amount up into the target currency's internal
 // units. Enforcement paths use ceil so cross-currency spend cannot under-count
 // because of fractional internal-unit conversion.

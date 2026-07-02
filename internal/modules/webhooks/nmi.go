@@ -20,8 +20,10 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -383,7 +385,7 @@ func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, u
 	var priceID *uuid.UUID
 
 	if sub != nil && sub.Price != nil {
-		priceAmount = float64(sub.Price.Amount) / 100.0
+		priceAmount = moneyutil.MicrosToMajorUnits(sub.Price.Amount) // #671 1f: micros, not cents
 		priceCurrency = sub.Price.Currency
 		if sub.Price.RecurringCycleHours() != nil {
 			billingHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
@@ -915,15 +917,18 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		if s.MoneyService != nil && s.SubscriptionService != nil {
 			updated, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for initial credit grants (NMI)")
-			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
+				return fmt.Errorf("load subscription for initial credit grants (NMI): %w", err)
+			}
+			if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
 				if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 					SubscriptionID: updated.ID,
 					PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 					Cadence:        models.CreditGrantCadenceOnce,
 					Source:         "subscription_initial",
 				}); err != nil {
-					log.WithContext(ctx).WithError(err).Warn("failed to grant initial subscription credits (NMI)")
+					// #675: propagate for retry — the deposit is idempotent per
+					// (subscription, label, period_end); warn-and-ack lost the lot.
+					return fmt.Errorf("grant initial subscription credits (NMI): %w", err)
 				}
 			}
 		}
@@ -966,6 +971,23 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 					"transaction_id":              txnID,
 					"subscription_lifecycle_step": "renew_membership",
 				}).Warn("Blocked terminal -> active transition for delayed NMI success event")
+				// #675: the customer WAS charged — leave a durable trace before ACKing.
+				if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+					Provider:       provider,
+					Operation:      "terminal_blocked_renewal_success",
+					TransactionID:  txnID,
+					UserID:         subscription.CustomerID.String(),
+					SubscriptionID: &subscription.ID,
+					Err:            err,
+					Metadata: map[string]any{
+						"rail_subscription_id": subscription.RailSubscriptionID,
+						"amount_cents":         amountCents,
+						"currency":             currencyValue,
+						"event_type":           s.Data.EventType,
+					},
+				}); alertErr != nil {
+					return fmt.Errorf("record terminal-blocked NMI renewal repair alert: %w", alertErr)
+				}
 				return nil
 			}
 			return fmt.Errorf("failed to renew subscription: %w", err)
@@ -974,15 +996,18 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		if s.MoneyService != nil && s.SubscriptionService != nil {
 			updated, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for renewal credit grants (NMI)")
-			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
+				return fmt.Errorf("load subscription for renewal credit grants (NMI): %w", err)
+			}
+			if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
 				if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 					SubscriptionID: updated.ID,
 					PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 					Cadence:        models.CreditGrantCadencePerRenewal,
 					Source:         "subscription_renewal",
 				}); err != nil {
-					log.WithContext(ctx).WithError(err).Warn("failed to grant renewal subscription credits (NMI)")
+					// #675: propagate for retry — the deposit is idempotent per
+					// (subscription, label, period_end); warn-and-ack lost the lot.
+					return fmt.Errorf("grant renewal subscription credits (NMI): %w", err)
 				}
 			}
 		}
@@ -1976,8 +2001,23 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// Parse refund amount exactly in cents (avoid float drift), then derive display float.
 	refundAmountCents, err := transactionAmountCents(body)
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("Failed to parse refund amount")
-		refundAmountCents = 0
+		// #675: never downgrade a refund to a 0-amount no-op — durable alert,
+		// then terminal (redelivery resends the same unparseable bytes).
+		if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+			Provider:      s.Rail,
+			Operation:     "refund_amount_parse_failed",
+			TransactionID: txnID,
+			Err:           err,
+			Metadata: map[string]any{
+				"original_transaction_id": originalTxnID,
+				"rail_subscription_id":    nmiSubID,
+			},
+		}); alertErr != nil {
+			return fmt.Errorf("record NMI refund amount parse repair alert: %w", alertErr)
+		}
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Invalid refund amount", map[string]interface{}{
+			"transaction_id": txnID,
+		}, err))
 	}
 	if refundAmountCents < 0 {
 		refundAmountCents = -refundAmountCents
@@ -2000,6 +2040,13 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			log.WithContext(ctx).WithField("rail_subscription_id", nmiSubID).
 				Warn("Received refund for unknown subscription (by rail_subscription_id); continuing without lifecycle actions")
 		}
+	}
+
+	// #675: no local subscription (one-time purchase, or refund raced the
+	// sale) — resolve by transaction id and reverse, mirroring Stripe's
+	// one-off path. Previously this ACKed with zero effect.
+	if subscription == nil {
+		return s.handleNMIOneOffRefund(ctx, txnID, originalTxnID, refundAmountCents)
 	}
 
 	// Determine if we should terminate subscription based on refund amount.
@@ -2082,7 +2129,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":  subscription.ID,
 			"refund_amount":    refundAmount,
-			"subscription_fee": float64(subscription.Price.Amount) / 100,
+			"subscription_fee": moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
 		}).Warn("Terminating subscription due to significant refund (>=80%)")
 
 		// Use lifecycle service to cancel membership with immediate revocation
@@ -2166,6 +2213,83 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		"subscription_terminated": shouldTerminate,
 	}).Info("NMI refund processed")
 
+	return nil
+}
+
+// handleNMIOneOffRefund reverses a refund that has no local subscription
+// (dashboard refunds of one-time purchases) — mirrors the Stripe one-off path:
+// resolve the original payment by transaction id, record the negative payment,
+// and revoke what the payment funded once fully refunded (#675).
+func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, originalTxnID string, refundAmountCents int64) error {
+	if s.PaymentService == nil {
+		return fmt.Errorf("payment service is required for NMI refund")
+	}
+	if txnID == "" {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing refund transaction ID", map[string]interface{}{}, nil))
+	}
+	rail := models.Rail(s.Rail)
+	var original *models.Payment
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, rail, txnID); err == nil && existing != nil {
+		if existing.RefundedPaymentID == nil {
+			return nil // already recorded, not as a reversal — nothing to revoke
+		}
+		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)
+		if err != nil {
+			return fmt.Errorf("lookup original NMI payment for existing refund: %w", err)
+		}
+	} else if err != nil && !repo.IsNotFound(err) {
+		return fmt.Errorf("lookup NMI refund payment: %w", err)
+	}
+	if original == nil {
+		if originalTxnID == "" || originalTxnID == txnID {
+			// Retryable: redelivery wins once the sale materializes.
+			return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
+		}
+		var err error
+		original, err = s.PaymentService.GetByTransactionID(ctx, rail, originalTxnID)
+		if err != nil {
+			if repo.IsNotFound(err) {
+				return fmt.Errorf("original payment %q not found for NMI refund %q", originalTxnID, txnID)
+			}
+			return fmt.Errorf("resolve original payment for NMI refund: %w", err)
+		}
+		if refundAmountCents <= 0 {
+			return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Non-positive refund amount", map[string]interface{}{
+				"transaction_id": txnID,
+			}, nil))
+		}
+		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, moneyutil.CentsToMicros(refundAmountCents)); err != nil {
+			return fmt.Errorf("record NMI refund: %w", err)
+		}
+	}
+	refundedTotal, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, original.ID)
+	if err != nil {
+		return fmt.Errorf("calculate NMI refund total: %w", err)
+	}
+	if refundedTotal < original.Amount {
+		return nil
+	}
+	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
+		reason := "NMI refund processed"
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			SubscriptionID: original.SubscriptionID,
+			Rail:           &rail,
+			CancelType:     models.CancelTypeMerchant,
+			CancelFeedback: &reason,
+			RevokeAccess:   true,
+		}); err != nil {
+			return fmt.Errorf("cancel subscription after NMI refund: %w", err)
+		}
+	} else if original.SubscriptionID == nil && s.DB != nil {
+		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
+			return fmt.Errorf("revoke one-off entitlements after NMI refund: %w", err)
+		}
+		paSvc := productaccess.NewService(s.DB, s.Clock)
+		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeRefund); err != nil {
+			return fmt.Errorf("revoke product access after NMI refund: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -2270,10 +2394,11 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 				voidedSubscriptionID = &id
 			}
 		} else {
+			// #675: void may race the sale webhook — retryable error (NMI
+			// redelivers on non-2xx) so redelivery wins once the sale lands;
+			// a plain ACK would leave the reversed charge invisible.
 			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
-			if subscription != nil {
-				return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
-			}
+			return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
 		}
 	}
 	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {

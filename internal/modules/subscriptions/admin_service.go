@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -35,11 +36,11 @@ type AdminSubscriptionService struct {
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
-	NotificationService NotificationStore
+	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService
 	NMIClients          map[string]*nmi.NMIClient
 	StripeService       *StripeService
-	EventLogService     AdminCancellationLogger
+	EventLogService     *analytics.EventLogService
 	clock               clockwork.Clock
 	// No user directory enrichment; IdP subject is stored on subscription
 }
@@ -416,7 +417,7 @@ func NewAdminSubscriptionService(
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	entitlementService *entitlements.EntitlementService,
-	notificationService NotificationStore,
+	notificationService *NotificationService,
 	paymentService *payments.PaymentService,
 	nmiClients map[string]*nmi.NMIClient,
 	clocks ...clockwork.Clock,

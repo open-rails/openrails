@@ -17,7 +17,11 @@ func TestResolvedServiceCredential_HasPermission(t *testing.T) {
 
 func TestResolvedServiceCredential_ApexGrantDoesNotBypassPermissionChecks(t *testing.T) {
 	r := &ResolvedServiceCredential{Permissions: []string{"root:*"}}
-	for _, p := range CatalogNames() {
+	for _, p := range []string{
+		PermMerchantSettingsRead, PermMerchantAdmissionsCreate,
+		PermMerchantPaymentsRefund, PermCustomerBalanceRead,
+		PermCustomerSpendDelegationsUpdate,
+	} {
 		if r.HasPermission(p) {
 			t.Errorf("apex grant %q must not bypass exact check for %q", "root:*", p)
 		}

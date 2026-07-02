@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/open-rails/openrails/internal/http/response"
 
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -54,19 +54,16 @@ func AsAuthenticator(p Provider) (billingauth.Authenticator, bool) {
 func (p *authenticatorProvider) Required() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if p == nil || p.a == nil {
-			response.InternalError(c, "authentication disabled")
-			c.Abort()
+			abortJSON(c, http.StatusInternalServerError, "authentication disabled")
 			return
 		}
 		uc, err := p.a.Authenticate(c.Request.Context(), c.Request)
 		if err != nil {
-			response.UnauthorizedWithMessage(c, billingauth.UnauthenticatedMessage(err))
-			c.Abort()
+			abortJSON(c, http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
 			return
 		}
 		if verr := uc.ValidateSubject(); verr != nil {
-			response.UnauthorizedWithMessage(c, verr.Error())
-			c.Abort()
+			abortJSON(c, http.StatusUnauthorized, verr.Error())
 			return
 		}
 		applyGinUserContext(c, uc)
@@ -85,6 +82,13 @@ func (p *authenticatorProvider) Optional() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// abortJSON writes the canonical pkg/api error envelope and aborts the chain
+// (the internal/http/response wrapper package was retired in #670).
+func abortJSON(c *gin.Context, code int, message string) {
+	c.JSON(code, api.SimpleErrorResponse(code, message))
+	c.Abort()
 }
 
 // applyGinUserContext stores uc in BOTH the gin context and the request context,

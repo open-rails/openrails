@@ -172,17 +172,19 @@ func TestIsContentAddressedNMIPlanID(t *testing.T) {
 func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	var sawWrite bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("report_type") != "recurring_plans" {
+		if r.Method != http.MethodGet {
 			sawWrite = true
-			w.Write([]byte("response=1"))
+			w.Write([]byte(`{}`))
 			return
 		}
-		w.Write([]byte(`<nm_response>
-			<plan><plan_id>premium-usd-23000000-30</plan_id><plan_name>Premium</plan_name><plan_amount>23.00</plan_amount></plan>
-			<plan><plan_id>retired-usd-900-30</plan_id><plan_name>Retired</plan_name><plan_amount>9.00</plan_amount></plan>
-			<plan><plan_id>legacy-vip-plan</plan_id><plan_name>Legacy VIP</plan_name><plan_amount>5.00</plan_amount></plan>
-		</nm_response>`))
+		if r.URL.Path != "/plans" {
+			t.Errorf("unexpected v5 GET %q", r.URL.Path)
+		}
+		w.Write([]byte(`{"plans":[
+			{"object":"plan","id":"premium-usd-23000000-30","plan_name":"Premium","plan_amount":"23.00"},
+			{"object":"plan","id":"retired-usd-900-30","plan_name":"Retired","plan_amount":"9.00"},
+			{"object":"plan","id":"legacy-vip-plan","plan_name":"Legacy VIP","plan_amount":"5.00"}
+		],"next_cursor":null,"has_more":false}`))
 	}))
 	defer server.Close()
 
@@ -192,6 +194,7 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	}
 	client.DirectPostURL = server.URL
 	client.QueryURL = server.URL
+	client.V5BaseURL = server.URL
 
 	plans, err := fetchNMIPlans(client)
 	if err != nil {

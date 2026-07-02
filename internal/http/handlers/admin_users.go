@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
@@ -9,7 +8,6 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/vault"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -44,11 +42,6 @@ type adminCreditBalanceResponse struct {
 	Balance               int64  `json:"balance"`
 	HeldBalance           int64  `json:"held_balance"`
 	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-}
-
-type adminPaymentMethodPath struct {
-	UserID string `uri:"customer_id" binding:"required"`
-	ID     string `uri:"id" binding:"required"`
 }
 
 type adminSubscriptionPath struct {
@@ -159,52 +152,6 @@ func GetAdminUserPaymentMethods(r *httprequest.Request) {
 	}
 	charges := paymentMethodCharges(r, pms)
 	r.SuccessJSON(map[string]any{"object": "list", "data": paymentMethodsToAPI(pms, charges)})
-}
-
-func DeleteAdminUserPaymentMethod(r *httprequest.Request) {
-	var path adminPaymentMethodPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	id, err := api.ParsePaymentMethodID(path.ID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment method ID")
-		return
-	}
-	if r.State.PaymentMethodService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
-		return
-	}
-	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, path.UserID)
-	if err != nil {
-		switch {
-		case errors.Is(err, vault.ErrPaymentMethodNotFound):
-			r.ErrorJSON(http.StatusNotFound, "payment method not found")
-		case errors.Is(err, vault.ErrPaymentMethodAccessDenied):
-			r.ErrorJSON(http.StatusForbidden, "payment method does not belong to user")
-		default:
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": path.UserID}).Error("failed to validate admin payment method delete")
-			r.ErrorJSON(http.StatusInternalServerError, "failed to validate payment method")
-		}
-		return
-	}
-	for _, sub := range paymentMethod.Subscriptions {
-		if sub.Status == "active" || sub.Status == "pending" || sub.Status == "past_due" {
-			r.ErrorJSON(http.StatusConflict, "cannot delete payment method linked to active, pending, or past_due subscription")
-			return
-		}
-	}
-	if err := r.State.PaymentMethodService.Delete(r.Request.Context(), id); err != nil {
-		if errors.Is(err, vault.ErrPaymentMethodNotFound) {
-			r.ErrorJSON(http.StatusNotFound, "payment method not found")
-			return
-		}
-		log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": path.UserID}).Error("failed to delete admin payment method")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to delete payment method")
-		return
-	}
-	r.SuccessJSON(map[string]any{"success": true})
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {

@@ -1,16 +1,17 @@
 package server
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"net/http"
+
+	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string) {
-	group := e.Group(apiPrefix + "/merchant")
+func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix string) {
+	prefix := apiPrefix + "/merchant"
 	opts := httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{
-			Authenticator:             s.embeddedAuthenticator(),
+			Authenticator:             s.authenticator,
 			AdminPermissionChecker:    s.controlPlane,
 			ServiceCredentialResolver: s.controlPlane,
 			DelegatedResolver:         s.controlPlane,
@@ -20,12 +21,12 @@ func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string)
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone
 	// mounts every merchant route set here: human admin/support, settings/catalog,
 	// and the machine billing API.
-	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
-	httproutes.RegisterCatalogRoutes(ginrouter.New(group.Group("/catalog"), s.runtime), s.runtime, opts)
-	httproutes.RegisterPaymentProviderRoutes(ginrouter.New(group.Group("/payment-providers"), s.runtime), s.runtime, opts)
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
+	httproutes.RegisterMerchantActionRoutes(router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterCatalogRoutes(router.NewMuxRecorded(mux, prefix+"/catalog", s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterPaymentProviderRoutes(router.NewMuxRecorded(mux, prefix+"/payment-providers", s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterServiceRoutes(router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute), s.runtime, opts)
 }
 
-func (s *Server) registerMerchantActionRoutesOn(e *gin.Engine) {
-	s.registerMerchantActionRoutesAt(e, StandaloneV1Prefix)
+func (s *Server) registerMerchantActionRoutes(mux *http.ServeMux) {
+	s.registerMerchantActionRoutesAt(mux, StandaloneV1Prefix)
 }

@@ -137,7 +137,10 @@ func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, new
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
 	// All columns are written explicitly so nil values CLEAR fields
-	// (CancelledAt, EndedAt, ...) when reactivating subscriptions.
+	// (CancelledAt, EndedAt, ...) when reactivating subscriptions. Because this
+	// is a full-row write from an in-memory image, webhook-apply
+	// read-modify-writes must read via GetByRailSubscriptionIDForUpdate inside
+	// one tx or a concurrent writer's committed changes get reverted (#675).
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -376,6 +379,20 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	row, err := r.db.Gen(ctx).GetActiveSubscriptionByCustomerAt(ctx, gen.GetActiveSubscriptionByCustomerAtParams{
 		CustomerID: tsid,
 		Now:        now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, false)
+}
+
+// GetByRailSubscriptionIDForUpdate is the row-locked (FOR UPDATE) variant for
+// webhook-apply read-modify-writes (#675). Must run inside a transaction;
+// UpdateAt is a full-row write, so the lock must be held from read to write.
+func (r *SubscriptionRepo) GetByRailSubscriptionIDForUpdate(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionByRailSubIDForUpdate(ctx, gen.GetSubscriptionByRailSubIDForUpdateParams{
+		Rail:               rail,
+		RailSubscriptionID: railSubscriptionID,
 	})
 	if err != nil {
 		return nil, err

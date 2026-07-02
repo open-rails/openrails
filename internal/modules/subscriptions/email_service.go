@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -28,7 +29,7 @@ var errUserEmailUnavailable = errors.New("user email unavailable")
 // It wraps the SendGrid SDK and has domain knowledge for building subscription/payment emails.
 type EmailService struct {
 	client       *sendgrid.Client
-	profileStore merchantConfigurationReader
+	profileStore *merchantconfig.Store
 	clock        clockwork.Clock
 
 	// Domain dependencies for building subscription emails
@@ -36,10 +37,6 @@ type EmailService struct {
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
 	users               identity.UserDirectory
-}
-
-type merchantConfigurationReader interface {
-	Get(ctx context.Context) (models.MerchantConfiguration, bool, error)
 }
 
 // OneOffPurchaseEmailData contains data for one-off purchase receipts
@@ -54,7 +51,7 @@ type OneOffPurchaseEmailData struct {
 
 // NewEmailService wires the SendGrid SDK into the billing domain service.
 // Sender info is merchant-scoped and loaded from merchant_configurations.
-func NewEmailService(sendgridCfg *config.SendGridConfig, profileStore merchantConfigurationReader, clocks ...clockwork.Clock) (*EmailService, error) {
+func NewEmailService(sendgridCfg *config.SendGridConfig, profileStore *merchantconfig.Store, clocks ...clockwork.Clock) (*EmailService, error) {
 	if sendgridCfg == nil {
 		return nil, fmt.Errorf("sendgrid configuration not provided")
 	}
@@ -574,23 +571,8 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	return strings.Join(parts, " ")
 }
 
+// railDisplayName is registry-backed (#669); unknown rails keep the legacy
+// upper-cased fallback.
 func railDisplayName(rail models.Rail) string {
-	if rails.IsNMI(rail) {
-		return "Credit Card"
-	}
-
-	switch rail {
-	case models.RailCCBill:
-		return "Credit Card"
-	case models.RailPayPal:
-		return "PayPal"
-	case models.RailSolana:
-		return "Solana"
-	default:
-		clean := strings.TrimSpace(string(rail))
-		if clean == "" {
-			return ""
-		}
-		return strings.ToUpper(clean)
-	}
+	return rails.DisplayName(rail)
 }

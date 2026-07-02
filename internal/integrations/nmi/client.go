@@ -303,7 +303,8 @@ func parseMobiusResponseCode(output url.Values) int {
 func parseDirectResponse(response string) (url.Values, error) {
 	output, err := url.ParseQuery(response)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %s", response)
+		// A 200 body arrived but is unreadable: the mutation likely executed.
+		return nil, ambiguous(fmt.Errorf("failed to parse response: %s", response))
 	}
 	return output, nil
 }
@@ -333,13 +334,15 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 		return "", ErrProviderReadOnly
 	}
 
+	// Every direct-post request is a MUTATION: any failure past this point may
+	// have executed at the gateway, so it is wrapped transport-ambiguous (#674).
 	resp, err := c.client().PostForm(c.DirectPostURL, data)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"provider":     c.providerName,
 			"request_type": requestType,
 		}).Warn("NMI direct request failed")
-		return "", fmt.Errorf("failed to send request: %w", err)
+		return "", ambiguous(fmt.Errorf("failed to send request: %w", err))
 	}
 	defer func() {
 		cerr := resp.Body.Close()
@@ -354,12 +357,12 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 			"request_type": requestType,
 			"status_code":  resp.StatusCode,
 		}).Warn("NMI direct request returned non-200 status")
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return "", ambiguous(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return "", ambiguous(fmt.Errorf("failed to read response: %w", err))
 	}
 
 	return string(body), nil

@@ -12,9 +12,19 @@ const (
 	MicrosPerCent      = MicrosPerMajorUnit / CentsPerMajorUnit
 )
 
-func ParseDecimalToMicros(value string) (int64, error) {
-	return parseDecimalScaled(value, MicrosPerMajorUnit)
-}
+// Micros is an amount in millionths of a major currency unit — the system-wide
+// internal money unit. Defined type so passing micros where a cents/dollars
+// parameter is expected is a compile error (#671).
+type Micros int64
+
+// Cents is an amount in hundredths of a major currency unit — the minor unit
+// most card rails (NMI, Stripe) charge in for 2-decimal currencies.
+type Cents int64
+
+// MajorUnits is a float amount in major currency units (dollars for USD) —
+// used only where a provider wire format genuinely takes a decimal amount
+// (e.g. NMI classic recurring). Never do ledger math in this type.
+type MajorUnits float64
 
 func ParseDecimalToCents(value string) (int64, error) {
 	return parseDecimalScaled(value, CentsPerMajorUnit)

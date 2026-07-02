@@ -36,13 +36,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 const (
@@ -167,7 +168,7 @@ type selfCheckoutResponse struct {
 	} `json:"payment"`
 }
 
-func postSelfCheckout(t *testing.T, router *gin.Engine, body map[string]any) selfCheckoutResponse {
+func postSelfCheckout(t *testing.T, router http.Handler, body map[string]any) selfCheckoutResponse {
 	t.Helper()
 	w := doHostSeamSelf(router, http.MethodPost, "/v1/me/checkout", string(mustJSON(t, body)))
 	require.Equalf(t, http.StatusOK, w.Code, "checkout should return 200: %s", w.Body.String())
@@ -193,6 +194,15 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	require.Equal(t, nmi.DefaultQueryAPIURL, client.QueryURL)
 
 	rt := suite.App.Runtime
+
+	// The checkout money path resolves the NMI client from MERCHANT SECRETS
+	// first (production posture); the suite seeds a placeholder key there, so
+	// overwrite it with the real sandbox key or every charge 401s at NMI.
+	secretName, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "security_key")
+	require.NoError(t, err)
+	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
+	require.NoError(t, err)
+
 	rt.NMIClients[nmiE2EProvider] = client
 	if rt.SubscriptionService != nil {
 		rt.SubscriptionService.NMIClients = rt.NMIClients

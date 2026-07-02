@@ -1,15 +1,10 @@
 package middleware
 
-// This file holds the framework-NEUTRAL rate-limit + captcha engine (issue #282).
-// It is the single source of truth for OpenRails' rate-limiting and captcha
-// enforcement: the standalone gin surface (internal/http/middleware/ginmw) and the
-// gin-free embedded surface (internal/http/embedhttp) both drive it.
-//
-// The engine operates on plain net/http types (*http.Request / http.ResponseWriter)
-// plus a caller-derived subject list, and returns a RateLimitDecision WITHOUT
-// writing the response. Each surface supplies its own subject derivation (gin keys
-// vs request context) and its own response writer, so the security-critical
-// counting/captcha math can never drift between the two surfaces.
+// This file holds the rate-limit + captcha engine (issue #282). It is the
+// single source of truth for OpenRails' rate-limiting and captcha enforcement;
+// since #670 one net/http middleware (RateLimitHTTP) serves the standalone and
+// embedded surfaces alike. The engine returns a RateLimitDecision WITHOUT
+// writing the response; the middleware writes the canonical pkg/api envelope.
 
 import (
 	"context"
@@ -28,7 +23,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -310,13 +305,13 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 }
 
 // RateLimitHTTP is the gin-free net/http rate-limit + captcha middleware (issue
-// #282). It mirrors ginmw.RateLimitWithChallengeStore exactly — same buckets, same
+// #282; the ONLY rate-limit middleware since #670) — same buckets, same
 // payload-size shedding, same X-RateLimit-* headers, same captcha challenge flow,
 // same 429/Retry-After — and is what lets the EMBEDDED surface enforce OpenRails'
 // own rate-limiting and captcha without the host fronting it with a gateway.
 //
 // Identity for the user-scoped subject is read from the request context
-// (authprovider.FromContext), so mount billingauth.Optional BEFORE this so an
+// (billingauth.FromContext), so mount billingauth.Optional BEFORE this so an
 // authenticated caller is limited per-user, not only per-IP.
 func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, rdb *redis.Client, challengeStore *captcha.ChallengeStore) HTTPMiddleware {
 	if limits == nil {
@@ -348,23 +343,31 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 	for k, v := range decision.Headers {
 		w.Header().Set(k, v)
 	}
+	// Error outcomes emit the canonical pkg/api envelope — identical to the
+	// retired gin middleware's writers, so the standalone flip (#670) changed no
+	// response bodies (and the embedded surface now matches too).
 	switch decision.Outcome {
 	case RateLimitTooLarge:
-		writeJSONResponse(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request payload too large"})
+		writeJSONResponse(w, http.StatusRequestEntityTooLarge, api.SimpleErrorResponse(http.StatusRequestEntityTooLarge, "request payload too large"))
 	case RateLimitCaptchaRequired:
-		writeJSONResponse(w, http.StatusForbidden, map[string]any{
-			"error":    "captcha_required",
-			"provider": captchaCfg.EffectiveProvider(),
-			"site_key": strings.TrimSpace(captchaSiteKey(captchaCfg)),
-			"bucket":   decision.Bucket,
-		})
+		w.Header().Set("X-Captcha-Required", "true")
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_required", "Captcha verification required").
+			WithMetadata(map[string]any{
+				"provider": captchaCfg.EffectiveProvider(),
+				"site_key": strings.TrimSpace(captchaSiteKey(captchaCfg)),
+				"bucket":   decision.Bucket,
+			})
+		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitCaptchaInvalid:
-		writeJSONResponse(w, http.StatusForbidden, map[string]any{
-			"error":   "captcha_invalid",
-			"message": decision.CaptchaMessage,
-		})
+		w.Header().Set("X-Captcha-Required", "true")
+		msg := strings.TrimSpace(decision.CaptchaMessage)
+		if msg == "" {
+			msg = "Captcha verification failed"
+		}
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_invalid", msg)
+		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitTooMany:
-		billingauth.WriteJSONError(w, http.StatusTooManyRequests, "rate_limit", "Rate limit exceeded")
+		writeJSONResponse(w, http.StatusTooManyRequests, api.SimpleErrorResponse(http.StatusTooManyRequests, "Rate limit exceeded"))
 	default:
 		if len(decision.SubjectKeys) > 0 {
 			r = r.WithContext(WithSubjectKeys(r.Context(), decision.SubjectKeys))
@@ -396,7 +399,7 @@ func rateLimitSubjectsHTTP(r *http.Request) []RateLimitSubject {
 	if clientIP := strings.TrimSpace(httpClientIP(r)); clientIP != "" {
 		subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeIP, Value: clientIP, Key: RateLimitScopeIP + ":" + clientIP})
 	}
-	if uc, ok := authprovider.FromContext(r.Context()); ok {
+	if uc, ok := billingauth.FromContext(r.Context()); ok {
 		if userID := strings.TrimSpace(uc.UserID); userID != "" {
 			subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeUser, Value: userID, Key: RateLimitScopeUser + ":" + userID})
 		}
@@ -539,16 +542,6 @@ func (s *RateLimitStore) pruneLocked(now time.Time) {
 		}
 		delete(s.counters, oldestKey)
 	}
-}
-
-// Reset clears one subject+bucket counter.
-func (s *RateLimitStore) Reset(subjectKey, bucket string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.counters, rateLimitMemoryKey(bucket, subjectKey))
 }
 
 // ResetBuckets clears the given buckets for the given subjects.

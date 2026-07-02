@@ -15,13 +15,13 @@
 //     doujins repo (the shape reference).
 //
 //   - STANDALONE real server + real AuthKit (Server 2, the production path).
-//     Boots the actual standalone gin server (internal/bootstrap/ginboot +
+//     Boots the actual standalone server (internal/bootstrap/serverboot +
 //     internal/http, the same graph cmd/openrails run-server uses) with the
 //     OpenRails-owned AuthKit control plane attached, provisions the merchant via
 //     the REAL control-plane bootstrap (links permission_group_id + mints a real
 //     admin API key through AuthKit core), and authenticates the client
 //     with that real token. The /v1/merchant/* requests are resolved by the real
-//     ServiceCredentialRequired -> control plane ResolveAPIKey -> AuthKit core
+//     service-credential gate -> control plane ResolveAPIKey -> AuthKit core
 //     path, exercising #481 role-based merchant authz. NO stubResolver.
 //
 // Both servers run against the SAME shared migrated Postgres (dbtest.RunPostgres
@@ -35,12 +35,12 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
@@ -54,11 +54,11 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
+	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -135,7 +135,6 @@ func (s *Surface) Client(opts ...openrails.RemoteOption) openrails.Client {
 // this harness share them.
 func New(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	dsn := dbtest.SharedPostgresDSN(t)
 
@@ -169,7 +168,7 @@ func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.
 
 // StartEmbeddedHost boots Server 1: an embedded engine (embed.New, host-owns-auth)
 // over the shared Postgres + Redis, serving the real embedded /v1/merchant/*
-// surface over httptest behind the REAL ServiceCredentialRequired middleware wired to
+// surface over httptest behind the REAL service-credential route gate wired to
 // a TRUSTING resolver (no auth). It registers the bound merchant (embed.New does
 // this) and returns a Surface whose client speaks real HTTP. currency is the
 // client's default currency (Balance keys off it).
@@ -185,11 +184,10 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	require.NoError(h.t, err, "embed.New")
 	h.t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	router := gin.New()
-	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
+	mux := http.NewServeMux()
 	runtime := rt.Embedded().App().Runtime
 	httproutes.RegisterServiceRoutes(
-		ginrouter.New(router.Group("/v1/merchant"), runtime),
+		router.NewMux(mux, "/v1/merchant", runtime),
 		runtime,
 		httproutes.Options{
 			Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
@@ -198,7 +196,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 			}}),
 		},
 	)
-	srv := httptest.NewServer(router)
+	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID)))
 	h.t.Cleanup(srv.Close)
 
 	return &Surface{
@@ -209,13 +207,13 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	}
 }
 
-// StartStandalone boots Server 2: the REAL standalone gin server (ginboot.NewServer
+// StartStandalone boots Server 2: the REAL standalone server (serverboot.NewServer
 // -> internal/http, the cmd/openrails run-server graph) over the shared Postgres +
 // Redis with the OpenRails control plane attached, then provisions the merchant
 // through the REAL control-plane bootstrap (links permission_group_id + mints a real
 // admin API key via AuthKit core) and returns a Surface whose client
 // authenticates with that real token. The /v1/merchant/* path is authenticated by
-// the real ServiceCredentialRequired -> ResolveAPIKey -> AuthKit core chain
+// the real service-credential gate -> ResolveAPIKey -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
 // StartStandalone boots the standalone server for an integration test. The server
 // connects as the unprivileged openrails_app role (NOBYPASSRLS), so the per-merchant
@@ -249,8 +247,8 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := ginboot.NewServer(cfg, &ginboot.Options{})
-	require.NoError(h.t, err, "ginboot.NewServer (real standalone)")
+	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{})
+	require.NoError(h.t, err, "serverboot.NewServer (real standalone)")
 	app := assembled.App
 	h.t.Cleanup(func() { _ = app.Close(context.Background()) })
 

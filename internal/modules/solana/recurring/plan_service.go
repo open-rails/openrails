@@ -53,11 +53,22 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID merchant.ID, inst
 	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, s.rpc, instructions)
 }
 
+// SubmitWithPresubmit persists the signed tx signature via presubmit BEFORE
+// submission (#674).
+func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+	return solanaint.BuildSignSubmitPresubmit(ctx, tenantID, s.signer, s.rpc, instructions, presubmit)
+}
+
 func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
+	return s.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchantAddress, instructions, nil)
+}
+
+// SubmitForMerchantAddressWithPresubmit: see SubmitWithPresubmit.
+func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	if signer, ok := s.signer.(publicKeySigner); ok {
-		return solanaint.BuildSignSubmitWithPayer(ctx, s.rpc, merchantAddress, instructions, func(message []byte) (solanago.Signature, error) {
+		return solanaint.BuildSignSubmitWithPayerPresubmit(ctx, s.rpc, merchantAddress, instructions, func(message []byte) (solanago.Signature, error) {
 			return signer.SignMessageForPublicKey(ctx, tenantID, merchantAddress, message)
-		})
+		}, presubmit)
 	}
 	active, err := s.signer.PublicKey(ctx, tenantID)
 	if err != nil {
@@ -66,7 +77,7 @@ func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID
 	if !active.Equals(merchantAddress) {
 		return solanago.Signature{}, fmt.Errorf("solana: active signer %s does not match subscription merchant address %s", active.String(), merchantAddress.String())
 	}
-	return s.Submit(ctx, tenantID, instructions)
+	return s.SubmitWithPresubmit(ctx, tenantID, instructions, presubmit)
 }
 
 // planReader is the minimal RPC read surface PublishPlan needs for its idempotent
@@ -86,14 +97,6 @@ type PlanService struct {
 	network   string     // "mainnet" | "devnet"
 	tokens    map[string]config.TokenConfig
 	now       func() time.Time
-}
-
-// NewPlanService builds a PlanService for the given network. The idempotent
-// re-publish guard is disabled (no plan reader); prefer NewPlanServiceWithReader
-// in production so a re-publish of an already-created plan is a no-op rather than
-// a loud on-chain create_plan failure.
-func NewPlanService(submitter Submitter, network string, tokens ...map[string]config.TokenConfig) *PlanService {
-	return &PlanService{submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
 // NewPlanServiceWithReader builds a PlanService that reads the Plan PDA back

@@ -116,7 +116,7 @@ func (p Product) tierRank() int {
 // financial substance (currency, unit_amount, duration, auto_renew).
 type Price struct {
 	Currency   string `json:"currency,omitempty" yaml:"currency,omitempty"`
-	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"`
+	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // micros (millionths of a major unit)
 
 	// Duration is the access window a purchase of this price grants (#622):
 	// a finite value (`3d`/`30d`/`90d`/`365d`) or `indefinite`. Optional;
@@ -156,8 +156,8 @@ type Price struct {
 	// Trial is an optional FIRST phase that differs from the recurring terms above
 	// (#622). unit_amount=0 is a free trial. Requires auto_renew. Omit for a flat
 	// price.
-	//   trial: {unit_amount: 1995, duration: 30d}  # $19.95 first 30d, then UnitAmount recurring
-	//   trial: {unit_amount: 0, duration: 7d}       # free 7-day trial, then UnitAmount recurring
+	//   trial: {unit_amount: 19950000, duration: 30d}  # $19.95 (micros) first 30d, then UnitAmount recurring
+	//   trial: {unit_amount: 0, duration: 7d}           # free 7-day trial, then UnitAmount recurring
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
 
 	Metered *MeteredPrice `json:"metered,omitempty" yaml:"metered,omitempty"`
@@ -185,7 +185,7 @@ type MeteredPrice struct {
 // own price/length, then the Price's recurring terms. Requires the price's
 // auto_renew.
 type PriceTrial struct {
-	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price (0 = free trial)
+	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price in micros (0 = free trial)
 	Duration   string `json:"duration" yaml:"duration"`       // first-phase length
 }
 

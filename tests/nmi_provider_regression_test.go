@@ -166,6 +166,7 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	require.NoError(t, err)
 	client.DirectPostURL = mock.URL()
 	client.QueryURL = mock.URL()
+	client.V5BaseURL = mock.URL()
 
 	suite.App.Runtime.NMIClients[provider] = client
 	if suite.App.Runtime.SubscriptionService != nil {

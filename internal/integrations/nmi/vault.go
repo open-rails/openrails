@@ -38,6 +38,12 @@ type CreateCustomerVaultResponse struct {
 
 func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBillingRequest, error) {
 	billing := &v5CustomerBillingRequest{
+		// The live v5 create-customer REQUIRES a billing currency (verified
+		// 2026-07-01; the docs omit it). The classic API had no such field —
+		// the gateway defaulted to the account currency. USD mirrors the
+		// existing money-path default (money.DefaultCurrency) for the one
+		// account class we run NMI on.
+		Currency:  "USD",
 		FirstName: d.FirstName,
 		LastName:  d.LastName,
 		Company:   d.Company,
@@ -81,8 +87,11 @@ func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCu
 	return &CreateCustomerVaultResponse{CustomerVaultID: customer.ID}, nil
 }
 
-// UpdateCustomerVault updates the priority-1 billing record (payment token
-// and/or address fields) via PATCH /v5/customers/{id}.
+// UpdateCustomerVault updates the primary billing record (payment token
+// and/or address fields) via PATCH /v5/customers/{id}. The live gateway
+// REQUIRES billing[].id (verified 2026-07-01 — the documented
+// omit-for-priority-1 behavior 400s), so the priority-1 billing id is
+// resolved with a read first.
 func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -96,7 +105,22 @@ func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 		return err
 	}
 
-	// billing is an array on update; omitting billing_id targets priority 1.
+	page, err := c.ListCustomersPage("", 1, vaultID)
+	if err != nil {
+		return fmt.Errorf("failed to update customer vault: lookup: %w", err)
+	}
+	var primary *V5CustomerBilling
+	for i := range page.Customers {
+		if strings.TrimSpace(page.Customers[i].ID) == vaultID {
+			primary = page.Customers[i].PrimaryBilling()
+			break
+		}
+	}
+	if primary == nil {
+		return fmt.Errorf("failed to update customer vault: customer %s has no billing record at NMI", vaultID)
+	}
+	billing.ID = primary.ID
+
 	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
 	if err := c.sendV5Request(http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {
 		return fmt.Errorf("failed to update customer vault: %w", err)

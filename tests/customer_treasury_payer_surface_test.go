@@ -10,14 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -49,10 +50,9 @@ var allCustomerTreasuryPerms = []string{
 // random subject proves the rebind is what scopes the balance.
 func newCustomerTreasuryServer(t *testing.T, suite *TestContainerSuite, perms []string) *httptest.Server {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	ginroutes.RegisterCustomerTreasuryRoutes(router.Group("/v1/customers"), suite.App.Runtime,
-		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: uuid.NewString(), perms: perms}))
+	router := http.NewServeMux()
+	httproutes.RegisterCustomerTreasuryRoutes(httprouter.NewMux(router, "/v1/customers", suite.App.Runtime), suite.App.Runtime,
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: uuid.NewString(), perms: perms}), routesurface.AllProviderRoutes())
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv

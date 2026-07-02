@@ -25,8 +25,10 @@ func (CreditExpiryArgs) Kind() string { return KindCreditExpiry }
 // grant that still has an unspent balance, it runs grants.ExpireLapsed, which
 // emits a #512 ledger transfer (DR customer_balance / CR expired_credits) per
 // lapsed lot — conserved, append-only, idempotent (an already-clawed lot has
-// zero remainder and is skipped). The credit lot IS the grant; there is no
-// money_blocks table to compact anymore.
+// zero remainder and is skipped). ExpireLapsed takes the per-customer spend
+// lock inside this worker's tx (#677), so an expiry never races a spend on the
+// same lot. The credit lot IS the grant; there is no money_blocks table to
+// compact anymore.
 type CreditExpiryWorker struct {
 	river.WorkerDefaults[CreditExpiryArgs]
 	DB        *db.DB

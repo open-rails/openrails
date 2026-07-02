@@ -98,6 +98,14 @@ SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
 LIMIT 1;
 
+-- name: GetSubscriptionByRailSubIDForUpdate :one
+-- Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
+-- UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
+SELECT * FROM openrails.subscriptions sub
+WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+LIMIT 1
+FOR UPDATE;
+
 -- name: GetSubscriptionByRailMetadataValue :one
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = $1

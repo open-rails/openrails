@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -33,10 +32,11 @@ func (a testHostPrincipalAuthenticator) AuthenticateDelegated(context.Context, *
 }
 
 func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
-	srv := setupTestServer(t)
-	require.NotNil(t, srv)
+	suite := getSharedTestSuite(t)
+	asm := embedhttp.FromApp(suite.App)
+	require.NotNil(t, asm)
 
-	h := srv.NewHTTPHandler(server.HTTPHandlerOptions{RouteSets: []server.RouteSet{server.RouteSetWebhooks}})
+	h := asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetWebhooks}})
 
 	// Merchant-scoped webhook route should exist; global /webhooks is not mounted.
 	{
@@ -88,21 +88,26 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 	srv := setupTestServer(t)
 	require.NotNil(t, srv)
+	suite := getSharedTestSuite(t)
+	asm := embedhttp.FromApp(suite.App)
+	require.NotNil(t, asm)
+	// Default route sets include checkout/customer, which require an authenticator.
+	asm.Authenticator = suiteTestAuthenticator{}
 
-	embeddedDefault := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{}))
+	embeddedDefault := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{}))
 	t.Cleanup(embeddedDefault.Close)
 	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/merchant/admissions"))
 	require.NotEqual(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/catalog/products"))
 	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/payment-providers/nmi"))
 
-	embeddedMerchantAPI := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
-		RouteSets: []server.RouteSet{server.RouteSetMerchantAPI},
+	embeddedMerchantAPI := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
+		RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI},
 	}))
 	t.Cleanup(embeddedMerchantAPI.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/merchant/admissions"))
 
-	embeddedPaymentProviders := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
-		RouteSets: []server.RouteSet{server.RouteSetPaymentProviders},
+	embeddedPaymentProviders := httptest.NewServer(asm.NewHTTPHandler(embedhttp.Options{
+		RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetPaymentProviders},
 	}))
 	t.Cleanup(embeddedPaymentProviders.Close)
 	require.NotEqual(t, http.StatusNotFound, status(t, embeddedPaymentProviders.Client(), http.MethodGet, embeddedPaymentProviders.URL+"/billing/v1/merchant/payment-providers/nmi"))

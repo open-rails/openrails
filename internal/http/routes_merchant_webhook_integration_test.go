@@ -28,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -69,13 +68,6 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	mux := http.NewServeMux()
 	httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/global", globalRT), globalRT)
 	httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, "/v1", rt), rt)
-	hostGroup := router.NewMux(mux, "/host-webhooks", rt).Group("", func(next router.Handler) router.Handler {
-		return func(r *request.Request) {
-			r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), acme.ID))
-			next(r)
-		}
-	})
-	httproutes.RegisterHostWebhookRoutes(hostGroup, rt)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -85,8 +77,6 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/nope/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_evil", ts, body)))
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/acme/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/host-webhooks/stripe", body, stripeSig("whsec_evil", ts, body)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/host-webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
 
 	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"nmi_acme_account"},"transaction_id":"txn_1"}}`)
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/acme/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))

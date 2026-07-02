@@ -11,13 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -47,17 +48,15 @@ func (h hostSeamAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 	}, nil
 }
 
-func newHostSeamSelfRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) *gin.Engine {
+func newHostSeamSelfRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) http.Handler {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	e := gin.New()
-	group := e.Group("/v1/me")
-	ginroutes.RegisterSelfServiceRoutes(group, suite.App.Runtime,
-		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: subject, perms: perms}))
-	return e
+	mux := http.NewServeMux()
+	httproutes.RegisterSelfServiceRoutes(httprouter.NewMux(mux, "/v1/me", suite.App.Runtime), suite.App.Runtime,
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: subject, perms: perms}), routesurface.AllProviderRoutes())
+	return mux
 }
 
-func doHostSeamSelf(e *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
+func doHostSeamSelf(e http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer host-credential")
 	req.Header.Set("Content-Type", "application/json")

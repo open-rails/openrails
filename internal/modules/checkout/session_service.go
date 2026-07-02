@@ -22,11 +22,13 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -41,20 +43,18 @@ const (
 	redirectCheckoutSessionTTL   = 24 * time.Hour
 )
 
-type IdempotencyStatus string
+// Idempotency types are the idempotency module's own (#666 — the copy that
+// lived here, plus the payments adapter that translated between the two, is
+// gone; checkout consumes the module's types directly).
+type IdempotencyStatus = idempotency.IdempotencyStatus
 
 const (
-	IdempotencyStatusPending IdempotencyStatus = "pending"
-	IdempotencyStatusSuccess IdempotencyStatus = "success"
-	IdempotencyStatusFailed  IdempotencyStatus = "failed"
+	IdempotencyStatusPending = idempotency.IdempotencyStatusPending
+	IdempotencyStatusSuccess = idempotency.IdempotencyStatusSuccess
+	IdempotencyStatusFailed  = idempotency.IdempotencyStatusFailed
 )
 
-type IdempotencyRecord struct {
-	Status    IdempotencyStatus
-	Result    json.RawMessage
-	Error     string
-	CreatedAt time.Time
-}
+type IdempotencyRecord = idempotency.IdempotencyRecord
 
 type checkoutSessionIdempotencyResult struct {
 	RequestFingerprint string                   `json:"request_fingerprint"`
@@ -64,7 +64,7 @@ type checkoutSessionIdempotencyResult struct {
 type sessionIdempotencyStore interface {
 	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
 	Fail(ctx context.Context, operation, key string, operationErr error) error
-	Complete(ctx context.Context, operation, key string, result any) error
+	Complete(ctx context.Context, operation, key string, result json.RawMessage) error
 }
 
 type checkoutSessionExecutor interface {
@@ -713,7 +713,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaTransactionService == nil {
 			return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, session.Amount, session.Currency, s.fxProvider, s.priceProvider)
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -1302,14 +1302,14 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		oldPeriodEndsAt: oldSub.CurrentPeriodEndsAt,
 	}
 	if isUpgrade {
-		firstChargeCents, _ := CalculateModelBUpgradeCharge(
+		firstChargeMicros, _ := CalculateModelBUpgradeCharge(
 			oldPrice.Amount,
 			newPrice.Amount,
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			s.now(),
 		)
-		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(ctx, firstChargeCents, newTerms.mintSymbol, s.priceProvider)
+		firstChargeBaseUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, s.priceProvider)
 		if firstChargeBaseUnits == 0 {
 			firstChargeBaseUnits = 1
 		}

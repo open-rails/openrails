@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
@@ -264,25 +265,11 @@ func TestDriftDedupeKeyStable(t *testing.T) {
 // NMI pass tests
 // ---------------------------------------------------------------------------
 
-const nmiPlansXMLFixture = `<?xml version="1.0" encoding="UTF-8"?>
-<nm_response>
-  <plan>
-    <plan_id>premium-usd-999-30</plan_id>
-    <plan_name>Premium Monthly</plan_name>
-    <plan_amount>9.99</plan_amount>
-  </plan>
-  <plan>
-    <plan_id>operator-handmade-plan</plan_id>
-    <plan_name>Legacy Plan</plan_name>
-    <plan_amount>4.99</plan_amount>
-  </plan>
-</nm_response>`
-
-func TestParseNMIPlans(t *testing.T) {
-	plans, err := parseNMIPlans(nmiPlansXMLFixture)
-	if err != nil {
-		t.Fatalf("parseNMIPlans: %v", err)
-	}
+func TestMapNMIPlans(t *testing.T) {
+	plans := mapNMIPlans([]nmi.V5Plan{
+		{ID: "premium-usd-999-30", PlanName: "Premium Monthly", PlanAmount: "9.99"},
+		{ID: "operator-handmade-plan", PlanName: "Legacy Plan", PlanAmount: "4.99"},
+	})
 	if len(plans) != 2 {
 		t.Fatalf("expected 2 plans, got %d", len(plans))
 	}

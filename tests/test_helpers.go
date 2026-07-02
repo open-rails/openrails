@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	authtesting "github.com/open-rails/authkit/authtest"
 	"github.com/stretchr/testify/require"
@@ -44,10 +43,6 @@ var (
 // the subject is simply the parsed value.
 func personalOwnerID(userID string) uuid.UUID {
 	return uuid.MustParse(userID)
-}
-
-func init() {
-	gin.SetMode(gin.TestMode)
 }
 
 // getTestIssuer returns a shared test issuer for authentication.

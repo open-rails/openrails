@@ -579,6 +579,21 @@ type OpenrailsMerchantSecret struct {
 	UpdatedAt  time.Time
 }
 
+// #672 per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.
+type OpenrailsMeteredRatingWatermark struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).
+	Source       string
+	PeriodFrom   time.Time
+	RatedThrough time.Time
+	// Micros already accrued for [period_from, rated_through); the sweep accrues only the delta above this.
+	AccruedAmount int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision.
 type OpenrailsMoneySetting struct {
 	ID          uuid.UUID
@@ -673,17 +688,6 @@ type OpenrailsPayment struct {
 	CustomerID               uuid.UUID
 	// Provider account that produced this payment/charge mirror row.
 	ProviderAccountID *uuid.UUID
-}
-
-// Tenant-scoped blocklist of known-bad payment identifiers (issue #300). customer_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
-type OpenrailsPaymentBlocklist struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Kind       string
-	Value      string
-	Reason     *string
-	CreatedAt  time.Time
 }
 
 // Generalized payment method table supporting multiple rails.

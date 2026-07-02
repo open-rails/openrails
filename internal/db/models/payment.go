@@ -25,7 +25,7 @@ type Payment struct {
 	Rail          Rail   `json:"rail"` // Rail: nmi, ccbill, solana
 	TransactionID string `json:"transaction_id"`
 
-	// Payment details - amount in cents (smallest currency unit)
+	// Payment details - amount in MICROS (millionths of a major currency unit)
 	Amount     int64  `json:"amount"`
 	ListAmount int64  `json:"list_amount"`
 	Currency   string `json:"currency"`

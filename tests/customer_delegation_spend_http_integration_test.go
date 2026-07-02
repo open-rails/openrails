@@ -11,16 +11,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -75,16 +74,15 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 
 	// --- 1) The customer grants the delegate a $1000-per-day spend window via the
 	// real customer-treasury HTTP route. ---
-	treasury := gin.New()
-	gin.SetMode(gin.TestMode)
-	ginroutes.RegisterCustomerTreasuryRoutes(treasury.Group("/v1/customers"), suite.App.Runtime,
-		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{
+	treasury := http.NewServeMux()
+	httproutes.RegisterCustomerTreasuryRoutes(httprouter.NewMux(treasury, "/v1/customers", suite.App.Runtime), suite.App.Runtime,
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
 				controlplane.PermCustomerSpendDelegationsRead,
 				controlplane.PermCustomerSpendDelegationsUpdate,
 			},
-		}))
+		}), routesurface.AllProviderRoutes())
 	treasurySrv := httptest.NewServer(treasury)
 	t.Cleanup(treasurySrv.Close)
 
@@ -100,15 +98,13 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
 	// --- Mount the real merchant admissions surface (service-credential auth). ---
-	admitRouter := gin.New()
-	admitRouter.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := admitRouter.Group("/v1/merchant")
+	admitMux := http.NewServeMux()
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{controlplane.PermMerchantAdmissionsCreate},
 	}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime,
+	httproutes.RegisterServiceRoutes(httprouter.NewMux(admitMux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime,
 		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
-	admitSrv := httptest.NewServer(admitRouter)
+	admitSrv := httptest.NewServer(middleware.ChainHTTP(admitMux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID)))
 	t.Cleanup(admitSrv.Close)
 
 	type admitResp struct {

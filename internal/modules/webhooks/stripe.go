@@ -9,6 +9,7 @@ import (
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -251,10 +252,10 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 
 	if s.DeduplicationService != nil {
 		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe, evt, func(ctx context.Context) error {
-			return s.handleEvent(ctx, eventType, evt.Data.Object)
+			return s.handleEvent(ctx, eventType, evt)
 		})
 	}
-	return s.handleEvent(ctx, eventType, evt.Data.Object)
+	return s.handleEvent(ctx, eventType, evt)
 }
 
 // HandledStripeEventTypes is the canonical list of Stripe event types OpenRails
@@ -280,12 +281,13 @@ var HandledStripeEventTypes = []string{
 	"charge.dispute.closed",
 }
 
-func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, obj json.RawMessage) error {
+func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, evt stripeEvent) error {
+	obj := evt.Data.Object
 	switch eventType {
 	case "invoice.paid":
-		return s.handleInvoicePaid(ctx, obj)
+		return s.handleInvoicePaid(ctx, obj, evt.Created)
 	case "invoice.payment_failed":
-		return s.handleInvoicePaymentFailed(ctx, obj)
+		return s.handleInvoicePaymentFailed(ctx, obj, evt.Created)
 	case "invoice_payment.paid":
 		return s.handleInvoicePaymentPaid(ctx, obj)
 	case "checkout.session.completed":
@@ -297,7 +299,7 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	case "checkout.session.expired":
 		return s.handleCheckoutSessionExpired(ctx, obj)
 	case "customer.subscription.updated":
-		return s.handleSubscriptionUpdated(ctx, obj)
+		return s.handleSubscriptionUpdated(ctx, obj, evt.Created)
 	case "customer.subscription.deleted":
 		return s.handleSubscriptionDeleted(ctx, obj)
 	case "refund.created", "refund.updated":
@@ -399,7 +401,7 @@ func (s *StripeWebhookService) recordStripeCardForCustomer(ctx context.Context, 
 	)
 }
 
-func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.RawMessage) error {
+func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.RawMessage, evtCreated int64) error {
 	var inv stripeInvoice
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse invoice: %w", err)
@@ -523,10 +525,33 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 					"rail_subscription_id": railSubID,
 					"transaction_id":       paymentTransactionID,
 				}).Warn("Blocked terminal -> active transition for delayed Stripe renewal")
+				// #675: the customer WAS charged — leave a durable trace before ACKing.
+				if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+					Provider:       string(models.RailStripe),
+					Operation:      "terminal_blocked_renewal_success",
+					TransactionID:  paymentTransactionID,
+					UserID:         sub.CustomerID.String(),
+					SubscriptionID: &sub.ID,
+					Err:            err,
+					Metadata: map[string]any{
+						"rail_subscription_id": railSubID,
+						"stripe_invoice_id":    strings.TrimSpace(inv.ID),
+						"amount_micros":        amountMicros,
+						"currency":             strings.TrimSpace(inv.Currency),
+					},
+				}); alertErr != nil {
+					return fmt.Errorf("record terminal-blocked stripe renewal repair alert: %w", alertErr)
+				}
 				return nil
 			}
 			return fmt.Errorf("renew membership: %w", err)
 		}
+	}
+
+	// #675 ordering guard: mark this invoice's event as applied so a delayed
+	// older subscription.updated can't revert the renewal's committed state.
+	if err := s.bumpStripeSubscriptionEventWatermark(ctx, railSubID, evtCreated); err != nil {
+		return fmt.Errorf("bump stripe subscription event watermark: %w", err)
 	}
 
 	if err := s.ensureStripePaidSubscriptionEntitlements(ctx, railSubID, price); err != nil {
@@ -551,11 +576,9 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 				Cadence:        cadence,
 				Source:         source,
 			}); err != nil {
-				// Credits are an optional add-on to subscription processing; don't fail the entire webhook.
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id": sub.ID,
-					"period_end":      periodEnd,
-				}).Warn("failed to grant subscription credits")
+				// #675: propagate so the event retries — the deposit is idempotent
+				// per (subscription, label, period_end); warn-and-ack lost the lot.
+				return fmt.Errorf("grant stripe subscription credits: %w", err)
 			}
 		}
 	}
@@ -873,7 +896,7 @@ func (s *StripeWebhookService) handleSubscriptionDeleted(ctx context.Context, ob
 	})
 }
 
-func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, obj json.RawMessage) error {
+func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, obj json.RawMessage, evtCreated int64) error {
 	var data struct {
 		ID                 string `json:"id"`
 		Status             string `json:"status"`
@@ -896,84 +919,115 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if subID == "" {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), subID)
-	if err != nil {
-		return nil
-	}
-	incomingStatus := strings.ToLower(strings.TrimSpace(data.Status))
-	if _, terminal := subscriptions.TerminalCancelReason(sub); terminal && (incomingStatus == "active" || incomingStatus == "trialing") {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      sub.ID,
-			"rail_subscription_id": subID,
-			"incoming_status":      incomingStatus,
-		}).Warn("ignoring stripe active update for terminal local subscription")
-		return nil
-	}
 
-	oldEntitlementsSpec := models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
-	var oldProduct *models.Product
-	if s.ProductService != nil && sub.ProductID != uuid.Nil {
-		if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
-			oldProduct = product
-		} else {
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load old product for stripe entitlement reconciliation")
+	// #675: one tx + FOR UPDATE around the read-modify-write (UpdateAt is a
+	// full-row write), plus an event-created watermark so a delayed OLDER
+	// subscription.updated can't revert newer committed state (e.g. flip
+	// past_due back to active after invoice.payment_failed).
+	var (
+		updatedSub          *models.Subscription
+		oldEntitlementsSpec map[string]*int
+		oldProduct          *models.Product
+		newProduct          *models.Product
+	)
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		subRepo := repo.NewSubscriptionRepo(db.NewWithPgxTx(tx))
+		sub, err := subRepo.GetByRailSubscriptionIDForUpdate(ctx, string(models.RailStripe), subID)
+		if err != nil {
+			if repo.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("load stripe subscription for update: %w", err)
 		}
-	}
-	var newProduct *models.Product
+		if evtCreated > 0 && stripeSubEventCreated(sub.Metadata) > evtCreated {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":      sub.ID,
+				"rail_subscription_id": subID,
+				"event_created":        evtCreated,
+				"last_applied_created": stripeSubEventCreated(sub.Metadata),
+			}).Warn("ignoring stale stripe subscription.updated (older than last applied event)")
+			return nil
+		}
+		incomingStatus := strings.ToLower(strings.TrimSpace(data.Status))
+		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal && (incomingStatus == "active" || incomingStatus == "trialing") {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":      sub.ID,
+				"rail_subscription_id": subID,
+				"incoming_status":      incomingStatus,
+			}).Warn("ignoring stripe active update for terminal local subscription")
+			return nil
+		}
 
-	if len(data.Items.Data) > 0 {
-		stripePrice := strings.TrimSpace(data.Items.Data[0].Price.ID)
-		if stripePrice != "" {
-			price, err := s.PriceService.GetByStripePriceID(ctx, stripePrice)
-			if err == nil {
-				sub.PriceID = price.ID
-				sub.ProductID = price.ProductID
-				sub.ScheduledPriceID = nil
-				if s.ProductService != nil {
-					if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-						newProduct = product
-						sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-						sub.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
-					} else {
-						log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load new product for stripe entitlement reconciliation")
-					}
-				}
+		oldEntitlementsSpec = models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
+		if s.ProductService != nil && sub.ProductID != uuid.Nil {
+			if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
+				oldProduct = product
 			} else {
-				log.WithFields(log.Fields{
-					"stripe_price_id": stripePrice,
-					"subscription_id": sub.ID,
-				}).Warn("stripe subscription update price not mapped")
+				log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load old product for stripe entitlement reconciliation")
 			}
 		}
-	}
 
-	if data.CurrentPeriodStart > 0 {
-		ts := time.Unix(data.CurrentPeriodStart, 0).UTC()
-		sub.CurrentPeriodStartsAt = &ts
-	}
-	if data.CurrentPeriodEnd > 0 {
-		ts := time.Unix(data.CurrentPeriodEnd, 0).UTC()
-		sub.CurrentPeriodEndsAt = &ts
-	}
-
-	if data.CancelAtPeriodEnd {
-		applyStripeScheduledCancellation(sub, data.Status, data.CanceledAt, s.now().UTC())
-		_ = data.CanceledAt
-	} else {
-		// Not scheduled to cancel. If Stripe now reports it active/trialing while
-		// the local record is still cancelled, this is a resume — clear the prior
-		// scheduled-cancellation marks before applying the status.
-		if sub.Status == models.StatusCancelled && (incomingStatus == "active" || incomingStatus == "trialing") {
-			sub.CancelledAt = nil
-			sub.EndedAt = nil
+		if len(data.Items.Data) > 0 {
+			stripePrice := strings.TrimSpace(data.Items.Data[0].Price.ID)
+			if stripePrice != "" {
+				price, err := s.PriceService.GetByStripePriceID(ctx, stripePrice)
+				if err == nil {
+					sub.PriceID = price.ID
+					sub.ProductID = price.ProductID
+					sub.ScheduledPriceID = nil
+					if s.ProductService != nil {
+						if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
+							newProduct = product
+							sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+							sub.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+						} else {
+							log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load new product for stripe entitlement reconciliation")
+						}
+					}
+				} else {
+					log.WithFields(log.Fields{
+						"stripe_price_id": stripePrice,
+						"subscription_id": sub.ID,
+					}).Warn("stripe subscription update price not mapped")
+				}
+			}
 		}
-		applyStripeSubscriptionStatus(sub, data.Status, data.CanceledAt, s.now().UTC())
-	}
 
-	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
-		return fmt.Errorf("update subscription from stripe: %w", err)
+		if data.CurrentPeriodStart > 0 {
+			ts := time.Unix(data.CurrentPeriodStart, 0).UTC()
+			sub.CurrentPeriodStartsAt = &ts
+		}
+		if data.CurrentPeriodEnd > 0 {
+			ts := time.Unix(data.CurrentPeriodEnd, 0).UTC()
+			sub.CurrentPeriodEndsAt = &ts
+		}
+
+		if data.CancelAtPeriodEnd {
+			applyStripeScheduledCancellation(sub, data.Status, data.CanceledAt, s.now().UTC())
+		} else {
+			// Not scheduled to cancel. If Stripe now reports it active/trialing while
+			// the local record is still cancelled, this is a resume — clear the prior
+			// scheduled-cancellation marks before applying the status.
+			if sub.Status == models.StatusCancelled && (incomingStatus == "active" || incomingStatus == "trialing") {
+				sub.CancelledAt = nil
+				sub.EndedAt = nil
+			}
+			applyStripeSubscriptionStatus(sub, data.Status, data.CanceledAt, s.now().UTC())
+		}
+
+		setStripeSubEventCreated(sub, evtCreated)
+		if err := subRepo.UpdateAt(ctx, sub, s.now()); err != nil {
+			return fmt.Errorf("update subscription from stripe: %w", err)
+		}
+		updatedSub = sub
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := s.reconcileStripeSubscriptionEntitlements(ctx, sub, oldEntitlementsSpec, oldProduct, newProduct); err != nil {
+	if updatedSub == nil {
+		return nil
+	}
+	if err := s.reconcileStripeSubscriptionEntitlements(ctx, updatedSub, oldEntitlementsSpec, oldProduct, newProduct); err != nil {
 		return err
 	}
 	return nil
@@ -1116,7 +1170,7 @@ func failedPaymentTransactionID(inv stripeInvoice) string {
 	return "failed:" + normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent, inv.ID)
 }
 
-func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, obj json.RawMessage) error {
+func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, obj json.RawMessage, evtCreated int64) error {
 	var inv stripeInvoice
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse failed invoice: %w", err)
@@ -1125,21 +1179,47 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	if railSubID == "" {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
-	if err != nil {
+	// #675: row-locked read-modify-write + event watermark, so the past_due
+	// flip can't be lost to a concurrent full-row write and a delayed older
+	// subscription.updated(active) can't revert it afterwards.
+	var sub *models.Subscription
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		subRepo := repo.NewSubscriptionRepo(db.NewWithPgxTx(tx))
+		locked, err := subRepo.GetByRailSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
+		if err != nil {
+			if repo.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("load stripe subscription for payment failure: %w", err)
+		}
+		if locked.Status == models.StatusCancelled {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":      locked.ID,
+				"rail_subscription_id": railSubID,
+				"invoice_id":           inv.ID,
+			}).Warn("ignoring stripe payment failure for cancelled local subscription")
+			return nil
+		}
+		if evtCreated > 0 && stripeSubEventCreated(locked.Metadata) > evtCreated {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":      locked.ID,
+				"rail_subscription_id": railSubID,
+				"invoice_id":           inv.ID,
+			}).Warn("ignoring stale stripe payment failure (older than last applied event)")
+			return nil
+		}
+		locked.Status = models.StatusPastDue
+		setStripeSubEventCreated(locked, evtCreated)
+		if err := subRepo.UpdateAt(ctx, locked, s.now()); err != nil {
+			return fmt.Errorf("update stripe subscription after payment failure: %w", err)
+		}
+		sub = locked
 		return nil
+	}); err != nil {
+		return err
 	}
-	if sub.Status == models.StatusCancelled {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      sub.ID,
-			"rail_subscription_id": railSubID,
-			"invoice_id":           inv.ID,
-		}).Warn("ignoring stripe payment failure for cancelled local subscription")
+	if sub == nil {
 		return nil
-	}
-	sub.Status = models.StatusPastDue
-	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
-		return fmt.Errorf("update stripe subscription after payment failure: %w", err)
 	}
 
 	// Record the failed attempt so it shows in payment history. The transaction
@@ -1148,7 +1228,8 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	// failure dedupe (CreateIfNotExists on rail+transaction_id). This is a
 	// plain insert: no entitlements/credits are granted for a failed payment.
 	if s.PaymentService != nil {
-		amount := inv.AmountDue
+		// #671 1f: amount_due is CENTS; the payment row is micros.
+		amount := moneyutil.CentsToMicros(inv.AmountDue)
 		currency := normalize.FirstNonEmpty(inv.Currency)
 		if currency == "" && sub.Price != nil {
 			currency = strings.TrimSpace(sub.Price.Currency)
@@ -1231,7 +1312,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 	var productID *uuid.UUID
 	priceID := sub.PriceID
 	if sub.Price != nil {
-		priceAmount = float64(sub.Price.Amount) / 100.0
+		priceAmount = moneyutil.MicrosToMajorUnits(sub.Price.Amount) // #671 1f: micros, not cents
 		if curr := strings.TrimSpace(sub.Price.Currency); curr != "" {
 			priceCurrency = curr
 		}
@@ -1751,6 +1832,69 @@ func stripeInvoiceHasNoRefundableTransaction(inv stripeInvoice) bool {
 
 func ptrRail(p models.Rail) *models.Rail {
 	return &p
+}
+
+// stripeEventCreatedKey stores (in subscription metadata) the Stripe event
+// created timestamp of the last webhook applied to the row — the #675 ordering
+// guard: a stale customer.subscription.updated must not revert newer state.
+const stripeEventCreatedKey = "stripe_last_event_created"
+
+// stripeSubEventCreated reads the last-applied event watermark (0 when unset).
+func stripeSubEventCreated(md json.RawMessage) int64 {
+	if len(md) == 0 {
+		return 0
+	}
+	var m map[string]any
+	if json.Unmarshal(md, &m) != nil {
+		return 0
+	}
+	switch v := m[stripeEventCreatedKey].(type) {
+	case float64:
+		return int64(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	}
+	return 0
+}
+
+// setStripeSubEventCreated merges the watermark into the subscription metadata.
+func setStripeSubEventCreated(sub *models.Subscription, created int64) {
+	if sub == nil || created <= 0 {
+		return
+	}
+	m := map[string]any{}
+	if len(sub.Metadata) > 0 {
+		_ = json.Unmarshal(sub.Metadata, &m)
+	}
+	m[stripeEventCreatedKey] = created
+	if b, err := json.Marshal(m); err == nil {
+		sub.Metadata = b
+	}
+}
+
+// bumpStripeSubscriptionEventWatermark advances the subscription's applied-event
+// watermark under the row lock (never rewinds it). Called after invoice-driven
+// lifecycle writes so an older, delayed subscription.updated can't revert them.
+func (s *StripeWebhookService) bumpStripeSubscriptionEventWatermark(ctx context.Context, railSubID string, evtCreated int64) error {
+	if s.DB == nil || evtCreated <= 0 || strings.TrimSpace(railSubID) == "" {
+		return nil
+	}
+	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		subRepo := repo.NewSubscriptionRepo(db.NewWithPgxTx(tx))
+		sub, err := subRepo.GetByRailSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
+		if err != nil {
+			if repo.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if stripeSubEventCreated(sub.Metadata) >= evtCreated {
+			return nil
+		}
+		setStripeSubEventCreated(sub, evtCreated)
+		return subRepo.UpdateAt(ctx, sub, s.now())
+	})
 }
 
 func stripeInvoicePaymentMetadata(inv stripeInvoice) map[string]any {

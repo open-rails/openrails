@@ -1,6 +1,7 @@
 package merchantsecrets
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/config"
@@ -48,6 +49,65 @@ func TestGateSecretBackend(t *testing.T) {
 				t.Fatalf("useVault=%v, want %v", useVault, tc.wantUseVault)
 			}
 		})
+	}
+}
+
+// enforceEncryptionPosture is the #667 boot gate: DB-backed store + disabled
+// encryptor refuses boot outside development (mirrors db.EnforceRLSPosture).
+func TestEnforceEncryptionPosture(t *testing.T) {
+	cases := []struct {
+		name             string
+		enabled, require bool
+		wantErr          bool
+	}{
+		{"prod + no key = boot refused", false, true, true},
+		{"dev + no key = allowed (warns)", false, false, false},
+		{"prod + key = allowed", true, true, false},
+		{"dev + key = allowed", true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := enforceEncryptionPosture(tc.enabled, tc.require)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want boot-refusal error, got nil")
+				}
+				// The error must be actionable: name the key and the Vault alternative.
+				for _, want := range []string{"ENCRYPTION_MASTER_KEY", "secret_backend=vault"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error %q missing %q", err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// RequiresSecretEncryption pins the env signal to the same gate as RequiresRLS.
+func TestRequiresSecretEncryption_EnvSignal(t *testing.T) {
+	cases := []struct {
+		env  string
+		want bool
+	}{
+		{"", false}, {"dev", false}, {"development", false},
+		{"production", true}, {"staging", true},
+	}
+	for _, tc := range cases {
+		cfg := &config.Config{Env: tc.env}
+		if got := cfg.RequiresSecretEncryption(); got != tc.want {
+			t.Fatalf("Env=%q: RequiresSecretEncryption()=%v, want %v", tc.env, got, tc.want)
+		}
+		if got, rls := cfg.RequiresSecretEncryption(), cfg.RequiresRLS(); got != rls {
+			t.Fatalf("Env=%q: encryption gate %v diverges from RLS gate %v", tc.env, got, rls)
+		}
+	}
+	var nilCfg *config.Config
+	if nilCfg.RequiresSecretEncryption() {
+		t.Fatal("nil config must not require encryption (mirrors RequiresRLS)")
 	}
 }
 

@@ -78,6 +78,12 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
+// providerAccountEnvironment is the environment provider-account rows carry in
+// this deployment: test under test_mode, live otherwise (#641).
+func (s *CheckoutService) providerAccountEnvironment() string {
+	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
+}
+
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -156,7 +162,11 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	if err != nil {
 		return nil, err
 	}
-	scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailCCBill), "live")
+	// Environment follows test_mode (#641/#668): sandbox deployments declare
+	// environment=test rows (ValidateRailSet enforces it), so a hardcoded
+	// "live" here can never resolve under test_mode.
+	env := s.providerAccountEnvironment()
+	scope, ok, err := scopeResolver.ActiveProviderAccountScope(ctx, tid, string(models.RailCCBill), env)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +193,7 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		{key: "datalink_username", dst: &cfg.DataLinkUsername},
 		{key: "datalink_password", dst: &cfg.DataLinkPassword},
 	} {
-		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), "live", item.key)
+		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), env, item.key)
 		if err != nil {
 			return nil, fmt.Errorf("load merchant CCBill %s: %w", item.key, err)
 		}

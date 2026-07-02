@@ -33,7 +33,6 @@ var merchantOwnedTables = []string{
 	"invoice_items",
 	"invoice_payments",
 	"notification_queue",
-	"payment_blocklist",
 	"rail_customers",
 	"external_provider_mutation_logs",
 	"grants",

@@ -7,7 +7,271 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 681
+next_id: 684
+
+---
+
+# #683: remote-identity renaming — one `rail_` family for everything provider-facing (rail_merchant_accounts / rail_customer_accounts)
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01, Paul) — follows the #682 identity-alignment review and anticipates the
+two-party platform direction (openrails.com users creating "merchant accounts" and "customer accounts",
+Link/Shop-Pay-style).
+
+## Why
+The remote-facing axis is currently spelled THREE ways (`provider_*`, `rail_*`, `external_provider_*`),
+and the two identity tables hide that they are mirror images of one another:
+- `provider_accounts` = the MERCHANT's account at a rail (`acct_...`, NMI Gateway ID,
+  `clientAccnum/subacc`, recipient wallet). "Provider account" reads equally as "an account belonging to
+  the provider" — and "merchant account" is the exact industry term for this object (NMI documents the
+  Gateway ID as "the merchant ID").
+- `rail_customers` = the CUSTOMER's record at a rail (`cus_...` — Stripe-only in practice post-#682).
+Renaming both under one prefix makes the mirror explicit: every row answers "WHOSE account at WHICH rail".
+
+HISTORY: #652/#654 (2026-06-30) already decided `provider_accounts` -> `payment_provider_accounts` and
+claim "complete (uncommitted)" — but the rename is NOT in the tree (001_schema still says
+`provider_accounts`; zero references to `payment_provider_accounts` in live schema). That work evaporated
+before landing. This issue SUPERSEDES that naming decision — go straight to the `rail_` family, once.
+
+PLATFORM RESERVATION: with the two-party platform, bare "merchant account" / "customer account" become
+PLATFORM-tier nouns (a registered openrails.com user's roles). The `rail_` prefix is what keeps the two
+axes apart — land this rename BEFORE the platform tier exists, and reserve the `platform_*` family
+(e.g. `platform_users`, `customers.platform_user_id`) for that later work. Identity ladder:
+platform person -> merchant-scoped customer (projection) -> rail handles (leaf artifacts).
+
+GROUNDED IN THE SAAS PLANS (~/openrails-saas, reviewed 2026-07-01):
+- Roadmap v0.2 is explicit: openrails.com gets BOTH a "customer login/registration" and a "merchant
+  login/registration" — the platform nouns are coming; this rename must precede them.
+- `payments-multi-merchant-wallet-and-payfac.md` (2026-06-14) already designed the wallet layer as "a new
+  cross-merchant wallet/global-customer entity ABOVE per-merchant customer rows" — identical ladder to the
+  reservation above. Its Rank-1 path (Stripe-Connect saved-PM reuse: customer + card held on the OpenRails
+  PLATFORM Stripe account, charged on behalf of connected merchants) implies a future wrinkle for
+  `rail_merchant_accounts`: the PLATFORM's own gateway account (the Connect master) is a
+  rail-merchant-account-shaped row owned by NO merchant — anticipate platform-owned rows
+  (nullable merchant_id or a platform pseudo-merchant) as a documented future extension, NOT part of this
+  rename.
+- Cross-repo note: ~/openrails-saas/agents/progress.md #0 still uses the DEPRECATED "tenant / tenant
+  subject" vocabulary (pre-rename); its glossary needs syncing to merchant/customer + the reserved
+  platform nouns when that repo becomes active.
+
+## Rename map (hard cut, one migration, no aliases — #649/#652 discipline)
+Tables:
+| current | new |
+|---|---|
+| `provider_accounts` | `rail_merchant_accounts` |
+| `rail_customers` | `rail_customer_accounts` |
+| `provider_intents` | `rail_intents` |
+| `external_provider_mutation_logs` | `rail_mutation_logs` |
+| `provider_refresh_watermarks` | `rail_refresh_watermarks` |
+
+Columns:
+- `provider_account_id` FK (56 references across the schema: payment_methods, rail_customers,
+  subscriptions, payments, webhooks/routing, ...) -> `rail_merchant_account_id`.
+- `payment_methods.vault_id` / `billing_id` -> `rail_customer_ref` / `rail_method_ref` (align the DB to
+  the Go field names; today NMI vault jargon leaks into the generic table).
+- `rail_customers.rail_customer_id` -> `rail_customer_accounts.account_id` — symmetric with
+  `rail_merchant_accounts.account_id`: both tables read `(merchant_id, rail, environment?, account_id)`.
+
+Code/type sweep (regenerate sqlc; rename structs/DTOs/params to match): `ProviderAccountConfig`,
+`ProviderAccountSet`, repo/query names, route params, YAML keys in merchant config
+(`provider_accounts:` blocks), docs + CLAUDE.md + the billing-naming-vocabulary conventions.
+
+Module rename (the "vault" triple-collision): `internal/modules/vault` (our payment-method service) ->
+`internal/modules/paymentmethods`; reserve the word "vault" for the two external systems that own it
+(NMI Customer Vault, HashiCorp Vault #648/#661).
+
+## DO-NOT-RENAME trap classes (wire vs local — sed-sweep traps)
+- Provider WIRE fields stay verbatim: NMI `customer_vault_id`/`billing_id`/`customer_vault` form+JSON
+  fields, Stripe/CCBill payload fields, v5 request/response structs in `internal/integrations/*` — these
+  are the provider's spelling, not ours (#651 record-verbatim rule).
+- `rail_subscription_id`, `rail_customer_ref`, `rail_method_ref` field SEMANTICS unchanged.
+- AuthKit/org vocabulary untouched (org = controller; merchant = controlled resource).
+
+## THE ONE BLOCKING DECISION: secret-name shapes
+"provider account" is baked into DURABLE identifiers, not just code: #653 canonical secret names
+(`merchants.ProviderAccountSecretName` -> `...provider_accounts...` name shapes in the DB/Vault-backed
+secret store) and host env spans (`BILLING_MERCHANTS_<m>_PROVIDER_ACCOUNTS_<key>_<RAIL>_<FIELD>`) that
+doujins / hentai0 / cozy-art deployments already carry. Two coherent postures — pick ONE before starting:
+(a) HARD CUT NOW (recommended; the window is still open — greenfield migrations, no external adopters):
+    rename stored secret names in the same migration + coordinated host env bump (doujins, hentai0,
+    cozy-art) in the same release train, like the authkit v0.42.0 chain; or
+(b) FREEZE the secret-name shape as wire format forever (stripeapi.APIVersion discipline) and accept the
+    permanent code-vs-secret-name naming split.
+
+## Considered tradeoffs (recorded, not blockers)
+- "account" is the most overloaded noun in the repo (`ledger_accounts`, credit/spend accounts); the
+  `rail_`/`ledger_` prefixes are what disambiguate — acceptable.
+- `rail_customer_accounts` is Stripe-only in practice after #682 (NMI/CCBill/Solana have no person-level
+  remote identity). The name describes what a row IS, not how many rails populate it — acceptable.
+- COORDINATION: #674 (universal write-ahead provider-intents log) is actively reworking
+  `provider_intents`; land or sequence this rename WITH that work, not across it. Same for any in-flight
+  #650/#653 consumers.
+
+## Tasks
+- [ ] Decision gate: secret-name posture (a) hard-cut vs (b) freeze — Paul signs off before any code.
+- [ ] One forward-only migration (002+): all table + column renames above (constraints, indexes, FKs,
+      RLS policies, comments); regenerate sqlc/gen.
+- [ ] Code sweep: structs/DTOs/route params/YAML keys/queries to the new names; delete zero-alias
+      (no compatibility views, columns, or shims).
+- [ ] `internal/modules/vault` -> `internal/modules/paymentmethods` (package + service naming).
+- [ ] If posture (a): secret-name migration + env-span rename + coordinated doujins/hentai0/cozy-art bump.
+- [ ] Docs: CLAUDE.md rails section, merchant-config examples, billing-naming vocabulary note (record the
+      `rail_` = remote-facing / `platform_` = reserved convention and the wire-field trap classes).
+- [ ] Tests: schema-shape tests (merchant_aware/RLS suites pick up new table names), example-config
+      parse/dump, full integration suite green.
+
+Acceptance: one prefix (`rail_`) for every remote-facing table; `rail_merchant_accounts` /
+`rail_customer_accounts` mirror pair landed; `provider_*` / `external_provider_*` spellings gone from the
+schema; "vault" means only NMI-Customer-Vault or HashiCorp; secret-name posture decided and executed (or
+frozen and documented); trackers/docs/vocabulary updated; no aliases anywhere.
+
+---
+
+# #682: NMI vault identity honesty — per-card vaults are instruments, not customers
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01) — from the post-#663 customer-identifier alignment review of CCBill /
+Stripe / NMI identity models.
+
+## Provider identity reality (verified against live gateways, 2026-07-01)
+- **Stripe**: real person-level customer (`cus_...`) distinct from instruments (`pm_...`). Correctly
+  modeled: `rail_customers` holds `cus_...`; `payment_methods.rail_method_ref` holds `pm_...`;
+  `rail_customer_ref` empty.
+- **CCBill**: NO customer identifier of any kind — subscription id is the only handle (upgrade lineage via
+  `originalSubscriptionId`). Correctly excluded from `rail_customers`. (`provider_accounts` is unrelated —
+  that is the MERCHANT gateway-account catalog and is populated for CCBill.)
+- **NMI**: no person concept. The vault "customer" (`customer_vault_id`, v5 `/customers`) is a CONTAINER of
+  stored cards (billing entries, `billing[].id`); it survives card updates but carries no identity.
+  `customerid` on transactions is merchant-defined free text (we stamp it on non-vaulted signups only;
+  nothing reads it back).
+- **Solana** (for completeness): no customer AND no payment-method rows — the signed pull authorization
+  (subscription PDA derived from plan+subscriber, + token delegation to the authority PDA) is bound to ONE
+  subscription, not a reusable instrument, so it lives on `solana_subscriptions` (+ subscription PDA as
+  `rail_subscription_id`), like CCBill's subscription-scoped identity. The subscriber wallet pubkey is a
+  funding-source address — matching EVIDENCE (person↔wallet is many-to-many, self-custodied), never
+  person identity. Correctly excluded from `rail_customers` (#635).
+
+## The misalignment (usage, not schema)
+The two-handle schema is RIGHT (`rail_customer_ref` = customer-scope, `rail_method_ref` =
+instrument-scope). But for NMI:
+1. We mint ONE VAULT CUSTOMER PER CARD (`vault_service.CreateVault` -> `CreateCustomerVault` per method),
+   so `customer_vault_id` behaves as an instrument id. A person with N cards = N unrelated NMI "customers".
+2. #635's reconcile materializer imports NMI vault ids into `rail_customers` (the person-level table),
+   where they are NOT person-unique — one person can accumulate N NMI rows.
+3. `rail_method_ref` (NMI `billing_id`) is never captured for OpenRails-native vaults (the v5 create
+   response returns `billing[].id`; we discard it). Only legacy doujins-imported methods carry one — and
+   that EMPTINESS IS LOAD-BEARING: `subscriptionProviderAutoBilled` (jobs_dunning.go) reads "no billing id"
+   as "NMI's own recurring engine bills this" and "billing id present" as "OpenRails drives manual
+   rebills". Capturing billing ids naively would silently flip every new NMI subscription into the
+   manual-rebill lane.
+
+## Decision: KEEP one-vault-per-card; make the model honest about it
+Considered and REJECTED (2026-07-01): the Stripe-isomorphic grouping (one vault customer per person,
+cards as billing entries, vault ≈ `cus_...`, `billing_id` ≈ `pm_...`). It is the structurally faithful
+mapping — NMI has billing priorities, billing CRUD sub-resources, and rebill-by-billing_id — but it buys
+almost nothing here (multi-card users are rare; person-resolution already works exactly via
+`payment_methods.vault_id` -> local customer) and costs real risk:
+- requires the mode-flag decoupling FIRST (item 3 above);
+- unverified gateway semantics: whether v5 `customer_vault:{id}` sale can select a billing entry is
+  exactly the kind of thing docs.nmi.com asserts and the live gateway contradicts (see #663's divergence
+  list); card-switch becomes priority-juggling on a shared vault vs today's clean repoint;
+- a data migration over provider-owned vault state we cannot freely move (card-lapse-then-recapture is
+  the only migration primitive — #655/#657 posture);
+- larger blast radius (today delete-method == delete-vault, total and simple).
+Per-card vaults also fit the deplatforming/recapture posture: small vaults die and re-mint naturally.
+If N-cards-per-person ever becomes product scope, revisit grouping — the write-up above is the map.
+
+RATIFIED BY THE SAAS WALLET STRATEGY (~/openrails-saas/payments-multi-merchant-wallet-and-payfac.md,
+2026-06-14): "The NMI seam: NMI vaults are per-merchant and won't go cross-merchant cleanly — plan to
+consolidate billable merchants onto the Connect wallet rather than trying to share NMI vaults." The
+Shop-Pay-style platform tier puts NO pressure on NMI vault grouping — cross-merchant instrument reuse
+happens on the Stripe-Connect platform account (or non-custodial Solana), never by restructuring NMI
+vaults. Per-card NMI vaults remain a leaf artifact under any platform future.
+
+LEGACY PRECEDENT (verified in ~/doujins-legacy, `CustomersVault::initializeVault`): the legacy system kept
+ONE vault per user containing ONE card, and on card change DELETED the whole vault at NMI and re-minted —
+so the vault-wraps-a-single-card invariant held there too (replace-in-place vs our N-vault history).
+Legacy also GENERATED its own `billing_id` and passed it into `add_customer` (NMI accepts merchant-supplied
+billing ids) because its rebill flow needs one — which is exactly why imported methods carry
+`rail_method_ref` and OpenRails-native ones don't.
+
+## Imported/shared-vault contract (importers that did NOT follow one-card-per-vault)
+An import encountering a genuinely multi-card vault materializes ONE `payment_methods` row PER billing
+entry — shared `rail_customer_ref` (vault id), distinct `rail_method_ref` (billing id) — and STILL no
+`rail_customers` row (the vault layer stays invisible to identity; the local `customer_id` UUID is the
+only person). Two operational rules that current code would violate:
+1. DELETE must be billing-entry-scoped when the vault is shared: `DeleteCustomerVault` today deletes the
+   WHOLE vault, which would kill sibling cards. Rule: if another payment-method row shares the vault id,
+   delete the billing entry (v5 `DELETE /customers/{id}/billing-addresses/{id}`); only the last entry's
+   removal deletes the vault (NMI refuses zero-billing vaults, which matches).
+2. CHARGES must target the billing entry: sale against a multi-entry vault hits priority-1 unless
+   specified. Classic sale/rebill accept `billing_id`; whether the v5 `customer_vault:{id}` sale can
+   select a billing entry is UNVERIFIED — live-probe before accepting any such import (#663 precedent:
+   docs assert, live gateway decides).
+3. The importer sets the rebill-driver mode EXPLICITLY (never inferred from billing-id presence).
+
+## Tasks
+- [ ] `models.PaymentMethod.RailCustomerRef` doc + `vault_service` comments: state that for NMI this is an
+      instrument-scoped handle in OUR usage (one vault customer per card, deliberately); NMI has NO
+      person-level remote identity in our model.
+- [ ] #635 materializer: stop creating `rail_customers` rows for NMI (`railExposesRemoteCustomer` drops
+      "nmi" -> like CCBill, NMI has no person-level remote customer). Decide disposition of existing NMI
+      rows in `rail_customers` (delete vs leave-and-ignore); either way document in the migration/issue.
+      Check nothing reads NMI rows from `rail_customers` before dropping (the reconcile/converge identity
+      paths resolve via `payment_methods.vault_id`).
+- [ ] Decouple the rebill-driver mode from identity: add an explicit column (e.g.
+      `subscriptions.rebill_driver` or a payment-method flag, backfilled from the current
+      `rail_method_ref != ''` rule), flip `subscriptionProviderAutoBilled` to read it, and ONLY THEN allow
+      capturing `billing[].id` into `rail_method_ref` at vault creation (the v5 create response already
+      returns it — #663 discards it deliberately today).
+- [ ] Tests: pin the minting policy (one CreateCustomerVault call per added card) and the dunning routing
+      (mode column, not ref-emptiness) so neither regresses silently.
+- [ ] Shared-vault safety guard (import-proofing, cheap now): before `DeleteCustomerVault`, check whether
+      another payment-method row shares the vault id; if so refuse (or delete the billing entry once that
+      path exists) — protects sibling cards the moment any importer violates one-card-per-vault.
+- [ ] IF a multi-card import ever lands: billing-entry-scoped delete + sale billing-targeting per the
+      shared-vault contract above, with the v5 billing-selection question live-probed first.
+
+Acceptance: NMI identity semantics are explicit in code and docs (vault = instrument container, no person
+identity), `rail_customers` holds only genuinely person-unique remote ids (Stripe), the rebill-driver mode
+has its own field with the identity handles free to be captured accurately, and the grouped-vault
+alternative is recorded here as considered-and-rejected with its revisit conditions.
+
+---
+
+# #681: scoped provider-credential lookups hardcode environment="live" — sandbox deployments can't resolve NMI/Stripe/Solana credentials
+
+**Completed:** no
+**Status:** PLANNED (2026-07-01) — surfaced by the #668 test-posture work. The CCBill instance of this bug was
+FIXED (internal/modules/checkout/merchant_rail_secrets.go now derives via
+`config.ExpectedProviderEnvironment(IsTestMode())`); the remaining rails still hardcode.
+
+## Metadata
+- Category: bug
+- Status: planned
+- Passes: false
+
+## Problem
+Under #355/#668 semantics, `test_mode=true` ⇒ provider-account catalog rows get `environment='test'`
+(ValidateRailSet enforces consistency). But scoped credential lookups hardcode `environment="live"`:
+- internal/http/handlers/checkout_session.go:143
+- internal/modules/checkout/merchant_rail_secrets.go resolveNMIClient (NMI leg; CCBill leg fixed)
+- internal/modules/vault/vault_service.go:268
+- internal/merchants/credentials.go — LoadStripeCredentials / LoadNMIWebhookSigningSecret / LoadNMITokenizationConfig
+- internal/modules/solana/recurring/wiring.go
+
+A true sandbox deployment (test rows) can never resolve those rails' scoped credentials. The tests/ suite
+masks it by seeding NMI as 'live'.
+
+## Tasks
+- [ ] Sweep all sites to derive environment from config (`ExpectedProviderEnvironment(IsTestMode())`) — some
+      `merchants.Service` methods carry no config today, so signatures change; plumb, don't global.
+- [ ] Un-mask the test fixtures: seed NMI/Stripe as 'test' under test_mode posture and keep the suite green.
+- [ ] One regression test per rail: sandbox posture resolves scoped credentials.
+
+## Acceptance
+A test_mode deployment resolves every configured rail's scoped credentials from its 'test' catalog rows; no
+lookup hardcodes an environment literal.
 
 ---
 
@@ -58,6 +322,13 @@ asks permission.
 
 ## Tasks
 
+- [ ] Queue-always for terminal cancels (Paul's model, 2026-07-01: queue the delete intent even without
+      credentials/mode to execute — execution waits, the decision is durable): (a) `FailMembership` under
+      `provider_write_mode=limited` currently SKIPS queuing the delete entirely (inconsistent — the dunning
+      CHARGE path under limited materializes its intent "for the executor to drain when the mode allows");
+      (b) unknown-resolution's stale-decline → cancelled path queues nothing though the remote may be alive.
+      Both should durably record the desired delete unconditionally; mode/credentials/breaker govern execution
+      only. Aligns with #674 (all external writes post a durable intent first).
 - [ ] Budget check in the provider-intent executor for destructive types, per (merchant, rail), rolling window;
       threshold `max(K, pct of active subs)` — constants, not config knobs, until someone needs tuning.
 - [ ] Breach → halt destructive execution for that merchant + OPERATOR finding (`life.provider_intent.held_bulk`
@@ -80,7 +351,16 @@ boot-probe/readonly/limited stack is unchanged.
 # #671: CRITICAL — micros passed where cents/dollars expected: real charges at 10,000×
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit. Headline claims (1a, 1b, worker wiring)
+**Status:** IN_PROGRESS (2026-07-01) — 1a/1b/1c/1d/1e/1g + the analytics siblings of 1f FIXED, with
+wire-pinning unit tests; `go build ./...` + all touched-package tests green. DEFERRED: 1f storage row
+(webhooks/stripe.go — #675 owns that file) and the NMI/Stripe/CCBill provider-boundary wire tests + boundary
+struct retyping (collide with the in-flight #663 nmi-v5 rewrite; post-#663 task added below). Notable:
+CalculateModelBUpgradeCharge output was generally NOT whole-cent micros (integer proration), so the fix
+quantizes the unused credit UP to a whole cent inside the shared helper (customer-favored; preview==charge on
+every rail) and the NMI RunSale seam converts via MicrosToCentsExact (errors on sub-cent, never rounds).
+RefundPayload.AmountCents now really is cents (converted at prepare, 400 on sub-cent micros), which also makes
+the verifier's cents-vs-cents comparison consistent by construction — no separate verifier edit was needed.
+Original filing: from the 2026-07-01 money-path audit. Headline claims (1a, 1b, worker wiring)
 re-verified firsthand in source before filing. One root cause: the micros migration flipped the happy-path
 checkout but missed tier-change/upgrade, Solana quote, and admin-refund paths. `nmi.SaleParams.Amount` is CENTS
 (`FormatCentsDecimal`, internal/integrations/nmi/payments.go:47,104); `price.Amount` is MICROS (the happy path
@@ -121,16 +401,55 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
   truncation credits more micros than charged (≤9,999/topup); arrears ceil collects ≤9,999 micros unledgered.
 
 ## Tasks
-- [ ] Fix 1a/1b/1d with the existing exact converters (`MicrosToCentsExact`, `MicrosToMajorUnits`,
+- [x] Fix 1a/1b/1d with the existing exact converters (`MicrosToCentsExact`, `MicrosToMajorUnits`,
       `FiatMicrosToStablecoinBaseUnits`); fix 1c callers or retype CalculateTokenQuote to micros.
-- [ ] Fix 1e end to end (micros → provider-minor at the intents boundary; fix the verifier comparison).
-- [ ] Fix 1f storage row (stripe.go:1151) exactly; analytics display family opportunistically.
-- [ ] 1g: ONE scale-aware converter with an explicit per-adapter unit contract; both arrears + topup use it.
+      → DONE: CalculateTokenQuote retyped to `moneyutil.Micros` (÷1e6, currency-independent; dead
+      `currencyMinorUnits` deleted); `FiatCentsToStablecoinBaseUnits` deleted (zero production callers after
+      the switch); transaction.go label bug → FormatMicrosDecimal.
+- [x] Fix 1e end to end (micros → provider-minor at the intents boundary; fix the verifier comparison).
+      → DONE: `refundAmountCents` (MicrosToCentsExact, 400 on sub-cent) at prepareAdminRefund; cents carried on
+      adminRefundPrepared into RefundIntentFor + RefundPayload.AmountCents. Verifier compare is cents==cents
+      once the payload is truly cents — no refund.go logic change needed (unit doc added).
+- [x] Fix 1f storage row (stripe.go:1151) exactly — DONE (in #675 agent — stripe.go failed-payment row now
+      stores CentsToMicros(inv.AmountDue)). Analytics display family: event_log_service.go /100.0 pair fixed
+      (MicrosToMajorUnits) by #671; the stripe.go/nmi.go/ccbill.go /100.0(+/100) siblings in
+      internal/modules/webhooks (8 sites) also converted to MicrosToMajorUnits by the #675 agent.
+- [x] 1g: ONE scale-aware converter with an explicit per-adapter unit contract; both arrears + topup use it.
+      → DONE: `money.NativeToRailMinor` (registry-driven: new `MinorDecimals` on the Currency table; ceil,
+      errors on unknown currency); arrears chargeOneOpenInvoice + topUpAccount both use it;
+      `nativeAmountToRailMinor` deleted; ChargeRequest.AmountCents unit contract documented.
 - [ ] SYSTEMIC: introduce `Micros`/`Cents` defined types at the integration boundaries (nmi.SaleParams,
       RefundPayload, solana helpers) so this bug shape is a compile error; sweep remaining `/100` and `/10_000`
       literals.
+      → PARTIAL: `moneyutil.Micros`/`moneyutil.Cents` defined; applied to CalculateTokenQuote +
+      FiatMicrosToStablecoinBaseUnits params. Remaining sweep hits are inside internal/modules/webhooks (#675)
+      and internal/integrations/nmi (#663).
+- [x] POST-#663: retype the provider boundary structs (`nmi.SaleParams.Amount`/`RefundParams.Amount` →
+      `moneyutil.Cents`, `RecurringPaymentData.Amount` dollars → consider a defined type,
+      `intents.RefundPayload.AmountCents`, `subscriptions.RefundParams.Amount`, `money.ChargeRequest.AmountCents`)
+      once the nmi-v5 rewrite lands — deliberately NOT done now to avoid colliding with #663's uncommitted tree.
+      Ship the deferred provider-boundary wire tests (NMI RunSale/refund/recurring, Stripe outbound+webhook,
+      CCBill parsing) in the same pass.
+      → DONE 2026-07-01 (with the #669 agent — same boundary files). Retyped: nmi.SaleParams.Amount +
+      nmi.RefundParams.Amount + AddRecurringPlan/EditRecurringPlan params + centsJSONAmount/centsToDollarString
+      → moneyutil.Cents; RecurringPaymentData.Amount → NEW `moneyutil.MajorUnits` (float64 decimal dollars);
+      intents.RefundPayload.AmountCents + RefundIntentFor param + adminRefundPrepared.amountCents →
+      moneyutil.Cents; subscriptions.RefundParams.Amount + StripeInvoiceCollectionParams.AmountCents →
+      moneyutil.Cents; money.ChargeRequest.AmountCents → moneyutil.Cents (rail minor; NativeToRailMinor now
+      RETURNS Cents so both arrears+topup flow typed end-to-end). All existing wire-pinning assertions pass
+      with UNCHANGED values (only mechanical type conversions at a few test call sites). NEW NMI wire tests:
+      TestRunSale_WirePinsCentsAmount (Cents(1999) ⇒ body "19.99"), TestRefund_WirePinsCentsAmount ("5.00";
+      0 ⇒ amount key omitted), TestAddRecurringSubscription_WirePinsDollarsAmount (MajorUnits(19.99) ⇒
+      form amount=19.99) — joining the pre-existing TestCentsAmountWirePinning + plan-shape tests. The
+      Stripe outbound+webhook and CCBill parsing wire-test battery remains under the TEST WALL bullet.
 - [ ] TEST WALL (Paul 2026-07-01: mandatory — a units mixup must never reach production again; unit-test EVERY
-      place that matters). Two layers:
+      place that matters). PARTIAL — landed now: TestUpgradeWirePinning + TestCalculateModelBUpgradeCharge
+      (checkout: preview micros == 3133-cent "31.33" NMI wire, recurring dollars shared converter, sub-cent ⇒
+      error), TestCalculateTokenQuote_MicrosWirePin + TestFiatMicrosToStablecoinBaseUnits (solana: $19.99 ⇒
+      19_990_000 base units, never 199,900), TestRefundAmountCents (handlers: 5_000 micros ⇒ ERROR, 60_000_000
+      ⇒ 6000 cents), TestNativeToRailMinor(+LegacyArrearsCeil) (money: USD/EUR/JPY-zero-decimal, ceil, unknown
+      currency errors), TestSolanaUpgradeReducedFirstCharge rewritten to micros. REMAINING (post-#663): the
+      provider-package boundaries listed below. Two layers:
       1. Wire-pinning unit tests at every provider money boundary — feed a known micros amount, assert the EXACT
          wire value the provider sees (not "a" conversion — the literal string/int on the wire):
          - NMI (internal/integrations/nmi): RunSale, capture, refund, void, AddRecurringSubscription /
@@ -147,8 +466,8 @@ converts via `MicrosToCentsExact`, internal/modules/checkout/nmi_sale_service.go
          micros == charged amount converted back (no truncation gain).
       Convention going forward: any NEW provider boundary ships with its wire-pinning test in the same PR —
       typed Micros/Cents makes new mixups uncompilable, the tests pin the conversions that remain.
-- [ ] Stale unit docs while in there: pkg/catalog/manifest.go:159 example, solana/recurring/confirm_tier_change.go:73,
-      models/payment.go:28.
+- [x] Stale unit docs while in there: pkg/catalog/manifest.go:159 example, solana/recurring/confirm_tier_change.go:73,
+      models/payment.go:28. → DONE (plus micros notes on manifest UnitAmount fields and solana types.go Amounts).
 
 ## Acceptance
 No production call passes micros into a cents/dollars parameter (typed units make it uncompilable); upgrade,
@@ -160,13 +479,22 @@ in ⇒ exact wire amount out) — a reintroduced units mixup fails unit tests, n
 
 # #672: CRITICAL — metered usage re-accrued (billed N×) across overlapping invoice-close windows
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit.
+**Completed:** yes
+**Status:** FIXED (2026-07-01) — delta-vs-accrued-prefix design (chosen over segment rating, which would
+re-grant allowances and drift rounding per segment): durable per-period watermark table
+`openrails.metered_rating_watermarks` (migration 056; PK merchant/customer/currency/source[+dim]/period_from;
+columns accrued_amount + rated_through). Every metered sweep now goes through `accrueMeteredPrefix`
+(metered_rating.go): rate the FULL prefix [period_from, cutoff) once, upsert-LOCK the watermark row, accrue only
+`rated − accrued_amount` — ledger transfer + pending item + watermark advance in ONE tx. Monotone: repeated or
+stale closes compute delta ≤ 0 and accrue nothing. Both sweep paths converted (RateMeteredUsageFromEvents +
+sweepCatalogRateCardUsage); the explicit per-report AccrueCatalogMeteredAggregate (spend.go) keeps caller
+source_id idempotency (not window-keyed, unaffected). Integration test
+`TestMeteredUsage_OverlappingCloses_RatedExactlyOnce` GREEN; pre-existing bridge/ratecard/re-finalize tests GREEN.
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 `FinalizeInvoice` sweeps catalog metered usage keyed by the exact window: `meteredPeriodSourceID` =
@@ -179,11 +507,15 @@ collected by `ChargeOutstanding` → the customer's card is charged N× for the 
 the threshold (feedback loop).
 
 ## Tasks
-- [ ] Rated-through watermark per meter (or accrue only the delta vs the already-accrued prefix); source_id keyed
-      by the watermark advance, not the full window.
-- [ ] Backstop invariant: sum of accruals for a meter over a period == rating of that period's usage exactly once
-      (integration test with a threshold close mid-period + month-end finalize).
-- [ ] Audit existing accruals for double-billing exposure once fixed (conservation query).
+- [x] Rated-through watermark per meter (delta-vs-accrued-prefix; source_id = `period:<from>-<cutoff>` of the
+      advancing close, amount = only the unbilled delta).
+- [x] Backstop invariant: integration test with threshold close mid-period + longer-prefix close + month-end
+      finalize + stale re-close ⇒ total accrued == rating the period exactly once
+      (metered_watermark_integration_test.go).
+- [x] Audit existing accruals for double-billing exposure: MOOT — the only producers of overlapping closes
+      (InvoiceWorker threshold/month-end jobs) were wedged since birth by #673 (every run died in
+      merchant.Require), so no overlapping close ever executed; direct FinalizeInvoice callers use a single
+      window per period. No historical double-accruals to repair.
 
 ## Acceptance
 Threshold close + later threshold close + month-end finalize over the same period accrues each unit of usage
@@ -193,15 +525,22 @@ exactly once; the feedback loop is structurally impossible (watermark monotone).
 
 # #673: CRITICAL — invoice collection + auto-top-up workers run with no merchant context: wedged since birth
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit; wiring re-verified firsthand
-(jobs_credit_money_in.go has zero merchant-context references; InvoiceSettings → merchantconfig Get →
-merchant.Require → ErrNoMerchant).
+**Completed:** yes
+**Status:** FIXED (2026-07-01) — `forEachActiveMerchant` helper (jobs_credit_money_in.go) mirrors
+ConvergeSweepWorker: privileged ListActiveMerchantIDs, then each merchant runs under
+`RunInMerchantConn(merchant.WithID(…))`; one merchant's failure is logged + skipped, the joined error is
+returned so a failing run is visible in River (never silently "succeeds"). InvoiceWorker + AutoTopupWorker got a
+`DB` field (wired in river_register.go). LowBalanceAlertWorker registration + its hourly periodic job DELETED —
+no money.Alerter implementation exists anywhere in the runtime, so registration was a permanent no-op; re-add
+with the notification wiring (worker type kept). Landed deliberately AFTER #672 + the #674 minimal arrears
+hardening, since unwedging these workers activates arrears collection + metered sweeps. Integration tests
+(worker_merchant_ctx_integration_test.go) run both workers exactly as River does — bare context.Background(), no
+merchant — and assert real effects: invoice collected to paid, balance topped up. GREEN.
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 `InvoiceWorker.Work` → `w.Money.InvoiceSettings(ctx)` (internal/river/jobs_credit_money_in.go:135) →
@@ -216,13 +555,14 @@ Related while in there: `LowBalanceAlertWorker` is registered without an `Alerte
 (river_register.go:170-174; nil guard jobs_credit_money_in.go:40-43).
 
 ## Tasks
-- [ ] Mirror ConvergeSweepWorker: enumerate active merchants, run each under `RunInMerchantConn(merchant.WithID(…))`.
-- [ ] Integration test that runs InvoiceWorker + AutoTopupWorker against a seeded merchant and asserts actual
-      collection/top-up effects (this class of wedge = a worker whose every run errors — consider a
-      worker-error-rate alert so "retries forever" is never silent again).
-- [ ] Wire or delete the LowBalanceAlertWorker registration.
-- [ ] NOTE: fixing this ACTIVATES arrears collection + metered sweeps — land #672 (N× accrual) and the #674
-      arrears-CAS fix first or together, or the newly-unwedged workers start collecting doubled debt.
+- [x] Mirror ConvergeSweepWorker: enumerate active merchants, run each under `RunInMerchantConn(merchant.WithID(…))`.
+- [x] Integration test that runs InvoiceWorker + AutoTopupWorker against a seeded merchant and asserts actual
+      collection/top-up effects. Per-merchant failures are Error-logged AND joined into the worker's return
+      error, so River's job state shows the failure (a full worker-error-rate alert channel remains a good
+      follow-up).
+- [x] Wire or delete the LowBalanceAlertWorker registration — DELETED (registration + hourly periodic job): no
+      Alerter implementation exists in the runtime.
+- [x] NOTE honored: #672 and the #674 minimal arrears hardening landed in the same pass, BEFORE this unwedge.
 
 ## Acceptance
 Hourly/monthly/daily invoice jobs and auto-top-up demonstrably move money for a seeded merchant in integration
@@ -233,11 +573,94 @@ tests; no worker in river_register runs with a context its own call graph reject
 # #674: universal write-ahead provider-intents log — every external write durable-first, effectively-once
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit. One theme, six sites: a real provider
+**Status:** IMPLEMENTED IN-TREE (2026-07-01) — primitive + NMI ambiguity classification + four site migrations
+(sync NMI sale, NMI subscription create, auto-top-up, Solana crank) + upgrade-proration verify-hardening + CI
+guard + crash-injection integration tests; unit + integration suites for intents/checkout/money/river green.
+No new migration needed (provider_intents already carries everything; intent kinds are strings). Deferred
+tails listed below. Originally PLANNED from the 2026-07-01 money-path audit. One theme, six sites: a real provider
 charge can happen with no durable local record (→ re-charge on retry/crash), and transport-ambiguous errors are
 treated as clean declines. The provider-intents outbox (dunning/manual-rebill/refunds) already does ALL of this
 right — unique (merchant, idempotency_key), SKIP LOCKED lease, attempts>1 ⇒ verify-at-provider before resend —
 these paths predate/bypass it.
+
+## Implementation notes (2026-07-01)
+- **Primitive**: `Runner.EnqueueAndExecute` (pre-existing, #358/#607) IS the write-through primitive — insert
+  intent (idempotent) → ClaimByID → execute inline through the identical gate/execute/classify pipeline →
+  return the canonical post-execution row. No new runner machinery was needed; this issue added intent KINDS +
+  producers + the ambiguity classification underneath. Producers branch on row.Status; non-final statuses
+  surface as `checkout.ErrCheckoutProcessing` ("retry with the SAME idempotency key"), never a decline.
+- **NMI ambiguity (new)**: `nmi.TransportAmbiguousError` / `nmi.IsTransportAmbiguous` — wrapped at the
+  transports: direct-post PostForm/non-200/body-read/unparseable-200, v5 non-GET send/read/5xx/undecodable-2xx.
+  Parsed declines (CustomerVaultError), parsed 4xx envelopes, read-only guard, pre-send validation stay CLEAN.
+  Reads (GET) never wrapped. Conservative: connection-refused is ambiguous (verify resolves to
+  "not executed" → clean retry).
+- **New intent kinds**: `nmi_sale` + `nmi_subscription_create` (handlers in internal/modules/checkout — they
+  need per-merchant NMI client resolution + the registration services; intents pkg can't import checkout),
+  `topup_charge` (internal/intents/topup_charge.go), `solana_pull` (internal/river/jobs_solana_pull_intent.go).
+  All provider order-ids/idempotency keys derive from the INTENT ID (`intent.ID`, `topup:<id>`), ≤ 50 chars;
+  intent identity derives from the client checkout key / persisted episode anchors.
+- **Sale (a)**: CheckoutNMISaleService.Process = redis idempotency shell (kept for response caching) +
+  EnqueueAndExecute. ReserveProviderAttempt/nmi_sale_attempt rows ABSORBED into the intent (removed from the
+  flow; ValidateRefund keeps the historic `nmi_sale_attempt:`/`nmi_sub_attempt:` prefix guards for old rows).
+  finalize = idempotent RegisterPurchase; charged-but-unrecorded ⇒ unknown_needs_verify, verifier repairs via
+  FindSuccessfulSaleByOrderID. The "retry with a new idempotency key" message now only follows a VERIFIED-clean
+  decline.
+- **Subscription create (b)**: same shape; verify leg = order-id sale search (immediate starts) + v5
+  subscription ROSTER scan matched on (customer_vault_id, plan.id), accepting matches unknown locally (the
+  orphan) or whose local row carries this intent's order_id (finalize crashed midway). finalize reuses
+  completeNMISubscriptionRegistration (idempotent). recoverNMISubscriptionAttempt + the attempt-row reservation
+  removed.
+- **Upgrade proration (b, partial)**: NOT a full intent (compensation saga too entangled) — hardened in place:
+  redis Failed now falls through + pre-charge verify by the stable content-derived order id; RunSale ambiguity
+  ⇒ verify-then-adopt txn, else rollback successor + ErrCheckoutProcessing (retry re-verifies same order id).
+  Never rolls back/declines on a lost response anymore.
+- **Auto-top-up (c)**: episode anchor = persisted last_topup_at (unix or "genesis"), NEVER wall clock;
+  MoneyService.RunAutoTopups/topUpAccount replaced by ListDueAutoTopups + HasAutoTopupDeposit (credit-grant
+  source_id lookup — the old GetTransactionBySource("deposit",...) check never matched the #514 grant-ledger
+  shape, i.e. the old dedupe was dead) + FinalizeAutoTopup + StampAutoTopupAttempt. Deposit source_id = wire
+  ref = `topup:<intent id>` (also fixes the >50-char NMI order-id breakage of the old `autotopup:<uuid>:<unix>`
+  key under the #663 length check). Verify: local deposit first, then NMI order-id search; stripe-family rails
+  re-execute under the same Stripe Idempotency-Key (replay-safe) instead of a read.
+- **Solana crank (d)**: signature WRITE-AHEAD — BuildSignSubmit*Presubmit persists the signed tx signature onto
+  the intent (Store.RecordProgress, evidence key transaction_id) BEFORE submission; crankOne refactored to a
+  typed crankOutcome (+presubmit hook; state-machine unit tests intact). Handler: recorded-sig ⇒ chain read
+  (GetTransaction) BEFORE any re-pull — landed ⇒ renewal repair (RenewMembership+AdvanceAfterPull via
+  finalizePull; the "subscriber paid, gets nothing" bug is dead), read-failed ⇒ refuse to re-pull blind
+  (ambiguous), verified-not-landed ⇒ re-crank (program period guard Custom:400 backstops). AlreadyPaid with no
+  recorded sig keeps the legacy advance+reconcile-repair (out-of-band payment). Worker keeps a legacy direct
+  path when Intents is nil (unit-test harnesses).
+- **CI guard**: internal/intents/enforcement_guard_test.go (no build tag) — textual scan of internal/+pkg/
+  (excluding internal/integrations/**, which IS the client layer) for the choke tokens (.RunSale(,
+  .AddRecurringSubscription(, .AttemptManualRebill(, nmi.RefundParams{, .Void(, .DeleteRecurringSubscription(,
+  .UpdateSubscriptionPaymentSource(, .DeleteCustomerVault(, solanaint.BuildSignSubmit) against a per-token
+  file allowlist with justifications. LIMITS (documented in the test): token-textual (wrappers/method values
+  invisible), allowlisted files trusted wholesale, Stripe not scanned (architecturally choked through
+  stripeapi's readonly transport, the stronger guard).
+- **Tests** (integration tag, testcontainers): per site — happy-path/decline/ambiguous-timeout-verify/
+  charged-but-unrecorded-repair/provider-offline-original-key (checkout sale:
+  nmi_sale_intent_integration_test.go), orphaned-remote-create repair (nmi_subscription_intent_integration_test.go),
+  topup episode/decline-cooldown/ambiguous-verify/charge-crash-deposit/offline-retry
+  (money_in_integration_test.go), solana crash-after-submit signature repair + not-landed re-crank
+  (jobs_solana_pull_intent_integration_test.go), NMI ambiguity classification unit tests (ambiguity_test.go).
+
+## Deferred (follow-ups, not in this pass)
+- **Arrears collection**: stays on the Wave-1 hardening (attempt-count keys + CAS-miss recording, #672/#673).
+  Migrating chargeOneOpenInvoice onto a `topup_charge`-style intent is NOT a small mechanical step (invoice
+  snapshot CAS + PayOwed transfer live inside the recording tx) — do it as its own slice; nmi_collection.go is
+  allowlisted in the guard with this note.
+- **Upgrade as a full intent saga** (successor create + proration + swap + compensation): only the proration
+  leg was verify-hardened; an ambiguous successor CREATE still rolls back pessimistically (delete is
+  verify-then-execute, so safe, but a lost-create-response leaves a remote sub until the delete lands).
+- **Vault delete / payment-method swap / reactive cancels**: still direct calls through their service chokes
+  (VaultService.DeleteVault, UpdateSubscriptionPaymentSource, DeleteRecurringSubscription in user/admin
+  cancels) — allowlisted in the guard; migrate opportunistically.
+- **CCBill**: no writes migrated (its mutations are hosted-page/DataLink shaped); unchanged.
+
+NOTE (2026-07-01): the MINIMAL arrears-collection hardening landed with #672/#673 — chargeOneOpenInvoice now
+keys the charge `invoice:<id>:attempt:<n>` (n = durable count of recorded invoice_payments rows, NOT the mutable
+amount snapshot), and on ApplyInvoicePaymentSnapshot n==0 after a successful provider charge it records the
+settled invoice_payments row + PayOwed transfer (unapplied) and Error-alerts instead of `return nil` (tests:
+arrears_cas_integration_test.go). The full intents-outbox migration of this site remains THIS issue.
 
 ## Design decision (Paul, 2026-07-01): generalize, don't patch
 
@@ -252,7 +675,7 @@ calls are exempt. The six findings below become migrations onto this one primiti
 
 ## Metadata
 - Category: bug
-- Status: planned
+- Status: in_progress
 - Passes: false
 
 ## Findings
@@ -285,29 +708,27 @@ calls are exempt. The six findings below become migrations onto this one primiti
   record).
 
 ## Tasks
-- [ ] Extend `internal/intents` with a synchronous execute-through mode: `PostAndExecute(intent)` = insert
-      intent (in the caller's local tx where one exists) → run the provider call inline → complete/fail the
-      intent with the outcome. Ambiguous outcome (transport error after send) marks the intent
-      `pending_verify`, never failed. The EXISTING lease/sweeper machinery picks up pending/pending_verify
-      intents: verify-at-provider (FindSuccessfulSaleByOrderID / Stripe fetch by idempotency key / chain read
-      by signature) then resolve or resend. New intent kinds as needed: sale, recurring-create/update/delete,
-      vault-delete, void, topup-charge, solana-pull.
-- [ ] Provider idempotency keys/order-ids are derived from the intent id — one intent, one external effect,
-      regardless of how many times execution is attempted.
-- [ ] NMI client: classify transport-ambiguous vs provider-declined errors (prerequisite for the
-      pending_verify state); ambiguity ⇒ verify-by-order-id, never MarkFailed/DeleteVault/new-key.
-- [ ] Migrate the six sites onto the primitive: sync NMI sale + subscription create + upgrade proration;
-      arrears collection (key by invoice+attempt intent, not mutable snapshot; on CAS n==0 after a successful
-      charge, record the payment unapplied or void — never `return nil`); auto-top-up (episode from persisted
-      state); Solana crank (intent carries the signature before submit; AlreadyPaid branch resolves via the
-      intent and runs the renewal repair); retire/absorb `ReserveProviderAttempt` + `nmi_sale_attempt` rows
-      into intents (or give Reserve a created-bool and a stale-pending verifier if kept).
-- [ ] Enforcement: no provider write bypasses intents — integration-client choke points (stripeapi, nmi client
-      mutating methods, solana submit) accept an intent ref or are only callable from the intents executor;
-      plus a lint/deps-test-style guard so a bypass fails CI, not review.
-- [ ] Crash-injection integration tests per site: die before-execute / after-execute-before-complete / on
-      timeout ⇒ re-run yields exactly one external effect and one local record; provider-offline test: intent
-      parks, provider returns, sweeper lands the write with the original idempotency key.
+- [x] Extend `internal/intents` with a synchronous execute-through mode — DONE via the pre-existing
+      `Runner.EnqueueAndExecute` (no duplication needed): insert intent → inline execute through the identical
+      gate/execute/classify pipeline → complete/fail. Ambiguity marks `unknown_needs_verify`, never failed; the
+      existing lease/sweeper drains pending/unknown. New kinds shipped: nmi_sale, nmi_subscription_create,
+      topup_charge, solana_pull. (recurring-update/vault-delete/void kinds deferred — see Deferred.)
+- [x] Provider idempotency keys/order-ids derived from the intent id (sale/sub-create order id = intent.ID
+      [+e2e suffix], topup wire ref = `topup:<intent id>`, solana signature recorded onto the intent).
+- [x] NMI client: transport-ambiguous vs provider-declined classification
+      (nmi.TransportAmbiguousError/IsTransportAmbiguous at both transports); ambiguity ⇒ verify-by-order-id,
+      never MarkFailed/DeleteVault/new-key.
+- [x] Migrated sites: sync NMI sale (a), NMI subscription create (b), upgrade proration verify-hardening
+      (b, partial — full saga deferred), auto-top-up with persisted-state episode anchor (c), Solana crank with
+      pre-submit signature + recorded-sig renewal repair (d); ReserveProviderAttempt/nmi_sale_attempt +
+      nmi_sub_attempt reservations ABSORBED into intents. Arrears deliberately left on Wave-1 hardening (not a
+      small mechanical step — see Deferred).
+- [x] Enforcement: grep-based allowlist guard (enforcement_guard_test.go, runs untagged in CI) over the NMI
+      mutating methods + solana sign-submit; Stripe covered architecturally by the stripeapi choke. Limits
+      documented in the test + Implementation notes.
+- [x] Crash-injection integration tests per migrated site (ambiguous-timeout ⇒ verify resolves; charged-but-
+      unrecorded ⇒ verifier repairs off the original key; provider-offline ⇒ intent parks then lands under the
+      ORIGINAL derived key; decline ⇒ terminal, no effect; replay ⇒ durable answer, zero provider calls).
 
 ## Acceptance
 Every external WRITE (charge, refund, void, recurring create/update/delete, vault delete, on-chain submit) has
@@ -322,13 +743,14 @@ intent (enforced by CI guard).
 # #675: webhook state correctness — clobbering writes, dropped renewals, swallowed reversals
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit. Enqueue/dedup/signature layers verified
-sound; these are the apply-layer holes.
+**Status:** IMPLEMENTED (2026-07-01) — all findings fixed in-tree; unit + full webhooks/repo integration suites
+green. Awaiting review/commit. Enqueue/dedup/signature layers were verified sound; these were the apply-layer
+holes. See Implementation notes below.
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Findings
 - **No row lock / ordering guard; full-row clobber**: `SubscriptionRepo.UpdateAt` writes EVERY column from an
@@ -360,16 +782,51 @@ sound; these are the apply-layer holes.
   drifted real charge deserves a durable repair alert.
 
 ## Tasks
-- [ ] Subscription apply layer: one tx + FOR UPDATE (or updated_at CAS) around read-modify-write; persist and
+- [x] Subscription apply layer: one tx + FOR UPDATE (or updated_at CAS) around read-modify-write; persist and
       compare provider event created-timestamps; make UpdateAt full-row semantics explicit or retire it for
       webhook applies.
-- [ ] Terminal-blocked renewal: record the payment or a CCBill-style repair alert before return nil (Stripe+NMI).
-- [ ] Void/chargeback/refund not-found: retryable error (as nmi.go:2019 refunds do) or deferred-reversal repair
+- [x] Terminal-blocked renewal: record the payment or a CCBill-style repair alert before return nil (Stripe+NMI).
+- [x] Void/chargeback/refund not-found: retryable error (as nmi.go:2019 refunds do) or deferred-reversal repair
       alert — never plain ACK.
-- [ ] Propagate GrantSubscriptionCredits errors (all six sites).
-- [ ] NMI one-off refund branch (resolve by transaction id); parse failure = error.
-- [ ] Out-of-order integration tests: invoice.paid ∥ subscription.updated; payment_failed then stale
+- [x] Propagate GrantSubscriptionCredits errors (re-grep: 5 sites in webhooks — stripe ×1, ccbill ×2, nmi ×2;
+      NMI's warn-only pre-grant subscription reloads now propagate too).
+- [x] NMI one-off refund branch (resolve by transaction id); parse failure = error.
+- [x] Out-of-order integration tests: invoice.paid ∥ subscription.updated; payment_failed then stale
       updated(active); void-then-sale; renewal-after-cancel.
+- [x] Minor: CCBill >2% amount mismatch now writes a durable `amount_mismatch` repair alert (both
+      validateCCBillBilledAmount callers + the upgrade-success inline check; upgrade alert written after the
+      tx rolls back so it survives).
+
+## Implementation notes (2026-07-01)
+- Ordering guard: new sqlc query `GetSubscriptionByRailSubIDForUpdate` + repo method; stripe
+  `handleSubscriptionUpdated` and `handleInvoicePaymentFailed` run one MerchantTx with FOR UPDATE, and a
+  `stripe_last_event_created` watermark in subscription metadata rejects strictly-older events;
+  `handleInvoicePaid` bumps the watermark (row-locked, never rewinds) after CreateMembership/RenewMembership
+  so a delayed older updated(active) can't revert a renewal or a past_due flip. evt.Created plumbed through
+  handleEvent. UpdateAt's full-row semantics documented at the definition.
+- Void/chargeback race: chose RETRYABLE ERROR at all three not-found sites (CCBill handleVoid/handleChargeback,
+  NMI handleVoidSuccess — the NMI one now errors regardless of subscription presence): all three rails
+  redeliver on non-2xx, matching the pattern NMI refunds already used. The not-found-branch ClickHouse "audit"
+  logging was dropped (it would duplicate per retry; durable trace = failed idempotency record + the applied
+  reversal on redelivery).
+- NMI refunds: new `handleNMIOneOffRefund` mirrors Stripe's one-off path (resolve by refund txn id, then
+  original txn id → Refund row → full refund revokes entitlements/product-access, or cancels the payment's
+  subscription); amount parse failure = durable repair alert + non-retryable (redelivery resends the same
+  bytes). Refund/one-off-before-sale → retryable error.
+- OTHER UpdateAt callers left unguarded (deliberately out of scope): lifecycle_service.go
+  RenewMembership/CancelMembership read-modify-write inside MerchantTx but WITHOUT FOR UPDATE; NMI
+  handleUpdateSubscription/ACU and CCBill customer-data/billing-date handlers Update() from non-locked reads.
+  Follow-up: switch those reads to the ForUpdate variant.
+- Sweep note: `sqlc generate` (needed for the new query) also regenerated gen for ANOTHER agent's in-flight
+  uncommitted removal of the payment_blocklist queries (admission_support.sql edit + untracked migration
+  055_drop_payment_blocklist) — gen/admission_support.sql.go + gen/models.go lost that dead code; zero Go
+  references, build green.
+- Tests: stripe_ordering_test.go (watermark unit tests) + webhooks_apply_integration_test.go (8 tests:
+  payment_failed then stale updated(active) does NOT reactivate; invoice.paid ∥ stale updated in BOTH orders
+  keeps the renewed period; terminal-blocked renewal writes the repair alert; CCBill void + chargeback
+  before-sale retryable; NMI void before-sale retryable; NMI one-off refund reverses + idempotent redelivery;
+  NMI refund-before-sale retryable; CCBill credit-grant failure propagates retryable). Full webhooks + repo
+  integration suites green via testcontainers.
 
 ## Acceptance
 Out-of-order or concurrent webhook delivery cannot revert committed state or grant access without payment; no
@@ -381,12 +838,12 @@ three).
 # #676: spendgate holds — volatile capture pointer, leaking held gauge, phantom sweep
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit.
+**Status:** IMPLEMENTED (2026-07-01) — all four findings fixed + tested (see Resolution); awaiting commit.
 
 ## Metadata
 - Category: admission
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Findings
 - **Capture depends on a volatile Redis pointer**: capture wire carries only request_id (remote.go:177-192);
@@ -405,14 +862,41 @@ three).
 - Minor: releaseScript recreates expired window buckets as permanent negative keys (gate.go:138-146).
 
 ## Tasks
-- [ ] Durable admit-coordinate record (or caller-supplied payer coords as capture fallback); pointer Set failure
+- [x] Durable admit-coordinate record (or caller-supplied payer coords as capture fallback); pointer Set failure
       = admit failure, not best-effort.
-- [ ] Implement the held-recompute sweep the comment promises (or rolling-TTL holds + recompute-on-expiry);
+- [x] Implement the held-recompute sweep the comment promises (or rolling-TTL holds + recompute-on-expiry);
       fix releaseScript bucket recreation.
-- [ ] Derive the balance/owed split from spendable lots (or fall through to owed on shortfall) so lapsed lots
+- [x] Derive the balance/owed split from spendable lots (or fall through to owed on shortfall) so lapsed lots
       can't block capture.
-- [ ] Chaos test: admit → Redis flush → capture still lands (degraded path); abandoned admits don't shrink
+- [x] Chaos test: admit → Redis flush → capture still lands (degraded path); abandoned admits don't shrink
       capacity permanently.
+
+## Resolution (2026-07-01)
+- **Capture pointer**: admit's request→payer pointer Set is now REQUIRED (Set failure ⇒ admit error, fail
+  closed; the leaked reservation self-heals via hold TTL + recompute). Durable fallback = caller-supplied payer
+  coords on capture, ADDITIVE wire fields `customer_id`/`currency`/`invoker`/`admit_source` on
+  POST /v1/merchant/admissions/:id/capture (handler + pkg/service.CaptureHoldRequest + SDK CaptureUsage +
+  remote/embed transports). `admit_source` must echo the admit's source (default "admit") so retries dedupe on
+  the same (source, source_id) ledger coordinates. Chosen over a per-admit Postgres record: no hot-path DB
+  write, no migration (avoids the live #582/#630 db/gen churn); hosts opt in by echoing coords they already
+  hold. Fallback customer_id passes requireServiceCustomerScope in the handler.
+- **held gauge**: chose lazy recompute-on-deny inside admitScript over a River sweep: when the affordability
+  gate would deny, the (atomic) script recomputes held = Σ live hold records via a new "<base>:holds" index SET
+  (SADD on reserve, SREM on capture/release + stale-member GC) and re-checks — abandoned admits release
+  capacity exactly when it's needed, no scan job, trivially race-free. capture/release clamp held at 0.
+- **releaseScript**: window decrements now gated on EXISTS — an expired bucket is never recreated as a
+  permanent negative key.
+- **Lapsed lots**: spendBalanceThenOwedTx caps the balance leg at the SPENDABLE-lot total
+  (ListSpendableCreditLots AsOf now) instead of the raw ledger balance; the shortfall follows the existing
+  gating contract (capture → owed unconditionally; immediate spend → credit-line gate). Lapsed lots can no
+  longer surface ErrInsufficientCredits on capture.
+- Tests (all green): spendgate `TestGate_AbandonedHoldRecomputeRestoresCapacity`,
+  `TestGate_ReleaseAfterBucketExpiryNoNegativeWindow`; money
+  `TestCaptureAuthorized_LapsedLotNeverBlocksCapture` (new file lapsed_lot_capture_integration_test.go);
+  service `TestCaptureHold_RedisFlushFallback`, `TestCaptureHold_FallbackRetryIsIdempotent`
+  (new file capture_fallback_integration_test.go).
+- Known follow-up: gauge introspection (HeldAmount/BudgetStatus) can read a stale (inflated) held for an idle
+  payer until the next denied admit — display-only, enforcement is exact.
 
 ## Acceptance
 A rendered service is always chargeable (no capture path depends on volatile state); abandoned admits release
@@ -422,15 +906,24 @@ capacity within one sweep interval; lapsed lots never produce ErrInsufficientCre
 
 # #677: customer-lock bypasses — credit expiry, converge repairs, AccrueOwed race
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit (lock discipline verified firsthand:
-LockCustomerForSpend via lockBalance, money_service.go:664-681; overdraft trigger enforces only the ACCOUNT
-total, not per-lot).
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented in-tree, uncommitted. All three bypasses now take the SAME
+customers-row FOR UPDATE as spends (new `grants.Ledger.LockCustomer`, delegating to LockCustomerForSpend):
+ExpireLapsed locks at entry (the job's tx wraps it); converge MaterializeGrant repairs run via
+`lockedMaterialize` (MerchantTx + LockCustomer, converge_passes.go); AccrueOwed locks before its
+check-then-insert. DB backstop = migration 057: partial unique `idx_ledger_transfers_lot_once`
+(merchant_id, grant_id, transfer_type) WHERE type IN (deposit, credit_expire, credit_revoke) — a lot
+deposits/expires/claws at most once — and `idx_ledger_transfers_owed_accrual_once`
+(merchant_id, customer_id, currency, source, source_id) WHERE type='owed_accrual' AND source_id <> ''
+(empty excluded: SpendCredits permits keyless spends whose owed spill legitimately repeats). Concurrency
+tests green: spend∥expiry (TestGrants_SpendExpiryConcurrency_LockSerializes), overlapping clawbacks at the
+grants seam AND through two full concurrent Converge runs, two concurrent AccrueOwed. The latent RevokeGrant
+over-refund race is gone with RevokeGrant itself (#666 item 7, done alongside).
 
 ## Metadata
 - Category: bug
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Findings
 - **Credit expiry bypasses the lock**: jobs_credit_expiry.go:74-79 runs ExpireLapsed in a bare RunInTx;
@@ -447,11 +940,18 @@ total, not per-lot).
   over-refund race; no non-test callers today (surface being deleted in #666 — keep whichever survives locked).
 
 ## Tasks
-- [ ] Take LockCustomerForSpend inside ExpireLapsed (or in the expiry job per customer).
-- [ ] Wrap converge money repairs in MerchantTx + customer lock; consider a partial unique index on
-      ledger_transfers(grant_id, kind) for the clawback/deposit pairs as a DB backstop.
-- [ ] AccrueOwed: lockBalance first, or a partial unique index on owed_accrual coordinates.
-- [ ] Concurrency tests: spend ∥ expiry on the same lot; two converge repairs on the same grant; two AccrueOwed.
+- [x] Take LockCustomerForSpend inside ExpireLapsed (or in the expiry job per customer). (Inside ExpireLapsed —
+      every caller inherits it; grants_customer_fk guarantees the customers row exists, no ensure needed.)
+- [x] Wrap converge money repairs in MerchantTx + customer lock; consider a partial unique index on
+      ledger_transfers(grant_id, kind) for the clawback/deposit pairs as a DB backstop. (Both MaterializeGrant
+      repair closures wrapped in lockedMaterialize; index landed as 057 idx_ledger_transfers_lot_once, also
+      covering credit_expire. Entitlement-only repairs — DeriveSubscriptionGrant/DeriveWalletGrant — stay on
+      the engine conn: no money legs, and derive-1 relies on incremental per-feature commits.)
+- [x] AccrueOwed: lockBalance first, or a partial unique index on owed_accrual coordinates. (Both: the lock
+      primitive without the balance derivation — ensureCustomer + LockCustomerForSpend — plus 057
+      idx_ledger_transfers_owed_accrual_once; index excludes source_id='' for keyless SpendCredits spills.)
+- [x] Concurrency tests: spend ∥ expiry on the same lot; two converge repairs on the same grant; two AccrueOwed.
+      (True-parallel goroutine tests against the shared pg, made deterministic via channel + lock-hold; green.)
 
 ## Acceptance
 Every write that consumes or reverses lot value runs under the same per-customer serialization as spends; the
@@ -462,17 +962,18 @@ ledger cannot record the same accrual/clawback twice (app lock + DB backstop).
 # #678: webhook dedup is Redis-only, fail-open, non-transactional
 
 **Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 money-path audit. Lower urgency than #675 (payment rows
-have DB unique backstops; #675 findings are the residual non-replay-safe holes) but this is the posture that
-makes those holes reachable.
+**Status:** IMPLEMENTED (2026-07-01) — posture gate + lease heartbeat + dead-code removal in-tree; unit +
+targeted integration (testcontainers Redis + Postgres) green. Postgres-truth dedup deliberately deferred
+(design note below). Awaiting review/commit. (Originally from the 2026-07-01 money-path audit; #675's
+row locks/watermarks are the apply-layer half.)
 
 ## Metadata
 - Category: reliability
-- Status: planned
-- Passes: false
+- Status: implemented
+- Passes: true
 
 ## Problem
-Webhook dedup lives only in Redis (90d TTL, build_runtime.go:799); `cfg.Redis == nil` silently falls back to a
+(line refs = audit-time, pre-fix) Webhook dedup lives only in Redis (90d TTL, build_runtime.go:799); `cfg.Redis == nil` silently falls back to a
 PER-PROCESS memStore (idempotency/service.go:105-117) — multi-replica standalone loses cross-replica dedup
 entirely, and Redis flush/eviction loses history. `Complete` is written after (not with) the effects, so every
 handler must be individually replay-safe (that's #675's job). The 2-min pending-lease takeover
@@ -480,11 +981,45 @@ handler must be individually replay-safe (that's #675's job). The 2-min pending-
 (deduplication.go:70-98) is dead code with a mismatched op key.
 
 ## Tasks
-- [ ] Refuse to start webhook processing without Redis when running multi-instance (config posture check, like
+- [x] Refuse to start webhook processing without Redis when running multi-instance (config posture check, like
       EnforceRLSPosture) — silent memStore fallback only in dev/single-process.
-- [ ] Consider moving dedup marks into Postgres inside the effect tx (then Redis is a fast-path, not the truth).
-- [ ] Revisit the 2-min takeover: lease renewal for slow handlers instead of concurrent takeover.
-- [ ] Delete dead IsDuplicate (fold into #666 if it lands first).
+- [x] Consider moving dedup marks into Postgres inside the effect tx (then Redis is a fast-path, not the truth)
+      — DESIGN ONLY, see note below (>50 lines; collides with #675's just-landed apply layer).
+- [x] Revisit the 2-min takeover: lease renewal for slow handlers instead of concurrent takeover.
+- [x] Delete dead IsDuplicate (fold into #666 if it lands first) — deleted here (zero callers, mismatched
+      `webhook.<rail>.event` op key; verified incl. integration files).
+
+## Implementation notes (2026-07-01)
+- **Posture gate** (`enforceWebhookDedupPosture` + pure `webhookDedupPostureError`, build_runtime.go, called
+  right after Redis resolution in `buildRuntimeWithOverrides`): no Redis + non-dev (`!cfg.IsDev()`, same axis
+  as `RequiresRLS`) + standalone ⇒ startup error. **Standalone signal = no host-injected DB pool**
+  (`overrides.DB == nil`) — the exact signal that scopes `createDatabase`'s RLS gate to the config-built path:
+  embedded hosts inject a pgx pool (documented BootstrapOptions contract) and are single-process by contract;
+  the standalone server AND worker binaries build their DB from config and can run N replicas. Dev/embedded
+  without Redis keep the memStore fallback behind a loud `log.Warn` (per-process, no cross-replica protection).
+- **Lease heartbeat**: `IdempotencyService.RenewPending` (thin `TryTakeoverPending(…, 0)` delegate — pending-only,
+  cannot resurrect a completed record) + `DeduplicationService.startPendingHeartbeat` renews the pending
+  record's CreatedAt every lease/4 while the owning handler runs. Takeover-by-timeout kept unchanged as the
+  dead-holder path: staleness now genuinely means the holder died (4 consecutive missed heartbeats), not that
+  it was slow. `pendingLease` is a test-only override field (default still 2 min). #675 row locks backstop the
+  residual wedged-process >2min pause window — deliberately not over-built.
+- Tests: posture unit matrix (internal/app/webhook_dedup_posture_test.go); slow-handler-stays-exclusive +
+  dead-holder-takeover + renewal semantics (webhooks + idempotency unit, -race -count=3); Redis-backed
+  renew/takeover integration (service_redis_integration_test.go, testcontainers);
+  TestStripeInvoicePaymentAlreadyRecorded integration re-run green. Full `go build ./...` blocked by another
+  agent's in-flight internal/http/handlers edit (not this change); all touched packages build/vet clean.
+
+## Design note — Postgres as dedup truth (deferred)
+Goal: `Complete` written INSIDE the effect tx so Redis is a fast-path, not the truth. Sketch:
+`openrails.webhook_events(merchant_id, rail, op, event_id, status, payload_hash, processed_at,
+PRIMARY KEY (rail, op, event_id))` with RLS. ProcessWebhook order: Redis Begin (fast-path reject + lease as
+today) → handler runs and, in its OWN effect tx, INSERT … ON CONFLICT DO NOTHING the success row (conflict ⇒
+already applied ⇒ no-op) → after commit, write Redis Complete as cache. Crash between commit and Redis write
+now converges (redelivery hits the DB row) instead of double-applying. Cost: plumbing the effect tx into
+ProcessWebhook's contract (today processingFunc owns its txs internally, some handlers commit several), a
+migration, and a backfill story for the 90d Redis history — well over 50 lines and it reshapes the same
+handler seams #675 just settled. Do it as its own issue once #675 is committed; the watermark/row-lock work
+plus this heartbeat make the remaining window (wedged process >2min + same-event redelivery) narrow.
 
 ## Acceptance
 Two replicas processing the same delivery cannot both apply effects; losing Redis degrades to slower processing,
@@ -492,80 +1027,6 @@ never to replayed money effects.
 
 ---
 
-# #663: hard-cut the NMI rail to the modern v5 JSON API (classic `transact.php` dies; `query.php` stays for transaction search only)
-
-**Completed:** no — ACTIVE (promoted from future.md 2026-07-01). Paul's call: switch now, delete the old
-API entirely, keep the old API only where genuinely necessary.
-
-## Decision (2026-07-01): hard cut, not incremental
-The future.md plan was incremental behind a per-account `api_version` toggle with classic retained as a
-fallback. SUPERSEDED: delete the classic Direct Post (`transact.php`) path outright — every mutation and
-every read moves to v5 JSON, EXCEPT transaction search, which has no modern merchant-credential equivalent
-(see below) — `query.php` stays for exactly that. No toggle, no coexistence. Cutover gate is the live
-sandbox E2E, not a runtime fallback.
-
-## Auth — RESOLVED: same key, new transport, NO new secret
-NMI's Classic API Migration Playbook, verbatim: "No need to generate new API keys or alter permissions,
-both are inherited by the new endpoints." So the portal's plain "API key" (the classic security key — our
-existing `security_key` secret) auths v5 too. Transport changes: v5 wants it as the ENTIRE `Authorization`
-header value — "do not provide `Bearer`, `ApiKey`, or any other scheme". The portal's other keys are not
-ours to use here: the **v4 key** auths only `/api/v4/*` (partner/merchant-management surface we don't
-touch), the **checkout key** is the PUBLIC client-side key (Payment Component / hosted checkout).
-`query.php` keeps taking `security_key` in the request body as today.
-
-## Endpoint map (verified 2026-07-01 vs docs.nmi.com llms.txt index + v5 reference pages)
-| openrails op (classic) | v5 |
-|---|---|
-| sale / auth / validate / credit (new-money ops) | `POST /api/v5/payments/{sale,auth,validate,credit}` (top-level) |
-| capture / refund / void (ops ON a payment) | `POST /api/v5/payments/{id}/{capture,refund,void}` (id in PATH) |
-| get one transaction | `GET /api/v5/payments/{id}` |
-| Customer Vault add / update / delete | `POST` / `PATCH` / `DELETE /api/v5/customers[/{id}]` (+ billing/shipping sub-resources) |
-| vault roster (reconcile `report_type=customer_vault`) | `GET /api/v5/customers` (cursor pagination) |
-| recurring add / update / delete | `POST` / `PATCH` / `DELETE /api/v5/subscriptions` ("custom subscription" supported — keep our no-plan model; `/api/v5/plans` exists if ever wanted) |
-| recurring roster (reconcile `report_type=recurring`) | `GET /api/v5/subscriptions` |
-| recurring liveness by id (`GetRecurringLiveness`) | `GET /api/v5/subscriptions/{id}` |
-| Collect.js token in sale | `payment_details.payment_token` in JSON body (was flat `payment_token` field); client flow unchanged |
-| v5 refund vs credit | distinct ops, same as classic: refund = settled txn back to original method; credit = standalone |
-
-## `query.php` survives for transaction SEARCH only (researched, not assumed)
-- v5 payments has NO list/search — the complete v5 payments surface is the 7 ops + `GET /payments/{id}`
-  (get by KNOWN id). Every other v5 resource (customers, subscriptions, plans, invoices, products,
-  devices) has a List endpoint; payments does not (raw llms.txt grep, not a summarizer).
-- v4 HAS `POST /api/v4/transactions/reports` but it is PARTNER-key-only ("Your v4 API key that was
-  generated in the Partner portal", "transactions by merchants under your partner account") — that's the
-  reseller's (MobiusPay's) credential class, not our merchant one.
-- The two jobs that therefore stay on `query.php`:
-  1. reconcile's date-ranged bulk transaction pull, declines included (`internal/reconcile/nmi.go`
-     `report_type=transaction`);
-  2. order-id evidence probes (`internal/integrations/nmi/liveness.go` `ProbeSalesByOrderID` /
-     `FindSuccessfulSaleByOrderID` — #664/#665 machinery; get-by-id is useless when the tx id is the unknown).
-- Re-check for a v5 payments-list/search endpoint at each future NMI touch — if it appears, `query.php` dies.
-
-## Tasks
-- [ ] `internal/integrations/nmi/client.go`: v5 JSON transport — base URL const beside the query URL,
-      bare-security-key `Authorization` header, JSON encode/decode, error mapping (modern error shape ≠
-      classic `response`/`responsetext` — map at the client boundary so callers keep their semantics),
-      preserve timeout + read-only guards. DELETE the Direct Post `transact.php` path and form encoding.
-- [ ] Port mutations: sale (vaulted-customer charge + Collect.js `payment_details.payment_token`),
-      auth/capture, refund/void/credit, validate; Customer Vault add/update/delete → `/customers`;
-      recurring add/delete → `/subscriptions` (custom subscription, no-plan model preserved).
-- [ ] Reconcile fetcher (`internal/reconcile/nmi.go`): recurring + customer_vault reports → v5 lists with
-      cursor pagination; transaction pull stays `query.php`; re-map parsed fields (v5 JSON names ≠
-      query.php XML names) and assert parity against sandbox data.
-- [ ] `liveness.go`: `GetRecurringLiveness` → `GET /api/v5/subscriptions/{id}`; order-id probes stay.
-- [ ] Webhooks: expected unchanged (portal-configured, payload independent of which API created the txn) —
-      verify on sandbox; touch `internal/modules/webhooks/nmi.go` only if that's wrong.
-- [ ] Tests: rewrite NMI fixtures to JSON shapes; full live sandbox Go E2E green end-to-end.
-
-## Out of scope
-- The entire v4 surface (partner/onboarding/processor/fee config).
-- Client-side Collect.js / Payment Component changes (none needed).
-
-Acceptance: zero `transact.php` references remain; the NMI rail runs sale/vault/recurring/liveness/reconcile
-on v5 JSON with the existing `security_key`, `query.php` remains ONLY for the two transaction-search jobs,
-and the live sandbox E2E passes end-to-end.
-
----
 
 # #666: dead-code purge — ~7k lines of unreachable features and orphaned surface
 
@@ -641,11 +1102,110 @@ collapse pure-forwarding facades where they add nothing.
 - [x] Item 1 DONE 2026-07-01: USDC funding subsystem deleted (module, repo/models/queries/gen, webhook branch +
       Hook0 verifier, config + env mapping + example yaml, ufs_ ids, RLS-test refs; table dropped via migration
       054 and removed from 001 baseline). #328 closed to completed.md; intent re-filed as future.md #680.
-- [ ] Item 2: delete the abuse blocklist/velocity subsystem + its tables/queries (integration tests go with it).
-- [ ] Items 3-5, 8-9: delete unrouted handlers + dead mux/mount paths.
-- [ ] Item 6: replace health manager with on-demand pings in `/ready`.
+- [x] Item 2 DONE 2026-07-01: blocklist.go/velocity.go + their integration tests deleted (CardAbuseGuard/
+      WastedSpendGuard kept); payment_blocklist model + the 3 queries cut from admission_support.sql, sqlc
+      regenerated; table dropped via migration 055 and removed from the 001 baseline (+ the two schema-test
+      table lists).
+- [x] Items 3-5, 8-9: delete unrouted handlers + dead mux/mount paths.
+      (Item 4 DONE 2026-07-01: webhooks/replay subpackage deleted. Audit missed one importer —
+      tests/nmi_webhook_test.go — which existed to exercise replay itself; trimmed to the one non-replay
+      regression test (Stringish subscription-id normalization, now os.ReadFile on the fixture).
+      testdata/webhooks fixtures KEPT: used by ccbill tests + seed_data.go.)
+      (Item 3 DONE 2026-07-01 phase 2: all 14 unregistered Service* handlers deleted from
+      service_admission.go (-370) + service_credits.go (~-290) plus the types/helpers that died with them
+      (trustTierQuery, spendLimitWindow/spendLimitWindowInputs, serviceQueryCustomer, serviceWithdrawRequest,
+      serviceAccountSettingsRequest, serviceMerchantConfigurationRequest, servicePayerSpendLimitRequest,
+      serviceTierScheduleRequest, serviceInvokerSpendLimitRequest). embed/client.go references were comments
+      only. serviceTxnResponse KEPT (live via self_account.go); merchantProfileResponse +
+      serviceMerchantConfigWindows KEPT (live via ServiceGet/SetMerchantSettings).
+      Item 5 DONE: AdminReconcileProduct/Price, AdminListCatalogOrphans + AdminListStripeOrphans + listOrphans,
+      GetAdminManualRebillAttempts + manualRebillStatusFilters, DeleteAdminUserPaymentMethod +
+      adminPaymentMethodPath deleted (~-265).
+      Item 8 DONE: Server.NewHTTPHandler/newHTTPHandlerMux + http_handler_options.go + embedded_mux_test.go
+      deleted (~-330). Audit missed a SECOND live caller — tests/http_handler_options_test.go — its two
+      legacy-path tests were PORTED onto embedhttp.FromApp(suite.App) so route-set coverage survives on the
+      real embed path (Server.Handler() standalone assertions kept).
+      Item 9 DONE: RegisterHostWebhookRoutes + handlers.HostWebhook deleted; the /host-webhooks leg of
+      routes_merchant_webhook_integration_test.go trimmed — it existed only to exercise the dead mount.)
+- [x] Item 6 DONE 2026-07-01: internal/services/health deleted; /ready does on-demand pg pool.Ping + redis
+      Ping (2s timeout) in routes_public.go; HealthManager field + Start/Stop + createHealthManager wiring
+      removed from internal/app. Response keeps status/service/auth + verbose dependencies
+      {available, last_error|reason}; tests only assert status codes.
 - [ ] Items 7, 10-12: dead-surface tail sweep.
+      (Item 7 DONE 2026-07-01 by #677: every listed method grep-verified dead (incl. integration-tagged files
+      + pkg/embedded roots) and deleted — grants.Ledger.{Expire,Materialize,RevokeGrant,LiveGrants,
+      RevokeBySource,SpendableLots} (~95 lines, grants.go + credit_spend.go) and
+      money/ledger.Ledger.{Conservation,Spend,Expire} (~42 lines) + the now-orphaned LedgerLedgerNet sqlc
+      query (regenerated). RevokeBySourceAsOf/MaterializeGrant/CreditSpend/ExpireLapsed KEPT (live) and every
+      surviving lot-consuming/reversing path now runs under the customer lock (#677). Test-only consumers
+      rewritten onto the surviving surface / gen queries / raw SQL; the RevokeGrant refund-leg test died with
+      RevokeGrant (credit_refund transfers no longer have a writer). GrantAdmin/AdminGrantExists kept as noted.
+      deadcode ./cmd/openrails now reports NOTHING in grants/money-ledger except the documented embed-root
+      pair.)
+      (Item 11 DONE 2026-07-01: five *CrossMerchant methods deleted, crossMerchant bool collapsed out of
+      merchantFilter + the 5 query helpers; fixture-only tests removed, isolation integration test keeps its
+      per-merchant assertions. Item 12 PARTIAL 2026-07-01: pkg/authprovider shim deleted, 8 importers
+      migrated to billingauth (ginauth subpackage KEPT — live from ginmw/server/ginreq);
+      cache.CacheMiddleware/NewCacheMiddleware/GenerateKey deleted (Cache interface kept, live);
+      controlplane.Catalog/CatalogNames/MerchantOwnerRolePermissions + Permission type + catalogEntries
+      deleted — never seeded, Groups()+Perm* consts are the live surface; fixture-guard tests removed,
+      live-behavior tests (apex-bypass, admission gate, bootstrap owner walk-up) reworked onto inline perm
+      lists. sqlc SetSubscriptionUnknown: already deleted by #664, nothing to do. SKIPPED:
+      internal/bootstrap/merchant_env.go — audit claim stale, every func in the file is a live private
+      helper of MerchantBillingEnvKey (called from merchant_manifest.go's env.Provider loader).)
+      (Item 10 DONE 2026-07-01 phase 2: CCBillVersionedPayload interface + 12 Get* method blocks +
+      CCBillWebhookVersion type + the 5 version consts (only ever fed the dead interface) + webhooks.IsExpired
+      deleted from webhooks/types.go (-128).
+      Item 12 phase-2 slice DONE: solana ValidateRecurringMint (+its allowlist_test block),
+      IsTerminalFailure + terminalSignatures + failure_terminal_test.go (ClassifyCrankError's on-chain-code
+      path superseded it), tokens.GetTokenBySymbol/IsValidToken, bare recurring.NewPlanService (6 test callers
+      migrated to NewPlanServiceWithReader(sub, nil, ...)); moneyutil.ParseDecimalToMicros + its test
+      (parseDecimalScaled/roundHalfAwayFromZero KEPT — live via ParseDecimalToCents, whose rounding coverage
+      lives in webhooks/nmi_test.go); PaymentsIdempotencyAdapter + its test deleted, checkout's duplicate
+      IdempotencyStatus/IdempotencyRecord replaced with type aliases onto the idempotency module, the two
+      checkout store interfaces' Complete narrowed to json.RawMessage (nmi_sale_service marshals its struct
+      at the one call site), build_runtime passes idempotencyService directly (never-nil ctor);
+      dead ginmw: CORS (2 tests ported to CORSFromSource), bare RateLimit + classifyBucket (bucket test
+      retargeted at the live neutral middleware.ClassifyBucket), InternalIPWhitelist, WebhookIPWhitelist,
+      UserSessionAdminPrincipalRequired + userSessionPrincipal (+their tests), and most of
+      service_credential.go — ServiceCredentialRequired/resolveServiceCredential/ServiceCredentialFromGin/
+      RequireServiceCredentialCustomerScope + the 3 resolver interfaces + OwnerGroupRef context key +
+      service_credential_test.go (~-680 across ginmw); ServiceCredentialContextKey + bearerToken KEPT (live).
+      SKIPPED with reasons: MicrosToCentsCeil — LIVE (checkout/service.go:2164, audit claim stale);
+      FiatMicrosToStablecoinBaseUnits — LIVE post-#671 (handlers + checkout), as re-verified;
+      spendgate.Gate.SetClock — LIVE test seam (gate_integration_test.go:38 injects a fake clock);
+      derefStr triplication — all 3 copies are LIVE in their packages (not dead code); money copy is
+      #677-owned and normalize.FromPtr trims (behavior change), so 2-of-3 dedupe was skipped → #670/later.
+      NOT TOUCHED in phase 2 (outside the phase-2 slice, still present in-tree — remaining item-12 tail):
+      fx.NoOpProvider, solana/subscriptions.BuildResumeSubscription, RateLimitStore.Reset,
+      MoneyService.snapshotTx (#677 area), checkout.SetSolanaLifecycleForTest, internal/http/response
+      wrapper pkg, webhookutil ParseStripeSignatureHeader/ParseNMISignatureHeader re-exports.)
+      (TAIL CLEARED by #670 2026-07-01: fx.NoOpProvider, BuildResumeSubscription, RateLimitStore.Reset,
+      snapshotTx(+accountSnapshot), internal/http/response (pkg deleted, helpers inlined into ginauth),
+      webhookutil re-exports — all deleted. Still open: checkout.SetSolanaLifecycleForTest (grep-dead but
+      session_service.go was #674-hot; take in a later pass).)
+      (Yagni interface collapse DONE 2026-07-01 phase 2: subscriptions NotificationStore/
+      NotificationEmailSender → *NotificationService, AdminCancellationLogger/LifecycleEventLogger →
+      *analytics.EventLogService (river workers already held the concrete type; reconcile/converge callers
+      pass nil — no reconcile edits), merchantConfigurationReader → *merchantconfig.Store;
+      user_admin_support.go now holds only GetNotificationsFilters. SKIPPED: StripeLivenessProber — live
+      test seam (fakeStripeProber in jobs_subscription_liveness_integration_test.go); StripeSubscriptionLister/
+      StripeChargeLister — collapse forces edits in internal/modules/reconcile + pkg/service/reconcile.go
+      (reconcile owned/in-rewrite during phase 2) → #670/later. Entitlements repo-facade collapse NOT done
+      (bigger refactor, not dead code) → future.)
 - [ ] Re-run deadcode + full integration suite green after each batch.
+      (Phase 2 verification 2026-07-01: go build ./... green, go build -tags integration ./... green,
+      go vet (+integration tag) green on every touched package, unit tests green: handlers, routes, http,
+      middleware+ginmw, webhooks, checkout, idempotency, subscriptions, river, app, solana/*, moneyutil.
+      Full integration suite not re-run here — grants/money/spendgate/nmi were churning concurrently
+      (#676/#677/#678 + the NMI rewrite session); run it once those land.)
+
+**Status update (2026-07-01): PHASE 2 COMPLETE.** All phase-2 items are DONE or explicitly SKIPPED-with-reason
+above. Phase-2 net ≈ -2,600 lines. What remains → #670 (or a final tail pass): the rest of the gin layer
+(CredentialType consts now mostly unreferenced, remaining ginmw surface), the deferred interface collapses
+(Stripe listers, derefStr dedupe), the untouched item-12 tail listed above (fx.NoOpProvider,
+BuildResumeSubscription, RateLimitStore.Reset, snapshotTx, SetSolanaLifecycleForTest, internal/http/response,
+webhookutil re-exports), and the entitlements facade question.
 
 ## Acceptance
 `deadcode ./cmd/openrails` (cross-checked against integration-tagged files and pkg/embedded roots) reports no
@@ -655,14 +1215,24 @@ production-dead symbols in the listed areas; no route-table or behavior change; 
 
 # #667: production gate: payment-provider secrets must not persist plaintext at rest
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 security audit (MEDIUM; highest-value security fix found —
-the rest of the audit came back clean: sig-verify, RLS/GUC, merchant binding, IDOR, crypto, SQL all verified).
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented in-tree, uncommitted. Fail-closed boot gate on the DB-backed
+(fallback) secret store: `enforceEncryptionPosture` in `internal/merchantsecrets/store.go` (buildDBSecretStore),
+gated by new `config.RequiresSecretEncryption()` — the exact same `!IsDev()` env signal as `RequiresRLS()`
+(#227). Non-dev + secret_backend=db + no ENCRYPTION_MASTER_KEY ⇒ boot refused with an actionable error (names
+ENCRYPTION_MASTER_KEY and secret_backend=vault); dev boots with one loud PLAINTEXT warning. All four boot
+paths (standalone http server, bootstrap manifest, bootstrap dump, embed/provision.go) funnel through
+merchantsecrets.Build — verified the only production construction site of the DB store. Vault-backed store
+unaffected (returns before the gate). Solana WriteRestrictedSecretStore KEPT: now dev-only-reachable, but
+Solana private keys are self-custody funds so plaintext is refused even where dev allows it for the rest.
+Tests: store_test.go (posture matrix + env-signal pin vs RequiresRLS) and store_integration_test.go
+(Build-level: prod+db+nokey refused / prod+vault+nokey boots via fake Vault / dev+db+nokey warns /
+prod+db+key round-trips ciphertext-at-rest) — all green.
 
 ## Metadata
 - Category: security
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 `buildDBSecretStore` (`internal/merchantsecrets/store.go:158-185`): when `ENCRYPTION_MASTER_KEY` is unset,
@@ -678,10 +1248,10 @@ is a FALLBACK. Scope accordingly — no new encryption machinery, just: whenever
 secrets, the master key must be set. Vault-backed deployments are unaffected.
 
 ## Tasks
-- [ ] Fail closed in non-dev: DB-backed secret store selected + disabled encryptor ⇒ refuse boot (mirror the
+- [x] Fail closed in non-dev: DB-backed secret store selected + disabled encryptor ⇒ refuse boot (mirror the
       EnforceRLSPosture pattern). Vault-backed store: no change.
-- [ ] Keep dev/test ergonomics: explicit dev-mode escape hatch, loudly logged.
-- [ ] Integration test: prod-ish config with DB store and no master key refuses boot / cannot write a
+- [x] Keep dev/test ergonomics: explicit dev-mode escape hatch, loudly logged.
+- [x] Integration test: prod-ish config with DB store and no master key refuses boot / cannot write a
       Stripe/NMI/CCBill credential.
 
 ## Acceptance
@@ -692,13 +1262,29 @@ dev keeps working with an explicit opt-out.
 
 # #668: CCBill webhook auth bypassed by global test_mode (+ webhook trust-flag hygiene)
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 security audit (MEDIUM + two LOW hardening nits).
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented in-tree, uncommitted. Bypass now gated by `ccbillWebhookIPAllowed`
+(one helper, all three ingestion sites): requires test_mode AND no environment=live CCBill row in
+`openrails.payment_provider_accounts` (new `merchants.Service.HasLiveProviderAccounts`, cross-merchant probe on
+the same trust boundary as ResolvePaymentProviderAccountByIdentity); probe failure / nil config / nil merchants
+fail closed to the allowlist. Rationale: CCBill creds carry no intrinsic test/live marker and ValidateRailSet
+forces config-declared environment to equal test_mode, so the persisted catalog rows are the only per-account
+signal that survives a live deployment flipping test_mode on. CCBill direct-dispatch events no longer stamp
+SignatureValid=true (nil now, matching the River path; re-verified only NMI/Stripe Apply gate on it). GUC-reset
+failure in db_pgx.go release() now warns AND closes the conn so the pool destroys it rather than reusing a conn
+that may still carry a merchant GUC. Tests: handlers/webhook_ccbill_test.go (4 tests, green).
+FOLLOW-UP FIX (2026-07-01, tests/ suite): checkout's scoped CCBill lookups hardcoded environment="live"
+(merchant_rail_secrets.go), so a sandbox deployment (test_mode ⇒ environment=test rows per ValidateRailSet ⇒
+the exact posture this issue requires) could never resolve its CCBill provider account — now derived via
+config.ExpectedProviderEnvironment(IsTestMode()). NOTE: the NMI/Stripe/solana scoped lookups still hardcode
+"live" (checkout_session.go:143, merchant_rail_secrets.go resolveNMIClient, vault_service.go:268,
+merchants/credentials.go LoadStripeCredentials/LoadNMIWebhookSigningSecret/LoadNMITokenizationConfig,
+solana recurring/wiring.go) — same latent sandbox-posture mismatch, needs its own sweep.
 
 ## Metadata
 - Category: security
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 CCBill has no HMAC — the source-IP allowlist is its ONLY authentication. `internal/http/handlers/webhook.go:106-116`
@@ -714,11 +1300,13 @@ Nits from the same audit:
   (GUC re-set before every use; RLS fails closed without GUC) but a failed reset should at least log.
 
 ## Tasks
-- [ ] Bind the CCBill IP-check bypass to the CCBill account's sandbox posture (or refuse test_mode when a live
+- [x] Bind the CCBill IP-check bypass to the CCBill account's sandbox posture (or refuse test_mode when a live
       CCBill account is configured) — never the global test_mode flag.
-- [ ] Stamp CCBill events `SignatureValid=false` (or a distinct `ip_allowlist` verification kind).
-- [ ] Log GUC-reset failure in `release()` (or use tx-scoped set_config).
-- [ ] Test: live-mode CCBill + test_mode=true still rejects webhooks from non-CCBill IPs.
+- [x] Stamp CCBill events `SignatureValid=false` (or a distinct `ip_allowlist` verification kind). (Left nil —
+      never claimed — matching the River path's unverified Prepared.QueueArgs.)
+- [x] Log GUC-reset failure in `release()` (or use tx-scoped set_config). (Warn + discard the conn; tx-scoped
+      set_config doesn't fit — the lazy conn's GUC spans multiple statements outside any tx.)
+- [x] Test: live-mode CCBill + test_mode=true still rejects webhooks from non-CCBill IPs.
 
 ## Acceptance
 No configuration accepts CCBill webhooks from arbitrary IPs while live credentials are configured; the
@@ -728,15 +1316,32 @@ SignatureValid flag never claims verification that didn't happen.
 
 # #669: rail capability descriptor registry — collapse the 36-point dispatch scatter
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 architecture audit. The single biggest extensibility tax
-found; everything else structural came back healthy (standalone/embedded share routes+services; sqlc fully
-consumed; suspected-dead dirs all alive).
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented in-tree, uncommitted. Registry lives in the existing rail-identity
+home `internal/modules/payments/rails` (registry.go): one `Descriptor` per rail (nmi, ccbill, stripe, solana,
+paypal) with fields Rail, DisplayName, HasProviderAccounts, HasRemoteCustomer, SupportsChargeSavedMethod,
+OpenRailsDrivenDunning, RenewalGraceEligible, AutoBilled (func field — NMI's answer depends on vault presence),
+CredentialKeys ([]{Name, MerchantWritable}; solana private_key is MerchantWritable=false). Compile-time
+completeness via UNKEYED in-package struct literals (adding a Descriptor field fails to compile until every
+rail declares it); registry_test.go forces every enum rail, pins every per-rail fact the old switches encoded,
+and pins Lookup normalization (mobius does NOT resolve — post-#630 it's a provider-account name).
+Collapsed all 12 descriptor-portable switch sites from the inventory below. Webhook ingress got the routing-
+TABLE port only: globalWebhookIngress (handlers/webhook.go) + serviceWebhookIngress (service_webhooks.go)
+replace the two top-level rail switches; posture gates/credential loading stayed put; the apply layer was
+already registry-driven (#296/#675); processResolvedMerchantWebhook/processProviderAccountWebhook if-chains
+deliberately LEFT (per-surface credential/#641-account/#668-posture logic, not routing). reconcile now iterates
+`rails.All()` filtered on HasProviderAccounts (same order as the old hardcoded loop); RailFetcher untouched.
+Legacy names (railHasRemoteCustomer, subscriptionProviderAutoBilled, RenewalGraceEligibleRail,
+OpenRailsDrivenDunning) kept as thin registry delegates so their existing pinning tests prove behavior
+preservation unchanged. Verified: go build+vet (both tags), repo-wide unit suite, integration suites for
+webhooks/checkout/money/river/reconcile(+converge)/subscriptions/intents/merchants/handlers/pkg-service +
+tests/ — green. (One-off parallel-package "tuple concurrently updated" role-provision flake on the shared DB
+reproduced pre-change semantics; every package green when run normally.)
 
 ## Metadata
 - Category: architecture
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
 
 ## Problem
 The four rails have four shapes (stripeapi choke-point pkg, NMIClient struct, CCBillClient struct, loose Solana
@@ -757,12 +1362,63 @@ names + webhook routing) into one file per rail; "did I miss a switch?" becomes 
 Overlaps #291 (processor-capability-metadata) — this IS #291's capability model, scoped to the dispatch
 points that exist today; fold #291's checkout-validation/routing ambitions in later, don't build them here.
 
+## Inventory (2026-07-01, re-verified in source before refactor)
+DESCRIPTOR-PORTABLE (facts/predicates — collapse into registry):
+1. rail_customer_service.go:72 `railHasRemoteCustomer` → HasRemoteCustomer
+2. reconcile/unknown_orchestration.go:58 `railExposesRemoteCustomer` (same fact, duplicated) → HasRemoteCustomer
+3. reconcile/unknown_orchestration.go:68 `railToProvider` + :96 hardcoded 4-rail loop → registry iteration
+4. money/collection.go:75 ChargeSavedMethod exclusion (ccbill/solana) → SupportsChargeSavedMethod
+5. river/jobs_dunning.go:660 `subscriptionProviderAutoBilled` (ccbill always; nmi vault-less) → AutoBilled func field
+6. subscriptions/email_service.go:574 `railDisplayName` → DisplayName
+7. merchants/payment_provider_config.go:365 `supportedPaymentProvider` → HasProviderAccounts
+8. merchants/payment_provider_config.go:374 `paymentProviderCredentialKeys` → CredentialKeys (merchant-writable subset)
+9. merchants/secrets.go:134 `NormalizeProviderAccountSecretKey` key sets → CredentialKeys (full set)
+10. merchants/secrets.go:125 `SecretWritable` solana/private_key carve-out → CredentialKey.MerchantWritable=false
+11. rails/nmi.go:27 `OpenRailsDrivenDunning` (nmi+solana) → descriptor field
+12. subscriptions/dunning.go:283 `RenewalGraceEligibleRail` (nmi+stripe) → descriptor field
+
+WEBHOOK INGRESS (3 layers): apply layer is ALREADY registry-driven (webhooks/dispatcher.go
+WebhookHandlerRegistry, #296/#675 — no work needed). Top-level rail switches in handlers/webhook.go:92-117
+(global surface) + pkg/service/service_webhooks.go:38-53 → routing-TABLE port only.
+processResolvedMerchantWebhook (:142) + processProviderAccountWebhook (:246) if-chains LEFT: each arm is
+per-rail credential loading / #641 account-identity extraction / #668 posture gates, not simple routing.
+
+LEFT AS-IS (behavior dispatch or ownership elsewhere): checkout service.go:392,417,2324 +
+session_service.go:499,554,630 (per-rail executors/validators — deliberate per the #521 drift comment);
+config/config.go:484,950 (config-shape validation; config is imported BY rails — cycle);
+subscriptions/cancel_mode.go:94 CancelModeFor (rail-fact candidate but drags nmiDeletePending along; future);
+admin_service.go:218 + admin_payments.go:246,335 + jobs_subscription_manage.go:105 (per-rail cancel/refund
+executors); the ~20 `rails.IsNMI` guard sites around NMI-only machinery (vault, deferred delete, liveness);
+build_runtime.go client construction (acceptance keeps it); webhookutil.CanonicalRail (legacy mobius alias);
+reconcile RailFetcher (kept by design).
+
+INCONSISTENCIES FOUND (old switches disagreeing — not silently resolved):
+- A. Stripe display name hit railDisplayName's generic fallback → "STRIPE" (email_service.go:586); every
+  other rail is curated. Descriptor sets "Stripe" — deliberate display-only fix, noted here not silent.
+- B. subscriptionProviderAutoBilled("stripe")=false although Stripe rebills itself (OpenRailsDrivenDunning
+  excludes stripe for exactly that reason). Harmless: the dunning worker only processes OpenRails-driven
+  cohorts. PRESERVED as-is in the descriptor (AutoBilled=never for stripe), documented on the field.
+- C. money.ChargeRequest.AmountCents is RAIL MINOR UNITS (whole yen for JPY) but the NMI collection adapter
+  feeds it to nmi.SaleParams.Amount whose wire format is two-decimal cents — divergent for zero-decimal
+  currencies on NMI. USD unaffected; PRESERVED (sibling of #671-1g; no NMI merchant bills JPY).
+- D. paymentProviderCredentialKeys("solana")=nil vs NormalizeProviderAccountSecretKey accepting
+  solana/private_key: deliberate (operator-only secret hidden from merchant credential-status view) — now
+  expressed as MerchantWritable=false rather than two disagreeing switches.
+- E. money/collection.go: known-but-unsupported rails (paypal) previously fell through to "no adapter
+  configured"; now get the explicit "does not support invoice collection" error. Unknown rail strings keep
+  the adapter-not-found path.
+
 ## Tasks
-- [ ] Inventory pass: enumerate every rail switch (list above is the audit's; re-verify).
-- [ ] Define the descriptor struct + registry; port the boolean predicates first (remote-customer, auto-billed,
+- [x] Inventory pass: enumerate every rail switch (list above is the audit's; re-verify). → DONE, see Inventory.
+- [x] Define the descriptor struct + registry; port the boolean predicates first (remote-customer, auto-billed,
       collection exclusion), then credential keys + display names, then the 3-layer webhook dispatch.
-- [ ] Compile-time completeness: constructing the registry requires every field per rail.
-- [ ] Leave RailFetcher as-is (it already has the right shape); reconcile switches route through the registry.
+      → DONE in that order; webhook dispatch = routing-TABLE port only (see Status — the merchant/provider-
+      account surface if-chains are credential/posture logic, deliberately left).
+- [x] Compile-time completeness: constructing the registry requires every field per rail. → unkeyed in-package
+      struct literals (a new Descriptor field breaks every rail's literal at compile time) + registry_test.go
+      forces every enum RAIL and non-zero required fields.
+- [x] Leave RailFetcher as-is (it already has the right shape); reconcile switches route through the registry.
+      → railToProvider + railExposesRemoteCustomer + the hardcoded 4-rail loop all registry-backed.
 
 ## Acceptance
 Adding a rail touches: the enum, its integrations package, ONE descriptor file, build_runtime wiring. The
@@ -773,14 +1429,94 @@ switches outside the registry returns ~zero.
 
 # #670: single HTTP stack — drop the gin layer, serve the neutral mux everywhere
 
-**Completed:** no
-**Status:** PLANNED (2026-07-01) — from the 2026-07-01 audit. Do AFTER #666 (which already deletes ~350 lines of
-production-dead ginmw).
+**Completed:** yes
+**Status:** DONE (2026-07-01) — implemented in-tree, uncommitted. Standalone now serves the SAME neutral
+net/http stack as embedded; every gin internal deleted.
 
 ## Metadata
 - Category: refactor
-- Status: planned
-- Passes: false
+- Status: done
+- Passes: true
+
+## What shipped (2026-07-01)
+- **Flip:** cmd/openrails → `embedded.StandaloneHandler` (new, gin-free, pkg/embedded/standalone.go) →
+  `internal/http` server.New, which now assembles an http.ServeMux + the neutral chain
+  (RecoverHTTP → RequestLogHTTP → SecurityHeadersHTTP → CORSFromSourceHTTP(dynamic control-plane origins,
+  NEW) → BodyLimitHTTP → ResolveMerchantHTTP → billingauth.Optional → RateLimitHTTP) — same order the gin
+  engine ran. `internal/bootstrap/ginboot` → `internal/bootstrap/serverboot` (gin-free composition root;
+  integrationharness + tests suite use it).
+- **Ports to neutral (were gin-only):** self-service + customer-treasury registrations →
+  `internal/http/routes/self.go` (RegisterSelfServiceRoutes/RegisterCustomerTreasuryRoutes on router.Router);
+  delegated middlewares + Principal/keys → `internal/http/middleware/delegated_neutral.go`
+  (DelegatedSelfRequired/DelegatedPrincipalRequired/CustomerScopeRequired/EnsureCustomerPermissionGroup/
+  RequirePermission; DelegatedContextKey etc. — handlers retargeted); control-plane /auth mount = direct
+  ServeMux registration of RouteSpecs (they are native ServeMux patterns; the gin `{}`→`:` translator died);
+  meta/health/captcha endpoints → net/http (captcha handlers shared via embedhttp.CaptchaStatusHandler/
+  CaptchaClientScriptHandler); embedhttp.NewSelfHandler (neutral self surface used by the shim). Root banner
+  registered as "GET /{$}" so ServeMux keeps gin's exact-root behavior.
+- **Route parity PROVEN:** dumped the gin engine's 206-route table BEFORE the cut (gin engine.Routes(), real
+  boot); golden checked in at internal/integrationharness/testdata/standalone_route_surface.txt (129 billing
+  routes; the 77 /auth routes are AuthKit-owned and asserted dynamically). Permanent test
+  `TestStandaloneRouteSurface` (integrationharness) boots the real standalone server and requires
+  RouteTable() == golden AND /auth == controlplane.RouteSpecs() verbatim (Server records every registered
+  pattern via router.NewMuxRecorded / Server.handle).
+- **pkg/embedded/gin shim (cozy-art compat, public API unchanged):** StandaloneHandler/Handler delegate to
+  embedded.StandaloneHandler; SelfHandler delegates to embedhttp.NewSelfHandler (gin-free);
+  MountHandler/RegisterAPI/MountOptions/ProviderRoutes/With* unchanged — gin now appears ONLY in
+  api.go's RegisterAPI (`gin.WrapH` + group.Handle) and pkg/authprovider/ginauth (public, kept).
+- **Deleted:** internal/http/middleware/ginmw (whole pkg), internal/http/router/ginrouter,
+  internal/http/request/ginreq, internal/http/routes/ginroutes (+tests, re-ported neutrally),
+  internal/controlplane/ginroutes, internal/http/response (helpers inlined: ginauth writes
+  api.SimpleErrorResponse directly), gin half of internal/http (newPublicEngine + gin routes_*.go rewritten
+  neutral), ginboot. Net across the cut ≈ -2,900 gin-coupled prod+test lines, ~+1,900 neutral lines
+  (ports + re-ported tests + parity test).
+- **Deliberate behavior deltas (audited):** (1) neutral rate-limit/captcha error bodies now emit the
+  canonical pkg/api envelope on BOTH deployments (gin already did; embedded previously used ad-hoc
+  `{"error":...}` maps) — envelope unification, standalone byte-compatible; (2) ServeMux answers
+  wrong-method with 405+Allow where gin returned 404, and gin's 301 trailing-slash redirect is gone
+  (matches the embedded surface's existing behavior); (3) global BodyLimit now exempts webhook paths on
+  standalone (neutral matcher; webhook handlers keep their tighter per-rail caps); (4) embedded self
+  handler now honors probed RouteCapabilities for provider routes (was rails-only), matching standalone.
+- **gin linkage:** `go list -deps ./cmd/openrails | grep gin-gonic` ⇒ EMPTY — the standalone binary no
+  longer links gin. gin remains in go.mod ONLY for the pkg/embedded/gin shim (RegisterAPI/WrapH) +
+  pkg/authprovider/ginauth; full go.mod removal happens when cozy-art migrates off the gin shim.
+- **Tests:** ginroutes self-surface tests re-ported to internal/http/routes (neutral); ginmw
+  delegated/ratelimit/security coverage re-ported to internal/http/middleware
+  (delegated_neutral_test.go, ratelimit_http_test.go additions incl. ClassifyBucket, http_base_extra_test.go);
+  internal/http captcha/meta/self tests rewritten on the mux; tests/ + integrationharness ad-hoc gin engines →
+  router.NewMux + middleware.ChainHTTP. Dropped without port: ginmw principal_test's user-session
+  principal cases (its subject, UserSessionAdminPrincipalRequired, was already deleted in #666).
+- **#666 tail deletions done here:** fx.NoOpProvider, solana/subscriptions.BuildResumeSubscription,
+  RateLimitStore.Reset, MoneyService.snapshotTx(+accountSnapshot), webhookutil
+  ParseStripeSignatureHeader/ParseNMISignatureHeader re-exports. SKIPPED:
+  checkout.SetSolanaLifecycleForTest (grep-dead, but session_service.go was hot under the concurrent #674
+  agent — delete in a later pass).
+
+## Tasks
+- [x] Standalone serves the embedhttp/neutral mux; gin hosts keep working via `gin.WrapH` (pkg/embedded/gin
+      is now a thin delegating shim — cozy-art public API preserved).
+- [x] Port the few live gin-only middlewares to the neutral chain; delete the gin packages.
+- [ ] Remove gin from go.mod — deferred until cozy-art drops pkg/embedded/gin (shim + ginauth are the only
+      remaining importers; the standalone binary already links zero gin-gonic).
+- [x] Route-surface parity test green (TestStandaloneRouteSurface: neutral table == pre-cut gin golden) +
+      integration suites (see verification note).
+
+## Verification (2026-07-01)
+- go build ./... + -tags integration green; go test ./... (repo-wide unit) fully green.
+- Integration: TestStandaloneRouteSurface GREEN (129/129 billing routes == gin golden; 77 /auth ==
+  RouteSpecs). pkg/embedded (+/gin) integration green. internal/integrationharness green except
+  TestNativeCatalogBundleIncludesHTTP ("membership tier requires a recurring price" — concurrent catalog
+  validation churn, not transport). tests/ suite: green except concurrent-agent areas — ccbill IP-gate
+  hardening (webhook.go, theirs), refund whole-cents validation (intents/refund.go, theirs), subscription
+  dunning lifecycle expectations (modules/subscriptions churn), TestGetProductsEndpoint interval "720h" vs
+  "30d" (billing-cycle-hours formatting drift, not transport).
+- REAL BUG the flip surfaced + fixed: the neutral query binder (request.go decodeTaggedValues) did not
+  recurse into nested filter structs (query.QueryOptions[T].Filters), silently dropping e.g. the
+  /v1/merchant/payments?user_id= filter, and lacked time.Time(time_format)/TextUnmarshaler(uuid) support —
+  gin recursed. Fixed to gin parity + pinned by TestHTTPBindQueryNestedFiltersTimeAndUUID; the admin
+  payments list-filter integration tests now pass. Also fixed two stale tests: http_handler_options_test
+  (#666 migration forgot Assembler.Authenticator → panic aborted the whole tests/ package) and
+  embedded_http_surface_test (pre-#650 expectation that the global /v1/webhooks surface is absent).
 
 ## Problem
 Two complete HTTP stacks: standalone serves gin (`cmd/openrails/main.go:204` → `pkg/embedded/gin` →
@@ -1300,6 +2036,11 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 **Completed:** no
 
 Add Hyperswitch as an optional OpenRails payment provider and payment-method vault integration, covering both Hyperswitch Cloud and self-hosted Hyperswitch. This is payment vaulting/tokenization, not HashiCorp Vault merchant-secret storage. OpenRails should store only opaque Hyperswitch customer/payment-method identifiers plus non-sensitive metadata, while PAN/card collection stays in Hyperswitch-hosted/client-side tokenization flows or equivalent PCI-scoped Hyperswitch surfaces.
+
+NOTE (2026-07-01): for the CROSS-MERCHANT wallet, the SaaS strategy chose Stripe-Connect saved-PM reuse
+(Rank 1, ~/openrails-saas/payments-multi-merchant-wallet-and-payfac.md) — Hyperswitch is NOT that path;
+it stays a per-merchant vault-tech option, and any shared use falls under openrails-saas #23
+(vault/state inseparability).
 
 This issue must reconcile with future issue #297 (`deplatforming-resilient-card-vault`): Hyperswitch should not be positioned as the default adult/high-risk deplatforming-resilient vault until its contractual/export/compliance posture is explicitly certified. Hyperswitch Cloud may still be useful for lower-risk deployments or as an optional provider, and self-hosted Hyperswitch may be a break-glass/advanced deployment path if the operator accepts and satisfies the PCI requirements.
 

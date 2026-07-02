@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/intents"
 )
 
 const defaultAdminOperationsLimit = 50
@@ -73,97 +71,6 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 	r.SuccessJSONPaginated(items, total, limit, offset)
 }
 
-// manualRebillStatusFilters maps the endpoint's legacy status vocabulary
-// (from the retired openrails.manual_rebill_attempts table) onto provider
-// intent ledger statuses (#358 phase C).
-var manualRebillStatusFilters = map[string]string{
-	"pending":                        intents.StatusPending,
-	"succeeded":                      intents.StatusSucceeded,
-	"failed":                         intents.StatusFailedTerminal,
-	"unknown":                        intents.StatusUnknownNeedsVerify,
-	intents.StatusInFlight:           intents.StatusInFlight,
-	intents.StatusFailedRetryable:    intents.StatusFailedRetryable,
-	intents.StatusFailedTerminal:     intents.StatusFailedTerminal,
-	intents.StatusUnknownNeedsVerify: intents.StatusUnknownNeedsVerify,
-	intents.StatusSuperseded:         intents.StatusSuperseded,
-	intents.StatusExpired:            intents.StatusExpired,
-}
-
-// GetAdminManualRebillAttempts lists manual_rebill provider intents — the
-// dunning charges folded onto the intent ledger. Defaults to the rows needing
-// operator attention (unknown_needs_verify), like the retired claim-table
-// view did.
-func GetAdminManualRebillAttempts(r *httprequest.Request) {
-	ctx := r.Request.Context()
-	limit, offset := adminOperationsPagination(r)
-
-	var statusFilter *string
-	status := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("status")))
-	if status == "" {
-		status = "unknown"
-	}
-	if status != "all" {
-		mapped, ok := manualRebillStatusFilters[status]
-		if !ok {
-			r.ErrorJSON(http.StatusBadRequest, "invalid status")
-			return
-		}
-		statusFilter = &mapped
-	}
-
-	var railFilter *string
-	if rail := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("rail"))); rail != "" {
-		railFilter = &rail
-	}
-	intentType := intents.TypeManualRebill
-
-	q := r.State.DB.Gen(ctx)
-	total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
-		Status: statusFilter, Provider: railFilter, IntentType: &intentType,
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to count manual rebill intents")
-		return
-	}
-	rows, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
-		Status: statusFilter, Provider: railFilter, IntentType: &intentType,
-		PageLimit: int64(limit), PageOffset: int64(offset),
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve manual rebill intents")
-		return
-	}
-	items := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		item := map[string]any{
-			"id":              row.ID,
-			"subscription_id": row.SubscriptionID,
-			"rail":            row.Provider,
-			"status":          row.Status,
-			"attempts":        row.Attempts,
-			"next_attempt_at": row.NextAttemptAt,
-			"failure_reason":  row.LastFailureReason,
-			"expires_at":      row.ExpiresAt,
-			"executed_at":     row.ExecutedAt,
-			"created_at":      row.CreatedAt,
-			"updated_at":      row.UpdatedAt,
-		}
-		var payload intents.ManualRebillPayload
-		if len(row.Payload) > 0 && json.Unmarshal(row.Payload, &payload) == nil {
-			item["period_end"] = payload.PeriodEnd
-			item["order_reference"] = payload.OrderReference
-			item["attempt"] = payload.Attempt
-		}
-		var evidence map[string]any
-		if len(row.ResultEvidence) > 0 && json.Unmarshal(row.ResultEvidence, &evidence) == nil {
-			if txn, ok := evidence["transaction_id"].(string); ok {
-				item["transaction_id"] = txn
-			}
-		}
-		items = append(items, item)
-	}
-	r.SuccessJSONPaginated(items, total, limit, offset)
-}
-
 // #528: GetAdminProviderIntents (the #358 provider-intent ledger debug view) was
 // dropped — it lived only on the retired per-user admin surface.
+// #666: GetAdminManualRebillAttempts (never routed) was dropped with it.

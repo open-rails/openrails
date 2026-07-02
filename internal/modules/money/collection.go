@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -72,8 +73,9 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	if rail == "" {
 		return ChargeResult{}, fmt.Errorf("payment method rail required")
 	}
-	switch rail {
-	case string(models.RailCCBill), string(models.RailSolana):
+	// Registry-backed exclusion (#669): known rails that can't charge a saved
+	// method fail explicitly; unknown rail strings fall to adapter-not-found.
+	if d, ok := rails.Lookup(models.Rail(rail)); ok && !d.SupportsChargeSavedMethod {
 		return ChargeResult{}, fmt.Errorf("rail %q does not support invoice collection", rail)
 	}
 

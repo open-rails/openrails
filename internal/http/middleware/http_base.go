@@ -1,24 +1,23 @@
 package middleware
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// This file holds the gin-free net/http analogues of the global engine
-// middleware (issue #282). The embedded surface (server.NewHTTPHandler) wraps its
-// ServeMux with these so it can run security headers, body limits, CORS, and
-// merchant resolution WITHOUT importing gin. The standalone gin server keeps using
-// the gin versions in security.go / merchant.go.
-//
-// Rate-limiting + the captcha challenge flow ARE available gin-free: the neutral
-// engine lives in ratelimit_neutral.go (EvaluateRateLimit / RateLimitHTTP), driven
-// by both the gin surface (via ginmw) and the embedded surface, so an embedded
-// host enforces OpenRails' own rate limits + captcha without its own gateway.
+// This file holds the net/http base middleware (issue #282; sole stack since
+// #670): security headers, body limits, CORS, merchant resolution, recovery,
+// request logging. Both the standalone server and the embedded surface wrap
+// their muxes with these. Rate-limiting + the captcha challenge flow live in
+// ratelimit_neutral.go (EvaluateRateLimit / RateLimitHTTP).
 
 // HTTPMiddleware is a standard net/http middleware (outermost wrapper).
 type HTTPMiddleware func(http.Handler) http.Handler
@@ -97,6 +96,105 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// CORSOriginSource returns the browser Origin allow-list for the current request.
+type CORSOriginSource func(context.Context) ([]string, error)
+
+// CORSFromSourceHTTP grants browser CORS headers only to origins allow-listed by
+// a per-request source (e.g. AuthKit remote_application state). An empty or
+// failing source grants no browser Origin. OPTIONS is still answered with 204 so
+// denied preflight fails in the browser without invoking handlers.
+func CORSFromSourceHTTP(source CORSOriginSource) HTTPMiddleware {
+	staticCORS := CORSHTTP(nil)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origins := []string(nil)
+			if source != nil && strings.TrimSpace(r.Header.Get("Origin")) != "" {
+				if got, err := source(r.Context()); err == nil {
+					origins = got
+				}
+			}
+			if origins == nil {
+				staticCORS(next).ServeHTTP(w, r)
+				return
+			}
+			CORSHTTP(origins)(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+// RecoverHTTP converts handler panics into a 500 response (the net/http
+// analogue of gin.Recovery, kept for the standalone flip #670).
+func RecoverHTTP() HTTPMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+						panic(rec)
+					}
+					log.WithField("panic", rec).Error("http handler panicked")
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte(`{"error":{"type":"api_error","code":"internal_error","message":"internal server error"}}`))
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequestLogHTTP logs one line per request (method, path, status, latency) —
+// the neutral analogue of the gin logger the standalone server used. skipPaths
+// are not logged (health probes).
+func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
+	skip := make(map[string]bool, len(skipPaths))
+	for _, p := range skipPaths {
+		skip[p] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if skip[r.URL.Path] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			start := time.Now()
+			sw := &statusWriter{ResponseWriter: w}
+			next.ServeHTTP(sw, r)
+			log.WithFields(log.Fields{
+				"status":  sw.status(),
+				"latency": time.Since(start).String(),
+				"ip":      r.RemoteAddr,
+			}).Info(r.Method + " " + r.URL.Path)
+		})
+	}
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	if s.code == 0 {
+		s.code = code
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if s.code == 0 {
+		s.code = http.StatusOK
+	}
+	return s.ResponseWriter.Write(b)
+}
+
+func (s *statusWriter) status() int {
+	if s.code == 0 {
+		return http.StatusOK
+	}
+	return s.code
 }
 
 // OriginAllowed reports whether origin is explicitly allow-listed for browser

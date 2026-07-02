@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -34,9 +35,9 @@ type SubscriptionLifecycleService struct {
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
-	NotificationService NotificationEmailSender
-	PaymentService      *payments.PaymentService // For creating Payment records on renewal
-	EventLogService     LifecycleEventLogger     // For logging events to ClickHouse
+	NotificationService *NotificationService
+	PaymentService      *payments.PaymentService   // For creating Payment records on renewal
+	EventLogService     *analytics.EventLogService // For logging events to ClickHouse
 
 	// deferDelete enqueues the deferred NMI delete_subscription job (#344
 	// follow-up). Optional: injected via SetDeferredDeleteScheduler in the
@@ -74,7 +75,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *payments.PaymentService, eventLogService *analytics.EventLogService, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                            // Set via SetConfig if feature flags are needed

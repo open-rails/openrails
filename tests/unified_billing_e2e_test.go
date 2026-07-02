@@ -41,15 +41,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -62,7 +61,7 @@ import (
 type billingE2EHarness struct {
 	t          *testing.T
 	suite      *TestContainerSuite
-	router     *gin.Engine
+	router     http.Handler
 	creditType string
 	// ms + ctx read durable money state from the #512 ledger (the dropped
 	// money_transactions/money_blocks tables are gone).
@@ -77,10 +76,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "e2e_credits_" + uuid.NewString()
 
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/merchant")
+	mux := http.NewServeMux()
 	// Merchant-wide token: #569 (hard cut) removed API-key resource scopes, so a
 	// resolved merchant credential is merchant-wide — AllowsCustomer returns true
 	// for every customer under the merchant, so each test's random payer is in scope.
@@ -89,7 +85,8 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		controlplane.PermMerchantCustomerSettingsUpdate,
 		controlplane.PermMerchantAdmissionsCreate,
 	}}
-	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
 
 	return &billingE2EHarness{
 		t:          t,

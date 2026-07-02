@@ -162,14 +162,19 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 }
 
 // captureBody is the POST /v1/merchant/admissions/:id/capture body. The wire
-// field is "amount" (the handler binds it as REQUIRED).
+// field is "amount" (the handler binds it as REQUIRED). customer_id / currency /
+// invoker / admit_source are the ADDITIVE #676 fallback payer coordinates.
 type captureBody struct {
-	Amount    int64          `json:"amount"`
-	EventType string         `json:"event_type,omitempty"`
-	Resource  string         `json:"resource,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	Source    string         `json:"source,omitempty"`
-	SourceID  string         `json:"source_id,omitempty"`
+	Amount      int64          `json:"amount"`
+	CustomerID  string         `json:"customer_id,omitempty"`
+	Currency    string         `json:"currency,omitempty"`
+	Invoker     string         `json:"invoker,omitempty"`
+	AdmitSource string         `json:"admit_source,omitempty"`
+	EventType   string         `json:"event_type,omitempty"`
+	Resource    string         `json:"resource,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	Source      string         `json:"source,omitempty"`
+	SourceID    string         `json:"source_id,omitempty"`
 }
 
 // Capture implements Client (handler ServiceCaptureHold). Idempotent on the
@@ -179,6 +184,13 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 		return invalidErr("capture requires request_id")
 	}
 	body := captureBody{Amount: capturedAmount}
+	if usage != nil {
+		// #676 fallback payer coordinates travel regardless of EventType.
+		body.CustomerID = usage.CustomerID
+		body.Currency = usage.Currency
+		body.Invoker = usage.Invoker
+		body.AdmitSource = usage.AdmitSource
+	}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		body.EventType = usage.EventType
 		body.Resource = usage.Resource

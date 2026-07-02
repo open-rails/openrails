@@ -75,10 +75,28 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 	return nil
 }
 
+// LockCustomer takes the per-customer spend mutex (#491/#677): the same
+// customers-row FOR UPDATE money's lockBalance takes, so lot-consuming/
+// reversing writes serialize with spends. Only effective inside a tx.
+func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {
+	if _, err := l.q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
+		ID: customer, MerchantID: l.merchant,
+	}); err != nil {
+		return fmt.Errorf("grants: lock customer %s: %w", customer, err)
+	}
+	return nil
+}
+
 // ExpireLapsed claws the unspent remainder of every past-expiry credit lot to
 // the expired_credits account (one #512 transfer per lot). Idempotent: an
 // already-expired lot has zero remainder and is skipped. Returns total expired.
+// Compose inside a tx: it takes the per-customer spend lock (#677) so a
+// concurrent spend can't draw a lot between the remaining read and the
+// credit_expire write.
 func (l *Ledger) ExpireLapsed(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
+	if err := l.LockCustomer(ctx, customer); err != nil {
+		return 0, err
+	}
 	lots, err := l.q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
 		MerchantID: l.merchant, CustomerID: customer, Currency: currency, AsOf: l.now(),
 	})
@@ -108,12 +126,4 @@ func (l *Ledger) ExpireLapsed(ctx context.Context, customer uuid.UUID, currency 
 		expired += lot.Remaining
 	}
 	return expired, nil
-}
-
-// SpendableLots returns the customer's live credit lots with derived remaining
-// (FIFO order). Useful for callers that surface a credit breakdown.
-func (l *Ledger) SpendableLots(ctx context.Context, customer uuid.UUID, currency string) ([]gen.ListSpendableCreditLotsRow, error) {
-	return l.q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
-		MerchantID: l.merchant, CustomerID: customer, Currency: currency, AsOf: l.now(),
-	})
 }

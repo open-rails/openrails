@@ -11,14 +11,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprouter "github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -26,16 +27,15 @@ import (
 func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	suite := setupTestSuite(t)
 
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	ginroutes.RegisterCustomerTreasuryRoutes(router.Group("/v1/customers"), suite.App.Runtime,
-		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{
+	router := http.NewServeMux()
+	httproutes.RegisterCustomerTreasuryRoutes(httprouter.NewMux(router, "/v1/customers", suite.App.Runtime), suite.App.Runtime,
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
 				controlplane.PermCustomerSpendDelegationsRead,
 				controlplane.PermCustomerSpendDelegationsUpdate,
 			},
-		}))
+		}), routesurface.AllProviderRoutes())
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

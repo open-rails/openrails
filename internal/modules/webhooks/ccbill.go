@@ -173,6 +173,21 @@ func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, 
 	}
 	if svc != nil {
 		svc.logBillingError(ctx, billingErr, logFields)
+		// #675: amount mismatches ACK as non-retryable — a >2% drifted REAL
+		// charge needs a durable operator trace, not just a log line.
+		txnID, _ := billingErr.Context["transaction_id"].(string)
+		if txnID == "" {
+			txnID, _ = logFields["transaction_id"].(string)
+		}
+		if alertErr := recordLedgerRepairAlert(ctx, svc.NotificationService, svc.DB, svc.now(), ledgerRepairAlert{
+			Provider:      string(models.RailCCBill),
+			Operation:     "amount_mismatch",
+			TransactionID: txnID,
+			Err:           billingErr,
+			Metadata:      billingErr.Context,
+		}); alertErr != nil {
+			return fmt.Errorf("record CCBill amount mismatch repair alert: %w", alertErr)
+		}
 	}
 	return billingErr
 }
@@ -634,7 +649,9 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 				Cadence:        models.CreditGrantCadenceOnce,
 				Source:         "subscription_initial",
 			}); err != nil {
-				log.WithContext(ctx).WithError(err).Warn("failed to grant initial subscription credits (CCBill)")
+				// #675: propagate for retry — the deposit is idempotent per
+				// (subscription, label, period_end); warn-and-ack lost the lot.
+				return fmt.Errorf("grant initial subscription credits (CCBill): %w", err)
 			}
 		}
 	}
@@ -908,6 +925,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		}
 	}
 
+	var mismatchRepairAlert *ledgerRepairAlert
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
@@ -967,6 +985,18 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				"transaction_id":  transactionID,
 				"subscription_id": subscription.ID,
 			})
+			// #675: durable operator trace for the real drifted charge — captured
+			// here, written after the tx rolls back (see mismatchRepairAlert).
+			subscriptionID := subscription.ID
+			mismatchRepairAlert = &ledgerRepairAlert{
+				Provider:       string(models.RailCCBill),
+				Operation:      "amount_mismatch",
+				TransactionID:  transactionID,
+				UserID:         subscription.CustomerID.String(),
+				SubscriptionID: &subscriptionID,
+				Err:            billingErr,
+				Metadata:       billingErr.Context,
+			}
 			return billingErr
 		}
 
@@ -1118,6 +1148,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 		return nil
 	}); err != nil {
+		if mismatchRepairAlert != nil {
+			if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *mismatchRepairAlert); alertErr != nil {
+				return fmt.Errorf("record CCBill upgrade amount mismatch repair alert: %w", alertErr)
+			}
+		}
 		return err
 	}
 	return nil
@@ -1578,7 +1613,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if sub.Price != nil {
-			priceAmount = float64(sub.Price.Amount) / 100.0
+			priceAmount = moneyutil.MicrosToMajorUnits(sub.Price.Amount) // #671 1f: micros, not cents
 			priceCurrency = sub.Price.Currency
 			if sub.Price.RecurringCycleHours() != nil {
 				billingCycleHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
@@ -1912,47 +1947,16 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
-				// This is expected for voids - the subscription may never have been created
+				// #675: the void may race the NewSaleSuccess webhook — retryable
+				// error (CCBill redelivers on non-2xx) so redelivery applies the
+				// reversal once the sale materializes; a plain ACK let the later
+				// sale create entitlements for an already-voided charge.
 				log.WithContext(ctx).WithFields(log.Fields{
-					"rail_subscription_id":    pSubscriptionID,
-					"void_amount":             voidAmount,
-					"void_transaction_id":     voidTransactionID,
-					"original_transaction_id": voidTransactionID,
-				}).Info("Void event for non-existent subscription - transaction was voided before subscription creation")
-
-				// Still log the void event for audit purposes, but without subscription ID
-				if s.EventLogService != nil {
-					metadata := map[string]interface{}{
-						"void_transaction_id":     voidTransactionID,
-						"original_transaction_id": voidTransactionID,
-						"rail":                    "ccbill",
-						"event_source":            "webhook",
-						"void_reason":             voidReason,
-						"void_amount":             voidAmount,
-						"rail_subscription_id":    pSubscriptionID,
-						"subscription_exists":     false,
-					}
-
-					// Log as payment event (negative amount for void)
-					negativeAmount := -voidAmount
-					paymentEventData := analytics.PaymentEventData{
-						EventID:       uuidutil.NewV7(),
-						EventType:     analytics.PaymentEventVoid,
-						Rail:          "ccbill",
-						Amount:        &negativeAmount,
-						Currency:      currencyValue,
-						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
-						WebhookSource: "webhook",
-						Metadata:      analytics.CreateMetadataJSON(metadata),
-						Timestamp:     s.now().UTC(),
-					}
-
-					if err = s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-						log.WithError(err).Error("Failed to log void event to ClickHouse")
-					}
-				}
-
-				return nil // Don't fail webhook processing
+					"rail_subscription_id": pSubscriptionID,
+					"void_amount":          voidAmount,
+					"void_transaction_id":  voidTransactionID,
+				}).Warn("Void event for unknown subscription; retrying until the sale materializes")
+				return fmt.Errorf("subscription %q not found for CCBill void: %w", pSubscriptionID, err)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -2096,52 +2100,15 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if repo.IsNotFound(err) {
+				// #675: the chargeback may race the sale webhook — retryable error
+				// (CCBill redelivers on non-2xx) so redelivery terminates the
+				// subscription once the sale materializes; a plain ACK left the
+				// charged-back access standing.
 				log.WithContext(ctx).WithFields(log.Fields{
 					"rail_subscription_id": pSubscriptionID,
 					"chargeback_amount":    chargebackAmount,
-					"dispute_id":           "unknown",
-				}).Error("Chargeback event for non-existent subscription - potential fraud")
-
-				// Still log the chargeback event for audit purposes
-				if s.EventLogService != nil {
-					metadata := map[string]interface{}{
-						"chargeback_transaction_id": chargebackTransactionID,
-						"original_transaction_id":   chargebackTransactionID,
-						"rail":                      "ccbill",
-						"event_source":              "webhook",
-						"chargeback_reason":         chargebackReason,
-						// CCBill doesn't provide dispute_id or structured reason codes in their webhook format
-						// The "Reason" field is a free-text description, not a standard code
-						"rail_subscription_id": pSubscriptionID,
-						"subscription_exists":  false,
-						"fraud_flag":           true,
-						// Card info for fraud analysis
-						"card_type":     data.CardType,
-						"card_last4":    data.Last4,
-						"card_exp_date": data.ExpDate,
-						"card_bin":      data.Bin,
-					}
-
-					// Log as payment event (negative amount for chargeback)
-					negativeAmount := -chargebackAmount
-					paymentEventData := analytics.PaymentEventData{
-						EventID:       uuidutil.NewV7(),
-						EventType:     analytics.PaymentEventChargeback,
-						Rail:          "ccbill",
-						Amount:        &negativeAmount,
-						Currency:      currencyValue,
-						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
-						WebhookSource: "webhook",
-						Metadata:      analytics.CreateMetadataJSON(metadata),
-						Timestamp:     s.now().UTC(),
-					}
-
-					if err = s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-						log.WithError(err).Error("Failed to log chargeback event to ClickHouse")
-					}
-				}
-
-				return nil // Don't fail webhook processing
+				}).Error("Chargeback event for unknown subscription; retrying until the sale materializes")
+				return fmt.Errorf("subscription %q not found for CCBill chargeback: %w", pSubscriptionID, err)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -2467,7 +2434,9 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 				Cadence:        models.CreditGrantCadencePerRenewal,
 				Source:         "subscription_renewal",
 			}); err != nil {
-				log.WithContext(ctx).WithError(err).Warn("failed to grant renewal subscription credits (CCBill)")
+				// #675: propagate for retry — the deposit is idempotent per
+				// (subscription, label, period_end); warn-and-ack lost the lot.
+				return fmt.Errorf("grant renewal subscription credits (CCBill): %w", err)
 			}
 		}
 	}
@@ -2524,7 +2493,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if subscription.Price != nil {
-			priceAmount = float64(subscription.Price.Amount) / 100.0
+			priceAmount = moneyutil.MicrosToMajorUnits(subscription.Price.Amount) // #671 1f: micros, not cents
 			priceCurrency = subscription.Price.Currency
 			if subscription.Price.RecurringCycleHours() != nil {
 				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
@@ -2763,7 +2732,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
 		if subscription.Price != nil {
-			priceAmount = float64(subscription.Price.Amount) / 100.0
+			priceAmount = moneyutil.MicrosToMajorUnits(subscription.Price.Amount) // #671 1f: micros, not cents
 			priceCurrency = subscription.Price.Currency
 			if subscription.Price.RecurringCycleHours() != nil {
 				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
@@ -2891,7 +2860,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 			EventType:      analytics.PaymentEventSubscriptionCancelled,
 			Status:         string(models.StatusCancelled),
 			CancelType:     string(cancelType),
-			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
+			PriceAmount:    moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
 			PriceCurrency:  subscription.Price.Currency,
 			BillingCycleHours: func() uint32 {
 				if subscription.Price.RecurringCycleHours() != nil {
@@ -2972,7 +2941,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			EventType:      analytics.PaymentEventSubscriptionExpired,
 			Status:         string(models.StatusCancelled),
 			CancelType:     string(models.CancelTypeExpired),
-			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
+			PriceAmount:    moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
 			PriceCurrency:  subscription.Price.Currency,
 			BillingCycleHours: func() uint32 {
 				if subscription.Price.RecurringCycleHours() != nil {

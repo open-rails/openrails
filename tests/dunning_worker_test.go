@@ -804,7 +804,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 	require.NotNil(t, updated.RetryAttempts)
 	assert.Equal(t, 1, *updated.RetryAttempts)
 	require.NotNil(t, updated.NextRetryAt)
-	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7, 1)), updated.NextRetryAt.UTC(), time.Minute,
+	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7*24, 1)), updated.NextRetryAt.UTC(), time.Minute,
 		"weekly tier schedules the first retry 24h out")
 
 	// Second failure: still past_due, next retry another 24h out.
@@ -818,7 +818,7 @@ func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 	require.NotNil(t, updated.RetryAttempts)
 	assert.Equal(t, 2, *updated.RetryAttempts)
 	require.NotNil(t, updated.NextRetryAt)
-	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7, 2)), updated.NextRetryAt.UTC(), time.Minute,
+	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7*24, 2)), updated.NextRetryAt.UTC(), time.Minute,
 		"weekly tier schedules the second retry another 24h out")
 
 	// Third failure: terminal (weekly tier allows 3 failures total).

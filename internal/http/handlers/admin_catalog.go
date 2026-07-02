@@ -186,31 +186,6 @@ func AdminDeactivateProduct(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// AdminReconcileProduct diffs the OpenRails product against its Stripe Product
-// (discovered via the product's prices) and re-applies OpenRails values
-// (display_name, description, active) to Stripe. ?dry_run=true returns the diff
-// without mutating. This is the product-level analog of AdminReconcilePrice.
-func AdminReconcileProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	opts := billingservice.ReconcileOptions{
-		DryRun: parseBool(r.Query("dry_run")),
-	}
-	out, err := svc.ReconcileProduct(r.Request.Context(), id, opts)
-	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
 // -- Prices ------------------------------------------------------------------
 
 func AdminCreatePrice(r *httprequest.Request) {
@@ -337,31 +312,6 @@ func AdminActivatePrice(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.ActivatePrice(r.Request.Context(), id)
-	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-// AdminReconcilePrice diffs the OpenRails price against Stripe and re-applies
-// OpenRails values to Stripe. ?dry_run=true returns the diff without mutating.
-// ?recreate=true is required when the stored Stripe Price 404s.
-func AdminReconcilePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	opts := billingservice.ReconcileOptions{
-		DryRun:   parseBool(r.Query("dry_run")),
-		Recreate: parseBool(r.Query("recreate")),
-	}
-	out, err := svc.ReconcilePrice(r.Request.Context(), id, opts)
 	if err != nil {
 		writeCatalogError(r, priceLookupErr(err))
 		return

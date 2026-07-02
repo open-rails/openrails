@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
@@ -180,11 +181,26 @@ func adminRefundErrorResponse(err error) (int, string) {
 }
 
 type adminRefundPrepared struct {
-	existing             *models.Payment
-	payment              *models.Payment
-	reservation          *models.Payment
+	existing    *models.Payment
+	payment     *models.Payment
+	reservation *models.Payment
+	// amountCents is req.Amount (micros) converted at the provider boundary:
+	// NMI and Stripe both refund in cents (typed, #671). Exact conversion —
+	// sub-cent micros are rejected in prepare, never rounded.
+	amountCents          moneyutil.Cents
 	stripeRefundTargetID string
 	nmiClient            *nmi.NMIClient
+}
+
+// refundAmountCents converts an admin refund request amount (micros) to the
+// provider cents amount. Refunds must be exact: a sub-cent remainder is an
+// error, never rounded.
+func refundAmountCents(amountMicros int64) (int64, error) {
+	cents, err := moneyutil.MicrosToCentsExact(amountMicros)
+	if err != nil {
+		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
+	}
+	return cents, nil
 }
 
 func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
@@ -210,8 +226,12 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
+	amountCents, err := refundAmountCents(req.Amount)
+	if err != nil {
+		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+	}
 
-	prepared := &adminRefundPrepared{payment: payment}
+	prepared := &adminRefundPrepared{payment: payment, amountCents: moneyutil.Cents(amountCents)}
 	var stripeRefundTargetID string
 	var nmiClient *nmi.NMIClient
 	switch {
@@ -327,7 +347,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "refund processing error")
 	}
 
-	intentType, provider, intentKey, err := intents.RefundIntentFor(prepared.payment, providerTarget, req.Amount, req.Reason)
+	intentType, provider, intentKey, err := intents.RefundIntentFor(prepared.payment, providerTarget, prepared.amountCents, req.Reason)
 	if err != nil {
 		log.WithError(err).WithField("payment_id", prepared.payment.ID).Warn("admin refund: building refund intent failed")
 		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, err); relErr != nil {
@@ -350,7 +370,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		Payload: intents.RefundPayload{
 			OriginalPaymentID: prepared.payment.ID,
 			ReservationID:     prepared.reservation.ID,
-			AmountCents:       req.Amount,
+			AmountCents:       prepared.amountCents,
 			Reason:            strings.TrimSpace(req.Reason),
 			ProviderTarget:    providerTarget,
 		},

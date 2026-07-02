@@ -333,3 +333,61 @@ func TestGate_WindowAccumulates(t *testing.T) {
 	require.False(t, d.Allowed, "700+400 breaches the 1000 window")
 	require.NotNil(t, d.BlockedWindow)
 }
+
+// #676: an abandoned admit (hold record TTL-expired, never captured/released)
+// must not shrink capacity permanently — a blocked admit recomputes `held` from
+// the live hold records and re-checks.
+func TestGate_AbandonedHoldRecomputeRestoresCapacity(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, AccountBalance: 1000, HoldTTL: 200 * time.Millisecond})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(600), held)
+
+	// Let the hold record expire; the gauge still says 600.
+	time.Sleep(300 * time.Millisecond)
+
+	// This admit would be denied against the stale gauge (1000-600-600 < 0);
+	// the recompute drops the expired hold and admits.
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, AccountBalance: 1000})
+	require.NoError(t, err)
+	require.True(t, d.Allowed, "abandoned admit must release capacity once its hold expires")
+
+	held, err = g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(600), held, "gauge reflects only the live hold after recompute")
+}
+
+// #676: releasing a request whose window bucket already TTL-expired must not
+// recreate the bucket as a permanent negative key.
+func TestGate_ReleaseAfterBucketExpiryNoNegativeWindow(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	pol := fixedPayerPolicy(1000, 300*time.Millisecond)
+	req := spendgate.Request{}
+	r := rid()
+
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: r, Cost: 500, AccountBalance: 1_000_000, Policy: pol})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	// Bucket TTL = remaining window + 1s <= 1.3s real time; wait it out. The fake
+	// clock stays put, so the release targets the SAME (now expired) bucket key.
+	time.Sleep(1500 * time.Millisecond)
+
+	require.NoError(t, g.Release(ctx, spendgate.ReleaseInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
+
+	ws, err := g.WindowStatus(ctx, m, c, cur, pol, req)
+	require.NoError(t, err)
+	require.Len(t, ws, 1)
+	require.Equal(t, int64(0), ws[0].Used, "release must not recreate an expired bucket as a negative key")
+
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, held, int64(0), "held gauge never goes negative")
+}

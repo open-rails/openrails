@@ -559,16 +559,10 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 
 // RegisterWebhookRoutes mounts the legacy configured-merchant webhook surface.
 // Standalone and embedded defaults do not call this; hosts should prefer
-// RegisterMerchantWebhookRoutes or RegisterHostWebhookRoutes.
+// RegisterMerchantWebhookRoutes.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider/:account_id", h(httphandlers.Webhook))
 	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
-}
-
-// RegisterHostWebhookRoutes mounts POST /:provider for embedding hosts that
-// resolve Host -> merchant in middleware before OpenRails verifies the webhook.
-func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime) {
-	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.HostWebhook))
 }
 
 // RegisterMerchantWebhookRoutes mounts the CANONICAL merchant-scoped webhook surface

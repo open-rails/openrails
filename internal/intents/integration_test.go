@@ -23,12 +23,12 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-// fakeNMI scripts the gateway: the Query API (recurring report) answers
-// whether the subscription is "present", the Direct Post API answers the
-// delete. Both record call counts.
+// fakeNMI scripts the gateway: GET /subscriptions/{id} answers whether the
+// subscription is "present" (404 = gone), DELETE /subscriptions/{id} answers
+// the delete. Both record call counts.
 type fakeNMI struct {
 	present      atomic.Bool
-	deleteBody   atomic.Value // string response for recurring=delete_subscription
+	deleteBody   atomic.Value // string JSON response for the delete (empty = 200 no body)
 	queryCalls   atomic.Int64
 	deleteCalls  atomic.Int64
 	deleteStatus atomic.Int64 // optional HTTP status for the delete (0 = 200)
@@ -39,29 +39,29 @@ func newFakeNMI(t *testing.T, psid string, present bool) (*fakeNMI, *nmi.NMIClie
 	t.Helper()
 	f := &fakeNMI{psid: psid}
 	f.present.Store(present)
-	f.deleteBody.Store("response=1&responsetext=SUCCESS")
+	f.deleteBody.Store("{}")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("report_type") == "recurring" || r.URL.Query().Get("report_type") == "recurring" {
+		switch r.Method {
+		case http.MethodGet:
 			f.queryCalls.Add(1)
 			if f.present.Load() {
-				fmt.Fprintf(w, `<nm_response><subscription><subscription_id>%s</subscription_id></subscription></nm_response>`, f.psid)
+				fmt.Fprintf(w, `{"object":"subscription","id":"%s"}`, f.psid)
 			} else {
-				fmt.Fprint(w, `<nm_response></nm_response>`)
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`)
 			}
-			return
-		}
-		if r.Form.Get("recurring") == "delete_subscription" {
+		case http.MethodDelete:
 			f.deleteCalls.Add(1)
 			if st := f.deleteStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
+				fmt.Fprint(w, `{"type":"internalError","error_code":"E_INTERNAL","message":"delete failed"}`)
 				return
 			}
 			_, _ = w.Write([]byte(f.deleteBody.Load().(string)))
-			return
+		default:
+			_, _ = w.Write([]byte(`{}`))
 		}
-		_, _ = w.Write([]byte("response=1"))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -72,6 +72,7 @@ func newFakeNMI(t *testing.T, psid string, present bool) (*fakeNMI, *nmi.NMIClie
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return f, client
 }
 

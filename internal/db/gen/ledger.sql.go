@@ -379,27 +379,6 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 	return balance, err
 }
 
-const ledgerLedgerNet = `-- name: LedgerLedgerNet :one
-SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint AS net
-FROM openrails.ledger_accounts
-WHERE merchant_id = $1::uuid
-  AND currency = $2::text
-`
-
-type LedgerLedgerNetParams struct {
-	MerchantID uuid.UUID
-	Currency   string
-}
-
-// LedgerLedgerNet: conservation check from maintained counters. Double-entry
-// guarantees this is 0 when the projection is in sync.
-func (q *Queries) LedgerLedgerNet(ctx context.Context, arg LedgerLedgerNetParams) (int64, error) {
-	row := q.db.QueryRow(ctx, ledgerLedgerNet, arg.MerchantID, arg.Currency)
-	var net int64
-	err := row.Scan(&net)
-	return net, err
-}
-
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid

@@ -131,7 +131,7 @@ func (a *nmiAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCre
 		planName = planID
 	}
 	// plan_payments=0 means bill forever; OpenRails models open-ended subscriptions.
-	return client.AddRecurringPlan(planID, planName, amountCents, *in.BillingCycleDays, 0)
+	return client.AddRecurringPlan(planID, planName, moneyutil.Cents(amountCents), *in.BillingCycleDays, 0)
 }
 
 // nmiDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.

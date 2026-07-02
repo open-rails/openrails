@@ -8,7 +8,7 @@
 //
 //   - Server 1, EMBEDDED no-auth HOST (≈ doujins minus auth): embed.New +
 //     the real embedded /v1/merchant/* surface on httptest, behind the REAL
-//     ServiceCredentialRequired middleware wired to a TRUSTING resolver (no auth).
+//     service-credential route gate wired to a TRUSTING resolver (no auth).
 //   - Server 2, STANDALONE real server + real AuthKit: the actual standalone gin
 //     server with the control plane attached, authenticated by a REAL minted
 //     API key resolved through AuthKit core (#481 role-based authz).
@@ -617,7 +617,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	require.NoError(t, standaloneClient.Release(ctx, uuid.NewString()))
 
 	// Standalone real-auth contract: a bad bearer is rejected by the real
-	// ServiceCredentialRequired middleware -> 401 -> ErrUnauthorized.
+	// service-credential gate -> 401 -> ErrUnauthorized.
 	badStandalone := standalone.Client(
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "openrails_st_wrong_token", nil }),
 	)

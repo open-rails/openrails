@@ -22363,3 +22363,158 @@ signup → renewal → (on failure) dunning → certain-exhaustion cancel. A fre
 legacy --skip-files run` on a fresh DB) followed by convergence in any job order yields correct state — the
 1,672-row damage cannot recur; the old DB is discarded, no repair path. The two cohort queries are provably
 complementary.
+
+---
+
+# #663: hard-cut the NMI rail to the modern v5 JSON API (classic ops survive only where v5 has no equivalent)
+
+**Completed:** yes
+**Status:** COMPLETED 2026-07-01 (Claude; uncommitted at archive time). Implemented, unit + integration
+green (nmi, reconcile, converge, intents, vault, money, river, pkg/service), and LIVE-VALIDATED against the
+real NMI sandbox: full lifecycle E2E green (vault -> v5 sale -> classic atomic enroll -> query.php remote
+verification -> active -> cancel) AND live invoice collection green. Paul's call: switch now, keep the old
+API only where genuinely necessary — five deliberate classic survivors, each live-verified necessary.
+
+## Decision (2026-07-01): hard cut, not incremental
+The future.md plan was incremental behind a per-account `api_version` toggle with classic retained as a
+fallback. SUPERSEDED: move to v5 JSON outright — no toggle, no coexistence. Cutover gate is the live
+sandbox E2E, not a runtime fallback.
+
+CORRECTION found during implementation + LIVE SANDBOX PROBING (2026-07-01): FIVE classic survivors, not
+one (each marked DELIBERATELY in code):
+1. `query.php` transaction SEARCH — bulk reconcile pull + order-id evidence probes (see below).
+2. `transact.php` `recurring=add_subscription` (`AddRecurringSubscription`) — the checkout enroll is an
+   ATOMIC first-charge + enroll + delayed-start (`start_date`) in ONE call. v5 `POST /subscriptions` was
+   LIVE-VERIFIED to NOT charge now: it schedules the first bill one full cycle out (created against a
+   30-day plan today -> start = +30d) and returns no transaction. Porting would both split one atomic
+   money op in two AND change when the customer is first charged. (Also: openrails DOES use NMI plans —
+   the "no-plan custom subscription" framing below was wrong.)
+3. `transact.php` `recurring=rebill_subscription` (`AttemptManualRebill`, dunning) — no v5 equivalent at all.
+4. `transact.php` `recurring=update_subscription` (`UpdateRecurringSubscription`,
+   `UpdateSubscriptionPaymentSource`) — PATCH /v5/subscriptions/{id} is DOCUMENTED but the live gateway
+   answers `E_ROUTE_NOT_FOUND`.
+5. `transact.php` `recurring=edit_plan` (`EditRecurringPlan`) — PATCH /v5/plans/{id} likewise
+   `E_ROUTE_NOT_FOUND` live.
+
+## Live-gateway divergences from the docs (found by probing the real sandbox, 2026-07-01)
+docs.nmi.com describes v5 surfaces the LIVE gateway doesn't have (or has differently). All encoded in code
+comments + tests:
+- `PATCH /v5/subscriptions/{id}` and `PATCH /v5/plans/{id}`: documented, but `E_ROUTE_NOT_FOUND` live.
+- `POST /v5/plans`: the id field is `id`, NOT the documented `plan_id` (rejected as an extra parameter).
+- `POST /v5/customers`: `billing.currency` is REQUIRED live (docs omit it); we send USD, mirroring the
+  money-path default (`money.DefaultCurrency`) and the single USD account class we run NMI on.
+- `PATCH /v5/customers/{id}`: requires `billing[].id` on each billing entry (live rejects the documented
+  `billing_id` name AND the documented omit-for-priority-1 behavior). `UpdateCustomerVault` therefore
+  resolves the priority-1 billing id with a read first.
+- Classic `edit_plan` identifies the plan via `current_plan_id`, NOT `plan_id` — sending `plan_id`
+  answers "Invalid Recurring Plan ID". The PRE-#663 code sent `plan_id`, meaning catalog plan edits had
+  NEVER worked against the live gateway; fixed as part of this issue and live-verified (v5 read shows the
+  classic edit).
+- Deleted subscriptions: v5 GET-by-id answers 200 with `delayed_condition:"inactive"` (a TOMBSTONE), not
+  404 — only never-existed ids 404. The LIST excludes deleted subs (count parity verified: v5 list ==
+  classic recurring report, 72==72). `GetSubscription` maps tombstones to found=false so the classic
+  absence-is-terminal semantics (#664/#665 evidence machinery) hold everywhere.
+- Vault sales: the documented `payment_details.customer_vault_id` is REJECTED as an extra parameter; the
+  live form is a TOP-LEVEL `customer_vault:{id}` object. (Lowercase currency codes are accepted.)
+- `order_details.id` hard-caps at 50 chars on payments (classic `orderid` had no such limit); >50 is a 422.
+  `order_details.order_id` is not accepted on payments (invoice-only field).
+- Pagination: `next_cursor` is a STRING (docs say integer) and EMPTY pages mid-stream are legal
+  (`has_more:true` with zero items) — loop on has_more/cursor, never break on an empty page.
+- The classic recurring report's `page_number=1` returns ZERO rows live (bare query returns all) — the OLD
+  fetcher's pagination was silently broken against the live gateway; the v5 roster fixes that.
+- Auth LIVE-CONFIRMED: the classic security key as the bare `Authorization` header works on every v5
+  route; classic-created plans/subscriptions/customers are all visible through v5 (same objects).
+
+## Auth — RESOLVED: same key, new transport, NO new secret
+NMI's Classic API Migration Playbook, verbatim: "No need to generate new API keys or alter permissions,
+both are inherited by the new endpoints." So the portal's plain "API key" (the classic security key — our
+existing `security_key` secret) auths v5 too. Transport changes: v5 wants it as the ENTIRE `Authorization`
+header value — "do not provide `Bearer`, `ApiKey`, or any other scheme". The portal's other keys are not
+ours to use here: the **v4 key** auths only `/api/v4/*` (partner/merchant-management surface we don't
+touch), the **checkout key** is the PUBLIC client-side key (Payment Component / hosted checkout).
+`query.php` keeps taking `security_key` in the request body as today.
+
+## Endpoint map (verified 2026-07-01 vs docs.nmi.com llms.txt index + v5 reference pages)
+| openrails op (classic) | v5 |
+|---|---|
+| sale / auth / validate / credit (new-money ops) | `POST /api/v5/payments/{sale,auth,validate,credit}` (top-level) |
+| capture / refund / void (ops ON a payment) | `POST /api/v5/payments/{id}/{capture,refund,void}` (id in PATH) |
+| get one transaction | `GET /api/v5/payments/{id}` |
+| vault charge (`RunSale`) | `POST /api/v5/payments/sale` with top-level `customer_vault:{id}` |
+| Customer Vault add / update / delete | `POST` / `PATCH` / `DELETE /api/v5/customers[/{id}]` (billing.currency required; update by `billing[].id`) |
+| vault roster (reconcile `report_type=customer_vault`) | `GET /api/v5/customers` (cursor pagination) |
+| recurring delete (cancel) | `DELETE /api/v5/subscriptions/{id}` (add/update/rebill stay classic — see Decision) |
+| recurring roster (reconcile `report_type=recurring`) | `GET /api/v5/subscriptions` |
+| recurring liveness by id (`GetRecurringLiveness`) | `GET /api/v5/subscriptions/{id}` |
+| Collect.js token in sale | `payment_details.payment_token` in JSON body (was flat `payment_token` field); client flow unchanged |
+| v5 refund vs credit | distinct ops, same as classic: refund = settled txn back to original method; credit = standalone |
+
+## `query.php` survives for transaction SEARCH only (researched, not assumed)
+- v5 payments has NO list/search — the complete v5 payments surface is the 7 ops + `GET /payments/{id}`
+  (get by KNOWN id). Every other v5 resource (customers, subscriptions, plans, invoices, products,
+  devices) has a List endpoint; payments does not (raw llms.txt grep, not a summarizer).
+- v4 HAS `POST /api/v4/transactions/reports` but it is PARTNER-key-only ("Your v4 API key that was
+  generated in the Partner portal", "transactions by merchants under your partner account") — that's the
+  reseller's (MobiusPay's) credential class, not our merchant one.
+- The two jobs that therefore stay on `query.php`:
+  1. reconcile's date-ranged bulk transaction pull, declines included (`internal/reconcile/nmi.go`
+     `report_type=transaction`);
+  2. order-id evidence probes (`internal/integrations/nmi/liveness.go` `ProbeSalesByOrderID` /
+     `FindSuccessfulSaleByOrderID` — #664/#665 machinery; get-by-id is useless when the tx id is the unknown).
+- Re-check for a v5 payments-list/search endpoint at each future NMI touch — if it appears, `query.php` dies.
+
+## Tasks
+- [x] v5 JSON transport (`internal/integrations/nmi/v5.go`, new): `DefaultV5BaseURL` + `V5BaseURL` field,
+      bare-security-key `Authorization` header, JSON encode/decode, error mapping (HTTP 4xx envelope
+      `{type,error_code,message}` → error; 404 → `ErrV5NotFound` sentinel; declined txns → the SAME
+      `CustomerVaultError` shape so caller semantics/localization ids are unchanged), read-only guard on
+      every non-GET, timeouts preserved. Money boundary is `centsJSONAmount`/`v5AmountToCents` (exact
+      decimal rendering, no float math) with wire-pinning tests (#671 rule).
+- [x] Port mutations: `RunSale` (vault charge via top-level `customer_vault:{id}` — live-verified form) →
+      v5 sale; `Refund`/`Void` → `POST /payments/{id}/{refund,void}`; vault CRUD → `/customers` (token in
+      `billing.payment_details.payment_token`; update targets the billing entry by `billing[].id`);
+      subscription delete → DELETE `/subscriptions/{id}`; plan create + lookup + list → `/plans[/{id}]`;
+      test-mode probe auth/void → v5. AddRecurringSubscription, AttemptManualRebill, subscription updates
+      and plan edits stay classic (see Decision — live gateway has no working routes for the last two).
+- [x] Reads: `GetRecurringLiveness` + nmi_delete's `subscriptionPresent` → `GET /subscriptions/{id}` (404 =
+      terminal); refund verifier `findRefund` → `GET /payments/{id}` actions; catalog drift/extras + River
+      reconciliation job → typed `ListRecurringPlans()` (v5 list, cursor); DELETED `GetTransactionDetails`,
+      `GetCustomerVaultData`, `GetSubscriptionData`, `GetRecurringPlanData`, `QueryRecurringSubscriptions`
+      + all their XML parsing.
+- [x] Reconcile fetcher (`internal/reconcile/nmi.go`): subscription + customer rosters → v5 lists with
+      cursor pagination (repeat-cursor guard); transaction pull stays `query.php`; email/name identity is
+      now JOINED from the customer roster via `customer_vault_id` (v5 subscriptions carry no email — the
+      diff engine's email-fallback matching depends on it, so the vault pull runs first).
+- [x] Tests rewritten to v5 JSON fixtures: nmi package (plans, probe, liveness, read-only guard covers BOTH
+      transports), reconcile fetcher, intents (delete present/absent via 404, refund verifier), vault
+      service (Authorization header + billing body pinned), catalog adapter/drift/extras. Full unit suite
+      green; reconcile/converge/intents/vault integration suites green locally.
+- [x] Webhooks: unchanged, verified by behavior — `internal/modules/webhooks/nmi.go` untouched; the live
+      E2E's subscription activated + cancelled through the normal flow with v5-created transactions.
+- [x] Live sandbox Go E2E (`tests/nmi_live_lifecycle_e2e_test.go`) GREEN end-to-end (2026-07-01): vault ->
+      v5 one-off sale approved -> classic atomic subscription enroll -> query.php remote verification ->
+      active -> cancel. Confirms the same security key auths v5 and classic-created objects are visible via
+      v5. (E2E fix required: the checkout money path resolves the NMI client from MERCHANT SECRETS first,
+      so the E2E now overwrites the suite's placeholder provider-account secret with the real sandbox key.)
+- [x] Live client-surface proof (`internal/integrations/nmi/live_sandbox_integration_test.go`, opt-in via
+      NMI_SANDBOX_SECURITY_KEY, kept permanently): drives EVERY ported client method against the real
+      sandbox — v5 probe auth/void, v5 plan create/get/list + classic edit (via v5-visible readback), v5
+      customer update (billing-id lookup + PATCH) / delete / roster, v5 vault sale, v5 payment get +
+      actions, v5 refund (simulator refunds immediately; production posture = settled-only refusal —
+      either accepted, shape errors never), query.php order-id search finding the v5-created sale, and
+      the 404 liveness path. GREEN 2026-07-01. Caught two real bugs: the `current_plan_id` edit_plan fix
+      and the missing `billing[].id` on customer update.
+- [x] Live sandbox invoice collection (`TestChargeOutstanding_NMISandbox_CollectsRealCharge`) GREEN —
+      caught two more live rules (see divergences): top-level `customer_vault:{id}` for vault sales, and
+      the 50-char `order_details.id` cap -> the invoice attempt key maps to a compact deterministic wire
+      ref (`nmiWireOrderRef`: "invoice:<uuid>:attempt:N" -> "inv:<uuid>:aN"); the LOCAL idempotency
+      identity is untouched and `RunSale` refuses >50-char order ids loudly (never silently truncates the
+      correlation handle the evidence probes search by).
+
+## Out of scope
+- The entire v4 surface (partner/onboarding/processor/fee config).
+- Client-side Collect.js / Payment Component changes (none needed).
+
+Acceptance (MET): the NMI rail runs sale/vault/plan-create/subscription-delete/liveness/reconcile-rosters
+on v5 JSON with the existing `security_key`; classic Direct Post remains ONLY for the five live-verified
+survivors and `query.php` ONLY for transaction search; live sandbox E2E + live invoice collection green.

@@ -42,15 +42,13 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 	return ledger.New(gen.New(pool), merchantID), pool, ctx, customer, merchantID, currency
 }
 
-// Deposit -> spend -> expire: balances move correctly and the ledger conserves.
+// Deposit -> spend -> expire transfers: balances move correctly and the ledger
+// conserves. (The spend/expire flows post through Apply — the module-level
+// wrappers live in grants.CreditSpend/ExpireLapsed.)
 func TestLedger_ConservationAndFlows(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 
 	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
-	require.NoError(t, err)
-	_, err = l.Spend(ctx, customer, cur, 300, "invoker-1", "gpt", 0)
-	require.NoError(t, err)
-	_, err = l.Expire(ctx, customer, cur, 200, "grant", uuid.NewString())
 	require.NoError(t, err)
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -62,14 +60,22 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 	exp, err := l.EnsureSystemAccount(ctx, ledger.ExpiredCredits, cur)
 	require.NoError(t, err)
 
+	c := customer
+	_, err = l.Apply(ctx, ledger.Transfer{
+		Debit: custAcc, Credit: rev, Amount: 300, Currency: cur, Type: "credit_spend", Customer: &c,
+	})
+	require.NoError(t, err)
+	_, err = l.Apply(ctx, ledger.Transfer{
+		Debit: custAcc, Credit: exp, Amount: 200, Currency: cur, Type: "credit_expire", Customer: &c,
+	})
+	require.NoError(t, err)
+
 	mustBalance(t, ctx, l, custAcc, 500)    // 1000 - 300 - 200
 	mustBalance(t, ctx, l, clearing, -1000) // funded the deposit
 	mustBalance(t, ctx, l, rev, 300)        // received the spend
 	mustBalance(t, ctx, l, exp, 200)        // received the expiry
 
-	net, err := l.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net, "every (merchant,currency) ledger must net to zero")
+	requireLedgerNetZero(t, ctx, pool, merchantID, cur)
 	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
@@ -80,20 +86,26 @@ func TestLedger_SignConstraint(t *testing.T) {
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
+	rev, err := l.EnsureSystemAccount(ctx, ledger.PlatformRevenue, cur)
+	require.NoError(t, err)
+	c := customer
 
 	// No credit line: overspend rejected, balance unchanged.
-	_, err = l.Spend(ctx, customer, cur, 150, "invoker-1", "gpt", 0)
+	_, err = l.Apply(ctx, ledger.Transfer{
+		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+	})
 	require.ErrorIs(t, err, ledger.ErrInsufficientFunds)
 	mustBalance(t, ctx, l, custAcc, 100)
 
 	// With a 100 arrears floor, the same spend is allowed and goes negative.
-	_, err = l.Spend(ctx, customer, cur, 150, "invoker-1", "gpt", 100)
+	_, err = l.Apply(ctx, ledger.Transfer{
+		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+		AllowDebitNegativeUpTo: 100,
+	})
 	require.NoError(t, err)
 	mustBalance(t, ctx, l, custAcc, -50)
 
-	net, err := l.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net)
+	requireLedgerNetZero(t, ctx, pool, merchantID, cur)
 	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
@@ -145,6 +157,17 @@ func TestLedger_AppendOnly(t *testing.T) {
 	_, err = conn.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE id = $1`, tr.ID)
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "permission denied")
+}
+
+// requireLedgerNetZero asserts double-entry conservation for the (merchant,
+// currency) ledger, read straight off the maintained counters.
+func requireLedgerNetZero(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, cur string) {
+	t.Helper()
+	var net int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
+		merchantID, cur).Scan(&net))
+	require.Equal(t, int64(0), net, "every (merchant,currency) ledger must net to zero")
 }
 
 func mustBalance(t *testing.T, ctx context.Context, l *ledger.Ledger, acc uuid.UUID, want int64) {

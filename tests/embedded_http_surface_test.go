@@ -51,9 +51,11 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 		require.NotEqual(t, http.StatusNotFound, w.Code)
 	}
 	{
+		// #650: the canonical provider-only global webhook surface IS mounted on
+		// standalone (payload/route resolves the provider account + merchant).
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
-		require.Equal(t, http.StatusNotFound, w.Code)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
 	}
 }

@@ -21,11 +21,10 @@ func IsConfigured(rails config.ProviderAccountSet, rail string) bool {
 
 // OpenRailsDrivenDunning reports whether OpenRails owns the retry timing for a
 // rail (so it models grace access as explicit entitlement windows during
-// dunning). True for the NMI gateway AND Solana recurring (#256/#257) — both are
-// charged by an OpenRails worker. Stripe is excluded: it drives its own dunning
-// and emits webhooks.
+// dunning). Registry-backed (#669); see Descriptor.OpenRailsDrivenDunning.
 func OpenRailsDrivenDunning(rail models.Rail) bool {
-	return rail == models.RailNMI || rail == models.RailSolana
+	d, ok := Lookup(rail)
+	return ok && d.OpenRailsDrivenDunning
 }
 
 // SameRail reports whether two rail identifiers name the same rail.

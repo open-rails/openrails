@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -380,17 +381,17 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	if isUpgrade {
-		// Model-B prorated first charge (new_full - old_unused) in cents, then
-		// cents -> stablecoin base units at the $1 peg (depeg failsafe inside).
-		firstChargeCents, _ := checkout.CalculateModelBUpgradeCharge(
+		// Model-B prorated first charge (new_full - old_unused) in micros, then
+		// micros -> stablecoin base units at the $1 peg (depeg failsafe inside).
+		firstChargeMicros, _ := checkout.CalculateModelBUpgradeCharge(
 			oldPrice.Amount,
 			newPrice.Amount,
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			nowOrDefault(r),
 		)
-		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(
-			r.Request.Context(), firstChargeCents, newTerms.mintSymbol, r.State.SolanaPriceProvider,
+		firstChargeBaseUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(
+			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, r.State.SolanaPriceProvider,
 		)
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the

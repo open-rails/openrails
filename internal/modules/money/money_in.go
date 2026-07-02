@@ -3,12 +3,16 @@ package money
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 // Charger performs an off-session (merchant-initiated) charge of a saved
@@ -25,10 +29,13 @@ type ChargeRequest struct {
 	Invoker         string
 	InvoiceID       *uuid.UUID
 	PaymentMethodID uuid.UUID
-	AmountCents     int64
-	Currency        string
-	IdempotencyKey  string
-	Description     string
+	// AmountCents is RAIL MINOR UNITS (typed Cents, #671): cents for USD/EUR,
+	// whole yen for zero-decimal JPY — always produced via NativeToRailMinor,
+	// never by an inline /10_000 or /100.
+	AmountCents    moneyutil.Cents
+	Currency       string
+	IdempotencyKey string
+	Description    string
 }
 
 type ChargeResult struct {
@@ -122,24 +129,34 @@ func (s *MoneyService) RunLowBalanceAlerts(ctx context.Context, alerter Alerter,
 	return sent, nil
 }
 
-// RunAutoTopups finds accounts with auto-top-up enabled whose available balance
-// is below the threshold, charges the saved payment method off-session, and
-// deposits the purchased credits. Deduped by last_topup_at within `cooldown`,
-// and idempotent per top-up episode so a retry cannot double-charge. Returns the
-// number of successful top-ups. (#239)
-func (s *MoneyService) RunAutoTopups(ctx context.Context, charger Charger, cooldown time.Duration) (int, error) {
+// AutoTopupCandidate is one account due an auto-top-up episode (#674): below
+// threshold, enabled, out of cooldown. EpisodeAnchor derives from the DURABLE
+// last_topup_at stamp (never wall clock), so every retry of one episode maps
+// onto ONE intent; the anchor only advances when a finalized episode stamps
+// the account.
+type AutoTopupCandidate struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	Currency        string
+	AmountNative    int64
+	PaymentMethodID uuid.UUID
+	Rail            string
+	EpisodeAnchor   string
+}
+
+// ListDueAutoTopups scans for accounts due an auto-top-up episode. The charge
+// itself is a durable topup_charge provider intent (#674) driven by the
+// AutoTopupWorker; this is the read side only. (#239)
+func (s *MoneyService) ListDueAutoTopups(ctx context.Context, cooldown time.Duration) ([]AutoTopupCandidate, error) {
 	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if charger == nil {
-		return 0, fmt.Errorf("charger required")
+		return nil, fmt.Errorf("money service not initialized")
 	}
 	rows, err := s.belowThresholdAccounts(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	now := s.now()
-	count := 0
+	var out []AutoTopupCandidate
 	for _, r := range rows {
 		if !r.AutoTopup || r.TopupAmount == nil || *r.TopupAmount <= 0 || r.PaymentMethodID == nil {
 			continue
@@ -147,92 +164,90 @@ func (s *MoneyService) RunAutoTopups(ctx context.Context, charger Charger, coold
 		if r.LastTopupAt != nil && now.Sub(*r.LastTopupAt) < cooldown {
 			continue
 		}
-		ok, err := s.topUpAccount(ctx, charger, r, cooldown, now)
-		if err != nil {
-			return count, err
+		// #474 invariant: auto-topup charges a card → external-currency-only.
+		if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
+			continue
 		}
-		if ok {
-			count++
+		method, merr := s.db.Gen(ctx).GetPaymentMethodByID(ctx, *r.PaymentMethodID)
+		if merr != nil {
+			log.WithContext(ctx).WithError(merr).WithField("payment_method_id", *r.PaymentMethodID).
+				Warn("auto-topup: load payment method for candidate")
+			continue
 		}
+		anchor := "genesis"
+		if r.LastTopupAt != nil {
+			anchor = strconv.FormatInt(r.LastTopupAt.UTC().Unix(), 10)
+		}
+		out = append(out, AutoTopupCandidate{
+			MerchantID:      r.MerchantID,
+			CustomerID:      r.CustomerID,
+			Currency:        normalizeCurrency(r.Currency),
+			AmountNative:    *r.TopupAmount,
+			PaymentMethodID: *r.PaymentMethodID,
+			Rail:            normalizeRail(method.Rail),
+			EpisodeAnchor:   anchor,
+		})
 	}
-	return count, nil
+	return out, nil
 }
 
-// topUpAccount performs one account's top-up. The episode key is stable within a
-// cooldown window so the charge idempotency key and deposit source_id are
-// deterministic: if the deposit already exists for this episode the charge is
-// skipped entirely; the Charger also receives the idempotency key so a retry
-// after a charge-but-before-deposit crash does not double-charge.
-func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r moneyInAccount, cooldown time.Duration, now time.Time) (bool, error) {
-	payer := identity.CustomerID(r.CustomerID)
-	// #474 invariant: auto-topup charges a card → external-currency-only.
-	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
-		return false, nil
+// HasAutoTopupDeposit reports whether the episode's deposit (source_id) is
+// already on the ledger. The deposit's idempotency key is the credit GRANT's
+// (merchant, customer, source_id) — the same lookup depositTx dedupes on.
+func (s *MoneyService) HasAutoTopupDeposit(ctx context.Context, customerID uuid.UUID, currency, sourceID string) (bool, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
 	}
-	bucket := now.Truncate(max(cooldown, time.Minute)).Unix()
-	episode := fmt.Sprintf("autotopup:%s:%d", r.CustomerID, bucket)
-	// #491: source_id is the natural key string itself (uuidv7 pk + UNIQUE
-	// (merchant,customer,currency,source,source_id)); no uuidv5 derivation.
-	depositSourceID := episode
-
-	// If this episode already deposited, we're done (idempotent).
-	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), r.Currency, "deposit", "auto_topup", depositSourceID)
-	if err == nil && existing != nil {
-		return false, nil
-	}
-
-	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
-		MerchantID:      r.MerchantID,
-		Payer:           payer,
-		Invoker:         payer.UUID().String(),
-		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     nativeAmountToRailMinor(r.Currency, *r.TopupAmount),
-		Currency:        normalizeCurrency(r.Currency),
-		IdempotencyKey:  episode,
-		Description:     "auto top-up",
+	_, err = s.db.Gen(ctx).GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
+		MerchantID: tid.UUID(), CustomerID: customerID, SourceID: sourceID,
 	})
-	if err != nil || res.Declined {
-		// Stamp last_topup_at to apply the cooldown so we don't hammer a failing
-		// card every tick; the alerter still surfaces the low balance.
-		_ = s.stampMoneyInTimestamp(ctx, r, "last_topup_at", now)
-		if res.Declined {
+	if err != nil {
+		if repo.IsNotFound(err) {
 			return false, nil
 		}
-		return false, err
-	}
-
-	if _, err := s.Deposit(ctx, DepositParams{
-		CustomerID:                &payer,
-		Invoker:                   payer.UUID().String(),
-		Currency:                  r.Currency,
-		Amount:                    *r.TopupAmount,
-		Source:                    "auto_topup",
-		SourceID:                  &depositSourceID,
-		ApplyAccountExpiryDefault: true,
-	}); err != nil {
-		return false, err
-	}
-	if err := s.stampMoneyInTimestamp(ctx, r, "last_topup_at", now); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func nativeAmountToRailMinor(currency string, amount int64) int64 {
-	scale, ok := CurrencyScale(currency)
-	if !ok {
-		return amount
+// FinalizeAutoTopup deposits a CONFIRMED top-up charge (idempotent on the
+// unique (merchant,customer,currency,source,source_id)) and stamps
+// last_topup_at, advancing the episode anchor.
+func (s *MoneyService) FinalizeAutoTopup(ctx context.Context, customerID uuid.UUID, currency string, amountNative int64, sourceID string) error {
+	payer := identity.CustomerID(customerID)
+	deposited, err := s.HasAutoTopupDeposit(ctx, customerID, currency, sourceID)
+	if err != nil {
+		return err
 	}
-	if scale <= 2 {
-		for range 2 - scale {
-			amount *= 10
+	if !deposited {
+		if _, err := s.Deposit(ctx, DepositParams{
+			CustomerID:                &payer,
+			Invoker:                   payer.UUID().String(),
+			Currency:                  currency,
+			Amount:                    amountNative,
+			Source:                    "auto_topup",
+			SourceID:                  &sourceID,
+			ApplyAccountExpiryDefault: true,
+		}); err != nil {
+			return err
 		}
-		return amount
 	}
-	for range scale - 2 {
-		amount /= 10
+	return s.StampAutoTopupAttempt(ctx, customerID, currency)
+}
+
+// StampAutoTopupAttempt stamps last_topup_at now — the cooldown after a
+// finalized episode OR a declined charge (so a failing card is not hammered
+// every tick; the alerter still surfaces the low balance).
+func (s *MoneyService) StampAutoTopupAttempt(ctx context.Context, customerID uuid.UUID, currency string) error {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
 	}
-	return amount
+	now := s.now()
+	return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
+		MerchantID: tid.UUID(), CustomerID: customerID, Currency: normalizeCurrency(currency), Now: &now,
+	})
 }
 
 // stampMoneyInTimestamp sets a single timestamp column on the settings row.

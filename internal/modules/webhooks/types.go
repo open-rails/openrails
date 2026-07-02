@@ -7,18 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/open-rails/openrails/internal/db/models"
 )
-
-// Subscription helper functions (moved from db model to service layer)
-
-// IsExpired checks if a subscription has expired at the given time.
-// Pass time.Now() for current state, or a mock time for testing.
-func IsExpired(s *models.Subscription, at time.Time) bool {
-	return s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Before(at)
-}
 
 // -------------------------------- Utility Types --------------------------------
 
@@ -353,27 +342,6 @@ type CCBillWebhookEvent struct {
 	Version   string // Detected or provided webhook version
 }
 
-// CCBillWebhookVersion represents supported CCBill webhook payload versions
-type CCBillWebhookVersion string
-
-const (
-	CCBillVersionV2 CCBillWebhookVersion = "v2"
-	CCBillVersionV4 CCBillWebhookVersion = "v4"
-	CCBillVersionV5 CCBillWebhookVersion = "v5"
-	CCBillVersionV7 CCBillWebhookVersion = "v7"
-	CCBillVersionV8 CCBillWebhookVersion = "v8"
-)
-
-// CCBillVersionedPayload represents a versioned webhook payload that can be parsed
-type CCBillVersionedPayload interface {
-	GetVersion() CCBillWebhookVersion
-	GetTransactionID() string
-	GetSubscriptionID() string
-	GetClientAccnum() string
-	GetClientSubacc() string
-	GetTimestamp() string
-}
-
 type CCBillCommonFields struct {
 	ClientAccnum   Stringish `json:"clientAccnum" validate:"required"`
 	ClientSubacc   string    `json:"clientSubacc" validate:"required"`
@@ -450,14 +418,6 @@ type CCBillNewSaleSuccessEvent struct {
 	LifeTimeSubscription           Stringish `json:"lifeTimeSubscription"`
 	LifeTimePrice                  string    `json:"lifeTimePrice"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillNewSaleSuccessEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV8 }
-func (e CCBillNewSaleSuccessEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillNewSaleSuccessEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillNewSaleSuccessEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillNewSaleSuccessEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillNewSaleSuccessEvent) GetTimestamp() string             { return e.Timestamp }
 
 // CCBillUpgradeSuccessEvent represents official CCBill UpgradeSuccess webhook v5 (April 2025)
 // Contains all NewSaleSuccess v8 fields plus upgrade-specific fields
@@ -545,14 +505,6 @@ type CCBillUpgradeSuccessEvent struct {
 	SCAResponseStatus      string    `json:"scaResponseStatus"` // E | Y | N | A | U | R
 
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillUpgradeSuccessEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillUpgradeSuccessEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillUpgradeSuccessEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillUpgradeSuccessEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillUpgradeSuccessEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillUpgradeSuccessEvent) GetTimestamp() string             { return e.Timestamp }
 
 // CCBillUpgradeFailureEvent represents official CCBill UpgradeFailure webhook v4 (April 2025)
 // Contains all NewSaleFailure fields plus upgrade-specific fields
@@ -642,14 +594,6 @@ type CCBillUpgradeFailureEvent struct {
 	PassThrough            map[string]interface{} `json:"passThrough"`       // Custom pass-through data
 }
 
-// Implement CCBillVersionedPayload interface
-func (e CCBillUpgradeFailureEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV4 }
-func (e CCBillUpgradeFailureEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillUpgradeFailureEvent) GetSubscriptionID() string        { return "" } // UpgradeFailure may not have subscriptionId
-func (e CCBillUpgradeFailureEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillUpgradeFailureEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillUpgradeFailureEvent) GetTimestamp() string             { return e.Timestamp }
-
 // CCBillBillingDateChangeEvent represents official CCBill BillingDateChange webhook v2 (Feb 2025)
 type CCBillBillingDateChangeEvent struct {
 	// Core fields
@@ -659,14 +603,6 @@ type CCBillBillingDateChangeEvent struct {
 	Timestamp       string `json:"timestamp" validate:"required"`
 	NextRenewalDate string `json:"nextRenewalDate" validate:"required"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillBillingDateChangeEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV2 }
-func (e CCBillBillingDateChangeEvent) GetTransactionID() string         { return "" }
-func (e CCBillBillingDateChangeEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillBillingDateChangeEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillBillingDateChangeEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillBillingDateChangeEvent) GetTimestamp() string             { return e.Timestamp }
 
 // CCBillCustomerDataUpdateEvent represents official CCBill CustomerDataUpdate webhook v5 (Feb 2025)
 type CCBillCustomerDataUpdateEvent struct {
@@ -699,14 +635,6 @@ type CCBillCustomerDataUpdateEvent struct {
 	ExpDate     string    `json:"expDate"`
 }
 
-// Implement CCBillVersionedPayload interface
-func (e CCBillCustomerDataUpdateEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillCustomerDataUpdateEvent) GetTransactionID() string         { return "" }
-func (e CCBillCustomerDataUpdateEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillCustomerDataUpdateEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillCustomerDataUpdateEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillCustomerDataUpdateEvent) GetTimestamp() string             { return e.Timestamp }
-
 // CCBillUserReactivationEvent represents official CCBill UserReactivation webhook v2 (Feb 2025)
 type CCBillUserReactivationEvent struct {
 	// Core fields
@@ -720,14 +648,6 @@ type CCBillUserReactivationEvent struct {
 	Password        string `json:"password"`
 	NextRenewalDate string `json:"nextRenewalDate"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillUserReactivationEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV2 }
-func (e CCBillUserReactivationEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillUserReactivationEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillUserReactivationEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillUserReactivationEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillUserReactivationEvent) GetTimestamp() string             { return "" } // UserReactivation doesn't have timestamp field
 
 // CCBillRenewalSuccessEvent represents official CCBill RenewalSuccess webhook v7
 type CCBillRenewalSuccessEvent struct {
@@ -761,14 +681,6 @@ type CCBillRenewalSuccessEvent struct {
 	CardSubType    string `json:"cardSubType"`
 }
 
-// Implement CCBillVersionedPayload interface
-func (e CCBillRenewalSuccessEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV7 }
-func (e CCBillRenewalSuccessEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillRenewalSuccessEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillRenewalSuccessEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillRenewalSuccessEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillRenewalSuccessEvent) GetTimestamp() string             { return e.Timestamp }
-
 type CCBillCancellationEvent struct {
 	CCBillCommonFields
 
@@ -800,14 +712,6 @@ type CCBillRenewalFailureEvent struct {
 	PaymentType string `json:"paymentType"`
 	CardSubType string `json:"cardSubType"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillRenewalFailureEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillRenewalFailureEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillRenewalFailureEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillRenewalFailureEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillRenewalFailureEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillRenewalFailureEvent) GetTimestamp() string             { return e.Timestamp }
 
 // CCBillNewSaleFailureEvent represents official CCBill NewSaleFailure webhook v5
 type CCBillNewSaleFailureEvent struct {
@@ -877,14 +781,6 @@ type CCBillNewSaleFailureEvent struct {
 	LifeTimePrice                  string    `json:"lifeTimePrice"`
 }
 
-// Implement CCBillVersionedPayload interface
-func (e CCBillNewSaleFailureEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillNewSaleFailureEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillNewSaleFailureEvent) GetSubscriptionID() string        { return "" } // No subscription for failures
-func (e CCBillNewSaleFailureEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillNewSaleFailureEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillNewSaleFailureEvent) GetTimestamp() string             { return e.Timestamp }
-
 // CCBillRefundEvent represents official CCBill Refund webhook v5
 type CCBillRefundEvent struct {
 	// Core transaction fields
@@ -912,14 +808,6 @@ type CCBillRefundEvent struct {
 	Last4          string `json:"last4"`
 	ExpDate        string `json:"expDate"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillRefundEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillRefundEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillRefundEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillRefundEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillRefundEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillRefundEvent) GetTimestamp() string             { return e.Timestamp }
 
 // CCBillChargebackEvent represents official CCBill Chargeback webhook v5
 type CCBillChargebackEvent struct {
@@ -950,14 +838,6 @@ type CCBillChargebackEvent struct {
 	ExpDate        string `json:"expDate"`
 }
 
-// Implement CCBillVersionedPayload interface
-func (e CCBillChargebackEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillChargebackEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillChargebackEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillChargebackEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillChargebackEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillChargebackEvent) GetTimestamp() string             { return e.Timestamp }
-
 // CCBillVoidEvent represents official CCBill Void webhook v5
 type CCBillVoidEvent struct {
 	// Core transaction fields
@@ -985,11 +865,3 @@ type CCBillVoidEvent struct {
 	Last4          string `json:"last4"`
 	ExpDate        string `json:"expDate"`
 }
-
-// Implement CCBillVersionedPayload interface
-func (e CCBillVoidEvent) GetVersion() CCBillWebhookVersion { return CCBillVersionV5 }
-func (e CCBillVoidEvent) GetTransactionID() string         { return e.TransactionID }
-func (e CCBillVoidEvent) GetSubscriptionID() string        { return e.SubscriptionID }
-func (e CCBillVoidEvent) GetClientAccnum() string          { return e.ClientAccnum }
-func (e CCBillVoidEvent) GetClientSubacc() string          { return e.ClientSubacc }
-func (e CCBillVoidEvent) GetTimestamp() string             { return e.Timestamp }

@@ -21,6 +21,8 @@ const (
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
 	idem *idempotency.IdempotencyService
+	// pendingLease overrides webhookPendingLease (tests only; zero = default).
+	pendingLease time.Duration
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -65,36 +67,36 @@ func NewDeduplicationService(idem *idempotency.IdempotencyService) *Deduplicatio
 	return &DeduplicationService{idem: idem}
 }
 
-// IsDuplicate checks if a webhook with this eventID has already been processed successfully.
-// Returns true if the webhook should be skipped (already processed), false otherwise.
-func (s *DeduplicationService) IsDuplicate(ctx context.Context, rail string, eventID string) (bool, error) {
-	trimmedEventID := strings.TrimSpace(eventID)
-	if trimmedEventID == "" {
-		return false, nil // No event ID, can't deduplicate
+func (s *DeduplicationService) lease() time.Duration {
+	if s != nil && s.pendingLease > 0 {
+		return s.pendingLease
 	}
+	return webhookPendingLease
+}
 
-	op := fmt.Sprintf("webhook.%s.event", rail)
-
-	if s == nil || s.idem == nil {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"eventID": trimmedEventID,
-			"rail":    rail,
-		}).Warn("IdempotencyService is not configured; dedupe check skipped")
-		return false, nil
-	}
-
-	rec, alreadyExists, err := s.idem.Begin(ctx, op, trimmedEventID)
-	if err != nil {
-		return false, fmt.Errorf("failed to check idempotency: %w", err)
-	}
-	if alreadyExists && rec.Status == idempotency.IdempotencyStatusSuccess {
-		return true, nil // Already processed successfully
-	}
-
-	// If this call claimed the event ID, leave it pending.
-	// Callers must transition pending -> success/failed after processing.
-
-	return false, nil
+// startPendingHeartbeat renews the pending lease while the handler runs, so
+// stale-pending takeover only fires for dead holders, not slow ones (#678).
+// Returned func stops the heartbeat.
+func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, key string) func() {
+	hbCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(s.lease() / 4)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-ticker.C:
+				if _, err := s.idem.RenewPending(hbCtx, op, key); err != nil && hbCtx.Err() == nil {
+					log.WithContext(hbCtx).WithError(err).WithFields(log.Fields{
+						"op":      op,
+						"eventID": key,
+					}).Warn("webhook pending-lease renewal failed")
+				}
+			}
+		}
+	}()
+	return cancel
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
@@ -133,8 +135,8 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				return nil
 			}
 			if alreadyExists && rec.Status == idempotency.IdempotencyStatusPending {
-				if time.Since(rec.CreatedAt) > webhookPendingLease {
-					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, webhookPendingLease)
+				if time.Since(rec.CreatedAt) > s.lease() {
+					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, s.lease())
 					if err != nil {
 						return fmt.Errorf("failed to take over stale webhook idempotency: %w", err)
 					}
@@ -164,6 +166,12 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
 			}
 		}
+	}
+
+	// We own the pending claim: heartbeat it so slow handlers keep exclusivity (#678).
+	if shouldRecordOutcome && trimmedEventID != "" {
+		stopHeartbeat := s.startPendingHeartbeat(ctx, op, trimmedEventID)
+		defer stopHeartbeat()
 	}
 
 	processingErr := processingFunc(ctx)

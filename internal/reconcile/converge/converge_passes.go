@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // pendingStaleAfter is how long a `pending` subscription may sit unconfirmed
@@ -81,7 +83,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			SubjectKey: "grant_effect:" + g.ID.String(),
 			Provider:   "self",
 			Evidence:   map[string]any{"grant_id": g.ID.String(), "kind": g.Kind},
-			Repair:     func(ctx context.Context) error { return gl.MaterializeGrant(ctx, g) },
+			Repair:     func(ctx context.Context) error { return p.lockedMaterialize(ctx, scope, g) },
 		})
 	}
 
@@ -106,7 +108,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			SubjectKey: "grant_effect:" + g.ID.String(),
 			Provider:   "self",
 			Evidence:   map[string]any{"grant_id": g.ID.String(), "kind": g.Kind, "cause": "terminated_grant"},
-			Repair:     func(ctx context.Context) error { return gl.MaterializeGrant(ctx, g) },
+			Repair:     func(ctx context.Context) error { return p.lockedMaterialize(ctx, scope, g) },
 		})
 	}
 
@@ -212,6 +214,23 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 	return out, nil
+}
+
+// lockedMaterialize runs a MaterializeGrant repair inside a merchant tx under
+// the per-customer spend lock (#677): the credit legs (deposit / clawback) are
+// check-then-write, so overlapping converge runs must serialize with each
+// other and with spends. The entitlement/ownership legs are lock-cheap no-ops
+// when already projected.
+func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.OpenrailsGrant) error {
+	ctx = merchant.WithID(ctx, scope.Merchant)
+	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		gl := grants.New(gen.New(tx), scope.Merchant.UUID())
+		gl.SetClock(p.e.Now)
+		if err := gl.LockCustomer(ctx, g.CustomerID); err != nil {
+			return err
+		}
+		return gl.MaterializeGrant(ctx, g)
+	})
 }
 
 // lifePass — LIFE plane: clock + state machine. Converge-not-replay:

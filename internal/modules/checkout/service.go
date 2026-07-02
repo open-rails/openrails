@@ -17,11 +17,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -35,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -105,9 +108,12 @@ type CheckoutService struct {
 	// StripeService is used to resolve/create the Stripe customer and to run the
 	// webhook-independent duplicate guard (issue #213).
 	StripeService *subscriptions.StripeService
-	clock         clockwork.Clock
-	Config        *config.Config
-	Rails         config.ProviderAccountSet
+	// Intents executes durable write-ahead provider intents (#674). Every NMI
+	// recurring create in this flow goes through it.
+	Intents intentExecutor
+	clock   clockwork.Clock
+	Config  *config.Config
+	Rails   config.ProviderAccountSet
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -579,16 +585,14 @@ func (s *CheckoutService) processNMISubscription(
 		return nil, err
 	}
 
-	client, err := s.resolveNMIClient(ctx, provider)
-	if err != nil {
+	// Fail fast on misconfiguration instead of parking a user-facing checkout.
+	if _, err := s.resolveNMIClient(ctx, provider); err != nil {
 		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
 	// Get idempotency key (client-provided or generated)
 	const idempOp = "nmi_subscription"
 	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, idempOp)
-	orderID := nmiSubscriptionOrderID(idempotencyKey, req.Metadata)
-	poNumber := orderID
 
 	// Check idempotency - have we already processed this request?
 	idempRec, alreadyExists, err := s.IdempotencyService.Begin(ctx, idempOp, idempotencyKey)
@@ -628,12 +632,9 @@ func (s *CheckoutService) processNMISubscription(
 		case IdempotencyStatusPending:
 			return nil, errors.New("subscription creation already in progress, please wait")
 		case IdempotencyStatusFailed:
-			if recovered, recoverErr := s.recoverNMISubscriptionAttempt(ctx, req, user, price, product, coverage, provider, orderID, idempOp, idempotencyKey); recoverErr == nil && recovered != nil {
-				return recovered, nil
-			} else if recoverErr != nil && !repo.IsNotFound(recoverErr) {
-				return nil, recoverErr
-			}
-			return nil, errors.New("previous subscription attempt failed, please try again")
+			// Fall through: the durable intent below is the source of truth —
+			// it replays a success, reports a decline, or keeps verifying an
+			// ambiguous create under the ORIGINAL order id (#674).
 		}
 	}
 
@@ -648,14 +649,9 @@ func (s *CheckoutService) processNMISubscription(
 	now := s.now().UTC()
 	startDate, delayedStart := nmiSubscriptionStartDate(coverage, now)
 
-	if recovered, recoverErr := s.recoverNMISubscriptionAttempt(ctx, req, user, price, product, coverage, provider, orderID, idempOp, idempotencyKey); recoverErr == nil && recovered != nil {
-		return recovered, nil
-	} else if recoverErr != nil && !repo.IsNotFound(recoverErr) {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, recoverErr)
-		return nil, fmt.Errorf("recover NMI subscription attempt: %w", recoverErr)
-	}
-
-	// Build subscription ID
+	// Local subscription ID for a FRESH intent; a replayed request maps onto
+	// the existing intent, whose stored payload (and so its original local
+	// subscription id) wins — enqueue conflicts never overwrite the payload.
 	subscriptionID := uuidutil.NewV7()
 	var paymentMethodID *uuid.UUID
 	if createdPaymentMethod != nil {
@@ -668,122 +664,145 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
-	customerID, err := customerIDFromUser(user.ID)
+	if _, err := customerIDFromUser(user.ID); err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
+	if s.Intents == nil {
+		return nil, errors.New("checkout intent executor not wired")
+	}
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuidutil.NewV7(),
-		CustomerID:    customerID,
-		PriceID:       price.ID,
-		Rail:          models.Rail(provider),
-		TransactionID: nmiSubscriptionAttemptTransactionID(orderID),
-		Amount:        price.Amount,
-		ListAmount:    price.Amount,
-		Currency:      price.Currency,
-		Status:        payments.PaymentStatusPendingValue,
-		Metadata:      nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "pending", "", "", subscriptionID, paymentMethodID, delayedStart, req.Metadata),
+
+	// #674 write-through: durable intent first, inline execution, NMI order id
+	// derived from the intent id. A crash/timeout at ANY point leaves an intent
+	// the executor/verifier resolves (sale search + roster scan) — never an
+	// orphaned live remote subscription, never a blind re-create.
+	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+		MerchantID: tid.UUID(),
+		Provider:   provider,
+		IntentType: TypeNMISubscriptionCreate,
+		PriceID:    &price.ID,
+		Payload: NMISubscriptionCreatePayload{
+			Provider:               provider,
+			PlanID:                 nmiPlanID,
+			CustomerVaultID:        customerVaultID,
+			AmountMicros:           price.Amount,
+			Currency:               price.Currency,
+			Email:                  req.Email,
+			UserID:                 user.ID,
+			PriceID:                price.ID,
+			LocalSubscriptionID:    subscriptionID,
+			PaymentMethodID:        paymentMethodID,
+			StartDate:              startDate,
+			DelayedStart:           delayedStart,
+			E2ERunID:               strings.TrimSpace(req.Metadata["e2e_run_id"]),
+			CheckoutIdempotencyKey: idempotencyKey,
+			FirstName:              ResolveCheckoutFirstName(req, user),
+			LastName:               ResolveCheckoutLastName(req),
+			Address1:               DefaultIfEmpty(req.Address1, "N/A"),
+			City:                   DefaultIfEmpty(req.City, "N/A"),
+			State:                  DefaultIfEmpty(req.State, "N/A"),
+			Zip:                    DefaultIfEmpty(req.Zip, "00000"),
+			Country:                DefaultIfEmpty(req.Country, "US"),
+		},
+		IdempotencyKey: NMISubscriptionCreateIdempotencyKey(idempotencyKey),
+		NextAttemptAt:  time.Now().UTC(),
+		Origin:         intents.OriginUser,
+		OriginReason:   "checkout subscription create",
 	})
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("reserve NMI subscription attempt: %w", err)
+		return nil, fmt.Errorf("post subscription create intent: %w", err)
 	}
 
-	// Build NMI params
-	params := nmi.RecurringPaymentData{
-		CardUserData: nmi.CardUserData{
-			FirstName: ResolveCheckoutFirstName(req, user),
-			LastName:  ResolveCheckoutLastName(req),
-			Address1:  DefaultIfEmpty(req.Address1, "N/A"),
-			City:      DefaultIfEmpty(req.City, "N/A"),
-			State:     DefaultIfEmpty(req.State, "N/A"),
-			Zip:       DefaultIfEmpty(req.Zip, "00000"),
-			Country:   DefaultIfEmpty(req.Country, "US"),
-		},
-		PlanID:          nmiPlanID,
-		CustomerVaultID: customerVaultID,
-		Amount:          moneyutil.MicrosToMajorUnits(price.Amount),
-		Currency:        price.Currency,
-		Email:           req.Email,
-		OrderID:         orderID,
-		PONumber:        poNumber,
-		CustomerID:      user.ID,
-		StartDate:       startDate,
-	}
-
-	// Create subscription with NMI
-	resp, err := client.AddRecurringSubscription(params)
-	if err != nil {
-		_ = s.PaymentService.MarkFailed(ctx, attempt.ID)
-		wrappedErr := fmt.Errorf("failed to create subscription: %w", err)
-		var nmiErr *nmi.CustomerVaultError
-		if errors.As(err, &nmiErr) {
-			wrappedErr = &vault.VaultError{
-				Err:            wrappedErr,
-				LocalizationID: nmiErr.LocalizationID,
-				Message:        wrappedErr.Error(),
-			}
-		}
-		// Cleanup vault if we created it
+	switch intent.Status {
+	case intents.StatusSucceeded:
+		// finalize already completed the idempotency record.
+		return nmiSubscriptionResponseFromIntent(intent)
+	case intents.StatusFailedTerminal:
+		// Verified-clean decline/rejection. Cleanup a vault created for this
+		// attempt, mirroring the pre-intent behavior.
 		if createdPaymentMethod != nil && s.VaultService != nil {
 			if cleanupErr := s.VaultService.DeleteVault(ctx, createdPaymentMethod); cleanupErr != nil {
 				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, wrappedErr)
-		return nil, wrappedErr
+		reason := "failed to create subscription"
+		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
+			reason = "failed to create subscription: " + *intent.LastFailureReason
+		}
+		var failErr error = errors.New(reason)
+		if locID := terminalEvidenceLocalization(intent); locID != "" {
+			failErr = &vault.VaultError{Err: failErr, LocalizationID: locID, Message: reason}
+		}
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
+		return nil, failErr
+	default:
+		// pending (parked), in_flight, unknown_needs_verify, failed_retryable:
+		// the intent ledger finishes it out-of-band.
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+		return nil, ErrCheckoutProcessing
 	}
-	completedAttempt, err := s.PaymentService.CompleteProviderAttemptInPlace(ctx, attempt.ID, nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "completed", resp.SubscriptionID, resp.TransactionID, subscriptionID, paymentMethodID, delayedStart, req.Metadata))
-	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("subscription created but failed to record provider attempt: %w", err)
-	}
-	providerSubscriptionID := metadataString(completedAttempt.Metadata, "provider_subscription_id")
-	if providerSubscriptionID == "" {
-		providerSubscriptionID = resp.SubscriptionID
-	}
-
-	return s.completeNMISubscriptionRegistration(ctx, req, user, price, product, provider, subscriptionID, providerSubscriptionID, resp.TransactionID, delayedStart, orderID, paymentMethodID, idempOp, idempotencyKey)
 }
 
-func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, coverage *CoverageInfo, provider string, orderID string, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
-	attempt, err := s.PaymentService.GetByMetadataValue(ctx, "nmi_subscription_order_id", orderID)
-	if err != nil {
-		return nil, err
+// nmiSubscriptionResponseFromIntent rebuilds the checkout response from a
+// succeeded create intent's evidence.
+func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsProviderIntent) (*CheckoutResponse, error) {
+	var evidence struct {
+		SubscriptionID string `json:"subscription_id"`
+		TransactionID  string `json:"transaction_id"`
+		DelayedStart   string `json:"delayed_start"`
+		Status         string `json:"status"`
+		Message        string `json:"message"`
 	}
-	attemptStatus := nmiSubscriptionAttemptStatusFromPayment(attempt)
-	if attemptStatus != payments.PaymentStatusCompletedValue {
-		if attemptStatus == payments.PaymentStatusPendingValue {
-			return nil, errors.New("NMI subscription attempt is already pending, please wait")
+	if len(intent.ResultEvidence) == 0 {
+		return nil, errors.New("subscription created but evidence unreadable")
+	}
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return nil, fmt.Errorf("subscription created but evidence unreadable: %w", err)
+	}
+	resp := &CheckoutResponse{
+		Status:        evidence.Status,
+		Action:        "new",
+		Message:       evidence.Message,
+		TransactionID: evidence.TransactionID,
+	}
+	if resp.Status == "" {
+		resp.Status = "success"
+	}
+	if resp.Message == "" {
+		resp.Message = "Subscription created successfully"
+	}
+	if evidence.SubscriptionID != "" {
+		if id, err := uuid.Parse(evidence.SubscriptionID); err == nil {
+			resp.SubscriptionID = &id
 		}
-		return nil, errors.New("previous NMI subscription attempt failed, retry with a new idempotency key")
 	}
-	providerSubscriptionID := metadataString(attempt.Metadata, "provider_subscription_id")
-	if providerSubscriptionID == "" {
-		return nil, errors.New("completed NMI subscription attempt is missing provider subscription id")
-	}
-	transactionID := metadataString(attempt.Metadata, "provider_transaction_id")
-	if transactionID == "" {
-		transactionID = attempt.TransactionID
-	}
-	subscriptionID := uuidutil.NewV7()
-	if rawID := metadataString(attempt.Metadata, "local_subscription_id"); rawID != "" {
-		if parsedID, err := uuid.Parse(rawID); err == nil {
-			subscriptionID = parsedID
+	if evidence.DelayedStart != "" {
+		if t, err := time.Parse(time.RFC3339, evidence.DelayedStart); err == nil {
+			resp.DelayedStart = &t
 		}
 	}
-	var paymentMethodID *uuid.UUID
-	if rawID := metadataString(attempt.Metadata, "payment_method_id"); rawID != "" {
-		if parsedID, err := uuid.Parse(rawID); err == nil {
-			paymentMethodID = &parsedID
-		}
+	return resp, nil
+}
+
+// terminalEvidenceLocalization reads the decline localization id off a
+// terminally-failed intent's evidence (for client-facing error rendering).
+func terminalEvidenceLocalization(intent gen.OpenrailsProviderIntent) string {
+	if len(intent.ResultEvidence) == 0 {
+		return ""
 	}
-	delayedStart := nmiSubscriptionDelayedStartFromMetadata(attempt.Metadata)
-	if delayedStart == nil {
-		_, delayedStart = nmiSubscriptionStartDate(coverage, s.now().UTC())
+	var evidence struct {
+		LocalizationID string `json:"localization_id"`
 	}
-	return s.completeNMISubscriptionRegistration(ctx, req, user, price, product, provider, subscriptionID, providerSubscriptionID, transactionID, delayedStart, orderID, paymentMethodID, idempOp, idempotencyKey)
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return ""
+	}
+	return evidence.LocalizationID
 }
 
 func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
@@ -1643,6 +1662,10 @@ func (s *CheckoutService) processUpgrade(
 		return nil, fmt.Errorf("idempotency check failed: %w", err)
 	}
 
+	// retryAfterFailure: this request retries a previously-failed attempt whose
+	// proration charge may have landed (verify before charging again, #674).
+	retryAfterFailure := false
+
 	if alreadyExists {
 		switch idempRec.Status {
 		case IdempotencyStatusSuccess:
@@ -1668,7 +1691,10 @@ func (s *CheckoutService) processUpgrade(
 		case IdempotencyStatusPending:
 			return nil, errors.New("upgrade already in progress, please wait")
 		case IdempotencyStatusFailed:
-			return nil, errors.New("previous upgrade attempt failed, please try again")
+			// Fall through and re-run: the proration order id is content-derived
+			// (stable across retries), so a charge landed by the failed attempt
+			// is re-found by the pre-charge verify below (#674).
+			retryAfterFailure = true
 		}
 	}
 
@@ -1703,6 +1729,15 @@ func (s *CheckoutService) processUpgrade(
 		"proration_amount": prorationAmount, // Model B first charge (new_full - old_unused)
 		"billing_model":    "B",
 	}).Info("calculating Model-B upgrade first charge")
+
+	// NMI charges in whole cents; prorationAmount is micros. Error (never round)
+	// on a sub-cent remainder — same policy as the one-time sale path.
+	prorationCents, err := moneyutil.MicrosToCentsExact(prorationAmount)
+	if err != nil {
+		err := fmt.Errorf("upgrade proration amount must be representable in whole cents: %w", err)
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 
 	provider := normalize.Lower(rail)
 	if provider == "" {
@@ -1759,7 +1794,7 @@ func (s *CheckoutService) processUpgrade(
 		},
 		PlanID:          nmiPlanID,
 		CustomerVaultID: customerVaultID,
-		Amount:          float64(newPrice.Amount) / 100.0,
+		Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(newPrice.Amount)), // NMI recurring amount is DOLLARS
 		Currency:        newPrice.Currency,
 		Email:           req.Email,
 		OrderID:         newSubscriptionID.String(),
@@ -1799,26 +1834,56 @@ func (s *CheckoutService) processUpgrade(
 	var prorationTransactionID string
 	if prorationAmount > 0 {
 		// Derive a stable OrderID from the idempotency key so a retried upgrade
-		// reuses the same order reference at NMI, letting NMI's duplicate-
-		// transaction detection prevent a double proration charge.
+		// reuses the same order reference at NMI: a charge landed by a previous
+		// ambiguous attempt is re-found by the order id, and NMI's duplicate-
+		// transaction detection backstops a raced double send.
 		prorationOrderID := "upg-" + shortHash(idempotencyKey)
-		saleResp, err := client.RunSale(nmi.SaleParams{
-			CustomerVaultID:  customerVaultID,
-			Amount:           prorationAmount,
-			Currency:         newPrice.Currency,
-			OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
-			OrderID:          prorationOrderID,
-		})
-		if err != nil {
-			rollbackNewSubscription()
-			if createdPaymentMethod != nil && s.VaultService != nil {
-				_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
+		if retryAfterFailure {
+			// A previous attempt failed; its charge may have landed. Verify by
+			// the order id BEFORE sending another sale (#674).
+			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID); verr != nil {
+				rollbackNewSubscription()
+				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+				return nil, ErrCheckoutProcessing
+			} else if found {
+				prorationTransactionID = txnID
 			}
-			prorationErr := fmt.Errorf("failed to charge proration: %w", err)
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
-			return nil, prorationErr
 		}
-		prorationTransactionID = saleResp.TransactionID
+		if prorationTransactionID == "" {
+			saleResp, err := client.RunSale(nmi.SaleParams{
+				CustomerVaultID:  customerVaultID,
+				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
+				Currency:         newPrice.Currency,
+				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
+				OrderID:          prorationOrderID,
+			})
+			switch {
+			case err == nil:
+				prorationTransactionID = saleResp.TransactionID
+			case nmi.IsTransportAmbiguous(err):
+				// The charge MAY have landed: never treat as a decline. Verify
+				// by the order id; unresolved ⇒ surface "processing" so the
+				// retry (same content-derived key) re-verifies — never a blind
+				// re-charge, never an unrecorded charge treated as failed.
+				txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID)
+				if verr == nil && found {
+					prorationTransactionID = txnID
+				} else {
+					rollbackNewSubscription()
+					_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+					return nil, ErrCheckoutProcessing
+				}
+			default:
+				// Verified-clean decline/rejection: no money moved.
+				rollbackNewSubscription()
+				if createdPaymentMethod != nil && s.VaultService != nil {
+					_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
+				}
+				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
+				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
+				return nil, prorationErr
+			}
+		}
 
 		log.WithFields(log.Fields{
 			"user_id":        user.ID,
@@ -2099,15 +2164,21 @@ func (s *CheckoutService) processDowngrade(
 // billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
 // full period, and then rebilled `newFull` at `now + cycle`.
 //
-//	oldUnused   = oldFull * (hoursRemaining / cycleHours) // integer math
-//	firstCharge = newFull - oldUnused                     // clamped to >= 0
+// UNITS: oldFull/newFull and the returned first charge are MICROS. The unused
+// credit is rounded UP to a whole cent (customer-favored), so for whole-cent
+// prices the first charge is a whole number of cents — chargeable on every
+// rail (NMI cents, Stripe cents, Solana base units) with preview == charge.
+//
+//	oldUnused   = ceilToCent(oldFull * hoursRemaining / cycleHours) // integer math
+//	firstCharge = newFull - oldUnused                               // clamped to >= 0
 //
 // where hoursRemaining is the number of WHOLE hours left in the current paid
 // period (0 if the period has already ended or periodEndsAt is nil).
 //
 // Example: $20 -> $50, 2 days into a 30-day cycle => hoursRemaining=672,
-// oldUnused = 2000*672/720 = 1866c, firstCharge = 5000-1866 = 3134c. The new
-// period becomes [now, now+30d] and the next bill is $50.
+// oldUnused = ceilToCent(20_000_000*672/720) = 18_670_000 micros, firstCharge =
+// 50_000_000-18_670_000 = 31_330_000 micros ($31.33). The new period becomes
+// [now, now+30d] and the next bill is $50.
 //
 // Boundary behavior:
 //   - 0 hours remaining           => firstCharge = newFull
@@ -2122,7 +2193,7 @@ func CalculateModelBUpgradeCharge(
 	periodEndsAt *time.Time,
 	billingCycleHours *int,
 	now time.Time,
-) (firstChargeCents int64, cycleHours int) {
+) (firstChargeMicros int64, cycleHours int) {
 	// Default to a 30-day (720h) cycle if not specified.
 	cycleHours = 30 * 24
 	if billingCycleHours != nil && *billingCycleHours > 0 {
@@ -2143,16 +2214,18 @@ func CalculateModelBUpgradeCharge(
 	}
 
 	// Credit for the unused portion of the OLD plan (integer math to avoid
-	// floating-point drift on cent amounts).
+	// floating-point drift), rounded UP to a whole cent (customer-favored) so
+	// the resulting charge is whole-cent for whole-cent prices.
 	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
+	oldUnused = moneyutil.MicrosToCentsCeil(oldUnused) * moneyutil.MicrosPerCent
 
-	firstChargeCents = newFull - oldUnused
-	if firstChargeCents < 0 {
+	firstChargeMicros = newFull - oldUnused
+	if firstChargeMicros < 0 {
 		// Defensive clamp. For a genuine upgrade newFull > oldFull so this is
 		// only reachable with bad inputs (e.g. a "downgrade" routed here).
-		firstChargeCents = 0
+		firstChargeMicros = 0
 	}
-	return firstChargeCents, cycleHours
+	return firstChargeMicros, cycleHours
 }
 
 // cancelNMISubscription cancels a subscription at NMI

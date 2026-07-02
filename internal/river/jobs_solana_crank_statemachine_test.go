@@ -192,7 +192,8 @@ func newCrankHarness(t *testing.T) *crankHarness {
 // run performs one crankOne against the harness fakes.
 func (h *crankHarness) run(t *testing.T) error {
 	t.Helper()
-	return h.w.crankOne(context.Background(), h.store, h.row)
+	_, err := h.w.crankOne(context.Background(), h.store, h.row, nil)
+	return err
 }
 
 // ---- tests -----------------------------------------------------------------

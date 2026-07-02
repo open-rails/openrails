@@ -204,6 +204,24 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	if available < 0 {
 		available = 0
 	}
+	// bal.Balance is the raw ledger balance and can include unswept lapsed-lot
+	// remainders that CreditSpend cannot draw (#676): cap the balance leg at the
+	// spendable-lot total so a lapsed lot never fails the spend outright.
+	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
+	})
+	if lerr != nil {
+		return 0, 0, lerr
+	}
+	var spendable int64
+	for _, lot := range lots {
+		if lot.Remaining > 0 {
+			spendable += lot.Remaining
+		}
+	}
+	if available > spendable {
+		available = spendable
+	}
 	fromBalance := amount
 	if fromBalance > available {
 		fromBalance = available

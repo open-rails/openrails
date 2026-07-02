@@ -38,22 +38,6 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 	return result.RowsAffected(), nil
 }
 
-const deletePaymentBlock = `-- name: DeletePaymentBlock :exec
-DELETE FROM openrails.payment_blocklist
-WHERE merchant_id = $1 AND kind = $2 AND value = $3
-`
-
-type DeletePaymentBlockParams struct {
-	MerchantID uuid.UUID
-	Kind       string
-	Value      string
-}
-
-func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlockParams) error {
-	_, err := q.db.Exec(ctx, deletePaymentBlock, arg.MerchantID, arg.Kind, arg.Value)
-	return err
-}
-
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
 SELECT id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1 AND owner = $2
@@ -129,42 +113,6 @@ func (q *Queries) GetPayerSpendLimits(ctx context.Context, arg GetPayerSpendLimi
 	return i, err
 }
 
-const insertPaymentBlockIfAbsent = `-- name: InsertPaymentBlockIfAbsent :exec
-
-INSERT INTO openrails.payment_blocklist (
-    id, merchant_id, customer_id, kind, value, reason, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (merchant_id, kind, value) DO NOTHING
-`
-
-type InsertPaymentBlockIfAbsentParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Kind       string
-	Value      string
-	Reason     *string
-	CreatedAt  time.Time
-}
-
-// Admission-plane support tables: the payment blocklist (#300), per-(payer,
-// tier) money policies, and hierarchical budget-scope policies (#473). The
-// Postgres rolling-budget engine (budget_inflight_holds / budget_window_state /
-// budget_reservations + FOR UPDATE) was removed in the #513 hard cut — budget
-// accounting now lives in the Redis spendgate.
-func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaymentBlockIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertPaymentBlockIfAbsent,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Kind,
-		arg.Value,
-		arg.Reason,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
 SELECT id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
@@ -207,26 +155,6 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 	return items, nil
 }
 
-const paymentBlockExists = `-- name: PaymentBlockExists :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.payment_blocklist
-    WHERE merchant_id = $1 AND kind = $2 AND value = $3
-)
-`
-
-type PaymentBlockExistsParams struct {
-	MerchantID uuid.UUID
-	Kind       string
-	Value      string
-}
-
-func (q *Queries) PaymentBlockExists(ctx context.Context, arg PaymentBlockExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, paymentBlockExists, arg.MerchantID, arg.Kind, arg.Value)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
 INSERT INTO openrails.invoker_spend_limits (
     id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at
@@ -266,6 +194,7 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 }
 
 const upsertPayerSpendLimit = `-- name: UpsertPayerSpendLimit :exec
+
 INSERT INTO openrails.payer_spend_limits (
     id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -285,6 +214,11 @@ type UpsertPayerSpendLimitParams struct {
 	UpdatedAt     time.Time
 }
 
+// Admission-plane support tables: per-(payer, tier) money policies and
+// hierarchical budget-scope policies (#473). The Postgres rolling-budget
+// engine (budget_inflight_holds / budget_window_state / budget_reservations
+// + FOR UPDATE) was removed in the #513 hard cut — budget accounting now
+// lives in the Redis spendgate.
 // Per-(subject, tier) limit override. ON CONFLICT targets the partial unique
 // index for non-NULL subjects (#477).
 func (q *Queries) UpsertPayerSpendLimit(ctx context.Context, arg UpsertPayerSpendLimitParams) error {

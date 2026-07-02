@@ -7,9 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-rails/openrails/internal/shared/webhookutil"
-	"github.com/stretchr/testify/require"
-
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 

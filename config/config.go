@@ -1246,6 +1246,13 @@ func (cfg *Config) RequiresRLS() bool {
 	return cfg != nil && !cfg.IsDev()
 }
 
+// RequiresSecretEncryption reports whether startup must fail if the DB-backed
+// merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
+// Same environment gate as RequiresRLS (#667): only development may run without.
+func (cfg *Config) RequiresSecretEncryption() bool {
+	return cfg != nil && !cfg.IsDev()
+}
+
 // assembleDBURL builds the database URL from atomic parameters if not explicitly set
 func assembleDBURL(cfg *Config) {
 	if cfg.DB == nil {

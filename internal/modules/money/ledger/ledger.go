@@ -184,12 +184,6 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// Conservation returns the sum of every account's balance in the (merchant,
-// currency) ledger. Double-entry guarantees it is 0.
-func (l *Ledger) Conservation(ctx context.Context, currency string) (int64, error) {
-	return l.q.LedgerLedgerNet(ctx, gen.LedgerLedgerNetParams{MerchantID: l.merchant, Currency: currency})
-}
-
 // --- flow constructors: the standard money movements as transfer pairs --------
 
 // Deposit credits the customer's balance from the rail-clearing account
@@ -214,42 +208,6 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 		t.GrantID = &g
 	}
 	return l.Apply(ctx, t)
-}
-
-// Spend debits the customer's balance into platform revenue
-// (DR customer_balance / CR platform_revenue). floor is the arrears credit line.
-func (l *Ledger) Spend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string, floor int64) (gen.OpenrailsLedgerTransfer, error) {
-	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	c := customer
-	return l.Apply(ctx, Transfer{
-		Debit: cust, Credit: rev, Amount: amount, Currency: currency, Type: "spend",
-		Invoker: &invoker, Resource: &resource, Customer: &c, AllowDebitNegativeUpTo: floor,
-	})
-}
-
-// Expire moves an unspent credit remainder from the customer's balance to the
-// expired-credits account (DR customer_balance / CR expired_credits).
-func (l *Ledger) Expire(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string) (gen.OpenrailsLedgerTransfer, error) {
-	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	exp, err := l.EnsureSystemAccount(ctx, ExpiredCredits, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	c := customer
-	return l.Apply(ctx, Transfer{
-		Debit: cust, Credit: exp, Amount: amount, Currency: currency, Type: "expire",
-		Source: &source, SourceID: &sourceID, Customer: &c,
-	})
 }
 
 // AccrueOwed recognizes postpaid usage as a revenue claim against the arrears

@@ -41,11 +41,12 @@ type livenessFixture struct {
 	procSubID       string
 	userID          string
 	directPostHits  *atomic.Int64
-	// transactionXML / recurringXML drive the fake Query API responses;
+	// transactionXML drives the fake query.php responses; subscriptionJSON is
+	// the v5 GET /subscriptions/{id} body ("" = 404, gone at NMI);
 	// queryStatus != 0 forces an HTTP error (unreachable provider).
-	transactionXML string
-	recurringXML   string
-	queryStatus    int
+	transactionXML   string
+	subscriptionJSON string
+	queryStatus      int
 }
 
 func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Duration) *livenessFixture {
@@ -62,9 +63,9 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 		dbi: dbi, pool: pool, q: q,
 		productID: uuid.New(), priceID: uuid.New(), paymentMethodID: uuid.New(), subID: uuid.New(),
 		procSubID: "psub_live_" + uuid.New().String(), userID: uuid.New().String(),
-		directPostHits: &atomic.Int64{},
-		transactionXML: `<?xml version="1.0"?><nm_response></nm_response>`,
-		recurringXML:   `<?xml version="1.0"?><nm_response></nm_response>`,
+		directPostHits:   &atomic.Int64{},
+		transactionXML:   `<?xml version="1.0"?><nm_response></nm_response>`,
+		subscriptionJSON: "", // absent at NMI by default
 	}
 
 	billingHours32 := int32(30 * 24)
@@ -120,6 +121,21 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	// Fake NMI: query.php answers come from the fixture fields; ANY hit on a
 	// non-query (direct-post mutation) shape increments directPostHits.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			// v5 read (GET /subscriptions/{id}).
+			if f.queryStatus != 0 {
+				w.WriteHeader(f.queryStatus)
+				_, _ = w.Write([]byte(`{"type":"internalError","error_code":"E_INTERNAL","message":"boom"}`))
+				return
+			}
+			if f.subscriptionJSON == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(f.subscriptionJSON))
+			return
+		}
 		_ = r.ParseForm()
 		reportType := r.Form.Get("report_type")
 		if reportType == "" {
@@ -137,8 +153,6 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><merchant><company>Live TEST</company><email>live@acme.test</email></merchant></nm_response>`))
 		case "transaction":
 			_, _ = w.Write([]byte(f.transactionXML))
-		case "recurring":
-			_, _ = w.Write([]byte(f.recurringXML))
 		default:
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
 		}
@@ -151,6 +165,7 @@ func newLivenessFixture(t *testing.T, rail models.Rail, periodEndAgo time.Durati
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 
 	f.worker = &SubscriptionLivenessWorker{
 		DB:         dbi,
@@ -255,13 +270,7 @@ func TestLivenessWorker_DeclinedRoutesIntoDunning(t *testing.T) {
 func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
 	f := newLivenessFixture(t, models.RailNMI, 36*time.Hour)
 	nextCharge := time.Now().UTC().Add(48 * time.Hour).Format("2006-01-02")
-	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
-<nm_response>
-  <subscription>
-    <subscription_id>%s</subscription_id>
-    <next_charge_date>%s</next_charge_date>
-  </subscription>
-</nm_response>`, f.procSubID, nextCharge)
+	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","delayed_condition":"active","next_billing_date":"%s"}`, f.procSubID, nextCharge)
 
 	f.run(t)
 
@@ -291,13 +300,7 @@ func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
 func TestLivenessWorker_MissingPeriodStillProbesProvider(t *testing.T) {
 	f := newLivenessFixture(t, models.RailNMI, 36*time.Hour)
 	nextCharge := time.Now().UTC().Add(72 * time.Hour).Format("2006-01-02")
-	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
-<nm_response>
-  <subscription>
-    <subscription_id>%s</subscription_id>
-    <next_charge_date>%s</next_charge_date>
-  </subscription>
-</nm_response>`, f.procSubID, nextCharge)
+	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","delayed_condition":"active","next_billing_date":"%s"}`, f.procSubID, nextCharge)
 	_, err := f.pool.Exec(context.Background(), `UPDATE openrails.subscriptions SET current_period_ends_at = NULL WHERE id = $1`, f.subID)
 	require.NoError(t, err)
 
@@ -387,13 +390,7 @@ func TestLivenessWorker_UnreachableProviderLeavesStateUntouched(t *testing.T) {
 func TestLivenessWorker_MonthsStaleNeverCharges(t *testing.T) {
 	f := newLivenessFixture(t, models.RailNMI, 120*24*time.Hour)
 	// Remote record exists but stalled months ago.
-	f.recurringXML = fmt.Sprintf(`<?xml version="1.0"?>
-<nm_response>
-  <subscription>
-    <subscription_id>%s</subscription_id>
-    <next_charge_date>%s</next_charge_date>
-  </subscription>
-</nm_response>`, f.procSubID, time.Now().UTC().Add(-119*24*time.Hour).Format("2006-01-02"))
+	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","delayed_condition":"active","next_billing_date":"%s"}`, f.procSubID, time.Now().UTC().Add(-119*24*time.Hour).Format("2006-01-02"))
 
 	f.run(t)
 

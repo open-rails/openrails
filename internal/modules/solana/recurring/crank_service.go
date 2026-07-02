@@ -23,6 +23,18 @@ type merchantAddressSubmitter interface {
 	SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
+// Presubmit capabilities (#674): the production signerSubmitter persists the
+// signed tx signature via the caller's hook BEFORE submission, so a crash
+// mid-submit is resolvable by a chain read. Optional — fakes without them
+// simply skip the write-ahead.
+type presubmitSubmitter interface {
+	SubmitWithPresubmit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+}
+
+type presubmitMerchantAddressSubmitter interface {
+	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+}
+
 // NewCrankService builds a CrankService over a per-merchant Submitter.
 func NewCrankService(submitter Submitter) *CrankService {
 	return &CrankService{submitter: submitter}
@@ -32,6 +44,13 @@ func NewCrankService(submitter Submitter) *CrankService {
 // pull reverts atomically (no partial charge); the caller classifies the error
 // (insufficient USDC -> dunning vs operational -> retry; see #257).
 func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
+	return s.CrankWithPresubmit(ctx, tenantID, sub, amountBaseUnits, nil)
+}
+
+// CrankWithPresubmit is Crank with a signature write-ahead hook (#674):
+// presubmit(sig) runs after signing, before submission. nil presubmit = plain
+// Crank.
+func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64, presubmit func(signature string) error) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
 	}
@@ -94,11 +113,22 @@ func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *mod
 	})
 
 	instructions := []solanago.Instruction{ix}
+	var sigPresubmit func(solanago.Signature) error
+	if presubmit != nil {
+		sigPresubmit = func(sig solanago.Signature) error { return presubmit(sig.String()) }
+	}
 	var sig solanago.Signature
-	if submitter, ok := s.submitter.(merchantAddressSubmitter); ok {
+	switch submitter := s.submitter.(type) {
+	case presubmitMerchantAddressSubmitter:
+		sig, err = submitter.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchant, instructions, sigPresubmit)
+	case merchantAddressSubmitter:
 		sig, err = submitter.SubmitForMerchantAddress(ctx, tenantID, merchant, instructions)
-	} else {
-		sig, err = s.submitter.Submit(ctx, tenantID, instructions)
+	default:
+		if ps, ok := s.submitter.(presubmitSubmitter); ok {
+			sig, err = ps.SubmitWithPresubmit(ctx, tenantID, instructions, sigPresubmit)
+		} else {
+			sig, err = s.submitter.Submit(ctx, tenantID, instructions)
+		}
 	}
 	if err != nil {
 		return "", err

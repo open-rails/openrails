@@ -112,11 +112,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND created_at >= sqlc.arg(period_from)::timestamptz
   AND created_at < sqlc.arg(period_to)::timestamptz
 GROUP BY transfer_type;
-
--- LedgerLedgerNet: conservation check from maintained counters. Double-entry
--- guarantees this is 0 when the projection is in sync.
--- name: LedgerLedgerNet :one
-SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint AS net
-FROM openrails.ledger_accounts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND currency = sqlc.arg(currency)::text;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -147,26 +148,77 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
 }
 
-func TestIsDuplicate_DoesNotAutoCompletePendingClaim(t *testing.T) {
+// A handler slower than the pending lease must stay exclusive: the heartbeat
+// renews the lease, so a redelivery is rejected instead of taking over (#678).
+func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 	ctx := context.Background()
 	idem := idempotency.NewIdempotencyService(nil)
 	svc := NewDeduplicationService(idem)
+	svc.pendingLease = 100 * time.Millisecond
 
-	isDupe, err := svc.IsDuplicate(ctx, "ccbill", "evt-1")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstErr := make(chan error, 1)
+	var attempts atomic.Int32
+
+	go func() {
+		firstErr <- svc.ProcessWebhook(
+			ctx, "tx-slow", "RenewalSuccess", models.RailCCBill, nil,
+			func(context.Context) error {
+				attempts.Add(1)
+				close(started)
+				<-release
+				return nil
+			},
+		)
+	}()
+
+	<-started
+	time.Sleep(3 * svc.pendingLease) // well past the lease; heartbeat must have renewed it
+
+	err := svc.ProcessWebhook(
+		ctx, "tx-slow", "RenewalSuccess", models.RailCCBill, nil,
+		func(context.Context) error {
+			attempts.Add(1)
+			return nil
+		},
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "webhook already in progress")
+	require.Equal(t, int32(1), attempts.Load(), "slow handler must stay exclusive")
+
+	close(release)
+	require.NoError(t, <-firstErr)
+}
+
+// A genuinely dead holder (pending record, no heartbeat) is still taken over
+// after the lease ages out.
+func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
+	ctx := context.Background()
+	idem := idempotency.NewIdempotencyService(nil)
+	svc := NewDeduplicationService(idem)
+	svc.pendingLease = 50 * time.Millisecond
+
+	// Simulate a crashed holder: claim pending, never heartbeat or complete.
+	_, existed, err := idem.Begin(ctx, "webhook.ccbill.RenewalSuccess", "tx-dead")
 	require.NoError(t, err)
-	require.False(t, isDupe)
+	require.False(t, existed)
 
-	rec, err := idem.Get(ctx, "webhook.ccbill.event", "evt-1")
+	time.Sleep(2 * svc.pendingLease)
+
+	attempts := 0
+	err = svc.ProcessWebhook(
+		ctx, "tx-dead", "RenewalSuccess", models.RailCCBill, nil,
+		func(context.Context) error {
+			attempts++
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, attempts, "stale pending claim should be taken over")
+
+	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-dead")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusPending, rec.Status)
-
-	isDupe, err = svc.IsDuplicate(ctx, "ccbill", "evt-1")
-	require.NoError(t, err)
-	require.False(t, isDupe)
-
-	require.NoError(t, idem.Complete(ctx, "webhook.ccbill.event", "evt-1", nil))
-	isDupe, err = svc.IsDuplicate(ctx, "ccbill", "evt-1")
-	require.NoError(t, err)
-	require.True(t, isDupe)
+	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
 }

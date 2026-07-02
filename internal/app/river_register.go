@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -164,22 +165,22 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	// Credit money-in + reconciliation workers (#239/#240/#241/#243/#508). The
+	// Credit money-in + reconciliation workers (#239/#241/#243/#508). The
 	// auto-top-up and invoice workers share the configured off-session charger;
 	// when it is nil they log-and-skip until rail wiring is attached.
-	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
-		Money: r.MoneyService,
-	}); err != nil {
-		return fmt.Errorf("add low-balance alert worker: %w", err)
-	}
+	// LowBalanceAlertWorker (#240) is NOT registered: no money.Alerter
+	// implementation exists in the runtime, so registration was a permanent
+	// no-op (#673) — re-add it together with the notification wiring.
 	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
+		DB:      r.DB,
 		Money:   r.MoneyService,
-		Charger: r.MoneyCharger,
 		Config:  r.Config,
+		Intents: r.intentRunner(intentRegistry, clock),
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceWorker{
+		DB:      r.DB,
 		Money:   r.MoneyService,
 		Charger: r.MoneyCharger,
 		Config:  r.Config,
@@ -202,6 +203,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Config:    r.Config,
 		Clock:     clock,
 		Lifecycle: r.SubscriptionLifecycleService,
+		// #674: pulls run as durable solana_pull intents through the same
+		// registry the scheduled executor/verifier drains.
+		Intents: r.intentRunner(intentRegistry, clock),
 	}
 	if r.SolanaCranker != nil {
 		solanaCrankWorker.Cranker = r.SolanaCranker
@@ -231,10 +235,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 
 // buildIntentRegistry assembles the per-type intent semantics for the
 // provider intent executor/verifier (#358): deferred NMI deletes (phase A),
-// NMI/Stripe refunds (phase B), manual rebills (phase C) and catalog archive
-// ops — Stripe product/price archives + Solana plan sunsets (phase D).
+// NMI/Stripe refunds (phase B), manual rebills (phase C), catalog archive
+// ops — Stripe product/price archives + Solana plan sunsets (phase D) — and
+// the #674 write-through kinds (checkout NMI sales, auto-top-up charges,
+// Solana recurring pulls).
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
-	return intents.NewRegistry(
+	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
@@ -243,6 +249,34 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
 	)
+	// #674 write-through kinds live next to their domain services and register
+	// only when those services are wired (worker-only runtimes may lack them).
+	if r.CheckoutService != nil {
+		if r.CheckoutService.NMISaleService != nil {
+			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
+		}
+		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
+	}
+	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.NMIClients, clock))
+	// Solana recurring pull (#674): the handler wraps the crank state machine
+	// with the pre-submit signature write-ahead + chain-read verification. The
+	// core worker here carries NO Intents runner (the handler IS the execution
+	// path; a runner on it would recurse).
+	solanaPullCore := &riverjobs.SolanaCrankWorker{
+		DB:        r.DB,
+		Config:    r.Config,
+		Clock:     clock,
+		Lifecycle: r.SubscriptionLifecycleService,
+	}
+	if r.SolanaCranker != nil {
+		solanaPullCore.Cranker = r.SolanaCranker
+	}
+	var solanaChain riverjobs.SolanaTxReader
+	if r.SolanaRPC != nil {
+		solanaChain = r.SolanaRPC
+	}
+	registry.Register(riverjobs.NewSolanaPullIntentHandler(solanaPullCore, intents.NewStore(r.DB), solanaChain))
+	return registry
 }
 
 // intentRunner builds a Runner over a registry. Config is attached only when
@@ -474,17 +508,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every hour: low-balance alerts (#240) + invoice collection (#241).
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(time.Hour),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.LowBalanceAlertArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
+	// Every hour: invoice collection (#241). (Low-balance alert scheduling was
+	// removed with its worker registration — no Alerter implementation exists.)
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {

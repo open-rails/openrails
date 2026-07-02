@@ -49,7 +49,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services/health"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
@@ -247,6 +246,13 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
+	// Webhook-dedup posture (#678). Embedded hosts are identified by the injected
+	// DB pool — the same signal that scopes createDatabase's RLS gate to the
+	// config-built (standalone) path.
+	if err := enforceWebhookDedupPosture(cfg, redisClient != nil, overrides != nil && overrides.DB != nil); err != nil {
+		return nil, err
+	}
+
 	ccbillClient := createCCBillClient(cfg, railSet)
 	ccbillRESTClient := createCCBillRESTClient(railSet)
 	ccbillDataLinkClient := createCCBillDataLinkClient(cfg, railSet)
@@ -264,7 +270,6 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	serviceInstances := createServices(database, cfg, railSet, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
-	healthManager := createHealthManager(database, redisClient)
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -304,7 +309,6 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		Rails:                railSet,
 		Clock:                clock,
 		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
-		HealthManager:        healthManager,
 		CCBillClient:         ccbillClient,
 		CCBillRESTClient:     ccbillRESTClient,
 		CCBillDataLink:       ccbillDataLinkClient,
@@ -399,8 +403,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		runtime.AdminSubscriptionService.EventLogService = runtime.EventLogService
 	}
 
-	if runtime.HealthManager != nil {
-		runtime.HealthManager.Start()
+	// #674: write-through provider intents. Producers post a durable intent and
+	// execute it inline through the SAME registry/runner the scheduled
+	// executor/verifier drains — one primitive, identical semantics.
+	if runtime.CheckoutService != nil {
+		intentRunner := runtime.IntentRunner()
+		runtime.CheckoutService.Intents = intentRunner
+		if runtime.CheckoutService.NMISaleService != nil {
+			runtime.CheckoutService.NMISaleService.Intents = intentRunner
+		}
 	}
 
 	return runtime, nil
@@ -456,21 +467,6 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		return nil, err
 	}
 	return database, nil
-}
-
-func createHealthManager(database *db.DB, redisClient *redis.Client) *health.ServiceHealthManager {
-	manager := health.NewServiceHealthManager()
-	if database != nil {
-		if pool := database.Pool(); pool != nil {
-			manager.RegisterChecker(health.NewPostgresHealthChecker(pool))
-		} else {
-			log.Warn("database health checker not registered: runtime DB has no pgx pool")
-		}
-	}
-	if redisClient != nil {
-		manager.RegisterChecker(health.NewRedisHealthChecker(redisClient))
-	}
-	return manager
 }
 
 func validateDatabase(cfg *config.Config, database *db.DB) error {
@@ -643,6 +639,33 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	return client, nil
 }
 
+// enforceWebhookDedupPosture (#678): without Redis, webhook dedup silently
+// falls back to a PER-PROCESS memory store — a multi-replica standalone
+// deployment loses cross-replica replay protection entirely. Fail startup in
+// standalone non-development mode; development and single-process embedded
+// hosts keep the fallback with a loud warning.
+func enforceWebhookDedupPosture(cfg *config.Config, hasRedis, embeddedHost bool) error {
+	if hasRedis {
+		return nil
+	}
+	if err := webhookDedupPostureError(cfg, embeddedHost); err != nil {
+		return err
+	}
+	log.Warn("redis not configured: webhook dedup degrades to a per-process memory store — no cross-replica replay protection (#678); acceptable only in development or single-process embedded hosts")
+	return nil
+}
+
+// webhookDedupPostureError is pure (no redis/db) so the decision is unit testable.
+func webhookDedupPostureError(cfg *config.Config, embeddedHost bool) error {
+	if embeddedHost || cfg == nil || cfg.IsDev() {
+		return nil
+	}
+	return fmt.Errorf(
+		"redis is required in non-development standalone mode (env %q): webhook dedup would fall back to a per-process memory store with no cross-replica replay protection (#678); configure redis",
+		cfg.Env,
+	)
+}
+
 func createCCBillClient(cfg *config.Config, rails config.ProviderAccountSet) *ccbill.CCBillClient {
 	ccbillProc := rails.GetCCBillRail()
 	if ccbillProc == nil {
@@ -741,8 +764,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 	// ExchangeAPIProvider uses the fawazahmed0 exchange-api (CC0, free, NO API key),
 	// wrapped in a 5-minute in-memory cache, or (when Redis is present) a 3-hour
 	// Redis cache with a background refresher. There is no config switch and no
-	// NoOp fallback here: production never runs at a flat 1.0 rate. (fx.NoOpProvider
-	// is test/standalone-only — see internal/integrations/fx/provider.go.)
+	// NoOp fallback here: production never runs at a flat 1.0 rate.
 	liveFX := fx.NewExchangeAPIProvider()
 	var fxProvider fx.Provider = fx.NewCachedProvider(liveFX, 5*time.Minute)
 	var fxRateRefresher interface {
@@ -855,7 +877,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 		entitlementService,
 		paymentMethodService,
 		vaultService,
-		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
+		idempotencyService,
 		nmiClients,
 		railCustomerService,
 		cfg,
@@ -878,7 +900,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.Provider
 		priceService,
 		productService,
 		paymentMethodService,
-		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
+		idempotencyService,
 		checkoutService,
 		solanaPayService,
 		solanaTransactionService,

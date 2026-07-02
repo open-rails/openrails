@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -38,16 +39,14 @@ func TestGrants_CreditSpendFIFO(t *testing.T) {
 	// Spend 250 -> drains lotA (100) then 150 of lotB (FIFO by expiry).
 	require.NoError(t, l.CreditSpend(ctx, customer, cur, 250, "invoker-1", "gpt", "spend", "req-1"))
 	mustBal(t, ctx, ml, custAcc, 350)
-	require.Equal(t, int64(0), lotRemaining(t, ctx, l, customer, cur, lotA.ID))
-	require.Equal(t, int64(350), lotRemaining(t, ctx, l, customer, cur, lotB.ID))
+	require.Equal(t, int64(0), lotRemaining(t, ctx, pool, merchantID, customer, cur, lotA.ID))
+	require.Equal(t, int64(350), lotRemaining(t, ctx, pool, merchantID, customer, cur, lotB.ID))
 
 	// Over-spend the remainder is rejected atomically (nothing applied).
 	require.ErrorIs(t, l.CreditSpend(ctx, customer, cur, 400, "invoker-1", "gpt", "spend", "req-2"), grants.ErrInsufficientCredits)
 	mustBal(t, ctx, ml, custAcc, 350)
 
-	net, err := ml.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net)
+	requireConserved(t, ctx, pool, merchantID, cur)
 }
 
 // A lapsed credit lot's unspent remainder is clawed to expired_credits; idempotent.
@@ -83,9 +82,87 @@ func TestGrants_CreditExpire(t *testing.T) {
 	require.Equal(t, int64(0), again)
 	mustBal(t, ctx, ml, custAcc, 0)
 
-	net, err := ml.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net)
+	requireConserved(t, ctx, pool, merchantID, cur)
+}
+
+// #677: a spend and the lapsed-lot expiry serialize on the per-customer spend
+// lock, so both can never consume the same lot. Lot B covers the ACCOUNT floor,
+// so only per-lot accounting (not the overdraft trigger) can catch the
+// over-consumption this guards against. The spender opens a tx, takes the lock
+// (the money-path contract) and draws lot A while the expiry runs concurrently;
+// ExpireLapsed must block on the lock and claw only the committed remainder.
+func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
+	l, pool, ctx, customer, product, merchantID := testGrants(t)
+	cur := "TC" + short()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+	})
+
+	edge := time.Now().UTC() // lot A lapses exactly here
+	lateEnd := edge.Add(24 * time.Hour)
+	lotA := mustCreditLot(t, ctx, l, customer, product, cur, 1000, edge.Add(-time.Hour), &edge)
+	mustCreditLot(t, ctx, l, customer, product, cur, 1000, edge.Add(-time.Hour), &lateEnd)
+
+	spendApplied := make(chan struct{})
+	spendErr := make(chan error, 1)
+	expireErr := make(chan error, 1)
+	var expired int64
+
+	// Spender: clock just BEFORE the edge (lot A still spendable). Lock + spend
+	// 800 from lot A, hold the tx open while the expiry runs, then commit.
+	go func() {
+		spendErr <- func() error {
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			gl := grants.New(gen.New(tx), merchantID)
+			gl.SetClock(func() time.Time { return edge.Add(-time.Second) })
+			if err := gl.LockCustomer(ctx, customer); err != nil {
+				return err
+			}
+			if err := gl.CreditSpend(ctx, customer, cur, 800, "invoker-1", "gpt", "spend", "race-1"); err != nil {
+				return err
+			}
+			close(spendApplied)
+			time.Sleep(300 * time.Millisecond) // hold the lock while the expiry contends
+			return tx.Commit(ctx)
+		}()
+	}()
+
+	// Expirer: the credit-expiry job path — ExpireLapsed in its own tx, clock
+	// just PAST the edge (lot A lapsed). It must block until the spend commits.
+	go func() {
+		expireErr <- func() error {
+			<-spendApplied
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			gl := grants.New(gen.New(tx), merchantID)
+			gl.SetClock(func() time.Time { return edge.Add(time.Second) })
+			var e error
+			if expired, e = gl.ExpireLapsed(ctx, customer, cur); e != nil {
+				return e
+			}
+			return tx.Commit(ctx)
+		}()
+	}()
+
+	require.NoError(t, <-spendErr)
+	require.NoError(t, <-expireErr)
+	require.Equal(t, int64(200), expired, "expiry claws only the post-spend remainder")
+
+	// Lot A consumed exactly once: spend 800 + expire 200 == the 1000 deposited.
+	var consumed int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(amount),0)::bigint FROM openrails.ledger_transfers
+		 WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type IN ('credit_spend','credit_expire')`,
+		merchantID, lotA.ID).Scan(&consumed))
+	require.Equal(t, int64(1000), consumed, "lot A must not be over-consumed")
+	requireConserved(t, ctx, pool, merchantID, cur)
 }
 
 func mustCreditLot(t *testing.T, ctx context.Context, l *grants.Ledger, customer, product uuid.UUID, cur string, amount int64, start time.Time, end *time.Time) gen.OpenrailsGrant {
@@ -106,9 +183,11 @@ func mustBal(t *testing.T, ctx context.Context, ml *ledger.Ledger, acc uuid.UUID
 	require.Equal(t, want, got, "balance of %s", acc)
 }
 
-func lotRemaining(t *testing.T, ctx context.Context, l *grants.Ledger, customer uuid.UUID, cur string, lotID uuid.UUID) int64 {
+func lotRemaining(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID, customer uuid.UUID, cur string, lotID uuid.UUID) int64 {
 	t.Helper()
-	lots, err := l.SpendableLots(ctx, customer, cur)
+	lots, err := gen.New(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+		MerchantID: merchantID, CustomerID: customer, Currency: cur, AsOf: time.Now().UTC(),
+	})
 	require.NoError(t, err)
 	for _, lot := range lots {
 		if lot.ID == lotID {

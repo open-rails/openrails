@@ -172,14 +172,34 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if err != nil {
 		return nil, fmt.Errorf("build merchant encryptor: %w", err)
 	}
+	if err := enforceEncryptionPosture(enc.Enabled(), cfg.RequiresSecretEncryption()); err != nil {
+		return nil, err
+	}
 	store, err := merchants.NewEncryptedSecretStore(dbStore, enc)
 	if err != nil {
 		return nil, fmt.Errorf("wrap DB merchant secret store with encryption: %w", err)
 	}
+	// Only reachable in dev post-#667; Solana keys are self-custody funds, so
+	// plaintext is refused even where dev deliberately allows it for the rest.
 	if !enc.Enabled() {
 		store = merchants.NewWriteRestrictedSecretStore(store, map[string]string{
 			"provider_accounts/solana/*/*/private_key": "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
 		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil
+}
+
+// enforceEncryptionPosture is the #667 boot gate on the DB-backed (fallback)
+// secret store, mirroring db.EnforceRLSPosture: outside development a disabled
+// encryptor refuses boot (secrets would persist plaintext at rest); development
+// proceeds with one loud warning. Vault-backed deployments never reach this.
+func enforceEncryptionPosture(encryptionEnabled, require bool) error {
+	if encryptionEnabled {
+		return nil
+	}
+	if require {
+		return fmt.Errorf("merchant secrets: secret_backend=db with no ENCRYPTION_MASTER_KEY would persist merchant provider credentials PLAINTEXT in openrails.merchant_secrets; set ENCRYPTION_MASTER_KEY (base64 32-byte AES-256 key) or store secrets in Vault (secret_backend=vault); only development may run without")
+	}
+	log.Warn("merchant secrets: ENCRYPTION_MASTER_KEY is not set; DB-backed merchant secrets will persist PLAINTEXT at rest (development only — non-development boots refuse this posture, #667)")
+	return nil
 }

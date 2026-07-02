@@ -209,18 +209,10 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 }
 
 func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
-	if override != nil {
-		return *override
+	if s == nil {
+		return ProviderRoutesForRuntime(nil, override)
 	}
-	if s != nil && s.Runtime != nil {
-		if len(s.Runtime.Rails) > 0 || !s.Runtime.ConfiguredMerchant.IsZero() {
-			if caps := s.Runtime.RouteCapabilities; caps != nil {
-				return routesurface.ProviderRoutesFromRailsWithCapabilities(s.Runtime.Rails, *caps)
-			}
-			return routesurface.ProviderRoutesFromRails(s.Runtime.Rails)
-		}
-	}
-	return routesurface.AllProviderRoutes()
+	return ProviderRoutesForRuntime(s.Runtime, override)
 }
 
 func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
@@ -252,28 +244,11 @@ func (s *Assembler) captchaStatusHandler(w http.ResponseWriter, r *http.Request)
 	if s != nil && s.Cfg != nil {
 		cfg = s.Cfg.Captcha
 	}
-	resp := map[string]any{
-		"enabled":           cfg.IsEnabled(),
-		"required":          false,
-		"token_header":      captcha.TokenHeader,
-		"client_script_url": captchaClientScriptURL(r),
+	var store *captcha.ChallengeStore
+	if s != nil {
+		store = s.CaptchaStore
 	}
-	if cfg != nil {
-		resp["provider"] = cfg.EffectiveProvider()
-	}
-	if cfg.IsEnabled() && s.CaptchaStore != nil {
-		for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r) {
-			challenged, err := s.CaptchaStore.IsChallenged(r.Context(), subjectKey)
-			if err != nil {
-				continue
-			}
-			if challenged {
-				resp["required"] = true
-				break
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
+	CaptchaStatusHandler(cfg, store)(w, r)
 }
 
 // captchaClientScriptHandler is the gin-free captcha client-script endpoint.
@@ -282,11 +257,47 @@ func (s *Assembler) captchaClientScriptHandler(w http.ResponseWriter, r *http.Re
 	if s != nil && s.Cfg != nil {
 		cfg = s.Cfg.Captcha
 	}
-	script := buildCaptchaClientScript(cfg)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(script))
+	CaptchaClientScriptHandler(cfg)(w, r)
+}
+
+// CaptchaStatusHandler is the captcha discovery endpoint shared by the embedded
+// and standalone surfaces (#670: one implementation, two mounts).
+func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"enabled":           cfg.IsEnabled(),
+			"required":          false,
+			"token_header":      captcha.TokenHeader,
+			"client_script_url": captchaClientScriptURL(r),
+		}
+		if cfg != nil {
+			resp["provider"] = cfg.EffectiveProvider()
+		}
+		if cfg.IsEnabled() && store != nil {
+			for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r) {
+				challenged, err := store.IsChallenged(r.Context(), subjectKey)
+				if err != nil {
+					continue
+				}
+				if challenged {
+					resp["required"] = true
+					break
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// CaptchaClientScriptHandler serves the captcha client bootstrap script.
+func CaptchaClientScriptHandler(cfg *config.CaptchaConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		script := buildCaptchaClientScript(cfg)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(script))
+	}
 }
 
 func captchaClientScriptURL(r *http.Request) string {
