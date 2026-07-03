@@ -267,6 +267,8 @@ github.com/open-rails/authkit v0.78.0 h1:QCLi0CgsVxhZZlbeWXa3p0CICsjSu8hGsQnFDIF
 github.com/open-rails/authkit v0.78.0/go.mod h1:gfpqg5Dk7aKmepkypI8nFcN8XI3Gn5OVVMNAIMZDT+Y=
 github.com/open-rails/migratekit v1.2.0 h1:5UcslJmg4k0/lav0wPKuxevPhKvfS7se8IOWqgHtpeY=
 github.com/open-rails/migratekit v1.2.0/go.mod h1:FmXhq5556xhvcDHx1wP3rNH1UBv408GHrxLw9gWXn6k=
+github.com/open-rails/migratekit v1.3.0 h1:Gf24VrBsayPESjF1gWBgVvkPhVMziQJ86LhNT/GJWus=
+github.com/open-rails/migratekit v1.3.0/go.mod h1:FmXhq5556xhvcDHx1wP3rNH1UBv408GHrxLw9gWXn6k=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
