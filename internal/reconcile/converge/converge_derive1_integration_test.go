@@ -18,9 +18,9 @@ import (
 // #631 derive-1: a stored, ungranted ACTIVE subscription for a grantable product
 // is auto-materialized into a grant (source_type=subscription) + an entitlement
 // window spanning its period. A second Converge is a no-op (source-keyed
-// idempotency). A PENDING subscription is NOT derived (only active/cancelled grant
-// access). This is exactly the migrate/convergence split: the migrate moves the
-// subscription, the engine derives the access.
+// idempotency). A PENDING subscription is NOT derived (only active/cancelled/
+// unknown grant access). This is exactly the migrate/convergence split: the
+// migrate moves the subscription, the engine derives the access.
 func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -488,6 +488,238 @@ func TestConverge_DeriveGrantMissing_CancelledSubNonOverlapped(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
 		require.NoError(t, err)
 		require.Zero(t, res.Findings, "second sweep is findings-free")
+		return nil
+	}))
+}
+
+// #716 fail-open: an imported-as-unknown AUTO-RENEW subscription (the legacy
+// import parks stale rows as `unknown`) is derive-1 sourced like active/cancelled
+// — grant recorded with the frozen stored period, and because the sub projects
+// standing access (auto_renew + unknown) the projection is a STANDING window
+// (end_at NULL): the customer holds access NOW while the resolution machinery
+// finds the truth. Evidence bounds still hold: a NON-renewing unknown
+// materializes only its stored bounded window (past period ⇒ no live access),
+// and an unknown with no window evidence at all derives nothing.
+func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	e := NewConvergeEngine(appDB)
+	sfx := uuid.NewString()[:8]
+	feat := "unk-feat-" + sfx
+
+	prodAuto, priceAuto := uuid.New(), uuid.New()
+	prodBounded, priceBounded := uuid.New(), uuid.New()
+	subAuto, subBounded, subBare := uuid.New(), uuid.New(), uuid.New()
+	var custAuto, custBounded, custBare uuid.UUID
+	now := time.Now().UTC()
+	start := now.Add(-40 * 24 * time.Hour)
+	pastEnd := now.Add(-10 * 24 * time.Hour) // stale import: period end already passed
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		custAuto = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		custBounded = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		custBare = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+			prodAuto, "unk-auto-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+			priceAuto, prodAuto, merchantID)
+		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+			prodBounded, "unk-bnd-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,false,$3)`,
+			priceBounded, prodBounded, merchantID)
+		// AUTO-RENEW sub imported as unknown with a stale (past) stored period.
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8)`,
+			subAuto, merchantID, custAuto, prodAuto, priceAuto, "unk-auto-"+sfx, start, pastEnd)
+		// NON-renewing unknown, same stale period.
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8)`,
+			subBounded, merchantID, custBounded, prodBounded, priceBounded, "unk-bnd-"+sfx, start, pastEnd)
+		// Unknown with NO window evidence: no period bounds, no ended_at.
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7)`,
+			subBare, merchantID, custBare, prodAuto, priceAuto, "unk-bare-"+sfx, start)
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+				merchantID, []string{"subscription:" + subAuto.String(), "subscription:" + subBounded.String(), "subscription:" + subBare.String()})
+			for _, c := range []uuid.UUID{custAuto, custBounded, custBare} {
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+			}
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subAuto, subBounded, subBare})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceAuto, priceBounded})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodAuto, prodBounded})
+			return nil
+		})
+	})
+
+	liveNow := func(ctx context.Context, c uuid.UUID) int {
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2
+			   AND revoked_at IS NULL AND deleted_at IS NULL
+			   AND start_at <= now() AND (end_at IS NULL OR end_at > now())`,
+			merchantID, c).Scan(&n))
+		return n
+	}
+
+	// Auto-renew unknown: grant frozen to the stale period, STANDING window → live NOW.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custAuto})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.AutoFixed, "derive.subscription.missing auto-fixed for the unknown sub")
+		var gStart, gEnd time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT starts_at, ends_at FROM openrails.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant'`,
+			merchantID, subAuto.String()).Scan(&gStart, &gEnd))
+		require.WithinDuration(t, start, gStart, time.Second, "grant freezes the stored period")
+		require.WithinDuration(t, pastEnd, gEnd, time.Second)
+		var entStart time.Time
+		var endAt, revokedAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT start_at, end_at, revoked_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			merchantID, custAuto, feat).Scan(&entStart, &endAt, &revokedAt))
+		require.Nil(t, endAt, "auto-renew unknown projects a STANDING window (fail-open)")
+		require.Nil(t, revokedAt)
+		require.WithinDuration(t, start, entStart, time.Second)
+		require.Equal(t, 1, liveNow(ctx, custAuto), "customer holds access now")
+		return nil
+	}))
+
+	// Non-renewing unknown: only the evidenced bounded window — already past, no live access.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custBounded})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.AutoFixed)
+		var endAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			merchantID, custBounded, feat).Scan(&endAt))
+		require.NotNil(t, endAt, "non-renewing unknown gets a BOUNDED window only")
+		require.WithinDuration(t, pastEnd, *endAt, time.Second, "window ends at the stored evidence, nothing invented")
+		require.Equal(t, 0, liveNow(ctx, custBounded), "past window grants no live access")
+		return nil
+	}))
+
+	// No window evidence: nothing derived, nothing fabricated.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custBare})
+		require.NoError(t, err)
+		require.Zero(t, res.Findings, "evidence-less unknown is not flagged")
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custBare).Scan(&n))
+		require.Zero(t, n, "no grant fabricated without a stored window")
+		require.Equal(t, 0, liveNow(ctx, custBare))
+		return nil
+	}))
+
+	// Repeat sweeps are findings-free (no flap) and access is unchanged.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		for _, c := range []uuid.UUID{custAuto, custBounded} {
+			cust := c
+			res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
+			require.NoError(t, err)
+			require.Zero(t, res.Findings, "second sweep is findings-free")
+		}
+		require.Equal(t, 1, liveNow(ctx, custAuto), "standing access intact")
+		return nil
+	}))
+}
+
+// #717 chargeback ⇒ no runway: derive-1 NEVER materializes access for a
+// cancel_type='chargeback' subscription — the legacy import maps chargebacks to
+// cancelled with ended_at=expiration (possibly future), and money reversed =
+// access reversed. Regression pin: a USER-cancelled sub with the same shape
+// KEEPS its paid-through runway (period-end window materializes, live now).
+func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	e := NewConvergeEngine(appDB)
+	sfx := uuid.NewString()[:8]
+	feat := "cb-feat-" + sfx
+
+	prod, price := uuid.New(), uuid.New()
+	subCB, subUser := uuid.New(), uuid.New()
+	var custCB, custUser uuid.UUID
+	now := time.Now().UTC()
+	start := now.Add(-40 * 24 * time.Hour)
+	futureEnd := now.Add(20 * 24 * time.Hour) // paid-through still in the future
+	cancelled := now.Add(-5 * 24 * time.Hour)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		custCB = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		custUser = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+			prod, "cb-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+			price, prod, merchantID)
+		// Charged-back sub, legacy import shape: ended_at = expiration (future).
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'chargeback',$8)`,
+			subCB, merchantID, custCB, prod, price, "cb-"+sfx, start, futureEnd, cancelled)
+		// User-cancelled sub with the SAME shape: paid-through runway is honored.
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'user',$8)`,
+			subUser, merchantID, custUser, prod, price, "cb-user-"+sfx, start, futureEnd, cancelled)
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+				merchantID, []string{"subscription:" + subCB.String(), "subscription:" + subUser.String()})
+			for _, c := range []uuid.UUID{custCB, custUser} {
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+			}
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subCB, subUser})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			return nil
+		})
+	})
+
+	// Chargeback: NO grant, NO window, not even a finding — excluded at source.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custCB})
+		require.NoError(t, err)
+		require.Zero(t, res.Findings, "chargeback sub is not a derive source")
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
+		require.Zero(t, n, "chargeback sub materializes no grant")
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
+		require.Zero(t, n, "chargeback sub materializes no window — money reversed = access reversed")
+		return nil
+	}))
+
+	// Regression pin: user cancel keeps the paid-through runway.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custUser})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.AutoFixed, "user-cancelled sub still derives its paid window")
+		var endAt time.Time
+		var revokedAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT end_at, revoked_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			merchantID, custUser, feat).Scan(&endAt, &revokedAt))
+		require.Nil(t, revokedAt)
+		require.WithinDuration(t, futureEnd, endAt, time.Second, "paid-through runway preserved for a user cancel")
+		require.True(t, endAt.After(time.Now().UTC()), "runway window is live now")
 		return nil
 	}))
 }

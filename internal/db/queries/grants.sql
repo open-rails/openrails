@@ -403,14 +403,18 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY g.created_at;
 
 -- #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
--- granting state (active/cancelled) for a product that PROMISES entitlements,
+-- granting state (active/cancelled/unknown) for a product that PROMISES entitlements,
 -- with NO subscription-sourced grant yet. After the migrate/convergence split the
 -- doujins migrate moves subscriptions as source-of-truth (#724) but no longer
 -- writes their entitlements — derive-1 materializes the grant + entitlement window
 -- from the stored subscription. Window is computed Go-side (mirrors the retired
 -- migrate logic): [COALESCE(current_period_starts_at,started_at),
--- COALESCE(current_period_ends_at,ended_at)). Only active+cancelled grant access
--- (pending/expired/failed/past_due do not). Bounded to windows ending within
+-- COALESCE(current_period_ends_at,ended_at)). active+cancelled+unknown grant
+-- access (pending/expired/failed/past_due do not). #716 fail-open: `unknown`
+-- matches SubscriptionProjectsStandingAccess — an imported-as-unknown sub gets
+-- its entitlement while the resolution machinery finds the truth. #717:
+-- cancel_type='chargeback' grants NO runway — money reversed = access reversed.
+-- Bounded to windows ending within
 -- scan_since (3y) — a past-ended window is harmless but skipping ancient ones
 -- keeps the sweep cheap. customer_id nullable (#575): NULL = merchant-wide sweep.
 -- name: ListUngrantedSubscriptions :many
@@ -421,7 +425,8 @@ FROM openrails.subscriptions s
 JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.status IN ('active', 'cancelled')
+  AND s.status IN ('active', 'cancelled', 'unknown')
+  AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
   AND COALESCE(s.current_period_ends_at, s.ended_at) >= sqlc.arg(scan_since)::timestamptz

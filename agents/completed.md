@@ -26311,3 +26311,679 @@ CLOSED, no store row → boot NMIClients fallback (embedded hosts keep working),
   (store-only credentials charge succeeds + auth key asserted; fail-closed on missing secret;
   boot-plane fallback) + manual_rebill_integration_test.go. All intents/money/river suites green.
 - NOTE: code comments initially stamped #727 (id collision with the rename issue); renumbered to #730.
+
+---
+
+# #705: [DB] naming sweep: post-#512/#603/#683 stragglers
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — usage_events.money_transaction_id →
+ledger_transfer_id and invoice_payments.money_transaction_id → ledger_transfer_id (+ uq_invoice_payments_ledger_transfer);
+BOTH got FKs to ledger_transfers(id) — delete.go tolerates them (neither table is purged; merchant delete is a
+tombstone) — and the JSON field is renamed too (usage_events → `ledger_transfer_id`). money_settings
+auto_topup_amount_cents → auto_topup_amount (Go field AutoTopupAmount everywhere incl. client.go SDK, whose
+json tag `auto_topup_amount_cents` had NEVER matched the server's `auto_topup_amount` — fixed). subscriptions.rail
+DEFAULT 'ccbill' dropped (all sqlc inserts pass rail; two raw test fixtures fixed). provider→rail axis:
+rail_intents.rail, rail_mutation_logs.rail + rail_intent_id (+ FK/index renames), rail_refresh_watermarks.rail +
+rail_merchant_account_key (+ _rail_check, idx_..._rail; identity_key constraint name kept — river ON CONFLICT
+targets it), catalog_drift_events.rail (+ _rail_check), catalog_credit_purchase_prices.rails. Go wrapper structs
+(intents.EnqueueParams/MutationLogParams, models.CatalogDriftEvent) keep their Provider field names and map at
+the gen boundary; the analytics/ClickHouse plane (provider_mutation_events) deliberately untouched. Stale names:
+products_key_not_null, idx_products_key, rail_merchant_accounts_rail_not_null,
+rail_customer_accounts_account_id_not_null; uq_subscriptions_tenant_subject/user_tier_group_active comment drift
+fixed (schema + subscription_repo.go + checkout/service.go). purchase_status enum left as-is (rename not cheap:
+type name baked into gen + models).
+
+- `usage_events.money_transaction_id`, `invoice_payments.money_transaction_id` (+ its unique index) — store
+  LEDGER TRANSFER ids since #512 dropped money_transactions; rename `ledger_transfer_id` (+ optional FK).
+- `money_settings.auto_topup_amount_cents` — value is micros; JSON name is already `auto_topup_amount`.
+  Rename. (Only `_cents` column in the schema.)
+- `subscriptions.rail DEFAULT 'ccbill'` — doujins-era default baked into a multi-rail schema; drop the
+  default, require explicit rail.
+- provider vs rail column axis (#683 survivors): `rail_intents.provider`, `rail_mutation_logs.provider` +
+  `provider_intent_id`, `rail_refresh_watermarks.provider` (+ generated `provider_account_key`),
+  `catalog_drift_events.provider`, `catalog_credit_purchase_prices.providers` text[]. Pick one word.
+- Stale names from column renames: `products_slug_not_null` / `idx_products_slug` (column is `key`),
+  `rail_merchant_accounts_provider_type_not_null` (column is `rail`),
+  `rail_customer_accounts_rail_customer_id_not_null` (column is `account_id`).
+- Comment drift: code comments referencing `uq_subscriptions_tenant_subject_tier_group_active` (old name);
+  `purchase_status` enum predates purchases→payments rename (cosmetic; rename only if cheap).
+
+---
+
+# #702: [DB] drop 7 dead tables (2026-07-02 pre-lock audit)
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — all 7 tables dropped from the 0001 baseline
+(full blocks incl. RLS/policies/grants); `entitlement_features.sql` queries, FeatureService + EntitlementFeatureRepo +
+models deleted; `GET /self/entitlements/active` now reads EntitlementService.ListActiveRecords directly and returns
+{id, customer_id, lookup_key, start_at, end_at, source_type, source_id} — no Feature object. Anchors test and
+credential-audit shims removed; schema guard tests updated. Dev DBs need a reset (baseline edited in place).
+
+- `catalog_credit_purchases` — superseded by `catalog_credit_balances` + `catalog_credit_purchase_prices`
+  (live quote path `internal/modules/money/credit_purchase.go` and manifest push `pkg/service/catalog_sidecars.go`
+  use only the new pair). Survived the squash by accident.
+- `customer_anchors` + `merchant_anchors` — #591 platform-anchor design whose runtime never landed; only
+  usage is one insert-and-count integration test (`catalog_platform_sidecars_integration_test.go`).
+- `bootstrap_state` — zero references anywhere.
+- `merchant_credential_audit` — feature deliberately removed as platform slop (future.md records
+  "do not recreate"); no INSERT exists; the table was forgotten. NOTE: it was an append-only credential
+  put/rotate/delete/test *audit trail*, not a credentials-work checker — dropping it removes nothing live.
+- `entitlement_features` + `product_entitlement_features` — #245 Stripe-shaped feature registry; full CRUD
+  (`internal/modules/entitlements/feature_service.go`) has NO route caller, production tables permanently
+  empty; the Stripe Feature mirror (#586) reads `product.entitlements_spec` strings directly. Drop tables +
+  FeatureService CRUD + queries; simplify `GET /self/entitlements/active` (already treats missing feature
+  rows as fine).
+
+Also update `migrations/postgres/merchant_aware_schema_test.go` merchantOwnedTables and drop the
+lifecycle-test CREATE TABLE shim for merchant_credential_audit.
+
+---
+
+# #703: [DB] drop dead / unenforced columns + dead enum values
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — all listed columns dropped from the baseline +
+queries + Go (money_settings ten incl. deleting suspension.go; webhook_events.status AND .rail — no reader, op
+embeds the rail; checkout_sessions.idempotency_key — model field kept request-scoped for Redis idempotency;
+rail_merchant_accounts.owner; invoices.sent_at). Judgment calls: invoices.collection_method KEPT with CHECK
+narrowed to 'charge_automatically'; tier_schedules.owner dropped ENTIRELY (constant 'platform'; removed from both
+unique indexes); merchant_exports lost `location`, status kept with CHECK narrowed to 'completed'.
+GetPaymentMethodByInitialTransactionID query+service+repo deleted. Self/customer settings PUT surface shrank
+(max_spend_per_day/month fields gone). Dev DBs need a reset.
+
+- `money_settings`: ten columns — `max_spend_per_day`, `max_spend_per_month`, `max_outstanding_owed_amount`,
+  `hard_stop_on_breach`, `alert_threshold_pct` (admission reads only billing_mode + credit_limit_amount +
+  ledger balance; real caps live in payer/invoker_spend_limits), `outstanding_owed_amount` (never UPDATEd,
+  always 0 — API derives from open invoices), and the suspension quartet `verified_payment_method` /
+  `verified_at` / `suspended_at` / `suspend_reason` (whole `internal/modules/money/suspension.go` surface has
+  zero production callers; schema comments admit "legacy ... not consulted"). Drop all ten + suspension.go +
+  queries, or explicitly decide to enforce them. Live in the same table (keep): billing_mode, currency,
+  credit_limit_amount, tier/tier_source, low_balance_threshold, auto_topup_*, last_alert_at, last_topup_at,
+  default_credit_expiry_hours.
+- `webhook_events.status` — CHECK-constrained to exactly one value ('completed'); inserts omit it. Drop
+  column + CHECK. `webhook_events.rail` is write-only (op key already embeds the rail) — keep only if wanted
+  for ops SQL.
+- `checkout_sessions.idempotency_key` — written, never read, no unique index (real idempotency is Redis).
+  Drop, or give it the partial unique index and make it the constraint.
+- `rail_merchant_accounts.owner` — never written (always default 'merchant'), never branched on; 'platform'
+  is the not-built platform-vault future. Drop, reintroduce with the feature.
+- `invoices`: `sent_at` never set; `collection_method='send_invoice'` never written. Dead column + dead enum arm.
+- `tier_schedules.owner` — 'subject' never written (graduation writes only 'platform'); dead enum value
+  widening two unique indexes.
+- `payment_methods`: `GetPaymentMethodByInitialTransactionID` read path has no production caller — drop the
+  query/service method (column itself is Stripe-alias provenance, keep).
+- `merchant_exports` — trim to what the export-before-delete gate uses: `location` never written; statuses
+  'pending'/'failed' never occur.
+
+---
+
+# #704: [DB] rail_merchant_account_id provenance: stamp-or-drop decision (legacy lanes)
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — rail_customer_accounts: column + FK + 3 dead
+indexes DROPPED; the `_legacy` uniques (the only live lane) renamed to uq_rail_customer_accounts_customer_rail /
+uq_rail_customer_accounts_merchant_rail_customer (now full uniques, no WHERE); upsert ON CONFLICT updated.
+payments/payment_methods/subscriptions: took the PREFERRED path — checkout-time stamping wired.
+CheckoutService.ResolveRailMerchantAccountID (merchant_rail_secrets.go) resolves the ACTIVE account via the
+existing RailMerchantAccountScopeResolver and stamps ctx (db.WithRailMerchantAccountID) in Checkout(),
+RegisterPurchase(), session creation (session row now carries the id) and ConfirmSession (session-pinned id
+preferred). Nil when unresolvable — never invented; solana/admin paths stay NULL. The `*_legacy` partial
+uniques on those three tables keep their names: the NULL lane still exists (unstamped writers), it just stops
+growing from checkout.
+
+- `rail_customer_accounts.rail_merchant_account_id`: the ONLY writer (`UpsertRailCustomerAccount`) never
+  includes it — every row NULL, so `uq_rail_customer_accounts_customer_rail_merchant_account`,
+  `uq_rail_customer_accounts_rail_merchant_account_customer`, `idx_rail_customer_accounts_rail_merchant_account`
+  can never contain a row and the `_legacy` indexes are the only live lane. Stamp on upsert or drop column + 3 indexes.
+- `payments` / `payment_methods` / `subscriptions`: provenance stamping happens ONLY in webhook handling
+  (`WithRailMerchantAccountID` call sites in `internal/http/handlers/webhook.go`); checkout/solana/admin
+  inserts land in the NULL lane by deliberate policy ("nil is better than inventing provenance",
+  `internal/db/provider_account_stamp.go`). So the `*_legacy` partial uniques are doing the real dedup work
+  and NOT NULL is unenforceable. Either build checkout-time account resolution
+  (`GetActiveRailMerchantAccountForNewWork` already exists) so all new work is stamped and the lanes converge,
+  or keep the two-lane design and rename the misleading `_legacy` suffix.
+
+---
+
+# #706: [DB] custom_credit_types is a broken seam between #475 and #639/#640 credit systems
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — catalog sidecar push is now the
+custom_credit_types WRITER: `syncCreditBalances` (pkg/service/catalog_sidecars.go,
+`defineCustomCreditUnit`) auto-defines/activates a type row for every non-builtin
+`catalog_credit_balances.unit` (name = unit, or the part after `slug/`; a qualified unit naming another
+merchant's slug fails the push loudly). Decimals = 0 (whole units; decimals only scale display) and an
+existing row's decimals are NOT clobbered on re-push (ON CONFLICT sets active=true only). Deactivation:
+NEVER automatic — a removed balance leaves its type ACTIVE (grants/lots may still reference the unit;
+entitlements must not be lost to catalog churn); schema comment documents the doctrine. Dead admin CRUD
+deleted: MoneyService.DefineCustomCreditType/ListCustomCreditTypes/SetCustomCreditTypeActive + their sqlc
+queries (GetCustomCreditType kept — ResolveUnit's read). Integration proof:
+TestSyncCatalogSidecars_AutoDefinesCustomCreditTypes (push → active row → credit-purchase quote + deposit
+resolve `slug/unit` → prune leaves type active) and TestNativeCatalogRemainingProductUseCasesHTTP now
+relies on the publish auto-define (manual defines removed).
+
+---
+
+# #707: [DB] two live metered-pricing engines: catalog_price_metered (#599) vs catalog_rate_cards (#638)
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — UNIFIED on rate cards (clean-mapping branch);
+**Post-completion note (session orchestrator):** the implementing agent was killed by a session limit before its final report; its work was complete and verified. Also landed in the same window (Paul's own planned rename, done concurrently — not agent work): `products.status` and `prices.status` (draft/active/archived 3-state) collapsed to `archived boolean` end-to-end (schema, sqlc, pkg/catalog manifest `archived:` flag, plan/apply counters) — `draft` had no users. Verified green alongside #707: fresh-DB apply, sqlc regen, full catalog/money/pkg-service integration.
+`catalog_price_metered` DROPPED from the baseline. No host manifest (doujins config/catalog.yaml, hentai0,
+cozy-art billing_catalog.yaml) declares `metered:` — zero wild users. Mapping: manifest validation
+translates each legacy `metered:` price into a rate card (`translateMeteredPrices`, pkg/catalog/load.go):
+per_unit {unit_amount: rate_micros, divide_by: per_units (× per-seconds for gauges), round: half_up
+default} — bit-identical round-once big.Int math. A pure-usage price (unit_amount 0) loses its price row;
+a base-fee metered price keeps the row minus the metered block. Aggregation bridge for legacy-shaped
+meters ({key, kind}, no aggregation) in loadCatalogRateCards: counter → sum of dimensions[key] defaulting
+each event to 1 (EXACT #599 hybrid, was 'count'), gauge → sum defaulting 0; explicit-aggregation meters
+unchanged. Watermark identity fix: sweep source is now the STABLE `metered:<meter_key>` (was
+`metered:<meter>:rate_card:<id>` — ids are regenerated on every delete+reinsert push, so a mid-period
+re-push double-billed the prefix); one-usage-card-per-meter now also enforced by partial unique index
+uq_catalog_rate_cards_meter + cross-shape manifest validation. Killed with the table: the pre-aggregated
+push-rating lane (POST /v1/merchant/usage/metered route + ServiceMeteredUsage handler +
+Service.AccrueMeteredUsage + money AccrueMeteredAggregate/AccrueCatalogMeteredAggregate/
+RateMeteredUsageFromEvents/MeteredRate — no callers in any host repo); RecordUsage → invoice-time sweep is
+the single rating path. Also fixed in passing: sweep's rate-card currency filter is now case-insensitive
+(manifest pushes lowercase price.currency, money normalizes upper — manifest-pushed cards were silently
+skipped). catalog_dump emits rate cards only (no metered reconstruction). Semantic deltas (documented, no
+users affected): value property falls back to metadata[key] in addition to dimensions[key]; declared rate
+cards on a kind-counter meter now sum quantities instead of counting rows.
+
+---
+
+# #708: [DB] missing hot-path indexes (payments txn lookup; webhook jsonb lookups)
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — added idx_payments_merchant_rail_transaction
+(merchant_id, rail, transaction_id) covering GetPaymentByTransactionID across both provenance lanes. Webhook
+jsonb lookups: expression indexes for the CONCRETE production keys only — payments (merchant_id,
+metadata->>'stripe_invoice_id') and (merchant_id, metadata->>'nmi_subscription_order_id'), subscriptions
+(merchant_id, rail, gateway_response->>'order_id') — each partial WHERE (expr) IS NOT NULL (provable from the
+strict `=` qual, unlike `metadata ? key`). Limitation noted: the queries take the key as a PARAMETER, so only
+custom plans (param inlined at plan time) match the expression; generic plans fall back to a scan. New keys
+need new indexes.
+
+- `GetPaymentByTransactionID` (renewal/dunning `lifecycle_service.go`, solana poller, checkout finalize) has
+  no covering index for non-legacy rows: `idx_payments_rail` is rail-only, the partial uniques cover only
+  their own lanes. Add full `(merchant_id, rail, transaction_id)`.
+- Webhook convergence jsonb scans: `GetPaymentByMetadataValue` (`payments.metadata ->> 'stripe_invoice_id'` /
+  `'nmi_subscription_order_id'`) and `GetSubscriptionByRailMetadataValue` (`subscriptions.gateway_response ->> key`)
+  have no expression/GIN indexes — merchant-wide seq scans on the webhook path. Add expression indexes for the
+  known keys.
+
+---
+
+# #709: [DB] constraint doctrine: merchants-FK split, findings→runs FKs, money_settings PK
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — doctrine adopted: EVERY merchant-scoped table now
+has merchant_id → merchants(id) ON DELETE RESTRICT (25 FKs added: invoices, payments, subscriptions,
+money_settings, usage_events, ledger_accounts, ledger_transfers, invoice_items, invoice_payments,
+rail_customer_accounts, notification_queue, tier_schedules, payer/invoker_spend_limits, solana_subscriptions,
+reconciliation_{runs,findings,state}, catalog_drift_events, custom_credit_types, merchant_{deks,secrets,exports},
+entitlements, rail_intents); guard test extended (merchant_fk_backfill_test.go). RESTRICT cannot break
+delete.go: merchant delete is a TOMBSTONE (status='deleted') + gated child purge, never a merchants row DELETE —
+no purge-order change needed; lifecycle integration tests green. The 3 pre-existing CASCADE merchant FKs
+(rail_merchant_accounts, rail_refresh_watermarks, rail_mutation_logs) left as-is (test cleanups rely on them;
+rows are operator catalog/bookkeeping, not money). findings→runs: first_seen_run/last_seen_run made NULLABLE
+with RESTRICT FKs — code decides it: the intents volume breaker raises findings OUTSIDE any run (was writing
+uuid.Nil sentinel, now NULL); runs are never pruned in production so RESTRICT is safe; upsert keeps the prior
+last_seen_run via COALESCE when a run-less writer refreshes. money_settings: surrogate id DROPPED (referenced by
+nothing — verified gen + Go), PK = (merchant_id, customer_id, currency), uq_money_settings_payer subsumed.
+ledger_transfers.grant_id comment documents the deliberate no-FK ledger-purity rule for grant_id/invoice_id/customer_id.
+2026-07-03 gate run: internal/crypto DEK-store integration tests still minted unseeded random merchant ids and tripped the new merchant_deks_merchant_fk — dek_store_db_integration_test.go now seeds merchants rows; suite green.
+
+- merchants-FK coverage is ~50/50: catalog/rail/config tables reference `merchants(id) ON DELETE RESTRICT`;
+  the money core (invoices, payments, subscriptions, ledger_accounts, ledger_transfers, money_settings,
+  entitlements, rail_intents, usage_events, ...) has bare `merchant_id` uuid, masked by the manual purge in
+  `internal/merchants/delete.go`. Either all merchant-scoped tables get the FK, or none do and delete.go is
+  the documented contract.
+- `reconciliation_findings.first_seen_run`/`last_seen_run` — NOT NULL uuids referencing reconciliation_runs
+  by convention, no FK. Add.
+- `money_settings.id` surrogate PK referenced by nothing; natural key (merchant_id, customer_id, currency)
+  already unique. Make it the PK or note why not.
+- Deliberate and fine (document, do not "fix"): ledger_transfers.grant_id/invoice_id/customer_id have no FKs
+  by ledger-purity design.
+
+---
+
+# #710: [CONFIG] dead/broken knobs: allowed_cidrs, SECRET_BACKEND env, dead overlay sections, NMI boot fields, mode alias
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — (1) allowed_cidrs DELETED from both planes: per-merchant
+CIDR narrowing has no threat-model value (CCBill webhooks come from provider-wide published ranges, identical for
+every merchant) and the HTTP IP gate runs pre-merchant-resolution by design; iputil.Configure seam +
+config.ConfigureProcessGlobals removed, DefaultCCBillIPRanges IS the allowlist; a manifest
+ccbill settings.allowed_cidrs now fails with a loud removal error. (2) envKeyToConfigKey rebuilt as a
+reflection-derived table of Config's top-level koanf keys (exact match for scalars, one-level nesting for
+struct/map fields) — SECRET_BACKEND works; env-path regression tests added (SECRET_BACKEND + CLICKHOUSE_HTTP_ADDR);
+the never-working BILLING_SECRET_BACKEND doc claim dropped. (3) Overlay: dead ISSUER section deleted;
+DELEGATED_INVOKER_WASTED_SPEND_WINDOWS routed (one JSON list value); overlay unmarshal now strict (ErrorUnused,
+matching the file parser) and unroutable BILLING_MERCHANTS_* vars fail loudly. (4) NMI: NMIRailConfig.TokenizationKey
+dropped; NMIProviderSettings = {SecurityKey, WebhookSecret} (Name/TestMode/TokenizationKey were never read);
+dead NMIClient.config field removed; ToNMIProviderSettings() takes no name. (5) mode alias hard-cut: Config.Mode,
+GetMode, ModeFull/Limited/ReadOnly, ValidModes, --mode flag all gone; a set mode/MODE/BILLING_MODE fails with a
+rename error pointing at provider_write_mode.
+
+- CCBill `allowed_cidrs` (BOTH planes) is parsed/validated/cloned and never enforced: the webhook IP check
+  reads an `iputil` package global whose only production setter is `iputil.Configure(nil)` in
+  `config.ConfigureProcessGlobals` — allowlist permanently = defaults; three comments claim otherwise.
+  Wire the merchant-scoped list into the webhook check or delete the field from both planes (and the
+  Configure seam).
+- `SECRET_BACKEND` / `BILLING_SECRET_BACKEND` env vars DO NOT WORK: `envKeyToConfigKey` special-cases only
+  five keys; `SECRET_BACKEND` maps to koanf `secret.backend` and never reaches the field (verified
+  empirically against config.Load). Dangerous under #661 declared-intent: forcing `db` on a Vault deployment
+  silently stays on Vault. Fix mapping + add an env-path regression test; longer term replace
+  first-underscore splitting with an explicit key table.
+- Dead merchant env-overlay sections: `BILLING_MERCHANTS_<M>_ISSUER_*` routes to a manifest field that does
+  not exist (non-strict overlay silently drops it); `DELEGATED_INVOKER_WASTED_SPEND_WINDOWS` is listed as a
+  section but the router has no case. Delete or route + strict-check the overlay.
+- Dead NMI boot fields: `NMIRailConfig.TokenizationKey` (runtime reads only DB rail-account settings);
+  `NMIProviderSettings.Name`/`TestMode` (the NMI client never reads its retained config struct). Shrink to
+  {SecurityKey, WebhookSecret}.
+- Deprecated `mode` alias surface has zero consumers (`Config.Mode`, `GetMode`, Mode* consts, `--mode` flag,
+  env special-case). Hard-cut with a rename error, matching #698 house style.
+
+---
+
+# #711: [CONFIG] duplicated/confused surfaces + overengineering collapse
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — Solana knobs moved to per-merchant rail-account
+**Addendum (Paul 2026-07-02):** `solana_pay_recurring_subscriptions` REMOVED entirely (config knob, settings key, boot-plane field, example yaml) — every merchant supports Solana Pay rebilling (v2 transaction system); rebillability is a property of the PRICE (catalog auto_renew), never merchant config. The /solana features echo now hardcodes solanaPayRecurringSubscriptions=true as a capability announcement. Hosts setting the removed field get a compile error on bump.
+**Addendum (Claude 2026-07-02):** the deferred CI RAILS_STRIPE_SECRET_KEY leftover is DONE — last RAILS_* env names retired. Live rail invoice tests (internal/modules/money) now arm credentials through the merchant-secrets store like production (#699): manifest-mirror seeding helper (rail_merchant_accounts row + scoped secret, merchant_store_arming_integration_test.go) resolved back through LoadStripeCredentials / checkout's ActiveRailMerchantAccountSecretName+Get seam; the boot-plane RailMerchantAccountSet only carries the STORE-resolved key (catalog webhook-registration pattern); Stripe acct identity self-discovers via GET /v1/account with a logged opaque-label fallback for restricted rk_test_ keys; non-live TestRailCredentialStoreArming_ProductionResolutionPath proves the seam without provider network; BOTH live legs validated green against real Stripe test mode + NMI sandbox (surfaced+fixed bit-rot: the fail-closed provider_write_mode default blocked the invoice write — test now declares full). Env reads: OPENRAILS_TEST_STRIPE_SECRET_KEY only (drops RAILS_STRIPE_SECRET_KEY/BILLING_RAILS_STRIPE_SECRET_KEY), NMI_SANDBOX_SECURITY_KEY only (drops RAILS_MOBIUS_* aliases); pkg/service catalog live-test straggler now OPENRAILS_TEST_STRIPE_SECRET_KEY|STRIPE_SECRET_KEY. live-gated-integration.yml renamed to secrets.OPENRAILS_TEST_STRIPE_SECRET_KEY (both Stripe jobs) with ::warning:: annotations on missing secrets. OPERATOR STEP (Paul): create GitHub Actions secret OPENRAILS_TEST_STRIPE_SECRET_KEY (Stripe TEST-mode key) and delete RAILS_STRIPE_SECRET_KEY — until then the workflow's Stripe legs warn+self-skip.
+`settings` (config/solana_settings.go typed parse/validate; strict at manifest push; store-wins overlay in the
+/solana config+tokens handlers and the #699 pull-plane RPC; example yaml fixed, false "runtime config" claim
+deleted). `solana_pay_recurring_subscriptions` DOCUMENTED as a client hint (not enforced; seam noted =
+checkout-session solana-pay subscribe leg — contended this pass). CCBill boot identity declared once:
+ClientAccNum/ClientSubAcc dropped from CCBillRailConfig, pair derived from dash-joined account_id
+(config.SplitCCBillAccountID; account_id now required for ccbill rails even in dev). Boot-plane webhook fields
+renamed to canonical WebhookSigningSecret(/Thin); koanf tags stripped from all rail structs (programmatic-only,
+#521) so no boot koanf keys remain to alias. embed.ParseMerchantConfig strict (DisallowUnknownField +
+renamed-key pointers) + test. Twin merges SKIPPED with reasons: CCBillConfig now differs (derived pair +
+TestMode); NMIProviderSettings merge would ripple into contended checkout. environment:test|live comments fixed
+to "assertion vs test_mode, not a selector" (config + manifest + example). embedded.New warns on TestMode
+zero-value in dev-like Env (+ Options/README docs). Nesting-doll collapse: bootstrap.Options/NewApp DELETED
+(embedded.New + serverboot call app.BootstrapWithOptions directly). CleanupConfig/CardAbuseConfig: ONE defaults
+path (registration wires Default*; in-Work re-default + withDefaults deleted; zero cleanup config errs loudly).
+tests/testcontainer_suite RAILS_MOBIUS_* → OPENRAILS_TEST_MOBIUS_*. Left as noted: CI RAILS_STRIPE_SECRET_KEY
+(GitHub-secret rename + contended modules/money test); process-wide poller/RPC-client rpc knobs stay boot-plane
+(RLS blocks a boot-time cross-merchant store read; per-merchant seam noted).
+
+- Solana runtime knobs (`rpc_provider`, `rpc_api_key`, `tokens`, `solana_pay_recurring_subscriptions`) are
+  unreachable in standalone (only embedded `Options.PaymentProviders` can set them) while
+  `config/merchants_config.example.yaml` claims they live in runtime config and shows a
+  `rail_merchant_accounts:` yaml shape no loader parses. Move them into per-merchant rail-account `settings`
+  (where tokenization_key lives) and fix the example. Also `solana_pay_recurring_subscriptions` gates nothing
+  server-side (echoed to browsers only) — enforce or rename as a client hint.
+- CCBill identity declared twice in the boot plane (`account_id` AND `client_acc_num`/`client_sub_acc`, can
+  contradict); the store path derives the pair from account_id — boot plane should too.
+- Webhook-secret name drift: boot `webhook_secret`/`webhook_secret_thin` vs store/manifest canonical
+  `webhook_signing_secret`/`_thin`. One canonical name in both planes.
+- `embed.ParseMerchantConfig` uses non-strict yaml (typo'd `acounts:` provisions a merchant with no rails,
+  silently) while manifest paths use DisallowUnknownField. Use the strict parser.
+- Embedded `test_mode` zero-value silently means LIVE posture where standalone defaults dev→sandbox;
+  embedded.New should warn or require explicitness when Env is dev-like and TestMode was left zero.
+- Overengineering: four nesting-doll option structs relaying the same fields (embedded.Options →
+  bootstrap.Options → app.BootstrapOptions → runtimeOverrides — collapse at least one, #688 altitude);
+  `CleanupConfig`/`CardAbuseConfig` constants-dressed-as-config with redundant re-defaulting layers;
+  vestigial koanf tags on rail structs nothing parses since #521; twin conversion structs (CCBillConfig vs
+  CCBillRailConfig, NMIProviderSettings vs NMIRailConfig); `environment: test|live` is an assertion, not a
+  selector — comments should say so; test harness resurrects the retired `RAILS_` prefix
+  (tests/testcontainer_suite.go) — rename to OPENRAILS_TEST_*.
+
+---
+
+# #712: [DOCTRINE] no library env reads — env is read once at the binary boundary + guard test
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — catalog_reconciliation_interval moved into Config
+(Load/Validate fail loudly on malformed; "0" disables; threaded via Runtime.Config to the periodic-job builder);
+db.sql_trace bool on DBConfig replaces OPENRAILS_SQL_TRACE (threaded through NewDB); both retired OPENRAILS_* env
+names fail with rename errors in config.Load. THIRD violator found+fixed: internal/integrations/vault ambient
+VAULT_TOKEN fallback removed (vault.token config carries it; absence fails closed). Guard test
+config/env_boundary_test.go greps the module for os.Getenv/os.LookupEnv/os.Environ/syscall.Getenv and fails outside
+cmd/, config/, tests/, scripts/, internal/dbtest/, internal/bootstrap/merchant_env.go (each allowlist entry
+justified inline); *_test.go exempt. Green.
+
+Doctrine (decided with Paul 2026-07-02): libraries must NOT call os.Getenv / read ambient env vars
+behind the host application's back. Env is read exactly once, at the process boundary, by the binary's
+config-loading pipeline (cmd/openrails via config.Load / BILLING_* overlay — correct today); every importable
+package receives the result as explicit config. In embedded mode the HOST is the process — its env belongs to
+its config pipeline, not ours. Test binaries own their env (OPENRAILS_TEST_* fine). Where an env-derived
+value gates something dangerous, shape the library field so absence fails closed.
+
+Violations to fix:
+- `internal/river/river_register.go`: `OPENRAILS_CATALOG_RECONCILIATION_INTERVAL` raw os.Getenv with a SILENT
+  1h fallback on malformed input (the exact typo-picks-a-behavior class provider_write_mode validation
+  prevents). Move into Config; fail loudly on parse error.
+- `internal/db/db_pgx.go`: `OPENRAILS_SQL_TRACE` undocumented debug knob — move to config/debug surface.
+
+Enforcement: add a guard test that fails on `os.Getenv`/`os.LookupEnv` outside cmd/, config/, and *_test.go
+(same spirit as the existing schema guard tests). Mirror issue: authkit #231.
+
+---
+
+# #725: [BUG] arrears charger arms from the boot-plane rail set — must resolve rail credentials from the merchant-secrets store
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — ScopedCharger (the ONE charger behind the arrears
+InvoiceWorker AND the #674 topup_charge intent handler) now takes a per-charge CollectionAdapterResolver:
+`money.MerchantCollectionAdapterBuilder` (internal/modules/money/merchant_collection_wiring.go) arms Stripe +
+NMI adapters PER MERCHANT from the merchant-secrets store AT CHARGE TIME (#699 precedence: store wins;
+declared-account-with-missing-secret fails CLOSED; no store row → boot-plane adapter fallback, so embedded
+hosts keep working; no caching → rotation-safe). Scope pick: the method's stamped #704 provenance account
+first (archived stays chargeable for existing obligations, #655), else PullRailMerchantAccountScope.
+Wired in build_runtime.go with late-bound Runtime.Merchants. Integration tests (money pkg): store-ONLY
+Stripe + store-ONLY NMI charge via fake provider servers, boot fallback, fail-closed. NOTE: dunning/manual
+NMI rebills were the one leftover — DONE as #730 (completed.md): ManualRebillHandler arms from the same
+store resolver at charge time.
+
+The collect-outstanding / arrears charging worker is constructed once at boot from the in-memory boot-plane
+rail set (`internal/app/build_runtime.go` ~:350 builds the charging `StripeService`/collection adapters from
+`config.RailMerchantAccountSet`). Webhooks, checkout, and the reconcile pullers all resolve per-merchant rail
+credentials from the merchant-secrets store (store-wins, #699): `merchants.Service.LoadStripeCredentials`,
+checkout's `ActiveRailMerchantAccountSecretName` + `Secrets().Get`. The arrears worker does NOT — so a
+merchant whose Stripe/NMI key lives only in the manifest/secrets store (the intended model) has working
+checkout + webhooks but an arrears worker that cannot charge. Works today only because embedded hosts also
+pass keys at boot.
+
+Fix: the charging path resolves credentials PER MERCHANT from the store at charge time (store-wins, boot
+plane fallback), using the same production resolvers the other planes use. Cover every rail the
+ChargeOutstanding/collection path serves (Stripe adapter; NMI vaulted rebills if that leg shares the
+constructor). Integration test: merchant with store-only credentials -> arrears charge succeeds (the #711
+store-arming test helpers in internal/modules/money/merchant_store_arming_integration_test.go are the
+ready-made seeding harness).
+
+---
+
+# #726: [DB] invoices.line_items jsonb vs invoice_items table — one representation, or two documented roles
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — kept both with disjoint roles, deleted every
+cross-copy. Trace showed all production invoice_items readers filter pending-only (nobody ever reads
+attached 'invoiced' rows), while the jsonb is the only reader-facing itemization — so: `invoice_items` =
+pending-accrual workspace ONLY (attach-at-close is just the consumed tombstone), `invoices.line_items` =
+immutable as-billed statement. Deleted the write-only 'invoiced' copy writes (insertInvoiceItemsFromRollup
+and the true-up row — the true-up is now a `minimum_spend_trueup` statement line) plus the 5 dead columns
+(event_type, period_from, period_to, quantity, unit_amount); InsertInvoiceItem → InsertPendingInvoiceItem;
+roles pinned by schema COMMENTs.
+
+Paul 2026-07-02: full latitude — consolidate onto one representation, delete one, or keep both with the
+roles made explicit; whatever the code says is right. Trace ALL readers first (invoice API DTOs in
+pkg/service, arrears receivable machinery, metered rating writes, statement rendering) before choosing.
+Schema edits go directly into migrations/postgres/0001_schema.up.sql (greenfield baseline).
+
+---
+
+# #727: [RENAME] finish the rail-vocabulary + payments-vocabulary renames skipped by #705
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — all three renames landed in the baseline (0001_schema.up.sql) + queries + sqlc regen: `openrails.purchase_status` → `payment_status` (gen type OpenrailsPurchaseStatus* → OpenrailsPaymentStatus*; zero hand-written Go referenced the type — only two comments swept), `probe_verdicts.provider` → `rail` (PK, table/column COMMENTs, probe_verdicts.sql, probe_cache.go params/log fields), `reconciliation_runs.providers` → `rails` (CreateReconciliationRun, reconcile/store.go + converge.go + one raw-SQL test). Fresh-DB apply, sqlc generate, build/vet(+integration), migrations guard tests and the named integration suites all green; status string VALUES untouched.
+
+- `openrails.purchase_status` enum → `payment_status` (the payments table stopped being "purchases" long ago;
+  the enum name is the last survivor). Baseline CREATE TYPE + every `::openrails.purchase_status` cast in
+  schema/queries + the sqlc-generated Go type (PurchaseStatus → PaymentStatus) and its uses.
+- `probe_verdicts.provider` → `rail`.
+- `reconciliation_runs.providers` → `rails`.
+Schema edits go directly into migrations/postgres/0001_schema.up.sql; sqlc regen; grep sweep.
+
+---
+
+# #728: [BUG] Solana process-wide poller/RPC client still arms from the boot plane
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — new `solanamodule.MerchantRPCBuilder` (#699/#725 pattern: store rail-account settings win, boot client fallback, malformed declared settings fail LOUD, nothing cached across passes) wired as Runtime.SolanaRPCResolver. The poller did NOT fan out per merchant before — pollPendingPayments was restructured: pending-set members are now merchant-attributed (`<mid>|<ref>`, stamped at store/register time from the request's merchant ctx; pre-cut bare members drop with a WARN), grouped per merchant, and each merchant's pass resolves its RPC + transaction service (WithRPC copy) and runs RLS-scoped under RunInMerchantConn; the boot-rail start gate in Runtime.RunWorkers is gone. Crank/recurring: signerSubmitter resolves RPC per merchant at submit time (NewSignerSubmitterWithResolver), the cranker builds even with no boot Solana rail, and the #674 pull-intent verify leg reads the chain via the resolver's merchant-scoped ChainReader. Integration tests (poller_store_arming_integration_test.go): store-only merchant polls via its store-armed endpoint, undeclared merchant via boot, malformed settings error — green, plus the full named suites.
+
+Was: noted by #711 — the process-wide poller/crank/RPC client armed once at boot from SolanaRailConfig; a
+store-only merchant got correct /solana config + pulls but a poller with wrong/no RPC settings.
+
+---
+
+# #729: [BUG] TestUpdateSubscriptionPaymentMethod* fail against the NMI mock (422) — pre-existing
+
+**Status:** IMPLEMENTED (2026-07-02) — root cause was NOT the mock's v5 surface (it serves GET
+/subscriptions/{id} fine): the #674 intent registry captures Runtime.NMIClients at BuildRuntime, and
+SetupSuiteWithMockNMI REPLACED the map, so nmi_payment_source_update resolved the boot-time client and hit the
+REAL Mobius sandbox (422 "The provided data is invalid." for non-numeric test ids) ⇒ Ambiguous ⇒ 409. Fix:
+tests re-arm the inline intent plumbing after any client swap — TestContainerSuite.RearmIntentPlumbing()
+(tests/testcontainer_suite.go), called from resetNMIClients + SetupSuiteWithMockNMI. Full tests/ package green.
+
+---
+
+# #724: MODE 2 — Vault-backed hosted mode proven against a REAL Vault (test-harness half)
+
+**Status:** IMPLEMENTED (2026-07-02) — harness + scenario-table half. The #723 mode-gate boot
+validation rows (merchant_source matrix, mode-2 boot shape with no manifest files) land with #723
+by its own agent; Build's `merchant_source=manifest` refusal was already in place mid-flight and
+the mode-2 tests here declare `MerchantSource: api` explicitly.
+
+Shipped:
+- **vaulttest harness** — `internal/integrations/vault/vaulttest` (integration tag): shared
+  hashicorp/vault:1.21 dev-mode testcontainer per test-package process (sync.Once + TestMain
+  teardown, dbtest pattern); VAULT_ADDR+VAULT_TOKEN env override reuses an external dev server the
+  way OPENRAILS_TEST_DB_URL does. Helpers: policy-scoped child tokens (canned
+  PolicyKVReadWrite/PolicyKVReadOnly/PolicyTransitOnly mirroring docs/vault.md), EnsureTransit,
+  EnsureAppRole, RevokeToken, and StartDedicated (per-test container with docker pause/unpause for
+  outage tests — memory intact across unpause).
+- **Mocks killed**: merchantsecrets/store_integration_test.go fakeVault httptest server DELETED
+  (Build now proven against the real container); integrations/vault/auth_test.go httptest Vault
+  DELETED (token/approle login + policy scoping proven in auth_integration_test.go against real
+  Vault; only pure no-HTTP error paths stay unit). KEPT deliberately: kv_test.go path arithmetic,
+  store_test.go TestGateSecretBackend/TestDeriveRouteGates (our logic, not Vault), and the
+  merchants in-memory VaultKV fakes for store-addressing/cache unit tests.
+- **Un-skipped**: vault_integration_test.go + capabilities_integration_test.go retagged
+  vaultint→integration; they run unconditionally via the container.
+- **Scenario table** (internal/merchantsecrets/vault_scenarios_integration_test.go, all real
+  Vault + real Postgres, green): store cycle w/ KV-v2 current_version bump on rotation + two-
+  merchant isolation; full stack UpsertPaymentProviderConfig → KV at the
+  RailMerchantAccountSecretName path → arming-resolver read → rotate-via-second-PUT → second
+  merchant untouched; capability gating with REAL policies (read-only serves reads + refuses
+  writes as ErrSecretBackendUnavailable + SecretWrite gate off; transit-only + vault backend
+  refuses boot; transit-only + db degrades w/ signing on); outage via pause/unpause (boot
+  unreachable ⇒ "vault capability probe" fail-loud; read-time ⇒ ErrSecretBackendUnavailable and
+  NEVER ErrSecretNotFound; in-process TTL cache keeps serving previously-read values by design;
+  unpause ⇒ recovery without restart, data intact); token lifecycle (approle token_period=5s +
+  LifetimeWatcher keeps ops alive past TTL; revoke ⇒ loud 403; PINNED: no emergent re-login —
+  supervisor/restart owns recovery); backend parity — the same cycle/rotation/isolation/status
+  table runs on the DEK-encrypted Postgres backend and the configured-status sets must match.
+- **Behavior fix** (needed by parity/status): `KVv2Adapter.ListSecrets`
+  (internal/integrations/vault/kv.go) now recursively descends KV-v2 "dir/" entries and returns
+  full relative LEAF names. Before, the vault store's List returned only top-level dirs
+  ("rail_merchant_accounts/"), so ListSecretStatuses/PaymentProviderConfig reported every
+  vault-held credential as unconfigured — a real mode-2 API bug.
+- **ADR**: docs/adr-custodial-merchant-secrets.md — custodial posture (ONE process-global Vault
+  token; isolation is OpenRails' addressing + RLS), threat model, non-goals (per-merchant tokens,
+  merchant-visible Vault), revisit trigger (BYO-Vault). Enforced by the grep-style guard test
+  TestNoAdHocSecretPathConstruction (internal/merchants/secret_path_guard_test.go): the durable
+  path fragments may appear only in the canonical builders (allowlisted).
+- Fixture fix: the pre-existing #667 DB round-trip test used a random unregistered merchant id —
+  now trips merchant_deks_merchant_fk; tests register real merchant rows.
+
+Verified: go build ./... + go vet ./... clean; internal/integrations/vault, internal/merchantsecrets,
+internal/merchants integration suites all green against OPENRAILS_TEST_DB_URL + the vault container.
+
+Deferred — RESOLVED 2026-07-03: mode-2 boot shape end-to-end is covered by composition, not one
+named test: the integrationharness standalone surface is PINNED merchant_source=api with no
+manifest files (harness.go), and its suite exercises API-driven catalog publish
+(merchant_catalog_http_test), API provider config (merchant_payment_providers_http_test), and
+real money movement (solana_money_movement_proof_test). The old phrasing "merchant provisioned
+purely via API" is stale by design — the merchant-creation API (#718) was deliberately axed;
+engine-side merchant creation is the CLI/embedding host's job, registration-is-provisioning
+lives in the saas wrapper (openrails-saas #24). Vault store Secret.Version stays a
+constant 1 — CLOSED 2026-07-03: VaultKV Read/WriteSecret now return the KV-v2 version, the store
+surfaces it on Secret (kvVersionOrOne floor), scenario tests assert 1→2 on rotation and strict
+monotonicity on both backends (was: parity pinned value semantics + monotonic version,
+not equal numbers); HTTP-handler-level PUT /v1/merchant/payment-providers duplicate of the
+service-level full-stack test.
+
+---
+
+# #721: platform merchant directory + soft-delete (engine mechanism for openrails-saas #16)
+
+**Completed:** no
+**Status:** IMPLEMENTED, uncommitted (2026-07-02). Tests green.
+
+Cross-merchant platform operator surface, standalone-only (mounted from internal/http/server.go;
+no embedded analogue — an embedded host controls exactly one merchant).
+
+## Routes (all under /v1/platform, human user sessions only — API keys/delegated/host principals 401)
+- GET    /v1/platform/merchants            — root:merchants:read; ?status=active(default)|deleted|all, limit/offset
+- GET    /v1/platform/merchants/:id        — root:merchants:read (any status; operators inspect tombstones)
+- DELETE /v1/platform/merchants/:id        — root:merchants:delete; SOFT delete only, idempotent
+- POST   /v1/platform/merchants/:id/restore — root:merchants:restore; idempotent
+Explicitly NOT built (saas #16): POST create, PATCH, hard delete, export, credential edits, any
+customer/payment/subscription sub-routes (probed 404/405 in tests).
+
+## Decisions
+- **Permission strings are `root:merchants:{read,delete,restore}`, NOT `platform:merchants:*`.**
+  AuthKit #111 renamed the platform namespace to `root:` (its docs cite `openrails
+  root:merchants:delete` as THE intended app extension; doujins already follows). Namespace purity
+  is schema-enforced: a root-persona role literally cannot hold a `platform:` grant. saas #16's
+  platform:merchants:* map 1:1. Constants in permissions/permissions.go; gate =
+  ControlPlane.HasRootPermission (Can on the singleton root group). Two bounded root roles
+  declared in controlplane.Groups(): `merchant-directory-viewer` (read) and
+  `merchant-directory-admin` (read+delete+restore); root `owner` (root:*) covers both. No
+  superadmin role invented.
+- **Soft-delete representation: the EXISTING status ('active'|'deleted') + deleted_at columns.**
+  No new flag. Scope limit honored (Paul axed lifecycle enforcement, ex-#719): directory state
+  only — no engine-wide charge/renewal/webhook blocking, no suspension semantics. Merchant-scoped
+  API auth failing closed on soft-deleted merchants is EMERGENT, not new code: credential→merchant
+  resolution (controlplane merchantDirectoryRow/MerchantScope) already filters
+  `deleted_at IS NULL AND status='active'` → 403 service_credential_merchant_unresolved; restore
+  re-admits. Asserted in tests. The #225 gated purge (export-before-delete) stays the only
+  row-destroying path; platform DELETE never touches business rows.
+- **RLS forces per-row enrichment probes.** rail_merchant_accounts + payments are FORCE-RLS
+  merchant-isolated; under openrails_app a single cross-merchant JOIN returns nothing. The list
+  reads the GLOBAL merchants table in one query, then per row one MerchantTx (GUC-pinned) runs two
+  index probes: rails_armed = DISTINCT non-archived rail_merchant_accounts.rail; last_payment_at =
+  latest payments.created_at (new baseline index idx_payments_merchant_created makes it O(1)).
+  Page-bounded (limit ≤ 200). Last-activity proxy = latest payment (money movement is the ops
+  signal; subscriptions/webhooks would cost more probes for less meaning).
+- Ordering: created_at DESC, id DESC. Envelope: SuccessJSONPaginated (object/data/total/has_more).
+- Handlers call gen directly (#688) — no repo wrapper; queries in
+  internal/db/queries/merchants_platform.sql.
+
+## Files
+permissions/permissions.go, internal/controlplane/{catalog,authority}.go,
+internal/db/queries/merchants_platform.sql (+ gen), migrations/postgres/0001_schema.up.sql
+(idx_payments_merchant_created), internal/http/routes/platform.go,
+internal/http/handlers/platform_merchants.go, internal/http/routes_platform.go,
+internal/http/server.go (mount), internal/integrationharness/platform_merchants_http_test.go.
+
+## Tests (integration, real stack: RLS app role + real AuthKit root grants)
+- TestPlatformMerchantDirectoryListHTTP — fields incl. rails_armed (archived excluded) +
+  last_payment_at, ordering, pagination no-overlap, 404/400 ids, bad status filter.
+- TestPlatformMerchantSoftDeleteRestoreHTTP — delete→default list excludes / status=deleted+all
+  include / GET by id still 200; merchant API key 403 while deleted, works again after restore;
+  idempotent re-delete (deleted_at unmoved) + re-restore; unknown ids 404.
+- TestPlatformMerchantPermissionsHTTP — viewer reads but 403 on delete/restore; no-role user 403;
+  API keys + unauthenticated 401; skipped routes (POST create, PATCH, customers/payments/
+  subscriptions subpaths) 405/404.
+
+---
+
+# #723: MODE 1 — manifest-is-truth self-hosting: YAML in memory, no stores, reboot to change
+
+**Status:** IMPLEMENTED 2026-07-02 (Claude; uncommitted) — full spec in future.md (section retained there with a moved pointer).
+
+The two-mode doctrine is now code. ONE scalar `merchant_source: manifest | api` (koanf
+`merchant_source`, env MERCHANT_SOURCE via the standard mapping; empty = manifest; unknown value =
+load error; accessors `Config.MerchantSourceMode()` / `IsManifestMerchantSource()`). It governs
+merchant config AND catalog — no separate catalog_source.
+
+## What shipped
+
+- **In-memory credential plane** — `merchants.ManifestSecretStore`
+  (internal/merchants/secrets_manifest.go): merchant-namespaced memory store implementing the SAME
+  `MerchantSecretStore` interface every consumer reads (checkout/vault via
+  `Runtime.ArmMerchantsService`, webhooks, #699 pulls, #725/#730 charge resolvers) — the manifest
+  IS the store, so "store wins" is vacuously true. Runtime Put/Delete return
+  `ErrManifestSecretsReadOnly`; only boot provisioning writes through `Seeder()`. Lives on
+  `app.Runtime.ManifestSecrets`, created at BootstrapWithOptions iff mode 1.
+- **Store never constructed in mode 1** — `merchantsecrets.Build` REFUSES in manifest mode; new
+  `merchantsecrets.BuildManifest` (store view: memory plane + optional Vault Transit for Solana
+  signing; SolanaCanSign=true, SecretWrite=true so the write routes stay MOUNTED and serve the
+  pointed 405, not a bare 404) + `BuildTransit`. Branched call sites: internal/http/server.go
+  (standalone), Runtime.EnsureMerchantsService (embedded workers — also now arms checkout/vault the
+  way standalone does), embed/provision.go UpsertMerchantConfig (arms Runtime.Merchants over the
+  plane immediately), bootstrap manifest reconcile, merchant_dump (refuses in mode 1 — the YAML is
+  the export), pkg/embedded pull_provider CLI (WARN + boot-plane only; the server's River pulls
+  stay store-armed).
+- **Provisioning** — `ProvisionMerchant` forces Insert+Overwrite+Prune in manifest mode (YAML
+  steamrolls the DB projections + memory every apply; seed-once is a mode-2 semantic).
+  `MerchantManifestReconcileOptions.SecretStore` injects the boot plane;
+  `ReconcileMerchantManifestData` in mode 1 without an injected store validates secrets into an
+  EPHEMERAL memory store (CLI runs converge DB projections, persist nothing, one INFO log).
+  Embedded UpsertMerchantConfig in mode 1 = reconcile identity/config/accounts rows + seed memory;
+  the empty-config read-side bind (hentai0) stays legal. Standalone boots load
+  `/etc/openrails/merchants.yaml` when present (serverboot `reconcileBootMerchantManifest`;
+  `Options.MerchantManifestPath` override — explicit path missing/unloadable ⇒ refuse boot).
+- **Mutation choke point** — ONE middleware `manifestModeWriteGuardMW`
+  (internal/http/routes/routes.go), prepended to the writeMW chains of
+  registerCatalogActionRoutes + registerPaymentProviderActionRoutes (covers standalone AND the
+  embedded mounts, which share these registrars): 405 + machine code `manifest_driven`
+  ("edit the YAML/secret files and reboot"). Runs BEFORE auth (deployment posture, not merchant
+  data). Plan-only POST /catalog/publish is ALSO rejected (deliberate: middleware doesn't parse
+  bodies; the CLI dry-run remains). Reads stay served.
+- **Boot validation matrix** — config.Validate: unknown merchant_source ⇒ load error; api mode +
+  BILLING_MERCHANTS_* env/secret-files ⇒ refuse (two truths); api mode outside dev + no secret
+  backend (no Vault, no ENCRYPTION_MASTER_KEY) ⇒ refuse (#667 extended to declared-mode time).
+  serverboot: api mode + merchants.yaml present ⇒ refuse. embed: api mode + UpsertMerchantConfig
+  declaring manifest truth (accounts/profile/invoice/windows/remote_application) ⇒ refuse; bare
+  binds (empty / display-name-only) legal in both modes. Manifest mode ignores encryption posture
+  (nothing persists). Embedded manifest mode with no Upsert call boots unbound (documented — same
+  as bare standalone control-plane-only).
+- **Catalog** — pkg/embedded.PushMerchantCatalog: mode 1 mutating push force-upgrades to full
+  converge (Insert+Overwrite+Prune, YAML wins); mode 2 REFUSES a mutating push (two truths;
+  plan-only stays as a read-only diff). CLI push-merchant-config refuses in api mode.
+- **Consumers** — doujins BuildOpenRailsConfig sets MerchantSource=manifest explicitly (+ two
+  pre-existing-drift fixes riding along: deleted the #710-removed `allowed_cidrs` key from
+  merchant_config.yaml; renamed the #698-stale RAIL_MERCHANT_ACCOUNTS env anchors in its test).
+  hentai0 unchanged (builds green against its pin; read-side bind covered by
+  TestManifestMode_ReadSideBindKeepsWorking). integrationharness standalone surface pinned to
+  MerchantSource=api (it IS the API-driven SaaS shape); bootstrap merchant-manifest
+  store-semantics tests pinned to api via apiModeReconcileConfig().
+
+## Tests (integration, real PG; fake provider HTTP only) — all green
+
+- embed/manifest_mode_integration_test.go: **TestManifestMode_Loop** (the conformance loop: boot
+  from manifest bytes + secret FILES via VAULT_SECRETS_PATH → NMI armed with the file key, catalog
+  converged, charge through the #725 resolver hits fake NMI with that key, entitlement lands,
+  runtime Put refused, zero openrails.merchant_secrets rows → rotate file + change price → reboot
+  (new embed.New, same DB) → new price active/old archived, next charge carries the ROTATED key,
+  still zero store rows → third boot idempotent), **TestManifestMode_MutationRoutesRejected405**
+  (PUT/DELETE payment-providers + catalog create + publish ⇒ 405 `manifest_driven`; GET 200),
+  **TestAPIMode_MutationRoutesWork** (same PUT persists to the store in api mode),
+  **TestManifestMode_APIModeRefusesManifestTruth**, **TestManifestMode_MalformedManifestRefusesBoot**,
+  **TestManifestMode_MissingSecretFailsClosed** (declared account, absent secret: boot proceeds,
+  rail unarmed, charge fails closed naming the credential),
+  **TestManifestMode_ReadSideBindKeepsWorking** (hentai0 shape).
+- config/merchant_source_test.go: default=manifest, unknown-value refusal, api-needs-backend
+  matrix, api-refuses-BILLING_MERCHANTS_* env, manifest-ignores-encryption-posture.
+- Suites verified green: embed (full), internal/bootstrap, internal/integrationharness (except two
+  failures owned by concurrent #721 platform-merchants work: route-surface golden +
+  TestCoreDoesNotMountPlatformAdminRoutesHTTP — both diffs show only /v1/platform/merchants
+  routes), internal/modules/money, internal/modules/catalog, internal/river, internal/db,
+  pkg/service, internal/http. Unit tests of every touched package green. `go build ./...` green in
+  openrails + doujins (go.work) + hentai0 (pin); repo-wide `go vet` noise is sibling in-flight work
+  (internal/reconcile solana test fake), not #723.
+
+## Docs
+
+- docs/self-hosting-mode1.md: the three files, the secrets dir, precedence yaml < files < env,
+  boot behavior, what 405s, rotation walkthrough, mode-2 one-liner.
+
+## Deferred / follow-ups
+
+- ~~pull-provider CLI in mode 1 arms boot-plane only~~ DONE 2026-07-03: the CLI builds the same
+  ephemeral manifest plane the converge path builds (`bootstrap.SeedMerchantManifestSecretPlane`
+  over the extracted `resolveManifestRailAccount`) and arms via the unchanged
+  `MerchantFetcherBuilder` #699 path — `PullProviderOptions.MerchantManifest`/`MerchantManifestPath`
+  (+ `--manifest` flag; doujins pull-provider passes `RuntimeMerchantConfig`); the WARN+boot-plane
+  special case is gone. Tests: embed TestPullProviderCLI_ManifestModeArmsFromManifestPlane +
+  …MissingSecretRailNotArmed.
+- ~~Managed Stripe webhook registration in mode 1 mints a reboot-lost secret~~ DONE 2026-07-03:
+  verified real (bootstrap lane seeded memory; worker lane Put-failed AFTER mutating Stripe) —
+  `ReconcileManagedStripeWebhook` refuses pre-mutation in manifest mode without a declared
+  `webhook_signing_secret`, and `DesiredWebhookEndpoint.ForbidCreate` refuses create/drift-recreate
+  before any Stripe write (existing endpoint survives); find-existing + declared-secret behavior
+  unchanged. Tests: catalog TestReconcileManagedStripeWebhookManifestMode{RefusesMint,
+  DeclaredSecretFindsExisting} + TestReconcileWebhookEndpointForbidCreate.
+- #731 filed: migratekit version skew — FIXED 2026-07-03, see future.md #731.
+
+## Spec tasks
+
+- [x] Explicit mode switch `merchant_source: manifest | api` + validation matrix (fail-loud both ways)
+- [x] Secrets from memory in manifest mode (no store reads/writes/seed-once; rotation = file + reboot)
+- [x] Catalog boot-converged, Overwrite+Prune always on in mode 1; DB rows documented as FK projection
+- [x] Conformance loop integration test (boot → charge/entitlement → rotate+reboot → idempotent third boot)
+- [x] Failure modes: missing secret ⇒ rail unarmed + loud warn + fail-closed charge; malformed manifest ⇒ refuse; encryption posture irrelevant in mode 1 (asserted)
+- [x] docs/self-hosting-mode1.md (three files, secrets dir, precedence yaml < files < env, edit + reboot)

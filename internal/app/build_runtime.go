@@ -57,6 +57,10 @@ import (
 const (
 	standaloneRiverDefaultQueueMaxWorkers = 10
 	standaloneRiverBillingQueueMaxWorkers = 20
+	// #719: the global cap on concurrent per-merchant provider refresh jobs —
+	// the simple, honest per-provider rate limit (thousands of merchants share
+	// each provider's API budget; a small worker cap is the brake).
+	standaloneRiverProviderRefreshQueueMaxWorkers = 4
 )
 
 // standaloneRiverSchema returns the schema for River tables when OpenRails
@@ -1035,8 +1039,9 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []r
 	drv := riverpgxv5.New(pool)
 	client, err := river.NewClient(drv, &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault:     {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
-			riverjobs.QueueBilling: {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
+			river.QueueDefault:             {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
+			riverjobs.QueueBilling:         {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
+			riverjobs.QueueProviderRefresh: {MaxWorkers: standaloneRiverProviderRefreshQueueMaxWorkers},
 		},
 		Schema:     standaloneRiverSchema(cfg),
 		Workers:    workers,

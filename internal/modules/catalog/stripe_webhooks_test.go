@@ -202,6 +202,39 @@ func TestReconcileWebhookEndpointRecreatesWhenSecretLost(t *testing.T) {
 	require.Equal(t, 1, fake.deletes)
 }
 
+// ForbidCreate (#723) refuses BOTH create branches before any Stripe mutation:
+// no endpoint → no create; drift/lost-secret → the existing endpoint survives
+// (no delete).
+func TestReconcileWebhookEndpointForbidCreate(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeStripeWebhooks()
+	svc := newWebhookTestSvc(t, fake)
+	events := []string{"invoice.paid"}
+
+	// 1. From nothing: refused, nothing created.
+	_, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, ForbidCreate: true})
+	require.ErrorIs(t, err, ErrWebhookCreateForbidden)
+	require.Zero(t, fake.creates)
+
+	// 2. Version drift with a held secret: recreate refused BEFORE the delete.
+	fake.endpoints["we_old"] = &StripeWebhookEndpoint{
+		ID: "we_old", URL: "https://a.example/wh", Status: "enabled",
+		APIVersion:    "2020-01-01",
+		EnabledEvents: events,
+		Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
+	}
+	_, err = svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true, ForbidCreate: true})
+	require.ErrorIs(t, err, ErrWebhookCreateForbidden)
+	require.Zero(t, fake.deletes, "existing endpoint survives")
+	require.Zero(t, fake.creates)
+
+	// 3. Held secret + matching endpoint: in-place reconcile still works.
+	fake.endpoints["we_old"].APIVersion = stripeapi.APIVersion
+	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true, ForbidCreate: true})
+	require.NoError(t, err)
+	require.Equal(t, WebhookUnchanged, res.Action)
+}
+
 func TestReconcileWebhookEndpointIgnoresUnmanaged(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()

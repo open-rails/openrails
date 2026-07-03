@@ -343,7 +343,10 @@ func (r *Runtime) AddBillingWorkersTo(ctx context.Context, workers *river.Worker
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
 	}
-	return r.addBillingWorkersToRegistry(ctx, workers)
+	// #719: embedded hosts configure only QueueBilling on their client
+	// (pkg/embedded contract), so per-merchant refresh jobs ride that queue —
+	// no host changes; a single embedded merchant is one job per tick anyway.
+	return r.addBillingWorkersToRegistry(ctx, workers, riverjobs.QueueBilling)
 }
 
 // GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.

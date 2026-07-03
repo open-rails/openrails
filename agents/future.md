@@ -1996,6 +1996,21 @@ is unknown — matters more once unknowns grant access (double-billing hole); (b
 mid-rework by a concurrent session (2026-07-02) — land this after that settles. Related: doujins
 #748 policy questions.
 
+STATUS (2026-07-03): IMPLEMENTED. derive-1's source query `ListUngrantedSubscriptions`
+(internal/db/queries/grants.sql) now sources status IN ('active','cancelled','unknown') — matching
+SubscriptionProjectsStandingAccess — so an imported-as-unknown auto-renew sub derives its grant and
+MaterializeGrant's standing lane projects the open (end_at NULL) window; sqlc regenerated (only
+ListUngrantedSubscriptions changed in gen). Evidence bounds hold: a non-renewing unknown gets only
+its stored bounded window; an unknown with no stored window derives nothing. The #691 companion
+guard ALREADY EXISTED and needed no change: `checkUnknownSubscriptionConflict` in
+internal/modules/checkout/purchase_service.go (ConflictCodeMembershipPendingVerification) blocks
+same-product/tier-group re-purchase at session creation (all rails funnel through Checkout()),
+proven by TestUnknownSubscriptionCheckoutGuard. New test:
+TestConverge_DeriveGrantMissing_UnknownSubscription (converge_derive1_integration_test.go) —
+standing window for auto-renew unknown, bounded-evidence-only for non-renew, nothing fabricated
+without evidence, repeat sweeps findings-free. grants/entitlements/checkout/webhooks/subscriptions/
+converge integration suites green.
+
 ---
 
 # #717: derive-1 grants chargeback subscriptions access through their paid period
@@ -2011,6 +2026,24 @@ isn't. RULED (Paul, 2026-07-02): YES — "if someone charges us back, we should 
 entitlement." Implement: chargeback ⇒ access revoked as of the chargeback event, both in derive-1
 (cancel_type=chargeback grants no runway window) and in the native chargeback webhook paths
 (NMI/CCBill/Stripe) — audit each rail's chargeback handler for the same leave-runway-standing hole.
+
+STATUS (2026-07-03): IMPLEMENTED (derive-1) + AUDITED CLEAN (native rails). derive-1
+`ListUngrantedSubscriptions` now excludes `status='cancelled' AND cancel_type='chargeback'` — a
+charged-back sub materializes NO grant and NO window (the legacy import's ended_at=expiration rows
+grant no runway); exclusion is scoped to status='cancelled' so a won-dispute reactivated (active)
+sub with a stale cancel_type still derives. Native-path audit found NO leave-runway-standing hole —
+all three rails already revoke immediately: NMI (chargeback.batch.complete → CancelMembership
+RevokeAccess:true + CancelType:chargeback → ApplyLocalCancellation truncates period to now, revokes
+subscription+grace sources as-of now with EntitlementRevokeChargeback, BoundSubscriptionAccess
+closure); Stripe (charge.dispute.created/closed → same CancelMembership path for sub payments;
+one-offs EndActiveByPayment + RevokeProductAccessByPayment; won disputes reactivate); CCBill
+(Chargeback → terminal cancel with cancel_type=chargeback + RevokeSourcesForSubscription, which
+revokes active windows AND soft-deletes future scheduled ones + terminates the backing grants).
+Solana has no chargeback surface. No re-derive loop: terminated grants keep their grant event row,
+so the source-keyed detection never re-fires. New test:
+TestConverge_DeriveGrantMissing_ChargebackNoRunway (converge_derive1_integration_test.go) —
+chargeback sub derives nothing (zero findings, zero windows), user-cancelled sub with identical
+future paid-through shape KEEPS its runway (regression pin). Targeted integration suites green.
 
 
 
@@ -2208,3 +2241,63 @@ provider's API budget), stagger/jitter so windows don't align, and a freshness m
 (oldest watermark age) as the SLO. Non-goals: no per-merchant goroutine fan-out inside one job
 (loses river's isolation); no scheduling for merchants with zero armed rails (they already cost
 one Build call — make even that skip via a cheap accounts-exist predicate).
+
+STATUS (2026-07-03): SHIPPED. `openrails.provider_refresh` (kind unchanged — a mid-upgrade
+pending umbrella row is worked as a fan-out, never a second serial loop) is now
+ProviderRefreshSchedulerWorker: lists active merchants, shuffles (kills ListActiveMerchantIDs
+tail bias), and enqueues one `openrails.provider_refresh_merchant` job each
+(ProviderRefreshWorker, body = the pre-#719 loop verbatim; watermarks/stats/log shapes
+unchanged). Dedupe: UniqueOpts ByArgs(merchant_id) + in-flight states (default minus completed)
+— overlapping ticks dedupe; proven in TestProviderRefreshScheduler_UniquePerMerchantAcrossTicks
+(two back-to-back passes ⇒ 1 river_job per merchant). Jitter: even spread over Stagger
+(default 30m), slot 0 immediate so embedded boot refreshes at once. Zero-armed skip: RLS-scoped
+`EXISTS rail_merchant_accounts` (archived counts — drain still pulls) per merchant, active only
+when NO boot-config fallback plane exists (boot rails arm every merchant); fail-open on
+predicate error. Rate limiting = bounded river queue `provider_refresh` (MaxWorkers 4,
+standalone buildRiverClient) — a global concurrency brake, NOT per-provider request-rate
+shaping (a fuller limiter would token-bucket per rail across workers); embedded hosts route the
+kind onto QueueBilling (AddBillingWorkersTo) so doujins/hentai0 need no client changes.
+Remaining tails: freshness SLO metric (oldest watermark age) not built; per-rail token-bucket
+if provider 429s ever show up. internal/river unit+integration suites green.
+
+---
+
+# #720: solana refresh must not read every subscription PDA every tick
+
+Paul (2026-07-03): per-sub account reads each 4h tick are silly at thousands/millions of subs.
+Three tiers:
+1. NOW — the #714 plan enumeration (getProgramAccounts per plan) already returns every
+   subscription account's DATA in the same response; decode statuses from that and DELETE the
+   per-known-PDA GetAccountData sweep (it is pure redundancy). Cost becomes O(plans) calls.
+2. NOW — insight: a user cancel/resume has no effect until the period boundary, so individual
+   chain reads are only ever needed for subs NEAR their period end (the crank already reads
+   before pulling). Any residual targeted-read path should filter to the due-window cohort.
+3. SAAS SCALE — push, not poll: programSubscribe websocket on the subscriptions program;
+   periodic pull demoted to a safety net over the due-window cohort + dataSlice'd enumeration.
+   Design-note only for now (ties to #719 scale constraint).
+
+STATUS (2026-07-03, implemented): Paul's standing law overrode the original tiering (a single
+getProgramAccounts-per-plan call is still O(subscribers) response/decode cost, so it can't be a
+routine per-tick lane either). Shipped in internal/reconcile/solana.go + solana_test.go, plus two
+small companion wires (internal/reconcile/local.go, merchant_wiring.go — outside the named surface
+but required for the fix to have any runtime effect; internal/db/gen and the river/grants/webhooks/
+checkout dirs were NOT touched). Lane 1 (locally-known refs): a new `Due SolanaDueSubscriptionSource`
+reuses the EXISTING (already-generated) ListDueSolanaSubscriptions query — server-side
+`status='active' AND next_pull_at<=now+lead` — so the due-set read is due-proportional, not O(all
+subs); `Source` itself stays exhaustive (narrowed per-sub/customer probes and the #714 known-map
+dedup both still need every locally-known ref). DueWindowLead defaults to 4h (matches the routine
+ProviderRefresh reconcile tick). A narrowed fetch (SubscriptionID/CustomerID set) always bypasses
+Due. Lane 2 (permissionless discovery, enumeratePlanSubscriptions): demoted to ~24h/plan via a
+stateless deterministic hash-of-plan-id time-slot (`planDiscoveryDue`) rather than a stored
+watermark — MerchantFetcherBuilder rebuilds a fresh SolanaFetcher every tick (stateless workers,
+#719), so in-struct state wouldn't survive between calls, and a new watermark column was out of
+scope (would require internal/db/gen changes). Correctness invariant verified pre-existing and
+pinned with a regression test: Solana's `traits.absenceMeansCancelled` is false and its snapshots
+never set `Coverage.SubscriptionsExhaustive`, so a ref skipped this tick is simply absent from the
+snapshot and produces zero diff findings (never misread as "disappeared") —
+TestSolanaSkippedRefExcludedFromDiff pins this. Tests added: due-window boundary (just-inside/
+just-outside/past-due/no-period-data/narrowed-bypass), discovery-cadence gate (pure-function +
+wired-through-Fetch RPC-call-count proof), skipped-ref-excluded-from-diff. All green:
+`go test ./internal/reconcile/... ./internal/integrations/solana/...` (17 solana tests + full
+package), `go build ./...` and `go vet ./...` clean repo-wide (no unrelated breakage encountered).
+Deferred/not done: tier 3 (websocket push) remains a design note only, unchanged.

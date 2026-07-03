@@ -620,9 +620,11 @@ func specFeatures(raw []byte) ([]string, error) {
 // are source-keyed (source_type+source_id), so they are a NO-OP for live data
 // (which already carries its grant) and only fire on the migrated cohort.
 
-// UngrantedSubscriptions returns active/cancelled subscriptions for a grantable
-// product with no subscription-sourced grant yet — the detection behind
-// `derive.subscription.missing` (#631). scanSince bounds the scan to
+// UngrantedSubscriptions returns active/cancelled/unknown subscriptions for a
+// grantable product with no subscription-sourced grant yet — the detection behind
+// `derive.subscription.missing` (#631). #716 fail-open: `unknown` sources too, so
+// the standing-access lane can engage for imported unknowns. #717: chargeback
+// cancels are excluded — no runway. scanSince bounds the scan to
 // windows ending on/after it (3y). customer nil = merchant-wide sweep.
 func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedSubscriptionsRow, error) {
 	return l.q.ListUngrantedSubscriptions(ctx, gen.ListUngrantedSubscriptionsParams{

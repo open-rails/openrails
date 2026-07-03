@@ -341,6 +341,29 @@ func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	}
 }
 
+// SolanaDueSubscriptionSourceFromDB adapts the existing ListDueSolanaSubscriptions
+// query into the #720 due-window source: subscription_pda values whose
+// next_pull_at is at/before `before`. That query already filters
+// server-side (status='active' AND next_pull_at<=$1), so this read is
+// due-proportional, not O(all subs) — unlike SolanaSubscriptionSourceFromDB
+// above, which stays exhaustive on purpose (narrowed probes and the #714
+// discovery de-dup set both need every locally-known ref).
+func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
+	return func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
+		rows, err := d.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
+			Now: before.UTC(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]struct{}, len(rows))
+		for _, r := range rows {
+			out[r.SubscriptionPda] = struct{}{}
+		}
+		return out, nil
+	}
+}
+
 // SolanaLocalRecordResolverFromDB resolves #713 memo local-ids against the two
 // record kinds the stamp names: checkout sessions (one-off local-id = session
 // id) and rail intents (pull local-id = #674 intent id). (nil, nil) = no local

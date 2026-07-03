@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -107,6 +108,34 @@ func registrationVerification(locked bool) authcore.RegistrationVerificationPoli
 	return authcore.RegistrationVerificationRequired
 }
 
+// resolveControlPlaneKeySource builds the JWT signing KeySource for the
+// control plane. Inline key material from config.Config.Auth (env
+// ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM/PUBLIC_KEYS, read once at config.Load —
+// #712) wins when present; otherwise it falls through to the standard
+// keys.json / dev-ephemeral resolution.
+func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) {
+	activeKeyID := strings.TrimSpace(cfg.Auth.ActiveKeyID)
+	activePrivateKeyPEM := strings.TrimSpace(cfg.Auth.ActivePrivateKeyPEM)
+	if activeKeyID != "" || activePrivateKeyPEM != "" {
+		var publicKeysPEM map[string]string
+		if raw := strings.TrimSpace(cfg.Auth.PublicKeysJSON); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &publicKeysPEM); err != nil {
+				return nil, fmt.Errorf("controlplane: parse auth.public_keys (PUBLIC_KEYS) JSON: %w", err)
+			}
+		}
+		ks, err := jwtkit.NewStaticKeySourceFromPEM(activeKeyID, activePrivateKeyPEM, publicKeysPEM)
+		if err != nil {
+			return nil, fmt.Errorf("controlplane: load JWT keys from ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM: %w", err)
+		}
+		return ks, nil
+	}
+	keysPath := strings.TrimSpace(cfg.Auth.KeysPath)
+	if keysPath == "" {
+		keysPath = jwtkit.DefaultAuthKeysPath
+	}
+	return jwtkit.ResolveKeySource(keysPath, cfg.IsDev())
+}
+
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
 // pool. The pool must point at the database that holds AuthKit's `profiles.*`
 // schema (in self-hosted mode this is the same database OpenRails uses). The
@@ -135,17 +164,20 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// verifier TRUSTS are guaranteed to be the same key. (When Keys is left nil,
 	// core.NewFromConfig auto-discovers internally and we'd have no handle on the
 	// active signer; in dev it could even generate a different key on a second
-	// call.) Per authkit #231 the library reads NO env vars: discovery is
-	// <path>/keys.json (Vault-mounted) -> dev-generated (development only).
+	// call.) Discovery (#712/#231: env is read ONLY at config.Load, never here or
+	// inside authkit): inline auth.active_key_id/active_private_key_pem (from
+	// ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM) wins; else /vault/auth/keys.json;
+	// else (dev only) an ephemeral dev key.
 	//
 	// The signing key is OPTIONAL (#527/#87): when no key is discoverable (the
-	// prod no-key case — dev still auto-generates), the control plane runs as a
-	// pure VERIFIER instead of failing the boot. It verifies inbound host-app
+	// prod no-key case — dev always gets an ephemeral one), the control plane runs
+	// as a pure VERIFIER instead of failing the boot. It verifies inbound host-app
 	// delegated tokens and serves RBAC, but cannot MINT tokens (mint paths return
 	// authkit ErrMissingSigner). This is the expected posture for a standalone
-	// deployment with no login-capable users; mounting a key (env/vault) re-enables
-	// minting automatically. Key presence is the enablement signal — no separate knob.
-	keySource, keyErr := jwtkit.ResolveKeySource(jwtkit.DefaultAuthKeysPath, cfg.IsDev())
+	// deployment with no login-capable users; mounting a key (env/keys.json/vault)
+	// re-enables minting automatically. Key presence is the enablement signal — no
+	// separate knob.
+	keySource, keyErr := resolveControlPlaneKeySource(cfg)
 	verifyOnly := false
 	if keyErr != nil {
 		log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled)")

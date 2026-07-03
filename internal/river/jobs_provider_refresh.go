@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -27,32 +29,228 @@ import (
 )
 
 const (
-	KindProviderRefresh = "openrails.provider_refresh"
+	KindProviderRefresh         = "openrails.provider_refresh"
+	KindProviderRefreshMerchant = "openrails.provider_refresh_merchant"
+
+	// QueueProviderRefresh bounds refresh concurrency in standalone (#719): a
+	// small MaxWorkers cap is the global brake on refresh HTTP so thousands of
+	// merchants can't stampede a provider's API budget. Embedded hosts route
+	// the kind onto QueueBilling instead (see AddBillingWorkersTo).
+	QueueProviderRefresh = "provider_refresh"
 
 	providerRefreshDomainEvents   = "events"
 	defaultRefreshWindow          = 24 * time.Hour
 	defaultRefreshSafetyLag       = 5 * time.Minute
 	defaultRefreshInitialLookback = 90 * 24 * time.Hour
 	defaultRefreshMaxWindows      = 8
+	// defaultRefreshStagger spreads the scheduler's fan-out so merchant pull
+	// windows don't align on the tick instant.
+	defaultRefreshStagger = 30 * time.Minute
 )
 
+// ProviderRefreshArgs is the periodic SCHEDULER kind (#719). The kind string is
+// unchanged from the pre-#719 serial umbrella, so a pending umbrella row from a
+// mid-upgrade deployment is worked as a scheduler pass (fan-out), never as a
+// second serial loop.
 type ProviderRefreshArgs struct{}
 
 func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 
-// ProviderRefreshWorker (#574) is the always-on provider-read umbrella. It keeps
-// provider truth fresh without remote mutations: bounded event pulls with
-// durable watermarks, the unknown-cohort reconcile (#632/#633/#665 — the ONE
-// per-subscription verification path), and the CCBill DataLink bulk lane.
-// Provider outages leave watermarks in place for the next scheduled/startup pass.
+// ProviderRefreshMerchantArgs is one merchant's refresh job (#719).
+type ProviderRefreshMerchantArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+}
+
+func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
+
+// providerRefreshUniqueStates = default unique set minus completed: exactly one
+// IN-FLIGHT job per merchant, re-enqueueable next tick. Overlapping scheduler
+// passes (a mid-upgrade leftover umbrella row next to the fresh periodic tick)
+// dedupe here instead of double-refreshing a merchant.
+var providerRefreshUniqueStates = []rivertype.JobState{
+	rivertype.JobStateAvailable,
+	rivertype.JobStatePending,
+	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
+	rivertype.JobStateScheduled,
+}
+
+// refreshJobInserter is the slice of river.Client the scheduler uses (test seam).
+type refreshJobInserter interface {
+	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
+}
+
+// ProviderRefreshSchedulerWorker (#719) is the periodic umbrella: it lists
+// active merchants and enqueues ONE per-merchant refresh job each, spread
+// evenly over Stagger. Merchants that cannot possibly arm (no declared
+// rail accounts AND no boot-config fallback plane) are skipped before enqueue
+// via a cheap RLS-scoped EXISTS. River supplies the rest: per-merchant error
+// isolation + retries, and the bounded queue caps refresh concurrency.
+type ProviderRefreshSchedulerWorker struct {
+	river.WorkerDefaults[ProviderRefreshArgs]
+	DB     *db.DB
+	Config *config.Config
+	Clock  clockwork.Clock
+
+	// Boot-plane deps, presence only: any boot-config fallback rail can arm
+	// EVERY merchant (merchant_wiring.go precedence), so the zero-accounts
+	// skip applies only when the deployment has no boot plane at all (hosted
+	// SaaS posture).
+	Rails          config.RailMerchantAccountSet
+	NMIClients     map[string]*nmi.NMIClient
+	CCBillDataLink *ccbill.DataLinkClient
+	SolanaRPC      *solanaint.RPCClient
+
+	// MerchantQueue is where per-merchant jobs land ("" = QueueProviderRefresh).
+	MerchantQueue string
+	// Stagger is the fan-out spread window (0 = defaultRefreshStagger). Slot 0
+	// is immediate, so a single-merchant (embedded) boot refreshes right away.
+	Stagger time.Duration
+
+	// Test seams; nil = production defaults.
+	Inserter        refreshJobInserter
+	ListMerchants   func(ctx context.Context) ([]uuid.UUID, error)
+	HasRailAccounts func(ctx context.Context, mid uuid.UUID) (bool, error)
+}
+
+func (ProviderRefreshSchedulerWorker) Kind() string { return KindProviderRefresh }
+
+func (w *ProviderRefreshSchedulerWorker) now() time.Time {
+	if w.Clock != nil {
+		return w.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (w *ProviderRefreshSchedulerWorker) stagger() time.Duration {
+	if w.Stagger > 0 {
+		return w.Stagger
+	}
+	return defaultRefreshStagger
+}
+
+func (w *ProviderRefreshSchedulerWorker) merchantQueue() string {
+	if w.MerchantQueue != "" {
+		return w.MerchantQueue
+	}
+	return QueueProviderRefresh
+}
+
+func (w *ProviderRefreshSchedulerWorker) bootPlaneArmed() bool {
+	return len(w.Rails) > 0 || len(w.NMIClients) > 0 || w.CCBillDataLink != nil || w.SolanaRPC != nil
+}
+
+func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]uuid.UUID, error) {
+	if w.ListMerchants != nil {
+		return w.ListMerchants(ctx)
+	}
+	return w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+}
+
+// merchantHasRailAccounts: cheap accounts-exist predicate. rail_merchant_accounts
+// is RLS-isolated, so the EXISTS runs under the merchant GUC. Archived rows
+// count — drain pulls still arm (#655). Environment is NOT filtered: a
+// wrong-environment row enqueues a job that arms nothing (fail open, cheap).
+func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
+	if w.HasRailAccounts != nil {
+		return w.HasRailAccounts(ctx, mid)
+	}
+	var exists bool
+	mctx := merchant.WithID(ctx, merchant.ID(mid))
+	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
+		// Explicit merchant_id predicate: redundant under RLS, load-bearing on
+		// BYPASSRLS roles (tests, superuser self-hosts).
+		return tx.QueryRow(tctx, `SELECT EXISTS (SELECT 1 FROM openrails.rail_merchant_accounts WHERE merchant_id = $1)`, mid).Scan(&exists)
+	})
+	return exists, err
+}
+
+func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
+	if w.Config != nil && w.Config.IsProviderReadOnly() {
+		log.WithContext(ctx).Warn("Readonly mode: provider refresh scheduling skipped (pure observer; no local convergence)")
+		return nil
+	}
+	inserter := w.Inserter
+	if inserter == nil {
+		client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
+		if err != nil {
+			return fmt.Errorf("provider refresh scheduler: river client: %w", err)
+		}
+		inserter = client
+	}
+	merchantIDs, err := w.listMerchants(ctx)
+	if err != nil {
+		return fmt.Errorf("provider refresh scheduler: list merchants: %w", err)
+	}
+	// Shuffle kills the ListActiveMerchantIDs order bias: no merchant is
+	// systematically last in every window.
+	rand.Shuffle(len(merchantIDs), func(i, j int) { merchantIDs[i], merchantIDs[j] = merchantIDs[j], merchantIDs[i] })
+
+	now := w.now()
+	var spacing time.Duration
+	if n := len(merchantIDs); n > 0 {
+		spacing = w.stagger() / time.Duration(n)
+	}
+	checkAccounts := !w.bootPlaneArmed()
+	var enqueued, deduped, skipped, failed, slot int
+	for _, mid := range merchantIDs {
+		if checkAccounts {
+			ok, err := w.merchantHasRailAccounts(ctx, mid)
+			if err != nil {
+				// Fail open: a broken predicate must not starve refresh.
+				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: accounts predicate failed; enqueueing anyway")
+			} else if !ok {
+				skipped++
+				continue
+			}
+		}
+		res, err := inserter.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: mid}, &river.InsertOpts{
+			Queue:       w.merchantQueue(),
+			ScheduledAt: now.Add(time.Duration(slot) * spacing),
+			UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
+		})
+		slot++
+		if err != nil {
+			failed++
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: enqueue merchant refresh failed")
+			continue
+		}
+		if res != nil && res.UniqueSkippedAsDuplicate {
+			deduped++
+		} else {
+			enqueued++
+		}
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"merchants":           len(merchantIDs),
+		"enqueued":            enqueued,
+		"deduped":             deduped,
+		"skipped_no_accounts": skipped,
+		"enqueue_errors":      failed,
+		"queue":               w.merchantQueue(),
+		"stagger":             w.stagger().String(),
+	}).Info("Provider Refresh: scheduled merchant refresh jobs")
+	if failed > 0 {
+		// Retry the scheduler; per-merchant unique keys make the rerun idempotent.
+		return fmt.Errorf("provider refresh scheduler: %d/%d enqueues failed", failed, len(merchantIDs))
+	}
+	return nil
+}
+
+// ProviderRefreshWorker (#574) is ONE merchant's provider-read refresh (#719:
+// the kind fans out from the scheduler above). It keeps provider truth fresh
+// without remote mutations: bounded event pulls with durable watermarks, the
+// unknown-cohort reconcile (#632/#633/#665 — the ONE per-subscription
+// verification path), and the CCBill DataLink bulk lane. Provider outages
+// leave watermarks in place for the next scheduled/startup pass.
 //
-// Credentials arm PER MERCHANT (#699): fetchers/probers are built inside each
+// Credentials arm PER MERCHANT (#699): fetchers/probers are built inside the
 // merchant's scope from the merchant-secrets store first, with the boot-config
 // rails (Rails + the boot-built clients below) as the fallback plane. Clients
 // are cheap per-merchant structs — nothing credentialed is cached across
 // merchants (#653).
 type ProviderRefreshWorker struct {
-	river.WorkerDefaults[ProviderRefreshArgs]
+	river.WorkerDefaults[ProviderRefreshMerchantArgs]
 	DB     *db.DB
 	Config *config.Config
 	Rails  config.RailMerchantAccountSet
@@ -77,7 +275,7 @@ type ProviderRefreshWorker struct {
 	MaxWindows      int
 }
 
-func (ProviderRefreshWorker) Kind() string { return KindProviderRefresh }
+func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshMerchant }
 
 func (w *ProviderRefreshWorker) now() time.Time {
 	if w.Clock != nil {
@@ -86,7 +284,7 @@ func (w *ProviderRefreshWorker) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshArgs]) error {
+func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshMerchantArgs]) error {
 	if w.DB == nil {
 		return fmt.Errorf("provider refresh: db not configured")
 	}
@@ -94,15 +292,13 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		log.WithContext(ctx).Warn("Readonly mode: provider refresh skipped (pure observer; no local convergence)")
 		return nil
 	}
-
-	logger := log.WithContext(ctx).WithField("worker", KindProviderRefresh)
-	stats := providerRefreshStats{}
-
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("provider refresh: list merchants: %w", err)
+	mid := job.Args.MerchantID
+	if mid == uuid.Nil {
+		return fmt.Errorf("provider refresh: merchant_id required")
 	}
-	stats.Merchants = len(merchantIDs)
+
+	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshMerchant).WithField("merchant_id", mid)
+	stats := providerRefreshStats{Merchants: 1}
 
 	// #699: fetchers + per-sub probers (#665) arm PER MERCHANT inside the
 	// merchant scope — merchant-store credentials first, boot-config rails as
@@ -119,47 +315,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Endpoints:      w.PullEndpoints,
 	}
 
-	for _, mid := range merchantIDs {
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
-		if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
-			armed := builder.Build(tctx, merchant.ID(mid))
-			if err := w.runCCBillDataLinkLane(tctx, armed.CCBillDataLink); err != nil {
-				stats.CCBillErrors++
-				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
-			}
-			res := w.runEventRefresh(tctx, mid, armed.Fetchers)
-			stats.add(res)
-			// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
-			// PROVES a source domain — flip reconciliation_state before the
-			// convergence pass so held EXCESS repairs can proceed.
-			if len(res.Proofs) > 0 {
-				if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
-					stats.LaneErrors++
-					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
-				} else if len(flipped) > 0 {
-					logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
-				}
-			}
-			if res.Changed {
-				if err := w.runConvergence(tctx, mid); err != nil {
-					stats.ConvergeErrors++
-					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
-				}
-			}
-			// #633: reconcile the `unknown` cohort against provider truth (one
-			// windowed bulk pull per rail + targeted per-sub probe fallbacks).
-			// Tolerant of missing/failed fetchers — those rails' subs stay
-			// `unknown` and are retried next pass (backoff).
-			if err := w.runUnknownReconcile(tctx, mid, armed.Fetchers, armed.Probers); err != nil {
-				stats.LaneErrors++
-				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
-			}
-			return nil
-		}); err != nil {
-			stats.LaneErrors++
-			logger.WithError(err).WithField("merchant_id", mid).Error("Provider Refresh: merchant connection failed")
-		}
-	}
+	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)
 
 	logger.WithFields(log.Fields{
 		"merchants":        stats.Merchants,
@@ -174,6 +330,58 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"converge_errors":  stats.ConvergeErrors,
 		"lane_errors":      stats.LaneErrors,
 	}).Info("Provider Refresh: pass completed")
+	if err != nil {
+		// Merchant connection failed — nothing ran; river retries with backoff.
+		// Lane failures stay best-effort (watermarks resume them next tick).
+		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
+	}
+	return nil
+}
+
+// refreshMerchant is the pre-#719 per-merchant loop body, verbatim: arm →
+// CCBill DataLink lane → event refresh → proofs → scoped convergence if
+// changed → unknown-cohort reconcile.
+func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *log.Entry) error {
+	mctx := merchant.WithID(ctx, merchant.ID(mid))
+	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
+		armed := builder.Build(tctx, merchant.ID(mid))
+		if err := w.runCCBillDataLinkLane(tctx, armed.CCBillDataLink); err != nil {
+			stats.CCBillErrors++
+			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
+		}
+		res := w.runEventRefresh(tctx, mid, armed.Fetchers)
+		stats.add(res)
+		// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
+		// PROVES a source domain — flip reconciliation_state before the
+		// convergence pass so held EXCESS repairs can proceed.
+		if len(res.Proofs) > 0 {
+			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
+				stats.LaneErrors++
+				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
+			} else if len(flipped) > 0 {
+				logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
+			}
+		}
+		if res.Changed {
+			if err := w.runConvergence(tctx, mid); err != nil {
+				stats.ConvergeErrors++
+				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
+			}
+		}
+		// #633: reconcile the `unknown` cohort against provider truth (one
+		// windowed bulk pull per rail + targeted per-sub probe fallbacks).
+		// Tolerant of missing/failed fetchers — those rails' subs stay
+		// `unknown` and are retried next pass (backoff).
+		if err := w.runUnknownReconcile(tctx, mid, armed.Fetchers, armed.Probers); err != nil {
+			stats.LaneErrors++
+			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
+		}
+		return nil
+	}); err != nil {
+		stats.LaneErrors++
+		logger.WithError(err).WithField("merchant_id", mid).Error("Provider Refresh: merchant connection failed")
+		return err
+	}
 	return nil
 }
 

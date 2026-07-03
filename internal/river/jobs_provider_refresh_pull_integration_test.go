@@ -266,8 +266,11 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 	dlSrv := newFakeDataLinkServer(t, railSubID, rebill.Format("2006-01-02"))
 
 	// NO boot rails: Rails/NMIClients/CCBillDataLink/SolanaRPC all zero.
+	// #719: one job per merchant — the scheduler fans these out in production.
 	worker := newStorePullWorker(dbi, svc, nmiSrv, dlSrv, config.ProviderWriteModeLimited)
-	require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
+	for _, mid := range []merchant.ID{midA, midB} {
+		require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshMerchantArgs]{Args: ProviderRefreshMerchantArgs{MerchantID: mid.UUID()}}))
+	}
 
 	// Watermarks advanced per merchant+rail.
 	horizon := worker.now().Add(-worker.safetyLag())
@@ -332,7 +335,7 @@ func TestProviderRefresh_MissingSecret_RailAbsentWithWarn(t *testing.T) {
 	defer hook.Reset()
 
 	worker := newStorePullWorker(dbi, svc, nmiSrv, dlSrv, config.ProviderWriteModeLimited)
-	require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
+	require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshMerchantArgs]{Args: ProviderRefreshMerchantArgs{MerchantID: mid.UUID()}}))
 
 	// NMI absent: no watermark, no fake-server traffic.
 	_, ok := loadPullWatermark(t, dbi, mid, "nmi")
@@ -373,7 +376,7 @@ func TestProviderRefresh_ReadonlySkipsStoreArmedPulls(t *testing.T) {
 	nmiSrv := newFakeNMIPullServer(t)
 
 	worker := newStorePullWorker(dbi, svc, nmiSrv, nil, config.ProviderWriteModeReadOnly)
-	require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
+	require.NoError(t, worker.Work(context.Background(), &river.Job[ProviderRefreshMerchantArgs]{Args: ProviderRefreshMerchantArgs{MerchantID: mid.UUID()}}))
 
 	assert.Empty(t, nmiSrv.seenKeys(), "readonly mode: pure observer, no pulls")
 	_, ok := loadPullWatermark(t, dbi, mid, "nmi")

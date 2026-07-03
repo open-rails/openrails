@@ -238,9 +238,10 @@ services:
       PORT: "3053"
       API_URL: "${API_URL:-http://localhost:3053}"
       AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
-      # AuthKit signing keys for OpenRails' own issuer:
+      # AuthKit signing keys for OpenRails' own issuer (read once at
+      # config.Load, never by the authkit library itself — #712/#231):
       #   1. ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS envs, or
-      #   2. /vault/auth/keys.json injected by Vault/External Secrets, or
+      #   2. AUTHKIT_KEYS_PATH/keys.json injected by Vault/External Secrets, or
       #   3. development-only generated keys persisted at /.runtime/authkit.
       AUTHKIT_KEYS_PATH: "${AUTHKIT_KEYS_PATH:-/vault/auth}"
       ACTIVE_KEY_ID: "${ACTIVE_KEY_ID:-}"

@@ -16,7 +16,9 @@ import (
 // buildRiverWorkers constructs the worker registry for River.
 func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error) {
 	workers := river.NewWorkers()
-	if err := r.addBillingWorkersToRegistry(ctx, workers); err != nil {
+	// Standalone: per-merchant refresh jobs land on the dedicated bounded queue
+	// (#719) configured in buildRiverClient.
+	if err := r.addBillingWorkersToRegistry(ctx, workers, riverjobs.QueueProviderRefresh); err != nil {
 		return nil, err
 	}
 	return workers, nil
@@ -24,7 +26,10 @@ func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error)
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // This is used both internally (buildRiverWorkers) and externally (AddBillingWorkersTo).
-func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
+// merchantRefreshQueue routes the #719 per-merchant refresh jobs: the bounded
+// QueueProviderRefresh in standalone, QueueBilling for embedded hosts (whose
+// river clients only configure that queue).
+func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers, merchantRefreshQueue string) error {
 	if err := r.validateBillingWorkerRuntime(); err != nil {
 		return err
 	}
@@ -44,10 +49,25 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, NMIResolver: r.CollectionResolver, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	// Provider Refresh (#574): always-on provider truth refresh. It wraps
-	// bounded provider event pulls, the unknown-cohort reconcile (#632/#665 —
-	// the one per-subscription verification path; the #367 liveness worker is
-	// retired), CCBill DataLink, and scoped convergence after refresh writes.
+	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
+	// fans out one per-merchant refresh job (staggered; unique per merchant),
+	// skipping merchants with no declared accounts when no boot rails exist.
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshSchedulerWorker{
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Rails:          r.Rails,
+		NMIClients:     r.NMIClients,
+		CCBillDataLink: r.CCBillDataLink,
+		SolanaRPC:      r.SolanaRPC,
+		MerchantQueue:  merchantRefreshQueue,
+	}); err != nil {
+		return fmt.Errorf("add provider refresh scheduler worker: %w", err)
+	}
+	// The per-merchant body: bounded provider event pulls, the unknown-cohort
+	// reconcile (#632/#665 — the one per-subscription verification path; the
+	// #367 liveness worker is retired), CCBill DataLink, and scoped
+	// convergence after refresh writes.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
 		DB:                  r.DB,
 		Config:              r.Config,
@@ -390,10 +410,11 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 4 hours: Provider Refresh (#574) — refresh provider truth via
-	// bounded event windows, the unknown-cohort reconcile, and CCBill DataLink.
-	// RunOnStart=true: startup after a stale dump/outage should not wait for
-	// the first 4-hour tick.
+	// Every 4 hours: Provider Refresh scheduler (#574/#719) — fans out one
+	// per-merchant refresh job (bounded event windows, unknown-cohort
+	// reconcile, CCBill DataLink). RunOnStart=true: startup after a stale
+	// dump/outage should not wait for the first 4-hour tick; boot enqueues the
+	// scheduler which enqueues the merchant jobs.
 	jobs = append(jobs, r.healthPeriodic(
 		4*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {

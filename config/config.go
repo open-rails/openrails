@@ -696,6 +696,23 @@ type AuthConfig struct {
 	// (e.g. "https://openrails.mysite.com"). Required outside development; in
 	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
+
+	// Inline JWT signing-key material (env ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM
+	// / PUBLIC_KEYS, canonical AuthKit names — special-cased in
+	// envKeyToConfigKey so they land here instead of a mechanical auth.* split).
+	// Read ONCE here at the config-load boundary and handed to authkit as an
+	// explicit jwtkit.KeySource (internal/controlplane); authkit's own library
+	// no longer reads any env itself. Optional: the control plane falls back to
+	// KeysPath/keys.json (or, in dev, an ephemeral key) when unset.
+	ActiveKeyID         string `koanf:"active_key_id,omitempty"`
+	ActivePrivateKeyPEM string `koanf:"active_private_key_pem,omitempty"`
+	// PublicKeysJSON is a JSON object {kid: PEM} of additional trusted public
+	// keys (verify-only, e.g. a previous active key mid-rotation).
+	PublicKeysJSON string `koanf:"public_keys,omitempty"`
+	// KeysPath is the directory holding keys.json when no inline key material
+	// is set (env AUTHKIT_KEYS_PATH; special-cased below). Empty uses
+	// jwtkit.DefaultAuthKeysPath ("/vault/auth").
+	KeysPath string `koanf:"keys_path,omitempty"`
 }
 
 // TokenConfig defines configuration for a specific Solana token.
@@ -1573,6 +1590,21 @@ func envKeyToConfigKey(s string) string {
 	// vault.address (the mechanical split would yield vault.addr).
 	if s == "vault_addr" {
 		return "vault.address"
+	}
+
+	// ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS are AuthKit's
+	// canonical inline-key env names (mirrored by cmd/authkit-server); the
+	// mechanical split would look for a nonexistent "active"/"public" top-level
+	// prefix, so these are dead without the special case.
+	switch s {
+	case "active_key_id":
+		return "auth.active_key_id"
+	case "active_private_key_pem":
+		return "auth.active_private_key_pem"
+	case "public_keys":
+		return "auth.public_keys"
+	case "authkit_keys_path":
+		return "auth.keys_path"
 	}
 
 	if envTopLevelScalarKeys[s] || envTopLevelNestedKeys[s] {

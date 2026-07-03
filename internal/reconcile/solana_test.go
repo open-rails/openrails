@@ -28,14 +28,17 @@ var usdcMint = solanago.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4
 // fakeSolanaRPC serves canned account data, signature listings, transactions
 // and program-account listings (memcmp filters applied byte-for-byte).
 type fakeSolanaRPC struct {
-	accounts        map[string][]byte
-	signatures      map[string][]solanaint.SignatureInfo
-	transactions    map[string]*solrpc.GetTransactionResult
-	programAccounts []solanaint.ProgramAccount
-	pageCalls       int
+	accounts            map[string][]byte
+	signatures          map[string][]solanaint.SignatureInfo
+	transactions        map[string]*solrpc.GetTransactionResult
+	programAccounts     []solanaint.ProgramAccount
+	pageCalls           int
+	programAccountCalls int
+	accountDataCalls    int
 }
 
 func (f *fakeSolanaRPC) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	f.accountDataCalls++
 	return f.accounts[address.String()], nil
 }
 
@@ -69,6 +72,7 @@ func (f *fakeSolanaRPC) GetTransaction(ctx context.Context, signature solanago.S
 }
 
 func (f *fakeSolanaRPC) GetProgramAccounts(ctx context.Context, program solanago.PublicKey, filters []solanaint.ProgramAccountFilter) ([]solanaint.ProgramAccount, error) {
+	f.programAccountCalls++
 	var out []solanaint.ProgramAccount
 	for _, acc := range f.programAccounts {
 		match := true
@@ -167,6 +171,39 @@ func tokenIntoWalletMeta(wallet, mint solanago.PublicKey, pre, post uint64) stri
 
 func sigFromByte(b byte) string {
 	return solanago.SignatureFromBytes(bytes.Repeat([]byte{b}, 64)).String()
+}
+
+// discoverySlotBase anchors the #720 discovery-cadence search helpers below;
+// an arbitrary fixed instant (deterministic, not wall-clock-dependent).
+var discoverySlotBase = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// dueDiscoverySlot finds a time inside planPDA's #720 discovery slot
+// (searched across exactly one cadence period, so it always terminates).
+func dueDiscoverySlot(t *testing.T, planPDA string) time.Time {
+	t.Helper()
+	slots := int(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
+	for i := 0; i < slots; i++ {
+		c := discoverySlotBase.Add(time.Duration(i) * solanaDiscoverySlotWidth)
+		if planDiscoveryDue(planPDA, c) {
+			return c
+		}
+	}
+	t.Fatalf("no due discovery slot found for plan %s", planPDA)
+	return time.Time{}
+}
+
+// notDueDiscoverySlot finds a time OUTSIDE planPDA's #720 discovery slot.
+func notDueDiscoverySlot(t *testing.T, planPDA string) time.Time {
+	t.Helper()
+	slots := int(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
+	for i := 0; i < slots; i++ {
+		c := discoverySlotBase.Add(time.Duration(i) * solanaDiscoverySlotWidth)
+		if !planDiscoveryDue(planPDA, c) {
+			return c
+		}
+	}
+	t.Fatalf("no non-due discovery slot found for plan %s", planPDA)
+	return time.Time{}
 }
 
 func TestSolanaFetcher_Fetch(t *testing.T) {
@@ -707,12 +744,17 @@ func TestSolanaFetcher_PlanEnumeration(t *testing.T) {
 			{Address: foreignSub, Data: buildSubBlob(t, subscriberB, otherPlan, 9_990_000, 720, 0, periodStart, 0)},
 		},
 	}
+	// #720: the plan enumeration lane runs on a slow cadence; pin Now inside
+	// this plan's discovery slot so the test is deterministic regardless of
+	// wall-clock time.
+	due := dueDiscoverySlot(t, planPDA.String())
 	fetcher := &SolanaFetcher{
 		RPC: rpc,
 		Source: func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
 			return []SolanaSubscriptionRef{{SubscriptionPDA: knownSub.String(), PlanPDA: planPDA.String(), SubscriberWallet: subscriberA.String()}}, nil
 		},
 		Plans: func(ctx context.Context) ([]string, error) { return []string{planPDA.String()}, nil },
+		Now:   func() time.Time { return due },
 	}
 
 	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
@@ -974,4 +1016,208 @@ func TestSolanaFiatCents(t *testing.T) {
 		require.Equal(t, tc.ok, ok, "mint %s base %d", tc.mint, tc.base)
 		require.Equal(t, tc.cents, cents, "mint %s base %d", tc.mint, tc.base)
 	}
+}
+
+// TestSolanaFetcher_DueWindow pins the #720 due-window boundary: a ref's
+// chain read only happens when the fake Due source (simulating
+// ListDueSolanaSubscriptions) reports it at/before now+lead — just-inside
+// and past-due refs are read, just-outside is skipped.
+func TestSolanaFetcher_DueWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	lead := 4 * time.Hour
+
+	justInside := solanago.NewWallet().PublicKey()
+	justOutside := solanago.NewWallet().PublicKey()
+	pastDue := solanago.NewWallet().PublicKey()
+
+	// nextPullAt mirrors what a real openrails.solana_subscriptions row would
+	// carry; the fake Due closure applies the SAME inequality the SQL query
+	// does (next_pull_at <= before) so the test exercises dueWindowLead()'s
+	// wiring, not just set membership.
+	nextPullAt := map[string]time.Time{
+		justInside.String():  now.Add(lead),               // exactly at the window edge -> due
+		justOutside.String(): now.Add(lead + time.Minute), // one minute past the edge -> not due
+		pastDue.String():     now.Add(-48 * time.Hour),    // long overdue (stuck/dunning) -> due
+	}
+	due := func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
+		out := map[string]struct{}{}
+		for pda, npa := range nextPullAt {
+			if !npa.After(before) {
+				out[pda] = struct{}{}
+			}
+		}
+		return out, nil
+	}
+
+	accounts := map[string][]byte{
+		justInside.String():  {0x02},
+		justOutside.String(): {0x02},
+		pastDue.String():     {0x02},
+	}
+	rpc := &fakeSolanaRPC{accounts: accounts}
+	refs := []SolanaSubscriptionRef{
+		{SubscriptionPDA: justInside.String()},
+		{SubscriptionPDA: justOutside.String()},
+		{SubscriptionPDA: pastDue.String()},
+	}
+	fetcher := &SolanaFetcher{
+		RPC:           rpc,
+		Source:        func(ctx context.Context) ([]SolanaSubscriptionRef, error) { return refs, nil },
+		Due:           due,
+		DueWindowLead: lead,
+		Now:           func() time.Time { return now },
+	}
+
+	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+
+	var got []string
+	for _, s := range snap.Subscriptions {
+		got = append(got, s.RailSubscriptionID)
+	}
+	require.ElementsMatch(t, []string{justInside.String(), pastDue.String()}, got)
+	// 2 subscription-account reads (skipped one never calls GetAccountData).
+	require.Equal(t, 2, rpc.accountDataCalls)
+}
+
+// TestSolanaFetcher_DueWindowNoData pins the "no period data" boundary: Due
+// unset entirely (the fetcher has no way to know a due window) fails open —
+// every locally-known ref is still read, exactly like pre-#720 behavior.
+func TestSolanaFetcher_DueWindowNoData(t *testing.T) {
+	t.Parallel()
+
+	a := solanago.NewWallet().PublicKey()
+	b := solanago.NewWallet().PublicKey()
+	rpc := &fakeSolanaRPC{accounts: map[string][]byte{a.String(): {0x02}, b.String(): {0x02}}}
+	refs := []SolanaSubscriptionRef{{SubscriptionPDA: a.String()}, {SubscriptionPDA: b.String()}}
+
+	fetcher := &SolanaFetcher{
+		RPC:    rpc,
+		Source: func(ctx context.Context) ([]SolanaSubscriptionRef, error) { return refs, nil },
+		// Due left nil.
+	}
+	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.Len(t, snap.Subscriptions, 2)
+	require.Equal(t, 2, rpc.accountDataCalls)
+}
+
+// TestSolanaFetcher_DueWindowBypassedByNarrowedFetch pins that an explicit
+// per-subscription probe always reads regardless of the due window — an
+// operator asking for one subscription by id gets it now, not next tick.
+func TestSolanaFetcher_DueWindowBypassedByNarrowedFetch(t *testing.T) {
+	t.Parallel()
+
+	target := solanago.NewWallet().PublicKey()
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	rpc := &fakeSolanaRPC{accounts: map[string][]byte{target.String(): {0x02}}}
+	fetcher := &SolanaFetcher{
+		RPC: rpc,
+		Source: func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
+			return []SolanaSubscriptionRef{{SubscriptionPDA: target.String()}}, nil
+		},
+		Due: func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
+			return map[string]struct{}{}, nil // nothing is due
+		},
+		Now: func() time.Time { return now },
+	}
+
+	snap, err := fetcher.Fetch(context.Background(), FetchParams{SubscriptionID: target.String()})
+	require.NoError(t, err)
+	require.Len(t, snap.Subscriptions, 1)
+	require.Equal(t, target.String(), snap.Subscriptions[0].RailSubscriptionID)
+}
+
+// TestSolanaPlanDiscoveryCadence pins the #720 slow-cadence gate as a pure
+// function: exactly one of the day's slots is a given plan's turn, and the
+// same slot recurs every solanaDiscoveryCadence with no stored state.
+func TestSolanaPlanDiscoveryCadence(t *testing.T) {
+	t.Parallel()
+
+	plan := solanago.NewWallet().PublicKey().String()
+	slots := int(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
+
+	dueCount := 0
+	var due time.Time
+	for i := 0; i < slots; i++ {
+		c := discoverySlotBase.Add(time.Duration(i) * solanaDiscoverySlotWidth)
+		if planDiscoveryDue(plan, c) {
+			dueCount++
+			due = c
+		}
+	}
+	require.Equal(t, 1, dueCount, "exactly one slot per day is this plan's turn")
+
+	// Recurs every cadence period with no stored watermark.
+	require.True(t, planDiscoveryDue(plan, due.Add(solanaDiscoveryCadence)))
+	require.True(t, planDiscoveryDue(plan, due.Add(2*solanaDiscoveryCadence)))
+	// Neighboring slots (same day) are not due.
+	require.False(t, planDiscoveryDue(plan, due.Add(solanaDiscoverySlotWidth)))
+	require.False(t, planDiscoveryDue(plan, due.Add(-solanaDiscoverySlotWidth)))
+}
+
+// TestSolanaFetcher_DiscoveryCadenceGatesEnumeration proves the cadence gate
+// is actually wired into Fetch(): getProgramAccounts fires on the plan's due
+// slot and not on any other slot, so a routine 4h tick does NOT call it for
+// every plan on file.
+func TestSolanaFetcher_DiscoveryCadenceGatesEnumeration(t *testing.T) {
+	t.Parallel()
+
+	planPDA := solanago.NewWallet().PublicKey().String()
+	due := dueDiscoverySlot(t, planPDA)
+	notDue := notDueDiscoverySlot(t, planPDA)
+
+	rpc := &fakeSolanaRPC{}
+	fetcher := &SolanaFetcher{
+		RPC:    rpc,
+		Source: func(ctx context.Context) ([]SolanaSubscriptionRef, error) { return nil, nil },
+		Plans:  func(ctx context.Context) ([]string, error) { return []string{planPDA}, nil },
+	}
+
+	fetcher.Now = func() time.Time { return notDue }
+	_, err := fetcher.Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.Zero(t, rpc.programAccountCalls, "enumeration must not run outside the plan's discovery slot")
+
+	fetcher.Now = func() time.Time { return due }
+	_, err = fetcher.Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.Equal(t, 1, rpc.programAccountCalls, "enumeration runs once the plan's discovery slot arrives")
+}
+
+// TestSolanaSkippedRefExcludedFromDiff is the #720 correctness-critical
+// proof: a live local subscription whose PDA was skipped this tick (due
+// window, or discovery not run) is simply ABSENT from the snapshot — and an
+// absent-from-snapshot solana subscription must never be read as
+// "disappeared". Solana's traits.absenceMeansCancelled is false and its
+// snapshots never claim SubscriptionsExhaustive coverage, so the diff must
+// produce zero findings here.
+func TestSolanaSkippedRefExcludedFromDiff(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, traitsFor(ProviderSolana).absenceMeansCancelled,
+		"solana absence must never be treated as proof of termination (a skipped ref would misreport as PS-2)")
+
+	now := time.Now().UTC()
+	local := &LocalState{
+		Subscriptions: []LocalSubscription{{
+			ID:                 uuid.New(),
+			CustomerID:         uuid.New(),
+			Status:             "active",
+			Rail:               "solana",
+			RailSubscriptionID: solanago.NewWallet().PublicKey().String(),
+		}},
+	}
+	// This tick's snapshot carries no subscriptions at all — exactly what a
+	// due-window skip (or a not-yet-run discovery pass) produces. Coverage is
+	// left zero-value: real solana fetches never claim SubscriptionsExhaustive.
+	snap := &RemoteSnapshot{
+		Provider:     ProviderSolana,
+		Capabilities: Capabilities{Subscriptions: true},
+	}
+
+	findings := diffProvider(ProviderSolana, snap, local, nil, now, diffOptions{})
+	require.Empty(t, findings, "a ref skipped this tick must never be read as disappeared")
 }
