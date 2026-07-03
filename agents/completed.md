@@ -26987,3 +26987,317 @@ merchant config AND catalog — no separate catalog_source.
 - [x] Conformance loop integration test (boot → charge/entitlement → rotate+reboot → idempotent third boot)
 - [x] Failure modes: missing secret ⇒ rail unarmed + loud warn + fail-closed charge; malformed manifest ⇒ refuse; encryption posture irrelevant in mode 1 (asserted)
 - [x] docs/self-hosting-mode1.md (three files, secrets dir, precedence yaml < files < env, edit + reboot)
+
+---
+
+# #713: stamp SPL Memo self-recognition metadata on every Solana purchase transaction
+
+Solana Pay references (recurring/reference.go, integrations/solana/transfer.go) let us find a
+transaction we already know about (local ref → chain). They do NOT let us recognize our own
+transactions from the chain alone — the legacy import just proved why that matters: one-off
+transfers to the merchant wallet are indistinguishable from random deposits, and the fiat value
+charged is unrecoverable (2026-07-02, doujins #748 C-3: 26 rows permanently blocked).
+
+Add an SPL Memo instruction to every purchase transaction we construct or request, BOTH lanes:
+- one-off Solana Pay transfers (the transfer builder)
+- recurring subscription pulls (crank/delegated pull txs in modules/solana/recurring)
+
+Format (trimmed 2026-07-02, Paul): `openrails:1:<local-id>` — version + the ONE field the chain
+cannot derive (local-id = OUR checkout/payment UUID; random, not the customer's id, no account
+linkage). Everything else considered and DROPPED as derivable: kind (oneoff vs rebill IS the tx
+shape — plain SPL transfer vs transfer_subscription against a subscription PDA), merchant (the
+destination wallet IS the declared account_id, 1:1), usd_micros (Paul's call; stablecoin base
+units are micro-dollars on-chain anyway — only raw-SOL one-offs lose chain-alone fiat and would
+need price-at-slot). Memos are public and immutable: keep the vocabulary boring.
+Spec alignment: this is the Solana Pay `memo` field (SPL Memo instruction placed BEFORE the
+transfer instruction, per spec); references stay as-is for live correlation.
+
+TRUST MODEL (memos are trivially forgeable and publicly copyable — Paul 2026-07-02): the memo is a
+DISCOVERY HINT, never money truth. Money truth is only the transfer itself (mint, base units,
+destination, signature) — unforgeable without actually paying us. The one real attack — dust
+payment whose memo claims full price — dies on that rule alone, so NO MAC/signing (considered and
+dropped as YAGNI, Paul's call): forged memos cost the attacker real money to matter, a merchant
+spamming its own wallet only pollutes its own books, and copycat memos are triage noise for the
+#714 park lane. Recurring pulls are sender-authenticated anyway (we sign them).
+Standing invariant (from the axed #718 discussion): the Solana rail has exactly ONE hot key — the
+crank/signer, which never holds funds. The receiving wallet stays cold; memo recognition and
+recovery are read-side only. Don't design anything that forces the receiving wallet hot.
+
+STATUS (2026-07-02): SHIPPED, both lanes. Shared format helper (single source of truth, #714 reuses
+it): internal/integrations/solana/memo.go — PurchaseMemo(uuid)/ParsePurchaseMemo (strict: canonical
+non-nil UUID, version 1 only), NewMemoInstruction (raw-bytes SPL Memo, program MemoSq4…, zero
+accounts), PurchaseMemoLocalIDs, VerifyPurchaseMemo (present-must-match, ABSENT PASSES, foreign
+memos ignored, uuid.Nil skips). One-off lane, local-id = CHECKOUT SESSION ID: (a) transfer-request
+URL — GeneratePayment appends the Solana Pay `memo` param (pay.go; wallet places the SPL Memo
+before the transfer per spec); (b) transaction-request — PaymentTransactionBuildRequest.SessionID
+(required; build refuses unstamped), memo instruction placed BEFORE the transfer in
+integrations/solana/transfer.go buildTransferInstructions. Recurring lane, local-id = PULL INTENT
+ID (durable pre-send per #674; it's what crankOne has at construction; resolves intent→subscription):
+threaded intent.ID → crankOne → CrankService.CrankWithPresubmit, [memo, transfer_subscription]
+ordering; legacy no-intents Work() path stays unstamped by construction (unit-test harness only —
+production pulls always route via SolanaPullIntentHandler). Verify legs: VerifyTransactionWithContent
+gains expectedMemoLocalID (poller passes pending.SessionID, checkout confirm passes session.ID);
+recurring repair legs cross-check the landed tx's memo against intent.ID — mismatch parks the
+intent (verify-not-decline), absence passes. Deferred: the atomic [subscribe+transfer] first-charge
+bundle (prepare_subscribe.go) is NOT stamped — outside the decided two lanes; #714 recognizes
+subscribes by tx shape + PDA enumeration. Files: internal/integrations/solana/{memo.go,transfer.go},
+internal/modules/solana/{types.go,transaction.go,pay.go}, internal/modules/checkout/session_service.go,
+internal/modules/solana/recurring/crank_service.go, internal/river/{jobs_solana_crank.go,
+jobs_solana_pull_intent.go} (+ tests: memo_test.go, pay_memo_test.go, crank_service_test.go,
+jobs_solana_pull_intent_memo_test.go). Tests: wire-pinned memo string/bytes + instruction ordering +
+all verify-leg cases; package suites integrations/solana, modules/solana(+recurring), river,
+checkout all green; whole-repo build + vet (incl. integration tag) clean.
+
+---
+
+# #714: reconcile: chain→local Solana recovery lane (memo-recognized merchant-wallet scan)
+
+Counterpart of #713. The SolanaFetcher (reconcile/solana.go) only reads locally-known subscription
+PDAs — one-off purchases and anything the local DB lost are invisible. Add a wallet-scan lane to
+the Solana pull: walk the declared merchant wallet's signature history (rail_merchant_accounts
+account_id IS the wallet), parse each tx, and recognize OURS by the #713 `openrails:` memo prefix — everything
+without a recognized memo is ignored by design (a transfer into the wallet is not evidence of a
+purchase; could be anything). Normalize recognized txs to findings (payer wallet, mint, base
+units, memo local-id) and let the existing converge backfill
+payments/subscription evidence (CreatePaymentIfNotExists lane). Recognition/verification per the
+#713 trust model (no MAC — the transfer is the truth): money comes ONLY from the transfer
+(stablecoin base units ARE micro-dollars; SOL needs price-at-slot); kind comes from the tx shape
+(plain transfer = one-off, transfer_subscription = pull); local-id must resolve consistently and
+uniquely against local records when they exist. ANY mismatch or duplicate local-id ⇒ park as a
+finding for operator triage — never auto-land (verify-not-decline applied to recovery). ALSO: `subscribe` is
+permissionless against our plans (user signs alone; verified 2026-07-02 in
+integrations/solana/subscriptions/instructions.go) — an on-chain subscriber can exist that no
+checkout created. The same lane should enumerate subscription PDAs per OUR plans
+(getProgramAccounts) rather than trusting the locally-known list, and route unknown-but-valid
+subscriptions through the same verify-or-park rules. Result: for memo-era
+transactions, openrails can be reconstructed from the chain + catalog alone — true
+disaster-recovery for the Solana rail. Watermark by signature/slot like the other pull providers.
+
+STATUS (2026-07-02): SHIPPED — both discovery scans live in the SolanaFetcher (reconcile/solana.go),
+feeding the existing findings/diff/converge machinery. (1) Merchant-wallet scan: paginated
+GetSignaturesForAddressPage walk of the declared wallet (account_id = wallet; FetchParams.AccountID
+overrides fetcher.MerchantWallet), windowed by Since/Until blockTime (watermarking unchanged),
+page 200 / hard cap 1000 per window; unfetchable txs skipped w/ one WARN. No recognized
+`openrails:` memo ⇒ invisible (random deposits = zero findings). Recognized ⇒ RemoteTransaction w/
+money ONLY from the transfer (pull = TransferData; one-off = the ONE asset's balance-delta into
+the wallet, walletTransferMoney; stablecoin ⇒ cents via solanaFiatCents, else unpriced w/ Raw
+truth) + a `solana_discovery` verdict envelope in Raw. Verification (verifyWalletDiscovery):
+local-id resolves via SolanaLocalRecordResolverFromDB (GetCheckoutSessionByID → GetRailIntent,
+existing gen queries only — db/gen untouched); ANY mismatch (kind vs record kind, rail, recipient,
+mint, base units, session-settled-by-other-sig, duplicate local-id across successful sigs,
+multi-memo) ⇒ verdict park. Routing (diff.go makeSolanaDiscoveryPS4): clean+priced one-off ⇒ PS-4
+w/ BackfillPaymentAction (same idempotent lane as other rails, identity from the resolved
+session); park/unpriced ⇒ requires_review, never applied; clean pull ⇒ generic PS-4 correlator by
+sub PDA. Valueless memo claiming nothing local ⇒ dropped (costless forgery = zero noise); failed
+txs ⇒ decline evidence, no verdict. (2) Per-plan enumeration: getProgramAccounts(ProgramID,
+memcmp disc=4 @0 + plan PDA @35 — offsets exported+test-pinned in subscriptions) over
+SolanaPlanSourceFromDB (solana_subscriptions ∪ catalog rails["solana"].plan_pda, so a fresh DB
+enumerates from catalog alone); discovered-not-local subs normalized like known ones, marked
+`discovered_not_local` in Raw ⇒ PS-1 with materialization HARD-BLOCKED in makePS1 (test proves the
+identical non-discovered row would materialize). Also: planLinkIDKeys gained "plan_pda" so solana
+PS-1 plan resolution works at all. RPC additions: GetSignaturesForAddressPage (before-cursor),
+GetProgramAccounts + fallback GetProgramAccountsWithOpts. Tests: recognize/ignore/park table,
+pagination cap, enumeration, walletTransferMoney wire-pins, diff routing, PS-1 block — all green
+(`go test ./internal/reconcile/... ./internal/integrations/solana/...`; repo-wide build green).
+DEFERRED→DONE 2026-07-03 (Paul): solana added to refreshProviders' allowed lanes; pulls still run
+only for merchants whose scope arms a solana fetcher (per-merchant arming #699 = "only refresh
+what actively matters"; river test repinned). Original note: enabling was one map entry, once
+solana watermark cadence is decided.
+OPTIMIZATION (noted 2026-07-03, not urgent at current volume): scanMerchantWallet fetches EVERY new
+signature's tx to read memos; getSignaturesForAddress already returns the memo field in the listing,
+so pre-filtering to `openrails:`-prefixed signatures would skip GetTransaction for unstamped traffic.
+
+---
+
+# #715: SolanaFetcher normalization gaps: subscription decoder, tx parsing, fiat amounts
+
+reconcile/solana.go is deliberately minimal and says so; make it real:
+- no subscription-account decoder exists (only DecodePlanAccount) — status is INFERRED from PDA
+  presence (present=active, absent=cancelled); decode the subscription account properly.
+- transactions are signature listings only — kind unknown (success→sale, fail→decline); parse the
+  tx (and #713 memo when present) to classify subscribe/pull/cancel and extract real amounts.
+- amounts stay mint base units with AmountCents=0 and raw in Raw — normalize stablecoin mints
+  (USDC/USD1: base units are micro-dollars already) to fiat so the cross-provider diff engine can
+  actually compare money.
+
+STATUS (2026-07-02): all three gaps closed. (1) DecodeSubscriptionAccount shipped
+(integrations/solana/subscriptions/subscription_account.go) — layout established with confidence
+from the OFFICIAL program's IDL + Rust source (solana-program/subscriptions:
+state/{subscription_delegation,header}.rs), triple cross-validated against repo-proven artifacts
+(plan decoder byte-for-byte, devnet-verified SA initId offset 98, instruction discriminators):
+v1 = 155B, header{disc=4,version,bump,delegator=subscriber,delegatee=planPDA,payer,initId} +
+terms snapshot{amount,periodHours,createdAt} + amountPulledInPeriod + currentPeriodStartTs +
+expiresAtTs (0=active; cancel sets period-end boundary, resume clears; trailing bytes tolerated
+for future versions). Fetcher status now decode-driven: expires_at=0→active, future→active/
+"cancel_at_period_end" (Stripe parity), past→cancelled/"expires_at_passed"; undecodable falls back
+to presence inference with a Raw note. (2) Tx classification: solanaRPC gained GetTransaction
+(real client already had it); per-signature fetch classifies by discriminator via new
+ParseInstructionKind/DecodeTransferData — pulls→sale/decline with real amount+mint from
+transferData, subscribe/cancel/resume/revoke→new lifecycle TransactionTypes (declared in
+solana.go; money paths ignore them by construction); unfetchable/unparseable→legacy
+success→sale/fail→decline with "signature_only" Raw note, never kills the window. (3) Fiat:
+solanaFiatCents normalizes registry-declared USD stablecoins w/ 6 decimals (USDC/PYUSD/USD1/USDG;
+trust anchor KnownStablecoinByMint × declared decimals; USDT/EURC/devnet excluded — no declared
+decimals/not canonical) to integer CENTS (matches nmi/ccbill/stripe AmountCents + "USD" uppercase
+Currency); sub-cent micros never rounded (stays 0 + Raw note). Wire-pinning tests: 9_990_000
+micro-USDC ⇒ exactly 999 cents; decoder round-trip vs program encoding; discriminator map pinned.
+reconcile+subscriptions packages green; repo-wide `go build ./...` fails only in internal/river
+(jobs_solana_crank.go vs the #713 sibling's in-flight crank_service.go signature change — not
+this work).
+
+---
+
+# #716: derive-1 never grants access for imported-as-unknown subscriptions — fail-open lane can't engage
+
+SubscriptionProjectsStandingAccess deliberately includes status 'unknown' (auto_renew + non-terminal
+⇒ standing window), but derive-1 (grants.sql) materializes subscription grants ONLY from
+active/cancelled rows. A sub that ENTERS the DB as unknown (legacy import parks stale rows) never
+gets a grant, so the standing projection never engages — the fail-open doctrine lane exists but is
+unreachable for exactly the population it was designed around (2026-07-02: 66 imported CCBill
+unknowns hold no access). RULED (Paul, 2026-07-02): FAIL-OPEN — "if we have a subscription for a
+user and we don't know the status on that subscription, they get their entitlement, and we do our
+best to figure out the true state." Implementation: add 'unknown' to the derive-1 subscription
+source query (grants.sql) so it matches SubscriptionProjectsStandingAccess; the unknown-resolution
+machinery (forensics/probes) is the "figure out the truth" half and already exists. Accepted
+error: evidence-free imported unknowns (e.g. the 66 CCBill rows) hold access until proven dead.
+NOTE while implementing: (a) the #691 companion guard — block re-purchase of a product whose sub
+is unknown — matters more once unknowns grant access (double-billing hole); (b) grants/gen is
+mid-rework by a concurrent session (2026-07-02) — land this after that settles. Related: doujins
+#748 policy questions.
+
+STATUS (2026-07-03): IMPLEMENTED. derive-1's source query `ListUngrantedSubscriptions`
+(internal/db/queries/grants.sql) now sources status IN ('active','cancelled','unknown') — matching
+SubscriptionProjectsStandingAccess — so an imported-as-unknown auto-renew sub derives its grant and
+MaterializeGrant's standing lane projects the open (end_at NULL) window; sqlc regenerated (only
+ListUngrantedSubscriptions changed in gen). Evidence bounds hold: a non-renewing unknown gets only
+its stored bounded window; an unknown with no stored window derives nothing. The #691 companion
+guard ALREADY EXISTED and needed no change: `checkUnknownSubscriptionConflict` in
+internal/modules/checkout/purchase_service.go (ConflictCodeMembershipPendingVerification) blocks
+same-product/tier-group re-purchase at session creation (all rails funnel through Checkout()),
+proven by TestUnknownSubscriptionCheckoutGuard. New test:
+TestConverge_DeriveGrantMissing_UnknownSubscription (converge_derive1_integration_test.go) —
+standing window for auto-renew unknown, bounded-evidence-only for non-renew, nothing fabricated
+without evidence, repeat sweeps findings-free. grants/entitlements/checkout/webhooks/subscriptions/
+converge integration suites green.
+
+---
+
+# #717: derive-1 grants chargeback subscriptions access through their paid period
+
+mapLegacyStatusToNew(chargeback)→cancelled with ended_at=expiration, and derive-1 grants
+active+cancelled windows with NO cancel_type filter — so a charged-back sub with future expiration
+keeps entitlement while the money was reversed. Native chargeback handling should be checked for
+the same hole (webhook-driven cancels that leave a future-bounded window standing). Proposal:
+chargeback ⇒ revoke access as of the chargeback event (money reversed = access reversed), which
+means derive-1 (or the cancel writer) must distinguish cancel_type=chargeback from user/expired
+cancels' paid-through runway. Latent today (0 chargeback rows in the current dump) — fix before it
+isn't. RULED (Paul, 2026-07-02): YES — "if someone charges us back, we should immediately revoke
+entitlement." Implement: chargeback ⇒ access revoked as of the chargeback event, both in derive-1
+(cancel_type=chargeback grants no runway window) and in the native chargeback webhook paths
+(NMI/CCBill/Stripe) — audit each rail's chargeback handler for the same leave-runway-standing hole.
+
+STATUS (2026-07-03): IMPLEMENTED (derive-1) + AUDITED CLEAN (native rails). derive-1
+`ListUngrantedSubscriptions` now excludes `status='cancelled' AND cancel_type='chargeback'` — a
+charged-back sub materializes NO grant and NO window (the legacy import's ended_at=expiration rows
+grant no runway); exclusion is scoped to status='cancelled' so a won-dispute reactivated (active)
+sub with a stale cancel_type still derives. Native-path audit found NO leave-runway-standing hole —
+all three rails already revoke immediately: NMI (chargeback.batch.complete → CancelMembership
+RevokeAccess:true + CancelType:chargeback → ApplyLocalCancellation truncates period to now, revokes
+subscription+grace sources as-of now with EntitlementRevokeChargeback, BoundSubscriptionAccess
+closure); Stripe (charge.dispute.created/closed → same CancelMembership path for sub payments;
+one-offs EndActiveByPayment + RevokeProductAccessByPayment; won disputes reactivate); CCBill
+(Chargeback → terminal cancel with cancel_type=chargeback + RevokeSourcesForSubscription, which
+revokes active windows AND soft-deletes future scheduled ones + terminates the backing grants).
+Solana has no chargeback surface. No re-derive loop: terminated grants keep their grant event row,
+so the source-keyed detection never re-fires. New test:
+TestConverge_DeriveGrantMissing_ChargebackNoRunway (converge_derive1_integration_test.go) —
+chargeback sub derives nothing (zero findings, zero windows), user-cancelled sub with identical
+future paid-through shape KEEPS its runway (regression pin). Targeted integration suites green.
+
+
+
+---
+
+# #719: scale provider refresh to thousands of merchants (openrails-saas)
+
+Standing constraint (Paul, 2026-07-03): the design must scale to THOUSANDS of merchants with
+heterogeneous provider configs. Embedded hosts (doujins/hentai0, one merchant) don't need it;
+openrails-saas (the hosted offering) does.
+
+Current shape: ProviderRefreshWorker is ONE river job per tick that serially loops every active
+merchant (jobs_provider_refresh.go ~122) — per-merchant arming (#699) and error isolation are
+already right, and watermarks are per merchant+provider (resumable), but at N=thousands one tick
+is hours of serial HTTP; a mid-loop death or time-box starves tail merchants every pass
+(ListActiveMerchantIDs order bias); provider rate limits and RPC load concentrate in one process.
+
+Design direction (the watermarks make this mechanical): umbrella job becomes a SCHEDULER that
+enqueues one per-merchant refresh job (river unique/dedupe keys on merchant_id) with jitter;
+the per-merchant job body is exactly today's loop body (arm → lanes → converge → unknown-cohort).
+River then gives concurrency caps, retries, per-merchant isolation, and replica spreading for
+free. Add: per-provider global rate limiting (thousands of merchants on one rail share the
+provider's API budget), stagger/jitter so windows don't align, and a freshness metric
+(oldest watermark age) as the SLO. Non-goals: no per-merchant goroutine fan-out inside one job
+(loses river's isolation); no scheduling for merchants with zero armed rails (they already cost
+one Build call — make even that skip via a cheap accounts-exist predicate).
+
+STATUS (2026-07-03): SHIPPED. `openrails.provider_refresh` (kind unchanged — a mid-upgrade
+pending umbrella row is worked as a fan-out, never a second serial loop) is now
+ProviderRefreshSchedulerWorker: lists active merchants, shuffles (kills ListActiveMerchantIDs
+tail bias), and enqueues one `openrails.provider_refresh_merchant` job each
+(ProviderRefreshWorker, body = the pre-#719 loop verbatim; watermarks/stats/log shapes
+unchanged). Dedupe: UniqueOpts ByArgs(merchant_id) + in-flight states (default minus completed)
+— overlapping ticks dedupe; proven in TestProviderRefreshScheduler_UniquePerMerchantAcrossTicks
+(two back-to-back passes ⇒ 1 river_job per merchant). Jitter: even spread over Stagger
+(default 30m), slot 0 immediate so embedded boot refreshes at once. Zero-armed skip: RLS-scoped
+`EXISTS rail_merchant_accounts` (archived counts — drain still pulls) per merchant, active only
+when NO boot-config fallback plane exists (boot rails arm every merchant); fail-open on
+predicate error. Rate limiting = bounded river queue `provider_refresh` (MaxWorkers 4,
+standalone buildRiverClient) — a global concurrency brake, NOT per-provider request-rate
+shaping (a fuller limiter would token-bucket per rail across workers); embedded hosts route the
+kind onto QueueBilling (AddBillingWorkersTo) so doujins/hentai0 need no client changes.
+Remaining tails: freshness SLO metric (oldest watermark age) not built; per-rail token-bucket
+if provider 429s ever show up. internal/river unit+integration suites green.
+
+---
+
+# #720: solana refresh must not read every subscription PDA every tick
+
+Paul (2026-07-03): per-sub account reads each 4h tick are silly at thousands/millions of subs.
+Three tiers:
+1. NOW — the #714 plan enumeration (getProgramAccounts per plan) already returns every
+   subscription account's DATA in the same response; decode statuses from that and DELETE the
+   per-known-PDA GetAccountData sweep (it is pure redundancy). Cost becomes O(plans) calls.
+2. NOW — insight: a user cancel/resume has no effect until the period boundary, so individual
+   chain reads are only ever needed for subs NEAR their period end (the crank already reads
+   before pulling). Any residual targeted-read path should filter to the due-window cohort.
+3. SAAS SCALE — push, not poll: programSubscribe websocket on the subscriptions program;
+   periodic pull demoted to a safety net over the due-window cohort + dataSlice'd enumeration.
+   Design-note only for now (ties to #719 scale constraint).
+
+STATUS (2026-07-03, implemented): Paul's standing law overrode the original tiering (a single
+getProgramAccounts-per-plan call is still O(subscribers) response/decode cost, so it can't be a
+routine per-tick lane either). Shipped in internal/reconcile/solana.go + solana_test.go, plus two
+small companion wires (internal/reconcile/local.go, merchant_wiring.go — outside the named surface
+but required for the fix to have any runtime effect; internal/db/gen and the river/grants/webhooks/
+checkout dirs were NOT touched). Lane 1 (locally-known refs): a new `Due SolanaDueSubscriptionSource`
+reuses the EXISTING (already-generated) ListDueSolanaSubscriptions query — server-side
+`status='active' AND next_pull_at<=now+lead` — so the due-set read is due-proportional, not O(all
+subs); `Source` itself stays exhaustive (narrowed per-sub/customer probes and the #714 known-map
+dedup both still need every locally-known ref). DueWindowLead defaults to 4h (matches the routine
+ProviderRefresh reconcile tick). A narrowed fetch (SubscriptionID/CustomerID set) always bypasses
+Due. Lane 2 (permissionless discovery, enumeratePlanSubscriptions): demoted to ~24h/plan via a
+stateless deterministic hash-of-plan-id time-slot (`planDiscoveryDue`) rather than a stored
+watermark — MerchantFetcherBuilder rebuilds a fresh SolanaFetcher every tick (stateless workers,
+#719), so in-struct state wouldn't survive between calls, and a new watermark column was out of
+scope (would require internal/db/gen changes). Correctness invariant verified pre-existing and
+pinned with a regression test: Solana's `traits.absenceMeansCancelled` is false and its snapshots
+never set `Coverage.SubscriptionsExhaustive`, so a ref skipped this tick is simply absent from the
+snapshot and produces zero diff findings (never misread as "disappeared") —
+TestSolanaSkippedRefExcludedFromDiff pins this. Tests added: due-window boundary (just-inside/
+just-outside/past-due/no-period-data/narrowed-bypass), discovery-cadence gate (pure-function +
+wired-through-Fetch RPC-call-count proof), skipped-ref-excluded-from-diff. All green:
+`go test ./internal/reconcile/... ./internal/integrations/solana/...` (17 solana tests + full
+package), `go build ./...` and `go vet ./...` clean repo-wide (no unrelated breakage encountered).
+Deferred/not done: tier 3 (websocket push) remains a design note only, unchanged.
+
+---

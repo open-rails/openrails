@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 732
+next_id: 734
 
 ---
 
@@ -181,8 +181,51 @@ existing rows/secrets migrated forward-only; slash ids fail validation loudly.
 # #696: CCBill subscription management API — per-subscription probe + merchant-initiated cancel
 
 **Completed:** no
-**Status:** IMPLEMENTED pending Phase 0 wire verification (2026-07-02) — Phases 1+2 coded against the
-best-documented wire shape; Phase 0 (live probe) still blocked on DataLink credentials. See Progress below.
+**Status:** PHASE 0 COMPLETE — read+cancel wire LIVE-VERIFIED against the real production DataLink account
+(2026-07-03); those paths shipped, production golden tests pin the shapes. REFUND FLOW BUILT (2026-07-03),
+build+vet+unit green, but its wire is **PROVISIONAL** — it could NOT be probed live (real money) so the
+refund request/response shape is modeled, not verified. REMAINING: the FIRST real refund must confirm the
+wire (see the refund subsection); until then #696 stays open.
+
+**PHASE 3 REFUND PROBE (2026-07-03, live — safe fail-test, NO money moved):** Paul authorized a
+live refund on an OLD transaction where it MUST fail. Probed BOTH voidOrRefundTransaction AND
+refundTransaction on the 2013-dead sub 113027706000000428 (0 rebills, 12yr past any refund window):
+both returned HTTP 200 `<results>-7</results>`; a viewSubscriptionStatus control in the same session
+returned a full status document (creds+IP fine). CORRECTED INTERPRETATION (Paul: both refund
+subsystems ARE enabled for this DataLink user): -7 here is CCBill REFUSING THE OPERATION (transaction
+too old / not refundable), NOT the subsystem being absent and NOT an auth failure. KEY FINDING: -7 is
+CCBill's OVERLOADED denial code — the SAME code returned for a wrong password (Phase 0) AND for a
+refund of a too-old transaction with valid creds. So classifyResultsCode(-7 → ErrDataLinkAuth) is too
+narrow, and the refund handler's `-7 → Retryable("auth rejected: clean retry")` is a BUG: a
+permanently-unrefundable transaction (too old) would retry forever with backoff (the runner does not
+cap Retryable) and surface a misleading "auth" reason. FIX REQUIRED (handed to the refund agent):
+treat a refund -7 as a DENIAL (did not execute — safe, no money moved) with BOUNDED retry →
+failed_terminal + an operator-facing reason ("ccbill refund denied (-7): provider refused — not
+permitted / not refundable / auth"), never infinite clean-retry; reframe the -7 doc from
+"authentication rejected" to the overloaded "request denied" meaning. What the probe PROVED: the code
+builds a well-formed request that reaches CCBill and the failure path moves no money. What still
+CANNOT be verified without a real (small, reversible) refund: the SUCCESS result code, the amount
+format (dollars vs cents), transaction targeting, and the counter increment.
+
+**PHASE 0 VERIFIED RESULTS
+
+**PHASE 0 VERIFIED RESULTS (2026-07-03, Paul enabled the DataLink subsystems + IP whitelist + live creds):**
+- Endpoint/envelope confirmed: POST /utils/subscriptionManagement.cgi, form-encoded → HTTP 200
+  `<?xml version='1.0' standalone='yes'?><results>…</results>`.
+- viewSubscriptionStatus (ACTIVE, id 116206701000000779): subscriptionStatus=2, recurringSubscription=1,
+  nextBillingDate=20260801 (8-digit), signupDate=20160724003047 (14-digit), timesRebilled=121,
+  chargebacksIssued/refundsIssued/voidsIssued=0.
+- viewSubscriptionStatus (DEAD since 2013, id 113027706000000428): subscriptionStatus=0,
+  recurringSubscription=1 (!), expirationDate/cancelDate=20130131123315 (14-digit), returnsIssued=1.
+- cancelSubscription success = bare `<results>1</results>` (verified on the 2013-dead sub — a no-op, no
+  money, no active access affected).
+- Auth/authz rejection = HTTP 200 + `<results>-7</results>` (confirmed from prior probe).
+- FIXES LANDED (subscription_management.go): expiry field list → [nextBillingDate, expirationDate] (was
+  guessed [expirationDate, expireDate, nextRenewalDate] — nextBillingDate was MISSING, so active-sub
+  paid-through never parsed); date layouts → [20060102150405 (14-digit), 20060102 (8-digit)] (the real
+  14-digit datetime was MISSING); rebill prediction keys off subscriptionStatus NOT recurringSubscription
+  (a dead sub reports recurringSubscription=1); classifyResultsCode maps ONLY the verified -7 to
+  ErrDataLinkAuth (no fabrication for unverified codes). Production golden tests added.
 Original research note: CCBill's DataLink suite DOES have a per-subscription
 API, `https://datalink.ccbill.com/utils/subscriptionManagement.cgi`, with per-DataLink-USER subsystem toggles:
 `viewSubscriptionStatus` (read one sub's status/expiry by subscriptionId, `returnXML=1`) and
@@ -225,8 +268,10 @@ the real DataLink account before any code.
       account; capture exact request params (username/password, clientAccnum/clientSubacc, subscriptionId,
       returnXML) and VERBATIM responses incl. error shapes (auth failure, unknown sub, already-cancelled).
       Record findings in this section — the response schema drives the client structs.
-- [ ] While probing: check whether the SMS subsystem also exposes refund/void actions (would complete #692's
-      cancel_and_refund for ccbill); note availability either way.
+- [x] While probing: check whether the SMS subsystem also exposes refund/void actions (would complete #692's
+      cancel_and_refund for ccbill); note availability either way. → could NOT probe the refund action live
+      (real money — no live refund calls were made). Refund flow BUILT against a modeled wire
+      (voidOrRefundTransaction), marked PROVISIONAL; first real refund confirms it.
 
 ## Phase 1 — probe (read): CCBillSubscriptionProber
 
@@ -261,8 +306,8 @@ the real DataLink account before any code.
       rail descriptor CancelMode flipped external_portal -> destructive, CancelPortalURL removed.
 - [x] Admin cancel: extend #692's `cancel_and_refund` executor ccbill branch from not-supported to the intent
       path (refund leg stays not-supported unless Phase 0 found a refund action — then wire it the same way).
-      → cancel leg = ApplyLocalCancellation + admin-origin intent; refund leg errors clearly, naming the
-      manual CCBill-portal path.
+      → cancel leg = ApplyLocalCancellation + admin-origin intent. Refund leg SUPERSEDED by Phase 3 below:
+      the ccbill refund now rides the same intent path (WIRE PROVISIONAL) instead of the manual-portal error.
 - [x] Webhook interplay: CCBill sends its own cancellation webhook when the cancel lands — verify the webhook
       handler treats the provider-confirmed cancel idempotently against our already-cancelled local row (no
       double revoke, no finding flap). → handleCancel was NOT idempotent (would overwrite cancel_type/
@@ -277,9 +322,62 @@ the real DataLink account before any code.
       test extended to the new destructive type. (Unknown-sub response shape is Phase-0-uncaptured; until
       then it surfaces as an ERROR — retried, never resolved off a guess.)
 
+## Phase 3 — refund (write): admin "refund button" for CCBill payments (2026-07-03, WIRE PROVISIONAL)
+
+Goal (Paul): a working refund button for CCBill in OUR admin instead of routing operators to CCBill's portal.
+Built ON the existing refund infra (NMI/Stripe intents) + the #696 SMS choke point. NO live refund calls were
+made (real money) — the refund wire is MODELED, marked PROVISIONAL everywhere, and pinned by unit tests.
+
+- [x] Choke-point transport `DataLinkClient.RefundTransaction(ctx, subscriptionID, transactionID, amountCents)`
+      (`subscription_management.go`) — action `voidOrRefundTransaction` (voids unsettled, else refunds; handles
+      both), keyed by subscriptionId + original transactionId (precision), optional amount for partials. REUSES
+      subscriptionManagementForm/parse/classifyResultsCode; ONE new form-based transport core
+      (postSubscriptionManagementForm) serves view/cancel/refund. Same success(1)/auth(-7)/reject envelope as
+      cancel: ErrProviderReadOnly / ErrDataLinkAuth / ErrRefundRejected / else-ambiguous. readonly blocks before
+      any HTTP (verified: zero wire hits).
+- [x] Intent `ccbill_refund` (`intents/refund.go`): CCBillRefundHandler mirrors NMI/Stripe refund reservation
+      flow (producer reserves negative pending payment; finalize completes / release on terminal). CONTENT-
+      ADDRESSED idempotency `CCBillRefundIdempotencyKey(subscription, transaction, amount)`. RefundPayload gains
+      `provider_transaction_id` (CCBill needs subscriptionId AND transactionId). Registered in
+      river_register buildIntentRegistry (nil client parks).
+- [x] Admin API: admin_payments.go CCBill branch (prepare ~switch + issue ~switch) replaced the hard 400
+      ("use CCBill's portal") with the real path — resolves subscriptionId off the subscription row
+      (rail_subscription_id) + transactionId off the payment, reserves, enqueues the intent. The #692 findings-
+      queue refund (admin_findings_actions.go) CCBill rejection removed too (same executeAdminRefund path).
+- [x] Amount: micros→cents at the boundary (RefundPayload.AmountCents); wire amount encoded DECIMAL major units
+      ("9.99"), NOT integer cents — matches CCBill's other money fields + classic FormatCentsDecimal, and is the
+      SAFER guess (cents-vs-dollars mistake under-refunds/errors instead of a 100x over-refund). ONE-line
+      encoding in refundForm; wire-pinned (999c → "9.99", 6000c → "60.00").
+- [x] verify-not-decline: CCBill exposes only per-subscription refund COUNTERS (refundsIssued/voidsIssued), no
+      per-transaction refund read. Verify reads viewSubscriptionStatus: counters KNOWN-ZERO ⇒ verified NOT
+      executed (retryable); NONZERO or UNKNOWN ⇒ cannot attribute to this transaction ⇒ Ambiguous (operator
+      confirms — never auto-decline nor auto-resend). Reclaimed lease (attempts>1) pre-send-verifies the same
+      way. A producer-captured baseline would enable "counter incremented ⇒ succeeded" attribution (future).
+- [x] -7 OVERLOADED-denial fix (2026-07-03 safe fail-probe: refund/void of a 12-yr-dead sub returned HTTP 200
+      `<results>-7</results>` with VALID creds + subsystems enabled — so -7 is NOT auth-only, it is CCBill's
+      generic "request denied" (auth OR operation-not-permitted / not-refundable). ErrDataLinkAuth doc +
+      classifyResultsCode reframed to say so. Handlers no longer clean-retry -7 forever behind a misleading
+      "auth rejected": bounded retry (ccbillDenialMaxAttempts=3, covers transient auth/IP) THEN OutcomeTerminal
+      with an operator-facing reason — refund releases the reservation, cancel goes Terminal. Applied to BOTH
+      the refund AND cancel handlers. The -7 op did NOT execute (safe). NO live money calls.
+- [x] Breaker: refunds are NOT breaker-gated today (destructiveIntentTypes holds only cancel/delete, NOT
+      TypeNMIRefund/TypeStripeRefund) — ccbill_refund stays CONSISTENT (not added). Refund rate-limiting is the
+      separate #732.
+- [x] Tests (build+vet+unit green, NO live calls): refund form wire-pin; response classification
+      (success/auth/reject/ambiguous); readonly-zero-HTTP; counter parsing; handler classification
+      (parked/auth-retryable/reject-ambiguous/transport-ambiguous/missing-txn-terminal); reclaim pre-send-verify;
+      Verify (counters zero→retryable, nonzero/unknown→ambiguous, read-fail→ambiguous); RefundIntentFor ccbill
+      routing; admin ccbillRefundTarget resolution + guards. Full-path success→finalize needs DB (integration,
+      not run here).
+- [ ] FIRST REAL REFUND MUST VERIFY (before trusting the wire / closing #696): (1) success + already-refunded +
+      partial result codes for voidOrRefundTransaction; (2) the amount format — DECIMAL DOLLARS assumed vs cents
+      (the single riskiest field: fix refundForm's one line + re-pin a golden if wrong); (3) that transactionId
+      narrows the refund to THAT charge (vs CCBill refunding the latest); (4) whether refundsIssued/voidsIssued
+      increment on success (the verify signal). Then add a production golden test like the read/cancel ones.
+
 ## Out of scope
 
-- Refund execution if Phase 0 finds no refund action (stays operator-manual in CCBill's portal).
+- Refund rate-limiting / breaker gating (separate #732; refunds are un-gated today, ccbill matches).
 - Migrating the FlexForm checkout or webhook auth (unchanged).
 - Solana admin-cancel (subscriber-signed by design — different problem).
 
@@ -675,3 +773,142 @@ Publish and maintain a provider certification matrix for Stripe, NMI, CCBill, an
 - PROCESS:
 - [ ] Make certification matrix updates part of provider-related PRs.
 - [ ] Record last verified date, environment, and command for each provider flow without exposing secrets.
+
+---
+
+# #733: merchant analytics API — three-stream metrics (subscriptions / one-time / usage-credits)
+
+**Completed:** no
+**Status:** planned (2026-07-03). Replaces the fixed-section admin metrics surface (#232/#528:
+{summary, revenue, subscriptions, rails, churn}) with ONE composable, per-merchant analytics query
+endpoint — a small in-house semantic layer over a fixed star schema. A merchant has up to three
+revenue streams — subscriptions, one-time products, and the API platform (credit purchase + usage
+draw-down) — and every dashboard tile any of them wants is a point in one cube: measures × dimensions
+× time-grain. Instead of a route (or named section) per metric, the frontend composes its own queries
+by picking from a fixed measure/dimension REGISTRY; the server owns all SQL.
+
+## Metadata
+- Category: product / analytics
+- Status: planned
+- Passes: false
+
+## Design doctrine
+
+- ONE composable endpoint, NOT one route per metric and NOT named sections. `GET /admin/metrics/query`
+  takes measures + group-by dimensions + filters + date range + grain and returns rows.
+- SEMANTIC LAYER, NOT a query language. The frontend speaks business nouns (measure/dimension NAMES);
+  it never sends SQL, column names, or raw expressions. Safety is an allowlist lookup, not a parser:
+  1. `measure` / `by` / `filter` keys are resolved through a fixed in-code REGISTRY (name → SQL
+     expression + aggregation semantics). Any unknown name → 400. No client string ever becomes a
+     column or SQL fragment.
+  2. `WHERE merchant_id = ?` is injected server-side on EVERY query, non-overridable, non-visible to
+     the client (merchant.Require). No cross-merchant reads — ever.
+  3. Filter VALUES are parameterized; operators are allowlisted; `limit` clamped; grain is an enum.
+  Result: the whole request compiles to ONE parameterized query.
+- MEASURES CARRY THEIR AGGREGATION TYPE (this is why the registry must be code, not arbitrary columns):
+  - `additive` — SUM/COUNT over the grain (net_revenue, new_subscriptions, …).
+  - `ratio` — numerator/denominator computed AFTER grouping (churn_rate, approval_rate, arpu, …); the
+    engine aggregates the two components, then divides per row. Never averages an average.
+  - `snapshot` — point-in-time / last-value, NEVER summed across days (mrr, active_subscriptions,
+    outstanding_credit_liability, …). An arbitrary-column API would silently `SUM(mrr)` over 30 days
+    and report garbage; the registry prevents that structurally.
+- TWO DATASETS, one per source of truth. A query targets ONE dataset; mixing measures across datasets
+  in a single call → 400.
+  - `events` (ClickHouse `daily_metrics` rollup) — all flow/series/count measures. Display-only and
+    optional: a CH outage degrades this endpoint, never blocks openrails.
+  - `balances` (Postgres ledger, point-in-time) — outstanding credit liability, arrears AR. NEVER
+    derive a balance from the event stream (the existing "ClickHouse is never truth" boundary).
+- Prepaid credits: cash-in ≠ revenue-earned. `credits_sold` (cash) and `usage_revenue` (consumed =
+  recognized) are DISTINCT measures; deferred revenue = unconsumed lots, a `balances` snapshot.
+
+## API shape (illustrative)
+
+```
+GET /admin/metrics/query
+  ?dataset=events                       # events | balances (default events)
+  &measure=net_revenue,new_subscriptions
+  &by=day,rail                          # group-by dimensions (incl. time grain as `day/week/month/…`)
+  &from=2026-06-01&to=2026-06-30
+  &filter=rail:ccbill;currency:USD      # allowlisted dim:value, parameterized
+  &order=net_revenue.desc&limit=100
+```
+Response: `{ columns: [...], rows: [...], grain, currency_mode, data_fresh_as_of }`. Multi-currency
+stays explicit — `currency` is a normal dimension; a query spanning currencies without `by=currency`
+or a `currency:` filter is either grouped or 400 (same ambiguity rule as #528, enforced in the engine).
+
+## Registry v1 (the fixed vocabulary the endpoint ships with)
+
+MEASURES —
+- additive money: `gross_revenue`, `net_revenue`, `subscription_revenue`, `one_time_revenue`,
+  `usage_revenue`, `credits_sold`, `refunds`, `chargebacks`, `breakage`.
+- additive counts: `payment_count`, `payment_attempts`, `payment_failures`, `new_subscriptions`,
+  `cancellations`, `reactivations`, `entitlement_grants`, `units_sold`, `chargeback_count`,
+  `refund_count`.
+- ratio: `arpu`, `churn_rate`, `approval_rate`, `chargeback_rate`, `refund_rate`, `recovery_rate`
+  (dunning), `ltv`.
+- snapshot (events): `mrr`, `arr`, `active_subscriptions`.
+- snapshot (balances dataset): `outstanding_credit_liability`, `outstanding_owed`.
+
+DIMENSIONS — `time`(grain day/week/month/quarter/year), `currency`, `rail`, `stream`
+(subscription/one_time/usage), `product_id`, `price_id`, `plan`, `billing_cycle`, `cancel_type`
+(voluntary/involuntary/expired/chargeback), `status`, `event_type`, `payer`, `sku`/`rate_card`.
+
+Every dashboard view is then a query, no bespoke endpoint:
+- KPI row → measures `mrr,arr,net_revenue,churn_rate` with prior-period compare.
+- Revenue-over-time stacked by stream → `net_revenue` by `week,stream`.
+- Dunning/recovery → `payment_failures,recovery_rate` by `week`, filter subscription stream.
+- Payment health → `approval_rate,chargeback_rate,refund_rate` by `rail`.
+- Product mix → `net_revenue,units_sold` by `product_id`, order desc.
+- Usage → `credits_sold,usage_revenue,breakage` by `week,sku`; top payers → `usage_revenue` by
+  `payer` order desc limit 10.
+- Deferred revenue / AR → dataset `balances`, `outstanding_credit_liability` by `currency`.
+
+## Scope
+
+Query engine (the new read surface):
+- [ ] Measure/dimension REGISTRY (in-code): name → {dataset, aggregation type, SQL expr, allowed as
+      dimension?}. Single source of truth; the endpoint's whole vocabulary.
+- [ ] Query compiler: params → validated plan → ONE parameterized query per dataset. Enforces
+      merchant_id injection, allowlist resolution, ratio post-aggregation, snapshot last-value,
+      single-dataset rule, currency-ambiguity rule, clamped limit, enum grain.
+- [ ] `GET /admin/metrics/query` handler on the existing per-merchant admin surface; column/row
+      response shape; prior-period compare param.
+- [ ] Registry-driven capability endpoint (`GET /admin/metrics/query/schema`) so the frontend can
+      discover available measures/dimensions/grains instead of hardcoding — makes it truly
+      self-composing.
+
+Rollup + schema work (the data the registry reads; unchanged by the API redesign):
+- [ ] Extend `daily_metrics` with the missing dimensions/measures: `stream`, `product_id`/`price_id`,
+      `payer`, `sku`/`rate_card`; dunning columns (declines, in-retry, recovered-vs-lost — data
+      already flows via `charge_failure`, `subscription_past_due`, cancel-type events); usage columns
+      (`credits_sold`, `usage_revenue`/consumed, `breakage` — ACU events already flow); per-rail
+      failure counts (for approval/chargeback/refund rates).
+- [ ] `balances` dataset: Postgres ledger aggregates for `outstanding_credit_liability` (unconsumed
+      grant lots = deferred revenue) and `outstanding_owed` (arrears AR + simple aging), point-in-time,
+      merchant-scoped.
+- [ ] Micros cleanup (do it in this same schema change, not a second migration): analytics events
+      carry money as float64 (`PriceAmount`, `Amount`) and CH columns are named `_cents` — move to
+      typed micros end-to-end and rename columns to match doctrine.
+
+Tests:
+- [ ] Engine unit-ish coverage on the compiler: allowlist rejection (unknown measure/dimension → 400),
+      merchant_id always injected, ratio vs snapshot vs additive aggregation correctness, cross-dataset
+      rejection, currency-ambiguity rule.
+- [ ] Integration tests (testcontainers CH+PG) exercising real queries across the registry, including
+      merchant-isolation (follow `admin_metrics_merchant_isolation_integration_test.go`): confirm one
+      merchant's query can never read another's rows.
+- [ ] `balances` verified against ledger truth (seed grants/usage/owed in PG, assert API numbers match
+      the ledger, not the event stream).
+
+Migration note:
+- [ ] This SUPERSEDES the fixed `/admin/metrics` sections (#232/#528). Greenfield / pre-launch — hard
+      cut to `/query`, no compatibility shim for the old section response (house style). The frontend
+      dashboard moves to composed queries.
+
+Explicitly out of scope:
+- Arbitrary SQL / raw-expression passthrough — the registry allowlist is the hard boundary; if a true
+  ad-hoc need appears later it's a per-merchant event EXPORT (CSV), never an open query language.
+- Joins / arbitrary multi-dataset queries in one call — one dataset per query; the frontend stitches.
+- Cohort retention curves + a dedicated LTV endpoint (LTV ≈ arpu ÷ churn_rate composed client-side);
+  add a `cohorts` dataset when a merchant actually asks.
+- Entity/list queries (subscriber search, failed-payment lists) — admin CRUD surface, not metrics.
