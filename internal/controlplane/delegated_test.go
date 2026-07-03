@@ -13,9 +13,10 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/open-rails/authkit"
+	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
-	authhttp "github.com/open-rails/authkit/http"
-	jwtkit "github.com/open-rails/authkit/jwt"
+	jwtkit "github.com/open-rails/authkit/jwtkit"
+	"github.com/open-rails/authkit/verify"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,12 +41,12 @@ const (
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
 // configuration (issuer, openrails audience, local public key, NO permission
 // allowlist — #564), seeded with a freshly generated signing key.
-func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) {
+func newTestDelegatedVerifier(t *testing.T) (*verify.Verifier, jwtkit.Signer) {
 	t.Helper()
 	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
 	require.NoError(t, err)
 
-	v := authhttp.NewVerifier()
+	v := verify.NewVerifier()
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
 		ID:      "remote-app-1",
 		Slug:    "openrails-test",
@@ -78,7 +79,28 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authkit.DelegatedAccess
 	if p.DelegatedSubject == "" {
 		p.DelegatedSubject = testDelegatedSubject
 	}
-	tok, err := authcore.MintDelegatedAccessToken(context.Background(), signer, p)
+	ttl := p.TTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	now := time.Now()
+	// Mirror authkit's delegated-token claim shape and sign with the delegated
+	// JOSE typ. The package-level minter became a Client method in the authkit
+	// restructure; this reproduces the same token from a raw signer for the
+	// verifier tests below (which need no engine/DB).
+	claims := jwt.MapClaims{
+		"iss":           p.Issuer,
+		"iat":           now.Unix(),
+		"exp":           now.Add(ttl).Unix(),
+		"delegated_sub": p.DelegatedSubject,
+	}
+	if len(p.Audiences) > 0 {
+		claims["aud"] = p.Audiences
+	}
+	if len(p.Permissions) > 0 {
+		claims["permissions"] = p.Permissions
+	}
+	tok, err := jwtkit.SignWithType(context.Background(), signer, claims, jwtkit.DelegatedAccessTokenType, true)
 	require.NoError(t, err)
 	return tok
 }

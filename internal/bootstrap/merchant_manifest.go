@@ -23,7 +23,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
-	jwtkit "github.com/open-rails/authkit/jwt"
+	jwtkit "github.com/open-rails/authkit/jwtkit"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"

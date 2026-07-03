@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	authhttp "github.com/open-rails/authkit/http"
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -56,7 +56,7 @@ func bearerToken(header string) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-func userContextFromClaims(cl authhttp.Claims) billingauth.UserContext {
+func userContextFromClaims(cl verify.Claims) billingauth.UserContext {
 	return billingauth.UserContext{
 		UserID:          cl.UserID,
 		Email:           cl.Email,

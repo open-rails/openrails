@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
-	jwtkit "github.com/open-rails/authkit/jwt"
+	jwtkit "github.com/open-rails/authkit/jwtkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"

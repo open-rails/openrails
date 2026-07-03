@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	authhttp "github.com/open-rails/authkit/http"
+	authhttp "github.com/open-rails/authkit/authhttp"
 )
 
 // IntentionalRouteGroups is the set of AuthKit route groups OpenRails

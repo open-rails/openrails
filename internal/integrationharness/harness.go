@@ -47,7 +47,7 @@ import (
 	"github.com/open-rails/authkit"
 	authtesting "github.com/open-rails/authkit/authtest"
 	authcore "github.com/open-rails/authkit/embedded"
-	jwtkit "github.com/open-rails/authkit/jwt"
+	jwtkit "github.com/open-rails/authkit/jwtkit"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 

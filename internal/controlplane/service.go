@@ -9,9 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
-	authhttp "github.com/open-rails/authkit/http"
-	jwtkit "github.com/open-rails/authkit/jwt"
+	jwtkit "github.com/open-rails/authkit/jwtkit"
+	"github.com/open-rails/authkit/verify"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -42,12 +43,12 @@ type ControlPlane struct {
 	// self-service surface (issue #222 browser tier). It is built from the same
 	// issuer/audience/keys the control plane signs with, plus a self-service
 	// permissions validator. See delegated.go.
-	delegatedVerifier *authhttp.Verifier
+	delegatedVerifier *verify.Verifier
 	// userVerifier validates first-party AuthKit user access tokens for narrow
 	// OpenRails wrappers around AuthKit-generated routes. AuthKit still performs
 	// the authoritative route auth inside its handler; this verifier only lets
 	// OpenRails run pre-auth setup such as lazy customer-group creation.
-	userVerifier *authhttp.Verifier
+	userVerifier *verify.Verifier
 
 	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
 	// so they verify against delegatedVerifier.
@@ -134,7 +135,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// verifier TRUSTS are guaranteed to be the same key. (When Keys is left nil,
 	// core.NewFromConfig auto-discovers internally and we'd have no handle on the
 	// active signer; in dev it could even generate a different key on a second
-	// call.) Discovery priority is unchanged: env -> /vault/auth -> dev-generated.
+	// call.) Per authkit #231 the library reads NO env vars: discovery is
+	// <path>/keys.json (Vault-mounted) -> dev-generated (development only).
 	//
 	// The signing key is OPTIONAL (#527/#87): when no key is discoverable (the
 	// prod no-key case — dev still auto-generates), the control plane runs as a
@@ -143,7 +145,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// authkit ErrMissingSigner). This is the expected posture for a standalone
 	// deployment with no login-capable users; mounting a key (env/vault) re-enables
 	// minting automatically. Key presence is the enablement signal — no separate knob.
-	keySource, keyErr := jwtkit.NewAutoKeySourceWithPath(jwtkit.DefaultAuthKeysPath)
+	keySource, keyErr := jwtkit.ResolveKeySource(jwtkit.DefaultAuthKeysPath, cfg.IsDev())
 	verifyOnly := false
 	if keyErr != nil {
 		log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled)")
@@ -199,13 +201,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
 
-	coreOptions := authClient.Options()
-	userVerifier := authhttp.NewVerifier(
-		authhttp.WithSkew(5*time.Second),
-		authhttp.WithAPIKeyPrefix(coreOptions.APIKeyPrefix),
-		authhttp.WithSSRFGuard(),
+	// The verifier trusts exactly what coreCfg above declared (issuer,
+	// audiences, API-key prefix) — read the local values instead of an
+	// accessor so mint and verify cannot drift.
+	userVerifier := verify.NewVerifier(
+		verify.WithSkew(5*time.Second),
+		verify.WithAPIKeyPrefix(APIKeyPrefix),
+		verify.WithSSRFGuard(),
 	)
-	if err := userVerifier.AddIssuer(coreOptions.Issuer, coreOptions.ExpectedAudiences, authhttp.IssuerOptions{
+	if err := userVerifier.AddIssuer(issuer, []string{"openrails"}, verify.IssuerOptions{
 		RawKeys: authClient.PublicKeysByKID(),
 		IsLocal: true,
 	}); err != nil {

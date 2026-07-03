@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit"
-	authhttp "github.com/open-rails/authkit/http"
+	"github.com/open-rails/authkit/verify"
 )
 
 // ResolveServiceJWT validates a first-party OIDC service JWT and resolves the
@@ -23,7 +23,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrNoControlPlane
 	}
-	principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), authhttp.WithServiceJWTMaxLifetime(authkit.DefaultServiceJWTLifetime))
+	principal, err := c.delegatedVerifier.VerifyServiceJWT(ctx, strings.TrimSpace(token), verify.WithServiceJWTMaxLifetime(authkit.DefaultServiceJWTLifetime))
 	if err != nil {
 		return nil, err
 	}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	authhttp "github.com/open-rails/authkit/http"
+	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -144,7 +144,7 @@ var ErrDelegatedOriginNotAllowed = errors.New("controlplane: delegated origin no
 
 // DelegatedVerifier returns the control plane's delegated-access-token verifier.
 // Exposed for the middleware and tests.
-func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
+func (c *ControlPlane) DelegatedVerifier() *verify.Verifier {
 	if c == nil {
 		return nil
 	}
@@ -161,7 +161,7 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 // (AddIssuer with JWKS-URL fetching), so at runtime the verifier trusts every
 // registered+enabled merchant issuer — and ONLY those. OpenRails signs no delegated
 // tokens itself; there is no self-issuer.
-func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*authhttp.Verifier, error) {
+func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*verify.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -179,9 +179,9 @@ func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*authhttp
 	// guard is the required second layer against DNS-rebinding SSRF from the
 	// control-plane host to cloud metadata / internal services. AuthKit's own server
 	// always installs it; a verify-only embedder must opt in explicitly.
-	v := authhttp.NewVerifier(
-		authhttp.WithAPIKeyPrefix(tokenPrefix),
-		authhttp.WithSSRFGuard(),
+	v := verify.NewVerifier(
+		verify.WithAPIKeyPrefix(tokenPrefix),
+		verify.WithSSRFGuard(),
 	)
 	return v, nil
 }

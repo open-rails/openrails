@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	authhttp "github.com/open-rails/authkit/http"
+	"github.com/open-rails/authkit/verify"
 )
 
 // Verifier validates bearer tokens against configured issuers/JWKS.
 type Verifier interface {
-	Verify(token string) (authhttp.Claims, error)
+	Verify(token string) (verify.Claims, error)
 }
 
 // NewIssuerVerifier builds an AuthKit-backed verifier over an explicit issuer
@@ -22,7 +22,7 @@ func NewIssuerVerifier(issuers []string, expectedAudience string) (Verifier, err
 	}
 
 	expectedAudience = strings.TrimSpace(expectedAudience)
-	v := authhttp.NewVerifier()
+	v := verify.NewVerifier()
 
 	addedIssuers := 0
 	for _, issuer := range issuers {
@@ -34,7 +34,7 @@ func NewIssuerVerifier(issuers []string, expectedAudience string) (Verifier, err
 		if expectedAudience != "" {
 			audiences = []string{expectedAudience}
 		}
-		if err := v.AddIssuer(issuer, audiences, authhttp.IssuerOptions{
+		if err := v.AddIssuer(issuer, audiences, verify.IssuerOptions{
 			JWKSURI: issuer + "/.well-known/jwks.json",
 		}); err != nil {
 			return nil, fmt.Errorf("add auth issuer %q: %w", issuer, err)
