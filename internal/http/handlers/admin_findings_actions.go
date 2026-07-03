@@ -270,7 +270,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		result["cancel"] = "cancelled"
 		result["subscription_id"] = subID.String()
 		if scheduleDelete {
-			if err := intents.NewNMIDeleteScheduler(r.State.DB, intents.OriginAdmin, reason).
+			if err := intents.NewNMIDeleteScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason).
 				ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
 				// Marker committed with the cancellation keeps the delete
 				// discoverable (startup marker sweep converts it).
@@ -297,7 +297,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		result["cancel"] = "cancelled"
 		result["subscription_id"] = subID.String()
 		if sub.RailSubscriptionID != "" {
-			if err := intents.NewCCBillCancelScheduler(r.State.DB, intents.OriginAdmin, reason).
+			if err := intents.NewCCBillCancelScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason).
 				ScheduleCCBillCancel(ctx, sub.CustomerID.String(), sub.ID); err != nil {
 				return fmt.Errorf("local cancel applied but ccbill cancel intent enqueue failed: %w", err)
 			}
@@ -343,11 +343,9 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
-	if payment.Rail == models.RailCCBill {
-		// #696: DataLink SMS exposes no verified refund action (Phase 0 will
-		// confirm whether one exists); refunds stay operator-manual.
-		return paramErrorf("refunds are not supported for ccbill through OpenRails; issue the refund manually in the CCBill admin portal (payment %s, transaction %s)", paymentID, payment.TransactionID)
-	}
+	// #696: CCBill refunds now ride the same intent-ledger path as NMI/Stripe
+	// (executeAdminRefund resolves the DataLink refund target). WIRE PROVISIONAL —
+	// the CCBill refund wire is unverified until the first real refund confirms it.
 	amount := payment.Amount // full refund by default (micros)
 	if raw, ok := params["amount"]; ok && raw != nil {
 		f, isNum := raw.(float64)

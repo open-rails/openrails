@@ -293,6 +293,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewCCBillCancelHandler(r.DB, r.CCBillDataLink, clock),       // #696 (nil client parks)
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
+		intents.NewCCBillRefundHandler(r.DB, r.CCBillDataLink, clock), // #696 refund (nil client parks)
 		manualRebill,
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Rails, clock),
@@ -342,7 +343,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // working — a typed-nil ModeView would panic inside the gate.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
-		Store:    intents.NewStore(r.DB),
+		// #732: gate the request-path enqueue chokepoint (vault delete, admin
+		// refund) — destructive user/admin ops pass the rate ceiling before the
+		// write-ahead intent is created.
+		Store:    intents.NewStoreGated(r.DB, r.RateCeiling()),
 		Logger:   intents.NewAnalyticsMutationLogger(r.EventLogService),
 		Registry: registry,
 		Breaker:  intents.NewVolumeBreaker(r.DB), // #679: gate destructive types everywhere
@@ -364,6 +368,14 @@ func (r *Runtime) IntentRunner() *intents.Runner {
 		clock = clockwork.NewRealClock()
 	}
 	return r.intentRunner(r.buildIntentRegistry(clock), clock)
+}
+
+// RateCeiling returns the #732 anti-credential-compromise destructive-op rate
+// ceiling, bound to the root pool-backed DB. It is the single gate producers
+// wire onto their enqueue chokepoints (schedulers, the intent runner). Cheap to
+// build (a thin DB wrapper), so returned fresh per call.
+func (r *Runtime) RateCeiling() *intents.RateCeiling {
+	return intents.NewRateCeiling(r.DB)
 }
 
 func (r *Runtime) validateBillingWorkerRuntime() error {

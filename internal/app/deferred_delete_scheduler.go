@@ -19,8 +19,8 @@ import (
 // NMI delete scheduler. The implementation moved to intents.NMIDeleteScheduler
 // (#679) so the unknown-reconcile path and tests can construct the REAL
 // production scheduler; this shim keeps the composition root unchanged.
-func newIntentDeferredDeleteScheduler(d *db.DB, origin intents.Origin, reason string) subscriptions.DeferredDeleteScheduler {
-	return intents.NewNMIDeleteScheduler(d, origin, reason)
+func newIntentDeferredDeleteScheduler(d *db.DB, ceiling *intents.RateCeiling, origin intents.Origin, reason string) subscriptions.DeferredDeleteScheduler {
+	return intents.NewNMIDeleteScheduler(d, ceiling, origin, reason)
 }
 
 // ConvertDeferredDeleteMarkersToIntents is the startup sweep that converts

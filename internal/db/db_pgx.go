@@ -63,6 +63,22 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 	return gen.New(d.Qx(ctx))
 }
 
+// GenGlobal returns a sqlc query catalog bound to the BASE pool, deliberately
+// IGNORING any merchant-pinned connection in the context. It is for the rare
+// cross-merchant reads (the #732 destructive-rate ceiling counts across all
+// actors + merchants) that must span the whole deployment — a merchant-pinned
+// connection's RLS GUC would scope them to a single merchant. Cross-tenant
+// visibility follows the SAME posture as the River workers' base-pool sweeps
+// (ExpireOverdueRailIntents, ListStuckRailIntents): RLS enforcement, if the
+// connected role enforces it, applies equally to both. Returns an erroring
+// catalog when this DB has no pool (a tx-scoped wrapper).
+func (d *DB) GenGlobal() *gen.Queries {
+	if d == nil || d.pool == nil {
+		return gen.New(errDBTX{fmt.Errorf("db: GenGlobal requires a pool-backed DB")})
+	}
+	return gen.New(d.rw.wrapDBTX(d.pool))
+}
+
 // pgxBeginner abstracts where a transaction starts: the pinned merchant
 // connection when one is in flight (so the tx inherits its session GUC), the
 // base pool otherwise.

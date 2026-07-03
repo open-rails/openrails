@@ -19,9 +19,30 @@ import (
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB
+	// ceiling is the #732 anti-credential-compromise rate ceiling. When set,
+	// Enqueue passes every destructive user/admin intent through it BEFORE the
+	// write-ahead row is created (the producer chokepoint). nil ⇒ ungated (unit
+	// tests, and system-only Stores where the gate is inert anyway). The gate
+	// carries its OWN root pool DB, so it survives tx-rebind (WithTx).
+	ceiling *RateCeiling
 }
 
 func NewStore(d *db.DB) *Store { return &Store{db: d} }
+
+// NewStoreGated builds a Store whose destructive user/admin enqueues are gated
+// by the #732 rate ceiling. The ceiling references the ROOT pool DB and is
+// preserved across tx-rebinds (withTxDB).
+func NewStoreGated(d *db.DB, ceiling *RateCeiling) *Store {
+	return &Store{db: d, ceiling: ceiling}
+}
+
+// withTxDB rebinds this Store onto a tx-scoped DB while PRESERVING the rate
+// ceiling (whose own pool-backed DB is independent of the tx). Producers that
+// commit the enqueue atomically with their local write (ccbill/nmi cancel
+// schedulers) use this so the gate is not lost on rebind.
+func (s *Store) withTxDB(txdb *db.DB) *Store {
+	return &Store{db: txdb, ceiling: s.ceiling}
+}
 
 // EnqueueParams describes one logical intent. MerchantID is stamped explicitly;
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
@@ -39,7 +60,12 @@ type EnqueueParams struct {
 	NextAttemptAt         time.Time
 	Origin                Origin
 	OriginReason          string
-	ExpiresAt             *time.Time
+	// Actor is the authenticated principal id (admin user id / self-service
+	// customer id) that produced this intent, stamped on the row and used by the
+	// #732 per-actor ceiling. Empty ⇒ resolved from the ambient principal on the
+	// context (auth middleware); system/background paths carry none.
+	Actor     string
+	ExpiresAt *time.Time
 }
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
@@ -60,6 +86,31 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
+	// Resolve the actor (explicit override, else the ambient authenticated
+	// principal) up front: it is both stamped on the row and the #732 per-actor
+	// ceiling key.
+	actor := ResolveActor(ctx, p.Actor)
+
+	// #732 anti-credential-compromise rate ceiling: destructive user/admin ops
+	// pass through the gate BEFORE the write-ahead intent is created. A trip
+	// returns a typed refusal (no row created ⇒ the op does not happen); a gate
+	// evaluation error FAILS CLOSED (also refuses). The gate is inert for
+	// non-destructive types and system-origin ops.
+	if s.ceiling != nil {
+		if err := s.ceiling.Check(ctx, CheckParams{
+			Actor:      actor,
+			MerchantID: p.MerchantID,
+			IntentType: p.IntentType,
+			Origin:     p.Origin,
+		}, time.Now().UTC()); err != nil {
+			return gen.OpenrailsRailIntent{}, err
+		}
+	}
+
+	var actorPtr *string
+	if actor != "" {
+		actorPtr = &actor
+	}
 	// rail_merchant_account_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
 	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
@@ -74,6 +125,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		NextAttemptAt:         p.NextAttemptAt.UTC(),
 		Origin:                string(p.Origin),
 		OriginReason:          originReason,
+		Actor:                 actorPtr,
 		ExpiresAt:             p.ExpiresAt,
 		RailMerchantAccountID: p.RailMerchantAccountID,
 	})

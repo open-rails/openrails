@@ -117,8 +117,16 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
 			return Parked("ccbill provider writes blocked (mode=readonly)")
 		case errors.Is(err, ccbill.ErrDataLinkAuth):
-			// Definite auth rejection: the cancel did not execute.
-			return Retryable("cancelSubscription auth rejected: " + err.Error())
+			// -7 is CCBill's OVERLOADED denial (auth/IP OR operation-not-permitted).
+			// The cancel did NOT execute. Bounded clean-retry for a transient
+			// auth/IP flap, then terminal for the operator — never infinite retry
+			// behind a misleading "auth" reason (a permanently-refused cancel means
+			// the subscriber keeps rebilling: an operator must see it, not a silent
+			// forever-retry).
+			if ccbillDenialExhausted(intent.Attempts) {
+				return Terminal("cancelSubscription denied (-7): provider refused after bounded retries — not permitted / auth — needs operator attention")
+			}
+			return Retryable("cancelSubscription denied (-7): provider refused (auth/IP, or not permitted); bounded retry")
 		default:
 			// Definite reject (may mean already-cancelled) or transport
 			// ambiguity — the verifier's read resolves either way.
@@ -202,18 +210,22 @@ type CCBillCancelScheduler struct {
 	reason string
 }
 
-func NewCCBillCancelScheduler(d *db.DB, origin Origin, reason string) *CCBillCancelScheduler {
-	return &CCBillCancelScheduler{db: d, store: NewStore(d), origin: origin, reason: reason}
+// NewCCBillCancelScheduler builds the scheduler. ceiling (may be nil) is the
+// #732 rate ceiling; user/admin-origin schedulers pass it so self-service and
+// admin CCBill cancels are gated.
+func NewCCBillCancelScheduler(d *db.DB, ceiling *RateCeiling, origin Origin, reason string) *CCBillCancelScheduler {
+	return &CCBillCancelScheduler{db: d, store: NewStoreGated(d, ceiling), origin: origin, reason: reason}
 }
 
 // WithTx rebinds the scheduler onto the caller's transaction so the intent
-// enqueue commits atomically with the local cancellation.
+// enqueue commits atomically with the local cancellation. The rate ceiling
+// (its own pool-backed DB) is preserved across the rebind.
 func (s *CCBillCancelScheduler) WithTx(tx pgx.Tx) subscriptions.CCBillRemoteCancelScheduler {
 	if s == nil {
 		return s
 	}
 	txdb := s.db.NewWithPgxTx(tx)
-	return &CCBillCancelScheduler{db: txdb, store: NewStore(txdb), origin: s.origin, reason: s.reason}
+	return &CCBillCancelScheduler{db: txdb, store: s.store.withTxDB(txdb), origin: s.origin, reason: s.reason}
 }
 
 // ScheduleCCBillCancel enqueues the durable remote cancel, due now.

@@ -31,12 +31,17 @@ type NMIDeleteScheduler struct {
 	reason string
 }
 
-func NewNMIDeleteScheduler(d *db.DB, origin Origin, reason string) *NMIDeleteScheduler {
-	return &NMIDeleteScheduler{db: d, store: NewStore(d), origin: origin, reason: reason}
+// NewNMIDeleteScheduler builds the scheduler. ceiling (may be nil) is the #732
+// rate ceiling; user/admin-origin schedulers must pass it so self-service and
+// admin NMI cancels are gated. System-origin schedulers (dunning) pass nil —
+// the gate is inert for system origin anyway.
+func NewNMIDeleteScheduler(d *db.DB, ceiling *RateCeiling, origin Origin, reason string) *NMIDeleteScheduler {
+	return &NMIDeleteScheduler{db: d, store: NewStoreGated(d, ceiling), origin: origin, reason: reason}
 }
 
 // WithTx rebinds the scheduler onto the caller's transaction: the intent
 // enqueue and the caller's subscription update commit or roll back together.
+// The rate ceiling (its own pool-backed DB) is preserved across the rebind.
 func (s *NMIDeleteScheduler) WithTx(tx pgx.Tx) subscriptions.DeferredDeleteScheduler {
 	if s == nil {
 		return s
@@ -44,7 +49,7 @@ func (s *NMIDeleteScheduler) WithTx(tx pgx.Tx) subscriptions.DeferredDeleteSched
 	txdb := s.db.NewWithPgxTx(tx)
 	return &NMIDeleteScheduler{
 		db:     txdb,
-		store:  NewStore(txdb),
+		store:  s.store.withTxDB(txdb),
 		origin: s.origin,
 		reason: s.reason,
 	}

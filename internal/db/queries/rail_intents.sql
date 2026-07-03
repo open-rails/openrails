@@ -23,13 +23,13 @@
 INSERT INTO openrails.rail_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    expires_at, rail_merchant_account_id
+    actor, expires_at, rail_merchant_account_id
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
-    sqlc.narg(origin_reason), sqlc.narg(expires_at),
+    sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(expires_at),
     sqlc.narg(rail_merchant_account_id)
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
@@ -56,6 +56,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     origin_reason = CASE
         WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
+    END,
+    actor = CASE
+        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.actor
+        ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
         WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
@@ -316,3 +320,34 @@ SELECT * FROM openrails.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND finding_type = sqlc.arg(finding_type)
   AND subject_key = sqlc.arg(subject_key);
+
+-- ============================================================================
+-- #732 anti-credential-compromise rate ceiling (per-actor + global)
+-- ============================================================================
+-- The durable rail_intents ledger IS the counter (#674): every destructive
+-- user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
+-- created_at is the burst gauge. Scoped to origin IN ('user','admin') — the
+-- credential-theft surface; origin='system' (automated dunning / decline
+-- cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
+-- CREATION (created_at), not execution: the ceiling stops the burst at the
+-- producer chokepoint, before the write-ahead intent is even created. These
+-- run cross-merchant (per-actor AND global), so callers must execute them on a
+-- non-merchant-pinned connection (the base pool), like the other cross-tenant
+-- worker sweeps.
+
+-- Destructive user/admin intents THIS actor created in the rolling window.
+-- name: CountDestructiveIntentsByActorSince :one
+SELECT count(*) FROM openrails.rail_intents
+WHERE actor = sqlc.arg(actor)::text
+  AND origin IN ('user', 'admin')
+  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
+  AND created_at >= sqlc.arg(since)::timestamptz;
+
+-- Destructive user/admin intents ALL actors + ALL merchants created in the
+-- rolling window — the absolute frying-protection ceiling even if many actor
+-- identities are forged.
+-- name: CountDestructiveIntentsGlobalSince :one
+SELECT count(*) FROM openrails.rail_intents
+WHERE origin IN ('user', 'admin')
+  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
+  AND created_at >= sqlc.arg(since)::timestamptz;

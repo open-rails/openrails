@@ -418,9 +418,13 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginUser,
+	// #732: user/admin destructive cancels pass the anti-credential-compromise
+	// rate ceiling before their write-ahead intent is created. System-origin
+	// deletes (dunning) skip it (the gate is inert for system origin).
+	rateCeiling := runtime.RateCeiling()
+	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginUser,
 		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, nil, intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
@@ -428,7 +432,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		// #696: user CCBill cancels queue a durable ccbill_cancel_subscription
 		// intent atomically with the local cancel. User-origin: reactive
 		// completion, executes under mode=limited.
-		runtime.UserSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, intents.OriginUser,
+		runtime.UserSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, rateCeiling, intents.OriginUser,
 			"user cancellation; remote CCBill subscription must stop rebilling"))
 	}
 	if runtime.SubscriptionLifecycleService != nil {

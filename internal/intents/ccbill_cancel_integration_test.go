@@ -133,7 +133,7 @@ func (fx ccbillFixture) userService() *subscriptions.UserSubscriptionService {
 		catalog.NewProductService(fx.db), catalog.NewPriceService(fx.db), nil,
 		subscriptions.NewNotificationService(fx.db, nil),
 		entitlements.NewEntitlementService(fx.db), nil)
-	usvc.SetCCBillCancelScheduler(NewCCBillCancelScheduler(fx.db, OriginUser, "test: user ccbill cancel"))
+	usvc.SetCCBillCancelScheduler(NewCCBillCancelScheduler(fx.db, nil, OriginUser, "test: user ccbill cancel"))
 	return usvc
 }
 

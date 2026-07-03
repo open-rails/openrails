@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -519,6 +520,13 @@ func DeletePaymentMethod(r *httprequest.Request) {
 		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found during deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+			return
+		}
+		if errors.Is(err, intents.ErrRateCeilingTripped) {
+			// #732: destructive-op rate ceiling refused this delete. Client-safe
+			// message; the operator alert (finding + log.Error) was already raised.
+			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method delete refused by destructive-op rate ceiling")
+			r.ErrorJSON(http.StatusTooManyRequests, "Destructive operation rate limit reached — please try later or contact support")
 			return
 		}
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Error("Failed to delete payment method")

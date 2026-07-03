@@ -1532,6 +1532,7 @@ CREATE TABLE openrails.rail_intents (
     claimed_until timestamp with time zone,
     origin text NOT NULL,
     origin_reason text,
+    actor text,
     last_failure_reason text,
     expires_at timestamp with time zone,
     result_evidence jsonb,
@@ -1558,6 +1559,8 @@ COMMENT ON COLUMN openrails.rail_intents.claimed_until IS 'Single-executor lease
 
 COMMENT ON COLUMN openrails.rail_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
 
+COMMENT ON COLUMN openrails.rail_intents.actor IS 'Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the #732 anti-credential-compromise rate ceiling (per-actor + global rolling-hour count of destructive ops).';
+
 COMMENT ON COLUMN openrails.rail_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
 
 COMMENT ON COLUMN openrails.rail_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
@@ -1582,6 +1585,14 @@ CREATE INDEX idx_rail_intents_merchant_id ON openrails.rail_intents USING btree 
 CREATE INDEX idx_rail_intents_rail_merchant_account ON openrails.rail_intents USING btree (rail_merchant_account_id) WHERE (rail_merchant_account_id IS NOT NULL);
 
 CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
+
+-- #732 per-actor rolling-hour scan (anti-credential-compromise ceiling): count
+-- destructive user/admin intents an actor produced in the last hour.
+CREATE INDEX idx_rail_intents_actor_created ON openrails.rail_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
+
+-- #732 global rolling-hour scan: count destructive user/admin intents across
+-- all actors + merchants in the last hour (filtered by intent_type + origin).
+CREATE INDEX idx_rail_intents_created ON openrails.rail_intents USING btree (created_at);
 
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 

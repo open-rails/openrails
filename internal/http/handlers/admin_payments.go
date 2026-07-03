@@ -146,8 +146,9 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
-		paymentService := payments.NewPaymentService(db.NewWithPgxTx(tx), r.Clock)
-		result, err := prepareAdminRefund(ctx, r, paymentService, paymentID, req, idempotencyKey)
+		txDB := db.NewWithPgxTx(tx)
+		paymentService := payments.NewPaymentService(txDB, r.Clock)
+		result, err := prepareAdminRefund(ctx, r, txDB, paymentService, paymentID, req, idempotencyKey)
 		if err != nil {
 			return err
 		}
@@ -189,6 +190,10 @@ type adminRefundPrepared struct {
 	amountCents          moneyutil.Cents
 	stripeRefundTargetID string
 	nmiClient            *nmi.NMIClient
+	// CCBill refund coordinates: the DataLink voidOrRefundTransaction key
+	// (subscription.rail_subscription_id) + the original transaction id.
+	ccbillSubscriptionID string
+	ccbillTransactionID  string
 }
 
 // refundAmountCents converts an admin refund request amount (micros) to the
@@ -202,7 +207,7 @@ func refundAmountCents(amountMicros int64) (int64, error) {
 	return cents, nil
 }
 
-func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
+func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
 	payment, err := paymentService.GetByID(ctx, paymentID)
 	if err != nil {
 		return nil, adminRefundHTTPError(http.StatusNotFound, "payment not found")
@@ -233,9 +238,26 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	prepared := &adminRefundPrepared{payment: payment, amountCents: moneyutil.Cents(amountCents)}
 	var stripeRefundTargetID string
 	var nmiClient *nmi.NMIClient
+	var ccbillSubscriptionID, ccbillTransactionID string
 	switch {
 	case payment.Rail == models.RailCCBill:
-		return nil, adminRefundHTTPError(http.StatusBadRequest, "CCBill refunds must be processed through CCBill's admin portal. After issuing the refund in CCBill, it will be recorded automatically via webhook.")
+		// #696: refund through OUR admin via the DataLink SMS choke point instead
+		// of routing the operator to CCBill's portal. The refund action keys off
+		// the CCBill subscriptionId (carried on the subscription row) + the
+		// payment's transaction id; the provider mutation rides the intent ledger.
+		if payment.SubscriptionID == nil {
+			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: ccbill payment has no linked subscription")
+		}
+		sub, err := subscriptions.NewSubscriptionRepo(txDB).GetByID(ctx, *payment.SubscriptionID)
+		if err != nil {
+			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: could not load subscription for the ccbill refund")
+		}
+		subID, txnID, err := ccbillRefundTarget(payment, sub)
+		if err != nil {
+			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
+		}
+		ccbillSubscriptionID = subID
+		ccbillTransactionID = txnID
 	case payment.Rail == models.RailStripe:
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
@@ -254,6 +276,8 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	}
 	prepared.stripeRefundTargetID = stripeRefundTargetID
 	prepared.nmiClient = nmiClient
+	prepared.ccbillSubscriptionID = ccbillSubscriptionID
+	prepared.ccbillTransactionID = ccbillTransactionID
 
 	reservationMetadata := adminRefundMetadata(idempotencyKey, req, "pending", "")
 	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, reservationMetadata)
@@ -262,6 +286,26 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	}
 	prepared.reservation = reservation
 	return prepared, nil
+}
+
+// ccbillRefundTarget derives the CCBill refund coordinates from a CCBill payment
+// and its (already loaded) subscription: the CCBill subscriptionId (the DataLink
+// voidOrRefundTransaction key, = subscription.rail_subscription_id) + the
+// original transactionId. Both are required — refunding without the exact
+// transaction id lets CCBill pick the latest charge on the subscription.
+func ccbillRefundTarget(payment *models.Payment, sub *models.Subscription) (subscriptionID, transactionID string, err error) {
+	transactionID = strings.TrimSpace(payment.TransactionID)
+	if transactionID == "" {
+		return "", "", errors.New("ccbill payment has no transaction id")
+	}
+	if sub == nil {
+		return "", "", errors.New("ccbill payment has no linked subscription; cannot resolve the CCBill subscription id")
+	}
+	subscriptionID = strings.TrimSpace(sub.RailSubscriptionID)
+	if subscriptionID == "" {
+		return "", "", errors.New("subscription has no CCBill rail subscription id")
+	}
+	return subscriptionID, transactionID, nil
 }
 
 func adminRefundMatchesRequest(existing *models.Payment, req refundRequest) bool {
@@ -327,17 +371,22 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		return nil, 0, errors.New("refund preparation is incomplete")
 	}
 
-	var providerTarget string
+	var providerTarget, providerTransactionID string
 	switch {
 	case prepared.payment.Rail == models.RailStripe:
 		providerTarget = prepared.stripeRefundTargetID
+	case prepared.payment.Rail == models.RailCCBill:
+		// CCBill refunds against the subscriptionId; the transaction id narrows
+		// the refund to this specific charge.
+		providerTarget = prepared.ccbillSubscriptionID
+		providerTransactionID = prepared.ccbillTransactionID
 	case rails.IsNMI(prepared.payment.Rail):
 		providerTarget = prepared.payment.TransactionID
 	default:
-		// Unreachable by construction: prepareAdminRefund already rejects CCBill
-		// and unsupported rails before a reservation exists. Reaching here
-		// means the issue-stage switch drifted from the prepare-stage guard —
-		// an internal invariant violation, not a user error.
+		// Unreachable by construction: prepareAdminRefund already rejects
+		// unsupported rails before a reservation exists. Reaching here means the
+		// issue-stage switch drifted from the prepare-stage guard — an internal
+		// invariant violation, not a user error.
 		cause := fmt.Errorf("rail %s reached refund issue stage unguarded", prepared.payment.Rail)
 		log.WithError(cause).WithField("payment_id", prepared.payment.ID).Error("admin refund: issue-stage rail switch drifted from prepare-stage guard")
 		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
@@ -367,11 +416,12 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		SubscriptionID: prepared.payment.SubscriptionID,
 		PaymentID:      &paymentRowID,
 		Payload: intents.RefundPayload{
-			OriginalPaymentID: prepared.payment.ID,
-			ReservationID:     prepared.reservation.ID,
-			AmountCents:       prepared.amountCents,
-			Reason:            strings.TrimSpace(req.Reason),
-			ProviderTarget:    providerTarget,
+			OriginalPaymentID:     prepared.payment.ID,
+			ReservationID:         prepared.reservation.ID,
+			AmountCents:           prepared.amountCents,
+			Reason:                strings.TrimSpace(req.Reason),
+			ProviderTarget:        providerTarget,
+			ProviderTransactionID: providerTransactionID,
 		},
 		IdempotencyKey: intentKey,
 		NextAttemptAt:  time.Now().UTC(),

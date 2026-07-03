@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -32,6 +33,7 @@ import (
 const (
 	TypeNMIRefund    = "nmi_refund"
 	TypeStripeRefund = "stripe_refund"
+	TypeCCBillRefund = "ccbill_refund"
 )
 
 // RefundPayload is the stored payload for refund intents.
@@ -46,9 +48,15 @@ type RefundPayload struct {
 	AmountCents moneyutil.Cents `json:"amount_cents"`
 	Reason      string          `json:"reason,omitempty"`
 	// ProviderTarget is what the provider refunds against: the Stripe charge /
-	// payment-intent id (ch_/pi_), or the NMI transaction id of the original
-	// payment.
+	// payment-intent id (ch_/pi_), the NMI transaction id of the original
+	// payment, or — for CCBill — the CCBill subscriptionId (the
+	// voidOrRefundTransaction action key).
 	ProviderTarget string `json:"provider_target"`
+	// ProviderTransactionID is the original provider transaction id, used only by
+	// rails whose refund action needs BOTH a subscription id (ProviderTarget) and
+	// the specific transaction — CCBill (voidOrRefundTransaction). Empty for
+	// NMI/Stripe (ProviderTarget alone identifies the charge/transaction).
+	ProviderTransactionID string `json:"provider_transaction_id,omitempty"`
 }
 
 // NMIRefundIdempotencyKey content-addresses one logical NMI refund: original
@@ -56,6 +64,14 @@ type RefundPayload struct {
 // mutation (NMI has no request-level idempotency; this key is the guard).
 func NMIRefundIdempotencyKey(transactionID string, amountCents int64) string {
 	return fmt.Sprintf("%s:%s:%d", TypeNMIRefund, strings.TrimSpace(transactionID), amountCents)
+}
+
+// CCBillRefundIdempotencyKey content-addresses one logical CCBill refund:
+// subscription + original transaction + amount. Re-asking for the same refund is
+// ONE provider mutation (CCBill has no request-level idempotency; this key is the
+// ledger guard).
+func CCBillRefundIdempotencyKey(subscriptionID, transactionID string, amountCents int64) string {
+	return fmt.Sprintf("%s:%s:%s:%d", TypeCCBillRefund, strings.TrimSpace(subscriptionID), strings.TrimSpace(transactionID), amountCents)
 }
 
 // StripeRefundIntentIdempotencyKey is the stripe_refund intent identity —
@@ -441,6 +457,189 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	return Succeeded(map[string]any{"provider_refund_id": result.ID, "refund_status": result.Status, "verified_existing": true})
 }
 
+// ============================================================================
+// CCBill
+// ============================================================================
+
+// ccbillDenialMaxAttempts bounds clean retries of a CCBill DataLink DENIAL
+// (ccbill.ErrDataLinkAuth: bare -7 or HTTP 401/403) before it is declared
+// terminal. -7 is OVERLOADED — verified 2026-07-03 (safe fail-probe, no money
+// moved): CCBill returns -7 BOTH for a wrong password AND for a refund/void of a
+// too-old, non-refundable transaction with VALID creds. The operation did NOT
+// execute either way, so a few clean retries cover a transient auth/IP flap; past
+// that the denial is treated as PERMANENT (not permitted / not refundable /
+// broken creds) and handed to an operator, never retried forever behind a
+// misleading "auth" reason.
+const ccbillDenialMaxAttempts = 3
+
+// ccbillDenialExhausted reports whether a -7/auth denial has spent its bounded
+// clean-retry budget and must go terminal. intent.Attempts is 1 on the first
+// execution (the claim bumps it before Execute runs), so the budget is
+// ccbillDenialMaxAttempts distinct send attempts.
+func ccbillDenialExhausted(attempts int32) bool {
+	return attempts >= ccbillDenialMaxAttempts
+}
+
+// CCBillRefundHandler executes refunds against CCBill via the DataLink SMS choke
+// point (voidOrRefundTransaction). CCBill has NO request-level idempotency AND
+// exposes no per-transaction refund read — only per-subscription refund/void
+// COUNTERS — so effectively-once rests on the ledger (one intent per
+// subscription+transaction+amount) and the money mover NEVER blind-resends: any
+// outcome that MIGHT have moved money parks as unknown_needs_verify and the
+// verifier resolves it against the counters (verify-not-decline, #674).
+//
+// WIRE PROVISIONAL — the refund request+response shape is unverified (cannot
+// probe live: real money). See ccbill.DataLinkClient.RefundTransaction.
+type CCBillRefundHandler struct {
+	refundReservations
+	Client *ccbill.DataLinkClient
+	Policy BackoffPolicy
+}
+
+func NewCCBillRefundHandler(d *db.DB, client *ccbill.DataLinkClient, clock clockwork.Clock) *CCBillRefundHandler {
+	return &CCBillRefundHandler{
+		refundReservations: refundReservations{DB: d, Clock: clock},
+		Client:             client,
+		Policy:             DefaultBackoff,
+	}
+}
+
+func (h *CCBillRefundHandler) Type() string                         { return TypeCCBillRefund }
+func (h *CCBillRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+
+// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): the admin
+// refund producer reads reservation_id off the durable succeeded row to detect a
+// double-refund conflict (admin_payments.go).
+func (h *CCBillRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
+
+func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+	return h.checkRelevance(ctx, intent)
+}
+
+func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	if h.Client == nil {
+		return Parked("ccbill datalink client not configured")
+	}
+	if h.Client.ReadOnly {
+		return Parked("ccbill provider writes blocked (mode=readonly)")
+	}
+	p, err := decodeRefundPayload(intent)
+	if err != nil {
+		return Terminal(err.Error())
+	}
+	subscriptionID := strings.TrimSpace(p.ProviderTarget)
+	transactionID := strings.TrimSpace(p.ProviderTransactionID)
+	if transactionID == "" {
+		// Never refund without the exact transaction id — CCBill would otherwise
+		// pick the latest charge on the subscription.
+		return Terminal("ccbill refund requires the original transaction id (provider_transaction_id)")
+	}
+
+	// Money mover on a provider with no request idempotency: a reclaimed lease
+	// (attempts > 1) means a prior send MAY have reached CCBill. Pre-send verify
+	// via the per-subscription counters before sending again (verify-not-decline).
+	if intent.Attempts > 1 {
+		if proceed, out := h.preSendVerify(ctx, subscriptionID, transactionID); !proceed {
+			return out
+		}
+	}
+
+	res, err := h.Client.RefundTransaction(ctx, subscriptionID, transactionID, p.AmountCents)
+	if err != nil {
+		switch {
+		case errors.Is(err, ccbill.ErrProviderReadOnly):
+			return Parked("ccbill provider writes blocked (mode=readonly)")
+		case errors.Is(err, ccbill.ErrDataLinkAuth):
+			// -7 is CCBill's OVERLOADED denial (auth/IP OR operation-not-permitted,
+			// e.g. a too-old / non-refundable transaction). It did NOT execute
+			// (safe — a counter re-read confirms no money moved), but it may be
+			// PERMANENT: bounded clean-retry for a transient auth/IP flap, then
+			// terminal for the operator — never infinite retry behind a misleading
+			// "auth" reason. Terminal releases the reservation.
+			if ccbillDenialExhausted(intent.Attempts) {
+				return h.terminally(ctx, p,
+					"ccbill refund denied (-7): provider refused after bounded retries — not permitted / not refundable / auth — needs operator attention",
+					map[string]any{"denial_code": "-7", "attempts": intent.Attempts})
+			}
+			return Retryable("ccbill refund denied (-7): provider refused (auth/IP, or not permitted / not refundable); bounded retry")
+		default:
+			// Definite reject (ErrRefundRejected) or transport/unparseable
+			// ambiguity — the refund MAY have moved money. Verifier reads before
+			// any decline (#674 verify-not-decline).
+			return Ambiguous("ccbill refund outcome unknown: " + err.Error())
+		}
+	}
+	if err := h.finalize(ctx, p, ccbillRefundProviderRef(subscriptionID, transactionID)); err != nil {
+		return Ambiguous("refunded at provider, but local finalize failed: " + err.Error())
+	}
+	return Succeeded(map[string]any{
+		"results":              res.Results,
+		"action":               res.Action,
+		"rail_subscription_id": subscriptionID,
+		"transaction_id":       transactionID,
+	})
+}
+
+// Verify resolves an ambiguous CCBill refund via viewSubscriptionStatus. CCBill
+// exposes only per-subscription refund/void COUNTERS, so:
+//   - counters KNOWN and ZERO -> no refund/void exists on the subscription; the
+//     refund definitely did not execute (Retryable — the executor may resend).
+//   - counters NONZERO or UNKNOWN -> a refund/void may exist but cannot be
+//     attributed to THIS transaction (CCBill has no per-transaction refund read);
+//     stay Ambiguous so an operator confirms — never auto-decline (would strand a
+//     real refund) nor auto-resend (double refund). A producer-captured baseline
+//     would let "counter incremented" prove attribution (future enhancement).
+func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	if h.Client == nil {
+		return Ambiguous("ccbill datalink client not configured; cannot verify")
+	}
+	p, err := decodeRefundPayload(intent)
+	if err != nil {
+		return Terminal(err.Error())
+	}
+	total, known, err := h.refundCounters(ctx, strings.TrimSpace(p.ProviderTarget))
+	if err != nil {
+		return Ambiguous("provider read failed: " + err.Error())
+	}
+	if known && total == 0 {
+		return Retryable("no refund/void recorded on the subscription at provider; verified not executed")
+	}
+	return Ambiguous(fmt.Sprintf(
+		"ccbill exposes only per-subscription refund counters (refunds+voids=%d, known=%v); cannot attribute to transaction %s — operator must confirm",
+		total, known, strings.TrimSpace(p.ProviderTransactionID)))
+}
+
+// preSendVerify reads the counters before a reclaimed resend. proceed=true ONLY
+// when the counters are KNOWN-ZERO (nothing refunded yet — safe to send again).
+func (h *CCBillRefundHandler) preSendVerify(ctx context.Context, subscriptionID, transactionID string) (proceed bool, out Outcome) {
+	total, known, err := h.refundCounters(ctx, subscriptionID)
+	if err != nil {
+		return false, Ambiguous("pre-send verification read failed: " + err.Error())
+	}
+	if known && total == 0 {
+		return true, Outcome{}
+	}
+	return false, Ambiguous(fmt.Sprintf(
+		"pre-send verify inconclusive (refunds+voids=%d, known=%v); not resending to avoid double refund on transaction %s",
+		total, known, transactionID))
+}
+
+func (h *CCBillRefundHandler) refundCounters(ctx context.Context, subscriptionID string) (total int64, known bool, err error) {
+	status, err := h.Client.ViewSubscriptionStatus(ctx, subscriptionID)
+	if err != nil {
+		return 0, false, err
+	}
+	total, known = status.RefundsAndVoidsIssued()
+	return total, known, nil
+}
+
+// ccbillRefundProviderRef is the synthetic provider reference recorded on the
+// completed reservation. CCBill answers a refund with a bare results code, NOT a
+// refund id, so the stable reference is the (subscription, transaction) pair.
+func ccbillRefundProviderRef(subscriptionID, transactionID string) string {
+	return "ccbill_refund:" + subscriptionID + ":" + transactionID
+}
+
 // RefundIntentFor derives the intent type, provider key and content-addressed
 // idempotency key for refunding a payment, or an error when the rail has
 // no ledger refund path. Shared by the admin producer so handler and producer
@@ -452,6 +651,11 @@ func RefundIntentFor(payment *models.Payment, providerTarget string, amountCents
 	case payment.Rail == models.RailStripe:
 		return TypeStripeRefund, strings.ToLower(string(payment.Rail)),
 			StripeRefundIntentIdempotencyKey(providerTarget, int64(amountCents), reason), nil
+	case payment.Rail == models.RailCCBill:
+		// providerTarget is the CCBill subscriptionId; the transactionId is the
+		// payment's own transaction id — both content-address the refund.
+		return TypeCCBillRefund, strings.ToLower(string(payment.Rail)),
+			CCBillRefundIdempotencyKey(providerTarget, payment.TransactionID, int64(amountCents)), nil
 	default:
 		return TypeNMIRefund, strings.ToLower(string(payment.Rail)),
 			NMIRefundIdempotencyKey(providerTarget, int64(amountCents)), nil

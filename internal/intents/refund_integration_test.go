@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -306,6 +307,97 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 		status, _, _ := fx.reservation(t)
 		assert.Equal(t, "completed", status)
 	})
+}
+
+// fakeDataLinkDenyRefund serves an action-aware DataLink SMS: the refund action
+// always returns the OVERLOADED denial code -7 (as CCBill did in the 2026-07-03
+// safe fail-probe against a too-old transaction), while viewSubscriptionStatus
+// returns known-zero counters so the pre-send verify lets each attempt proceed.
+func fakeDataLinkDenyRefund(t *testing.T) (*ccbill.DataLinkClient, *atomic.Int64) {
+	t.Helper()
+	var refundHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.PostFormValue("action") == "voidOrRefundTransaction" {
+			refundHits.Add(1)
+			_, _ = w.Write([]byte(`<results>-7</results>`))
+			return
+		}
+		// viewSubscriptionStatus: alive sub, no refunds/voids recorded.
+		_, _ = w.Write([]byte(`<results><subscriptionStatus>2</subscriptionStatus><refundsIssued>0</refundsIssued><voidsIssued>0</voidsIssued></results>`))
+	}))
+	t.Cleanup(srv.Close)
+	client := &ccbill.DataLinkClient{
+		BaseURL: srv.URL, ClientAccNum: "900100", ClientSubAcc: "0000",
+		Username: "u", Password: "p", HTTPClient: &http.Client{Timeout: 5 * time.Second},
+	}
+	return client, &refundHits
+}
+
+// TestCCBillRefundDenialBoundedRetryThenTerminal: -7 is CCBill's OVERLOADED
+// denial (auth OR not-permitted/too-old). The refund did NOT execute, so it is
+// bounded-retried (a few clean attempts cover a transient auth/IP flap) and then
+// declared TERMINAL — never infinite Retryable behind a misleading "auth" reason.
+// Terminal releases the reservation and the reason is operator-facing.
+func TestCCBillRefundDenialBoundedRetryThenTerminal(t *testing.T) {
+	fx := seedRefundablePayment(t, 500)
+	client, refundHits := fakeDataLinkDenyRefund(t)
+	ctx := context.Background()
+
+	runner := &Runner{
+		Store:    fx.store,
+		Registry: NewRegistry(NewCCBillRefundHandler(fx.db, client, nil)),
+		Config:   fullModeConfig(),
+	}
+	paymentID := fx.paymentID
+	params := EnqueueParams{
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		Provider:   "ccbill",
+		IntentType: TypeCCBillRefund,
+		PaymentID:  &paymentID,
+		Payload: RefundPayload{
+			OriginalPaymentID:     fx.paymentID,
+			ReservationID:         fx.reservationID,
+			AmountCents:           moneyutil.Cents(500),
+			ProviderTarget:        "sub_x", // CCBill subscriptionId (arbitrary here)
+			ProviderTransactionID: "tx_x",
+		},
+		IdempotencyKey: CCBillRefundIdempotencyKey("sub_x", "tx_x", 500),
+		NextAttemptAt:  time.Now().UTC(),
+		Origin:         OriginAdmin,
+		OriginReason:   "integration test",
+	}
+
+	// First (synchronous) attempt: -7 -> bounded retry, NOT terminal, NOT the old
+	// "auth rejected" reason.
+	row, err := runner.EnqueueAndExecute(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailedRetryable, row.Status, "-7 first attempt is a bounded retry, not infinite/terminal")
+	require.NotNil(t, row.LastFailureReason)
+	assert.Contains(t, *row.LastFailureReason, "denied (-7)")
+	assert.NotContains(t, *row.LastFailureReason, "auth rejected")
+	status, _, _ := fx.reservation(t)
+	assert.Equal(t, "pending", status, "reservation stays open while the intent retries")
+
+	// Drive the scheduled executor until the bounded budget is spent -> terminal.
+	for i := 0; i < ccbillDenialMaxAttempts+2; i++ {
+		if fx.intentByID(t, row.ID).Status == StatusFailedTerminal {
+			break
+		}
+		_, err = fx.db.Pool().Exec(ctx,
+			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		require.NoError(t, err)
+		_, err = runner.RunExecuteOnce(ctx)
+		require.NoError(t, err)
+	}
+
+	final := fx.intentByID(t, row.ID)
+	assert.Equal(t, StatusFailedTerminal, final.Status, "a permanently-denied refund goes terminal, not forever-retryable")
+	require.NotNil(t, final.LastFailureReason)
+	assert.Contains(t, *final.LastFailureReason, "operator")
+	assert.EqualValues(t, ccbillDenialMaxAttempts, refundHits.Load(), "exactly the bounded number of refund sends, then stop")
+	status, _, _ = fx.reservation(t)
+	assert.Equal(t, "failed", status, "terminal denial releases the reservation")
 }
 
 // TestNMIRefundDeclineReleasesReservation: a clean gateway decline is

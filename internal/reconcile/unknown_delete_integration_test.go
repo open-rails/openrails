@@ -28,7 +28,7 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	// The REAL production scheduler (intent-ledger backed), as wired by
 	// jobs_provider_refresh.runUnknownReconcile.
-	lc.SetDeferredDeleteScheduler(intents.NewNMIDeleteScheduler(appDB, intents.OriginSystem, "unknown-resolution stale-decline cancel"))
+	lc.SetDeferredDeleteScheduler(intents.NewNMIDeleteScheduler(appDB, nil, intents.OriginSystem, "unknown-resolution stale-decline cancel"))
 
 	now := time.Now().UTC()
 	periodEnd := now.Add(-30 * 24 * time.Hour) // lapsed far beyond the 14d dunning window
