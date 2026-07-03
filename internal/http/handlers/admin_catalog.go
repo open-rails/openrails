@@ -238,8 +238,8 @@ func AdminListPrices(r *httprequest.Request) {
 		Type:     strings.TrimSpace(r.Query("type")),
 	}
 	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
-		active := parseBool(v)
-		filter.Active = &active
+		archived := !parseBool(v)
+		filter.Archived = &archived
 	}
 	limit := parseIntDefault(r.Query("limit"), 100)
 	offset := parseIntDefault(r.Query("offset"), 0)

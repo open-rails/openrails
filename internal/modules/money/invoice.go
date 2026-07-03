@@ -69,13 +69,12 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		return nil, err
 	}
 
-	// #615: rate reported usage (openrails.usage_events) into pending owed invoice
-	// items via the catalog metered sidecars the payer reported usage for in this
-	// period, BEFORE the finalize transaction rolls pending items onto the invoice.
-	// Runs in its own transactions (AccrueOwed) so the committed owed accruals are
-	// visible to the finalize tx below; idempotent on a deterministic period
-	// source_id, so a re-finalize accrues nothing new.
-	if err := s.sweepCatalogMeteredUsage(ctx, payer, cur, from.UTC(), to.UTC()); err != nil {
+	// #615/#707: rate reported usage (openrails.usage_events) into pending owed
+	// invoice items via the catalog rate cards, BEFORE the finalize transaction
+	// rolls pending items onto the invoice. Runs in its own transactions
+	// (AccrueOwed) so the committed owed accruals are visible to the finalize tx
+	// below; the #672 watermark makes a re-finalize accrue nothing new.
+	if err := s.sweepCatalogRateCardUsage(ctx, payer, cur, from.UTC(), to.UTC()); err != nil {
 		return nil, err
 	}
 
@@ -190,6 +189,11 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			}
 		}
 		receivable := pendingReceivable + trueUp
+		// #726: itemize the true-up on the frozen statement (the only
+		// reader-facing itemization); the money truth is the owed ledger below.
+		if trueUp > 0 {
+			lineItems = append(lineItems, models.InvoiceLineItem{EventType: "minimum_spend_trueup", Amount: trueUp, Count: 1})
+		}
 
 		// --- closing balance snapshot (derived, #491) ---
 		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
@@ -280,7 +284,10 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		}); err != nil {
 			return err
 		}
-		attached, err := q.AttachPendingInvoiceItemsToInvoice(ctx, gen.AttachPendingInvoiceItemsToInvoiceParams{
+		// #726: consume the pending workspace — attached rows keep only their
+		// invoice_id/status tombstone so they can't bill twice. No 'invoiced'
+		// rows are inserted; the statement itemization is line_items above.
+		if _, err := q.AttachPendingInvoiceItemsToInvoice(ctx, gen.AttachPendingInvoiceItemsToInvoiceParams{
 			MerchantID: inv.MerchantID,
 			CustomerID: inv.CustomerID,
 			InvoiceID:  &inv.ID,
@@ -288,47 +295,15 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			Currency:   inv.Currency,
 			PeriodFrom: inv.PeriodFrom,
 			PeriodTo:   inv.PeriodTo,
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
-		if attached == 0 {
-			if err := insertInvoiceItemsFromRollup(ctx, q, inv, now); err != nil {
-				return err
-			}
-		}
-		// #643: post the minimum-spend true-up as a real owed liability + an
-		// invoiced line on this invoice, so the ledger balance and amount_due
-		// agree. Idempotent — FinalizeInvoice returns the existing invoice on
-		// re-finalize before reaching here.
+		// #643: post the minimum-spend true-up as a real owed liability so the
+		// ledger balance and amount_due agree. Idempotent — FinalizeInvoice
+		// returns the existing invoice on re-finalize before reaching here.
 		if trueUp > 0 {
 			if _, lerr := s.moneyLedger(q, tenantID).AccrueOwed(ctx, payerID, cur, trueUp, "minimum_spend_trueup", inv.ID.String(), &inv.ID); lerr != nil {
 				return lerr
-			}
-			trueUpMeta, jerr := json.Marshal(map[string]any{"kind": "minimum_spend_trueup"})
-			if jerr != nil {
-				return fmt.Errorf("money: encode true-up metadata: %w", jerr)
-			}
-			if err := q.InsertInvoiceItem(ctx, gen.InsertInvoiceItemParams{
-				ID:         uuidutil.NewV7(),
-				MerchantID: tenantID,
-				CustomerID: payerID,
-				Currency:   cur,
-				InvoiceID:  &inv.ID,
-				SourceType: "minimum_spend_trueup",
-				SourceID:   inv.ID.String(),
-				PeriodFrom: pfrom,
-				PeriodTo:   pto,
-				InvoiceAt:  now,
-				Quantity:   1,
-				UnitAmount: trueUp,
-				Amount:     trueUp,
-				Status:     "invoiced",
-				Metadata:   trueUpMeta,
-				CreatedAt:  now,
-				UpdatedAt:  now,
-			}); err != nil {
-				return err
 			}
 		}
 		return nil
@@ -337,48 +312,6 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		return nil, err
 	}
 	return inv, nil
-}
-
-func insertInvoiceItemsFromRollup(ctx context.Context, q *gen.Queries, inv *models.Invoice, now time.Time) error {
-	for _, item := range inv.LineItems {
-		metadata, err := json.Marshal(map[string]any{"dimensions": item.Dimensions})
-		if err != nil {
-			return fmt.Errorf("money: encode invoice item metadata: %w", err)
-		}
-		eventType := item.EventType
-		sourceID := fmt.Sprintf("%s:%s", inv.ID.String(), item.EventType)
-		quantity := item.Count
-		if quantity <= 0 {
-			quantity = 1
-		}
-		unitAmount := int64(0)
-		if item.Count > 0 {
-			unitAmount = item.Amount / item.Count
-		}
-		if err := q.InsertInvoiceItem(ctx, gen.InsertInvoiceItemParams{
-			ID:         uuidutil.NewV7(),
-			MerchantID: inv.MerchantID,
-			CustomerID: inv.CustomerID,
-			Currency:   inv.Currency,
-			InvoiceID:  &inv.ID,
-			SourceType: "usage_rollup",
-			SourceID:   sourceID,
-			EventType:  &eventType,
-			PeriodFrom: inv.PeriodFrom,
-			PeriodTo:   inv.PeriodTo,
-			InvoiceAt:  now,
-			Quantity:   quantity,
-			UnitAmount: unitAmount,
-			Amount:     item.Amount,
-			Status:     "invoiced",
-			Metadata:   metadata,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ListInvoices lists an merchant subject's finalized invoices, newest period first,
@@ -619,20 +552,20 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		// Off-rail manual invoice settlement is recorded under the manual channel.
 		rail := string(models.ChannelManual)
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:                 uuidutil.NewV7(),
-			MerchantID:         tid.UUID(),
-			CustomerID:         payer.UUID(),
-			InvoiceID:          id,
-			MoneyTransactionID: &tr.ID,
-			Currency:           invoiceRow.Currency,
-			Amount:             amount,
-			Status:             "settled",
-			Rail:               &rail,
-			RailPaymentID:      &railPaymentID,
-			AttemptedAt:        now,
-			SettledAt:          &now,
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			ID:               uuidutil.NewV7(),
+			MerchantID:       tid.UUID(),
+			CustomerID:       payer.UUID(),
+			InvoiceID:        id,
+			LedgerTransferID: &tr.ID,
+			Currency:         invoiceRow.Currency,
+			Amount:           amount,
+			Status:           "settled",
+			Rail:             &rail,
+			RailPaymentID:    &railPaymentID,
+			AttemptedAt:      now,
+			SettledAt:        &now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}); e != nil {
 			return e
 		}

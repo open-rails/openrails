@@ -233,14 +233,14 @@ func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.Enqu
 	return gen.OpenrailsRailIntent{
 		ID:         uuid.New(),
 		IntentType: p.IntentType,
-		Provider:   p.Provider,
+		Rail:       p.Provider,
 		Status:     intents.StatusSucceeded,
 	}, nil
 }
 
 func succeededRow(p intents.EnqueueParams, evidence string) gen.OpenrailsRailIntent {
 	return gen.OpenrailsRailIntent{
-		ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+		ID: uuid.New(), IntentType: p.IntentType, Rail: p.Provider,
 		Status: intents.StatusSucceeded, ResultEvidence: []byte(evidence),
 	}
 }
@@ -356,7 +356,7 @@ func TestArchiveCatalogExtrasVia_ParkedIsDurableNotError(t *testing.T) {
 	reason := "mode=readonly blocks all provider writes"
 	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsRailIntent {
 		return gen.OpenrailsRailIntent{
-			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+			ID: uuid.New(), IntentType: p.IntentType, Rail: p.Provider,
 			Status: intents.StatusPending, LastFailureReason: &reason,
 		}
 	}}
@@ -385,7 +385,7 @@ func TestArchiveCatalogExtrasVia_TerminalFailuresAggregate(t *testing.T) {
 	reason := "stripe refused"
 	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.OpenrailsRailIntent {
 		return gen.OpenrailsRailIntent{
-			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+			ID: uuid.New(), IntentType: p.IntentType, Rail: p.Provider,
 			Status: intents.StatusFailedTerminal, LastFailureReason: &reason,
 		}
 	}}
@@ -436,10 +436,10 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	cycleHours := 30 * 24
 	productID := uuid.New()
 	product := &models.Product{ID: productID, Key: "premium"}
-	mkPrice := func(pda string, status models.CatalogStatus) *models.Price {
+	mkPrice := func(pda string, archived bool) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
-			AccessDurationHours: &cycleHours, AutoRenew: true, Status: status,
+			AccessDurationHours: &cycleHours, AutoRenew: true, Archived: archived,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": pda},
 			},
@@ -451,10 +451,10 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	pdaActiveLive := solanago.NewWallet().PublicKey().String()     // ACTIVE price -> in the live catalog, never an extra
 
 	snap := buildSnapshotFromRows([]*models.Product{product}, []*models.Price{
-		mkPrice(pdaActiveArchived, models.CatalogStatusArchived),
-		mkPrice(pdaSunsetArchived, models.CatalogStatusArchived),
-		mkPrice(pdaAbsentArchived, models.CatalogStatusArchived),
-		mkPrice(pdaActiveLive, models.CatalogStatusActive),
+		mkPrice(pdaActiveArchived, true),
+		mkPrice(pdaSunsetArchived, true),
+		mkPrice(pdaAbsentArchived, true),
+		mkPrice(pdaActiveLive, false),
 	})
 	reader := &fakeSolanaReader{accounts: map[string][]byte{
 		pdaActiveArchived: encodeTestPlanAccount(1), // active

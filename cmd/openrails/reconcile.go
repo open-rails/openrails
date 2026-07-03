@@ -28,6 +28,7 @@ func newPullProviderCmd() *cobra.Command {
 		railMerchantAccount string
 		runIDStr            string
 		logDir              string
+		manifestPath        string
 		insert              bool
 		overwrite           bool
 		prune               bool
@@ -44,10 +45,11 @@ func newPullProviderCmd() *cobra.Command {
 			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
 			"that are ABSENT from the provider source. The remote rails are NEVER mutated.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runPullProvider(c, providers, railMerchantAccount, since, until, format, merchantSlug, logDir, insert, overwrite, prune)
+			return runPullProvider(c, providers, railMerchantAccount, since, until, format, merchantSlug, logDir, manifestPath, insert, overwrite, prune)
 		},
 	}
 	cmd.Flags().StringSliceVar(&providers, "rail", nil, "Rail(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
+	cmd.Flags().StringVar(&manifestPath, "manifest", "", "MODE-1 (#723) merchant manifest to arm credentials from (default: the conventional /etc/openrails/merchants.yaml when present)")
 	cmd.Flags().StringVar(&railMerchantAccount, "provider-account", "", "Provider account UUID to pull explicitly (requires matching configured credentials)")
 	cmd.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
@@ -73,21 +75,22 @@ func newPullProviderCmd() *cobra.Command {
 	return cmd
 }
 
-func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAccountStr, sinceStr, untilStr, format, merchantSlug, logDir string, insert, overwrite, prune bool) error {
+func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAccountStr, sinceStr, untilStr, format, merchantSlug, logDir, manifestPath string, insert, overwrite, prune bool) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	return embedded.PullProvider(cmd.Context(), embedded.PullProviderOptions{
-		Config:              cfg,
-		MerchantSlug:        merchantSlug,
-		Providers:           providerNames,
-		RailMerchantAccount: railMerchantAccountStr,
-		Since:               sinceStr,
-		Until:               untilStr,
-		Format:              format,
-		LogDir:              logDir,
-		Insert:              insert,
-		Overwrite:           overwrite,
-		Prune:               prune,
-		Out:                 os.Stdout,
+		Config:               cfg,
+		MerchantSlug:         merchantSlug,
+		Providers:            providerNames,
+		RailMerchantAccount:  railMerchantAccountStr,
+		Since:                sinceStr,
+		Until:                untilStr,
+		Format:               format,
+		LogDir:               logDir,
+		MerchantManifestPath: manifestPath,
+		Insert:               insert,
+		Overwrite:            overwrite,
+		Prune:                prune,
+		Out:                  os.Stdout,
 	})
 }
 

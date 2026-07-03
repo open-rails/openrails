@@ -124,7 +124,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	logEntry := log.WithContext(ctx).WithFields(log.Fields{
 		"intent_id":   intent.ID,
 		"intent_type": intent.IntentType,
-		"provider":    intent.Provider,
+		"provider":    intent.Rail,
 		"origin":      intent.Origin,
 		"attempts":    intent.Attempts,
 	})
@@ -250,7 +250,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,
-			"provider":    intent.Provider,
+			"provider":    intent.Rail,
 		})
 		handler := r.Registry.Lookup(intent.IntentType)
 		if handler == nil {
@@ -380,7 +380,7 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 	}
 	return logger.LogExternalMutation(ctx, MutationLogParams{
 		MerchantID:            intent.MerchantID,
-		Provider:              intent.Provider,
+		Provider:              intent.Rail,
 		RailMerchantAccountID: intent.RailMerchantAccountID,
 		ProviderIntentID:      &intentID,
 		IntentType:            intent.IntentType,

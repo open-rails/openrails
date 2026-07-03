@@ -6,14 +6,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"io"
-	"net/http"
-	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	log "github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
@@ -22,11 +19,20 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func TestMain(m *testing.M) { dbtest.RunMain(m) }
+// TestMain composes the dbtest and vaulttest shared-container teardowns (both
+// RunMain variants os.Exit, so they cannot nest).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	vaulttest.TerminateShared()
+	dbtest.TerminateShared()
+	dbtest.TerminateSharedRedis()
+	dbtest.TerminateSharedClickHouse()
+	os.Exit(code)
+}
 
 func startSecretsPostgres(t *testing.T) (*db.Pool, context.Context) {
 	t.Helper()
@@ -45,29 +51,22 @@ func testMasterKey(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(k)
 }
 
-// fakeVault serves just enough Vault API for Build's vault branch: token auth is
-// local (no HTTP) and the capability probe hits sys/capabilities-self.
-func fakeVault(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sys/capabilities-self") {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{
-					"secret/data/openrails/probe": []string{"read", "create"},
-				},
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+// vaultBackedConfig is a mode-2 config (#723 merchant_source=api): secrets
+// declared to live in Vault, reached with the given token (#724 — always a REAL
+// Vault, never a mock).
+func vaultBackedConfig(env, addr, token string) *config.Config {
+	return &config.Config{
+		Env:            env,
+		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendVault,
+		Vault:          &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
+	}
 }
 
 // #667 (a): production posture + DB store + no ENCRYPTION_MASTER_KEY refuses boot.
 func TestBuild_ProdDBStoreNoMasterKey_RefusesBoot(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	cfg := &config.Config{Env: "production", SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{Env: "production", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
 	_, err := Build(ctx, cfg, pool)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
@@ -75,18 +74,16 @@ func TestBuild_ProdDBStoreNoMasterKey_RefusesBoot(t *testing.T) {
 }
 
 // #667 (b): production + Vault-backed store boots without a master key (secrets
-// live in Vault; the DB gate never applies).
+// live in Vault; the DB gate never applies). Runs against the real container.
 func TestBuild_ProdVaultStoreNoMasterKey_Boots(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	srv := fakeVault(t)
-	cfg := &config.Config{
-		Env:           "production",
-		SecretBackend: config.SecretBackendVault,
-		Vault:         &config.VaultConfig{Enabled: true, Address: srv.URL, AuthMethod: "token", Token: "test-root"},
-	}
-	store, err := Build(ctx, cfg, pool)
+	addr, token := vaulttest.Addr(t)
+	store, err := Build(ctx, vaultBackedConfig("production", addr, token), pool)
 	require.NoError(t, err)
 	require.NotNil(t, store.Secrets)
+	require.True(t, store.Capabilities.KVRead, "root token must probe KV read")
+	require.True(t, store.Capabilities.KVWrite, "root token must probe KV write")
+	require.True(t, store.SecretWrite)
 }
 
 // #667 (c): dev + DB store + no key boots, with the loud plaintext warning.
@@ -94,7 +91,7 @@ func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 	hook := logtest.NewGlobal()
 	defer hook.Reset()
-	cfg := &config.Config{Env: "dev", SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
 	require.NotNil(t, store.Secrets)
@@ -112,14 +109,15 @@ func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
 func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 	cfg := &config.Config{
-		Env:           "production",
-		SecretBackend: config.SecretBackendDB,
-		Encryption:    &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+		Env:            "production",
+		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
+		Encryption:     &config.EncryptionConfig{MasterKey: testMasterKey(t)},
 	}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
 
-	mid := merchant.ID(uuid.New())
+	mid, _ := registerMerchant(t, ctx, pool, "dbrt") // merchant_deks FK needs a real merchant
 	const plaintext = "sk_live_667_roundtrip"
 	_, err = store.Secrets.Put(ctx, mid, merchants.SecretStripeSecretKey, plaintext)
 	require.NoError(t, err)

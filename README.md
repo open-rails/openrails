@@ -445,8 +445,8 @@ Two orthogonal settings:
 - **`provider_write_mode`** (yaml) / `PROVIDER_WRITE_MODE` (env) /
   `--provider-write-mode` (CLI flag; flag beats env beats yaml) —
   the pure **behavior** dial: how much OpenRails may do against the payment providers.
-  One of `full | limited | readonly`. `mode` / `MODE` / `--mode` remain as deprecated
-  compatibility aliases.
+  One of `full | limited | readonly`. The old `mode` / `MODE` / `--mode` alias is
+  removed (#710) — a set key fails loudly at load.
 - **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
   **credential** axis: `true` enforces sandbox rail credentials. Default `false`.
 

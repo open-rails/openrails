@@ -89,11 +89,14 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 	if opts.ProductID != nil {
 		filter.ProductID = opts.ProductID
 	}
+	// Public wire filter is Stripe-shaped ("active"); the catalog filter is the
+	// archived flag — invert once here.
 	if opts.Active != nil {
-		filter.Active = opts.Active
+		archived := !*opts.Active
+		filter.Archived = &archived
 	} else if !opts.IncludeInactive {
-		active := true
-		filter.Active = &active
+		archived := false
+		filter.Archived = &archived
 	}
 
 	modelPrices, totalItems, err := prices.ListPaginated(ctx, filter, limit, offset)

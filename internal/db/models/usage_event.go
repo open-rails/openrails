@@ -38,9 +38,9 @@ type UsageEvent struct {
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
 	Source   string `json:"source"`
 	SourceID string `json:"source_id"`
-	// MoneyTransactionID links to the ledger debit this event produced.
-	MoneyTransactionID *uuid.UUID     `json:"money_transaction_id,omitempty"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
-	OccurredAt         time.Time      `json:"occurred_at"`
-	CreatedAt          time.Time      `json:"created_at"`
+	// LedgerTransferID links to the ledger debit transfer this event produced.
+	LedgerTransferID *uuid.UUID     `json:"ledger_transfer_id,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+	OccurredAt       time.Time      `json:"occurred_at"`
+	CreatedAt        time.Time      `json:"created_at"`
 }

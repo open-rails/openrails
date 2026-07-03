@@ -57,7 +57,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
 	})
@@ -69,7 +69,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		ProductID:           productID,
 		Amount:              9_990_000,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           clock.Now().UTC(),

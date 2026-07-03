@@ -62,8 +62,8 @@ type planLink struct {
 }
 
 // planLinkIDKeys are the provider-link config keys that hold a rail-side
-// plan/price identifier.
-var planLinkIDKeys = []string{"plan_id", "price_id", "recurring_billing_option_id"}
+// plan/price identifier (plan_pda: solana remote plan ids are the plan PDA).
+var planLinkIDKeys = []string{"plan_id", "price_id", "recurring_billing_option_id", "plan_pda"}
 
 // buildPlanIndex maps remote plan ids onto local prices via the catalog
 // provider_links blobs, restricted to the provider's local rail names.
@@ -524,6 +524,11 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		// Local past_due requires a period end (chk_past_due_has_period_end).
 		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
 	}
+	if discoveredNotLocalRaw(r.Raw) {
+		// #714: chain-scan discoveries (permissionless `subscribe`) never
+		// auto-create local billing state — operator decision only.
+		blockers = append(blockers, "subscription was discovered on-chain with no local checkout trail (#714); creating billing state from chain data alone is an operator decision")
+	}
 	if len(blockers) > 0 {
 		remoteEv["materialize_blocked"] = strings.Join(blockers, "; ")
 		return f
@@ -895,10 +900,19 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 		t := &snap.Transactions[i]
 		switch t.Type {
 		case TransactionTypeSale:
-			if !t.Success || t.AmountCents <= 0 || t.TransactionID == "" {
+			if !t.Success || t.TransactionID == "" {
 				continue
 			}
 			if _, ok := paymentsByTxnID[t.TransactionID]; ok {
+				continue
+			}
+			// #714 wallet-scan discoveries route on their verdict envelope
+			// (before the amount gate: unpriced discoveries must still park).
+			if f, ok := makeSolanaDiscoveryPS4(provider, t); ok {
+				findings = append(findings, f)
+				continue
+			}
+			if t.AmountCents <= 0 {
 				continue
 			}
 			findings = append(findings, makePS4(provider, t, corr, now))
@@ -985,6 +999,116 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		f.Apply = &ApplyAction{BackfillPayment: action}
 	}
 	return f
+}
+
+// decodeSolanaDiscovery extracts the #714 wallet-scan verdict envelope from a
+// transaction's Raw; nil when the transaction is not a wallet-scan discovery.
+func decodeSolanaDiscovery(raw json.RawMessage) *solanaDiscovery {
+	if len(raw) == 0 {
+		return nil
+	}
+	var wrap struct {
+		D *solanaDiscovery `json:"solana_discovery"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil
+	}
+	return wrap.D
+}
+
+// discoveredNotLocalRaw reports the #714 program-scan marker: the remote
+// subscription exists on-chain with no local mirror row.
+func discoveredNotLocalRaw(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var wrap struct {
+		D bool `json:"discovered_not_local"`
+	}
+	_ = json.Unmarshal(raw, &wrap)
+	return wrap.D
+}
+
+// makeSolanaDiscoveryPS4 routes a #714 wallet-scan discovery (memo-recognized
+// merchant-wallet charge with no local payment). Verify-not-decline:
+//   - fetcher verdict "park" (any memo/local-record/transfer disagreement,
+//     duplicate local-id) => requires_review, never applied;
+//   - clean but unpriced (asset is not a registry USD stablecoin) => parked
+//     too — the payments mirror is fiat, so the operator prices it manually;
+//   - clean one-off with resolved checkout-session identity => backfill via
+//     the same idempotent payment lane the other rails use, money from the
+//     on-chain transfer only;
+//   - clean pull => ok=false, the generic correlator lane owns it (matches by
+//     subscription PDA; unknown subscriptions park there).
+func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, bool) {
+	d := decodeSolanaDiscovery(t.Raw)
+	if d == nil {
+		return Finding{}, false
+	}
+	if d.Verdict == "clean" && d.Kind == solanaDiscoveryKindPull {
+		return Finding{}, false
+	}
+
+	ev := remoteTxnEvidence(t)
+	ev["memo_local_id"] = d.MemoLocalID
+	ev["discovered_via"] = "wallet_scan"
+	f := Finding{
+		Provider:       provider,
+		Type:           FindingChargeMissingLocal,
+		SubjectKey:     t.TransactionID,
+		Severity:       SeverityHigh,
+		Status:         FindingStatusReconcileRequired,
+		RemoteEvidence: ev,
+	}
+
+	park := func(reason string) (Finding, bool) {
+		ev["park_reason"] = reason
+		f.Status = FindingStatusAdminRequired
+		f.RequiresAdmin = true
+		f.RecommendedAction = "memo-recognized on-chain payment failed verification (" + reason + "); operator triage — recovery never auto-lands on a mismatch (verify-not-decline)"
+		return f, true
+	}
+
+	if d.Verdict != "clean" {
+		return park(d.ParkReason)
+	}
+	// Clean one-off.
+	if t.AmountCents <= 0 {
+		return park("recognized purchase is unpriced (transfer asset is not a registry USD stablecoin); price it from the Raw transfer truth and import manually")
+	}
+	customerID, err := uuid.Parse(d.CustomerID)
+	if err != nil {
+		return park("discovery envelope carries no resolved customer identity")
+	}
+	priceID, err := uuid.Parse(d.PriceID)
+	if err != nil {
+		return park("discovery envelope carries no resolved price identity")
+	}
+
+	f.LocalEvidence = map[string]any{
+		"checkout_session_id": d.MemoLocalID,
+		"customer_id":         customerID.String(),
+		"price_id":            priceID.String(),
+		"correlated_via":      "purchase_memo",
+	}
+	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout session (recipient, mint and amount agree); enforce backfills the missing openrails.payments row with money from the on-chain transfer"
+	f.Apply = &ApplyAction{BackfillPayment: &BackfillPaymentAction{
+		Rail:          string(ProviderSolana),
+		TransactionID: t.TransactionID,
+		AmountCents:   t.AmountCents,
+		Currency:      strings.ToLower(t.Currency),
+		PurchasedAt:   t.OccurredAt,
+		PriceID:       priceID,
+		CustomerID:    customerID,
+		Metadata: map[string]any{
+			"reconcile_backfill":  true,
+			"correlated_via":      "purchase_memo",
+			"discovered_via":      "wallet_scan",
+			"checkout_session_id": d.MemoLocalID,
+			"provider":            string(provider),
+		},
+	}}
+	return f, true
 }
 
 func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment, now time.Time) (Finding, bool) {

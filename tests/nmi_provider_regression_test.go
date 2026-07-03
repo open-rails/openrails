@@ -158,9 +158,7 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	}
 
 	settings := &config.NMIProviderSettings{
-		Name:        provider,
 		SecurityKey: "test-security-key-" + provider,
-		TestMode:    true,
 	}
 	client, err := nmi.NewClient(provider, settings, true)
 	require.NoError(t, err)

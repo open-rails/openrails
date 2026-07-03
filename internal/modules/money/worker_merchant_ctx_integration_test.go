@@ -62,7 +62,7 @@ func TestAutoTopupWorker_NoMerchantContext_TopsUpSeededMerchant(t *testing.T) {
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
+		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmount: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})

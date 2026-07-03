@@ -67,47 +67,6 @@ func DefaultCardAbuseConfig() CardAbuseConfig {
 	}
 }
 
-func (c CardAbuseConfig) withDefaults() CardAbuseConfig {
-	d := DefaultCardAbuseConfig()
-	if c.FailWindow <= 0 {
-		c.FailWindow = d.FailWindow
-	}
-	if c.CaptchaAfter <= 0 {
-		c.CaptchaAfter = d.CaptchaAfter
-	}
-	if c.BlockAfter <= 0 {
-		c.BlockAfter = d.BlockAfter
-	}
-	if c.BlockAfter < c.CaptchaAfter {
-		c.BlockAfter = c.CaptchaAfter
-	}
-	if c.ChallengeTTL <= 0 {
-		c.ChallengeTTL = d.ChallengeTTL
-	}
-	if c.BlockTTL <= 0 {
-		c.BlockTTL = d.BlockTTL
-	}
-	if c.DailyWindow <= 0 {
-		c.DailyWindow = d.DailyWindow
-	}
-	if c.DailyBlockAfter <= 0 {
-		c.DailyBlockAfter = d.DailyBlockAfter
-	}
-	if c.DailyBlockTTL <= 0 {
-		c.DailyBlockTTL = d.DailyBlockTTL
-	}
-	if c.GlobalWindow <= 0 {
-		c.GlobalWindow = d.GlobalWindow
-	}
-	if c.GlobalAttackAfter <= 0 {
-		c.GlobalAttackAfter = d.GlobalAttackAfter
-	}
-	if c.AttackTTL <= 0 {
-		c.AttackTTL = d.AttackTTL
-	}
-	return c
-}
-
 // CardAbuseGuard records failed card attempts and escalates abusive subjects to
 // captcha (then an aggressive block), plus a site-wide attack mode — all by
 // reusing the existing Redis windowed limiter and the captcha ChallengeStore.
@@ -120,9 +79,11 @@ type CardAbuseGuard struct {
 
 // NewCardAbuseGuard builds the guard. If lim or challenges is nil the guard is
 // a safe no-op (so it never breaks the charge path when Redis/captcha aren't
-// configured).
+// configured). cfg is used VERBATIM (#711 — no zero-value re-defaulting):
+// production wires DefaultCardAbuseConfig(), the ONE defaults path; tests
+// pass a complete config.
 func NewCardAbuseGuard(lim *ratelimit.Limiter, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
-	return &CardAbuseGuard{lim: lim, challenges: challenges, cfg: cfg.withDefaults()}
+	return &CardAbuseGuard{lim: lim, challenges: challenges, cfg: cfg}
 }
 
 func (g *CardAbuseGuard) enabled() bool {

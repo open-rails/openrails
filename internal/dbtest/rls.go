@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	// appRole is the unprivileged, NOBYPASSRLS role created by 001_schema.up.sql that
+	// appRole is the unprivileged, NOBYPASSRLS role created by 0001_schema.up.sql that
 	// production connects as so the per-merchant RLS policies actually constrain
 	// queries. RLS tests connect as this role to prove enforcement.
 	appRole = "openrails_app"
@@ -35,7 +35,7 @@ var (
 // Both point at the SAME shared, fully-migrated database as SharedPostgresDSN — so
 // a package that uses both helpers still provisions only one container. The super
 // DSN bypasses RLS (use it to seed cross-merchant fixtures); the app DSN connects as
-// the openrails_app role (NOBYPASSRLS, created by 001_schema.up.sql) that the RLS
+// the openrails_app role (NOBYPASSRLS, created by 0001_schema.up.sql) that the RLS
 // policies enforce against.
 func SharedRLSPostgres(t *testing.T) (superDSN, appDSN string) {
 	t.Helper()

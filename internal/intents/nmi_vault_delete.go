@@ -128,7 +128,7 @@ func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.Openrail
 	}
 	client, err := h.Vault.ResolveClientForPaymentMethod(ctx, pm)
 	if err != nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Provider, err))
+		return Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -224,7 +224,7 @@ func (h *NMIVaultDeleteHandler) Verify(ctx context.Context, intent gen.Openrails
 	}
 	client, err := h.Vault.ResolveClientForPaymentMethod(ctx, pm)
 	if err != nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	vaultID := strings.TrimSpace(pm.RailCustomerRef)
 	if vaultID == "" {
@@ -269,7 +269,7 @@ func (h *NMIVaultDeleteHandler) loadPaymentMethod(ctx context.Context, intent ge
 	}
 	return &models.PaymentMethod{
 		ID:                    p.PaymentMethodID,
-		Rail:                  models.Rail(strings.ToLower(intent.Provider)),
+		Rail:                  models.Rail(strings.ToLower(intent.Rail)),
 		RailCustomerRef:       p.RailCustomerRef,
 		RailMethodRef:         p.RailMethodRef,
 		RailMerchantAccountID: intent.RailMerchantAccountID,

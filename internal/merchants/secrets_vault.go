@@ -29,8 +29,10 @@ var ErrVaultNotConfigured = fmt.Errorf("%w: vault-backed secret store is not con
 // in a managed deployment. Keeping it an interface lets the store build and be
 // unit-tested WITHOUT pulling in or running Vault.
 type VaultKV interface {
-	ReadSecret(ctx context.Context, path string) (map[string]string, error)
-	WriteSecret(ctx context.Context, path string, data map[string]string) error
+	// ReadSecret returns the data map and the KV-v2 current version (0 unknown).
+	ReadSecret(ctx context.Context, path string) (map[string]string, int, error)
+	// WriteSecret returns the new KV-v2 version (0 unknown).
+	WriteSecret(ctx context.Context, path string, data map[string]string) (int, error)
 	DeleteSecret(ctx context.Context, path string) error
 	ListSecrets(ctx context.Context, path string) ([]string, error)
 }
@@ -130,7 +132,7 @@ func (v *vaultSecretStore) Get(ctx context.Context, tenantID merchant.ID, name s
 	if err != nil {
 		return Secret{}, err
 	}
-	data, err := v.client.ReadSecret(ctx, vpath)
+	data, version, err := v.client.ReadSecret(ctx, vpath)
 	if err != nil {
 		// A read error is an OPERATIONAL failure (Vault unreachable / sealed /
 		// permission). Absence is signalled by missing "value" below, NOT by an
@@ -141,7 +143,16 @@ func (v *vaultSecretStore) Get(ctx context.Context, tenantID merchant.ID, name s
 	if !ok {
 		return Secret{}, ErrSecretNotFound
 	}
-	return Secret{Name: name, Value: val, Version: 1}, nil
+	return Secret{Name: name, Value: val, Version: kvVersionOrOne(version)}, nil
+}
+
+// kvVersionOrOne keeps the pre-#724 "at least 1" contract when the mount
+// reports no version metadata.
+func kvVersionOrOne(v int) int {
+	if v < 1 {
+		return 1
+	}
+	return v
 }
 
 func (v *vaultSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
@@ -155,10 +166,11 @@ func (v *vaultSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, 
 	if err != nil {
 		return Secret{}, err
 	}
-	if err := v.client.WriteSecret(ctx, vpath, map[string]string{"value": value}); err != nil {
+	version, err := v.client.WriteSecret(ctx, vpath, map[string]string{"value": value})
+	if err != nil {
 		return Secret{}, fmt.Errorf("merchants: vault write %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
-	return Secret{Name: name, Value: value, Version: 1}, nil
+	return Secret{Name: name, Value: value, Version: kvVersionOrOne(version)}, nil
 }
 
 func (v *vaultSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {

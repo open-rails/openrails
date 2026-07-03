@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -140,11 +139,10 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	// subscriptions (#642). The loader put them in a synthetic singleton group;
 	// persist NULL so they never share tier exclusivity.
 	tierGroupPtr := &group.Key
-	if len(product.RateCards) > 0 || product.hasMeteredPrice() {
+	if len(product.RateCards) > 0 {
 		tierGroupPtr = nil
 	}
 	tierRank := product.tierRank()
-	desiredStatus := statusFromActive(product.Active)
 
 	pp := &ProductPlan{Key: product.Key}
 
@@ -162,7 +160,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 			CreditsSpec:      credits,
 			TierGroup:        tierGroupPtr,
 			TierRank:         tierRank,
-			Status:           toModelStatus(desiredStatus),
+			Archived:         product.Archived,
 		}
 		if err := planPrices(ctx, applier, m, product, nil, pp, opts); err != nil {
 			return nil, err
@@ -173,7 +171,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	pp.UpdateID = existing.ID
 	name := product.DisplayName
 	desc := strings.TrimSpace(product.Description)
-	st := toModelStatus(desiredStatus)
+	archived := product.Archived
 	pp.UpdateReq = billingservice.UpdateProductRequest{
 		DisplayName:      &name,
 		Description:      &desc,
@@ -184,9 +182,9 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 		TierGroup:        tierGroupPtr,
 		SetTierGroup:     true,
 		TierRank:         &tierRank,
-		Status:           &st,
+		Archived:         &archived,
 	}
-	if productUnchanged(existing, product, entitlements, credits, tierGroupPtr, tierRank, desiredStatus) {
+	if productUnchanged(existing, product, entitlements, credits, tierGroupPtr, tierRank) {
 		pp.Action = ProductUnchanged
 	} else {
 		pp.Action = ProductUpdate
@@ -207,7 +205,7 @@ func sameTierGroup(existing, desired *string) bool {
 	return strings.EqualFold(strings.TrimSpace(*existing), strings.TrimSpace(*desired))
 }
 
-func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup *string, tierRank int, desiredStatus string) bool {
+func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup *string, tierRank int) bool {
 	if existing == nil {
 		return false
 	}
@@ -223,7 +221,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 	if !sameTierGroup(existing.TierGroup, tierGroup) {
 		return false
 	}
-	if string(existing.Status) != desiredStatus {
+	if existing.Archived != product.Archived {
 		return false
 	}
 	if len(existing.EntitlementsSpec) != len(entitlements) {
@@ -273,7 +271,6 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		if price.Model != "" {
 			continue
 		}
-		desiredStatus := statusFromActive(price.Active)
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
 			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
@@ -299,12 +296,12 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			claimed[match.ID] = struct{}{}
 			plp := PricePlan{Label: label, ExistingID: match.ID}
 			switch {
-			case string(match.Status) == desiredStatus:
+			case match.Archived == price.Archived:
 				plp.Action = PriceUnchanged
-			case desiredStatus == StatusActive:
-				plp.Action = PriceActivate
-			default: // inactive desired but currently active
+			case price.Archived: // archived desired but currently active
 				plp.Action = PriceArchive
+			default: // active desired but currently archived
+				plp.Action = PriceActivate
 			}
 			pp.Prices = append(pp.Prices, plp)
 			continue
@@ -322,7 +319,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			TrialDurationHours:  trialHours,
 			Providers:           price.Providers,
 			ProviderLinks:       price.ProviderLinks,
-			Status:              toModelStatus(desiredStatus),
+			Archived:            price.Archived,
 		}
 		pp.Prices = append(pp.Prices, PricePlan{
 			Label:     label,
@@ -338,7 +335,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			if _, ok := claimed[c.ID]; ok {
 				continue
 			}
-			if string(c.Status) != StatusActive {
+			if c.Archived {
 				continue
 			}
 			pp.Prices = append(pp.Prices, PricePlan{
@@ -377,7 +374,7 @@ func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurati
 		if !samePtrInt64(c.TrialUnitAmount, trialAmount) || !samePtrInt(c.TrialDurationHours, trialHours) {
 			continue
 		}
-		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
+		if best == nil || (best.Archived && !c.Archived) {
 			best = c
 		}
 	}
@@ -445,13 +442,6 @@ func creditsSpec(credits []CreditGrant) billingservice.CreditsSpec {
 		return nil
 	}
 	return out
-}
-
-// toModelStatus casts a manifest status string to the OpenRails CatalogStatus
-// enum exposed on the service request structs. An empty string is left empty so
-// the facade applies its own default (active).
-func toModelStatus(s string) models.CatalogStatus {
-	return models.CatalogStatus(s)
 }
 
 // HasChanges reports whether the plan would mutate anything.

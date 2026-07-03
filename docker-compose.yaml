@@ -16,7 +16,7 @@ services:
       # manage the version-specific data subdirectory (e.g. 18/main) itself.
       - postgres_data:/var/lib/postgresql
       # Bootstrap SQL runs automatically during first initialization
-      - ./migrations/bootstrap/001_postgres_init.sql:/docker-entrypoint-initdb.d/001_postgres_init.sql:ro
+      - ./migrations/bootstrap/0001_postgres_init.sql:/docker-entrypoint-initdb.d/0001_postgres_init.sql:ro
     command:
       - postgres
       - -c

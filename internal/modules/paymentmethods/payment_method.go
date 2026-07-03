@@ -90,22 +90,6 @@ func (s *PaymentMethodService) GetByRailMethodRef(ctx context.Context, provider,
 	return pm, nil
 }
 
-// GetByInitialTransactionID finds a NMI payment method by initial transaction ID
-func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, provider, initialTransactionID string) (*models.PaymentMethod, error) {
-	provider = strings.TrimSpace(strings.ToLower(provider))
-	if provider == "" {
-		return nil, errors.New("provider is required")
-	}
-	pm, err := s.repo.GetByInitialTransactionID(ctx, provider, initialTransactionID)
-	if err != nil {
-		if errors.Is(err, ErrPaymentMethodNotFound) {
-			return nil, ErrPaymentMethodNotFound
-		}
-		return nil, err
-	}
-	return pm, nil
-}
-
 func (s *PaymentMethodService) Update(ctx context.Context, method *models.PaymentMethod) error {
 	if err := s.repo.Update(ctx, method); err != nil {
 		if errors.Is(err, ErrPaymentMethodNotFound) {

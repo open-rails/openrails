@@ -30,12 +30,12 @@ type CaptureUsageEventParams struct {
 	Amount    int64  // host-priced captured amount (>= 0)
 	// Resource is the caller-supplied free-form string for what was metered
 	// (opaque to OpenRails; e.g. tensorhub maps its endpoint slug here). Optional.
-	Resource           string
-	Dimensions         map[string]int64
-	Metadata           map[string]any // string long-tail dims (function_name, tier, ...)
-	Source             string
-	SourceID           string
-	MoneyTransactionID *uuid.UUID
+	Resource         string
+	Dimensions       map[string]int64
+	Metadata         map[string]any // string long-tail dims (function_name, tier, ...)
+	Source           string
+	SourceID         string
+	LedgerTransferID *uuid.UUID
 }
 
 // InsertCaptureUsageEvent appends a usage_event for analytics, idempotent on
@@ -73,21 +73,21 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 			return err
 		}
 		ev := &models.UsageEvent{
-			ID:                 uuidutil.NewV7(),
-			MerchantID:         tid.UUID(),
-			CustomerID:         p.CustomerID,
-			Invoker:            p.Invoker,
-			Currency:           cur,
-			Resource:           nilIfEmpty(p.Resource),
-			EventType:          p.EventType,
-			Dimensions:         p.Dimensions,
-			Amount:             p.Amount,
-			Source:             p.Source,
-			SourceID:           p.SourceID,
-			MoneyTransactionID: p.MoneyTransactionID,
-			Metadata:           p.Metadata,
-			OccurredAt:         now,
-			CreatedAt:          now,
+			ID:               uuidutil.NewV7(),
+			MerchantID:       tid.UUID(),
+			CustomerID:       p.CustomerID,
+			Invoker:          p.Invoker,
+			Currency:         cur,
+			Resource:         nilIfEmpty(p.Resource),
+			EventType:        p.EventType,
+			Dimensions:       p.Dimensions,
+			Amount:           p.Amount,
+			Source:           p.Source,
+			SourceID:         p.SourceID,
+			LedgerTransferID: p.LedgerTransferID,
+			Metadata:         p.Metadata,
+			OccurredAt:       now,
+			CreatedAt:        now,
 		}
 		dims, err := toJSONBC(ev.Dimensions)
 		if err != nil {
@@ -98,21 +98,21 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 			return err
 		}
 		return q.InsertUsageEventIfAbsent(ctx, gen.InsertUsageEventIfAbsentParams{
-			ID:                 ev.ID,
-			MerchantID:         ev.MerchantID,
-			CustomerID:         ev.CustomerID,
-			InvokerID:          ev.Invoker,
-			Currency:           ev.Currency,
-			Resource:           ev.Resource,
-			EventType:          ev.EventType,
-			Dimensions:         dims,
-			Amount:             ev.Amount,
-			Source:             ev.Source,
-			SourceID:           ev.SourceID,
-			MoneyTransactionID: ev.MoneyTransactionID,
-			Metadata:           meta,
-			OccurredAt:         ev.OccurredAt,
-			CreatedAt:          ev.CreatedAt,
+			ID:               ev.ID,
+			MerchantID:       ev.MerchantID,
+			CustomerID:       ev.CustomerID,
+			InvokerID:        ev.Invoker,
+			Currency:         ev.Currency,
+			Resource:         ev.Resource,
+			EventType:        ev.EventType,
+			Dimensions:       dims,
+			Amount:           ev.Amount,
+			Source:           ev.Source,
+			SourceID:         ev.SourceID,
+			LedgerTransferID: ev.LedgerTransferID,
+			Metadata:         meta,
+			OccurredAt:       ev.OccurredAt,
+			CreatedAt:        ev.CreatedAt,
 		})
 	})
 }

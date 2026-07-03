@@ -267,6 +267,11 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		return nil, errors.New("rail is required")
 	}
 
+	// #704: pin the active provider account for this rail so payment /
+	// subscription / payment-method rows created by this flow carry
+	// rail_merchant_account_id provenance (nil when unresolvable — never invented).
+	ctx = s.stampRailMerchantAccount(ctx, rail)
+
 	// Check for tier group conflicts (upgrade/downgrade scenarios)
 	// This must happen BEFORE the general coverage check
 	if product.TierGroup != nil && *product.TierGroup != "" {
@@ -1634,6 +1639,10 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
 	}
+	if req != nil {
+		// #704 provenance stamping for the registered payment row.
+		ctx = s.stampRailMerchantAccount(ctx, req.Rail)
+	}
 	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
 
@@ -1998,7 +2007,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Persist the swap ATOMICALLY: the partial unique index
-	// uq_subscriptions_tenant_subject_tier_group_active allows only one live
+	// uq_subscriptions_customer_tier_group_active allows only one live
 	// subscription per (payable subject, tier group), so the old row's cancel
 	// and the new row's insert must commit together (cancel first). On failure
 	// the transaction rolls back: the old subscription stays active locally and

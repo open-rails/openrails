@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
@@ -141,12 +142,14 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Openra
 	// landed). Resolve it via the chain BEFORE any re-pull: landed ⇒ renewal
 	// repair; read failure ⇒ never crank blind on top of an unresolved send.
 	if sig := recordedSignature(intent); sig != "" {
-		landed, verdict := h.checkSignature(ctx, sig)
+		result, verdict := h.checkSignature(ctx, sig)
 		switch verdict {
 		case sigVerdictUnknown:
 			return intents.Ambiguous("recorded pull signature unresolved (chain read failed); refusing to re-pull blind")
 		case sigVerdictLanded:
-			_ = landed
+			if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
+				return intents.Parked("recorded pull signature landed but " + err.Error())
+			}
 			return h.repairFromSignature(ctx, repo, row, sig)
 		case sigVerdictNotLanded:
 			// Verified not executed (reverted or never landed): safe to
@@ -163,7 +166,10 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Openra
 		return h.Store.RecordProgress(ctx, intent.ID, map[string]any{"transaction_id": sig})
 	}
 
-	outcome, crankErr := h.Core.crankOne(ctx, repo, row, presubmit)
+	// The intent id is the #713 memo local-id: it exists durably BEFORE the
+	// send, so the stamped pull is chain-recognizable even if every local send
+	// record is lost.
+	outcome, crankErr := h.Core.crankOne(ctx, repo, row, intent.ID, presubmit)
 	if crankErr != nil {
 		if recorded != "" || outcome.signature != "" {
 			// The tx was signed (and its signature durably recorded) before the
@@ -209,14 +215,16 @@ func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.Openrai
 	if sig == "" {
 		return intents.Retryable("no signature recorded; nothing was submitted")
 	}
-	landed, verdict := h.checkSignature(ctx, sig)
+	result, verdict := h.checkSignature(ctx, sig)
 	switch verdict {
 	case sigVerdictUnknown:
 		return intents.Ambiguous("chain read failed; still unresolved")
 	case sigVerdictNotLanded:
 		return intents.Retryable("recorded signature verified not landed; safe to re-pull")
 	}
-	_ = landed
+	if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
+		return intents.Parked("recorded pull signature landed but " + err.Error())
+	}
 	row, err := h.loadRow(ctx, p)
 	if err != nil {
 		return intents.Ambiguous("pull landed on-chain, but local row load failed: " + err.Error())
@@ -249,16 +257,17 @@ const (
 	sigVerdictNotLanded
 )
 
-// checkSignature reads the chain for the recorded signature. landed reports a
-// CONFIRMED, on-chain-successful transaction.
-func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (bool, sigVerdict) {
+// checkSignature reads the chain for the recorded signature. sigVerdictLanded
+// reports a CONFIRMED, on-chain-successful transaction (result non-nil only
+// then, for the #713 memo cross-check).
+func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	if h.Chain == nil {
-		return false, sigVerdictUnknown
+		return nil, sigVerdictUnknown
 	}
 	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
 		// Not a real signature (corrupt evidence): nothing can have landed.
-		return false, sigVerdictNotLanded
+		return nil, sigVerdictNotLanded
 	}
 	result, err := h.Chain.GetTransaction(ctx, sig)
 	if err != nil || result == nil {
@@ -267,12 +276,28 @@ func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature 
 		// UNKNOWN — the caller decides (executor refuses to re-pull blind on a
 		// recorded signature; the program period guard covers a stale answer).
 		if errors.Is(err, rpc.ErrNotFound) {
-			return false, sigVerdictNotLanded
+			return nil, sigVerdictNotLanded
 		}
-		return false, sigVerdictUnknown
+		return nil, sigVerdictUnknown
 	}
 	if result.Meta != nil && result.Meta.Err != nil {
-		return false, sigVerdictNotLanded // landed but REVERTED: no money moved
+		return nil, sigVerdictNotLanded // landed but REVERTED: no money moved
 	}
-	return true, sigVerdictLanded
+	return result, sigVerdictLanded
+}
+
+// verifyPullMemoMatchesIntent applies the #713 verify rule to a landed pull:
+// a stamped purchase memo must name THIS intent — a different local-id is
+// cross-wired evidence, parked for operator triage, never auto-repaired.
+// Absent or undecodable memos pass (pre-memo pulls stay repairable; the memo
+// is a discovery hint, never money truth).
+func verifyPullMemoMatchesIntent(result *rpc.GetTransactionResult, intentID uuid.UUID) error {
+	if result == nil || result.Transaction == nil {
+		return nil
+	}
+	tx, err := result.Transaction.GetTransaction()
+	if err != nil || tx == nil {
+		return nil
+	}
+	return solanaint.VerifyPurchaseMemo(tx, intentID)
 }

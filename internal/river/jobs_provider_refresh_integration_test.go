@@ -217,7 +217,7 @@ func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi 
 SELECT watermark_at, last_error
   FROM openrails.rail_refresh_watermarks
  WHERE merchant_id = $1::uuid
-   AND provider = 'stripe'
+   AND rail = 'stripe'
    AND event_domain = 'events'
    AND rail_merchant_account_id IS NULL
 `, merchantID).Scan(&watermark, &lastErr)

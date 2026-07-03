@@ -165,7 +165,7 @@ JOIN openrails.catalog_credit_balances cb
 WHERE cpp.merchant_id = $1
   AND p.key = $2
   AND ($3 = '' OR lower(cpp.currency) = lower($3))
-  AND ($4 = '' OR $4 = ANY(cpp.providers))
+  AND ($4 = '' OR $4 = ANY(cpp.rails))
 ORDER BY cpp.ordinal`, tid.UUID(), productKey, currency, provider)
 		if err != nil {
 			return err

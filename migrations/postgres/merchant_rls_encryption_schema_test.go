@@ -28,8 +28,6 @@ func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 	c := loadSchema001(t)
 	tables := append([]string{}, merchantOwnedTables...)
 	tables = append(tables,
-		"entitlement_features",
-		"product_entitlement_features",
 		"usage_events",
 		"invoices",
 		"payer_spend_limits",

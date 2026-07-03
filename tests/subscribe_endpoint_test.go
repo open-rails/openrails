@@ -224,9 +224,7 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 
 	// Create NMI client with mock server URL
 	nmiSettings := &config.NMIProviderSettings{
-		Name:        "mobius",
 		SecurityKey: "test-security-key",
-		TestMode:    true,
 	}
 
 	client, err := nmi.NewClient("mobius", nmiSettings, true) // true = test mode (sandbox endpoints)
@@ -259,6 +257,10 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients
 		}
 	}
+	// #729: the intent registry captured the boot-time client map; re-arm so
+	// the #674 write-through paths (payment-source swap, sale, vault delete)
+	// resolve the mock instead of the real sandbox.
+	suite.RearmIntentPlumbing()
 
 	t.Cleanup(func() {
 		mock.Close()

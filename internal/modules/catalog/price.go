@@ -34,7 +34,7 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 		ID:                  price.ID,
 		MerchantID:          price.MerchantID,
 		ProductID:           price.ProductID,
-		Status:              string(price.Status),
+		Archived:            price.Archived,
 		Amount:              price.Amount,
 		Currency:            price.Currency,
 		AccessDurationHours: models.IntPtrTo32(price.AccessDurationHours),
@@ -75,9 +75,9 @@ func pricesFromGen(rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 }
 
 func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	// All statuses (active + archived/draft). The catalog converge relies on this
-	// to reconcile already-archived historical prices instead of re-creating
-	// them; GetActiveByProductID is the active-only variant.
+	// Archived included. The catalog converge relies on this to reconcile
+	// already-archived historical prices instead of re-creating them;
+	// GetActiveByProductID is the non-archived variant.
 	rows, err := s.db.Gen(ctx).ListPricesByProduct(ctx, productID)
 	if err != nil {
 		return nil, err
@@ -140,22 +140,14 @@ func priceWithProduct(p gen.OpenrailsPrice, prod gen.OpenrailsProduct) (*models.
 
 // PriceFilter contains optional filters for listing prices
 type PriceFilter struct {
-	Active    *bool                 // Filter by active status (true=status='active', false=status<>'active')
-	Status    *models.CatalogStatus // Filter by exact lifecycle status (admin)
-	Currency  string                // Filter by currency (e.g., "usd")
-	ProductID *uuid.UUID            // Filter by product ID
-	Type      string                // Filter by "recurring" or "one_time"
+	Archived  *bool      // Filter by archived flag (nil = all)
+	Currency  string     // Filter by currency (e.g., "usd")
+	ProductID *uuid.UUID // Filter by product ID
+	Type      string     // Filter by "recurring" or "one_time"
 }
 
 // ListPaginated returns prices with pagination and optional filters
 func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, limit, offset int) ([]*models.Price, int64, error) {
-	onlyActive := filter.Active != nil && *filter.Active
-	onlyInactive := filter.Active != nil && !*filter.Active
-	var status *string
-	if filter.Status != nil {
-		s := string(*filter.Status)
-		status = &s
-	}
 	var currency *string
 	if filter.Currency != "" {
 		currency = &filter.Currency
@@ -165,9 +157,7 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 
 	q := s.db.Gen(ctx)
 	total, err := q.CountPricesFiltered(ctx, gen.CountPricesFilteredParams{
-		OnlyActive:    onlyActive,
-		OnlyInactive:  onlyInactive,
-		Status:        status,
+		Archived:      filter.Archived,
 		Currency:      currency,
 		ProductID:     filter.ProductID,
 		OnlyRecurring: onlyRecurring,
@@ -179,9 +169,7 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListPricesFiltered(ctx, gen.ListPricesFilteredParams{
-		OnlyActive:    onlyActive,
-		OnlyInactive:  onlyInactive,
-		Status:        status,
+		Archived:      filter.Archived,
 		Currency:      currency,
 		ProductID:     filter.ProductID,
 		OnlyRecurring: onlyRecurring,
@@ -208,8 +196,8 @@ func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string)
 	if rail == "" {
 		return nil, fmt.Errorf("nmi rail is required for plan %q", normalize.Trim(nmiPlanID))
 	}
-	// Resolve any non-draft price (active or archived). Archived prices must
-	// still resolve here so grandfathered subscriptions keep openrails.
+	// Archived prices must still resolve here so grandfathered subscriptions
+	// keep billing.
 	row, err := s.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
 		Rail:               rail,
 		PlanID:             nmiPlanID,
@@ -245,14 +233,14 @@ func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
 }
 
 // Delete is not supported - prices are immutable to preserve historical payment accuracy.
-// To retire a price, archive it via Deactivate() (sets status=archived).
+// To retire a price, archive it via Deactivate() (sets archived).
 func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("prices cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
 // updateRow writes the full price row (the raw persistence Update, formerly
 // repo.PriceRepo.Update). Unexported on purpose: the public Update() forbids
-// arbitrary changes; the allowed mutations (SetStatus, UpdateRails) funnel here.
+// arbitrary changes; the allowed mutations (SetArchived, UpdateRails) funnel here.
 func (s *PriceService) updateRow(ctx context.Context, price *models.Price) error {
 	rails, err := priceRailsJSONB(price)
 	if err != nil {
@@ -261,7 +249,7 @@ func (s *PriceService) updateRow(ctx context.Context, price *models.Price) error
 	rows, err := s.db.Gen(ctx).UpdatePrice(ctx, gen.UpdatePriceParams{
 		ID:                  price.ID,
 		ProductID:           price.ProductID,
-		Status:              string(price.Status),
+		Archived:            price.Archived,
 		Amount:              price.Amount,
 		Currency:            price.Currency,
 		AccessDurationHours: models.IntPtrTo32(price.AccessDurationHours),
@@ -280,28 +268,25 @@ func (s *PriceService) updateRow(ctx context.Context, price *models.Price) error
 	return nil
 }
 
-// Deactivate archives a price (status=archived) so it won't appear in product
-// listings and cannot be purchased by new customers. Existing subscriptions and
-// payments referencing this price are grandfathered and keep openrails.
+// Deactivate archives a price so it won't appear in product listings and
+// cannot be purchased by new customers. Existing subscriptions and payments
+// referencing this price are grandfathered and keep billing.
 func (s *PriceService) Deactivate(ctx context.Context, id uuid.UUID) error {
-	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
+	return s.SetArchived(ctx, id, true)
 }
 
-// Activate marks a price as active so it appears in product listings.
+// Activate un-archives a price so it appears in product listings.
 func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
-	return s.SetStatus(ctx, id, models.CatalogStatusActive)
+	return s.SetArchived(ctx, id, false)
 }
 
-// SetStatus sets the lifecycle status (draft|active|archived) on a price.
-func (s *PriceService) SetStatus(ctx context.Context, id uuid.UUID, status models.CatalogStatus) error {
-	if !status.Valid() {
-		return fmt.Errorf("invalid catalog status %q", status)
-	}
+// SetArchived sets the archived lifecycle flag on a price.
+func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
 	price, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	price.Status = status
+	price.Archived = archived
 	return s.updateRow(ctx, price)
 }
 

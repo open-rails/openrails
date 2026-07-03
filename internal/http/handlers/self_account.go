@@ -69,8 +69,6 @@ func GetMyBalance(r *httprequest.Request) {
 
 type selfAccountSettingsRequest struct {
 	Currency               string  `json:"currency"`
-	MaxSpendPerDay         *int64  `json:"max_spend_per_day"`
-	MaxSpendPerMonth       *int64  `json:"max_spend_per_month"`
 	LowBalanceThreshold    *int64  `json:"low_balance_threshold"`
 	AutoTopupEnabled       *bool   `json:"auto_topup_enabled"`
 	AutoTopupAmount        *int64  `json:"auto_topup_amount"`
@@ -79,8 +77,6 @@ type selfAccountSettingsRequest struct {
 
 type selfAccountSettingsResponse struct {
 	Currency               string     `json:"currency"`
-	MaxSpendPerDay         *int64     `json:"max_spend_per_day,omitempty"`
-	MaxSpendPerMonth       *int64     `json:"max_spend_per_month,omitempty"`
 	LowBalanceThreshold    *int64     `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled       bool       `json:"auto_topup_enabled"`
 	AutoTopupAmount        *int64     `json:"auto_topup_amount,omitempty"`
@@ -102,11 +98,9 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	}
 
 	in := money.AccountSettingsInput{
-		MaxSpendPerDay:       req.MaxSpendPerDay,
-		MaxSpendPerMonth:     req.MaxSpendPerMonth,
-		LowBalanceThreshold:  req.LowBalanceThreshold,
-		AutoTopupEnabled:     req.AutoTopupEnabled,
-		AutoTopupAmountCents: req.AutoTopupAmount,
+		LowBalanceThreshold: req.LowBalanceThreshold,
+		AutoTopupEnabled:    req.AutoTopupEnabled,
+		AutoTopupAmount:     req.AutoTopupAmount,
 	}
 	if req.AutoTopupPaymentMethod != nil {
 		pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod))
@@ -142,11 +136,9 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	}
 	r.SuccessJSON(selfAccountSettingsResponse{
 		Currency:               settings.Currency,
-		MaxSpendPerDay:         settings.MaxSpendPerDay,
-		MaxSpendPerMonth:       settings.MaxSpendPerMonth,
 		LowBalanceThreshold:    settings.LowBalanceThreshold,
 		AutoTopupEnabled:       settings.AutoTopupEnabled,
-		AutoTopupAmount:        settings.AutoTopupAmountCents,
+		AutoTopupAmount:        settings.AutoTopupAmount,
 		AutoTopupPaymentMethod: settings.AutoTopupPaymentMethod,
 	})
 }

@@ -60,5 +60,5 @@ const (
 // (#589) — computed at query time from openrails.payments, never a stored column.
 type PaymentMethodCharge struct {
 	LastChargedAt time.Time
-	Status        string // raw purchase_status: completed|failed|refunded|pending
+	Status        string // raw payment_status: completed|failed|refunded|pending
 }

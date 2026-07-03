@@ -26,12 +26,13 @@ import (
 // API answers recurring=rebill_subscription sales, the Query API answers the
 // order_id transaction search.
 type fakeNMIRebillGateway struct {
-	saleBody   atomic.Value // string Direct Post response
-	saleStatus atomic.Int64 // optional HTTP status (0 = 200)
-	charged    atomic.Bool  // query reports a successful sale for the order id
-	saleCalls  atomic.Int64
-	queryCalls atomic.Int64
-	txnID      string
+	saleBody    atomic.Value // string Direct Post response
+	saleStatus  atomic.Int64 // optional HTTP status (0 = 200)
+	charged     atomic.Bool  // query reports a successful sale for the order id
+	saleCalls   atomic.Int64
+	queryCalls  atomic.Int64
+	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
+	txnID       string
 }
 
 func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClient) {
@@ -56,6 +57,7 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 		}
 		if r.Form.Get("type") == "sale" {
 			f.saleCalls.Add(1)
+			f.saleAuthKey.Store(r.Form.Get("security_key"))
 			if st := f.saleStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
 				return

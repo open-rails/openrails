@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -41,19 +42,6 @@ type CatalogProductIncludesSpec struct {
 type CatalogProductUsageLimitsSpec struct {
 	ProductKey string   `json:"product_key"`
 	Keys       []string `json:"keys"`
-}
-
-type CatalogMeteredPriceSpec struct {
-	ProductKey string `json:"product_key"`
-	UnitAmount int64  `json:"unit_amount"`
-	Currency   string `json:"currency"`
-	// AccessDurationHours is the metered price's window in hours — the lookup key
-	// that pins this meter to its price row (not a provider cadence).
-	AccessDurationHours *int   `json:"access_duration_hours,omitempty"`
-	MeterKey            string `json:"meter_key"`
-	RateMicros          int64  `json:"rate_micros"`
-	PerUnits            int64  `json:"per_units"`
-	PerSeconds          *int64 `json:"per_seconds,omitempty"`
 }
 
 type CatalogRateCardSpec struct {
@@ -89,7 +77,6 @@ type SyncCatalogSidecarsRequest struct {
 	Meters          []CatalogMeterSpec               `json:"meters,omitempty"`
 	ProductIncludes []CatalogProductIncludesSpec     `json:"product_includes,omitempty"`
 	ProductLimits   []CatalogProductUsageLimitsSpec  `json:"product_limits,omitempty"`
-	MeteredPrices   []CatalogMeteredPriceSpec        `json:"metered_prices,omitempty"`
 	RateCards       []CatalogRateCardSpec            `json:"rate_cards,omitempty"`
 	CreditBalances  []CatalogCreditBalanceSpec       `json:"credit_balances,omitempty"`
 	CreditPurchases []CatalogCreditPurchasePriceSpec `json:"credit_purchases,omitempty"`
@@ -108,7 +95,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSideca
 		if err := syncUsageLimits(ctx, tx, tid.UUID(), req.UsageLimits); err != nil {
 			return err
 		}
-		if err := syncMeters(ctx, tx, tid.UUID(), req.Meters, req.MeteredPrices); err != nil {
+		if err := syncMeters(ctx, tx, tid.UUID(), req.Meters); err != nil {
 			return err
 		}
 		if err := syncRateCards(ctx, tx, tid.UUID(), req.RateCards); err != nil {
@@ -159,7 +146,7 @@ SET measure = EXCLUDED.measure, windows = EXCLUDED.windows, updated_at = now()`,
 	return err
 }
 
-func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []CatalogMeterSpec, metered []CatalogMeteredPriceSpec) error {
+func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []CatalogMeterSpec) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1`, merchantID); err != nil {
 		return err
 	}
@@ -186,38 +173,6 @@ SET kind = EXCLUDED.kind,
 			strings.TrimSpace(meter.Aggregation), strings.TrimSpace(meter.Unit), string(groupBy)); err != nil {
 			return fmt.Errorf("upsert meter %q: %w", key, err)
 		}
-	}
-
-	desiredPriceIDs := make([]uuid.UUID, 0, len(metered))
-	for _, spec := range metered {
-		priceID, err := resolveCatalogPriceID(ctx, tx, merchantID, spec)
-		if err != nil {
-			return err
-		}
-		desiredPriceIDs = append(desiredPriceIDs, priceID)
-		perUnits := spec.PerUnits
-		if perUnits == 0 {
-			perUnits = 1
-		}
-		if _, err := tx.Exec(ctx, `
-INSERT INTO openrails.catalog_price_metered (price_id, merchant_id, meter_key, rate_micros, per_units, per_seconds)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (price_id) DO UPDATE
-SET meter_key = EXCLUDED.meter_key,
-    rate_micros = EXCLUDED.rate_micros,
-    per_units = EXCLUDED.per_units,
-    per_seconds = EXCLUDED.per_seconds,
-    updated_at = now()`,
-			priceID, merchantID, strings.TrimSpace(spec.MeterKey), spec.RateMicros, perUnits, spec.PerSeconds); err != nil {
-			return fmt.Errorf("upsert metered price %q: %w", spec.ProductKey, err)
-		}
-	}
-	if len(desiredPriceIDs) == 0 {
-		if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_price_metered WHERE merchant_id = $1`, merchantID); err != nil {
-			return err
-		}
-	} else if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_price_metered WHERE merchant_id = $1 AND NOT (price_id = ANY($2::uuid[]))`, merchantID, desiredPriceIDs); err != nil {
-		return err
 	}
 
 	if len(meterKeys) == 0 {
@@ -270,6 +225,9 @@ SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours, updated_at = n
 			merchantID, key, strings.TrimSpace(spec.Unit), spec.ExpiresHours); err != nil {
 			return fmt.Errorf("upsert credit balance %q: %w", key, err)
 		}
+		if err := defineCustomCreditUnit(ctx, tx, merchantID, key, spec.Unit); err != nil {
+			return err
+		}
 	}
 	if len(keys) == 0 {
 		_, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1`, merchantID)
@@ -277,6 +235,45 @@ SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours, updated_at = n
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND NOT (key = ANY($2::text[]))`, merchantID, keys)
 	return err
+}
+
+// defineCustomCreditUnit auto-defines (#706) the custom_credit_types row a
+// custom-unit credit balance needs at runtime: the ledger's ResolveUnit
+// hard-rejects qualified units without an active row, and the credit-purchase
+// flow qualifies units — so the manifest is the registry's writer. Built-in
+// currencies need no row. Removed balances deliberately leave their type
+// ACTIVE: grants/balances may still reference the unit, and entitlements must
+// never be lost to catalog churn. Decimals are 0 (credits are whole units;
+// decimals only scale display).
+func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, balanceKey, unit string) error {
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	name := unit
+	if slug, qualified, ok := strings.Cut(unit, "/"); ok {
+		// A qualified unit is only resolvable in its owning merchant's ledger —
+		// declaring another merchant's slug would push an unusable balance.
+		var merchantSlug string
+		if err := tx.QueryRow(ctx, `SELECT slug FROM openrails.merchants WHERE id = $1`, merchantID).Scan(&merchantSlug); err != nil {
+			return fmt.Errorf("resolve merchant slug: %w", err)
+		}
+		if slug != merchantSlug {
+			return fmt.Errorf("credit balance %q unit %q is qualified with slug %q, not this merchant's %q", balanceKey, unit, slug, merchantSlug)
+		}
+		name = qualified
+	} else if _, builtin := money.CurrencyScale(unit); builtin {
+		return nil
+	}
+	if name == "" || strings.ContainsAny(name, "/ ") {
+		return fmt.Errorf("credit balance %q has invalid custom credit unit %q", balanceKey, unit)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
+VALUES (uuidv7(), $1, $2, 0, true)
+ON CONFLICT (merchant_id, name) DO UPDATE
+SET active = true, updated_at = now()`,
+		merchantID, name); err != nil {
+		return fmt.Errorf("define custom credit unit %q: %w", unit, err)
+	}
+	return nil
 }
 
 func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, purchases []CatalogCreditPurchasePriceSpec) error {
@@ -288,7 +285,7 @@ func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p
 		if err != nil {
 			return err
 		}
-		// providers is NOT NULL with a '{}' default; a nil slice encodes as SQL NULL
+		// rails is NOT NULL with a '{}' default; a nil slice encodes as SQL NULL
 		// and would violate the constraint, so coalesce to an empty array.
 		providers := spec.Providers
 		if providers == nil {
@@ -296,7 +293,7 @@ func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_purchase_prices
-    (merchant_id, product_id, ordinal, credit_key, currency, providers, input_min, input_max, round, price)
+    (merchant_id, product_id, ordinal, credit_key, currency, rails, input_min, input_max, round, price)
 VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, NULLIF($9, ''), $10::jsonb)`,
 			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.CreditKey), strings.TrimSpace(spec.Currency),
 			providers, spec.InputMin, spec.InputMax, strings.TrimSpace(spec.Round), string(spec.Price)); err != nil {
@@ -355,26 +352,6 @@ ON CONFLICT DO NOTHING`,
 		}
 	}
 	return nil
-}
-
-func resolveCatalogPriceID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec CatalogMeteredPriceSpec) (uuid.UUID, error) {
-	productID, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	var priceID uuid.UUID
-	if err := tx.QueryRow(ctx, `
-SELECT id FROM openrails.prices
-WHERE merchant_id = $1
-  AND product_id = $2
-  AND amount = $3
-  AND lower(currency) = lower($4)
-  AND access_duration_hours IS NOT DISTINCT FROM $5
-LIMIT 1`,
-		merchantID, productID, spec.UnitAmount, spec.Currency, spec.AccessDurationHours).Scan(&priceID); err != nil {
-		return uuid.Nil, fmt.Errorf("resolve price for product %q: %w", spec.ProductKey, err)
-	}
-	return priceID, nil
 }
 
 func resolveProductID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string) (uuid.UUID, error) {

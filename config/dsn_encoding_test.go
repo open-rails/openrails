@@ -14,8 +14,8 @@ func TestGetConnectionString_URLEncodesCredentials(t *testing.T) {
 		Host:     "db.internal",
 		Port:     "5432",
 		Database: "billing",
-		Username: "open rails",          // space is reserved
-		Password: "p@ss/w:rd?#",         // '@' and '/' would corrupt a raw DSN
+		Username: "open rails",  // space is reserved
+		Password: "p@ss/w:rd?#", // '@' and '/' would corrupt a raw DSN
 	}
 
 	dsn := c.GetConnectionString()

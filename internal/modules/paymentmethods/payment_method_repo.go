@@ -219,20 +219,6 @@ func (r *PaymentMethodRepo) GetByRailMethodRef(ctx context.Context, rail, method
 	return models.PaymentMethodFromGen(row)
 }
 
-func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, rail, initialTransactionID string) (*models.PaymentMethod, error) {
-	row, err := r.db.Gen(ctx).GetPaymentMethodByInitialTransactionID(ctx, gen.GetPaymentMethodByInitialTransactionIDParams{
-		Rail:                 rail,
-		InitialTransactionID: initialTransactionID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrPaymentMethodNotFound
-		}
-		return nil, err
-	}
-	return models.PaymentMethodFromGen(row)
-}
-
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
 	meta, err := models.ToJSONB(method.Metadata)
 	if err != nil {

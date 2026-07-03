@@ -182,17 +182,17 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	hours := 720
 	insertProductAndPrice(ctx, t, pool, &models.Product{
 		ID: oldProductID, Key: "upg-old-" + sfx, DisplayName: "Upgrade Old",
-		Status: models.CatalogStatusActive, CreatedAt: now, UpdatedAt: now,
+		Archived: false, CreatedAt: now, UpdatedAt: now,
 	}, &models.Price{
-		ID: oldPriceID, ProductID: oldProductID, Status: models.CatalogStatusActive,
+		ID: oldPriceID, ProductID: oldProductID, Archived: false,
 		Amount: 50_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	insertProductAndPrice(ctx, t, pool, &models.Product{
 		ID: newProductID, Key: "upg-new-" + sfx, DisplayName: "Upgrade New",
-		Status: models.CatalogStatusActive, CreatedAt: now, UpdatedAt: now,
+		Archived: false, CreatedAt: now, UpdatedAt: now,
 	}, &models.Price{
-		ID: newPriceID, ProductID: newProductID, Status: models.CatalogStatusActive,
+		ID: newPriceID, ProductID: newProductID, Archived: false,
 		Amount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		CreatedAt: now, UpdatedAt: now,
 	})

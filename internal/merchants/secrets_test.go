@@ -225,16 +225,16 @@ func (s staticMerchantSlugResolver) MerchantSlug(_ context.Context, id merchant.
 	return s[id.String()], nil
 }
 
-func (f *fakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, error) {
+func (f *fakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, int, error) {
 	d, ok := f.data[path]
 	if !ok {
-		return nil, nil
+		return nil, 0, nil
 	}
-	return d, nil
+	return d, 1, nil
 }
-func (f *fakeVaultKV) WriteSecret(_ context.Context, path string, data map[string]string) error {
+func (f *fakeVaultKV) WriteSecret(_ context.Context, path string, data map[string]string) (int, error) {
 	f.data[path] = data
-	return nil
+	return 1, nil
 }
 func (f *fakeVaultKV) DeleteSecret(_ context.Context, path string) error {
 	delete(f.data, path)

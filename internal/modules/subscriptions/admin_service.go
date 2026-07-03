@@ -333,49 +333,6 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 	return nil
 }
 
-// CreateProduct creates a new product (admin)
-func (s *AdminSubscriptionService) CreateProduct(ctx context.Context, product *models.Product) error {
-	product.ID = uuidutil.NewV7()
-	return s.ProductService.Create(ctx, product)
-}
-
-// UpdateProduct updates a product (admin)
-func (s *AdminSubscriptionService) UpdateProduct(ctx context.Context, productID uuid.UUID, updates map[string]any) error {
-	product, err := s.ProductService.GetByID(ctx, productID)
-	if err != nil {
-		return fmt.Errorf("product not found: %w", err)
-	}
-
-	// Apply allowed updates
-	for field, value := range updates {
-		switch field {
-		case "name":
-			if name, ok := value.(string); ok {
-				product.DisplayName = name
-			}
-		case "description":
-			if desc, ok := value.(string); ok {
-				product.Description = desc
-			}
-		case "status":
-			if raw, ok := value.(string); ok {
-				st := models.CatalogStatus(raw)
-				if st.Valid() {
-					product.Status = st
-				}
-			}
-		}
-	}
-
-	return s.ProductService.Update(ctx, product)
-}
-
-// CreatePrice creates a new price (admin)
-func (s *AdminSubscriptionService) CreatePrice(ctx context.Context, price *models.Price) error {
-	price.ID = uuidutil.NewV7()
-	return s.PriceService.Create(ctx, price)
-}
-
 // GetAllPurchases retrieves all purchases with filtering (admin)
 func (s *AdminSubscriptionService) GetAllPurchases(ctx context.Context, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
 	purchases, total, err := s.PaymentService.GetPayments(ctx, *queryOpts)

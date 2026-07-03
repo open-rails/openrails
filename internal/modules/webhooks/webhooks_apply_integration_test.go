@@ -172,7 +172,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 		Key:         "apply_product_" + uuid.New().String(),
 		DisplayName: "Apply Product",
 		Description: &description,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -183,7 +183,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 		ProductID:           f.productID,
 		Amount:              29_990_000, // 2999 cents
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -519,7 +519,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 		Key:         "refund_product_" + uuid.New().String(),
 		DisplayName: "Refund Product",
 		Description: &description,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -530,7 +530,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 		ProductID:  productID,
 		Amount:     19_990_000,
 		Currency:   "usd",
-		Status:     string(models.CatalogStatusActive),
+		Archived:   false,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	})
@@ -647,7 +647,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 		DisplayName: "Broken Credit Product",
 		Description: &description,
 		CreditsSpec: creditsSpecJSON,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -658,7 +658,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 		ProductID:           productID,
 		Amount:              9_990_000,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,

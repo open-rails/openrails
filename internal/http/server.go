@@ -182,13 +182,27 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
-	// control-plane DB) and permission-group provisioner. The DB-backed secret
-	// store is the self-hosted default and needs no live Vault; a managed
-	// deployment swaps in the Vault-backed store with the same addressing.
+	// control-plane DB) and permission-group provisioner. MODE 1 (#723,
+	// merchant_source=manifest) serves the runtime's in-memory manifest plane —
+	// no DB/Vault store exists; the write routes stay mounted and 405 with the
+	// manifest_driven code. MODE 2 builds the declared persistent backend.
 	{
-		secretBackend, err := merchantsecrets.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
-		if err != nil {
-			return nil, err
+		var secretBackend *merchantsecrets.Store
+		if deps.Config.IsManifestMerchantSource() {
+			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
+				return nil, fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
+			}
+			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets)
+			if err != nil {
+				return nil, err
+			}
+			secretBackend = b
+		} else {
+			b, err := merchantsecrets.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
+			if err != nil {
+				return nil, err
+			}
+			secretBackend = b
 		}
 		secretStore := secretBackend.Secrets
 		solanaTransit := secretBackend.SolanaTransit
@@ -222,13 +236,20 @@ func New(deps Dependencies) (*Server, error) {
 		// Submitter (Transit when configured so the key never leaves Vault, else a
 		// keypair signer over the secret store) and share it across the cranker,
 		// plan-publish, and enroll services. The cranker MUST be injected BEFORE
-		// workers start (InitRiver).
-		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
+		// workers start (InitRiver). The Submitter's RPC resolves PER MERCHANT at
+		// submit time (#728: store settings win, boot client fallback), so the
+		// cranker arms even for store-only merchants (no boot Solana rail).
+		if deps.Runtime != nil {
 			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
 			solanaSigner := recurring.NewSignerFromRailMerchantAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
-			submitter := recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
+			var submitter recurring.Submitter
+			if deps.Runtime.SolanaRPCResolver != nil {
+				submitter = recurring.NewSignerSubmitterWithResolver(solanaSigner, deps.Runtime.SolanaRPCResolver.Resolve)
+			} else {
+				submitter = recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
+			}
 			network := "mainnet"
 			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {
 				network = pc.Solana.Network
@@ -240,8 +261,9 @@ func New(deps Dependencies) (*Server, error) {
 			cranker := recurring.NewCrankService(submitter)
 			deps.Runtime.SetSolanaCranker(cranker)
 			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
-			// the lifecycle (membership) + the on-chain subscription store.
-			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
+			// the lifecycle (membership) + the on-chain subscription store — and a
+			// boot RPC client for its chain reads (request-plane; boot-gated as before).
+			if deps.Runtime.SolanaRPC != nil && deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
 				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network, solanaTokens)
 				enrollSvc := recurring.NewEnrollService(
 					deps.Runtime.SubscriptionLifecycleService,
@@ -325,6 +347,9 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerUserRoutes(mux)
 	// #555/#561: merchant/support routes live only under `/v1/merchant/*`.
 	s.registerMerchantActionRoutes(mux)
+	// #721: cross-merchant platform operator directory (/v1/platform/*),
+	// standalone-only (root-group-gated; no embedded analogue).
+	s.registerPlatformRoutes(mux)
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
 	// ONLY the intentional AuthKit route groups (login/session/user) under

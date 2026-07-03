@@ -1,13 +1,8 @@
-//go:build vaultint
+//go:build integration
 
-// Live Vault integration tests (no mocks). They run against a real Vault when
-// VAULT_ADDR + VAULT_TOKEN are set — e.g. a dev server:
-//
-//	vault server -dev -dev-root-token-id=root &
-//	export VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root
-//	vault secrets enable -version=2 -path=secret kv   # (dev mode pre-enables this)
-//	vault secrets enable transit
-//	go test -tags vaultint -run Vault ./internal/integrations/vault/...
+// Live Vault integration tests (no mocks). They run unconditionally under the
+// integration tag against the vaulttest dev-mode container (#724); exporting
+// VAULT_ADDR + VAULT_TOKEN reuses an external dev server instead.
 //
 // They exercise the REAL KV-v2 put/get/list/delete + merchant path isolation and
 // real Transit Ed25519 create/sign/verify against the boundary OpenRails uses.
@@ -16,31 +11,19 @@ package vault
 import (
 	"context"
 	"crypto/ed25519"
-	"os"
 	"testing"
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
 
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func liveClient(t *testing.T) *vaultapi.Client {
 	t.Helper()
-	addr := os.Getenv("VAULT_ADDR")
-	token := os.Getenv("VAULT_TOKEN")
-	if addr == "" || token == "" {
-		t.Skip("set VAULT_ADDR + VAULT_TOKEN to run live Vault integration tests")
-	}
-	cfg := vaultapi.DefaultConfig()
-	cfg.Address = addr
-	cl, err := vaultapi.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("vault client: %v", err)
-	}
-	cl.SetToken(token)
-	return cl
+	return vaulttest.RootClient(t)
 }
 
 func TestVaultKVRoundTripAndIsolation(t *testing.T) {
@@ -50,16 +33,16 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 	pathA := "secret/openrails/merchants/tenant-a/provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
 	pathB := "secret/openrails/merchants/tenant-b/provider_accounts/solana/live/9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu/private_key"
 
-	if err := kv.WriteSecret(ctx, pathA, map[string]string{"value": "keyA"}); err != nil {
+	if _, err := kv.WriteSecret(ctx, pathA, map[string]string{"value": "keyA"}); err != nil {
 		t.Fatalf("write A: %v", err)
 	}
-	if err := kv.WriteSecret(ctx, pathB, map[string]string{"value": "keyB"}); err != nil {
+	if _, err := kv.WriteSecret(ctx, pathB, map[string]string{"value": "keyB"}); err != nil {
 		t.Fatalf("write B: %v", err)
 	}
 	defer kv.DeleteSecret(ctx, pathA)
 	defer kv.DeleteSecret(ctx, pathB)
 
-	got, err := kv.ReadSecret(ctx, pathA)
+	got, _, err := kv.ReadSecret(ctx, pathA)
 	if err != nil {
 		t.Fatalf("read A: %v", err)
 	}
@@ -67,7 +50,7 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 		t.Fatalf("merchant A value = %q, want keyA (isolation/round-trip broken)", got["value"])
 	}
 
-	missing, err := kv.ReadSecret(ctx, "secret/openrails/merchants/tenant-a/does/not/exist")
+	missing, _, err := kv.ReadSecret(ctx, "secret/openrails/merchants/tenant-a/does/not/exist")
 	if err != nil {
 		t.Fatalf("read missing: %v", err)
 	}
@@ -79,6 +62,7 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 func TestVaultTransitEd25519SignVerify(t *testing.T) {
 	ctx := context.Background()
 	client := liveClient(t)
+	vaulttest.EnsureTransit(t)
 	transit := NewTransitAdapter(client, "transit")
 
 	name := "openrails-it-" + time.Now().Format("150405")
@@ -87,7 +71,7 @@ func TestVaultTransitEd25519SignVerify(t *testing.T) {
 		"type":       "ed25519",
 		"exportable": false,
 	}); err != nil {
-		t.Skipf("transit engine unavailable (enable it): %v", err)
+		t.Fatalf("create transit ed25519 key: %v", err)
 	}
 	defer client.Logical().DeleteWithContext(ctx, "transit/keys/"+name+"/config") //nolint
 

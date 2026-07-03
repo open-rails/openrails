@@ -13,9 +13,11 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
 	koanfyaml "github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
@@ -92,12 +94,38 @@ func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
 		return nil, err
 	}
 	k := koanf.New(".")
-	if err := k.Load(env.Provider(MerchantBillingEnvPrefix, ".", MerchantBillingEnvKey), nil); err != nil {
+	// Operator-mounted secret files (filename = env-var name) load BELOW the
+	// env overlay, so env wins. Default non-SaaS path: Vault renders
+	// BILLING_MERCHANTS_* files into the mounted dir; no live Vault needed.
+	fileOverlay, err := merchantSecretFileOverlay()
+	if err != nil {
+		return nil, err
+	}
+	if len(fileOverlay) > 0 {
+		if err := k.Load(confmap.Provider(fileOverlay, "."), nil); err != nil {
+			return nil, fmt.Errorf("load merchant config secret-file overlay: %w", err)
+		}
+	}
+	if err := k.Load(env.ProviderWithValue(MerchantBillingEnvPrefix, ".", merchantBillingEnvKV), nil); err != nil {
 		return nil, fmt.Errorf("load merchant config env overlay: %w", err)
 	}
 	if len(k.Keys()) > 0 {
 		var overlay BillingConfig
-		if err := k.Unmarshal("", &overlay); err != nil {
+		// Strict, matching the file path's DisallowUnknownField (#710): a var that
+		// routes to a section but names an unknown field errors, never drops.
+		if err := k.UnmarshalWithConf("", &overlay, koanf.UnmarshalConf{
+			Tag: "koanf",
+			DecoderConfig: &mapstructure.DecoderConfig{
+				DecodeHook: mapstructure.ComposeDecodeHookFunc(
+					mapstructure.StringToTimeDurationHookFunc(),
+					mapstructure.StringToSliceHookFunc(","),
+					mapstructure.TextUnmarshallerHookFunc(),
+				),
+				Result:           &overlay,
+				WeaklyTypedInput: true,
+				ErrorUnused:      true,
+			},
+		}); err != nil {
 			return nil, fmt.Errorf("unmarshal merchant config env overlay: %w", err)
 		}
 		mergeMerchantConfigManifest(manifest, &overlay)
@@ -106,6 +134,49 @@ func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// merchantSecretFileOverlay maps operator-mounted secret files
+// (config.SecretFiles: filename = env-var name, content = value) through the
+// same routing and rejection rules as BILLING_* env vars.
+func merchantSecretFileOverlay() (map[string]any, error) {
+	files, err := config.SecretFiles()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for name, value := range files {
+		if !strings.HasPrefix(name, MerchantBillingEnvPrefix) {
+			continue
+		}
+		if err := rejectRenamedMerchantEnvName("secret file", name); err != nil {
+			return nil, err
+		}
+		key, v := merchantBillingEnvKV(name, value)
+		if key == "" {
+			continue
+		}
+		out[key] = v
+	}
+	return out, nil
+}
+
+// merchantBillingEnvKV maps a BILLING_* env var to its koanf key and value.
+// JSON array/object values decode structurally so list-valued manifest fields
+// (delegated_invoker_wasted_spend_windows) can be overlaid from one var.
+func merchantBillingEnvKV(name, value string) (string, any) {
+	key := MerchantBillingEnvKey(name)
+	if key == "" {
+		return "", nil
+	}
+	v := strings.TrimSpace(value)
+	if len(v) >= 2 && ((v[0] == '[' && v[len(v)-1] == ']') || (v[0] == '{' && v[len(v)-1] == '}')) {
+		var decoded any
+		if err := json.Unmarshal([]byte(v), &decoded); err == nil {
+			return key, decoded
+		}
+	}
+	return key, v
 }
 
 // ParseMerchantConfigManifest parses the merchant config manifest consumed by
@@ -366,12 +437,19 @@ type MerchantProfileConfig struct {
 type RailMerchantAccountConfig map[string]ProviderRailAccountConfig
 
 type ProviderRailAccountConfig struct {
+	// Environment (test|live) is an ASSERTION cross-checked against the
+	// deployment's test_mode (#641/#711), not a behavior selector — test_mode
+	// alone drives sandbox posture. Omitted derives from test_mode.
 	Environment string                           `yaml:"environment,omitempty" koanf:"environment"`
 	AccountID   string                           `yaml:"account_id,omitempty" koanf:"account_id"`
 	Archived    bool                             `yaml:"archived,omitempty" koanf:"archived"`
 	Signer      *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
 	Secrets     map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
-	Settings    map[string]any                   `yaml:"settings,omitempty" koanf:"settings"`
+	// Settings are per-account NON-SECRET runtime knobs, stored on the
+	// rail_merchant_accounts row (NMI: tokenization_key/tokenization_url;
+	// Solana: rpc_provider, rpc_api_key, tokens,
+	// recipient_wallet — see config.SolanaAccountSettings, #711).
+	Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
 }
 
 type RailMerchantAccountSignerConfig struct {
@@ -397,6 +475,12 @@ type MerchantManifestReconcileOptions struct {
 	// from the manifest, reconciling the secret set to the file. Provider-account
 	// and issuer removal stay reversible/manual and are not pruned here.
 	Prune bool
+	// SecretStore overrides where manifest secrets reconcile to. MODE 1 (#723)
+	// boot paths pass the runtime's in-memory manifest plane
+	// (ManifestSecretStore.Seeder()); nil selects by mode — api mode builds the
+	// persistent backend, manifest mode uses an EPHEMERAL in-memory store
+	// (validation only; the long-running server seeds its own plane at boot).
+	SecretStore merchants.MerchantSecretStore
 	// IdentityResolver is an optional test/embedding seam for provider account
 	// discovery. Production uses the default resolver over provider read-only
 	// identity APIs.
@@ -459,11 +543,10 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		return nil
 	}
 
-	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
+	secretStore, solanaTransit, err := manifestReconcileSecretStore(ctx, cfg, cp, opts)
 	if err != nil {
-		return fmt.Errorf("merchant bootstrap: build secret store: %w", err)
+		return err
 	}
-	secretStore := secretBackend.Secrets
 	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
@@ -476,7 +559,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			ControlPlane:  cp,
 			Database:      database,
 			SecretStore:   secretStore,
-			SolanaTransit: secretBackend.SolanaTransit,
+			SolanaTransit: solanaTransit,
 			Slug:          slug,
 			Merchant:      mt,
 			Options:       opts,
@@ -495,9 +578,47 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	return nil
 }
 
+// manifestReconcileSecretStore picks where manifest secrets land (#723):
+// injected store (mode-1 boot plane) > mode-2 persistent backend > mode-1
+// ephemeral memory (CLI runs: DB projections converge, secrets validate but
+// are NOT persisted — the running server holds its own from its boot manifest).
+func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, opts MerchantManifestReconcileOptions) (merchants.MerchantSecretStore, solana.TransitClient, error) {
+	if opts.SecretStore != nil {
+		transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
+		}
+		return opts.SecretStore, transit, nil
+	}
+	if cfg.IsManifestMerchantSource() {
+		log.Info("merchant bootstrap: merchant_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
+		transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
+		}
+		return merchants.NewMemorySecretStore(), transit, nil
+	}
+	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
+	if err != nil {
+		return nil, nil, fmt.Errorf("merchant bootstrap: build secret store: %w", err)
+	}
+	return secretBackend.Secrets, secretBackend.SolanaTransit, nil
+}
+
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
+	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
+	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
+	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
+	// UpsertMerchantConfig, standalone boot, CLI) converging identically.
+	if req.Config.IsManifestMerchantSource() {
+		req.Options.Insert = true
+		req.Options.Overwrite = true
+		// Prune needs a store to list; a storeless call (read-side bind with no
+		// accounts, e.g. hentai0's empty config) has nothing to prune.
+		req.Options.Prune = req.SecretStore != nil
+	}
 	database := req.Database
 	if database == nil {
 		if req.ControlPlane == nil || req.ControlPlane.Pool() == nil {
@@ -793,44 +914,114 @@ func hasManifestProfile(p MerchantProfileConfig) bool {
 		strings.TrimSpace(p.SupportURL) != ""
 }
 
-func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
-	rail = normalizeManifestRail(rail)
-	if rail == "" {
-		return fmt.Errorf("provider account rail is required")
+// resolvedManifestRailAccount is the store/DB-independent front half of a
+// manifest rail-account reconcile: normalized rail, resolved environment,
+// account identity and secret values, fully validated. Shared by the DB
+// reconcile path and the seeding-only plane build (#723).
+type resolvedManifestRailAccount struct {
+	rail           string
+	environment    string
+	accountID      string
+	secrets        manifestSecretValues
+	identity       manifestProviderIdentity
+	signerEvidence map[string]string
+}
+
+func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (resolvedManifestRailAccount, error) {
+	out := resolvedManifestRailAccount{rail: normalizeManifestRail(rail)}
+	if out.rail == "" {
+		return out, fmt.Errorf("provider account rail is required")
 	}
 	environment, err := manifestProviderEnvironment(cfg, account.Environment)
 	if err != nil {
-		return err
+		return out, err
 	}
-	secrets, err := newManifestSecretValues(rail, account.Secrets)
+	out.environment = environment
+	// #711: the Solana runtime knobs live in the account settings block —
+	// validate strictly at push time so a typo'd key/value fails loudly here
+	// instead of being stored inert.
+	if out.rail == string(models.RailSolana) {
+		if err := config.ValidateSolanaAccountSettings(account.Settings); err != nil {
+			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		}
+	}
+	secrets, err := newManifestSecretValues(out.rail, account.Secrets)
 	if err != nil {
-		return err
+		return out, err
 	}
-	resolver := opts.IdentityResolver
+	out.secrets = secrets
 	if resolver == nil {
 		resolver = defaultManifestProviderIdentityResolver{}
 	}
-	identity, err := resolver.ResolveManifestRailMerchantAccount(ctx, cfg, rail, environment, account, secrets)
+	identity, err := resolver.ResolveManifestRailMerchantAccount(ctx, cfg, out.rail, environment, account, secrets)
 	if err != nil {
-		return err
+		return out, err
 	}
+	out.identity = identity
 	accountID := strings.TrimSpace(identity.AccountID)
 	// For Solana, manifestProviderSignerEvidence derives the stored provider-account
 	// identity from the signer key; a declared account_id is ignored (warned).
-	signerEvidence, accountID, err := manifestProviderSignerEvidence(ctx, rail, accountID, account, secrets, transit)
+	signerEvidence, accountID, err := manifestProviderSignerEvidence(ctx, out.rail, accountID, account, secrets, transit)
+	if err != nil {
+		return out, err
+	}
+	out.signerEvidence = signerEvidence
+	if accountID == "" {
+		if out.rail == string(models.RailSolana) {
+			return out, fmt.Errorf("provider account %q requires signer-derived identity", out.rail)
+		}
+		return out, fmt.Errorf("provider account %q requires account_id", out.rail)
+	}
+	// #697: rail-specific format doctrine (CCBill ids are dash-joined).
+	if err := config.ValidateRailAccountID(models.Rail(out.rail), accountID); err != nil {
+		return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+	}
+	out.accountID = accountID
+	return out, nil
+}
+
+// SeedMerchantManifestSecretPlane resolves ONE merchant's manifest-declared
+// rail secrets and seeds them into store, touching no DB state — the same
+// values the server's boot reconcile seeds into its runtime plane. MODE-1
+// one-off processes (pull-provider CLI, #723) build their ephemeral in-memory
+// plane through it and arm per-merchant fetchers from the on-disk manifest.
+func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
+	if store == nil {
+		return fmt.Errorf("merchant manifest secret plane: store is required")
+	}
+	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
+		ra, err := resolveManifestRailAccount(ctx, cfg, entry.rail, entry.config, transit, nil)
+		if err != nil {
+			return err
+		}
+		for key, fallback := range entry.config.Secrets {
+			name, err := merchants.RailMerchantAccountSecretName(ra.rail, ra.environment, ra.accountID, key)
+			if err != nil {
+				return err
+			}
+			value, err := ra.secrets.Resolve(key, fallback)
+			if err != nil {
+				return fmt.Errorf("resolve secret %s.%s: %w", ra.rail, key, err)
+			}
+			if _, err := store.Put(ctx, merchantID, name, value); err != nil {
+				return fmt.Errorf("seed secret %s: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+	ra, err := resolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err
 	}
-	if accountID == "" {
-		if rail == string(models.RailSolana) {
-			return fmt.Errorf("provider account %q requires signer-derived identity", rail)
-		}
-		return fmt.Errorf("provider account %q requires account_id", rail)
-	}
-	// #697: rail-specific format doctrine (CCBill ids are dash-joined).
-	if err := config.ValidateRailAccountID(models.Rail(rail), accountID); err != nil {
-		return fmt.Errorf("provider account %q: %w", rail, err)
-	}
+	rail = ra.rail
+	environment := ra.environment
+	accountID := ra.accountID
+	secrets := ra.secrets
+	identity := ra.identity
+	signerEvidence := ra.signerEvidence
 	for key, value := range account.Secrets {
 		name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
 		if err != nil {

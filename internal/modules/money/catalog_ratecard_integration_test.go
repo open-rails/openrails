@@ -113,7 +113,7 @@ FROM openrails.invoice_items
 WHERE customer_id = $1
   AND invoice_id = $2
   AND status = 'invoiced'
-  AND source_id LIKE 'metered:%:rate_card:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
+  AND source_id LIKE 'metered:%:period:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
 	require.Equal(t, 2, itemCount)
 	require.Equal(t, inv.AmountDue, itemTotal)
 }
@@ -132,7 +132,12 @@ func TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance(t *tes
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
-	_, err := svc.DefineCustomCreditType(ctx, "image-credit", 0)
+	// The catalog sidecar push is the custom_credit_types writer (#706); this
+	// test seeds sidecar rows directly, so seed the type row the same way.
+	_, err := pool.Exec(ctx, `
+INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
+VALUES (uuidv7(), $1, 'image-credit', 0, true)
+ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.products (id, key, display_name, merchant_id)
@@ -256,7 +261,10 @@ func TestCatalogCreditPurchase_QuotesByCreditsEntryWithinSpendBounds(t *testing.
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", merchantID, "image-credit")
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
-	_, err := svc.DefineCustomCreditType(ctx, "image-credit", 0)
+	_, err := pool.Exec(ctx, `
+INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
+VALUES (uuidv7(), $1, 'image-credit', 0, true)
+ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Topup', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)

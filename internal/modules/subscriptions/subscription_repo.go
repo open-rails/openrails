@@ -119,7 +119,7 @@ func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) e
 // ReplaceForTierChange atomically persists a tier change: it writes oldSub
 // (pre-mutated by the caller to its cancelled state) and inserts newSub in ONE
 // transaction. The partial unique index
-// uq_subscriptions_tenant_subject_tier_group_active allows only one live
+// uq_subscriptions_customer_tier_group_active allows only one live
 // subscription per (tenant_subject, tier_group), so the old row's cancel and
 // the new row's insert must commit together — and the cancel must execute
 // first. On any failure the transaction rolls back and the old subscription

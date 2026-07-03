@@ -103,17 +103,17 @@ type DriftField struct {
 // operations. There is no product-level provider field, no product-level
 // verify/reconcile, no product-level reconcile route.
 type CatalogProduct struct {
-	ID               uuid.UUID            `json:"id"`
-	Key              string               `json:"key"`
-	DisplayName      string               `json:"display_name"`
-	Description      string               `json:"description"`
-	EntitlementsSpec map[string]*int      `json:"entitlements_spec,omitempty"`
-	CreditsSpec      CreditsSpec          `json:"credits_spec,omitempty"`
-	TierGroup        *string              `json:"tier_group,omitempty"`
-	TierRank         int                  `json:"tier_rank"`
-	Status           models.CatalogStatus `json:"status"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	ID               uuid.UUID       `json:"id"`
+	Key              string          `json:"key"`
+	DisplayName      string          `json:"display_name"`
+	Description      string          `json:"description"`
+	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
+	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
+	TierGroup        *string         `json:"tier_group,omitempty"`
+	TierRank         int             `json:"tier_rank"`
+	Archived         bool            `json:"archived"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 type CreateProductRequest struct {
@@ -124,10 +124,9 @@ type CreateProductRequest struct {
 	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	TierRank         int             `json:"tier_rank,omitempty"`
-	// Status is the optional initial lifecycle state (draft|active|archived).
-	// Defaults to active. Creating archived directly supports migrating
-	// historical plans that already have subscribers (no purchasable gap).
-	Status models.CatalogStatus `json:"status,omitempty"`
+	// Archived creates the product retired. Supports migrating historical
+	// plans that already have subscribers (no purchasable gap).
+	Archived bool `json:"archived,omitempty"`
 }
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
@@ -146,13 +145,6 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	}
 
 	now := time.Now().UTC()
-	status := req.Status
-	if status == "" {
-		status = models.CatalogStatusActive
-	}
-	if !status.Valid() {
-		return nil, fmt.Errorf("invalid status %q", status)
-	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -167,7 +159,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		CreditsSpec:      toModelCreditsSpec(req.CreditsSpec),
 		TierGroup:        req.TierGroup,
 		TierRank:         req.TierRank,
-		Status:           status,
+		Archived:         req.Archived,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -187,9 +179,9 @@ type UpdateProductRequest struct {
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	SetTierGroup     bool            `json:"set_tier_group,omitempty"`
 	TierRank         *int            `json:"tier_rank,omitempty"`
-	// Status sets the lifecycle state (draft|active|archived). archived/draft
-	// propagate to Stripe as active=false; active propagates as active=true.
-	Status *models.CatalogStatus `json:"status,omitempty"`
+	// Archived sets the lifecycle flag. archived propagates to Stripe as
+	// active=false; unarchived as active=true.
+	Archived *bool `json:"archived,omitempty"`
 	// SkipRailSync, when true, suppresses any propagation of this update to
 	// configured external rails (Stripe etc.). The DB row is updated as usual.
 	// Use sparingly — drift introduced this way will appear as sync_status="drifted"
@@ -215,7 +207,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		TierGroup:        req.TierGroup,
 		SetTierGroup:     req.SetTierGroup,
 		TierRank:         req.TierRank,
-		Status:           req.Status,
+		Archived:         req.Archived,
 	})
 	if err != nil {
 		return nil, err
@@ -226,7 +218,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	// it lives on associated prices' rails.stripe.product_id. Look up one
 	// such price to find it; if no prices have a Stripe link yet, there is
 	// nothing to propagate (no Stripe Product exists for this OpenRails product).
-	if !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Status != nil) && s.rt.Config != nil {
+	if !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
 		stripeProductID := s.lookupStripeProductID(ctx, productID)
 		if stripeProductID != "" {
 			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
@@ -239,9 +231,9 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 				desc := strings.TrimSpace(*req.Description)
 				params.Description = &desc
 			}
-			if req.Status != nil {
-				// active -> Stripe active=true; draft/archived -> active=false.
-				active := *req.Status == models.CatalogStatusActive
+			if req.Archived != nil {
+				// archived -> Stripe active=false.
+				active := !*req.Archived
 				params.Active = &active
 			}
 			// Best-effort propagation: log on failure, do not roll back the DB change.
@@ -328,7 +320,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 		CreditsSpec:      credits,
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
-		Status:           p.Status,
+		Archived:         p.Archived,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}
@@ -337,17 +329,17 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
 type CatalogPrice struct {
-	ID                  uuid.UUID            `json:"id"`
-	ProductID           uuid.UUID            `json:"product_id"`
-	Status              models.CatalogStatus `json:"status"`
-	UnitAmount          int64                `json:"unit_amount"`
-	Currency            string               `json:"currency"`
-	AccessDurationHours *int                 `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool                 `json:"auto_renew"`
-	TrialUnitAmount     *int64               `json:"trial_unit_amount,omitempty"`
-	TrialDurationHours  *int                 `json:"trial_duration_hours,omitempty"`
-	CreatedAt           time.Time            `json:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
+	ID                  uuid.UUID `json:"id"`
+	ProductID           uuid.UUID `json:"product_id"`
+	Archived            bool      `json:"archived"`
+	UnitAmount          int64     `json:"unit_amount"`
+	Currency            string    `json:"currency"`
+	AccessDurationHours *int      `json:"access_duration_hours,omitempty"`
+	AutoRenew           bool      `json:"auto_renew"`
+	TrialUnitAmount     *int64    `json:"trial_unit_amount,omitempty"`
+	TrialDurationHours  *int      `json:"trial_duration_hours,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 
 	// Providers carries the typed per-provider attachment state for every
 	// rail this price is linked to. Always populated when at least one
@@ -413,10 +405,9 @@ type CreatePriceRequest struct {
 	// attach set even if absent from Providers.
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`
 
-	// Status is the optional initial lifecycle state (draft|active|archived).
-	// Defaults to active. draft prices are not created in the external provider;
-	// archived can be created directly to migrate a historical plan in one step.
-	Status models.CatalogStatus `json:"status,omitempty"`
+	// Archived creates the price retired — migrates a historical plan in one
+	// step (grandfathered subscriptions bill it; new buyers cannot).
+	Archived bool `json:"archived,omitempty"`
 }
 
 // RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
@@ -479,28 +470,11 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, fmt.Errorf("product not found")
 	}
 
-	status := req.Status
-	if status == "" {
-		status = models.CatalogStatusActive
-	}
-	if !status.Valid() {
-		return nil, fmt.Errorf("invalid status %q", status)
-	}
-
 	priceID := uuidutil.NewV7()
 
-	// Draft prices are not created in any external provider — they have no
-	// subscribers and are not purchasable, so there is nothing to mint remotely.
-	var (
-		rails          map[string]map[string]string
-		providerStates map[string]ProviderState
-		pending        []PendingAction
-	)
-	if status != models.CatalogStatusDraft {
-		rails, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
-		if err != nil {
-			return nil, err
-		}
+	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
+	if err != nil {
+		return nil, err
 	}
 
 	tid, err := merchant.Require(ctx)
@@ -512,7 +486,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		ID:                  priceID,
 		MerchantID:          tid.UUID(),
 		ProductID:           req.ProductID,
-		Status:              status,
+		Archived:            req.Archived,
 		Amount:              req.UnitAmount,
 		Currency:            req.Currency,
 		AccessDurationHours: req.AccessDurationHours,
@@ -529,7 +503,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// Created-as-archived: the providers were auto-created active above, so
 	// propagate active=false to match the archived lifecycle (best-effort; drift
 	// surfaces on next verify if a provider rejects it).
-	if status == models.CatalogStatusArchived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
+	if req.Archived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
 		inactive := false
 		adapters := s.providerAdapters()
 		for provider, ids := range rails {
@@ -570,9 +544,9 @@ type UpdatePriceRequest struct {
 	// not mentioned are left alone.
 	ReplaceProviderLinks bool `json:"replace_provider_links,omitempty"`
 
-	// Status sets the lifecycle state (draft|active|archived). active propagates
-	// to providers as active=true; draft/archived as active=false.
-	Status *models.CatalogStatus `json:"status,omitempty"`
+	// Archived sets the lifecycle flag. archived propagates to providers as
+	// active=false; unarchived as active=true.
+	Archived *bool `json:"archived,omitempty"`
 
 	// See UpdateProductRequest.SkipRailSync.
 	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
@@ -640,11 +614,8 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			return nil, err
 		}
 	}
-	if req.Status != nil {
-		if !req.Status.Valid() {
-			return nil, fmt.Errorf("invalid status %q", *req.Status)
-		}
-		if err := prices.SetStatus(ctx, priceID, *req.Status); err != nil {
+	if req.Archived != nil {
+		if err := prices.SetArchived(ctx, priceID, *req.Archived); err != nil {
 			return nil, err
 		}
 	}
@@ -656,12 +627,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// Propagate mutable changes to every attached provider via its adapter.
 	// Only when the caller did not opt out via SkipRailSync. Failures are
 	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !req.SkipRailSync && req.Status != nil {
-		mutable := mutableUpdate{}
-		if req.Status != nil {
-			active := *req.Status == models.CatalogStatusActive
-			mutable.IsActive = &active
-		}
+	if !req.SkipRailSync && req.Archived != nil {
+		active := !*req.Archived
+		mutable := mutableUpdate{IsActive: &active}
 		if !s.catalogRemoteWritesDisabled() {
 			adapters := s.providerAdapters()
 			for provider, ids := range updated.Rails {
@@ -685,7 +653,7 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
 		ID:                  p.ID,
 		ProductID:           p.ProductID,
-		Status:              p.Status,
+		Archived:            p.Archived,
 		UnitAmount:          p.Amount,
 		Currency:            p.Currency,
 		AccessDurationHours: p.AccessDurationHours,

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -51,6 +52,18 @@ func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
+// WithRPC returns a shallow copy bound to rpc — the #728 per-merchant-pass
+// seam (the poller verifies each merchant's payments with that merchant's
+// store-armed client). nil-receiver-safe.
+func (s *SolanaTransactionService) WithRPC(rpc *solanarpc.RPCClient) *SolanaTransactionService {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	cp.rpc = rpc
+	return &cp
+}
+
 func (s *SolanaTransactionService) Clock() clockwork.Clock {
 	return s.clock
 }
@@ -78,6 +91,11 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	if !isNativeTokenSymbol(req.TokenSymbol) && IsNativeSOLMint(req.TokenMint) {
 		return nil, fmt.Errorf("non-SOL token cannot use native SOL mint")
 	}
+	if req.SessionID == uuid.Nil {
+		// #713: every purchase tx we construct carries the memo stamp; refuse to
+		// build unstamped rather than silently omit it.
+		return nil, fmt.Errorf("checkout session id is required (purchase memo local-id)")
+	}
 
 	referenceStr := ""
 	if req.Reference != nil {
@@ -91,6 +109,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		TokenMint:   strings.TrimSpace(req.TokenMint),
 		Amount:      req.TokenAmount,
 		Reference:   referenceStr,
+		Memo:        solanarpc.PurchaseMemo(req.SessionID),
 	})
 	if err != nil {
 		return nil, err
@@ -122,8 +141,10 @@ func isNativeTokenSymbol(symbol string) bool {
 	return strings.EqualFold(strings.TrimSpace(symbol), "SOL")
 }
 
-// VerifyTransactionWithContent verifies a transaction against expected recipient, amount, and reference.
-func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error {
+// VerifyTransactionWithContent verifies a transaction against expected
+// recipient, amount, and reference. expectedMemoLocalID (uuid.Nil = skip)
+// additionally checks any #713 purchase memo: mismatch fails, absence passes.
+func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
 	if s.rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
 	}
@@ -143,13 +164,14 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 	}
 
 	return s.rpc.VerifyTransfer(ctx, solanarpc.VerifyTransferRequest{
-		Signature:         strings.TrimSpace(signature),
-		ExpectedAmount:    expectedAmount,
-		ExpectedRecipient: strings.TrimSpace(expectedRecipient),
-		ExpectedTokenMint: strings.TrimSpace(expectedTokenMint),
-		ExpectedPayer:     strings.TrimSpace(expectedPayer),
-		ExpectedReference: reference,
-		ProcessedNotAfter: processedNotAfter,
+		Signature:           strings.TrimSpace(signature),
+		ExpectedAmount:      expectedAmount,
+		ExpectedRecipient:   strings.TrimSpace(expectedRecipient),
+		ExpectedTokenMint:   strings.TrimSpace(expectedTokenMint),
+		ExpectedPayer:       strings.TrimSpace(expectedPayer),
+		ExpectedReference:   reference,
+		ExpectedMemoLocalID: expectedMemoLocalID,
+		ProcessedNotAfter:   processedNotAfter,
 	})
 }
 

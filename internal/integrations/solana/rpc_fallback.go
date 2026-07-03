@@ -606,6 +606,20 @@ func (c *RPCFallbackClient) GetSignaturesForAddressWithOpts(ctx context.Context,
 	return result, err
 }
 
+// GetProgramAccountsWithOpts lists program-owned accounts with automatic failover.
+func (c *RPCFallbackClient) GetProgramAccountsWithOpts(ctx context.Context, program solanago.PublicKey, opts *rpc.GetProgramAccountsOpts) (rpc.GetProgramAccountsResult, error) {
+	var result rpc.GetProgramAccountsResult
+	err := c.withFallback(ctx, "GetProgramAccounts", func(client *rpc.Client) error {
+		resp, err := client.GetProgramAccountsWithOpts(ctx, program, opts)
+		if err != nil {
+			return err
+		}
+		result = resp
+		return nil
+	})
+	return result, err
+}
+
 // GetEndpoint returns the primary endpoint URL (first in chain).
 func (c *RPCFallbackClient) GetEndpoint() string {
 	if len(c.endpoints) == 0 {

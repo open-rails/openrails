@@ -109,11 +109,9 @@ CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    owner text DEFAULT 'merchant' NOT NULL,
     CONSTRAINT payment_provider_accounts_pkey PRIMARY KEY (id),
     CONSTRAINT payment_provider_accounts_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
     CONSTRAINT payment_provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT payment_provider_accounts_owner_check CHECK (owner = ANY (ARRAY['merchant','platform'])),
     CONSTRAINT payment_provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
 ALTER TABLE ONLY openrails.rail_merchant_accounts FORCE ROW LEVEL SECURITY;
@@ -131,7 +129,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
 	var tenantID, permissionGroupID string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -145,7 +143,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, groupID, permissionGroupID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT permission_group_id
@@ -180,7 +178,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
@@ -244,7 +242,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
@@ -292,7 +290,7 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	err := ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true})
+	err := ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
 }
@@ -305,7 +303,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := cozyArtMerchantManifest()
@@ -365,7 +363,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	cfg := &config.Config{}
+	cfg := apiModeReconcileConfig()
 
 	threshold := int64(75_000_000)
 	floor := int64(2_000_000)
@@ -517,7 +515,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	vault := newMerchantManifestVault(t)
-	cfg := &config.Config{Vault: &config.VaultConfig{
+	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Vault: &config.VaultConfig{
 		Enabled:    true,
 		Address:    vault.Address,
 		AuthMethod: "token",
@@ -573,7 +571,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 
@@ -630,7 +628,7 @@ func TestReconcileMerchantManifestSerializesConcurrentReplicas(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if err := ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{Insert: true}); err == nil {
+			if err := ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}); err == nil {
 				successes.Add(1)
 			} else {
 				require.NoError(t, err)
@@ -779,6 +777,13 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	}
 	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
+}
+
+// apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723
+// merchant_source=api): they assert persistent-backend side effects (seed-once,
+// merchant_secrets rows, Vault KV) that mode 1 deliberately does not produce.
+func apiModeReconcileConfig() *config.Config {
+	return &config.Config{MerchantSource: config.MerchantSourceAPI}
 }
 
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {

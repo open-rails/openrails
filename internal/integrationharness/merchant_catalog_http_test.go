@@ -157,7 +157,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 		Key:         extraSlug,
 		DisplayName: "Prune Extra",
 		TierGroup:   &groupSlug,
-		Status:      models.CatalogStatusActive,
+		Archived:    false,
 	})
 	require.NoError(t, err)
 
@@ -170,7 +170,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(body))
 	var archived billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &archived))
-	require.Equal(t, models.CatalogStatusArchived, archived.Status)
+	require.True(t, archived.Archived)
 }
 
 func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
@@ -472,11 +472,15 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	}
 }
 
+// TestNativeCatalogMeteredUsageHTTP proves the #707 unification: a legacy
+// metered: price declaration published over HTTP is translated into a rate-card
+// row (no price row, no catalog_price_metered — the table is gone), and
+// reported usage is rated through it onto a finalized invoice with exact #599
+// semantics (counter = sum of per-event quantities, defaulting to 1).
 func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	standalone := h.StartStandalone("usd")
-	embedded := h.StartEmbeddedHost("usd")
 
 	token := standalone.MintAPIKey(
 		dbtest.TestMerchantSlug,
@@ -497,8 +501,6 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 0,
 				Currency:   "usd",
-				Duration:   "30d",
-				AutoRenew:  true,
 				Providers:  []string{},
 				Metered: &catalog.MeteredPrice{
 					Meter:    meterKey,
@@ -519,21 +521,68 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(body))
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
+
+	// Translated: no price row (pure usage), one rate card carrying the rate as
+	// per_unit unit_amount/divide_by, one meter.
 	prices, err := (httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}).ListPricesByProduct(ctx, product.ID, true)
 	require.NoError(t, err)
-	require.Len(t, prices, 1)
+	require.Empty(t, prices)
 	var meterCount int
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2`, dbtest.TestMerchantID.UUID(), meterKey).Scan(&meterCount))
 	require.Equal(t, 1, meterCount)
-	var sidecarCount int
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_price_metered WHERE merchant_id = $1 AND price_id = $2`, dbtest.TestMerchantID.UUID(), prices[0].ID).Scan(&sidecarCount))
-	require.Equal(t, 1, sidecarCount)
+	var unitAmount, divideBy int64
+	require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT (price -> 'per_unit' ->> 'unit_amount')::bigint, (price -> 'per_unit' ->> 'divide_by')::bigint
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term = 'in_arrears'`,
+		dbtest.TestMerchantID.UUID(), product.ID, meterKey).Scan(&unitAmount, &divideBy))
+	require.Equal(t, int64(250_000), unitAmount)
+	require.Equal(t, int64(100), divideBy)
 
-	for _, surface := range []*Surface{standalone, embedded} {
-		t.Run(surface.Name, func(t *testing.T) {
-			proveCatalogMeteredUsage(t, h, surface, prices[0].ID)
+	// Rate reported usage through the translated card: three quantity-bearing
+	// events (100+200+120) plus one without the dimension (counts as 1) —
+	// aggregate 421 -> round_half_up(421 * 250_000 / 100) = 1_052_500.
+	mctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, h.DSN)
+	pool := dbi.Pool()
+	payerID := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(mctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(mctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(mctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+	})
+	moneySvc := money.NewMoneyService(dbi)
+	payer := identity.CustomerID(payerID)
+	for _, quantity := range []int64{100, 200, 120} {
+		_, err := moneySvc.RecordUsage(mctx, money.RecordUsageParams{
+			Payer:      &payer,
+			Invoker:    "test-invoker",
+			Currency:   "usd",
+			EventType:  meterKey,
+			Dimensions: map[string]int64{meterKey: quantity},
+			Amount:     0,
+			Source:     "metered-usage-http",
+			SourceID:   uuid.NewString(),
+			OccurredAt: time.Now(),
 		})
+		require.NoError(t, err)
 	}
+	_, err = moneySvc.RecordUsage(mctx, money.RecordUsageParams{
+		Payer:      &payer,
+		Invoker:    "test-invoker",
+		Currency:   "usd",
+		EventType:  meterKey,
+		Amount:     0,
+		Source:     "metered-usage-http",
+		SourceID:   uuid.NewString(),
+		OccurredAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	inv, err := moneySvc.FinalizeInvoice(mctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "open", inv.Status)
+	require.Equal(t, int64(1_052_500), inv.AmountDue)
 }
 
 func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
@@ -934,11 +983,14 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
 	})
 
+	// No manual custom-credit definition: the catalog publish auto-defined the
+	// custom_credit_types rows from the declared credit-balance units (#706) —
+	// the grants below fail unit resolution if it didn't.
 	moneySvc := money.NewMoneyService(dbi)
-	_, err = moneySvc.DefineCustomCreditType(ctx, aiUnitName, 0)
-	require.NoError(t, err)
-	_, err = moneySvc.DefineCustomCreditType(ctx, apiUnitName, 0)
-	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.custom_credit_types WHERE merchant_id = $1 AND name = ANY($2::text[])",
+			dbtest.TestMerchantID.UUID(), []string{aiUnitName, apiUnitName})
+	})
 
 	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
 		Payer:     customer,
@@ -1011,37 +1063,6 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, grantLedger.MaterializeGrant(ctx, ownership))
 	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID))
-}
-
-func proveCatalogMeteredUsage(t *testing.T, h *Harness, surface *Surface, priceID uuid.UUID) {
-	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
-	pool := dbi.Pool()
-	payerID := uuid.New()
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
-	})
-
-	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/usage/metered", surface.Token, map[string]any{
-		"customer_id": payerID.String(),
-		"currency":    "usd",
-		"price_id":    priceID.String(),
-		"source_id":   "period-" + surface.Name + "-" + uuid.NewString(),
-		"aggregate":   420,
-	})
-	require.Equal(t, http.StatusOK, status, string(body))
-	var rated struct {
-		Amount int64 `json:"amount"`
-	}
-	require.NoError(t, json.Unmarshal(body, &rated))
-	require.Equal(t, int64(1_050_000), rated.Amount)
-
-	inv, err := money.NewMoneyService(dbi).FinalizeInvoice(ctx, identity.CustomerID(payerID), money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	require.NoError(t, err)
-	require.Equal(t, "open", inv.Status)
-	require.Equal(t, int64(1_050_000), inv.AmountDue)
 }
 
 func liveOwnershipGrantCount(t *testing.T, ctx context.Context, pool interface {
@@ -1499,9 +1520,9 @@ WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUI
 	require.Equal(t, exampleProductUsageLimitCount(m), n)
 
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.catalog_price_metered WHERE merchant_id = $1 AND meter_key = ANY($2::text[])`,
+		`SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = ANY($2::text[])`,
 		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
-	require.Equal(t, exampleMeteredPriceCount(m), n)
+	require.Equal(t, exampleUsageRateCardCount(m), n)
 
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*) FROM openrails.prices pr
@@ -1566,9 +1587,17 @@ func exampleProductUsageLimitCount(m catalog.Manifest) int {
 	return n
 }
 
-func exampleMeteredPriceCount(m catalog.Manifest) int {
+// exampleUsageRateCardCount counts metered rate cards in the published
+// manifest — declared rate_cards plus legacy metered: prices (translated into
+// rate cards at push time, #707).
+func exampleUsageRateCardCount(m catalog.Manifest) int {
 	var n int
 	for _, p := range m.Products {
+		for _, rc := range p.RateCards {
+			if rc.Meter != "" {
+				n++
+			}
+		}
 		for _, price := range p.Prices {
 			if price.Metered != nil {
 				n++

@@ -14,14 +14,14 @@ func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.GetDefaultBillingConfig()
-	cfg.Mode = config.ModeFull
+	cfg.ProviderWriteMode = config.ProviderWriteModeFull
 	cfg.TestMode = true
 	rails := config.RailMerchantAccountSet{
 		"ccbill": {
 			Rail: models.RailCCBill,
+			// #711: the clientAccnum/clientSubacc pair derives from the account_id.
+			AccountID: "945280-0001",
 			CCBill: &config.CCBillRailConfig{
-				ClientAccNum:     "945280",
-				ClientSubAcc:     "0001",
 				DataLinkUsername: "datalink-user",
 				DataLinkPassword: "datalink-pass",
 			},
@@ -69,7 +69,7 @@ func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
 func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig) (*config.Config, config.RailMerchantAccountSet) {
 	t.Helper()
 	cfg := config.GetDefaultBillingConfig()
-	cfg.Mode = config.ModeFull
+	cfg.ProviderWriteMode = config.ProviderWriteModeFull
 	cfg.TestMode = testMode
 	rails := config.RailMerchantAccountSet{
 		"solana": {Rail: models.RailSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},

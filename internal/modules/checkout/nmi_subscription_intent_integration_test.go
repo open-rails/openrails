@@ -139,9 +139,9 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	productID, priceID := uuid.New(), uuid.New()
 	insertProductAndPrice(ctx, t, pool, &models.Product{
 		ID: productID, Key: "sub-intent-" + uuid.NewString()[:8], DisplayName: "Sub Intent Test",
-		Status: models.CatalogStatusActive, CreatedAt: now, UpdatedAt: now,
+		Archived: false, CreatedAt: now, UpdatedAt: now,
 	}, &models.Price{
-		ID: priceID, ProductID: productID, Status: models.CatalogStatusActive,
+		ID: priceID, ProductID: productID, Archived: false,
 		Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: intPtr(720),
 		CreatedAt: now, UpdatedAt: now,
 	})

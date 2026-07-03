@@ -695,7 +695,7 @@ func (s *Service) computeSolanaCatalogDrift(ctx context.Context, snap localCatal
 		}
 		scanned++
 		local := &priceVerifyContext{
-			IsActive:         pr.Status == models.CatalogStatusActive,
+			IsActive:         !pr.Archived,
 			UnitAmount:       pr.Amount,
 			Currency:         pr.Currency,
 			BillingCycleDays: pr.RecurringCycleDays(),
@@ -780,7 +780,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
 			MerchantID:            tid.UUID(),
-			Provider:              string(row.Provider),
+			Rail:                  string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),
 			OpenrailsResourceID:   nilIfEmptyText(row.OpenRailsResourceID),
@@ -817,7 +817,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 func driftEventFromGen(r gen.OpenrailsCatalogDriftEvent) models.CatalogDriftEvent {
 	return models.CatalogDriftEvent{
 		ID:                    r.ID,
-		Provider:              models.CatalogDriftProvider(r.Provider),
+		Provider:              models.CatalogDriftProvider(r.Rail),
 		Kind:                  models.CatalogDriftKind(r.Kind),
 		OpenRailsResourceType: models.CatalogDriftResourceType(r.OpenrailsResourceType),
 		OpenRailsResourceID:   derefText(r.OpenrailsResourceID),
@@ -875,13 +875,13 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 	resourceType := nilIfEmptyText(strings.TrimSpace(filter.ResourceType))
 
 	total, err = q.CountOpenCatalogDriftFiltered(ctx, gen.CountOpenCatalogDriftFilteredParams{
-		Provider: provider, Kind: kind, ResourceType: resourceType,
+		Rail: provider, Kind: kind, ResourceType: resourceType,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count drift events: %w", err)
 	}
 	rows, err := q.ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
-		Provider: provider, Kind: kind, ResourceType: resourceType,
+		Rail: provider, Kind: kind, ResourceType: resourceType,
 		Column1: int32(limit), Column2: int32(offset),
 	})
 	if err != nil {
@@ -941,7 +941,7 @@ func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, e
 	}
 	out := make(map[string]int64, len(rows))
 	for _, r := range rows {
-		out[r.Provider+"/"+r.Kind] = r.N
+		out[r.Rail+"/"+r.Kind] = r.N
 	}
 	return out, nil
 }

@@ -197,9 +197,9 @@ func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.Openra
 }
 
 func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
+	client, ok := h.Clients[strings.ToLower(intent.Rail)]
 	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
+		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -253,9 +253,9 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // transaction means the money moved (finalize + succeed); a clean read with
 // no such action means it definitively did not (the executor may retry).
 func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
+	client, ok := h.Clients[strings.ToLower(intent.Rail)]
 	if !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	p, err := decodeRefundPayload(intent)
 	if err != nil {

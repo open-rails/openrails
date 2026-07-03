@@ -102,11 +102,10 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.Equal(t, int64(600), final.BalanceAmount, "1000 - 400 withdrawn = 600")
 
 	// #242 billing-account admin surface under openrails_app: configure arrears
-	// mode + an outstanding cap, read it back, and list the customer's usage.
+	// mode, read it back, and list the customer's usage.
 	arrears := "arrears"
-	var cap int64 = 5000
 	require.NoError(t, svc.SetCreditAccountSettings(tctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: &arrears, MaxOutstandingOwedAmount: &cap,
+		BillingMode: &arrears,
 	}), "SetCreditAccountSettings must work under openrails_app")
 
 	settings, err := svc.GetCreditAccountSettings(tctx, payer, money.DefaultCurrency)

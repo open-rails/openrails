@@ -13,7 +13,7 @@ import (
 )
 
 const countActiveProducts = `-- name: CountActiveProducts :one
-SELECT count(*) FROM openrails.products WHERE status = 'active'
+SELECT count(*) FROM openrails.products WHERE NOT archived
 `
 
 func (q *Queries) CountActiveProducts(ctx context.Context) (int64, error) {
@@ -38,14 +38,14 @@ const createProduct = `-- name: CreateProduct :execrows
 
 INSERT INTO openrails.products (
     id, merchant_id, key, display_name, description, entitlements_spec,
-    credits_spec, tier_group, tier_rank, status, created_at, updated_at
+    credits_spec, tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     $4::uuid,
     $2, $3, $5, $6,
     $7, $8,
     COALESCE(NULLIF($9::int, 0), 0),
-    COALESCE(NULLIF($10::text, ''), 'active'),
+    $10::boolean,
     COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
@@ -61,7 +61,7 @@ type CreateProductParams struct {
 	CreditsSpec      []byte
 	TierGroup        *string
 	TierRank         int32
-	Status           string
+	Archived         bool
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -78,7 +78,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 		arg.CreditsSpec,
 		arg.TierGroup,
 		arg.TierRank,
-		arg.Status,
+		arg.Archived,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -101,7 +101,7 @@ func (q *Queries) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products WHERE id = $1
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE id = $1
 `
 
 func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (OpenrailsProduct, error) {
@@ -116,7 +116,7 @@ func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (OpenrailsPr
 		&i.CreditsSpec,
 		&i.TierGroup,
 		&i.TierRank,
-		&i.Status,
+		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
@@ -125,7 +125,7 @@ func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (OpenrailsPr
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products WHERE key = $1
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE key = $1
 `
 
 func (q *Queries) GetProductByKey(ctx context.Context, key string) (OpenrailsProduct, error) {
@@ -140,7 +140,7 @@ func (q *Queries) GetProductByKey(ctx context.Context, key string) (OpenrailsPro
 		&i.CreditsSpec,
 		&i.TierGroup,
 		&i.TierRank,
-		&i.Status,
+		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
@@ -149,7 +149,7 @@ func (q *Queries) GetProductByKey(ctx context.Context, key string) (OpenrailsPro
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products WHERE status = 'active'
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE NOT archived
 `
 
 func (q *Queries) ListActiveProducts(ctx context.Context) ([]OpenrailsProduct, error) {
@@ -170,7 +170,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context) ([]OpenrailsProduct, e
 			&i.CreditsSpec,
 			&i.TierGroup,
 			&i.TierRank,
-			&i.Status,
+			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
@@ -186,8 +186,8 @@ func (q *Queries) ListActiveProducts(ctx context.Context) ([]OpenrailsProduct, e
 }
 
 const listActiveProductsPaged = `-- name: ListActiveProductsPaged :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products
-WHERE status = 'active'
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
+WHERE NOT archived
 ORDER BY created_at DESC
 LIMIT NULLIF($2::int, 0) OFFSET $1::int
 `
@@ -215,7 +215,7 @@ func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActivePro
 			&i.CreditsSpec,
 			&i.TierGroup,
 			&i.TierRank,
-			&i.Status,
+			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
@@ -231,7 +231,7 @@ func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActivePro
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
 `
 
 func (q *Queries) ListAllProducts(ctx context.Context) ([]OpenrailsProduct, error) {
@@ -252,7 +252,7 @@ func (q *Queries) ListAllProducts(ctx context.Context) ([]OpenrailsProduct, erro
 			&i.CreditsSpec,
 			&i.TierGroup,
 			&i.TierRank,
-			&i.Status,
+			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
@@ -268,7 +268,7 @@ func (q *Queries) ListAllProducts(ctx context.Context) ([]OpenrailsProduct, erro
 }
 
 const listAllProductsPaged = `-- name: ListAllProductsPaged :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
 ORDER BY created_at DESC
 LIMIT NULLIF($2::int, 0) OFFSET $1::int
 `
@@ -296,7 +296,7 @@ func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsP
 			&i.CreditsSpec,
 			&i.TierGroup,
 			&i.TierRank,
-			&i.Status,
+			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
@@ -312,7 +312,7 @@ func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsP
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, merchant_id FROM openrails.products WHERE id = ANY($1::uuid[])
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsProduct, error) {
@@ -333,7 +333,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]Ope
 			&i.CreditsSpec,
 			&i.TierGroup,
 			&i.TierRank,
-			&i.Status,
+			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
@@ -357,7 +357,7 @@ UPDATE openrails.products SET
     credits_spec = $8,
     tier_group = $9,
     tier_rank = $4,
-    status = $5,
+    archived = $5,
     updated_at = $10
 WHERE id = $1
 `
@@ -367,7 +367,7 @@ type UpdateProductParams struct {
 	Key              string
 	DisplayName      string
 	TierRank         int32
-	Status           string
+	Archived         bool
 	Description      *string
 	EntitlementsSpec []byte
 	CreditsSpec      []byte
@@ -381,7 +381,7 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (i
 		arg.Key,
 		arg.DisplayName,
 		arg.TierRank,
-		arg.Status,
+		arg.Archived,
 		arg.Description,
 		arg.EntitlementsSpec,
 		arg.CreditsSpec,

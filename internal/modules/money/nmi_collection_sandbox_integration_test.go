@@ -50,9 +50,8 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// The REAL NMI client, pointed at the REAL sandbox Direct Post endpoint (no URL
 	// override). test_mode=true mirrors the TEST_MODE=true sandbox configuration.
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{
-		SecurityKey:     securityKey,
-		TokenizationKey: strings.TrimSpace(os.Getenv("NMI_TOKENIZATION_KEY")),
-		WebhookSecret:   strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET")),
+		SecurityKey:   securityKey,
+		WebhookSecret: strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET")),
 	}, true)
 	require.NoError(t, err)
 	require.Equal(t, nmi.DefaultDirectPostURL, client.DirectPostURL, "must hit the real NMI gateway, not a stub")

@@ -64,8 +64,12 @@ type DunningWorker struct {
 	DB                 *db.DB
 	Config             *config.Config
 	Rails              config.RailMerchantAccountSet
-	Clock              clockwork.Clock
-	NMIClients         map[string]*nmi.NMIClient
+	Clock      clockwork.Clock
+	NMIClients map[string]*nmi.NMIClient
+	// NMIResolver arms store-scoped NMI clients per merchant (#730). Consulted
+	// at the charge gate when the boot map has no client; the rebill handler
+	// re-resolves at charge time (no caching).
+	NMIResolver        money.NMIClientResolver
 	EventLogService    *analytics.EventLogService
 	IdempotencyService *idempotency.IdempotencyService
 	// DeferDelete schedules the rail-side delete for terminal
@@ -90,17 +94,29 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
+	handler := intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService)
+	handler.SetNMIClientResolver(w.NMIResolver) // #730: store-armed charge-time resolution
 	runner := &intents.Runner{
-		Store: intents.NewStore(w.DB),
-		Registry: intents.NewRegistry(
-			intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService),
-		),
-		Clock: w.Clock,
+		Store:    intents.NewStore(w.DB),
+		Registry: intents.NewRegistry(handler),
+		Clock:    w.Clock,
 	}
 	if w.Config != nil {
 		runner.Config = w.Config
 	}
 	return runner
+}
+
+// storeArmsNMI reports whether the merchant-secrets store can arm an NMI
+// client for the subscription's account (#730). Resolver errors count as
+// armable: a declared-but-unarmable account must reach the ledger and park
+// with its loud fail-closed reason, not vanish in a silent skip.
+func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscription) bool {
+	if w.NMIResolver == nil {
+		return false
+	}
+	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, sub.RailMerchantAccountID)
+	return ok || err != nil
 }
 
 func (DunningWorker) Kind() string { return KindDunning }
@@ -135,7 +151,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		}
 	}
 
-	if w.NMIClients == nil {
+	if w.NMIClients == nil && w.NMIResolver == nil {
 		log.WithContext(ctx).Warn("NMI clients not configured; skipping dunning run")
 		return nil
 	}
@@ -289,7 +305,11 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed
 	}
 
-	if client == nil {
+	// #730: the boot map is not the only arming plane — a merchant whose NMI
+	// credentials live only in the merchant-secrets store must still reach the
+	// rebill intent (the handler re-resolves at charge time; a declared-but-
+	// unarmable account parks on the ledger with its fail-closed reason).
+	if client == nil && !w.storeArmsNMI(ctx, sub) {
 		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI client not configured for provider; skipping")
 		return dunningOutcomeFailed
 	}

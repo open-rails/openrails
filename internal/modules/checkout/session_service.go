@@ -76,6 +76,13 @@ type checkoutSessionExecutor interface {
 	CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error)
 }
 
+// railMerchantAccountIDResolver is the OPTIONAL executor capability (#704):
+// resolve the active provider account for new work on a rail, or nil.
+// Satisfied by *CheckoutService; test fakes may omit it.
+type railMerchantAccountIDResolver interface {
+	ResolveRailMerchantAccountID(ctx context.Context, rail string) *uuid.UUID
+}
+
 type solanaPaymentService interface {
 	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
 	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
@@ -86,7 +93,7 @@ type solanaPaymentService interface {
 
 type solanaTransactionService interface {
 	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error
+	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error
 }
 
 type CheckoutSessionService struct {
@@ -392,6 +399,18 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("error validating payment: %w", err)
 	}
 
+	// #704: resolve the active provider account for the selected rail and pin it
+	// on the session + into ctx so payment/subscription/payment-method rows this
+	// flow creates carry rail_merchant_account_id provenance. nil when no
+	// resolver / no active account — never invented.
+	var railMerchantAccountID *uuid.UUID
+	if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
+		railMerchantAccountID = resolver.ResolveRailMerchantAccountID(ctx, rail)
+	}
+	if railMerchantAccountID != nil {
+		ctx = db.WithRailMerchantAccountID(ctx, *railMerchantAccountID)
+	}
+
 	now := s.now()
 	ttl := defaultCheckoutSessionTTL
 	if rail == "ccbill" || rail == "stripe" {
@@ -412,7 +431,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		RailState:             map[string]any{},
 		CreatedAt:             now,
 		UpdatedAt:             now,
-		RailMerchantAccountID: nil,
+		RailMerchantAccountID: railMerchantAccountID,
 		LastFour:              &req.Payment.LastFour,
 		CardType:              &req.Payment.CardType,
 		ExpiryDate:            &req.Payment.ExpiryDate,
@@ -493,6 +512,18 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 			_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
 		}
 		return nil, ErrCheckoutSessionExpired
+	}
+
+	// #704: carry the session's pinned provider-account provenance into the
+	// confirm flow (falling back to a fresh resolution for older sessions).
+	stampID := session.RailMerchantAccountID
+	if stampID == nil {
+		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
+			stampID = resolver.ResolveRailMerchantAccountID(ctx, rail)
+		}
+	}
+	if stampID != nil {
+		ctx = db.WithRailMerchantAccountID(ctx, *stampID)
 	}
 
 	switch rail {
@@ -1717,6 +1748,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		storedTokenMint,
 		expectedPayer,
 		reference,
+		session.ID, // #713: a present purchase memo must name THIS session; absence passes
 		session.ExpiresAt,
 	); err != nil {
 		return nil, err
@@ -2332,6 +2364,7 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 		Recipient:   recipient,
 		Amount:      session.Amount,
 		Currency:    session.Currency,
+		SessionID:   session.ID, // #713 memo local-id
 	}, nil
 }
 

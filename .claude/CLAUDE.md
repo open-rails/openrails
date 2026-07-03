@@ -48,7 +48,7 @@ identifiers OUT of committed files (code, trackers, this file).
 ## Schema / DB
 - App schema is `openrails` (configurable via execution-time SQL rewrite). RLS is enforced for the
   unprivileged `openrails_app` role, merchant-scoped via the `app.merchant_id` GUC set by MerchantTx.
-- Migrations are squashed to a single baseline (`migrations/postgres/001_*`); new migrations start
+- Migrations are squashed to a single baseline (`migrations/postgres/0001_*`); new migrations start
   at 002. Greenfield — no numbered history to preserve.
 
 ## Layer altitude (#688)

@@ -2,67 +2,12 @@ package vault
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
-// TestLogin_Token proves the token auth path: Login sets the supplied token on
-// the client without calling any auth/login endpoint, so a dev/e2e Vault reached
-// with VAULT_ADDR + VAULT_TOKEN works with no AppRole/Kubernetes config.
-func TestLogin_Token(t *testing.T) {
-	var sawToken string
-	var hitAuthLogin bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawToken = r.Header.Get("X-Vault-Token")
-		if strings.Contains(r.URL.Path, "/auth/") && strings.Contains(r.URL.Path, "/login") {
-			hitAuthLogin = true
-		}
-		// Respond to a token-self lookup or any probe with an empty OK.
-		writeJSON(w, map[string]any{"data": map[string]any{}})
-	}))
-	defer srv.Close()
-
-	client, err := Login(context.Background(), Config{
-		Address:    srv.URL,
-		AuthMethod: "token",
-		Token:      "root-dev-token",
-	})
-	if err != nil {
-		t.Fatalf("Login(token): %v", err)
-	}
-	if client.Token() != "root-dev-token" {
-		t.Fatalf("client token = %q, want root-dev-token", client.Token())
-	}
-
-	// Make a call so the mock observes the token; prove we never hit auth/login.
-	_, _ = client.Logical().ReadWithContext(context.Background(), "secret/data/probe")
-	if sawToken != "root-dev-token" {
-		t.Fatalf("request carried token %q, want root-dev-token", sawToken)
-	}
-	if hitAuthLogin {
-		t.Fatal("token auth must NOT call an auth/*/login endpoint")
-	}
-}
-
-// TestLogin_TokenInferredFromTokenOnly proves an empty AuthMethod defaults to
-// token auth when a Token is present (the VAULT_TOKEN-only convenience).
-func TestLogin_TokenInferredFromTokenOnly(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"data": map[string]any{}})
-	}))
-	defer srv.Close()
-
-	client, err := Login(context.Background(), Config{Address: srv.URL, Token: "tok"})
-	if err != nil {
-		t.Fatalf("Login(inferred token): %v", err)
-	}
-	if client.Token() != "tok" {
-		t.Fatalf("client token = %q, want tok", client.Token())
-	}
-}
+// Pure-logic error paths only (no HTTP is attempted before these fail). The live
+// token/approle login behavior is asserted against a REAL Vault container in
+// auth_integration_test.go (#724) — never a httptest mock.
 
 func TestLogin_UnsupportedMethod(t *testing.T) {
 	if _, err := Login(context.Background(), Config{Address: "http://127.0.0.1:1", AuthMethod: "bogus"}); err == nil {
@@ -70,9 +15,9 @@ func TestLogin_UnsupportedMethod(t *testing.T) {
 	}
 }
 
-// writeJSON is the shared httptest response helper (was in the deleted
-// kv_httptest_test.go twin; the live-Vault coverage moved to the vaultint lane).
-func writeJSON(w http.ResponseWriter, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(body)
+// Token auth with no token fails loudly (#712: no ambient VAULT_TOKEN fallback).
+func TestLogin_TokenMethodRequiresToken(t *testing.T) {
+	if _, err := Login(context.Background(), Config{Address: "http://127.0.0.1:1", AuthMethod: "token"}); err == nil {
+		t.Fatal("expected error for token auth without a token")
+	}
 }

@@ -30,7 +30,7 @@ func newCountingServer(t *testing.T) (*httptest.Server, *atomic.Int64) {
 
 func TestReadOnlyBlocksWritesLocally(t *testing.T) {
 	srv, hits := newCountingServer(t)
-	cfg := &config.Config{Mode: config.ModeReadOnly}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	client := Client(cfg, 0)
 
 	for _, method := range []string{http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch} {
@@ -49,7 +49,7 @@ func TestReadOnlyBlocksWritesLocally(t *testing.T) {
 
 func TestReadOnlyAllowsGet(t *testing.T) {
 	srv, hits := newCountingServer(t)
-	cfg := &config.Config{Mode: config.ModeReadOnly}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	client := Client(cfg, 0)
 
 	resp, err := client.Get(srv.URL + "/v1/balance")
@@ -65,10 +65,10 @@ func TestReadOnlyAllowsGet(t *testing.T) {
 func TestNonReadOnlyAllowsWrites(t *testing.T) {
 	srv, hits := newCountingServer(t)
 	for _, cfg := range []*config.Config{
-		nil,                                     // nil = tests/full (documented Client contract)
-		{Mode: config.ModeFull, TestMode: true}, // sandbox creds, full behavior (old mode=test)
-		{Mode: config.ModeFull},
-		{Mode: config.ModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
+		nil, // nil = tests/full (documented Client contract)
+		{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: true}, // sandbox creds, full behavior
+		{ProviderWriteMode: config.ProviderWriteModeFull},
+		{ProviderWriteMode: config.ProviderWriteModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
 	} {
 		client := Client(cfg, 0)
 		resp, err := client.Post(srv.URL+"/v1/customers", "application/x-www-form-urlencoded", strings.NewReader("email=a@b.c"))

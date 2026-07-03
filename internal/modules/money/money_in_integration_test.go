@@ -316,7 +316,7 @@ func seedTopupAccount(t *testing.T, ctx context.Context, svc *money.MoneyService
 	pm := seedPaymentMethod(t, pool, ctx, payer, rail)
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
+		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmount: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
@@ -763,7 +763,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	t.Cleanup(server.Close)
 
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{},
+		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
@@ -857,7 +857,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	t.Cleanup(server.Close)
 
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{},
+		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},

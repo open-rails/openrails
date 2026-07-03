@@ -144,7 +144,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Description:      &desc,
 		EntitlementsSpec: entSpec,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -154,7 +154,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		ProductID:           productID,
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		Amount:              999,
 		Currency:            "usd",
 		MerchantID:          dbtest.TestMerchantID.UUID(),

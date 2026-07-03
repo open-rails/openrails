@@ -1,5 +1,5 @@
 // Package authkit is the OPT-IN AuthKit verifier adapter for embedded hosts
-// (#284). The embedded CORE (pkg/embedded.New -> bootstrap.NewApp ->
+// (#284). The embedded CORE (pkg/embedded.New -> app.BootstrapWithOptions ->
 // internal/app) deliberately does NOT import AuthKit. Hosts (and the OpenRails
 // standalone binary) that want the AuthKit JWT-verifier auth boundary opt in
 // here and pass the result at HTTP mount time.

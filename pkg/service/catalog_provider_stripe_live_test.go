@@ -22,7 +22,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	}
 	key := firstStripeLiveTestKey()
 	if key == "" {
-		t.Fatal("Stripe test key missing; set STRIPE_SECRET_KEY, RAILS_STRIPE_SECRET_KEY, or BILLING_RAILS_STRIPE_SECRET_KEY")
+		t.Fatal("Stripe test key missing; set OPENRAILS_TEST_STRIPE_SECRET_KEY (or STRIPE_SECRET_KEY)")
 	}
 	if !strings.HasPrefix(key, "sk_test_") && !strings.HasPrefix(key, "rk_test_") {
 		t.Fatalf("refusing to run Stripe live catalog test without a Stripe test-mode key")
@@ -141,7 +141,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 }
 
 func firstStripeLiveTestKey() string {
-	for _, key := range []string{"STRIPE_SECRET_KEY", "RAILS_STRIPE_SECRET_KEY", "BILLING_RAILS_STRIPE_SECRET_KEY"} {
+	for _, key := range []string{"OPENRAILS_TEST_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}

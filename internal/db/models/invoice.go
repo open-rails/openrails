@@ -29,8 +29,9 @@ type Invoice struct {
 	AmountPaid     int64 `json:"amount_paid"`
 	AmountDue      int64 `json:"amount_due"`
 
-	// LineItems is the per-event_type usage rollup snapshot (amount, count,
-	// dimensions). MoneyMovements is the summed-by-type ledger snapshot.
+	// LineItems is the immutable as-billed statement itemization frozen at
+	// close (#726): per-event_type usage rollups plus adjustment lines (e.g.
+	// minimum_spend_trueup). MoneyMovements is the summed-by-type ledger snapshot.
 	LineItems      []InvoiceLineItem `json:"line_items"`
 	MoneyMovements map[string]int64  `json:"money_movements"`
 
@@ -41,15 +42,15 @@ type Invoice struct {
 	PaidAt            *time.Time `json:"paid_at,omitempty"`
 	VoidedAt          *time.Time `json:"voided_at,omitempty"`
 	UncollectibleAt   *time.Time `json:"uncollectible_at,omitempty"`
-	SentAt            *time.Time `json:"sent_at,omitempty"`
 	FinalizedAt       *time.Time `json:"finalized_at,omitempty"`
 	ExternalInvoiceID *string    `json:"external_invoice_id,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
-// InvoiceLineItem is one metered-usage line on an invoice: the per-event_type
-// (per model/endpoint) total amount, event count, and summed dimensions.
+// InvoiceLineItem is one statement line on an invoice: a per-event_type usage
+// rollup (total amount, event count, summed dimensions) or an adjustment line
+// (event_type = kind, e.g. "minimum_spend_trueup").
 type InvoiceLineItem struct {
 	EventType  string           `json:"event_type"`
 	Amount     int64            `json:"amount"`

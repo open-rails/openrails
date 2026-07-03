@@ -7,10 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -36,6 +36,11 @@ var (
 )
 
 type Options struct {
+	// Config is built programmatically by the host — embedded mode never runs
+	// config.Load, so none of Load's defaulting applies. In particular set
+	// Config.TestMode EXPLICITLY: the zero value means LIVE credential posture
+	// (standalone dev boots default to sandbox; embedded ones do not). New()
+	// warns when TestMode is left false in a dev-like Env (#711).
 	Config *config.Config
 	// PGXPool is the host-supplied database handle (pgx/v5). The bun-era
 	// *sql.DB option was removed with the ORM (#334).
@@ -72,16 +77,27 @@ func New(opts Options) (*Embedded, error) {
 		return nil, err
 	}
 
+	// #711: warn on the embedded test_mode zero-value fail-open. Standalone
+	// Load() defaults a dev-like boot to sandbox; embedded hosts build Config
+	// programmatically, so a forgotten TestMode silently means LIVE credentials.
+	// Warn-only (an explicit TestMode=false is indistinguishable from omission).
+	if opts.Config.IsDev() && !opts.Config.TestMode {
+		log.Warn("openrails embedded: Config.TestMode is false in a dev-like env — LIVE credential posture. " +
+			"Standalone defaults dev boots to sandbox; set TestMode explicitly (true for sandbox, false if live is intended).")
+	}
+
 	// Build the application graph only; HTTP surfaces (StandaloneHandler /
 	// NewHTTPHandler / MountHandler) are constructed from this App on demand.
-	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
+	// (#711: the bootstrap.Options relay layer is gone — this calls the app
+	// composition root directly.)
+	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,
 		Cache:   opts.Cache,
 		Rails:   rails,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 
 	return &Embedded{app: application}, nil

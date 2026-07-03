@@ -167,6 +167,13 @@ func validateManifestRailMerchantAccount(slug string, key string, account RailMe
 				return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
 			}
 		}
+		// #710: the per-merchant CCBill webhook IP allowlist is retired (it was
+		// parsed and never enforced); the built-in documented CCBill ranges apply.
+		if rail == "ccbill" {
+			if _, ok := cfg.Settings["allowed_cidrs"]; ok {
+				return fmt.Errorf("merchant %q accounts.%s.ccbill.settings.allowed_cidrs was removed (#710): CCBill webhook source IPs are the built-in documented ranges — delete the key", slug, key)
+			}
+		}
 		if rail == "solana" {
 			// Solana never needs account_id — it is always derived from the signer's
 			// public key, and a declared value is ignored (warned at apply). A signer

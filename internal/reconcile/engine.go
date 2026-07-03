@@ -397,7 +397,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 		rep.FindingsByType[string(f.Type)]++
 		rep.FindingsBySeverity[string(f.Severity)]++
-		if rec.FirstSeenRun == runID {
+		if rec.FirstSeenRun != nil && *rec.FirstSeenRun == runID {
 			rep.NewFindings++
 		} else {
 			rep.UpdatedFindings++
@@ -463,7 +463,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		return rep, records, planned, appliedChanges, fmt.Errorf("list actionable findings: %w", err)
 	}
 	for _, rec := range actionable {
-		if rec.LastSeenRun == runID {
+		if rec.LastSeenRun != nil && *rec.LastSeenRun == runID {
 			continue
 		}
 		switch rec.Type {

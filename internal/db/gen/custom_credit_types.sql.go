@@ -11,41 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const defineCustomCreditType = `-- name: DefineCustomCreditType :one
-
-INSERT INTO openrails.custom_credit_types (
-    id, merchant_id, name, decimals, active
-) VALUES (
-    uuidv7(), $1::uuid, $2::text, $3::int, true
-)
-ON CONFLICT (merchant_id, name) DO UPDATE
-    SET decimals = EXCLUDED.decimals, active = true, updated_at = now()
-RETURNING id, merchant_id, name, decimals, active, created_at, updated_at
-`
-
-type DefineCustomCreditTypeParams struct {
-	MerchantID uuid.UUID
-	Name       string
-	Decimals   int32
-}
-
-// openrails.custom_credit_types (#475): per-tenant consume-only credit units.
-func (q *Queries) DefineCustomCreditType(ctx context.Context, arg DefineCustomCreditTypeParams) (OpenrailsCustomCreditType, error) {
-	row := q.db.QueryRow(ctx, defineCustomCreditType, arg.MerchantID, arg.Name, arg.Decimals)
-	var i OpenrailsCustomCreditType
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Name,
-		&i.Decimals,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getCustomCreditType = `-- name: GetCustomCreditType :one
+
 SELECT id, merchant_id, name, decimals, active, created_at, updated_at FROM openrails.custom_credit_types
 WHERE merchant_id = $1::uuid AND name = $2::text
 `
@@ -55,70 +22,11 @@ type GetCustomCreditTypeParams struct {
 	Name       string
 }
 
+// openrails.custom_credit_types (#475): per-tenant consume-only credit units.
+// Rows are written by the catalog sidecar push (#706, auto-defined from
+// catalog_credit_balances.unit); this read backs ResolveUnit.
 func (q *Queries) GetCustomCreditType(ctx context.Context, arg GetCustomCreditTypeParams) (OpenrailsCustomCreditType, error) {
 	row := q.db.QueryRow(ctx, getCustomCreditType, arg.MerchantID, arg.Name)
-	var i OpenrailsCustomCreditType
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Name,
-		&i.Decimals,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const listCustomCreditTypes = `-- name: ListCustomCreditTypes :many
-SELECT id, merchant_id, name, decimals, active, created_at, updated_at FROM openrails.custom_credit_types
-WHERE merchant_id = $1::uuid
-ORDER BY name
-`
-
-func (q *Queries) ListCustomCreditTypes(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsCustomCreditType, error) {
-	rows, err := q.db.Query(ctx, listCustomCreditTypes, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsCustomCreditType
-	for rows.Next() {
-		var i OpenrailsCustomCreditType
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Name,
-			&i.Decimals,
-			&i.Active,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const setCustomCreditTypeActive = `-- name: SetCustomCreditTypeActive :one
-UPDATE openrails.custom_credit_types
-SET active = $1::boolean, updated_at = now()
-WHERE merchant_id = $2::uuid AND name = $3::text
-RETURNING id, merchant_id, name, decimals, active, created_at, updated_at
-`
-
-type SetCustomCreditTypeActiveParams struct {
-	Active     bool
-	MerchantID uuid.UUID
-	Name       string
-}
-
-func (q *Queries) SetCustomCreditTypeActive(ctx context.Context, arg SetCustomCreditTypeActiveParams) (OpenrailsCustomCreditType, error) {
-	row := q.db.QueryRow(ctx, setCustomCreditTypeActive, arg.Active, arg.MerchantID, arg.Name)
 	var i OpenrailsCustomCreditType
 	err := row.Scan(
 		&i.ID,

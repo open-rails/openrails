@@ -8,34 +8,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// CatalogStatus is the lifecycle state of a catalog product or price. It
-// replaces the previous is_active boolean so that "draft (not yet launched)"
-// and "archived (retired but grandfathered)" — both formerly is_active=false —
-// are distinct, first-class states.
-type CatalogStatus string
-
-const (
-	// CatalogStatusDraft: created but not launched. Not purchasable, hidden from
-	// the public catalog, not created in Stripe. No subscribers yet.
-	CatalogStatusDraft CatalogStatus = "draft"
-	// CatalogStatusActive: live. Purchasable, shown in the catalog, billed normally.
-	CatalogStatusActive CatalogStatus = "active"
-	// CatalogStatusArchived: retired. Not purchasable, hidden from the
-	// public catalog, but existing subscriptions are grandfathered and bill
-	// indefinitely. Stripe active=false.
-	CatalogStatusArchived CatalogStatus = "archived"
-)
-
-// Valid reports whether the status is one of the known lifecycle values.
-func (s CatalogStatus) Valid() bool {
-	switch s {
-	case CatalogStatusDraft, CatalogStatusActive, CatalogStatusArchived:
-		return true
-	default:
-		return false
-	}
-}
-
 // Product represents a product offering (e.g., Premium Membership)
 // This represents our product catalog concept
 type Product struct {
@@ -57,22 +29,19 @@ type Product struct {
 	TierGroup *string `json:"tier_group,omitempty"`
 	TierRank  int     `json:"tier_rank"`
 
-	Status    CatalogStatus `json:"status"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	// Archived: retired. Not purchasable, hidden from the public catalog, but
+	// existing subscriptions are grandfathered and bill indefinitely.
+	Archived  bool      `json:"archived"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
 	Prices []*Price `json:"prices,omitempty"`
 }
 
 // IsPurchasable reports whether the product can be bought by a new customer
-// (shown in the public catalog). Only active products are purchasable.
-func (p *Product) IsPurchasable() bool { return p.Status == CatalogStatusActive }
-
-// IsBillable reports whether existing subscriptions on this product may still
-// be billed. Archived products are grandfathered, so anything that is not a
-// draft remains billable.
-func (p *Product) IsBillable() bool { return p.Status != CatalogStatusDraft }
+// (shown in the public catalog).
+func (p *Product) IsPurchasable() bool { return !p.Archived }
 
 // CreditsSpec defines bundled credit/currency balance grants for a product — the
 // other half of "what you get" alongside entitlements (#472). Each entry deposits
@@ -153,12 +122,14 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
-	ID         uuid.UUID     `json:"id"`
-	MerchantID uuid.UUID     `json:"merchant_id"`
-	ProductID  uuid.UUID     `json:"product_id"`
-	Status     CatalogStatus `json:"status"`
-	Amount     int64         `json:"amount"`
-	Currency   string        `json:"currency"`
+	ID         uuid.UUID `json:"id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
+	ProductID  uuid.UUID `json:"product_id"`
+	// Archived: retired. Not purchasable, but grandfathered subscriptions keep
+	// billing it indefinitely.
+	Archived bool   `json:"archived"`
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
 
 	// AccessDurationHours is the access window (#622) a purchase of this price
 	// grants, in HOURS (supports sub-day windows, e.g. a 12h rental). nil =
@@ -195,13 +166,8 @@ type Price struct {
 }
 
 // IsPurchasable reports whether the price can be bought by a new customer
-// (shown in the public catalog). Only active prices are purchasable.
-func (p *Price) IsPurchasable() bool { return p.Status == CatalogStatusActive }
-
-// IsBillable reports whether existing subscriptions on this price may still be
-// billed. Archived prices are grandfathered, so the renewal/rebill path keeps
-// charging them indefinitely — anything that is not a draft remains billable.
-func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
+// (shown in the public catalog).
+func (p *Price) IsPurchasable() bool { return !p.Archived }
 
 // IsRecurring reports whether the price auto-renews (a subscription).
 func (p *Price) IsRecurring() bool { return p.AutoRenew }

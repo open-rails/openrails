@@ -294,15 +294,15 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		require.Len(t, all, 3, "three PS-1 identities (ghost + two unmatched duplicates), one row each")
 		var ghost *FindingRecord
 		for i := range all {
-			assert.Equal(t, advisory.RunID, all[i].FirstSeenRun, "three runs, one row per identity")
-			assert.Equal(t, rerun.RunID, all[i].LastSeenRun, "three runs, one row per identity")
+			assert.Equal(t, &advisory.RunID, all[i].FirstSeenRun, "three runs, one row per identity")
+			assert.Equal(t, &rerun.RunID, all[i].LastSeenRun, "three runs, one row per identity")
 			if strings.HasPrefix(all[i].SubjectKey, "ghost-") {
 				ghost = &all[i]
 			}
 		}
 		require.NotNil(t, ghost)
-		assert.Equal(t, advisory.RunID, ghost.FirstSeenRun)
-		assert.Equal(t, rerun.RunID, ghost.LastSeenRun)
+		assert.Equal(t, &advisory.RunID, ghost.FirstSeenRun)
+		assert.Equal(t, &rerun.RunID, ghost.LastSeenRun)
 
 		// Ack/dismiss lifecycle.
 		ok, err := store.AckFinding(ctx, ghost.ID, "imported by hand")

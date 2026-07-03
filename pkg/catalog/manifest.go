@@ -72,8 +72,9 @@ type Product struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	TierGroup   string `json:"tier_group,omitempty" yaml:"tier_group,omitempty"`
 	TierRank    *int   `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
-	// Active mirrors Stripe's product/price availability model. nil defaults to true.
-	Active       *bool         `json:"active,omitempty" yaml:"active,omitempty"`
+	// Archived maps to status=archived. Omitted/false = active (matches the
+	// merchant-manifest provider-account `archived` key).
+	Archived     bool          `json:"archived,omitempty" yaml:"archived,omitempty"`
 	Entitlements []string      `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
 	Credits      []CreditGrant `json:"credits,omitempty" yaml:"credits,omitempty"`
 	UsageLimits  []string      `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
@@ -130,8 +131,8 @@ type Price struct {
 	// to renew — auto_renew with an indefinite/omitted Duration is rejected.
 	AutoRenew bool `json:"auto_renew,omitempty" yaml:"auto_renew,omitempty"`
 
-	// Active mirrors Stripe's product/price availability model. nil defaults to true.
-	Active *bool `json:"active,omitempty" yaml:"active,omitempty"`
+	// Archived maps to status=archived. Omitted/false = active.
+	Archived bool `json:"archived,omitempty" yaml:"archived,omitempty"`
 
 	// Providers is the explicit provider list for this price. Omitted or empty
 	// means OpenRails-native only: no external provider sync.

@@ -43,7 +43,7 @@ func TestGetSolanaConfig(t *testing.T) {
 		require.Equal(t, http.StatusOK, recorder.Code)
 		var response SolanaRuntimeConfigResponse
 		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		require.False(t, response.Features.SolanaPayRecurringSubscriptions)
+		require.True(t, response.Features.SolanaPayRecurringSubscriptions)
 	})
 
 	runtime := &app.Runtime{
@@ -52,8 +52,7 @@ func TestGetSolanaConfig(t *testing.T) {
 			"solana": {
 				Rail: models.RailSolana,
 				Solana: &config.SolanaRailConfig{
-					Network:                         "devnet",
-					SolanaPayRecurringSubscriptions: true,
+					Network: "devnet",
 					Tokens: map[string]config.TokenConfig{
 						"USDC": {
 							Name:     "Dev USDC",

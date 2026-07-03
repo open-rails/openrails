@@ -24,8 +24,8 @@ func loadClickHouseSchemaMigration(t *testing.T) string {
 			sqlFiles = append(sqlFiles, entry.Name())
 		}
 	}
-	if len(sqlFiles) != 1 || sqlFiles[0] != "001_schema.up.sql" {
-		t.Fatalf("embedded ClickHouse SQL files = %v, want [001_schema.up.sql]", sqlFiles)
+	if len(sqlFiles) != 1 || sqlFiles[0] != "0001_schema.up.sql" {
+		t.Fatalf("embedded ClickHouse SQL files = %v, want [0001_schema.up.sql]", sqlFiles)
 	}
 
 	migrations, err := migratekit.LoadFromFS(FS)
@@ -35,8 +35,8 @@ func loadClickHouseSchemaMigration(t *testing.T) string {
 	if len(migrations) != 1 {
 		t.Fatalf("loaded ClickHouse migrations = %d, want 1", len(migrations))
 	}
-	if migrations[0].Name != "001_schema.up.sql" {
-		t.Fatalf("loaded ClickHouse migration = %q, want 001_schema.up.sql", migrations[0].Name)
+	if migrations[0].Name != "0001_schema.up.sql" {
+		t.Fatalf("loaded ClickHouse migration = %q, want 0001_schema.up.sql", migrations[0].Name)
 	}
 	return migrations[0].Content
 }

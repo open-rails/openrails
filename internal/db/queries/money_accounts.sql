@@ -46,34 +46,26 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 FOR UPDATE;
 
 -- name: InsertMoneyAccountSettingsIfAbsent :exec
--- Default settings row (hard-stop on, 80% alert threshold) in the given
--- billing mode; no-op when the row exists.
+-- Default settings row in the given billing mode; no-op when the row exists.
 INSERT INTO openrails.money_settings (
-    id, merchant_id, customer_id, currency, billing_mode,
-    hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, true, 80, sqlc.arg(now), sqlc.arg(now))
+    merchant_id, customer_id, currency, billing_mode, created_at, updated_at
+) VALUES ($1, $2, sqlc.arg(currency), $3, sqlc.arg(now), sqlc.arg(now))
 ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 
 -- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
-    id, merchant_id, customer_id, currency, billing_mode,
-    max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount,
-    low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents,
+    merchant_id, customer_id, currency, billing_mode,
+    low_balance_threshold, auto_topup_enabled, auto_topup_amount,
     auto_topup_payment_method_id, default_credit_expiry_hours,
-    hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    created_at, updated_at
+) VALUES ($1, $2, sqlc.arg(currency), $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    max_spend_per_day = EXCLUDED.max_spend_per_day,
-    max_spend_per_month = EXCLUDED.max_spend_per_month,
-    max_outstanding_owed_amount = EXCLUDED.max_outstanding_owed_amount,
     low_balance_threshold = EXCLUDED.low_balance_threshold,
     auto_topup_enabled = EXCLUDED.auto_topup_enabled,
-    auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents,
+    auto_topup_amount = EXCLUDED.auto_topup_amount,
     auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
     default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
-    hard_stop_on_breach = EXCLUDED.hard_stop_on_breach,
-    alert_threshold_pct = EXCLUDED.alert_threshold_pct,
     updated_at = EXCLUDED.updated_at;
 
 -- name: SetMoneyAccountCreditLimit :exec
@@ -92,25 +84,6 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 -- name: StampMoneyAccountTopupAt :exec
 UPDATE openrails.money_settings
 SET last_topup_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
--- name: SetMoneyAccountPaymentVerified :exec
-UPDATE openrails.money_settings
-SET verified_payment_method = sqlc.arg(verified)::boolean,
-    verified_at = CASE WHEN sqlc.arg(verified)::boolean THEN sqlc.arg(now)::timestamptz ELSE NULL END,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
--- name: SuspendMoneyAccount :exec
-UPDATE openrails.money_settings
-SET suspended_at = sqlc.arg(now)::timestamptz,
-    suspend_reason = sqlc.narg(reason),
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
--- name: ResumeMoneyAccount :exec
-UPDATE openrails.money_settings
-SET suspended_at = NULL, suspend_reason = NULL, updated_at = $3
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyAccountTier :exec
@@ -136,7 +109,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 -- threshold. Request holds live in Redis and are not part of this durable scan.
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
-           s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount_cents,
+           s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
            s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
            COALESCE((
                SELECT a.credits_posted - a.debits_posted
@@ -149,7 +122,7 @@ WITH avail AS (
 )
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,
-       auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id,
+       auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id,
        last_alert_at, last_topup_at
 FROM avail
 WHERE available < low_balance_threshold;

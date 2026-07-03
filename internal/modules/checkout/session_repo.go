@@ -69,7 +69,6 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 		Metadata:              meta,
 		RailFields:            fields,
 		RailState:             state,
-		IdempotencyKey:        session.IdempotencyKey,
 		RailMerchantAccountID: session.RailMerchantAccountID,
 		CreatedAt:             session.CreatedAt,
 		UpdatedAt:             session.UpdatedAt,
@@ -113,7 +112,6 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 		Metadata:              meta,
 		RailFields:            fields,
 		RailState:             state,
-		IdempotencyKey:        session.IdempotencyKey,
 		RailMerchantAccountID: session.RailMerchantAccountID,
 		UpdatedAt:             models.UpdateTimestamp(session.UpdatedAt),
 	})

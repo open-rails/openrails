@@ -186,7 +186,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	// A run stamps first_seen_run/last_seen_run on the findings (and drives
 	// auto-vanish). Created lazily — only when there is something to persist.
 	run, err := q.CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		MerchantID: scope.Merchant.UUID(), Mode: "enforce", Providers: []string{"self"},
+		MerchantID: scope.Merchant.UUID(), Mode: "enforce", Rails: []string{"self"},
 	})
 	if err != nil {
 		return res, fmt.Errorf("converge: create run: %w", err)
@@ -293,7 +293,7 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 		Status:            status,
 		RecommendedAction: recommended,
 		Evidence:          evidence,
-		RunID:             runID,
+		RunID:             &runID,
 	})
 	if err != nil {
 		return fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)

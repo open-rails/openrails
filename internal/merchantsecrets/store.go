@@ -60,6 +60,12 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 	if pool == nil {
 		return nil, fmt.Errorf("build merchant secret store: db pool is required")
 	}
+	// MODE 1 (#723): no persistent merchant-secret store exists. Callers must
+	// serve the runtime's in-memory manifest plane via BuildManifest instead —
+	// constructing a DB/Vault store here would run silently empty.
+	if cfg.IsManifestMerchantSource() {
+		return nil, fmt.Errorf("merchant_source=manifest constructs no merchant-secret store (#723): credentials live in memory from the boot manifest; use BuildManifest over Runtime.ManifestSecrets")
+	}
 	backend := cfg.SecretStoreBackend()
 
 	// Open a Vault connection whenever Vault is configured, then probe what the
@@ -187,6 +193,51 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil
+}
+
+// BuildManifest returns the MODE-1 (#723) store view: the runtime store is the
+// in-memory manifest plane (read-only; the manifest IS the store), and Vault —
+// when enabled — serves Transit signing ONLY (KV is never consulted; #661's
+// independence of KV vs Transit carries over). SolanaCanSign is true: the
+// memory store can hold+serve a manifest-declared keypair, and a Vault
+// connection adds transit. SecretWrite stays true so the provider-config write
+// routes MOUNT and serve the pointed 405 mode rejection instead of a bare 404.
+func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore) (*Store, error) {
+	if store == nil {
+		return nil, fmt.Errorf("build manifest secret plane: store is required")
+	}
+	transit, err := BuildTransit(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{
+		Secrets:       store,
+		SolanaTransit: transit,
+		SolanaCanSign: true,
+		SecretWrite:   true,
+	}, nil
+}
+
+// BuildTransit opens the Vault Transit signing client when Vault is enabled
+// (nil otherwise). Standalone of the KV store — MODE 1 uses it for Solana
+// vault_transit signers with no KV backend at all.
+func BuildTransit(ctx context.Context, cfg *config.Config) (solanaint.TransitClient, error) {
+	if cfg == nil || cfg.Vault == nil || !cfg.Vault.Enabled {
+		return nil, nil
+	}
+	vc := cfg.Vault
+	client, err := vault.Login(ctx, vault.Config{
+		Address:    vc.Address,
+		AuthMethod: vc.AuthMethod,
+		Token:      vc.Token,
+		RoleID:     vc.RoleID,
+		SecretID:   vc.SecretID,
+		K8sRole:    vc.K8sRole,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vault login: %w", err)
+	}
+	return vault.NewTransitAdapter(client, vaultTransitMount), nil
 }
 
 // enforceEncryptionPosture is the #667 boot gate on the DB-backed (fallback)

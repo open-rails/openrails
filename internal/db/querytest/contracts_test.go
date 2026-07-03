@@ -64,7 +64,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		CreditsSpec:      []byte(`[]`),
 		TierGroup:        strptr("premium"),
 		TierRank:         10,
-		Status:           "active",
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -76,7 +75,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		MerchantID:          merchantID,
 		Amount:              1999,
 		Currency:            "USD",
-		Status:              "active",
 		AccessDurationHours: int32ptr(30 * 24),
 		AutoRenew:           true,
 		Rails:               []byte(`{"ccbill":{"form":"948"}}`),
@@ -93,34 +91,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, prices, 1)
 	require.Equal(t, int64(1999), prices[0].Amount)
-
-	featureID, err := q.CreateEntitlementFeature(ctx, gen.CreateEntitlementFeatureParams{
-		LookupKey:  "premium",
-		Name:       "Premium",
-		MerchantID: merchantID,
-		Metadata:   []byte(`{"contract":true}`),
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	})
-	require.NoError(t, err)
-	_, err = q.CreateProductEntitlementFeature(ctx, gen.CreateProductEntitlementFeatureParams{
-		ProductID:            productID,
-		EntitlementFeatureID: featureID,
-		MerchantID:           merchantID,
-		DurationHours:        int32ptr(30 * 24),
-		Metadata:             []byte(`{}`),
-		CreatedAt:            now,
-		UpdatedAt:            now,
-	})
-	require.NoError(t, err)
-
-	features, err := q.ListProductEntitlementFeatures(ctx, gen.ListProductEntitlementFeaturesParams{
-		ProductID:  productID,
-		MerchantID: merchantID,
-	})
-	require.NoError(t, err)
-	require.Len(t, features, 1)
-	require.Equal(t, "premium", features[0].OpenrailsEntitlementFeature.LookupKey)
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                       subscriptionID,
@@ -244,7 +214,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Equal(t, int64(1999), latestPayment.Amount)
 
 	err = q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-		ID:          uuid.New(),
 		MerchantID:  merchantID,
 		CustomerID:  customerID,
 		BillingMode: "prepaid",
@@ -347,7 +316,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 
 	intent, err := q.EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
 		MerchantID:            merchantID,
-		Provider:              "ccbill",
+		Rail:                  "ccbill",
 		IntentType:            "nmi_delete_subscription",
 		SubscriptionID:        &subscriptionID,
 		PriceID:               &priceID,
@@ -366,7 +335,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "in_flight", claimed.Status)
 	intents, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
-		Provider:       strptr("ccbill"),
+		Rail:           strptr("ccbill"),
 		SubscriptionID: &subscriptionID,
 		PageLimit:      10,
 	})

@@ -76,7 +76,7 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
 		TierRank:         tierRank32,
-		Status:           string(product.Status),
+		Archived:         product.Archived,
 		CreatedAt:        product.CreatedAt,
 		UpdatedAt:        product.UpdatedAt,
 	})
@@ -196,7 +196,7 @@ func (s *ProductService) updateRow(ctx context.Context, product *models.Product)
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
 		TierRank:         tierRank32,
-		Status:           string(product.Status),
+		Archived:         product.Archived,
 		UpdatedAt:        models.UpdateTimestamp(product.UpdatedAt),
 	})
 	if err != nil {
@@ -216,28 +216,25 @@ func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Prod
 	return models.ProductFromGen(row)
 }
 
-// Deactivate archives a product (status=archived) so it won't appear in product
-// listings and cannot be purchased. Existing subscriptions referencing this
-// product's prices are grandfathered and keep openrails.
+// Deactivate archives a product so it won't appear in product listings and
+// cannot be purchased. Existing subscriptions referencing this product's
+// prices are grandfathered and keep billing.
 func (s *ProductService) Deactivate(ctx context.Context, id uuid.UUID) error {
-	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
+	return s.SetArchived(ctx, id, true)
 }
 
-// Activate marks a product as active so it appears in product listings.
+// Activate un-archives a product so it appears in product listings.
 func (s *ProductService) Activate(ctx context.Context, id uuid.UUID) error {
-	return s.SetStatus(ctx, id, models.CatalogStatusActive)
+	return s.SetArchived(ctx, id, false)
 }
 
-// SetStatus sets the lifecycle status (draft|active|archived) on a product.
-func (s *ProductService) SetStatus(ctx context.Context, id uuid.UUID, status models.CatalogStatus) error {
-	if !status.Valid() {
-		return fmt.Errorf("invalid catalog status %q", status)
-	}
+// SetArchived sets the archived lifecycle flag on a product.
+func (s *ProductService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
 	product, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	product.Status = status
+	product.Archived = archived
 	return s.updateRow(ctx, product)
 }
 
@@ -271,7 +268,7 @@ type ProductDefinitionUpdateParams struct {
 	TierGroup        *string
 	SetTierGroup     bool
 	TierRank         *int
-	Status           *models.CatalogStatus
+	Archived         *bool
 }
 
 // UpdateDefinition updates host-configurable fields on a product (catalog definition surface).
@@ -297,11 +294,8 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	if params.TierRank != nil {
 		product.TierRank = *params.TierRank
 	}
-	if params.Status != nil {
-		if !params.Status.Valid() {
-			return nil, fmt.Errorf("invalid catalog status %q", *params.Status)
-		}
-		product.Status = *params.Status
+	if params.Archived != nil {
+		product.Archived = *params.Archived
 	}
 	if params.SetCredits {
 		product.CreditsSpec = params.CreditsSpec

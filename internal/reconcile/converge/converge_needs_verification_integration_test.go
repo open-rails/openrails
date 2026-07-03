@@ -133,7 +133,7 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, sub, merchantID, cust, prod, price, pm, start, periodEnd)
 		// Provider truth synced past the period end (global NMI lane).
-		exec(`INSERT INTO openrails.rail_refresh_watermarks (id,merchant_id,provider,event_domain,watermark_at) VALUES ($1,$2,'nmi','events',$3)`,
+		exec(`INSERT INTO openrails.rail_refresh_watermarks (id,merchant_id,rail,event_domain,watermark_at) VALUES ($1,$2,'nmi','events',$3)`,
 			wm, merchantID, time.Now().UTC().Add(-time.Hour))
 		return nil
 	}))

@@ -491,7 +491,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
 			MerchantID:            tid.UUID(),
-			Provider:              string(row.Provider),
+			Rail:                  string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),
 			OpenrailsResourceID:   nilIfEmptyStr(row.OpenRailsResourceID),
@@ -527,7 +527,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 func catalogDriftEventFromGen(r gen.OpenrailsCatalogDriftEvent) models.CatalogDriftEvent {
 	return models.CatalogDriftEvent{
 		ID:                    r.ID,
-		Provider:              models.CatalogDriftProvider(r.Provider),
+		Provider:              models.CatalogDriftProvider(r.Rail),
 		Kind:                  models.CatalogDriftKind(r.Kind),
 		OpenRailsResourceType: models.CatalogDriftResourceType(r.OpenrailsResourceType),
 		OpenRailsResourceID:   derefStr(r.OpenrailsResourceID),

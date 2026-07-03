@@ -301,7 +301,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 	}
 	if rails.IsNMI(models.Rail(provider)) {
 		if proc := s.activeNMIConfig(); proc != nil {
-			client, err := s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+			client, err := s.buildNMIClient(provider, proc.ToNMIProviderSettings())
 			return client, nil, err
 		}
 	}
@@ -352,7 +352,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 		proc.NMI = &config.NMIRailConfig{}
 	}
 	proc.NMI.SecurityKey = value
-	return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
 }
 
 func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {

@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT current_timestamp NOT NULL,
     updated_at timestamptz DEFAULT current_timestamp NOT NULL,
-    owner text NOT NULL DEFAULT 'merchant',
     PRIMARY KEY (id),
     UNIQUE (rail, environment, account_id)
 );

@@ -70,7 +70,6 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.merchant_credential_audit WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,

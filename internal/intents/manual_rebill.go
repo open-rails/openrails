@@ -72,9 +72,14 @@ func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, r
 // per-renewal credits) in finalize so the async drain and the late-confirming
 // verifier need no waiting worker.
 type ManualRebillHandler struct {
-	DB       *db.DB
-	Config   *config.Config
-	Clients  map[string]*nmi.NMIClient
+	DB      *db.DB
+	Config  *config.Config
+	Clients map[string]*nmi.NMIClient
+	// Resolver arms the store-scoped NMI client per merchant AT CHARGE TIME
+	// (#730, the #725 precedence: store wins; declared-account-with-missing-
+	// secret fails closed; no store row → boot Clients fallback; no caching).
+	// nil = boot plane only (embedded hosts' model).
+	Resolver money.NMIClientResolver
 	Clock    clockwork.Clock
 	EventLog *analytics.EventLogService
 	Policy   BackoffPolicy
@@ -82,6 +87,36 @@ type ManualRebillHandler struct {
 
 func NewManualRebillHandler(d *db.DB, cfg *config.Config, clients map[string]*nmi.NMIClient, clock clockwork.Clock, eventLog *analytics.EventLogService) *ManualRebillHandler {
 	return &ManualRebillHandler{DB: d, Config: cfg, Clients: clients, Clock: clock, EventLog: eventLog, Policy: DefaultBackoff}
+}
+
+// SetNMIClientResolver arms per-merchant store resolution (#730). The resolver
+// gets first shot at every charge; boot Clients stay the fallback for
+// merchants with no declared NMI account.
+func (h *ManualRebillHandler) SetNMIClientResolver(r money.NMIClientResolver) {
+	if h != nil {
+		h.Resolver = r
+	}
+}
+
+// railClient arms the NMI client for one charge: store-scoped per merchant
+// first (#730; scope = the intent's stamped provenance account — dunning
+// stamps the subscription's account, archived stays chargeable for existing
+// obligations), else the boot Clients map. A declared account that cannot arm
+// errors (fail closed — never a cross-plane fallback).
+func (h *ManualRebillHandler) railClient(ctx context.Context, intent gen.OpenrailsRailIntent) (*nmi.NMIClient, error) {
+	if h.Resolver != nil {
+		client, ok, err := h.Resolver.ResolveNMIClient(ctx, intent.MerchantID, intent.RailMerchantAccountID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return client, nil
+		}
+	}
+	if client := h.Clients[strings.ToLower(intent.Rail)]; client != nil {
+		return client, nil
+	}
+	return nil, fmt.Errorf("nmi client not configured for provider %q", intent.Rail)
 }
 
 func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
@@ -127,9 +162,11 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
-	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
+	client, err := h.railClient(ctx, intent)
+	if err != nil {
+		// Unarmable (unconfigured, or declared-but-secretless — fail closed):
+		// park, never charge; the executor drains it once the operator repairs.
+		return Parked(err.Error())
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -212,9 +249,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 // read with no successful sale means no money moved and the executor may
 // retry this attempt.
 func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
-	if !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+	client, cerr := h.railClient(ctx, intent)
+	if cerr != nil {
+		return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
 	}
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {

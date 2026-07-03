@@ -25,16 +25,16 @@ func newCheckoutFakeVaultKV() *checkoutFakeVaultKV {
 	return &checkoutFakeVaultKV{data: map[string]map[string]string{}}
 }
 
-func (f *checkoutFakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, error) {
+func (f *checkoutFakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, int, error) {
 	if value, ok := f.data[path]; ok {
-		return value, nil
+		return value, 1, nil
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (f *checkoutFakeVaultKV) WriteSecret(_ context.Context, path string, data map[string]string) error {
+func (f *checkoutFakeVaultKV) WriteSecret(_ context.Context, path string, data map[string]string) (int, error) {
 	f.data[path] = data
-	return nil
+	return 1, nil
 }
 
 func (f *checkoutFakeVaultKV) DeleteSecret(_ context.Context, path string) error {
@@ -159,7 +159,6 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 		rail:        "ccbill",
 		environment: "live",
 		accountID:   "945280-0000",
-		settings:    map[string]any{"allowed_cidrs": []any{"64.38.240.0/24"}},
 	})
 
 	client, err := svc.resolveCCBillClient(ctx)
@@ -237,8 +236,8 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 
 func checkoutRailConfig(testMode bool) *config.Config {
 	return &config.Config{
-		Mode:     config.ModeFull,
-		TestMode: testMode,
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		TestMode:          testMode,
 	}
 }
 
@@ -250,10 +249,10 @@ func checkoutRailSet(mobiusKey string) config.RailMerchantAccountSet {
 		},
 		"ccbill": {
 			Rail: models.RailCCBill,
+			// #711: the clientAccnum/clientSubacc pair derives from the account_id.
+			AccountID: "945280-0000",
 			CCBill: &config.CCBillRailConfig{
-				ClientAccNum: "static-acc",
-				ClientSubAcc: "static-sub",
-				Salt:         "static-salt",
+				Salt: "static-salt",
 			},
 		},
 	}

@@ -8,19 +8,6 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// Status values mirror the OpenRails CatalogStatus enum at the service boundary.
-const (
-	StatusActive   = "active"
-	StatusArchived = "archived"
-)
-
-func statusFromActive(active *bool) string {
-	if active != nil && !*active {
-		return StatusArchived
-	}
-	return StatusActive
-}
-
 // Applier is the narrow facade surface the plan/apply pipeline drives. It
 // covers exactly the methods this package calls, so it can be satisfied by a
 // fake in tests, by an in-process *service.Service adapter, or by a remote HTTP

@@ -13,16 +13,16 @@ import (
 )
 
 const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
-SELECT provider, kind, count(*)::bigint AS n
+SELECT rail, kind, count(*)::bigint AS n
 FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
-GROUP BY provider, kind
+GROUP BY rail, kind
 `
 
 type CountOpenCatalogDriftByKindRow struct {
-	Provider string
-	Kind     string
-	N        int64
+	Rail string
+	Kind string
+	N    int64
 }
 
 func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenCatalogDriftByKindRow, error) {
@@ -34,7 +34,7 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 	var items []CountOpenCatalogDriftByKindRow
 	for rows.Next() {
 		var i CountOpenCatalogDriftByKindRow
-		if err := rows.Scan(&i.Provider, &i.Kind, &i.N); err != nil {
+		if err := rows.Scan(&i.Rail, &i.Kind, &i.N); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -48,19 +48,19 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
 SELECT count(*) FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
-  AND ($1::text IS NULL OR provider = $1::text)
+  AND ($1::text IS NULL OR rail = $1::text)
   AND ($2::text IS NULL OR kind = $2::text)
   AND ($3::text IS NULL OR openrails_resource_type = $3::text)
 `
 
 type CountOpenCatalogDriftFilteredParams struct {
-	Provider     *string
+	Rail         *string
 	Kind         *string
 	ResourceType *string
 }
 
 func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOpenCatalogDriftFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpenCatalogDriftFiltered, arg.Provider, arg.Kind, arg.ResourceType)
+	row := q.db.QueryRow(ctx, countOpenCatalogDriftFiltered, arg.Rail, arg.Kind, arg.ResourceType)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -68,14 +68,14 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 
 const insertCatalogDriftEvent = `-- name: InsertCatalogDriftEvent :exec
 INSERT INTO openrails.catalog_drift_events (
-    id, merchant_id, provider, kind, openrails_resource_type, openrails_resource_id,
+    id, merchant_id, rail, kind, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value, detected_at
 ) VALUES ($1, $11::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertCatalogDriftEventParams struct {
 	ID                    uuid.UUID
-	Provider              string
+	Rail                  string
 	Kind                  string
 	OpenrailsResourceType string
 	OpenrailsResourceID   *string
@@ -90,7 +90,7 @@ type InsertCatalogDriftEventParams struct {
 func (q *Queries) InsertCatalogDriftEvent(ctx context.Context, arg InsertCatalogDriftEventParams) error {
 	_, err := q.db.Exec(ctx, insertCatalogDriftEvent,
 		arg.ID,
-		arg.Provider,
+		arg.Rail,
 		arg.Kind,
 		arg.OpenrailsResourceType,
 		arg.OpenrailsResourceID,
@@ -106,7 +106,7 @@ func (q *Queries) InsertCatalogDriftEvent(ctx context.Context, arg InsertCatalog
 
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
-SELECT id, provider, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
+SELECT id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
 `
 
@@ -123,7 +123,7 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCa
 		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
-			&i.Provider,
+			&i.Rail,
 			&i.Kind,
 			&i.OpenrailsResourceType,
 			&i.OpenrailsResourceID,
@@ -146,9 +146,9 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCa
 }
 
 const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
-SELECT id, provider, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
+SELECT id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
-  AND ($3::text IS NULL OR provider = $3::text)
+  AND ($3::text IS NULL OR rail = $3::text)
   AND ($4::text IS NULL OR kind = $4::text)
   AND ($5::text IS NULL OR openrails_resource_type = $5::text)
 ORDER BY detected_at DESC
@@ -158,7 +158,7 @@ LIMIT $1::int OFFSET $2::int
 type ListOpenCatalogDriftFilteredParams struct {
 	Column1      int32
 	Column2      int32
-	Provider     *string
+	Rail         *string
 	Kind         *string
 	ResourceType *string
 }
@@ -167,7 +167,7 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
 		arg.Column1,
 		arg.Column2,
-		arg.Provider,
+		arg.Rail,
 		arg.Kind,
 		arg.ResourceType,
 	)
@@ -180,7 +180,7 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
-			&i.Provider,
+			&i.Rail,
 			&i.Kind,
 			&i.OpenrailsResourceType,
 			&i.OpenrailsResourceID,

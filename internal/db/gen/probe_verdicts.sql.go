@@ -14,12 +14,12 @@ const getProbeVerdict = `-- name: GetProbeVerdict :one
 
 SELECT verdict, checked_at
 FROM openrails.probe_verdicts
-WHERE provider = $1 AND key_hash = $2
+WHERE rail = $1 AND key_hash = $2
 `
 
 type GetProbeVerdictParams struct {
-	Provider string
-	KeyHash  string
+	Rail    string
+	KeyHash string
 }
 
 type GetProbeVerdictRow struct {
@@ -31,27 +31,27 @@ type GetProbeVerdictRow struct {
 // instance-level credential state) so these statements work on an ordinary
 // non-tenant-pinned boot connection.
 func (q *Queries) GetProbeVerdict(ctx context.Context, arg GetProbeVerdictParams) (GetProbeVerdictRow, error) {
-	row := q.db.QueryRow(ctx, getProbeVerdict, arg.Provider, arg.KeyHash)
+	row := q.db.QueryRow(ctx, getProbeVerdict, arg.Rail, arg.KeyHash)
 	var i GetProbeVerdictRow
 	err := row.Scan(&i.Verdict, &i.CheckedAt)
 	return i, err
 }
 
 const upsertProbeVerdict = `-- name: UpsertProbeVerdict :exec
-INSERT INTO openrails.probe_verdicts (provider, key_hash, verdict, checked_at)
+INSERT INTO openrails.probe_verdicts (rail, key_hash, verdict, checked_at)
 VALUES ($1, $2, $3, now())
-ON CONFLICT (provider, key_hash) DO UPDATE SET
+ON CONFLICT (rail, key_hash) DO UPDATE SET
     verdict = EXCLUDED.verdict,
     checked_at = now()
 `
 
 type UpsertProbeVerdictParams struct {
-	Provider string
-	KeyHash  string
-	Verdict  string
+	Rail    string
+	KeyHash string
+	Verdict string
 }
 
 func (q *Queries) UpsertProbeVerdict(ctx context.Context, arg UpsertProbeVerdictParams) error {
-	_, err := q.db.Exec(ctx, upsertProbeVerdict, arg.Provider, arg.KeyHash, arg.Verdict)
+	_, err := q.db.Exec(ctx, upsertProbeVerdict, arg.Rail, arg.KeyHash, arg.Verdict)
 	return err
 }

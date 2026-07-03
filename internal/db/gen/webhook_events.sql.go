@@ -14,7 +14,7 @@ import (
 
 const deleteCompletedWebhookEventsBefore = `-- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM openrails.webhook_events
-WHERE status = 'completed' AND completed_at < $1::timestamptz
+WHERE completed_at < $1::timestamptz
 `
 
 func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
@@ -26,25 +26,19 @@ func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, cutoff
 }
 
 const markWebhookEventCompleted = `-- name: MarkWebhookEventCompleted :execrows
-INSERT INTO openrails.webhook_events (merchant_id, rail, op, event_id)
-VALUES ($1, $2, $3, $4)
+INSERT INTO openrails.webhook_events (merchant_id, op, event_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, op, event_id) DO NOTHING
 `
 
 type MarkWebhookEventCompletedParams struct {
 	MerchantID uuid.UUID
-	Rail       string
 	Op         string
 	EventID    string
 }
 
 func (q *Queries) MarkWebhookEventCompleted(ctx context.Context, arg MarkWebhookEventCompletedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markWebhookEventCompleted,
-		arg.MerchantID,
-		arg.Rail,
-		arg.Op,
-		arg.EventID,
-	)
+	result, err := q.db.Exec(ctx, markWebhookEventCompleted, arg.MerchantID, arg.Op, arg.EventID)
 	if err != nil {
 		return 0, err
 	}

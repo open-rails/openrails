@@ -54,7 +54,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -66,7 +66,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 		ProductID:           productID,
 		Amount:              9_990_000,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -94,6 +94,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	// #691 shape: the paid access window is STANDING (end_at NULL).
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		ID:          paidEntID,
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",
@@ -200,7 +201,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		DisplayName:      "Test Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -212,7 +213,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		ProductID:           productID,
 		Amount:              9_990_000,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -239,6 +240,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		ID:          paidEntID,
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",
@@ -254,6 +256,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	graceEnd := now.Add(2 * 24 * time.Hour)
 	graceActiveID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		ID:          graceActiveID,
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",
@@ -269,6 +272,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	graceFutureEnd := graceEnd.Add(24 * time.Hour)
 	graceFutureID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		ID:          graceFutureID,
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",

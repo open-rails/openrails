@@ -14,9 +14,9 @@ import (
 const insertRailMutationLog = `-- name: InsertRailMutationLog :exec
 INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
-    provider,
+    rail,
     rail_merchant_account_id,
-    provider_intent_id,
+    rail_intent_id,
     intent_type,
     idempotency_key,
     attempt,
@@ -30,9 +30,9 @@ INSERT INTO openrails.rail_mutation_logs (
 
 type InsertRailMutationLogParams struct {
 	MerchantID            uuid.UUID
-	Provider              string
+	Rail                  string
 	RailMerchantAccountID *uuid.UUID
-	ProviderIntentID      *uuid.UUID
+	RailIntentID          *uuid.UUID
 	IntentType            *string
 	IdempotencyKey        *string
 	Attempt               int32
@@ -44,9 +44,9 @@ type InsertRailMutationLogParams struct {
 func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutationLogParams) error {
 	_, err := q.db.Exec(ctx, insertRailMutationLog,
 		arg.MerchantID,
-		arg.Provider,
+		arg.Rail,
 		arg.RailMerchantAccountID,
-		arg.ProviderIntentID,
+		arg.RailIntentID,
 		arg.IntentType,
 		arg.IdempotencyKey,
 		arg.Attempt,

@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/analytics"
@@ -302,6 +303,14 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		)
 	}
 
+	// Boot-plane collection adapters (embedded hosts' rail set). #725 attaches
+	// the per-merchant store resolver right after the runtime literal below.
+	moneyCharger := money.NewScopedCharger(database, func() map[string]money.CollectionAdapter {
+		adapters := money.NewNMICollectionAdapters(nmiClients)
+		adapters[string(models.RailStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg, Rails: railSet})
+		return adapters
+	}())
+
 	runtime := &Runtime{
 		DB:                   database,
 		RedisClient:          redisClient,
@@ -321,7 +330,6 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentMethodService:     serviceInstances.PaymentMethodService,
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
-		FeatureService:           serviceInstances.FeatureService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
 		VaultService:             serviceInstances.VaultService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
@@ -346,12 +354,42 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
 		CardAbuseGuard:         cardAbuseGuard,
 		MoneyService:           serviceInstances.MoneyService,
-		MoneyCharger: money.NewScopedCharger(database, func() map[string]money.CollectionAdapter {
-			adapters := money.NewNMICollectionAdapters(nmiClients)
-			adapters[string(models.RailStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg, Rails: railSet})
-			return adapters
-		}()),
-		RailCustomerService: serviceInstances.RailCustomerService,
+		MoneyCharger:           moneyCharger,
+		RailCustomerService:    serviceInstances.RailCustomerService,
+	}
+
+	// MODE 1 (#723): the in-memory credential plane exists from boot; manifest
+	// provisioning seeds it and every store consumer reads it. No persistent
+	// merchant-secret store is ever constructed in this mode.
+	if cfg.IsManifestMerchantSource() {
+		runtime.ManifestSecrets = merchants.NewManifestSecretStore()
+	}
+
+	// #725: the arrears/top-up collection path resolves rail credentials PER
+	// MERCHANT from the merchant-secrets store at charge time (store wins; the
+	// boot adapters above serve only merchants with no declared account).
+	// Merchants late-binds — EnsureMerchantsService / the standalone server set
+	// it after build. The SAME builder arms manual-rebill NMI clients (#730)
+	// via Runtime.CollectionResolver.
+	runtime.CollectionResolver = &money.MerchantCollectionAdapterBuilder{
+		Config:      cfg,
+		Rails:       railSet,
+		DB:          database,
+		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
+	}
+	moneyCharger.SetAdapterResolver(runtime.CollectionResolver)
+
+	// #728: the process-wide Solana services (payment poller, recurring crank,
+	// intent verify legs) arm their RPC PER MERCHANT at use time — store
+	// rail-account settings win, the boot client serves merchants with no
+	// declared account. Merchants late-binds like the #725 builder above.
+	runtime.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{
+		Config:      cfg,
+		Boot:        serviceInstances.SolanaRPC,
+		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
+	}
+	if serviceInstances.SolanaPayPoller != nil {
+		serviceInstances.SolanaPayPoller.SetMerchantRPC(runtime.SolanaRPCResolver)
 	}
 
 	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
@@ -505,8 +543,11 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	}
 	defer func() { _ = sqlDB.Close() }()
 
+	// Schema must mirror the apply step's WithSchema (#731): migratekit v1.2.0
+	// filters the ledger by schema, so a schema-less source stops matching rows
+	// applied via WithSchema.
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
-		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS},
+		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.DB.SchemaName()},
 	); err != nil {
 		log.WithError(err).Fatal("Postgres migrations validation failed")
 		return err
@@ -557,7 +598,7 @@ func createNMIClients(cfg *config.Config, rails config.RailMerchantAccountSet, d
 		}
 
 		// The client's identity IS its account_id (#641). TestMode set by caller.
-		settings := procConfig.ToNMIProviderSettings(accountID)
+		settings := procConfig.ToNMIProviderSettings()
 		if settings.SecurityKey == "" {
 			return nil, fmt.Errorf("nmi provider account %q security key is required", accountID)
 		}
@@ -708,12 +749,12 @@ func createCCBillDataLinkClient(cfg *config.Config, rails config.RailMerchantAcc
 	if ccbillProc == nil {
 		return nil
 	}
-	if ccbillProc.CCBill == nil || ccbillProc.CCBill.DataLinkUsername == "" || ccbillProc.CCBill.DataLinkPassword == "" || ccbillProc.CCBill.ClientAccNum == "" {
+	ccbillConfig := ccbillProc.ToCCBillConfig()
+	if ccbillProc.CCBill == nil || ccbillProc.CCBill.DataLinkUsername == "" || ccbillProc.CCBill.DataLinkPassword == "" || ccbillConfig.ClientAccNum == "" {
 		log.Info("CCBill DataLink credentials missing; DataLink worker disabled")
 		return nil
 	}
 
-	ccbillConfig := ccbillProc.ToCCBillConfig()
 	ccbillConfig.TestMode = cfg.IsTestMode()
 	client := ccbill.NewDataLinkClient(ccbillConfig)
 	// #696: SMS mutations (cancelSubscription) are blocked at the transport
@@ -735,7 +776,6 @@ type servicesInstances struct {
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
-	FeatureService           *entitlements.FeatureService
 	ProductAccessService     *productaccess.Service
 	VaultService             *paymentmethods.VaultService
 	SolanaPayService         *solanamodule.SolanaPayService
@@ -772,7 +812,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)
-	featureService := entitlements.NewFeatureService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	railCustomerService := payments.NewRailCustomerService(database)
@@ -957,7 +996,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		PaymentMethodService:         paymentMethodService,
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
-		FeatureService:               featureService,
 		ProductAccessService:         productAccessService,
 		VaultService:                 vaultService,
 		SolanaPayService:             solanaPayService,

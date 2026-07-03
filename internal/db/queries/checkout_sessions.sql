@@ -5,14 +5,14 @@ INSERT INTO openrails.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, rail_fields, rail_state,
-    idempotency_key, rail_merchant_account_id, created_at, updated_at
+    rail_merchant_account_id, created_at, updated_at
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7,
     sqlc.arg(currency),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
     sqlc.narg(rail_fields), sqlc.narg(rail_state),
-    sqlc.narg(idempotency_key), sqlc.narg(rail_merchant_account_id),
+    sqlc.narg(rail_merchant_account_id),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -37,7 +37,6 @@ UPDATE openrails.checkout_sessions SET
     metadata = sqlc.narg(metadata),
     rail_fields = sqlc.narg(rail_fields),
     rail_state = sqlc.narg(rail_state),
-    idempotency_key = sqlc.narg(idempotency_key),
     rail_merchant_account_id = sqlc.narg(rail_merchant_account_id),
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1;

@@ -56,7 +56,7 @@ func bootNMIRails(t *testing.T, accountID, securityKey string) (config.RailMerch
 			NMI:       &config.NMIRailConfig{SecurityKey: securityKey},
 		},
 	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{Name: accountID, SecurityKey: securityKey}, false)
+	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, false)
 	require.NoError(t, err)
 	return rails, map[string]*nmi.NMIClient{accountID: client, "nmi": client}
 }

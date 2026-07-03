@@ -289,8 +289,8 @@ func (r vaultPerMerchantProviderSecretResolver) ActiveRailMerchantAccountScope(_
 
 func vaultTestConfig(testMode bool) *config.Config {
 	return &config.Config{
-		Mode:     config.ModeFull,
-		TestMode: testMode,
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		TestMode:          testMode,
 	}
 }
 

@@ -46,6 +46,13 @@ const (
 	// Customer roles (#567). owner is auto-seeded by authkit (= `customer:*`).
 	CustomerRoleOwner  = "owner"
 	CustomerRoleMember = "member"
+
+	// Root (platform-operator) roles (#721): bounded merchant-directory bundles
+	// declared on authkit's intrinsic root persona. The root `owner` (root:*) is
+	// auto-seeded by authkit and covers both. No broad "superadmin" role is
+	// declared beyond that owner.
+	RootRoleMerchantDirectoryViewer = "merchant-directory-viewer"
+	RootRoleMerchantDirectoryAdmin  = "merchant-directory-admin"
 )
 
 // Groups returns the OpenRails permission-group type catalog (#567): the two
@@ -55,6 +62,25 @@ const (
 // `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.
 func Groups() []authcore.PersonaDef {
 	return []authcore.PersonaDef{
+		// Root persona EXTENSION (#721): extra bounded operator roles merged onto
+		// authkit's intrinsic root persona (BuildSchema merges Name==root
+		// declarations; owner = root:* stays auto-seeded). These gate the
+		// cross-merchant /v1/platform/merchants directory.
+		{
+			Name: authcore.RootPersona,
+			Roles: []authcore.RoleDef{
+				{
+					Name:        RootRoleMerchantDirectoryViewer,
+					Permissions: []string{PermRootMerchantsRead},
+				},
+				{
+					Name: RootRoleMerchantDirectoryAdmin,
+					Permissions: []string{
+						PermRootMerchantsRead, PermRootMerchantsDelete, PermRootMerchantsRestore,
+					},
+				},
+			},
+		},
 		{
 			Name:   MerchantType,
 			Parent: authcore.RootPersona,
@@ -134,6 +160,13 @@ const (
 	PermMerchantUsageRead              = permissions.MerchantUsageRead
 	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
 	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
+
+	// --- Platform operator (root persona, #721): cross-merchant directory
+	// authority checked against the singleton root group, never a merchant
+	// group. `root:` is authkit's platform-operator namespace (#111 rename). ---
+	PermRootMerchantsRead    = permissions.RootMerchantsRead
+	PermRootMerchantsDelete  = permissions.RootMerchantsDelete
+	PermRootMerchantsRestore = permissions.RootMerchantsRestore
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
 	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Coarse: one

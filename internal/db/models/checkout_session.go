@@ -63,6 +63,8 @@ type CheckoutSession struct {
 	RailFields map[string]any `json:"rail_fields,omitempty"`
 	RailState  map[string]any `json:"rail_state,omitempty"`
 
+	// IdempotencyKey is request-scoped only (Redis owns checkout idempotency,
+	// #702 dropped the column); never persisted or round-tripped from the DB.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	// RailMerchantAccountID is the provider_accounts row selected for this provider
 	// checkout. It prevents provider sessions from being confused across rotated

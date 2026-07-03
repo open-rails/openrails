@@ -79,21 +79,13 @@ func TestFetchStripeCatalogPaginates(t *testing.T) {
 	}
 }
 
-// catalogStatusFromActive maps provider active booleans to lifecycle status.
-func catalogStatusFromActive(active bool) models.CatalogStatus {
-	if active {
-		return models.CatalogStatusActive
-	}
-	return models.CatalogStatusArchived
-}
-
 // helper builders
 func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
-	return &models.Product{ID: id, Key: "prod-key", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
+	return &models.Product{ID: id, Key: "prod-key", DisplayName: name, Description: desc, Archived: !active}
 }
 
 func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
+	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: currency, Archived: !active}
 	if stripePriceID != "" || stripeProductID != "" {
 		p.Rails = map[string]map[string]string{"stripe": {}}
 		if stripePriceID != "" {
@@ -109,7 +101,7 @@ func price(id, productID uuid.UUID, _ string, amount int64, currency string, act
 // nmiPrice builds an OpenRails price linked to an NMI plan via the mobius
 // rail map.
 func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
+	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd"}
 	if planID != "" {
 		p.Rails = map[string]map[string]string{
 			string(models.RailNMI): {models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},

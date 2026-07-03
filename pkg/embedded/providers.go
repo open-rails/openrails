@@ -93,9 +93,6 @@ func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantA
 		v := *in.Solana
 		out.Solana = &v
 	}
-	if in.CCBill != nil && in.CCBill.AllowedCIDRs != nil {
-		out.CCBill.AllowedCIDRs = append([]string(nil), in.CCBill.AllowedCIDRs...)
-	}
 	if in.Solana != nil && in.Solana.Tokens != nil {
 		out.Solana.Tokens = make(map[string]config.TokenConfig, len(in.Solana.Tokens))
 		for k, v := range in.Solana.Tokens {

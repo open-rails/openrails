@@ -3,6 +3,9 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,7 +106,7 @@ type LocalPrice struct {
 	Amount           int64
 	Currency         string
 	BillingCycleDays *int
-	Status           string
+	Archived         bool
 	// Rails is the provider-links blob: rail name -> config map
 	// (plan_id / price_id / ...), as written by catalog bootstrap.
 	Rails map[string]map[string]string
@@ -200,7 +203,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 			ProductID: row.ProductID,
 			Amount:    row.Amount,
 			Currency:  row.Currency,
-			Status:    row.Status,
+			Archived:  row.Archived,
 		}
 		// Only an auto-renewing price has a recurring cadence to match a remote
 		// provider plan against (#622). The window is in hours; the provider
@@ -295,4 +298,121 @@ func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 		}
 		return refs, nil
 	}
+}
+
+// SolanaPlanSourceFromDB lists OUR plan PDAs for the #714 enumeration: the
+// union of locally-known subscription rows and the catalog's
+// rails["solana"].plan_pda provider links (so a fresh DB can still enumerate
+// from catalog alone).
+func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
+	return func(ctx context.Context) ([]string, error) {
+		set := map[string]struct{}{}
+		refs, err := d.Gen(ctx).ReconcileListSolanaSubscriptionRefs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range refs {
+			if pda := strings.TrimSpace(r.PlanPda); pda != "" {
+				set[pda] = struct{}{}
+			}
+		}
+		prices, err := d.Gen(ctx).ReconcileListPricesWithRails(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range prices {
+			if len(row.Rails) == 0 {
+				continue
+			}
+			var rails map[string]map[string]string
+			if err := json.Unmarshal(row.Rails, &rails); err != nil {
+				continue // malformed links never match; same tolerance as Load
+			}
+			if pda := strings.TrimSpace(rails["solana"]["plan_pda"]); pda != "" {
+				set[pda] = struct{}{}
+			}
+		}
+		out := make([]string, 0, len(set))
+		for pda := range set {
+			out = append(out, pda)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+}
+
+// SolanaLocalRecordResolverFromDB resolves #713 memo local-ids against the two
+// record kinds the stamp names: checkout sessions (one-off local-id = session
+// id) and rail intents (pull local-id = #674 intent id). (nil, nil) = no local
+// record; backend errors surface so the run retries instead of parking noise.
+func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
+	return func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error) {
+		row, err := d.Gen(ctx).GetCheckoutSessionByID(ctx, localID)
+		if err == nil {
+			session, err := models.CheckoutSessionFromGen(row)
+			if err != nil {
+				return nil, err
+			}
+			rec := &SolanaLocalRecord{
+				Kind:                SolanaLocalKindCheckoutSession,
+				Rail:                string(session.Rail),
+				CustomerID:          session.CustomerID,
+				PriceID:             session.PriceID,
+				SessionStatus:       string(session.Status),
+				ExpectedRecipient:   solanaStateStr(session.RailState, "recipient"),
+				ExpectedMint:        solanaStateStr(session.RailState, "token_mint"),
+				ExpectedTokenAmount: solanaStateU64(session.RailState, "token_amount"),
+			}
+			if session.TransactionID != nil {
+				rec.SettledTransactionID = strings.TrimSpace(*session.TransactionID)
+			}
+			return rec, nil
+		}
+		if !db.IsNotFound(err) {
+			return nil, err
+		}
+		intent, err := d.Gen(ctx).GetRailIntent(ctx, localID)
+		if err == nil {
+			rec := &SolanaLocalRecord{Kind: SolanaLocalKindPullIntent, Rail: intent.Rail}
+			var payload struct {
+				SubscriptionPDA string `json:"subscription_pda"`
+			}
+			if len(intent.Payload) > 0 {
+				_ = json.Unmarshal(intent.Payload, &payload)
+			}
+			rec.SubscriptionPDA = strings.TrimSpace(payload.SubscriptionPDA)
+			return rec, nil
+		}
+		if !db.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, nil
+	}
+}
+
+// solanaStateStr / solanaStateU64 read the checkout session's rail_state jsonb
+// (written by the solana checkout flow: recipient / token_mint / token_amount).
+func solanaStateStr(state map[string]any, key string) string {
+	if s, ok := state[key].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func solanaStateU64(state map[string]any, key string) uint64 {
+	switch v := state[key].(type) {
+	case float64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case string:
+		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			return n
+		}
+	case json.Number:
+		if n, err := strconv.ParseUint(v.String(), 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
 }

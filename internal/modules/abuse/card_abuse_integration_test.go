@@ -38,6 +38,7 @@ func TestCardAbuse_PerSubjectEscalatesToCaptcha(t *testing.T) {
 	guard, challenges, ctx := newCardAbuse(t, abuse.CardAbuseConfig{
 		FailWindow: time.Minute, CaptchaAfter: 3, BlockAfter: 5,
 		ChallengeTTL: time.Minute, BlockTTL: time.Minute,
+		DailyWindow: 24 * time.Hour, DailyBlockAfter: 1000, DailyBlockTTL: 24 * time.Hour,
 		GlobalWindow: time.Hour, GlobalAttackAfter: 1000, AttackTTL: time.Minute,
 	})
 	ip := "ip:" + uuid.NewString()
@@ -140,6 +141,7 @@ func TestCardAbuse_SiteWideAttackMode(t *testing.T) {
 	guard, _, ctx := newCardAbuse(t, abuse.CardAbuseConfig{
 		FailWindow: time.Minute, CaptchaAfter: 100, BlockAfter: 200,
 		ChallengeTTL: time.Minute, BlockTTL: time.Minute,
+		DailyWindow: 24 * time.Hour, DailyBlockAfter: 1000, DailyBlockTTL: 24 * time.Hour,
 		GlobalWindow: time.Hour, GlobalAttackAfter: 5, AttackTTL: time.Minute,
 	})
 

@@ -35,7 +35,7 @@ func nmiDeleteIntent() gen.OpenrailsRailIntent {
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     TypeNMIDeleteSubscription,
-		Provider:       "mobius",
+		Rail:           "mobius",
 		SubscriptionID: &subID,
 		Origin:         string(OriginUser),
 		Attempts:       1,

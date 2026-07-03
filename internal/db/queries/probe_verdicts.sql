@@ -5,11 +5,11 @@
 -- name: GetProbeVerdict :one
 SELECT verdict, checked_at
 FROM openrails.probe_verdicts
-WHERE provider = sqlc.arg(provider) AND key_hash = sqlc.arg(key_hash);
+WHERE rail = sqlc.arg(rail) AND key_hash = sqlc.arg(key_hash);
 
 -- name: UpsertProbeVerdict :exec
-INSERT INTO openrails.probe_verdicts (provider, key_hash, verdict, checked_at)
-VALUES (sqlc.arg(provider), sqlc.arg(key_hash), sqlc.arg(verdict), now())
-ON CONFLICT (provider, key_hash) DO UPDATE SET
+INSERT INTO openrails.probe_verdicts (rail, key_hash, verdict, checked_at)
+VALUES (sqlc.arg(rail), sqlc.arg(key_hash), sqlc.arg(verdict), now())
+ON CONFLICT (rail, key_hash) DO UPDATE SET
     verdict = EXCLUDED.verdict,
     checked_at = now();

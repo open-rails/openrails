@@ -100,7 +100,7 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 // openrails.merchant_exports row (issue #225). The export here is a row-count
 // manifest plus a Vault-side secret-name enumeration (values are NEVER exported
 // in plaintext) — enough to satisfy export-before-delete and give a portability
-// manifest. A managed deployment can extend `location` to a real dump artifact.
+// manifest.
 //
 // Returns the export id. Delete is gated on at least one completed export.
 func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[string]int, error) {

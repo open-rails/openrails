@@ -285,7 +285,7 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	})
 
 	limitedCfg := *rt.Config
-	limitedCfg.Mode = config.ModeLimited
+	limitedCfg.ProviderWriteMode = config.ProviderWriteModeLimited
 
 	recorder := &recordingDeferredDeleteScheduler{}
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(

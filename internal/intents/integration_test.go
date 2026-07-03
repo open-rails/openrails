@@ -125,7 +125,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
-			WHERE provider_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, fx.subID)
+			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -175,9 +175,17 @@ func (fx intentFixture) runner(client *nmi.NMIClient, cfg *config.Config) *Runne
 	}
 }
 
-func fullModeConfig() *config.Config     { return &config.Config{Mode: config.ModeFull} }
-func limitedModeConfig() *config.Config  { return &config.Config{Mode: config.ModeLimited} }
-func readonlyModeConfig() *config.Config { return &config.Config{Mode: config.ModeReadOnly} }
+func fullModeConfig() *config.Config {
+	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
+}
+
+func limitedModeConfig() *config.Config {
+	return &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}
+}
+
+func readonlyModeConfig() *config.Config {
+	return &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+}
 
 // TestExecutorDeletesPresentSubscription: enqueue -> executor verifies the
 // subscription exists at the provider, deletes it, succeeds, and clears the
@@ -206,7 +214,7 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 	rows, err := fx.db.Pool().Query(context.Background(), `
 		SELECT phase, attempt, evidence::text
 		FROM openrails.rail_mutation_logs
-		WHERE provider_intent_id = $1
+		WHERE rail_intent_id = $1
 		ORDER BY created_at, id`, row.ID)
 	require.NoError(t, err)
 	defer rows.Close()

@@ -1,5 +1,5 @@
 // Package controlplane wires the OpenRails AuthKit control plane onto an app
-// graph (#284). The embedded CORE (pkg/embedded.New -> bootstrap.NewApp ->
+// graph (#284). The embedded CORE (pkg/embedded.New -> app.BootstrapWithOptions ->
 // internal/app) deliberately does NOT import internal/controlplane (and through
 // it AuthKit): embedded hosts are host-authenticated and opt in by importing
 // THIS package, which is what pulls the control plane (and AuthKit) onto a

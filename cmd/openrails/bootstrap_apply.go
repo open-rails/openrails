@@ -156,6 +156,12 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
+	// #723: in api mode (MODE 2) a merchant manifest is a second truth — the
+	// APIs own merchant config. Manifest mode applies DB projections (secrets
+	// are validated but never persisted; the server holds them in memory).
+	if !cfg.IsManifestMerchantSource() {
+		return fmt.Errorf("merchant_source=api refuses push-merchant-config (two truths, #723/#724): provision merchants via the HTTP APIs, or run merchant_source=manifest")
+	}
 
 	application := &app.App{Config: cfg}
 	defer func() {

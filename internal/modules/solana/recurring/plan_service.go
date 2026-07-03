@@ -33,16 +33,48 @@ type publicKeySigner interface {
 	SignMessageForPublicKey(ctx context.Context, tenantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error)
 }
 
+// RPCResolver arms the merchant's Solana RPC client at use time (#728:
+// store-declared rail-account settings win, boot client as fallback). nil
+// client with nil error = no plane armed.
+type RPCResolver func(ctx context.Context, merchantID merchant.ID) (*solanaint.RPCClient, error)
+
 // signerSubmitter is the production Submitter: a per-merchant solana.Signer + RPC,
 // wired through solana.BuildSignSubmit (the verified build/sign/submit path).
+// The RPC resolves PER MERCHANT at submit time when a resolver is set (#728);
+// a fixed client is the boot-only wiring.
 type signerSubmitter struct {
-	signer solanaint.Signer
-	rpc    *solanaint.RPCClient
+	signer  solanaint.Signer
+	rpc     *solanaint.RPCClient
+	resolve RPCResolver
 }
 
-// NewSignerSubmitter builds the production Submitter.
+// NewSignerSubmitter builds the production Submitter over a fixed RPC client.
 func NewSignerSubmitter(signer solanaint.Signer, rpc *solanaint.RPCClient) Submitter {
 	return &signerSubmitter{signer: signer, rpc: rpc}
+}
+
+// NewSignerSubmitterWithResolver builds the production Submitter with use-time
+// per-merchant RPC resolution (#728).
+func NewSignerSubmitterWithResolver(signer solanaint.Signer, resolve RPCResolver) Submitter {
+	return &signerSubmitter{signer: signer, resolve: resolve}
+}
+
+// rpcFor arms this merchant's RPC: resolver first (store-wins), fixed client
+// as fallback; neither armed = loud error (the pull fails as operational).
+func (s *signerSubmitter) rpcFor(ctx context.Context, tenantID merchant.ID) (*solanaint.RPCClient, error) {
+	if s.resolve != nil {
+		rpc, err := s.resolve(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		if rpc != nil {
+			return rpc, nil
+		}
+	}
+	if s.rpc != nil {
+		return s.rpc, nil
+	}
+	return nil, fmt.Errorf("solana: no RPC client armed for merchant %s (#728)", tenantID.String())
 }
 
 func (s *signerSubmitter) MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error) {
@@ -50,13 +82,21 @@ func (s *signerSubmitter) MerchantAddress(ctx context.Context, tenantID merchant
 }
 
 func (s *signerSubmitter) Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error) {
-	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, s.rpc, instructions)
+	rpc, err := s.rpcFor(ctx, tenantID)
+	if err != nil {
+		return solanago.Signature{}, err
+	}
+	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, rpc, instructions)
 }
 
 // SubmitWithPresubmit persists the signed tx signature via presubmit BEFORE
 // submission (#674).
 func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
-	return solanaint.BuildSignSubmitPresubmit(ctx, tenantID, s.signer, s.rpc, instructions, presubmit)
+	rpc, err := s.rpcFor(ctx, tenantID)
+	if err != nil {
+		return solanago.Signature{}, err
+	}
+	return solanaint.BuildSignSubmitPresubmit(ctx, tenantID, s.signer, rpc, instructions, presubmit)
 }
 
 func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
@@ -66,7 +106,11 @@ func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID
 // SubmitForMerchantAddressWithPresubmit: see SubmitWithPresubmit.
 func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	if signer, ok := s.signer.(publicKeySigner); ok {
-		return solanaint.BuildSignSubmitWithPayerPresubmit(ctx, s.rpc, merchantAddress, instructions, func(message []byte) (solanago.Signature, error) {
+		rpc, err := s.rpcFor(ctx, tenantID)
+		if err != nil {
+			return solanago.Signature{}, err
+		}
+		return solanaint.BuildSignSubmitWithPayerPresubmit(ctx, rpc, merchantAddress, instructions, func(message []byte) (solanago.Signature, error) {
 			return signer.SignMessageForPublicKey(ctx, tenantID, merchantAddress, message)
 		}, presubmit)
 	}

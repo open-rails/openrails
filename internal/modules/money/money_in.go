@@ -88,7 +88,7 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 			Available:       r.Available,
 			Threshold:       r.Threshold,
 			AutoTopup:       r.AutoTopupEnabled,
-			TopupAmount:     r.AutoTopupAmountCents,
+			TopupAmount:     r.AutoTopupAmount,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
 			LastAlertAt:     r.LastAlertAt,
 			LastTopupAt:     r.LastTopupAt,

@@ -66,6 +66,12 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 	require.Equal(t, int64(-10_000), inv.MoneyMovements["withdrawal"])
 	require.Equal(t, int64(100_000), inv.MoneyMovements["deposit"])
 
+	// #726: prepaid statements never touch the pending-accrual workspace — the
+	// itemization above IS the line_items snapshot, no invoiced-copy rows.
+	var wsCount int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_items WHERE customer_id = $1`, payer.UUID()).Scan(&wsCount))
+	require.Equal(t, 0, wsCount)
+
 	// Idempotent.
 	inv2, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
@@ -203,14 +209,6 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 500))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "threshold-invoice", 500)
 	require.NoError(t, err)
-
-	var rawCounter int64
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT outstanding_owed_amount
-		FROM openrails.money_settings
-		WHERE customer_id = $1 AND currency = $2
-	`, payer.UUID(), money.DefaultCurrency).Scan(&rawCounter))
-	require.Equal(t, int64(0), rawCounter, "runtime exposure is invoice-derived, not the old settings counter")
 
 	n, err := svc.FinalizeThresholdInvoices(ctx, time.Now().Add(time.Hour))
 	require.NoError(t, err)

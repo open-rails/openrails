@@ -148,8 +148,66 @@ func (m *Manifest) validate() error {
 	if err := m.validateProductBenefitRefs(productKeys, usageLimitKeys); err != nil {
 		return err
 	}
+	// #707: legacy metered: price declarations become rate-card rows before the
+	// rate-card model is validated, so the one-usage-card-per-meter rule covers
+	// both shapes.
+	if err := m.translateMeteredPrices(meterKinds); err != nil {
+		return err
+	}
 	if err := m.validateRateCardModel(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// translateMeteredPrices rewrites every legacy metered: price (#599 sugar) into
+// an equivalent per_unit rate card (#707): unit_amount = rate micros, divide_by
+// = per_units (× per-seconds for gauges), round = half_up — the same
+// round-once integer math the retired catalog_price_metered engine used. A
+// pure-usage price (unit_amount 0) is removed from Prices (no price row); a
+// price with a base amount keeps its row minus the metered block.
+func (m *Manifest) translateMeteredPrices(meterKinds map[string]string) error {
+	for gi := range m.TierGroups {
+		for pi := range m.TierGroups[gi].Products {
+			p := &m.TierGroups[gi].Products[pi]
+			kept := p.Prices[:0]
+			for _, price := range p.Prices {
+				if price.Metered == nil {
+					kept = append(kept, price)
+					continue
+				}
+				mp := price.Metered
+				divideBy := mp.PerUnits // >= 1, validated
+				if meterKinds[mp.Meter] == "gauge" {
+					d, err := ParseDurationSpec(mp.Per) // validated non-empty for gauges
+					if err != nil {
+						return fmt.Errorf("product %q metered per: %w", p.Key, err)
+					}
+					seconds := int64(d / time.Second)
+					if seconds < 1 {
+						return fmt.Errorf("product %q metered per %q must be at least 1s", p.Key, mp.Per)
+					}
+					if divideBy > (1<<62)/seconds {
+						return fmt.Errorf("product %q metered per_units × per overflows", p.Key)
+					}
+					divideBy *= seconds
+				}
+				p.RateCards = append(p.RateCards, RateCard{
+					Meter:       mp.Meter,
+					PaymentTerm: PaymentInArrears,
+					Price: RatePrice{
+						Model:    ModelPerUnit,
+						Currency: price.Currency,
+						PerUnit:  &PerUnitPrice{UnitAmount: mp.Rate, DivideBy: divideBy},
+					},
+				})
+				if price.UnitAmount != 0 {
+					price.Metered = nil // keep the base-fee price row
+					kept = append(kept, price)
+				}
+			}
+			p.Prices = kept
+		}
 	}
 	return nil
 }

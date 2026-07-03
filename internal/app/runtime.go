@@ -94,7 +94,6 @@ type Runtime struct {
 
 	EventLogService      *analytics.EventLogService
 	EntitlementService   *entitlements.EntitlementService
-	FeatureService       *entitlements.FeatureService
 	ProductAccessService *productaccess.Service
 	MoneyService         *money.MoneyService
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
@@ -103,12 +102,24 @@ type Runtime struct {
 	MoneyCharger         money.Charger
 	RailCustomerService  *payments.RailCustomerService
 	Merchants            *merchants.Service
+	// ManifestSecrets is the MODE-1 in-memory credential plane (#723), set iff
+	// merchant_source=manifest. Boot provisioning seeds it (Seeder()); runtime
+	// consumers read it through Merchants like any other store. The DB/Vault
+	// store is never constructed in this mode.
+	ManifestSecrets *merchants.ManifestSecretStore
+	// CollectionResolver is the ONE #725 store-armed per-merchant credential
+	// builder (arrears/top-up adapters + #730 manual-rebill NMI clients).
+	CollectionResolver *money.MerchantCollectionAdapterBuilder
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaRPC                *solana.RPCClient
-	SolanaPriceProvider      solanamodule.TokenPriceProvider
+	// SolanaRPCResolver is the #728 store-armed per-merchant RPC builder for the
+	// process-wide Solana services (poller, crank, intent verify legs): merchant
+	// rail-account settings win, SolanaRPC is the boot fallback.
+	SolanaRPCResolver   *solanamodule.MerchantRPCBuilder
+	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
 	FXRateRefresher          interface {
 		Stop()
@@ -272,8 +283,11 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return fmt.Errorf("runtime is nil")
 	}
 
-	// Start Solana Pay poller if configured (regardless of River setup).
-	if r.SolanaPayPoller != nil && r.Rails.GetSolanaRail() != nil {
+	// Start Solana Pay poller if configured (regardless of River setup). No
+	// boot-rail gate (#728): a store-only merchant declares Solana purely in the
+	// merchant store, and each merchant pass arms its own RPC; without pending
+	// references a tick is a single cheap Redis read.
+	if r.SolanaPayPoller != nil {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 

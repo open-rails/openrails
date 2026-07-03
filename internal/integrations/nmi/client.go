@@ -22,7 +22,6 @@ const (
 
 type NMIClient struct {
 	providerName  string
-	config        *config.NMIProviderSettings
 	SecurityKey   string
 	WebhookSecret string
 	// DirectPostURL survives #663 for the two classic-only recurring ops
@@ -183,7 +182,6 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 
 	return &NMIClient{
 		providerName:  provider,
-		config:        cfg,
 		SecurityKey:   securityKey,
 		WebhookSecret: webhookSecret,
 		DirectPostURL: DefaultDirectPostURL,

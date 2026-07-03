@@ -58,14 +58,14 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	description := "Failopen test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), ID: productID, Key: "failopen_product_" + uuid.New().String(), DisplayName: "Failopen Product",
-		Description: &description, Status: string(models.CatalogStatusActive),
+		Description: &description, Archived: false,
 		EntitlementsSpec: []byte(`{"` + entName + `": null}`),
 		CreatedAt:        now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 9990000, Currency: "usd",
-		Status: string(models.CatalogStatusActive), AccessDurationHours: &billingHours, AutoRenew: autoRenew, CreatedAt: now, UpdatedAt: now,
+		Archived: false, AccessDurationHours: &billingHours, AutoRenew: autoRenew, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)

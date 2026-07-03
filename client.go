@@ -329,27 +329,15 @@ type CreditAccount struct {
 type AccountSettingsInput struct {
 	// BillingMode controls how the account is charged ("prepaid" or "postpaid").
 	BillingMode *string `json:"billing_mode,omitempty"`
-	// MaxSpendPerDay is the rolling-24h spend ceiling in currency-internal units.
-	MaxSpendPerDay *int64 `json:"max_spend_per_day,omitempty"`
-	// MaxSpendPerMonth is the calendar-month spend ceiling in currency-internal units.
-	MaxSpendPerMonth *int64 `json:"max_spend_per_month,omitempty"`
-	// MaxOutstandingOwedAmount caps outstanding postpaid balance in currency-internal units.
-	MaxOutstandingOwedAmount *int64 `json:"max_outstanding_owed_amount,omitempty"`
 	// LowBalanceThreshold triggers a low-balance alert when prepaid balance falls below this.
 	LowBalanceThreshold *int64 `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled    *bool  `json:"auto_topup_enabled,omitempty"`
-	// AutoTopupAmountCents is the topup deposit size in currency-internal units.
-	AutoTopupAmountCents   *int64  `json:"auto_topup_amount_cents,omitempty"`
+	// AutoTopupAmount is the topup deposit size in currency-internal units.
+	AutoTopupAmount        *int64  `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id,omitempty"`
 	// DefaultCreditExpiryHours is the default lifetime in hours for credit deposits that
 	// don't carry an explicit ExpiresAt.
 	DefaultCreditExpiryHours *int `json:"default_credit_expiry_hours,omitempty"`
-	// HardStopOnBreach rejects new admissions when any spend limit is breached rather
-	// than allowing with a warning.
-	HardStopOnBreach *bool `json:"hard_stop_on_breach,omitempty"`
-	// AlertThresholdPct triggers an alert when the balance falls below this percentage
-	// of the low-balance threshold (0–100).
-	AlertThresholdPct *int `json:"alert_threshold_pct,omitempty"`
 }
 
 // UsageRollupRow is one grouped spend bucket from OpenRails.

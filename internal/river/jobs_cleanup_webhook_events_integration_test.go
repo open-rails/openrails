@@ -25,8 +25,8 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	recentID := "evt_retention_recent_" + uuid.NewString()
 	insert := func(eventID string, completedAt time.Time) {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.webhook_events (merchant_id, rail, op, event_id, created_at, completed_at)
-			 VALUES ($1, 'ccbill', 'webhook.ccbill.TestEvent', $2, $3, $3)`,
+			`INSERT INTO openrails.webhook_events (merchant_id, op, event_id, created_at, completed_at)
+			 VALUES ($1, 'webhook.ccbill.TestEvent', $2, $3, $3)`,
 			dbtest.TestMerchantID.UUID(), eventID, completedAt)
 		require.NoError(t, err)
 	}
@@ -50,8 +50,8 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	require.Equal(t, 0, remaining(oldID), "expired mark must be deleted")
 	require.Equal(t, 1, remaining(recentID), "recent mark must survive")
 
-	// Zero/unset retention falls back to the 90d default rather than deleting everything.
-	deleted, err = w.cleanupWebhookEvents(ctx, now, 0)
-	require.NoError(t, err)
-	require.Equal(t, 1, remaining(recentID), "default retention must not delete recent marks")
+	// #711: a zero/unset retention is a wiring bug — Work refuses loudly instead
+	// of silently re-defaulting (registration wires DefaultCleanupConfig()).
+	require.Error(t, CleanupConfig{}.validate())
+	require.NoError(t, DefaultCleanupConfig().validate())
 }

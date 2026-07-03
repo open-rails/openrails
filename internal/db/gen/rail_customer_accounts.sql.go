@@ -73,7 +73,7 @@ const upsertRailCustomerAccount = `-- name: UpsertRailCustomerAccount :exec
 INSERT INTO openrails.rail_customer_accounts (
     id, merchant_id, customer_id, rail, account_id, created_at, updated_at
 ) VALUES ($1, $7::uuid, $2, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id, rail) WHERE rail_merchant_account_id IS NULL DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, rail) DO UPDATE SET
     account_id = EXCLUDED.account_id,
     updated_at = EXCLUDED.updated_at
 `

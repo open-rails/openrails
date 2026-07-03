@@ -110,9 +110,9 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	idempotencyKey := emptyStringNil(p.IdempotencyKey)
 	return s.db.Gen(ctx).InsertRailMutationLog(ctx, gen.InsertRailMutationLogParams{
 		MerchantID:            p.MerchantID,
-		Provider:              p.Provider,
+		Rail:                  p.Provider,
 		RailMerchantAccountID: p.RailMerchantAccountID,
-		ProviderIntentID:      p.ProviderIntentID,
+		RailIntentID:          p.ProviderIntentID,
 		IntentType:            intentType,
 		IdempotencyKey:        idempotencyKey,
 		Attempt:               p.Attempt,

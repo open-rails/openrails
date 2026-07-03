@@ -112,24 +112,18 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	// --- PUT /v1/me/settings: A configures its own self-imposed settings. ---
 	settingsBody := fmt.Sprintf(`{
 		"currency": %q,
-		"max_spend_per_day": 1000000,
-		"max_spend_per_month": 5000000,
 		"low_balance_threshold": 250000
 	}`, currency)
 	w = doHostSeamSelf(routerA, http.MethodPut, "/v1/me/settings", settingsBody)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	stored := decodeHostSeamBody(t, w)
-	require.EqualValues(t, 1_000_000, stored["max_spend_per_day"])
-	require.EqualValues(t, 5_000_000, stored["max_spend_per_month"])
 	require.EqualValues(t, 250_000, stored["low_balance_threshold"])
 	require.NotContains(t, stored, "billing_mode")
-	require.NotContains(t, stored, "max_outstanding_owed_amount")
-	require.NotContains(t, stored, "hard_stop_on_breach")
 
 	settings, err := svc.GetCreditAccountSettings(ctx, payerA, currency)
 	require.NoError(t, err)
-	require.NotNil(t, settings.MaxSpendPerDay)
-	require.EqualValues(t, 1_000_000, *settings.MaxSpendPerDay)
+	require.NotNil(t, settings.LowBalanceThreshold)
+	require.EqualValues(t, 250_000, *settings.LowBalanceThreshold)
 	require.Equal(t, "prepaid", settings.BillingMode, "customer self-service must not change platform billing mode")
 
 	// --- GET /v1/me/transactions: A sees exactly its deposit. ---

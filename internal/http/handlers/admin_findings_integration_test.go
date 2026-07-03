@@ -171,7 +171,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 	clients := map[string]*nmi.NMIClient{"nmi": fx.client}
 	fx.rt = &app.Runtime{
 		DB:                           dbi,
-		Config:                       &config.Config{Mode: config.ModeFull},
+		Config:                       &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Clock:                        clock,
 		NMIClients:                   clients,
 		SubscriptionService:          subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clients, nil, clock),
@@ -248,7 +248,7 @@ func (fx *findingsFixture) seedFinding(ftype, subject, severity, prose string, r
 		Status:            "requires_review",
 		RecommendedAction: prosePtr,
 		Evidence:          b,
-		RunID:             uuid.Nil,
+		RunID:             nil,
 	})
 	require.NoError(fx.t, err)
 	return row.ID

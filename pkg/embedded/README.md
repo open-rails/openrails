@@ -13,7 +13,11 @@ import (
 
 func main() {
     cfg := &config.Config{
-        // ... your OpenRails configuration
+        // ... your OpenRails configuration.
+        // Set TestMode EXPLICITLY: embedded mode never runs config.Load, so the
+        // zero value means LIVE credential posture (standalone dev boots default
+        // to sandbox; embedded ones do not). New() warns when TestMode is left
+        // false in a dev-like Env.
     }
 
     openrails, err := embedded.New(embedded.Options{

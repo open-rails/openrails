@@ -9,9 +9,9 @@ import (
 // Originally targeted migration 028; after squashing 001..029 the FK constraints live in 001.
 func loadBaselineMigration(t *testing.T) string {
 	t.Helper()
-	b, err := FS.ReadFile("001_schema.up.sql")
+	b, err := FS.ReadFile("0001_schema.up.sql")
 	if err != nil {
-		t.Fatalf("read 001_schema.up.sql: %v", err)
+		t.Fatalf("read 0001_schema.up.sql: %v", err)
 	}
 	return string(b)
 }
@@ -19,7 +19,7 @@ func loadBaselineMigration(t *testing.T) string {
 // TestMerchantFKBackfillConstraintsPresent asserts that the consolidated baseline (001)
 // contains ON DELETE RESTRICT merchant FKs for every core table.
 // Originally validated migration 028; after squashing 001..029 into a single
-// baseline the check now targets 001_schema.up.sql.
+// baseline the check now targets 0001_schema.up.sql.
 // This is a static SQL-text test (no live DB required); the integration test
 // suite (scripts/test_integration.sh) verifies the constraints actually apply.
 func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
@@ -32,11 +32,37 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 	cases := []wantFK{
 		{"products", "products_merchant_fk"},
 		{"prices", "prices_merchant_fk"},
-		{"entitlement_features", "entitlement_features_merchant_fk"},
-		{"product_entitlement_features", "product_entitlement_features_merchant_fk"},
 		{"payment_methods", "payment_methods_merchant_fk"},
 		{"checkout_sessions", "checkout_sessions_merchant_fk"},
 		{"grants", "grants_merchant_fk"},
+		// #709 FK doctrine: the money core + operator tables carry the same
+		// merchants(id) ON DELETE RESTRICT FK (merchant removal is a tombstone
+		// plus gated purge, never a row DELETE).
+		{"payments", "payments_merchant_fk"},
+		{"subscriptions", "subscriptions_merchant_fk"},
+		{"invoices", "invoices_merchant_fk"},
+		{"invoice_items", "invoice_items_merchant_fk"},
+		{"invoice_payments", "invoice_payments_merchant_fk"},
+		{"money_settings", "money_settings_merchant_fk"},
+		{"ledger_accounts", "ledger_accounts_merchant_fk"},
+		{"ledger_transfers", "ledger_transfers_merchant_fk"},
+		{"usage_events", "usage_events_merchant_fk"},
+		{"entitlements", "entitlements_merchant_fk"},
+		{"rail_intents", "rail_intents_merchant_fk"},
+		{"rail_customer_accounts", "rail_customer_accounts_merchant_fk"},
+		{"reconciliation_runs", "reconciliation_runs_merchant_fk"},
+		{"reconciliation_findings", "reconciliation_findings_merchant_fk"},
+		{"reconciliation_state", "reconciliation_state_merchant_fk"},
+		{"catalog_drift_events", "catalog_drift_events_merchant_fk"},
+		{"custom_credit_types", "custom_credit_types_merchant_fk"},
+		{"notification_queue", "notification_queue_merchant_fk"},
+		{"tier_schedules", "tier_schedules_merchant_fk"},
+		{"payer_spend_limits", "payer_spend_limits_merchant_fk"},
+		{"invoker_spend_limits", "invoker_spend_limits_merchant_fk"},
+		{"solana_subscriptions", "solana_subscriptions_merchant_fk"},
+		{"merchant_deks", "merchant_deks_merchant_fk"},
+		{"merchant_secrets", "merchant_secrets_merchant_fk"},
+		{"merchant_exports", "merchant_exports_merchant_fk"},
 	}
 
 	for _, c := range cases {
@@ -86,8 +112,6 @@ func TestMerchantFKBackfillNoCascadeOnFinancialTables(t *testing.T) {
 	merchantFKConstraints := []string{
 		"products_merchant_fk",
 		"prices_merchant_fk",
-		"entitlement_features_merchant_fk",
-		"product_entitlement_features_merchant_fk",
 		"payment_methods_merchant_fk",
 		"checkout_sessions_merchant_fk",
 		"grants_merchant_fk",

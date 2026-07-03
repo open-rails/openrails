@@ -9,28 +9,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
 
-// TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar proves the #615 bridge:
-// usage reported via RecordUsage (openrails.usage_events) is rated through the
-// catalog metered sidecar and lands on the finalized invoice. FinalizeInvoice now
-// runs the usage->aggregate->owed sweep, so reported VM-seconds become real
-// AmountDue. Re-finalizing the same window must NOT double-accrue (idempotent on
-// the deterministic period source_id).
+// TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar proves the #615/#707
+// bridge: usage reported via RecordUsage (openrails.usage_events) is rated
+// through the catalog rate card for a legacy-shaped gauge meter and lands on
+// the finalized invoice. FinalizeInvoice runs the usage->aggregate->owed sweep,
+// so reported VM-seconds become real AmountDue. Re-finalizing the same window
+// must NOT double-accrue (idempotent on the deterministic period source_id).
 func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	productID := uuid.New()
-	priceID := uuid.New()
 	merchantID := dbtest.TestMerchantID.UUID()
 	meterKey := "vm-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_price_metered WHERE price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE key = $1", meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
@@ -40,23 +39,24 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Publish a metered product + price + gauge meter + sidecar. Gauge meter so the
-	// aggregate is unit-seconds drawn from dimensions[meter_key].
+	// Publish a metered product + legacy gauge meter + the rate card the #707
+	// manifest translation produces for `metered: {rate: 500_000, per: 1h}`:
+	// per_unit unit_amount 500_000, divide_by 3600 (per_units 1 x 3600s).
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-bridge-"+uuid.NewString(), "Metered Bridge Product", merchantID)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency, access_duration_hours, auto_renew, status) VALUES ($1, $2, $3, $4, $5, $6, true, 'active')`,
-		priceID, merchantID, productID, int64(0), cur, 30)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
-	// rate: 500_000 micros per 1 unit, per 3600 seconds (per VM-hour).
 	rateMicros := int64(500_000)
-	perUnits := int64(1)
-	perSeconds := int64(3600)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_price_metered (price_id, merchant_id, meter_key, rate_micros, per_units, per_seconds) VALUES ($1, $2, $3, $4, $5, $6)`,
-		priceID, merchantID, meterKey, rateMicros, perUnits, perSeconds)
+	divideBy := int64(3600)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
+    'model', 'per_unit',
+    'currency', 'usd',
+    'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
+		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)
 
 	// Window around now; report usage at occurred_at inside it.
@@ -86,12 +86,7 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 	}
 
 	// Expected rated amount: rate once over the full period aggregate.
-	expected, err := money.RateMeteredAggregate(totalUnitSeconds, money.MeteredRate{
-		Kind:       money.MeterKindGauge,
-		RateMicros: rateMicros,
-		PerUnits:   perUnits,
-		Per:        time.Duration(perSeconds) * time.Second,
-	})
+	expected, err := pricing.ChargeModel{Kind: pricing.ModelPerUnit, UnitAmount: rateMicros, DivideBy: divideBy}.Rate(totalUnitSeconds)
 	require.NoError(t, err)
 	require.Greater(t, expected, int64(0), "expected a non-zero rated amount")
 

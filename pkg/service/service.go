@@ -312,17 +312,17 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		resource := strings.TrimSpace(req.Resource)
 		captureTxnID := trx.ID
 		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			CustomerID:         trx.CustomerID,
-			Invoker:            trx.Invoker,
-			Currency:           trx.Currency,
-			EventType:          req.EventType,
-			Resource:           resource,
-			Amount:             req.Amount,
-			Dimensions:         req.Dimensions,
-			Metadata:           req.Metadata,
-			Source:             usageSource,
-			SourceID:           sourceID,
-			MoneyTransactionID: &captureTxnID,
+			CustomerID:       trx.CustomerID,
+			Invoker:          trx.Invoker,
+			Currency:         trx.Currency,
+			EventType:        req.EventType,
+			Resource:         resource,
+			Amount:           req.Amount,
+			Dimensions:       req.Dimensions,
+			Metadata:         req.Metadata,
+			Source:           usageSource,
+			SourceID:         sourceID,
+			LedgerTransferID: &captureTxnID,
 		}); uerr != nil {
 			// Analytics is best-effort: a usage_event failure must NOT fail the
 			// capture (the money is already captured).

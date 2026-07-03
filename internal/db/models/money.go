@@ -44,26 +44,19 @@ type MoneyTransaction struct {
 }
 
 // MoneyAccount is the per-(merchant, merchant subject) spend policy and money-in
-// configuration (issue #237). NULL cap columns mean "no cap".
+// configuration (issue #237).
 type MoneyAccount struct {
-	ID         uuid.UUID `json:"id"`
 	MerchantID uuid.UUID `json:"merchant_id"`
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 
 	BillingMode              string     `json:"billing_mode"`
-	MaxSpendPerDay           *int64     `json:"max_spend_per_day,omitempty"`
-	MaxSpendPerMonth         *int64     `json:"max_spend_per_month,omitempty"`
-	MaxOutstandingOwedAmount *int64     `json:"max_outstanding_owed_amount,omitempty"`
 	LowBalanceThreshold      *int64     `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
-	AutoTopupAmountCents     *int64     `json:"auto_topup_amount,omitempty"`
+	AutoTopupAmount          *int64     `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
 	DefaultCreditExpiryHours *int       `json:"default_credit_expiry_hours,omitempty"`
-	HardStopOnBreach         bool       `json:"hard_stop_on_breach"`
-	AlertThresholdPct        int        `json:"alert_threshold_pct"`
 
-	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
 	// CreditLimitAmount is the admin-set arrears credit line (#489): under
 	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold
 	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
@@ -72,11 +65,7 @@ type MoneyAccount struct {
 	LastAlertAt       *time.Time `json:"last_alert_at,omitempty"`
 	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
-	VerifiedPaymentMethod bool       `json:"verified_payment_method"`
-	VerifiedAt            *time.Time `json:"verified_at,omitempty"`
-	SuspendedAt           *time.Time `json:"suspended_at,omitempty"`
-	SuspendReason         *string    `json:"suspend_reason,omitempty"`
-	Tier                  *string    `json:"tier,omitempty"`
+	Tier *string `json:"tier,omitempty"`
 	// TierSource is "auto" (schedule-driven graduation, #476) or "admin" (an
 	// explicit override that auto-graduation must not overwrite).
 	TierSource string `json:"tier_source,omitempty"`

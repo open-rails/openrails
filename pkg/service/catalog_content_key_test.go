@@ -102,11 +102,11 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 		t.Fatal("precondition: regenerated UUIDs should differ")
 	}
 
-	beforeProducts := []*models.Product{{ID: beforeProductID, Key: productKey, Status: models.CatalogStatusActive}}
-	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
+	beforeProducts := []*models.Product{{ID: beforeProductID, Key: productKey}}
+	beforePrices := []*models.Price{{ID: beforePriceID, ProductID: beforeProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true}}
 
-	afterProducts := []*models.Product{{ID: afterProductID, Key: productKey, Status: models.CatalogStatusActive}}
-	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
+	afterProducts := []*models.Product{{ID: afterProductID, Key: productKey}}
+	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true}}
 
 	beforeSnap := buildSnapshotFromRows(beforeProducts, beforePrices)
 	afterSnap := buildSnapshotFromRows(afterProducts, afterPrices)
@@ -159,8 +159,8 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 	priceID := uuid.New()
 
 	// Local catalog has the $29.00 price.
-	products := []*models.Product{{ID: productID, Key: productKey, Status: models.CatalogStatusActive}}
-	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true, Status: models.CatalogStatusActive}}
+	products := []*models.Product{{ID: productID, Key: productKey}}
+	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true}}
 	snap := buildSnapshotFromRows(products, prices)
 
 	// Stripe has a price at a DIFFERENT amount ($39.00) under its own (different)
@@ -188,7 +188,7 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 // currency divergence between the local OpenRails price and the Stripe price.
 func TestDiffPriceFieldsAmountDrift(t *testing.T) {
 	now := time.Now().UTC()
-	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "usd", Status: models.CatalogStatusActive}
+	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "usd"}
 
 	// Amount diverges only.
 	sp := catalog.StripePrice{ID: "price_1", UnitAmount: 2000, Currency: "usd", Active: true}

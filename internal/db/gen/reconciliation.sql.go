@@ -261,7 +261,7 @@ WHERE evidence->>'provider' = $1
 
 type AutoResolveVanishedReconciliationFindingsParams struct {
 	Provider     *string
-	RunID        uuid.UUID
+	RunID        *uuid.UUID
 	FindingTypes []string
 }
 
@@ -400,18 +400,18 @@ const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 
 INSERT INTO openrails.reconciliation_runs (
-    merchant_id, mode, providers, window_since, window_until, started_at, status
+    merchant_id, mode, rails, window_since, window_until, started_at, status
 ) VALUES (
     $1, $2, $3,
     $4, $5, now(), 'running'
 )
-RETURNING id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error
+RETURNING id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error
 `
 
 type CreateReconciliationRunParams struct {
 	MerchantID  uuid.UUID
 	Mode        string
-	Providers   []string
+	Rails       []string
 	WindowSince *time.Time
 	WindowUntil *time.Time
 }
@@ -427,7 +427,7 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 	row := q.db.QueryRow(ctx, createReconciliationRun,
 		arg.MerchantID,
 		arg.Mode,
-		arg.Providers,
+		arg.Rails,
 		arg.WindowSince,
 		arg.WindowUntil,
 	)
@@ -436,7 +436,7 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		&i.ID,
 		&i.MerchantID,
 		&i.Mode,
-		&i.Providers,
+		&i.Rails,
 		&i.WindowSince,
 		&i.WindowUntil,
 		&i.StartedAt,
@@ -501,7 +501,7 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
-SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT 1
 `
@@ -513,7 +513,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 		&i.ID,
 		&i.MerchantID,
 		&i.Mode,
-		&i.Providers,
+		&i.Rails,
 		&i.WindowSince,
 		&i.WindowUntil,
 		&i.StartedAt,
@@ -555,7 +555,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 }
 
 const getReconciliationRun = `-- name: GetReconciliationRun :one
-SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
+SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationRun, error) {
@@ -565,7 +565,7 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Openr
 		&i.ID,
 		&i.MerchantID,
 		&i.Mode,
-		&i.Providers,
+		&i.Rails,
 		&i.WindowSince,
 		&i.WindowUntil,
 		&i.StartedAt,
@@ -600,7 +600,7 @@ func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDoma
 }
 
 const listAbandonedProviderIntents = `-- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, provider FROM openrails.rail_intents
+SELECT id, intent_type, status, rail FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
   AND (
@@ -621,7 +621,7 @@ type ListAbandonedProviderIntentsRow struct {
 	ID         uuid.UUID
 	IntentType string
 	Status     string
-	Provider   string
+	Rail       string
 }
 
 // #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
@@ -640,7 +640,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 			&i.ID,
 			&i.IntentType,
 			&i.Status,
-			&i.Provider,
+			&i.Rail,
 		); err != nil {
 			return nil, err
 		}
@@ -967,7 +967,7 @@ SELECT s.id, s.status, s.rail,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
-              AND w.provider = s.rail
+              AND w.rail = s.rail
               AND (w.rail_merchant_account_id IS NULL OR w.rail_merchant_account_id = s.rail_merchant_account_id)
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
@@ -1115,7 +1115,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
-SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $1
 `
@@ -1138,7 +1138,7 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 			&i.ID,
 			&i.MerchantID,
 			&i.Mode,
-			&i.Providers,
+			&i.Rails,
 			&i.WindowSince,
 			&i.WindowUntil,
 			&i.StartedAt,
@@ -1655,7 +1655,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	Rail              string
 	TransactionID     string
 	Amount            int64
-	Status            OpenrailsPurchaseStatus
+	Status            OpenrailsPaymentStatus
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -1692,10 +1692,9 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithRails = `-- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, status, rails
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, rails
 FROM openrails.prices
 WHERE rails IS NOT NULL
-  AND status <> 'draft'
 `
 
 type ReconcileListPricesWithRailsRow struct {
@@ -1705,14 +1704,14 @@ type ReconcileListPricesWithRailsRow struct {
 	Currency            string
 	AccessDurationHours *int32
 	AutoRenew           bool
-	Status              string
+	Archived            bool
 	Rails               []byte
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
 // materializer maps a remote plan id onto the local price whose rails
-// jsonb carries that id under the provider's key. Draft prices are excluded
-// (not billable); archived prices stay (grandfathered subscriptions bill them).
+// jsonb carries that id under the provider's key. Archived prices stay
+// (grandfathered subscriptions bill them).
 func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]ReconcileListPricesWithRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPricesWithRails)
 	if err != nil {
@@ -1729,7 +1728,7 @@ func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]Reconcile
 			&i.Currency,
 			&i.AccessDurationHours,
 			&i.AutoRenew,
-			&i.Status,
+			&i.Archived,
 			&i.Rails,
 		); err != nil {
 			return nil, err
@@ -2071,7 +2070,7 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
-    last_seen_run = EXCLUDED.last_seen_run,
+    last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
 RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by
@@ -2085,7 +2084,7 @@ type UpsertReconciliationFindingParams struct {
 	Status            string
 	RecommendedAction *string
 	Evidence          []byte
-	RunID             uuid.UUID
+	RunID             *uuid.UUID
 }
 
 // ============================================================================

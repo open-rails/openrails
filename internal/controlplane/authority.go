@@ -39,6 +39,22 @@ func (c *ControlPlane) HasAdminPermission(ctx context.Context, merchantRef, user
 	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, MerchantType, ref, strings.TrimSpace(perm))
 }
 
+// HasRootPermission reports whether the user holds perm in the singleton ROOT
+// permission-group (#721): live AuthKit state, no merchant context. The root
+// `owner` auto-holds root:*; bounded operator roles (merchant-directory-*)
+// carry concrete root:merchants:* grants. Gates the /v1/platform/* tier.
+func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm string) (bool, error) {
+	if c == nil || c.Core() == nil {
+		return false, ErrNoControlPlane
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, nil
+	}
+	// The root group is the singleton parentless group: persona=root, no slug.
+	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, authcore.RootPersona, "", strings.TrimSpace(perm))
+}
+
 // ErrMerchantAmbiguous is returned by MerchantForUser when a user is a member of
 // more than one merchant group: the active merchant cannot be inferred from
 // membership alone and the caller must present an explicit merchant selector.

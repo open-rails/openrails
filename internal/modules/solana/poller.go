@@ -16,6 +16,7 @@ import (
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -61,7 +62,7 @@ type SolanaPayPoller struct {
 	db                     *db.DB
 	redis                  *redis.Client
 	cfg                    *config.Config
-	rpc                    *solanarpc.RPCClient
+	rpcBuilder             *MerchantRPCBuilder
 	solanaPayService       *SolanaPayService
 	solanaTransactionSvc   *SolanaTransactionService
 	purchaseRegistrar      purchaseRegistrar
@@ -109,13 +110,22 @@ func NewSolanaPayPoller(
 		db:                     db,
 		redis:                  redis,
 		cfg:                    cfg,
-		rpc:                    rpc,
+		rpcBuilder:             &MerchantRPCBuilder{Config: cfg, Boot: rpc}, // boot plane only until SetMerchantRPC
 		solanaPayService:       solanaPayService,
 		solanaTransactionSvc:   solanaTransactionService,
 		purchaseRegistrar:      purchaseRegistrar,
 		paymentLookup:          paymentLookup,
 		checkoutSessionService: checkoutSessionService,
 		retryAfter:             make(map[string]time.Time),
+	}
+}
+
+// SetMerchantRPC installs the store-aware per-merchant RPC builder (#728):
+// each merchant's pass arms from the merchant-secrets store first, boot plane
+// as fallback.
+func (p *SolanaPayPoller) SetMerchantRPC(b *MerchantRPCBuilder) {
+	if b != nil {
+		p.rpcBuilder = b
 	}
 }
 
@@ -160,39 +170,79 @@ func (p *SolanaPayPoller) Stop() {
 	}
 }
 
-// pollPendingPayments checks all pending payments for confirmation
+// pollPendingPayments checks all pending payments for confirmation. It fans
+// out PER MERCHANT (#728): each merchant's references are processed inside
+// that merchant's RLS scope with that merchant's store-armed RPC client
+// (store-wins, boot fallback) — resolved fresh every pass, nothing cached.
 func (p *SolanaPayPoller) pollPendingPayments(ctx context.Context) {
-	if p.rpc == nil || p.solanaPayService == nil {
+	if p.solanaPayService == nil {
 		return
 	}
 
-	// Get all pending payment references from Redis
-	refs, err := p.solanaPayService.GetAllPendingReferences(ctx)
+	byMerchant, err := p.solanaPayService.PendingReferencesByMerchant(ctx)
 	if err != nil {
 		log.WithError(err).Warn("Failed to get pending payment references")
 		return
 	}
-
-	if len(refs) == 0 {
+	if len(byMerchant) == 0 {
 		return // No pending payments
 	}
 
-	log.WithField("count", len(refs)).Debug("Polling pending Solana payments")
-
-	// Check each pending payment
-	for _, ref := range refs {
+	for mid, refs := range byMerchant {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-
-		p.checkPayment(ctx, ref)
+		p.pollMerchantPendingPayments(ctx, mid, refs)
 	}
 }
 
-// checkPayment checks a single payment reference for confirmation
-func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
+// pollMerchantPendingPayments runs one merchant's pass: arm the merchant's RPC
+// (fail LOUD on malformed declared settings — the pass is skipped, never run
+// with a wrong-plane client), then check each reference RLS-scoped.
+func (p *SolanaPayPoller) pollMerchantPendingPayments(ctx context.Context, mid merchant.ID, refs []string) {
+	mctx := merchant.WithID(ctx, mid)
+	rpc, err := p.rpcBuilder.Resolve(mctx, mid)
+	if err != nil {
+		log.WithError(err).WithField("merchant_id", mid.String()).
+			Warn("Solana poller: merchant pass skipped — RPC not armed (#728)")
+		return
+	}
+	if rpc == nil {
+		log.WithField("merchant_id", mid.String()).
+			Warn("Solana poller: merchant pass skipped — no Solana RPC on either plane (#728)")
+		return
+	}
+	txSvc := p.solanaTransactionSvc.WithRPC(rpc)
+
+	log.WithFields(log.Fields{"merchant_id": mid.String(), "count": len(refs)}).
+		Debug("Polling pending Solana payments")
+
+	run := func(tctx context.Context) error {
+		for _, ref := range refs {
+			select {
+			case <-tctx.Done():
+				return nil
+			default:
+			}
+			p.checkPayment(tctx, ref, rpc, txSvc)
+		}
+		return nil
+	}
+	if p.db != nil {
+		if err := p.db.RunInMerchantConn(mctx, run); err != nil {
+			log.WithError(err).WithField("merchant_id", mid.String()).
+				Warn("Solana poller: merchant pass failed")
+		}
+		return
+	}
+	_ = run(mctx)
+}
+
+// checkPayment checks a single payment reference for confirmation. rpc/txSvc
+// are the merchant-armed clients for this pass (#728).
+func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string, rpc *solanarpc.RPCClient, txSvc *SolanaTransactionService) {
 	if !p.shouldAttempt(reference) {
 		return
 	}
@@ -264,7 +314,7 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	}
 
 	limit := 10
-	sigs, err := p.rpc.GetSignaturesForAddress(ctx, reference, limit)
+	sigs, err := rpc.GetSignaturesForAddress(ctx, reference, limit)
 	if err != nil {
 		log.WithError(err).WithField("reference", reference).Debug("Failed to get signatures for reference")
 		p.deferRetry(reference, err)
@@ -298,7 +348,7 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		}
 
 		// Verify the transaction matches our expected payment
-		if p.verifyPayment(ctx, reference, sig.Signature, pending) {
+		if p.verifyPayment(ctx, txSvc, reference, sig.Signature, pending) {
 			log.WithFields(log.Fields{
 				"reference": reference,
 				"user_id":   pending.UserID,
@@ -306,7 +356,7 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 			}).Info("Solana payment confirmed")
 
 			// Process the confirmed payment
-			if err := p.processConfirmedPayment(ctx, reference, sig.Signature, pending); err != nil {
+			if err := p.processConfirmedPayment(ctx, txSvc, reference, sig.Signature, pending); err != nil {
 				// Recurring subscribe whose init landed but subscribe has not yet: keep
 				// the reference alive (the subscribe tx carries the SAME reference) and
 				// re-poll. This is normal in-progress, not a failure — do NOT finalize.
@@ -550,8 +600,9 @@ func (p *SolanaPayPoller) deferRetryFor(reference string, backoff time.Duration)
 	p.retryMu.Unlock()
 }
 
-// verifyPayment validates that a transaction matches our expected payment
-func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, signature string, pending *PendingSolanaPayment) bool {
+// verifyPayment validates that a transaction matches our expected payment.
+// txSvc is the merchant-armed transaction service for this pass (#728).
+func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransactionService, reference string, signature string, pending *PendingSolanaPayment) bool {
 	if pending != nil && (pending.Lifecycle || pending.Subscribe) {
 		// Lifecycle (cancel / tier-change) and recurring-subscribe sessions have no
 		// transfer to verify here; the random reference appearing on this signature
@@ -561,7 +612,7 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 		// subscription PDA — for subscribe).
 		return true
 	}
-	if p.solanaTransactionSvc == nil {
+	if txSvc == nil {
 		// Reference key is cryptographically random (32 bytes); fallback to reference-only checks.
 		return true
 	}
@@ -581,7 +632,13 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 	if ref != "" {
 		refPtr = &ref
 	}
-	if err := p.solanaTransactionSvc.VerifyTransactionWithContent(
+	// #713: a present purchase memo must match the checkout session id
+	// (absence passes; uuid.Nil skips for non-session pendings).
+	expectedMemo := uuid.Nil
+	if sid, err := uuid.Parse(strings.TrimSpace(pending.SessionID)); err == nil {
+		expectedMemo = sid
+	}
+	if err := txSvc.VerifyTransactionWithContent(
 		ctx,
 		strings.TrimSpace(signature),
 		expectedAmount,
@@ -589,6 +646,7 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 		expectedMint,
 		"",
 		refPtr,
+		expectedMemo,
 		solanaPaymentExpiryDeadline(pending),
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{
@@ -609,8 +667,9 @@ func solanaPaymentExpiryDeadline(pending *PendingSolanaPayment) *time.Time {
 	return &expiresAt
 }
 
-// processConfirmedPayment uses CheckoutService.RegisterPurchase to record payment and grant entitlements
-func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference, signature string, pending *PendingSolanaPayment) error {
+// processConfirmedPayment uses CheckoutService.RegisterPurchase to record payment and grant entitlements.
+// txSvc is the merchant-armed transaction service for this pass (#728).
+func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *SolanaTransactionService, reference, signature string, pending *PendingSolanaPayment) error {
 	// Lifecycle (cancel / tier-change): mirror the confirmed on-chain action via
 	// the checkout session service instead of registering a purchase. The mirror
 	// re-confirms the signature LANDED + SUCCEEDED on-chain (source of truth) and
@@ -691,8 +750,8 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	// time) — the poller can lag the block by its interval, so now() would be wrong.
 	// nil on error/absent => the payment records now() as an honest fallback.
 	var purchasedAt *time.Time
-	if p.solanaTransactionSvc != nil {
-		if bt, btErr := p.solanaTransactionSvc.TransactionBlockTime(ctx, signature); btErr != nil {
+	if txSvc != nil {
+		if bt, btErr := txSvc.TransactionBlockTime(ctx, signature); btErr != nil {
 			log.WithError(btErr).WithField("signature", signature).Warn("could not fetch solana block time; payment will record processing time")
 		} else {
 			purchasedAt = bt

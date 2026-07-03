@@ -12,13 +12,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
+// insertPendingInvoiceItemTx queues an owed accrual in the invoice_items
+// pending workspace (#726). Rows only leave via attach-at-close; the customer
+// statement itemization is invoices.line_items, never this table.
 func insertPendingInvoiceItemTx(
 	ctx context.Context,
 	q *gen.Queries,
 	merchantID, customerID uuid.UUID,
 	currency string,
 	sourceType, sourceID string,
-	eventType *string,
 	amount int64,
 	invoiceAt time.Time,
 	metadata map[string]any,
@@ -43,21 +45,15 @@ func insertPendingInvoiceItemTx(
 	if err != nil {
 		return fmt.Errorf("money: encode invoice item metadata: %w", err)
 	}
-	return q.InsertInvoiceItem(ctx, gen.InsertInvoiceItemParams{
+	return q.InsertPendingInvoiceItem(ctx, gen.InsertPendingInvoiceItemParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: merchantID,
 		CustomerID: customerID,
 		Currency:   normalizeCurrency(currency),
 		SourceType: sourceType,
 		SourceID:   sourceID,
-		EventType:  eventType,
-		PeriodFrom: invoiceAt,
-		PeriodTo:   invoiceAt,
 		InvoiceAt:  invoiceAt,
-		Quantity:   1,
-		UnitAmount: amount,
 		Amount:     amount,
-		Status:     "pending",
 		Metadata:   meta,
 		CreatedAt:  invoiceAt,
 		UpdatedAt:  invoiceAt,

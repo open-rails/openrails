@@ -16,12 +16,16 @@ import (
 // custom credit unit, deposit + spend it, assert balance) plus the invariant
 // (a billing op on the qualified unit is rejected) and presentation.
 func TestCustomCreditConsumeAndInvariant(t *testing.T) {
-	svc, _, payer, _, ctx := moneyInEnv(t)
+	svc, pool, payer, _, ctx := moneyInEnv(t)
 
 	// (1) define gold @ decimals=2, owned by the test merchant ("test" slug).
-	ct, err := svc.DefineCustomCreditType(ctx, "gold", 2)
+	// Registry writes live in the catalog sidecar push (#706); seed the row the
+	// same way it does.
+	_, err := pool.Exec(ctx, `
+INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
+VALUES (uuidv7(), $1, 'gold', 2, true)
+ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
-	require.Equal(t, int32(2), ct.Decimals)
 	unit := dbtest.TestMerchantSlug + "/gold" // "test/gold"
 
 	// ResolveUnit returns the custom decimals, not a built-in.

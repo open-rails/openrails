@@ -65,7 +65,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		DisplayName: "Test Product",
 		Description: &description,
 		CreditsSpec: creditsSpecJSON,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -77,7 +77,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:           productID,
 		Amount:              9_990_000,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,

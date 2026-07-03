@@ -8,8 +8,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -42,9 +44,30 @@ import (
 //     them.)
 type localClient struct {
 	svc *billingservice.Service
+	// rt carries the bound merchant: the transcription bypasses the in-process
+	// transport, so it must pin merchant ctx itself (see merchantCtx).
+	rt *app.Runtime
 	// currency is the default currency the unified client is built with
 	// (openrails.WithCurrency on the in-process remote).
 	currency string
+}
+
+// merchantCtx replicates the transport's merchant pinning (transport.go) for
+// the transcribed path: live-read the bound merchant (provisioning may bind it
+// after New), fall back to a per-call ctx pin, and stamp it before any
+// merchant-owned DB access. Without this every store call fails
+// merchant.Require in embedded mode.
+func (c *localClient) merchantCtx(ctx context.Context) context.Context {
+	mid := c.rt.ConfiguredMerchant
+	if mid.IsZero() {
+		if v, ok := merchant.FromContext(ctx); ok {
+			mid = v
+		}
+	}
+	if !mid.IsZero() {
+		ctx = merchant.WithID(ctx, mid)
+	}
+	return ctx
 }
 
 // ClientOption configures Runtime.Client.
@@ -212,7 +235,7 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 			Windows:  windows,
 		})
 	}
-	if err := c.svc.ReplaceInvokerSpendLimits(ctx, payer, next); err != nil {
+	if err := c.svc.ReplaceInvokerSpendLimits(c.merchantCtx(ctx), payer, next); err != nil {
 		return internalErr("set customer spend delegations failed")
 	}
 	return nil

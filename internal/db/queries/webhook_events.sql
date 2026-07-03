@@ -9,10 +9,10 @@ SELECT EXISTS(
 ) AS completed;
 
 -- name: MarkWebhookEventCompleted :execrows
-INSERT INTO openrails.webhook_events (merchant_id, rail, op, event_id)
-VALUES ($1, $2, $3, $4)
+INSERT INTO openrails.webhook_events (merchant_id, op, event_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, op, event_id) DO NOTHING;
 
 -- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM openrails.webhook_events
-WHERE status = 'completed' AND completed_at < sqlc.arg(cutoff)::timestamptz;
+WHERE completed_at < sqlc.arg(cutoff)::timestamptz;

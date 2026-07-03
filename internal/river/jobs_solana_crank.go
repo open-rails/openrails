@@ -44,9 +44,11 @@ type solanaCranker interface {
 
 // presubmitCranker is the optional signature write-ahead capability (#674):
 // presubmit(sig) persists the signed tx signature BEFORE submission.
+// memoLocalID (the durable pull-intent id; Nil = unstamped) is the #713
+// self-recognition memo stamped on the pull tx.
 // *recurring.CrankService implements it; fakes without it skip the write-ahead.
 type presubmitCranker interface {
-	CrankWithPresubmit(ctx context.Context, merchantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64, presubmit func(signature string) error) (string, error)
+	CrankWithPresubmit(ctx context.Context, merchantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
 }
 
 // membershipManager is the lifecycle surface the cranker drives (satisfied by
@@ -188,7 +190,10 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			}
 			continue
 		}
-		if _, err := w.crankOne(ctx, repo, row, nil); err != nil {
+		// Legacy direct crank (unit-test harnesses only): no intent exists, so the
+		// pull goes unstamped (uuid.Nil). Production always routes through the
+		// intent handler above, which stamps the intent id as the #713 memo.
+		if _, err := w.crankOne(ctx, repo, row, uuid.Nil, nil); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_pda", row.SubscriptionPDA).
 				Warn("Solana cranker: subscription crank failed")
 		}
@@ -219,11 +224,15 @@ type crankOutcome struct {
 
 // crankOne runs the pull state machine for one row. presubmit (optional)
 // durably records the signed tx signature BEFORE submission (#674) when the
-// cranker supports it. The returned error means the pull is UNRESOLVED
+// cranker supports it. memoLocalID (the pull intent id; Nil = unstamped) is
+// stamped on the pull tx as the #713 self-recognition SPL Memo — it exists
+// durably BEFORE the send, so a chain-side reader can resolve the tx back to
+// the intent (and through it the subscription) with no local send record.
+// The returned error means the pull is UNRESOLVED
 // (operational failure, or a pull that happened but whose local finalize
 // failed — the caller distinguishes via the recorded signature); a nil error
 // means the state machine resolved the period (see crankKind).
-func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, presubmit func(signature string) error) (crankOutcome, error) {
+func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, memoLocalID uuid.UUID, presubmit func(signature string) error) (crankOutcome, error) {
 	merchantID := merchant.ID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
@@ -254,7 +263,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 	var sig string
 	var crankErr error
 	if pc, ok := w.Cranker.(presubmitCranker); ok && presubmit != nil {
-		sig, crankErr = pc.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, presubmit)
+		sig, crankErr = pc.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, memoLocalID, presubmit)
 	} else {
 		sig, crankErr = w.Cranker.Crank(ctx, merchantID, row, amountBaseUnits)
 	}

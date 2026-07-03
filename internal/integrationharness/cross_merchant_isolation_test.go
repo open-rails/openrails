@@ -402,12 +402,15 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
 	require.NoError(t, err, "issue merchant admin user access token")
 
+	// #721: the platform directory is mounted on the standalone surface but
+	// root-gated — a merchant owner (no root: grants) must be denied, never
+	// see cross-merchant data.
 	for _, path := range []string{
 		"/v1/platform/merchants",
 	} {
 		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+path, token, nil)
-		require.Equalf(t, http.StatusNotFound, status,
-			"core must not mount platform/cross-merchant admin route %s: %s", path, string(body))
+		require.Equalf(t, http.StatusForbidden, status,
+			"merchant admin must not reach platform route %s: %s", path, string(body))
 	}
 }
 

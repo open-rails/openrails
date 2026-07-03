@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
@@ -84,6 +87,49 @@ func (s *CheckoutService) railMerchantAccountEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
 }
 
+// ResolveRailMerchantAccountID resolves the ACTIVE provider account for new work
+// on the given rail (#704). Returns nil when no resolver is wired or no active
+// account exists — provenance is only ever stamped with a REAL resolved account,
+// never invented. Resolution failures are logged and swallowed: stamping is
+// metadata and must not block a sale.
+func (s *CheckoutService) ResolveRailMerchantAccountID(ctx context.Context, rail string) *uuid.UUID {
+	if s == nil || s.ProviderSecrets == nil {
+		return nil
+	}
+	scopes, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver)
+	if !ok {
+		return nil
+	}
+	rail = strings.ToLower(strings.TrimSpace(rail))
+	if rail == "" {
+		return nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil
+	}
+	scope, found, err := scopes.ActiveRailMerchantAccountScope(ctx, tid, rail, s.railMerchantAccountEnvironment())
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("rail", rail).Debug("checkout: provider-account resolution failed; leaving provenance unstamped")
+		return nil
+	}
+	if !found || scope.ID == uuid.Nil {
+		return nil
+	}
+	id := scope.ID
+	return &id
+}
+
+// stampRailMerchantAccount pins resolved account provenance into ctx so the
+// payment / subscription / payment-method writes downstream of this checkout
+// flow stamp rail_merchant_account_id (#704).
+func (s *CheckoutService) stampRailMerchantAccount(ctx context.Context, rail string) context.Context {
+	if id := s.ResolveRailMerchantAccountID(ctx, rail); id != nil {
+		return db.WithRailMerchantAccountID(ctx, *id)
+	}
+	return ctx
+}
+
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -104,7 +150,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 				proc.NMI = &config.NMIRailConfig{}
 			}
 			proc.NMI.SecurityKey = value
-			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
+			return nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
 		} else if s.scopedProviderSecretsEnabled() {
 			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
 		}
@@ -117,7 +163,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	}
 	if rails.IsNMI(models.Rail(provider)) {
 		if proc := s.activeNMIConfig(); proc != nil {
-			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestMode())
+			return nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
 		}
 	}
 	return nil, fmt.Errorf("missing client")
@@ -186,7 +232,6 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	}
 	cfg.ClientAccNum = strings.TrimSpace(acc)
 	cfg.ClientSubAcc = strings.TrimSpace(sub)
-	cfg.AllowedCIDRs = providerSettingStrings(scope.Settings, "allowed_cidrs")
 
 	for _, item := range []struct {
 		key string
@@ -208,38 +253,6 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
 	}
 	return cfg, nil
-}
-
-func providerSettingStrings(settings map[string]any, key string) []string {
-	if len(settings) == 0 {
-		return nil
-	}
-	switch v := settings[key].(type) {
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s := strings.TrimSpace(fmt.Sprint(item)); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return nil
-		}
-		parts := strings.Split(v, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			if s := strings.TrimSpace(part); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
 }
 
 func (s *CheckoutService) railConfig(name string) *config.RailMerchantAccountConfig {

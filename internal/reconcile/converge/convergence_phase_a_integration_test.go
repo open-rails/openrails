@@ -23,7 +23,14 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(ctx, dbtest.TestMerchantID)
-	runID := uuid.New() // first_seen_run/last_seen_run are plain uuids (no FK)
+	// first_seen_run/last_seen_run FK into reconciliation_runs (#709): seed a run.
+	runID := uuid.New()
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := appDB.Qx(ctx).Exec(ctx, `
+			INSERT INTO openrails.reconciliation_runs (id, merchant_id, mode, rails, status)
+			VALUES ($1, $2, 'advisory', '{self}', 'completed')`, runID, merchantID)
+		return err
+	}))
 	suffix := uuid.NewString()[:8]
 
 	cases := []struct{ findingType, status, provider string }{
@@ -71,7 +78,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 			q := gen.New(appDB.Qx(ctx))
 			_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 				MerchantID: merchantID, FindingType: bad,
-				SubjectKey: bad + ":" + suffix, Severity: "high", Status: "reconcile_required", RunID: runID,
+				SubjectKey: bad + ":" + suffix, Severity: "high", Status: "reconcile_required", RunID: &runID,
 			})
 			require.Error(t, err, "finding_type %q must be rejected by the CHECK (slugs only)", bad)
 			return nil
@@ -84,7 +91,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 			q := gen.New(appDB.Qx(ctx))
 			_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 				MerchantID: merchantID, FindingType: "derive.grant.excess",
-				SubjectKey: "bad-status:" + bad + ":" + suffix, Severity: "high", Status: bad, RunID: runID,
+				SubjectKey: "bad-status:" + bad + ":" + suffix, Severity: "high", Status: bad, RunID: &runID,
 			})
 			require.Error(t, err, "legacy status %q must be rejected by the CHECK", bad)
 			return nil

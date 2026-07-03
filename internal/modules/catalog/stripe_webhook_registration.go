@@ -113,11 +113,20 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	if secretKey == "" {
 		if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
 			secretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
-			haveSecret = haveSecret || strings.TrimSpace(stripeProc.Stripe.WebhookSecret) != ""
+			haveSecret = haveSecret || strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecret) != ""
 		}
 	}
 	if secretKey == "" {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
+	}
+
+	// MODE 1 (#723): a Stripe-minted signing secret would seed only process
+	// memory and be lost on reboot — the endpoint would then be found WITHOUT a
+	// known secret (webhooks unverifiable). Any registration path that needs a
+	// mint is refused; a manifest-declared webhook_signing_secret keeps working.
+	manifestMode := p.Config != nil && p.Config.IsManifestMerchantSource()
+	if manifestMode && !haveSecret {
+		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_source=manifest refuses managed stripe webhook registration without a declared webhook_signing_secret (a Stripe-minted secret cannot survive reboot, #723): declare secrets.webhook_signing_secret in the manifest and register the endpoint %s out-of-band, or run merchant_source=api", webhookURL)
 	}
 
 	rails := config.RailMerchantAccountSet{"stripe": &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
@@ -126,7 +135,11 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		URL:           webhookURL,
 		EnabledEvents: p.EnabledEvents,
 		HaveSecret:    haveSecret,
+		ForbidCreate:  manifestMode,
 	})
+	if errors.Is(err, ErrWebhookCreateForbidden) {
+		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_source=manifest refuses to (re)create the managed stripe webhook endpoint %s (the Stripe-minted signing secret cannot survive reboot, #723): register it out-of-band and declare its webhook_signing_secret in the manifest, or run merchant_source=api: %w", webhookURL, err)
+	}
 	if err != nil {
 		return ManagedStripeWebhookResult{}, err
 	}
@@ -144,7 +157,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		if stripeProc.Stripe == nil {
 			stripeProc.Stripe = &config.StripeRailConfig{}
 		}
-		stripeProc.Stripe.WebhookSecret = res.Secret
+		stripeProc.Stripe.WebhookSigningSecret = res.Secret
 		return out, nil
 	}
 	return ManagedStripeWebhookResult{}, fmt.Errorf("stripe webhook secret destination not configured")

@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -25,7 +24,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 				CreateReq: billingservice.CreateProductRequest{
 					Key:         "new",
 					DisplayName: "New",
-					Status:      models.CatalogStatusActive,
+					Archived:    false,
 				},
 				Prices: []PricePlan{{
 					Label:  "new $9.99/month",
@@ -33,7 +32,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 					CreateReq: billingservice.CreatePriceRequest{
 						UnitAmount: 999,
 						Currency:   "usd",
-						Status:     models.CatalogStatusActive,
+						Archived:   false,
 					},
 				}},
 			},

@@ -51,7 +51,7 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
 
-	pool, err := newTunedPGXPool(context.Background(), url)
+	pool, err := newTunedPGXPool(context.Background(), url, cfg.SQLTrace)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
 // installs the optional query tracer, and verifies connectivity with retry.
-func newTunedPGXPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
+func newTunedPGXPool(ctx context.Context, url string, sqlTrace bool) (*pgxpool.Pool, error) {
 	pcfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
@@ -68,8 +68,8 @@ func newTunedPGXPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	pcfg.MaxConns = dbMaxOpenConns
 	pcfg.MaxConnLifetime = dbConnMaxLifetime
 	pcfg.MaxConnIdleTime = dbConnMaxIdleTime
-	if tracer := newSQLTracerFromEnv(); tracer != nil {
-		pcfg.ConnConfig.Tracer = tracer
+	if sqlTrace {
+		pcfg.ConnConfig.Tracer = newSQLTracer()
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)

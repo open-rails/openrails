@@ -76,14 +76,14 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: productID, Key: "scan_product_" + uuid.New().String(), DisplayName: "Scan Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
+		Description: &description, Archived: false, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	billingHours := int32(720)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Archived:   false, AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
@@ -155,14 +155,14 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: productID, Key: "nopm_product_" + uuid.New().String(), DisplayName: "No PM Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
-		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
+		Description: &description, Archived: false, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	billingHours := int32(720) // 30-day cycle: monthly dunning tier
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Status:     string(models.CatalogStatusActive), AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
+		Archived:   false, AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

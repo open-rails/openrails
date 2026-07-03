@@ -144,9 +144,10 @@ func (s *memStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding
 	now := time.Now()
 	rec, ok := s.findings[key]
 	if !ok {
+		rid := runID
 		rec = &FindingRecord{
 			ID: uuid.New(), Provider: f.Provider, Type: f.Type, SubjectKey: f.SubjectKey,
-			FirstSeenRun: runID, CreatedAt: now,
+			FirstSeenRun: &rid, CreatedAt: now,
 		}
 		s.findings[key] = rec
 		s.byID[rec.ID] = rec
@@ -163,7 +164,8 @@ func (s *memStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding
 		rec.Resolution = ""
 		rec.ResolutionEvid = nil
 	}
-	rec.LastSeenRun = runID
+	lsr := runID
+	rec.LastSeenRun = &lsr
 	rec.LastSeenAt = now
 	rec.UpdatedAt = now
 	return *rec, nil
@@ -197,7 +199,7 @@ func (s *memStore) AutoResolveVanished(ctx context.Context, provider Provider, r
 		if rec.Status != FindingStatusReconcileRequired && rec.Status != FindingStatusAdminRequired {
 			continue
 		}
-		if rec.LastSeenRun == runID {
+		if rec.LastSeenRun != nil && *rec.LastSeenRun == runID {
 			continue
 		}
 		rec.Status = FindingStatusFixed
@@ -1103,8 +1105,8 @@ func TestIdentityStableAcrossRuns(t *testing.T) {
 
 	assert.Equal(t, 1, store.count(), "re-runs must update the standing finding, not duplicate it")
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, res1.RunID, rec.FirstSeenRun)
-	assert.Equal(t, res2.RunID, rec.LastSeenRun)
+	assert.Equal(t, &res1.RunID, rec.FirstSeenRun)
+	assert.Equal(t, &res2.RunID, rec.LastSeenRun)
 }
 
 func TestAutoResolveOnDisappearance(t *testing.T) {
@@ -1336,7 +1338,6 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		ProductID: uuid.New(),
 		Amount:    999,
 		Currency:  "usd",
-		Status:    "active",
 		Rails: map[string]map[string]string{
 			// #630: the provider-link key is the gateway rail (nmi), not the
 			// provider-account name (mobius).

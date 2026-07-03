@@ -548,10 +548,10 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	stripeSecretKey := ""
 	if stripeProc := r.State.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
 		stripeSecretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
-		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSecret); s != "" {
+		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecret); s != "" {
 			secrets = append(secrets, s)
 		}
-		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSecretThin); s != "" {
+		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecretThin); s != "" {
 			secrets = append(secrets, s)
 		}
 	}

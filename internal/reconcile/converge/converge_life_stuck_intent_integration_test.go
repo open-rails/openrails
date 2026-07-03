@@ -42,7 +42,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 			t.Helper()
 			_, err := appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.rail_intents
-				   (id, provider, intent_type, idempotency_key,
+				   (id, rail, intent_type, idempotency_key,
 				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, merchant_id)
 				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, 2, now(), 'system', $4, now() - make_interval(mins => $5), $6)`,
 				id, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),

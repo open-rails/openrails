@@ -24,6 +24,7 @@ type CollectionAdapter interface {
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter
+	resolver CollectionAdapterResolver
 }
 
 func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *ScopedCharger {
@@ -36,6 +37,15 @@ func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *S
 		cp[rail] = adapter
 	}
 	return &ScopedCharger{db: database, adapters: cp}
+}
+
+// SetAdapterResolver arms per-merchant store resolution (#725). The resolver
+// gets first shot at every charge; the boot adapters map stays the fallback
+// for merchants with no declared account on the rail.
+func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
+	if c != nil {
+		c.resolver = r
+	}
 }
 
 func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest) (ChargeResult, error) {
@@ -80,6 +90,17 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	}
 
 	adapter := c.adapters[rail]
+	// #725: store-armed per-merchant credentials win over the boot-plane map;
+	// a declared account that cannot arm fails the charge closed.
+	if c.resolver != nil {
+		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method)
+		if rerr != nil {
+			return ChargeResult{}, fmt.Errorf("resolve merchant %s collection credentials: %w", rail, rerr)
+		}
+		if ok {
+			adapter = stored
+		}
+	}
 	if adapter == nil {
 		return ChargeResult{}, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)
 	}

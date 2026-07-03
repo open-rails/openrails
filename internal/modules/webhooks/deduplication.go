@@ -86,7 +86,6 @@ type dedupMarkCtxKey struct{}
 // dedupMark identifies the Postgres truth row for an in-flight webhook.
 type dedupMark struct {
 	merchantID merchant.ID
-	rail       models.Rail
 	op         string
 	eventID    string
 }
@@ -94,7 +93,6 @@ type dedupMark struct {
 func (m *dedupMark) params() gen.MarkWebhookEventCompletedParams {
 	return gen.MarkWebhookEventCompletedParams{
 		MerchantID: m.merchantID.UUID(),
-		Rail:       string(m.rail),
 		Op:         m.op,
 		EventID:    m.eventID,
 	}
@@ -102,7 +100,7 @@ func (m *dedupMark) params() gen.MarkWebhookEventCompletedParams {
 
 // newDedupMark resolves the truth-row identity, or nil when Postgres truth is
 // unavailable (no DB wired, or no merchant on ctx — then Redis is the only net).
-func (s *DeduplicationService) newDedupMark(ctx context.Context, rail models.Rail, op, eventID string) *dedupMark {
+func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID string) *dedupMark {
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -112,7 +110,7 @@ func (s *DeduplicationService) newDedupMark(ctx context.Context, rail models.Rai
 			Warn("no merchant on context: webhook dedup has no Postgres truth row for this event (Redis-only)")
 		return nil
 	}
-	return &dedupMark{merchantID: mid, rail: rail, op: op, eventID: eventID}
+	return &dedupMark{merchantID: mid, op: op, eventID: eventID}
 }
 
 // markCompleted reports whether the truth row exists (RLS-scoped via MerchantTx).
@@ -216,7 +214,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	var shouldRecordOutcome bool
 	var mark *dedupMark
 	if trimmedEventID != "" {
-		mark = s.newDedupMark(ctx, rail, op, trimmedEventID)
+		mark = s.newDedupMark(ctx, op, trimmedEventID)
 		if s == nil || s.idem == nil {
 			if mark == nil {
 				log.WithContext(ctx).WithFields(log.Fields{

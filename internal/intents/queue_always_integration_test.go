@@ -50,7 +50,7 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 		subID, priceID, productID, psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), custID, tenantID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
-			WHERE provider_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, subID)
+			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", custID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)

@@ -184,9 +184,7 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	suite.Rails[nmiE2EProvider] = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
-		Name:        nmiE2EProvider,
 		SecurityKey: securityKey,
-		TestMode:    true,
 	}, true)
 	require.NoError(t, err)
 	// Real NMI sandbox endpoints (defaults) — NOT a mock.

@@ -22,7 +22,7 @@ var QueryText = map[string]string{
 	"ListPaymentMethodsByCustomer": listPaymentMethodsByCustomer, // idx_payment_methods_customer
 
 	// Admission / ledger / credit-lot path (read-hot: service admit, spend).
-	"GetAdmissionCapacity":    getAdmissionCapacity,    // uq_ledger_accounts_customer + uq_money_settings_payer
+	"GetAdmissionCapacity":    getAdmissionCapacity,    // uq_ledger_accounts_customer + money_settings_pkey
 	"ListGrantsByCustomer":    listGrantsByCustomer,    // idx_grants_customer
 	"ListSpendableCreditLots": listSpendableCreditLots, // idx_grants_customer_kind + idx_grants_supersedes
 

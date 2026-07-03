@@ -139,7 +139,7 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 	// structured recommendation (ack_resume) lets the findings queue approve
 	// mechanically — resolution alone re-arms the breaker.
 	evidence, merr := json.Marshal(map[string]any{
-		"provider":             intent.Provider,
+		"provider":             intent.Rail,
 		"intent_type":          intent.IntentType,
 		"executed_count":       executed,
 		"budget":               budget,
@@ -162,7 +162,7 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 		Status:            "requires_review",
 		RecommendedAction: &action,
 		Evidence:          evidence,
-		RunID:             uuid.Nil, // raised by the intent executor, not a reconcile run
+		RunID:             nil, // raised by the intent executor, not a reconcile run
 	}); uerr != nil {
 		return false, "", fmt.Errorf("volume breaker: upsert held_bulk finding: %w", uerr)
 	}

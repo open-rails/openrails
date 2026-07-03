@@ -24,7 +24,7 @@ func manualRebillIntent(t *testing.T, payload ManualRebillPayload) gen.Openrails
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     TypeManualRebill,
-		Provider:       "mobius",
+		Rail:           "mobius",
 		Payload:        raw,
 		IdempotencyKey: "k",
 		Origin:         string(OriginSystem),

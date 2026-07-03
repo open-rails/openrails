@@ -54,7 +54,7 @@ func (q *Queries) CountRailMerchantAccountsForRailEnvironment(ctx context.Contex
 }
 
 const getActiveRailMerchantAccountForNewWork = `-- name: GetActiveRailMerchantAccountForNewWork :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.rail_merchant_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.rail_merchant_accounts
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -87,14 +87,13 @@ func (q *Queries) GetActiveRailMerchantAccountForNewWork(ctx context.Context, ar
 		&i.ReplacedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Owner,
 		&i.Archived,
 	)
 	return i, err
 }
 
 const getRailMerchantAccount = `-- name: GetRailMerchantAccount :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.rail_merchant_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.rail_merchant_accounts
 WHERE id = $1
 `
 
@@ -114,14 +113,13 @@ func (q *Queries) GetRailMerchantAccount(ctx context.Context, id uuid.UUID) (Ope
 		&i.ReplacedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Owner,
 		&i.Archived,
 	)
 	return i, err
 }
 
 const getRailMerchantAccountByIdentity = `-- name: GetRailMerchantAccountByIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.rail_merchant_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.rail_merchant_accounts
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -157,14 +155,13 @@ func (q *Queries) GetRailMerchantAccountByIdentity(ctx context.Context, arg GetR
 		&i.ReplacedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Owner,
 		&i.Archived,
 	)
 	return i, err
 }
 
 const getRailMerchantAccountByRailIdentity = `-- name: GetRailMerchantAccountByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.rail_merchant_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.rail_merchant_accounts
 WHERE rail = lower($1::text)
   AND environment = COALESCE($2::text, 'live')
   AND account_id = $3::text
@@ -193,14 +190,13 @@ func (q *Queries) GetRailMerchantAccountByRailIdentity(ctx context.Context, arg 
 		&i.ReplacedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Owner,
 		&i.Archived,
 	)
 	return i, err
 }
 
 const listRailMerchantAccountsForMerchant = `-- name: ListRailMerchantAccountsForMerchant :many
-SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived FROM openrails.rail_merchant_accounts
+SELECT id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.rail_merchant_accounts
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = lower($2::text))
 ORDER BY rail, environment, archived, created_at, id
@@ -233,7 +229,6 @@ func (q *Queries) ListRailMerchantAccountsForMerchant(ctx context.Context, arg L
 			&i.ReplacedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Owner,
 			&i.Archived,
 		); err != nil {
 			return nil, err
@@ -272,7 +267,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     last_verified_at = EXCLUDED.last_verified_at,
     updated_at = now()
 WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived
+RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived
 `
 
 type UpsertRailMerchantAccountParams struct {
@@ -312,7 +307,6 @@ func (q *Queries) UpsertRailMerchantAccount(ctx context.Context, arg UpsertRailM
 		&i.ReplacedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Owner,
 		&i.Archived,
 	)
 	return i, err

@@ -5,14 +5,14 @@
 INSERT INTO openrails.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    money_transaction_id, metadata, occurred_at, created_at
+    ledger_transfer_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
 
 -- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    money_transaction_id, metadata, occurred_at, created_at
+    ledger_transfer_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (merchant_id, customer_id, currency, event_type, source, source_id) DO NOTHING;
 

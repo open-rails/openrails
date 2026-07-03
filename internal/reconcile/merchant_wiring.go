@@ -204,7 +204,6 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, o
 		// account posture instead of a fabricated empty.
 		webhookSecret, _, _ := b.secret(ctx, mid, scope, "webhook_signing_secret")
 		client, err := nmi.NewClient(scope.AccountID, &config.NMIProviderSettings{
-			Name:          scope.AccountID,
 			SecurityKey:   securityKey,
 			WebhookSecret: webhookSecret,
 		}, b.testMode())
@@ -346,17 +345,31 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 	}
 	if scope, ok := b.resolveScope(ctx, mid, ProviderSolana); ok {
 		rpc := b.SolanaRPC
-		if rpc == nil {
+		// #711: the account settings block carries the merchant's RPC knobs
+		// (rpc_provider / rpc_api_key); store settings win over the boot client (#699).
+		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
+		if err != nil {
+			b.warnScopeError(ctx, mid, ProviderSolana, err)
+			return
+		}
+		if rpc == nil || settings.RPCProvider != "" || settings.RPCAPIKey != "" {
 			network := "mainnet"
 			if b.testMode() {
 				network = "devnet"
 			}
 			rpc = solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-				Network:  network,
-				ReadOnly: true,
+				RPCProvider: settings.RPCProvider,
+				RPCAPIKey:   settings.RPCAPIKey,
+				Network:     network,
+				ReadOnly:    true,
 			})
 		}
-		out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB)), key: scope.AccountID}
+		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
+		// #714 discovery lanes: the declared account_id IS the merchant wallet.
+		fetcher.MerchantWallet = scope.AccountID
+		fetcher.Plans = SolanaPlanSourceFromDB(b.DB)
+		fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
+		out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
 		return
 	}
 	// Boot-config fallback.
@@ -372,5 +385,11 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 	if proc == nil {
 		return
 	}
-	out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: NewSolanaFetcher(b.SolanaRPC, SolanaSubscriptionSourceFromDB(b.DB)), key: key}
+	fetcher := NewSolanaFetcher(b.SolanaRPC, SolanaSubscriptionSourceFromDB(b.DB))
+	// Boot-config fallback declares no account_id, so the wallet scan stays
+	// disarmed unless an operator pull passes one; enumeration + resolution
+	// still arm from the DB.
+	fetcher.Plans = SolanaPlanSourceFromDB(b.DB)
+	fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
+	out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: key}
 }

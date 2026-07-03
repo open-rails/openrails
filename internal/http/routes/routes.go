@@ -14,6 +14,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -222,7 +223,6 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	admissions.Handle(http.MethodPost, "/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
 
 	usage := group.Group("/usage")
-	usage.Handle(http.MethodPost, "/metered", h(httphandlers.ServiceMeteredUsage), usageReadMW...)
 	usage.Handle(http.MethodPost, "/rollup", h(httphandlers.ServiceUsageRollup), usageReadMW...)
 	usage.Handle(http.MethodPost, "/resource-revenue", h(httphandlers.ServiceResourceRevenue), usageReadMW...)
 
@@ -244,7 +244,7 @@ func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	registerCatalogActionRoutes(rr, opts, dbMW...)
+	registerCatalogActionRoutes(rr, rt, opts, dbMW...)
 }
 
 func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Options) {
@@ -252,7 +252,32 @@ func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	registerPaymentProviderActionRoutes(rr, opts, dbMW...)
+	registerPaymentProviderActionRoutes(rr, rt, opts, dbMW...)
+}
+
+// manifestModeWriteGuardMW is the ONE mode-1 mutation choke point (#723): in
+// merchant_source=manifest every catalog/provider-config mutation route —
+// standalone and embedded mount alike — answers 405 with a machine-readable
+// code instead of executing. That includes plan-only POST /catalog/publish
+// (the plan is computed at boot from the YAML; use the CLI dry-run instead) —
+// the middleware deliberately does not parse bodies to carve exceptions.
+// Reads (GET) are not guarded; routes stay MOUNTED so callers get this pointed
+// error, never a bare 404.
+func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if rt != nil && rt.Config.IsManifestMerchantSource() {
+				r.APIError(&api.APIError{
+					HTTPStatus: http.StatusMethodNotAllowed,
+					Type:       api.ErrorTypeInvalidRequest,
+					Code:       "manifest_driven",
+					Message:    "merchant_source=manifest: catalog and payment-provider configuration are manifest-driven; edit the YAML/secret files and reboot (#723)",
+				})
+				return
+			}
+			next(r)
+		}
+	}
 }
 
 func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
@@ -496,11 +521,13 @@ func bearerToken(header string) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-func registerCatalogActionRoutes(catalog router.Router, opts Options, dbMW ...router.Middleware) {
+func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
-	writeMW := append([]router.Middleware{write}, dbMW...)
+	// Mode-1 guard runs FIRST: a manifest-driven deployment answers 405 before
+	// auth work (#723).
+	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
 
 	products := catalog.Group("/products")
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)
@@ -524,11 +551,11 @@ func registerCatalogActionRoutes(catalog router.Router, opts Options, dbMW ...ro
 	catalog.Handle(http.MethodPost, "/publish", h(httphandlers.MerchantPublishCatalog), writeMW...)
 }
 
-func registerPaymentProviderActionRoutes(providers router.Router, opts Options, dbMW ...router.Middleware) {
+func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersRead)
 	write := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
-	writeMW := append([]router.Middleware{write}, dbMW...)
+	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
 
 	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)

@@ -46,7 +46,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 			"premium": nil,
 			"extra":   nil,
 		},
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})
@@ -54,7 +54,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	suite.InsertPrice(ctx, &models.Price{
 		ID:                  priceID,
 		ProductID:           productID,
-		Status:              models.CatalogStatusActive,
+		Archived:            false,
 		Amount:              9_990_000,
 		Currency:            "usd",
 		AccessDurationHours: &billingDays, AutoRenew: true,
@@ -219,7 +219,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		EntitlementsSpec: map[string]*int{
 			"premium": nil,
 		},
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})
@@ -227,7 +227,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	suite.InsertPrice(ctx, &models.Price{
 		ID:                  priceID,
 		ProductID:           productID,
-		Status:              models.CatalogStatusActive,
+		Archived:            false,
 		Amount:              9_990_000,
 		Currency:            "usd",
 		AccessDurationHours: &billingDays, AutoRenew: true,

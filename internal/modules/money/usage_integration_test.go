@@ -95,7 +95,7 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 		Amount:     0, Source: "req", SourceID: "z1",
 	})
 	require.NoError(t, err)
-	require.Nil(t, ev.MoneyTransactionID, "zero-cost event has no debit txn")
+	require.Nil(t, ev.LedgerTransferID, "zero-cost event has no debit txn")
 
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.NoError(t, err)

@@ -39,7 +39,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 		Key:         "provider_attempt_" + uuid.New().String(),
 		DisplayName: "Provider Attempt Test",
 		Description: &description,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -51,7 +51,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 		ProductID:           productID,
 		Amount:              2300,
 		Currency:            "USD",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingCycleDays,
 		AutoRenew:           true,
 		CreatedAt:           now,

@@ -118,9 +118,9 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Provider))
+	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Rail))
 	if err != nil {
-		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Provider, err))
+		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
 	if client.ReadOnly {
 		return intents.Parked("nmi client is read-only (mode=readonly)")
@@ -181,9 +181,9 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Provider))
+	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Rail))
 	if err != nil {
-		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 	txnID, found, err := client.FindSuccessfulSaleByOrderID(orderID)

@@ -72,7 +72,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
 		CreditsSpec: creditsSpecJSON,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -81,7 +81,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	price := &models.Price{
 		ID:                  priceID,
 		ProductID:           productID,
-		Status:              models.CatalogStatusActive,
+		Archived:            false,
 		Amount:              999,
 		Currency:            "usd",
 		AccessDurationHours: &billingDays,
@@ -95,7 +95,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		Amount:              999,
 		Currency:            "usd",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays32,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -256,14 +256,14 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		DisplayName: "Test Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
-		Status: string(models.CatalogStatusActive), AccessDurationHours: &billingHours32, AutoRenew: true,
+		Archived: false, AccessDurationHours: &billingHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.rail_intents
-		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
+		  (rail, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
 		VALUES ('nmi', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "nmi", orderRef, 0),

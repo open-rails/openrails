@@ -15,7 +15,7 @@ INSERT INTO openrails.invoices (
     period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, subtotal_amount, total_amount, amount_paid, amount_due,
     line_items, money_movements, status, collection_method,
-    issued_at, due_at, paid_at, voided_at, uncollectible_at, sent_at,
+    issued_at, due_at, paid_at, voided_at, uncollectible_at,
     finalized_at, external_invoice_id, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
@@ -25,22 +25,21 @@ INSERT INTO openrails.invoices (
     COALESCE(sqlc.arg(line_items), '[]'::jsonb), COALESCE(sqlc.arg(money_movements), '{}'::jsonb),
     sqlc.arg(status), sqlc.arg(collection_method),
     sqlc.narg(issued_at), sqlc.narg(due_at), sqlc.narg(paid_at), sqlc.narg(voided_at),
-    sqlc.narg(uncollectible_at), sqlc.narg(sent_at), sqlc.narg(finalized_at),
+    sqlc.narg(uncollectible_at), sqlc.narg(finalized_at),
     sqlc.narg(external_invoice_id), sqlc.arg(created_at), sqlc.arg(updated_at)
 );
 
--- name: InsertInvoiceItem :exec
+-- name: InsertPendingInvoiceItem :exec
+-- #726: invoice_items is the pending-accrual workspace only; rows are born
+-- pending and only ever leave via AttachPendingInvoiceItemsToInvoice. The
+-- statement itemization lives in invoices.line_items.
 INSERT INTO openrails.invoice_items (
-    id, merchant_id, customer_id, currency, invoice_id,
-    source_type, source_id, event_type,
-    period_from, period_to, invoice_at,
-    quantity, unit_amount, amount, status, metadata,
+    id, merchant_id, customer_id, currency,
+    source_type, source_id, invoice_at, amount, metadata,
     created_at, updated_at
 ) VALUES (
-    $1, $2, $3, sqlc.arg(currency), sqlc.narg(invoice_id),
-    sqlc.arg(source_type), sqlc.arg(source_id), sqlc.narg(event_type),
-    sqlc.arg(period_from), sqlc.arg(period_to), sqlc.arg(invoice_at),
-    sqlc.arg(quantity), sqlc.arg(unit_amount), sqlc.arg(amount), sqlc.arg(status),
+    $1, $2, $3, sqlc.arg(currency),
+    sqlc.arg(source_type), sqlc.arg(source_id), sqlc.arg(invoice_at), sqlc.arg(amount),
     COALESCE(sqlc.arg(metadata), '{}'::jsonb),
     sqlc.arg(created_at), sqlc.arg(updated_at)
 )
@@ -138,11 +137,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 
 -- name: InsertInvoicePayment :exec
 INSERT INTO openrails.invoice_payments (
-    id, merchant_id, customer_id, invoice_id, money_transaction_id,
+    id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
     failure_code, failure_message, attempted_at, settled_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(money_transaction_id),
+    $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(ledger_transfer_id),
     sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.narg(rail),
     sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_message),
     sqlc.arg(attempted_at), sqlc.narg(settled_at), sqlc.arg(created_at), sqlc.arg(updated_at)

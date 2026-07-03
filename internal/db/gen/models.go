@@ -13,48 +13,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type OpenrailsPurchaseStatus string
+type OpenrailsPaymentStatus string
 
 const (
-	OpenrailsPurchaseStatusPending   OpenrailsPurchaseStatus = "pending"
-	OpenrailsPurchaseStatusCompleted OpenrailsPurchaseStatus = "completed"
-	OpenrailsPurchaseStatusFailed    OpenrailsPurchaseStatus = "failed"
-	OpenrailsPurchaseStatusRefunded  OpenrailsPurchaseStatus = "refunded"
+	OpenrailsPaymentStatusPending   OpenrailsPaymentStatus = "pending"
+	OpenrailsPaymentStatusCompleted OpenrailsPaymentStatus = "completed"
+	OpenrailsPaymentStatusFailed    OpenrailsPaymentStatus = "failed"
+	OpenrailsPaymentStatusRefunded  OpenrailsPaymentStatus = "refunded"
 )
 
-func (e *OpenrailsPurchaseStatus) Scan(src interface{}) error {
+func (e *OpenrailsPaymentStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = OpenrailsPurchaseStatus(s)
+		*e = OpenrailsPaymentStatus(s)
 	case string:
-		*e = OpenrailsPurchaseStatus(s)
+		*e = OpenrailsPaymentStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for OpenrailsPurchaseStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for OpenrailsPaymentStatus: %T", src)
 	}
 	return nil
 }
 
-type NullOpenrailsPurchaseStatus struct {
-	OpenrailsPurchaseStatus OpenrailsPurchaseStatus
-	Valid                   bool // Valid is true if OpenrailsPurchaseStatus is not NULL
+type NullOpenrailsPaymentStatus struct {
+	OpenrailsPaymentStatus OpenrailsPaymentStatus
+	Valid                  bool // Valid is true if OpenrailsPaymentStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullOpenrailsPurchaseStatus) Scan(value interface{}) error {
+func (ns *NullOpenrailsPaymentStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.OpenrailsPurchaseStatus, ns.Valid = "", false
+		ns.OpenrailsPaymentStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.OpenrailsPurchaseStatus.Scan(value)
+	return ns.OpenrailsPaymentStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullOpenrailsPurchaseStatus) Value() (driver.Value, error) {
+func (ns NullOpenrailsPaymentStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.OpenrailsPurchaseStatus), nil
+	return string(ns.OpenrailsPaymentStatus), nil
 }
 
 type OpenrailsSubscriptionStatus string
@@ -112,33 +112,11 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
-type OpenrailsBootstrapState struct {
-	Singleton bool
-	AppliedAt time.Time
-}
-
 type OpenrailsCatalogCreditBalance struct {
 	MerchantID   uuid.UUID
 	Key          string
 	Unit         string
 	ExpiresHours *int32
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-// #639/#640 variable prepaid credit-purchase sidecars using the shared charge-model JSON.
-type OpenrailsCatalogCreditPurchase struct {
-	ProductID    uuid.UUID
-	MerchantID   uuid.UUID
-	CreditType   string
-	Unit         string
-	Currency     string
-	ExpiresHours *int32
-	Providers    []string
-	InputMin     int64
-	InputMax     int64
-	Round        *string
-	Price        []byte
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -150,7 +128,7 @@ type OpenrailsCatalogCreditPurchasePrice struct {
 	Ordinal    int32
 	CreditKey  string
 	Currency   string
-	Providers  []string
+	Rails      []string
 	InputMin   int64
 	InputMax   int64
 	Round      *string
@@ -162,7 +140,7 @@ type OpenrailsCatalogCreditPurchasePrice struct {
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
-	Provider              string
+	Rail                  string
 	Kind                  string
 	OpenrailsResourceType string
 	OpenrailsResourceID   *string
@@ -194,20 +172,7 @@ type OpenrailsCatalogMeter struct {
 	GroupBy []byte
 }
 
-// #599 optional rating sidecar for OpenRails-native metered prices. cost = aggregate * rate_micros / (per_units * per_seconds for gauges), rounded once.
-type OpenrailsCatalogPriceMetered struct {
-	PriceID    uuid.UUID
-	MerchantID uuid.UUID
-	MeterKey   string
-	RateMicros int64
-	PerUnits   int64
-	// Gauge denominator in seconds; NULL for counter meters.
-	PerSeconds *int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// #638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON.
+// #638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON. The ONLY metered-pricing engine (#707): legacy manifest metered: price declarations are translated into rate-card rows at push time (catalog_price_metered is gone).
 type OpenrailsCatalogRateCard struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -249,7 +214,6 @@ type OpenrailsCheckoutSession struct {
 	RailFields     []byte
 	RailState      []byte
 	Metadata       []byte
-	IdempotencyKey *string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	MerchantID     uuid.UUID
@@ -258,7 +222,7 @@ type OpenrailsCheckoutSession struct {
 	RailMerchantAccountID *uuid.UUID
 }
 
-// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
+// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
 type OpenrailsCustomCreditType struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -280,14 +244,6 @@ type OpenrailsCustomer struct {
 	Subject    *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
-}
-
-// #591 customer permission-group anchor. The id is the AuthKit customer permission-group id, stored as opaque text with no FK into AuthKit.
-type OpenrailsCustomerAnchor struct {
-	// Opaque AuthKit customer permission-group id. Bills by group identity, never by user_id.
-	PermissionGroupID string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
 }
 
 // #643 per-customer per-currency minimum-spend commitment; trues-up at periodic invoice close.
@@ -317,17 +273,6 @@ type OpenrailsEntitlement struct {
 	// OpenRails payable tenant subject for this entitlement window.
 	CustomerID uuid.UUID
 	GrantID    *uuid.UUID
-}
-
-// Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.
-type OpenrailsEntitlementFeature struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	LookupKey  string
-	Name       string
-	Metadata   []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
 }
 
 // #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
@@ -386,7 +331,8 @@ type OpenrailsInvoice struct {
 	TotalAmount    int64
 	AmountPaid     int64
 	// Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.
-	AmountDue         int64
+	AmountDue int64
+	// Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups plus adjustment lines (e.g. minimum_spend_trueup). The only reader-facing line-item representation.
 	LineItems         []byte
 	MoneyMovements    []byte
 	Status            string
@@ -396,14 +342,13 @@ type OpenrailsInvoice struct {
 	PaidAt            *time.Time
 	VoidedAt          *time.Time
 	UncollectibleAt   *time.Time
-	SentAt            *time.Time
 	FinalizedAt       *time.Time
 	ExternalInvoiceID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
 
-// Pending and invoiced billable items. Arrears usage creates pending items; invoice creation attaches them to a draft/open invoice.
+// Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
 type OpenrailsInvoiceItem struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -412,12 +357,7 @@ type OpenrailsInvoiceItem struct {
 	InvoiceID  *uuid.UUID
 	SourceType string
 	SourceID   string
-	EventType  *string
-	PeriodFrom time.Time
-	PeriodTo   time.Time
 	InvoiceAt  time.Time
-	Quantity   int64
-	UnitAmount int64
 	Amount     int64
 	Status     string
 	Metadata   []byte
@@ -427,22 +367,22 @@ type OpenrailsInvoiceItem struct {
 
 // Payment attempts and settled payments allocated to a specific invoice.
 type OpenrailsInvoicePayment struct {
-	ID                 uuid.UUID
-	MerchantID         uuid.UUID
-	CustomerID         uuid.UUID
-	InvoiceID          uuid.UUID
-	MoneyTransactionID *uuid.UUID
-	Currency           string
-	Amount             int64
-	Status             string
-	Rail               *string
-	RailPaymentID      *string
-	FailureCode        *string
-	FailureMessage     *string
-	AttemptedAt        time.Time
-	SettledAt          *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	InvoiceID        uuid.UUID
+	LedgerTransferID *uuid.UUID
+	Currency         string
+	Amount           int64
+	Status           string
+	Rail             *string
+	RailPaymentID    *string
+	FailureCode      *string
+	FailureMessage   *string
+	AttemptedAt      time.Time
+	SettledAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 	// Provider account used for this invoice payment attempt or settled provider payment.
 	RailMerchantAccountID *uuid.UUID
 }
@@ -491,8 +431,9 @@ type OpenrailsLedgerTransfer struct {
 	// Debit-account floor used by the counter trigger for debits_must_not_exceed_credits accounts. Usually 0; arrears paths pass the current credit-line allowance.
 	AllowDebitNegativeUpTo int64
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
-	Source     *string
-	SourceID   *string
+	Source   *string
+	SourceID *string
+	// Credit-lot attribution. grant_id/invoice_id/customer_id deliberately carry NO FKs (ledger purity, #709): the append-only ledger never blocks or cascades on control-plane rows.
 	GrantID    *uuid.UUID
 	CustomerID *uuid.UUID
 	InvokerID  *string
@@ -516,14 +457,6 @@ type OpenrailsMerchant struct {
 	DisplayName *string
 }
 
-// #591 merchant permission-group anchor. The id is the AuthKit merchant permission-group id, stored as opaque text with no FK into AuthKit.
-type OpenrailsMerchantAnchor struct {
-	// Opaque AuthKit merchant permission-group id. Mirrors openrails.merchants.permission_group_id without re-keying the existing merchant directory.
-	PermissionGroupID string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
 type OpenrailsMerchantConfiguration struct {
 	MerchantID uuid.UUID
@@ -532,17 +465,6 @@ type OpenrailsMerchantConfiguration struct {
 	ConfigVersion int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
-}
-
-// Append-only audit log of per-merchant credential put/rotate/delete/test events (issue #225). Merchant-owned and RLS protected.
-type OpenrailsMerchantCredentialAudit struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	Action     string
-	Actor      *string
-	Detail     *string
-	CreatedAt  time.Time
 }
 
 // Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.
@@ -560,7 +482,6 @@ type OpenrailsMerchantExport struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	Status      string
-	Location    *string
 	RowCounts   []byte
 	CreatedAt   time.Time
 	CompletedAt *time.Time
@@ -591,40 +512,23 @@ type OpenrailsMeteredRatingWatermark struct {
 	UpdatedAt     time.Time
 }
 
-// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision.
+// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.
 type OpenrailsMoneySetting struct {
-	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	BillingMode string
-	// Optional daily spend cap in the row currency internal precision; NULL = uncapped.
-	MaxSpendPerDay *int64
-	// Optional monthly spend cap in the row currency internal precision; NULL = uncapped.
-	MaxSpendPerMonth *int64
-	// Optional arrears owed ceiling in the row currency internal precision; NULL = uncapped.
-	MaxOutstandingOwedAmount *int64
 	// Optional low-balance trigger in the row currency internal precision.
 	LowBalanceThreshold      *int64
 	AutoTopupEnabled         bool
-	AutoTopupAmountCents     *int64
+	AutoTopupAmount          *int64
 	AutoTopupPaymentMethodID *uuid.UUID
 	// per-account default credit-grant expiry in HOURS; NULL = no default.
 	DefaultCreditExpiryHours *int32
-	HardStopOnBreach         bool
-	AlertThresholdPct        int32
-	// Current arrears owed amount in the row currency internal precision.
-	OutstandingOwedAmount int64
-	LastAlertAt           *time.Time
-	LastTopupAt           *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	// Legacy metadata noting that a collection method was verified; service admission consumes computed credit capacity instead of checking this flag.
-	VerifiedPaymentMethod bool
-	VerifiedAt            *time.Time
-	// Legacy account-freeze metadata; service admission does not consult this flag.
-	SuspendedAt   *time.Time
-	SuspendReason *string
-	Tier          *string
+	LastAlertAt              *time.Time
+	LastTopupAt              *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	Tier                     *string
 	// auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.
 	TierSource string
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
@@ -680,7 +584,7 @@ type OpenrailsPayment struct {
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	Status        OpenrailsPurchaseStatus
+	Status        OpenrailsPaymentStatus
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID           *uuid.UUID
 	RefundedPaymentID        *uuid.UUID
@@ -731,7 +635,7 @@ type OpenrailsPrice struct {
 	Amount     int64
 	Currency   string
 	Rails      []byte
-	Status     string
+	Archived   bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
@@ -745,10 +649,10 @@ type OpenrailsPrice struct {
 	TrialDurationHours *int32
 }
 
-// Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
+// Cached NMI test-mode probe verdicts (#348): one row per (rail, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
 type OpenrailsProbeVerdict struct {
-	Provider string
-	// sha256 hex of the provider security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.
+	Rail string
+	// sha256 hex of the rail security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.
 	KeyHash   string
 	Verdict   string
 	CheckedAt time.Time
@@ -767,23 +671,10 @@ type OpenrailsProduct struct {
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
 	TierRank   int32
-	Status     string
+	Archived   bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-}
-
-// Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.
-type OpenrailsProductEntitlementFeature struct {
-	ID                   uuid.UUID
-	MerchantID           uuid.UUID
-	ProductID            uuid.UUID
-	EntitlementFeatureID uuid.UUID
-	// entitlement grant window in HOURS; NULL = indefinite.
-	DurationHours *int32
-	Metadata      []byte
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
 }
 
 // #611 catalog bundle includes: parent product grants/owns included catalog products when materialized.
@@ -823,6 +714,7 @@ type OpenrailsProductUsageLimitBinding struct {
 	UpdatedAt     time.Time
 }
 
+// customer <-> rail customer-id mapping. Keyed per (merchant, customer, rail); rail_merchant_account_id provenance was dropped (#704) — no writer ever set it.
 type OpenrailsRailCustomerAccount struct {
 	ID         uuid.UUID
 	Rail       string
@@ -831,8 +723,6 @@ type OpenrailsRailCustomerAccount struct {
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// Provider account that produced this rail customer mirror row.
-	RailMerchantAccountID *uuid.UUID
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
@@ -840,7 +730,7 @@ type OpenrailsRailIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Rail the mutation targets (e.g. 'nmi', 'stripe').
-	Provider string
+	Rail string
 	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
 	IntentType     string
 	SubscriptionID *uuid.UUID
@@ -887,8 +777,6 @@ type OpenrailsRailMerchantAccount struct {
 	ReplacedAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	// #591 external-account owner: merchant = the merchant owns/vaults through this rail account; platform = OpenRails platform account.
-	Owner string
 	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
 	Archived bool
 }
@@ -897,9 +785,9 @@ type OpenrailsRailMerchantAccount struct {
 type OpenrailsRailMutationLog struct {
 	ID                    uuid.UUID
 	MerchantID            uuid.UUID
-	Provider              string
+	Rail                  string
 	RailMerchantAccountID *uuid.UUID
-	ProviderIntentID      *uuid.UUID
+	RailIntentID          *uuid.UUID
 	IntentType            *string
 	IdempotencyKey        *string
 	Attempt               int32
@@ -915,10 +803,10 @@ type OpenrailsRailMutationLog struct {
 type OpenrailsRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Provider   string
+	Rail       string
 	// Current provider account row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
-	RailMerchantAccountID *uuid.UUID
-	ProviderAccountKey    *uuid.UUID
+	RailMerchantAccountID  *uuid.UUID
+	RailMerchantAccountKey *uuid.UUID
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
 	// Exclusive lower bound for the next successful bounded provider event refresh window.
@@ -940,11 +828,12 @@ type OpenrailsReconciliationFinding struct {
 	Severity          string
 	Status            string
 	RecommendedAction *string
-	FirstSeenRun      uuid.UUID
-	LastSeenRun       uuid.UUID
-	LastSeenAt        time.Time
-	ResolvedAt        *time.Time
-	Resolution        *string
+	// Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).
+	FirstSeenRun *uuid.UUID
+	LastSeenRun  *uuid.UUID
+	LastSeenAt   time.Time
+	ResolvedAt   *time.Time
+	Resolution   *string
 	// Operator-entered notes attached when a finding is fixed or ignored manually.
 	OperatorNotes *string
 	CreatedAt     time.Time
@@ -955,12 +844,12 @@ type OpenrailsReconciliationFinding struct {
 	ResolvedBy *string
 }
 
-// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-provider counts and the dunning-forensics report.
+// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report.
 type OpenrailsReconciliationRun struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	Mode        string
-	Providers   []string
+	Rails       []string
 	WindowSince *time.Time
 	WindowUntil *time.Time
 	StartedAt   time.Time
@@ -1028,7 +917,7 @@ type OpenrailsSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).
+	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending subscription per (customer, tier group).
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
@@ -1037,7 +926,7 @@ type OpenrailsSubscription struct {
 	RailMerchantAccountID *uuid.UUID
 }
 
-// Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.
+// Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. Platform-owned (subjects cannot edit). OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.
 type OpenrailsTierSchedule struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1045,8 +934,6 @@ type OpenrailsTierSchedule struct {
 	CustomerID *uuid.UUID
 	// Currency whose cumulative paid amount is compared to this ladder.
 	Currency string
-	// platform (set by us; subject cannot edit/see) | subject.
-	Owner string
 	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.
 	Rungs           []byte
 	ScheduleVersion int64
@@ -1065,27 +952,24 @@ type OpenrailsUsageEvent struct {
 	// Native OpenRails currency code; amount uses this currency internal precision.
 	Currency string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
-	Resource           *string
-	EventType          string
-	Dimensions         []byte
-	Amount             int64
-	Source             string
-	SourceID           string
-	MoneyTransactionID *uuid.UUID
-	Metadata           []byte
-	OccurredAt         time.Time
-	CreatedAt          time.Time
+	Resource         *string
+	EventType        string
+	Dimensions       []byte
+	Amount           int64
+	Source           string
+	SourceID         string
+	LedgerTransferID *uuid.UUID
+	Metadata         []byte
+	OccurredAt       time.Time
+	CreatedAt        time.Time
 }
 
-// #678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); only completed marks live here.
+// #678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.
 type OpenrailsWebhookEvent struct {
 	MerchantID uuid.UUID
-	Rail       string
 	// Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.
-	Op      string
-	EventID string
-	// Always completed: pending coordination is Redis-only; a row here means effects are durably applied.
-	Status      string
+	Op          string
+	EventID     string
 	CreatedAt   time.Time
 	CompletedAt time.Time
 }

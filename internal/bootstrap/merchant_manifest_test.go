@@ -9,6 +9,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	akembedded "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,6 +125,15 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "acct_1N2YbMLkdIwHu7ix", byName[key{"stripe-sandbox", "test"}].AccountID)
 	// CCBill — one account.
 	require.Equal(t, "945280-0000", byName[key{"ccbill", "live"}].AccountID)
+
+	// #711: the example's solana settings block carries the runtime knobs and
+	// passes the strict push-time validation.
+	solanaSettings := byName[key{"solana", "live"}].Settings
+	require.NoError(t, config.ValidateSolanaAccountSettings(solanaSettings))
+	parsed, err := config.ParseSolanaAccountSettings(solanaSettings)
+	require.NoError(t, err)
+	require.Equal(t, "helius", parsed.RPCProvider)
+	require.Equal(t, 6, parsed.Tokens["USDC"].Decimals)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

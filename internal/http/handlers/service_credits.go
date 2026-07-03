@@ -210,64 +210,11 @@ type serviceUsageRollupRequest struct {
 	GroupBy    string `json:"group_by" binding:"required"`
 }
 
-type serviceMeteredUsageRequest struct {
-	CustomerID string `json:"customer_id" binding:"required"`
-	Currency   string `json:"currency"`
-	PriceID    string `json:"price_id" binding:"required"`
-	SourceID   string `json:"source_id" binding:"required"`
-	Aggregate  int64  `json:"aggregate"`
-}
-
 type serviceEndpointRevenueRequest struct {
 	Resource string `json:"resource" binding:"required"`
 	Currency string `json:"currency"`
 	From     int64  `json:"from" binding:"required"`
 	To       int64  `json:"to" binding:"required"`
-}
-
-func ServiceMeteredUsage(r *httprequest.Request) {
-	var req serviceMeteredUsageRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	tenantSubjectID, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if tenantSubjectID == nil {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
-		return
-	}
-	if !requireServiceCustomerScope(r, *tenantSubjectID) {
-		return
-	}
-	priceID, err := uuid.Parse(strings.TrimSpace(req.PriceID))
-	if err != nil || priceID == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
-		return
-	}
-	currency, ok := serviceRequiredCurrency(r, req.Currency)
-	if !ok {
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	amount, err := svc.AccrueMeteredUsage(r.Request.Context(), billingservice.MeteredUsageRequest{
-		CustomerID: *tenantSubjectID,
-		Currency:   currency,
-		PriceID:    priceID,
-		SourceID:   strings.TrimSpace(req.SourceID),
-		Aggregate:  req.Aggregate,
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	r.SuccessJSON(map[string]any{"currency": currency, "amount": amount})
 }
 
 // ServiceResourceRevenue returns per-day revenue for a resource (by usage_event

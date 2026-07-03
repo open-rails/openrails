@@ -360,21 +360,14 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 		tp := &testProducts[i]
 		tp.Product.CreatedAt = now
 		tp.Product.UpdatedAt = now
-		if tp.Product.Status == "" {
-			tp.Product.Status = models.CatalogStatusActive
-		}
-
 		// Use ON CONFLICT to make this idempotent
 		suite.upsertProduct(ctx, tp.Product,
-			"display_name = EXCLUDED.display_name, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at")
+			"display_name = EXCLUDED.display_name, archived = EXCLUDED.archived, updated_at = EXCLUDED.updated_at")
 
 		for _, price := range tp.Prices {
 			price.ProductID = tp.Product.ID
 			price.CreatedAt = now
 			price.UpdatedAt = now
-			if price.Status == "" {
-				price.Status = models.CatalogStatusActive
-			}
 
 			// Prices are immutable - use DO NOTHING to preserve existing records
 			suite.insertPriceIfAbsent(ctx, price)
@@ -391,38 +384,27 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 	_, err := suite.Pool.Exec(ctx, `
 			INSERT INTO openrails.products (
 				id, key, display_name, description, entitlements_spec, credits_spec,
-				tier_group, tier_rank, status, created_at, updated_at, merchant_id
+				tier_group, tier_rank, archived, created_at, updated_at, merchant_id
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (id) DO UPDATE SET `+onConflictSet,
 		p.ID, p.Key, p.DisplayName, p.Description,
 		suite.mustJSONB(p.EntitlementsSpec, len(p.EntitlementsSpec) == 0),
 		suite.mustJSONB(p.CreditsSpec, len(p.CreditsSpec) == 0),
-		p.TierGroup, p.TierRank, catalogStatusOrDefault(p.Status), p.CreatedAt, p.UpdatedAt,
+		p.TierGroup, p.TierRank, p.Archived, p.CreatedAt, p.UpdatedAt,
 		dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed product %s", p.Key)
-}
-
-// catalogStatusOrDefault maps a zero-value catalog status to 'active' — bun
-// omitted zero-value status columns so the DB default applied; raw inserts
-// must do it explicitly.
-func catalogStatusOrDefault(s models.CatalogStatus) string {
-	if s == "" {
-		return string(models.CatalogStatusActive)
-	}
-	return string(s)
 }
 
 // insertPriceIfAbsent inserts a price with ON CONFLICT (id) DO NOTHING.
 func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
 	suite.t.Helper()
-	status := catalogStatusOrDefault(price.Status)
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
-			id, product_id, status, amount, currency, access_duration_hours, auto_renew,
+			id, product_id, archived, amount, currency, access_duration_hours, auto_renew,
 			rails, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (id) DO NOTHING`,
-		price.ID, price.ProductID, status, price.Amount, price.Currency,
+		price.ID, price.ProductID, price.Archived, price.Amount, price.Currency,
 		price.AccessDurationHours, price.AutoRenew,
 		suite.mustJSONB(price.Rails, len(price.Rails) == 0),
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
@@ -445,7 +427,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  1,
-				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{
@@ -473,7 +454,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  2,
-				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{
@@ -502,7 +482,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  3,
-				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{

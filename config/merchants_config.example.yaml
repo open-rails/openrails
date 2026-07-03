@@ -1,19 +1,14 @@
 version: 1
 
 # Store real secrets in Hashicorp Vault and overlay them into this manifest.
-# Solana runtime rail config lives in normal OpenRails runtime config, for example:
-# rail_merchant_accounts:
-#   solana:
-#     rail: solana
-#     environment: live
-#     solana:
-#       rpc_provider: helius          # helius | public; empty defaults to helius
-#       rpc_api_key: replace-with-helius-api-key
-#       solana_pay_recurring_subscriptions: true
-#       tokens:
-#         SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
-#         USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
-# Solana provider account identity is derived from the signer public key.
+#
+# Per-account `environment: test|live` is an ASSERTION cross-checked against the
+# deployment's test_mode — NOT a behavior selector (test_mode alone drives
+# sandbox posture; a contradiction refuses to boot). Omitted = derived from
+# test_mode.
+#
+# Solana runtime knobs (#711) live in the solana account's `settings` block
+# below. Solana provider account identity is derived from the signer public key.
 
 merchants:
   local-stack:
@@ -80,13 +75,8 @@ merchants:
           environment: live
           # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
           account_id: "945280-0000"
-          # Omit allowed_cidrs to use built-in defaults; supplying it replaces the allowlist.
-          settings:
-            allowed_cidrs:
-              - 64.38.240.0/24
-              - 64.38.241.0/24
-              - 64.38.212.0/24
-              - 64.38.215.0/24
+          # Webhook source IPs are CCBill's documented provider-wide ranges,
+          # built in (#710) — there is no per-merchant allowlist.
           secrets:
             salt: replace-with-ccbill-flexform-salt
             datalink_username: replace-with-ccbill-datalink-username
@@ -116,6 +106,17 @@ merchants:
           settings:
             # Optional destination wallet; defaults to the signer public key when omitted.
             recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
+            # Solana runtime knobs (#711): declared per merchant here; when the
+            # embedded boot plane also sets them, these settings win (#699).
+            rpc_provider: helius # helius | public; empty defaults to helius
+            rpc_api_key: replace-with-helius-api-key
+            # CLIENT HINT: echoed to browsers so frontends only offer Solana Pay
+            # (transaction-request) recurring flows after the deployment validated
+            # its target wallets accept co-signed transactions. Not enforced
+            # server-side.
+            tokens:
+              SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
+              USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
           secrets:
             private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT
 

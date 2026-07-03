@@ -273,7 +273,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 // slot defers to pending_manual_link with the mode message, and the price
 // still applies locally.
 func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
-	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeLimited}}}
+	svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}}}
 	priceID := uuid.New()
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
 		Providers:  []string{"stripe", "nmi"},

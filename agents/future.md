@@ -1806,3 +1806,405 @@ Be the provider Stripe wasn't: expose the counter.
 Every in-scope table's UPDATE path is CAS-guarded (no silent lost updates under concurrent writers, proven by
 a concurrency test per class); mirrors carry NO revision-as-freshness semantics anywhere; hot money paths keep
 their existing lock discipline unchanged.
+
+# #701: Rebuild OTel/Prometheus metrics (salvage design from closed PR #65)
+
+An OpenTelemetry + Prometheus instrumentation pass (internal/observability: HTTP/DB/runtime
+metrics, ~1.6k lines) was built on PR #65 (feat/otel-prometheus-monitoring-v2) but never merged;
+it targeted pkg/embedded/gin and the pre-rewrite payments/subscriptions modules, both since
+removed/rewritten, so the branch was closed and deleted (2026-07-02) rather than rebased.
+The design (metric names, histogram buckets, DB-pool gauges, otel-collector + prometheus
+configs) is still readable via the PR: https://github.com/open-rails/openrails/pull/65
+(GitHub keeps refs/pull/65/head after branch deletion). Rebuild against the neutral net/http
+stack + current module layout when observability becomes a priority; go.mod already carries
+otelhttp as an indirect dep.
+
+---
+
+# #713: stamp SPL Memo self-recognition metadata on every Solana purchase transaction
+
+Solana Pay references (recurring/reference.go, integrations/solana/transfer.go) let us find a
+transaction we already know about (local ref → chain). They do NOT let us recognize our own
+transactions from the chain alone — the legacy import just proved why that matters: one-off
+transfers to the merchant wallet are indistinguishable from random deposits, and the fiat value
+charged is unrecoverable (2026-07-02, doujins #748 C-3: 26 rows permanently blocked).
+
+Add an SPL Memo instruction to every purchase transaction we construct or request, BOTH lanes:
+- one-off Solana Pay transfers (the transfer builder)
+- recurring subscription pulls (crank/delegated pull txs in modules/solana/recurring)
+
+Format (trimmed 2026-07-02, Paul): `openrails:1:<local-id>` — version + the ONE field the chain
+cannot derive (local-id = OUR checkout/payment UUID; random, not the customer's id, no account
+linkage). Everything else considered and DROPPED as derivable: kind (oneoff vs rebill IS the tx
+shape — plain SPL transfer vs transfer_subscription against a subscription PDA), merchant (the
+destination wallet IS the declared account_id, 1:1), usd_micros (Paul's call; stablecoin base
+units are micro-dollars on-chain anyway — only raw-SOL one-offs lose chain-alone fiat and would
+need price-at-slot). Memos are public and immutable: keep the vocabulary boring.
+Spec alignment: this is the Solana Pay `memo` field (SPL Memo instruction placed BEFORE the
+transfer instruction, per spec); references stay as-is for live correlation.
+
+TRUST MODEL (memos are trivially forgeable and publicly copyable — Paul 2026-07-02): the memo is a
+DISCOVERY HINT, never money truth. Money truth is only the transfer itself (mint, base units,
+destination, signature) — unforgeable without actually paying us. The one real attack — dust
+payment whose memo claims full price — dies on that rule alone, so NO MAC/signing (considered and
+dropped as YAGNI, Paul's call): forged memos cost the attacker real money to matter, a merchant
+spamming its own wallet only pollutes its own books, and copycat memos are triage noise for the
+#714 park lane. Recurring pulls are sender-authenticated anyway (we sign them).
+Standing invariant (from the axed #718 discussion): the Solana rail has exactly ONE hot key — the
+crank/signer, which never holds funds. The receiving wallet stays cold; memo recognition and
+recovery are read-side only. Don't design anything that forces the receiving wallet hot.
+
+STATUS (2026-07-02): SHIPPED, both lanes. Shared format helper (single source of truth, #714 reuses
+it): internal/integrations/solana/memo.go — PurchaseMemo(uuid)/ParsePurchaseMemo (strict: canonical
+non-nil UUID, version 1 only), NewMemoInstruction (raw-bytes SPL Memo, program MemoSq4…, zero
+accounts), PurchaseMemoLocalIDs, VerifyPurchaseMemo (present-must-match, ABSENT PASSES, foreign
+memos ignored, uuid.Nil skips). One-off lane, local-id = CHECKOUT SESSION ID: (a) transfer-request
+URL — GeneratePayment appends the Solana Pay `memo` param (pay.go; wallet places the SPL Memo
+before the transfer per spec); (b) transaction-request — PaymentTransactionBuildRequest.SessionID
+(required; build refuses unstamped), memo instruction placed BEFORE the transfer in
+integrations/solana/transfer.go buildTransferInstructions. Recurring lane, local-id = PULL INTENT
+ID (durable pre-send per #674; it's what crankOne has at construction; resolves intent→subscription):
+threaded intent.ID → crankOne → CrankService.CrankWithPresubmit, [memo, transfer_subscription]
+ordering; legacy no-intents Work() path stays unstamped by construction (unit-test harness only —
+production pulls always route via SolanaPullIntentHandler). Verify legs: VerifyTransactionWithContent
+gains expectedMemoLocalID (poller passes pending.SessionID, checkout confirm passes session.ID);
+recurring repair legs cross-check the landed tx's memo against intent.ID — mismatch parks the
+intent (verify-not-decline), absence passes. Deferred: the atomic [subscribe+transfer] first-charge
+bundle (prepare_subscribe.go) is NOT stamped — outside the decided two lanes; #714 recognizes
+subscribes by tx shape + PDA enumeration. Files: internal/integrations/solana/{memo.go,transfer.go},
+internal/modules/solana/{types.go,transaction.go,pay.go}, internal/modules/checkout/session_service.go,
+internal/modules/solana/recurring/crank_service.go, internal/river/{jobs_solana_crank.go,
+jobs_solana_pull_intent.go} (+ tests: memo_test.go, pay_memo_test.go, crank_service_test.go,
+jobs_solana_pull_intent_memo_test.go). Tests: wire-pinned memo string/bytes + instruction ordering +
+all verify-leg cases; package suites integrations/solana, modules/solana(+recurring), river,
+checkout all green; whole-repo build + vet (incl. integration tag) clean.
+
+---
+
+# #714: reconcile: chain→local Solana recovery lane (memo-recognized merchant-wallet scan)
+
+Counterpart of #713. The SolanaFetcher (reconcile/solana.go) only reads locally-known subscription
+PDAs — one-off purchases and anything the local DB lost are invisible. Add a wallet-scan lane to
+the Solana pull: walk the declared merchant wallet's signature history (rail_merchant_accounts
+account_id IS the wallet), parse each tx, and recognize OURS by the #713 `openrails:` memo prefix — everything
+without a recognized memo is ignored by design (a transfer into the wallet is not evidence of a
+purchase; could be anything). Normalize recognized txs to findings (payer wallet, mint, base
+units, memo local-id) and let the existing converge backfill
+payments/subscription evidence (CreatePaymentIfNotExists lane). Recognition/verification per the
+#713 trust model (no MAC — the transfer is the truth): money comes ONLY from the transfer
+(stablecoin base units ARE micro-dollars; SOL needs price-at-slot); kind comes from the tx shape
+(plain transfer = one-off, transfer_subscription = pull); local-id must resolve consistently and
+uniquely against local records when they exist. ANY mismatch or duplicate local-id ⇒ park as a
+finding for operator triage — never auto-land (verify-not-decline applied to recovery). ALSO: `subscribe` is
+permissionless against our plans (user signs alone; verified 2026-07-02 in
+integrations/solana/subscriptions/instructions.go) — an on-chain subscriber can exist that no
+checkout created. The same lane should enumerate subscription PDAs per OUR plans
+(getProgramAccounts) rather than trusting the locally-known list, and route unknown-but-valid
+subscriptions through the same verify-or-park rules. Result: for memo-era
+transactions, openrails can be reconstructed from the chain + catalog alone — true
+disaster-recovery for the Solana rail. Watermark by signature/slot like the other pull providers.
+
+STATUS (2026-07-02): SHIPPED — both discovery scans live in the SolanaFetcher (reconcile/solana.go),
+feeding the existing findings/diff/converge machinery. (1) Merchant-wallet scan: paginated
+GetSignaturesForAddressPage walk of the declared wallet (account_id = wallet; FetchParams.AccountID
+overrides fetcher.MerchantWallet), windowed by Since/Until blockTime (watermarking unchanged),
+page 200 / hard cap 1000 per window; unfetchable txs skipped w/ one WARN. No recognized
+`openrails:` memo ⇒ invisible (random deposits = zero findings). Recognized ⇒ RemoteTransaction w/
+money ONLY from the transfer (pull = TransferData; one-off = the ONE asset's balance-delta into
+the wallet, walletTransferMoney; stablecoin ⇒ cents via solanaFiatCents, else unpriced w/ Raw
+truth) + a `solana_discovery` verdict envelope in Raw. Verification (verifyWalletDiscovery):
+local-id resolves via SolanaLocalRecordResolverFromDB (GetCheckoutSessionByID → GetRailIntent,
+existing gen queries only — db/gen untouched); ANY mismatch (kind vs record kind, rail, recipient,
+mint, base units, session-settled-by-other-sig, duplicate local-id across successful sigs,
+multi-memo) ⇒ verdict park. Routing (diff.go makeSolanaDiscoveryPS4): clean+priced one-off ⇒ PS-4
+w/ BackfillPaymentAction (same idempotent lane as other rails, identity from the resolved
+session); park/unpriced ⇒ requires_review, never applied; clean pull ⇒ generic PS-4 correlator by
+sub PDA. Valueless memo claiming nothing local ⇒ dropped (costless forgery = zero noise); failed
+txs ⇒ decline evidence, no verdict. (2) Per-plan enumeration: getProgramAccounts(ProgramID,
+memcmp disc=4 @0 + plan PDA @35 — offsets exported+test-pinned in subscriptions) over
+SolanaPlanSourceFromDB (solana_subscriptions ∪ catalog rails["solana"].plan_pda, so a fresh DB
+enumerates from catalog alone); discovered-not-local subs normalized like known ones, marked
+`discovered_not_local` in Raw ⇒ PS-1 with materialization HARD-BLOCKED in makePS1 (test proves the
+identical non-discovered row would materialize). Also: planLinkIDKeys gained "plan_pda" so solana
+PS-1 plan resolution works at all. RPC additions: GetSignaturesForAddressPage (before-cursor),
+GetProgramAccounts + fallback GetProgramAccountsWithOpts. Tests: recognize/ignore/park table,
+pagination cap, enumeration, walletTransferMoney wire-pins, diff routing, PS-1 block — all green
+(`go test ./internal/reconcile/... ./internal/integrations/solana/...`; repo-wide build green).
+DEFERRED→DONE 2026-07-03 (Paul): solana added to refreshProviders' allowed lanes; pulls still run
+only for merchants whose scope arms a solana fetcher (per-merchant arming #699 = "only refresh
+what actively matters"; river test repinned). Original note: enabling was one map entry, once
+solana watermark cadence is decided.
+OPTIMIZATION (noted 2026-07-03, not urgent at current volume): scanMerchantWallet fetches EVERY new
+signature's tx to read memos; getSignaturesForAddress already returns the memo field in the listing,
+so pre-filtering to `openrails:`-prefixed signatures would skip GetTransaction for unstamped traffic.
+
+---
+
+# #715: SolanaFetcher normalization gaps: subscription decoder, tx parsing, fiat amounts
+
+reconcile/solana.go is deliberately minimal and says so; make it real:
+- no subscription-account decoder exists (only DecodePlanAccount) — status is INFERRED from PDA
+  presence (present=active, absent=cancelled); decode the subscription account properly.
+- transactions are signature listings only — kind unknown (success→sale, fail→decline); parse the
+  tx (and #713 memo when present) to classify subscribe/pull/cancel and extract real amounts.
+- amounts stay mint base units with AmountCents=0 and raw in Raw — normalize stablecoin mints
+  (USDC/USD1: base units are micro-dollars already) to fiat so the cross-provider diff engine can
+  actually compare money.
+
+STATUS (2026-07-02): all three gaps closed. (1) DecodeSubscriptionAccount shipped
+(integrations/solana/subscriptions/subscription_account.go) — layout established with confidence
+from the OFFICIAL program's IDL + Rust source (solana-program/subscriptions:
+state/{subscription_delegation,header}.rs), triple cross-validated against repo-proven artifacts
+(plan decoder byte-for-byte, devnet-verified SA initId offset 98, instruction discriminators):
+v1 = 155B, header{disc=4,version,bump,delegator=subscriber,delegatee=planPDA,payer,initId} +
+terms snapshot{amount,periodHours,createdAt} + amountPulledInPeriod + currentPeriodStartTs +
+expiresAtTs (0=active; cancel sets period-end boundary, resume clears; trailing bytes tolerated
+for future versions). Fetcher status now decode-driven: expires_at=0→active, future→active/
+"cancel_at_period_end" (Stripe parity), past→cancelled/"expires_at_passed"; undecodable falls back
+to presence inference with a Raw note. (2) Tx classification: solanaRPC gained GetTransaction
+(real client already had it); per-signature fetch classifies by discriminator via new
+ParseInstructionKind/DecodeTransferData — pulls→sale/decline with real amount+mint from
+transferData, subscribe/cancel/resume/revoke→new lifecycle TransactionTypes (declared in
+solana.go; money paths ignore them by construction); unfetchable/unparseable→legacy
+success→sale/fail→decline with "signature_only" Raw note, never kills the window. (3) Fiat:
+solanaFiatCents normalizes registry-declared USD stablecoins w/ 6 decimals (USDC/PYUSD/USD1/USDG;
+trust anchor KnownStablecoinByMint × declared decimals; USDT/EURC/devnet excluded — no declared
+decimals/not canonical) to integer CENTS (matches nmi/ccbill/stripe AmountCents + "USD" uppercase
+Currency); sub-cent micros never rounded (stays 0 + Raw note). Wire-pinning tests: 9_990_000
+micro-USDC ⇒ exactly 999 cents; decoder round-trip vs program encoding; discriminator map pinned.
+reconcile+subscriptions packages green; repo-wide `go build ./...` fails only in internal/river
+(jobs_solana_crank.go vs the #713 sibling's in-flight crank_service.go signature change — not
+this work).
+
+---
+
+# #716: derive-1 never grants access for imported-as-unknown subscriptions — fail-open lane can't engage
+
+SubscriptionProjectsStandingAccess deliberately includes status 'unknown' (auto_renew + non-terminal
+⇒ standing window), but derive-1 (grants.sql) materializes subscription grants ONLY from
+active/cancelled rows. A sub that ENTERS the DB as unknown (legacy import parks stale rows) never
+gets a grant, so the standing projection never engages — the fail-open doctrine lane exists but is
+unreachable for exactly the population it was designed around (2026-07-02: 66 imported CCBill
+unknowns hold no access). RULED (Paul, 2026-07-02): FAIL-OPEN — "if we have a subscription for a
+user and we don't know the status on that subscription, they get their entitlement, and we do our
+best to figure out the true state." Implementation: add 'unknown' to the derive-1 subscription
+source query (grants.sql) so it matches SubscriptionProjectsStandingAccess; the unknown-resolution
+machinery (forensics/probes) is the "figure out the truth" half and already exists. Accepted
+error: evidence-free imported unknowns (e.g. the 66 CCBill rows) hold access until proven dead.
+NOTE while implementing: (a) the #691 companion guard — block re-purchase of a product whose sub
+is unknown — matters more once unknowns grant access (double-billing hole); (b) grants/gen is
+mid-rework by a concurrent session (2026-07-02) — land this after that settles. Related: doujins
+#748 policy questions.
+
+---
+
+# #717: derive-1 grants chargeback subscriptions access through their paid period
+
+mapLegacyStatusToNew(chargeback)→cancelled with ended_at=expiration, and derive-1 grants
+active+cancelled windows with NO cancel_type filter — so a charged-back sub with future expiration
+keeps entitlement while the money was reversed. Native chargeback handling should be checked for
+the same hole (webhook-driven cancels that leave a future-bounded window standing). Proposal:
+chargeback ⇒ revoke access as of the chargeback event (money reversed = access reversed), which
+means derive-1 (or the cancel writer) must distinguish cancel_type=chargeback from user/expired
+cancels' paid-through runway. Latent today (0 chargeback rows in the current dump) — fix before it
+isn't. RULED (Paul, 2026-07-02): YES — "if someone charges us back, we should immediately revoke
+entitlement." Implement: chargeback ⇒ access revoked as of the chargeback event, both in derive-1
+(cancel_type=chargeback grants no runway window) and in the native chargeback webhook paths
+(NMI/CCBill/Stripe) — audit each rail's chargeback handler for the same leave-runway-standing hole.
+
+
+
+---
+
+# #721: platform merchant directory + soft-delete (engine mechanism for openrails-saas #16)
+
+**Status:** moved to progress.md (implementation 2026-07-02).
+
+openrails-saas #16 plans GET /v1/platform/merchants, GET /:id, DELETE (soft), POST /:id/restore
+with platform:merchants:{read,delete,restore}. Those routes are engine mechanism and belong in
+THIS repo (open-source; self-hosters get the same operator surface) — the wrapper only composes
+UI/policy on top. List view carries the ops-dashboard basics (slug, display_name, status,
+created_at, rails armed, last-activity).
+
+## Tasks
+
+- [ ] Routes + platform: permissions per saas #16's spec (explicitly NO platform create/patch of
+      merchant business state; creation stays the self-service flow).
+- [ ] Pagination + stable ordering; integration test over a multi-merchant fixture.
+
+---
+
+# #723: MODE 1 — manifest-is-truth self-hosting: YAML in memory, no stores, reboot to change
+
+**Status:** moved to progress.md (implementation 2026-07-02).
+
+The two-mode doctrine (Paul, 2026-07-02). Mode 1 is what doujins/hentai0 run:
+
+- The YAML supplied at boot (config.yaml + merchant_config.yaml + catalog.yaml, secrets via
+  BILLING_MERCHANTS_* env or /vault/secrets files) IS the source of truth. The end.
+- It lives in memory after boot. Changing catalog / merchant config / secrets = update the value
+  in (operator) Vault, re-render, reboot pods. This is rarely-changing CONFIG, not data.
+- OpenRails writes NOTHING back: no merchant-secret store, no seed-once dance, no store-vs-boot
+  divergence. #699's "store wins" posture is a MODE 2 statement only — in mode 1 there is no
+  store to win.
+
+Today's implementation half-does this: catalog already behaves right (boot converge with
+Insert+Overwrite+Prune — YAML wins), but secrets are seeded-once into the merchant secret store
+and the store is then authoritative forever, so a rotated manifest value is silently ignored.
+That inversion is the bug this issue removes.
+
+One engineering reality to encode, not fight: catalog rows still exist in the DB in mode 1, but
+strictly as a PROJECTION — subscriptions/payments/entitlements foreign-key price/product rows,
+and reconcile joins them. Deterministic natural-key IDs (#662) make the projection stable across
+rebuilds. The DB copy is steamrolled by the YAML every boot and is never a second truth.
+
+## Tasks
+
+- [ ] Explicit mode switch: ONE scalar `merchant_source: manifest | api`, DEFAULT manifest (api
+      is the deliberate opt-in). config.yaml key + MERCHANT_SOURCE env via the normal mapping;
+      embedded hosts set the orconfig field directly. It governs merchant config AND catalog —
+      one truth-unit, deliberately no separate catalog_source. Deployment shape does NOT imply
+      mode — embedded and standalone can each run either; the embed Options must agree with the
+      knob (manifest bytes passed iff manifest mode). Validation
+      matrix, fail-loud both ways:
+      - manifest + no manifests resolvable ⇒ refuse boot (declared truth missing);
+      - manifest ⇒ catalog/provider mutation APIs 405 with "manifest-driven; edit the YAML and
+        reboot"; merchant secret store never constructed. Read-side binding stays legal (hentai0's
+        empty UpsertMerchantConfig binds to doujins' merchant without declaring its own truth);
+      - api + manifest files present / manifest bytes passed ⇒ refuse boot (two truths);
+      - api + no secret backend (no Vault; no ENCRYPTION_MASTER_KEY outside dev) ⇒ refuse boot.
+- [ ] Secrets from memory: in manifest mode the charge/webhook/arming paths resolve credentials
+      from the loaded manifest (config overlay included) — no secret-store reads, no writes, no
+      seed-once, no #699 divergence warnings. Rotation = new file + reboot, same as catalog.
+- [ ] Catalog stays boot-converged (YAML wins, Overwrite+Prune always on in manifest mode);
+      document the DB rows as projection-for-FKs only.
+- [ ] Conformance integration test, the whole loop: boot from the three YAMLs + secret FILES →
+      rails armed, charge works, entitlement lands → edit price + rotate secret in the files →
+      reboot → new price live, new secret used, no stale residue anywhere → reboot again ⇒
+      idempotent no-op.
+- [ ] Failure modes: missing secret ⇒ rail not armed + loud warning; malformed manifest ⇒ refuse
+      boot; ENCRYPTION_MASTER_KEY posture irrelevant in this mode (nothing persisted) — assert.
+- [ ] One docs page for self-hosters: the three files, the secrets dir, precedence
+      (yaml < files < env), "change = edit + reboot".
+
+---
+
+# #724: MODE 2 — Vault-backed hosted mode: DB catalog + Vault secrets, API-driven, proven against a REAL Vault
+
+**Status:** moved to progress.md (implementation 2026-07-02).
+
+The two-mode doctrine (Paul, 2026-07-02). Mode 2 is hosted / OpenRails-SaaS:
+
+- NO merchant-config or catalog YAML is loaded at boot. Merchants exist and change only via the
+  HTTP APIs.
+- OpenRails expects a live Vault connection and reads + writes per-merchant secrets there
+  (KV-v2, openrails/merchants/<slug>/...). The DEK-encrypted Postgres store is the degenerate
+  fallback — allowed, NOT recommended for production.
+- Catalog is DB data, read + written as needed, mutable over the API by merchants. Merchant
+  secrets (and possibly merchant business config — decide: config likely stays DB, secret
+  material goes to Vault) are Vault data, mutable over the API.
+- This is constantly-changing DATA, unlike mode 1's rarely-changing config.
+
+The machinery exists (secret_backend=vault, PUT /v1/merchant/payment-providers writes, charge-path
+reads, capability probing #661, token renewal via LifetimeWatcher) but the green suite never
+touches a real Vault: the live tests (integrations/vault/vault_integration_test,
+capabilities_integration_test) SKIP unless VAULT_ADDR/VAULT_TOKEN are exported, and — worse —
+merchantsecrets/store_integration_test.go is integration-TAGGED but runs against a fakeVault
+httptest server, and auth_test.go mocks Vault with httptest too. Mocked-Vault tests assert our
+guesses about Vault, not Vault. Replace them with one real container.
+
+## Test harness
+
+- [ ] hashicorp/vault dev-mode testcontainer wired in like Postgres/Redis (shared TestMain
+      container; VAULT_ADDR/VAULT_TOKEN env override reuses an external dev server the same way
+      OPENRAILS_TEST_DB_URL does). Dev mode gives KV-v2 at secret/ and a root token out of the box;
+      the harness helper mints policy-scoped child tokens per test case.
+- [ ] Un-skip the existing live tests: vault_integration_test + capabilities_integration_test run
+      unconditionally under the integration tag.
+
+## Delete the mocks
+
+- [ ] store_integration_test.go: drop fakeVault; the same assertions run against the container.
+- [ ] auth_test.go: drop the httptest Vault; static-token / approle login paths are asserted
+      against the real container (enable approle via root token in the harness).
+- [ ] KEEP the two genuinely pure-logic tests (kv_test.go path arithmetic, store_test.go
+      TestGateSecretBackend decision matrix) — they test our logic, not Vault behavior.
+
+## Scenarios (all against the real container)
+
+- [ ] Store cycle, vault backend: Put/Get/Delete/status-list under a merchant namespace; KV-v2
+      overwrite versioning; TWO merchants — cross-namespace isolation asserted (merchant B never
+      sees A's paths).
+- [ ] Full stack through the public API: boot runtime with secret_backend=vault → PUT
+      /v1/merchant/payment-providers with credentials → KV holds them at the
+      RailMerchantAccountSecretName path → charge-path/arming read uses the stored value →
+      rotate via a second PUT → new value live immediately → second merchant untouched.
+- [ ] Capability gating (#661) with REAL policies: root token (full), KV-read-only token,
+      transit-only token → Build's probed capabilities + gateSecretBackend outcome + route
+      capabilities match the decision matrix.
+- [ ] Outage semantics, pinned by stopping/pausing the container: unreachable at boot (Build
+      fails loudly — vault backend declared means vault required); unreachable at charge-time
+      (typed fail-closed error, never a stale/fabricated fallback); unpause → recovery without a
+      process restart.
+- [ ] Token lifecycle: mint a short-TTL renewable token → LifetimeWatcher keeps operations alive
+      past the original TTL; revoke it → operations fail loudly; pin whatever re-login behavior
+      exists (or document that a restart is required — decide, don't leave it emergent).
+- [ ] Mode-2 boot shape: server boots with NO manifest files, merchant provisioned purely via
+      API, catalog created via API — full checkout works with nothing YAML-sourced.
+- [ ] Backend parity: the SAME scenario table (cycle/rotation/isolation) runs against the
+      DEK-encrypted Postgres backend so the two stores can't drift semantically.
+
+## Doctrine
+
+- [ ] ADR (folded from #722): custodial posture — one process-global Vault token over all merchant
+      namespaces; isolation is OpenRails' (RLS + all paths derived from the single
+      RailMerchantAccountSecretName builder — grep-proof no ad-hoc paths). Threat model, non-goals
+      (per-merchant tokens, merchant-visible Vault), revisit trigger (BYO-Vault).
+
+# #731: [BUG] migratekit v1.1.0↔v1.2.0 skew breaks migration validation for schema-applied ledgers
+
+**Status:** FIXED 2026-07-03 (uncommitted). openrails + hentai0 bumped to migratekit v1.2.0;
+openrails validateDatabase passes `Schema: cfg.DB.SchemaName()` (build_runtime.go); hentai0's
+openrails source passes `Schema: "openrails"` (internal/app/build.go); doujins already carried
+both. Reproducing doujins test green — and its stale assertion (secrets seeded to
+merchant_secrets) updated to the #723 mode-1 doctrine: zero persisted rows + manifest plane
+serves the values.
+
+openrails go.mod pins migratekit v1.1.0; doujins pins v1.2.0 (MVS resolves the doujins build —
+and any go.work spanning both — to v1.2.0). v1.2.0's `Postgres.Applied()` filters ledger rows by
+`schema` (`WHERE ... AND (schema = $3 OR schema = '')`), so rows applied via
+`WithSchema("openrails")` are invisible to a schema-LESS validator. openrails'
+`build_runtime.validateDatabase` passes `migratekit.MigrationSource{App, FS}` with NO Schema —
+under v1.2.0 it queries `schema = ''`, finds nothing, and fatals
+"1 pending migrations must be applied: [0001_schema.up.sql]" on a fully-migrated DB. Bites any
+host that applies openrails migrations with `WithSchema` (doujins
+applyOpenRailsMigrations/migrate up) — reproduced in doujins
+TestRuntimeMerchantConfigSeedsProviderAccountsIntegration; NOT a #723 effect.
+
+Fix: bump openrails to migratekit v1.2.0 and pass `Schema: cfg.DB.SchemaName()` (+ RewriteFrom
+where applicable) in every MigrationSource validation call (build_runtime Postgres + any
+embedded-boot validators); sweep hosts for the same asymmetry.
+
+---
+
+# #719: scale provider refresh to thousands of merchants (openrails-saas)
+
+Standing constraint (Paul, 2026-07-03): the design must scale to THOUSANDS of merchants with
+heterogeneous provider configs. Embedded hosts (doujins/hentai0, one merchant) don't need it;
+openrails-saas (the hosted offering) does.
+
+Current shape: ProviderRefreshWorker is ONE river job per tick that serially loops every active
+merchant (jobs_provider_refresh.go ~122) — per-merchant arming (#699) and error isolation are
+already right, and watermarks are per merchant+provider (resumable), but at N=thousands one tick
+is hours of serial HTTP; a mid-loop death or time-box starves tail merchants every pass
+(ListActiveMerchantIDs order bias); provider rate limits and RPC load concentrate in one process.
+
+Design direction (the watermarks make this mechanical): umbrella job becomes a SCHEDULER that
+enqueues one per-merchant refresh job (river unique/dedupe keys on merchant_id) with jitter;
+the per-merchant job body is exactly today's loop body (arm → lanes → converge → unknown-cohort).
+River then gives concurrency caps, retries, per-merchant isolation, and replica spreading for
+free. Add: per-provider global rate limiting (thousands of merchants on one rail share the
+provider's API budget), stagger/jitter so windows don't align, and a freshness metric
+(oldest watermark age) as the SLO. Non-goals: no per-merchant goroutine fan-out inside one job
+(loses river's isolation); no scheduling for merchants with zero armed rails (they already cost
+one Build call — make even that skip via a cheap accounts-exist predicate).

@@ -111,14 +111,12 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	// --- PUT settings: the customer sets self-imposed caps (billing mode stays
 	// merchant-granted — the shared handler refuses platform policy fields). ---
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/settings"), map[string]any{
-		"currency":            currency,
-		"max_spend_per_day":   1_000_000,
-		"max_spend_per_month": 9_000_000,
+		"currency":              currency,
+		"low_balance_threshold": 1_000_000,
 	})
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	stored := decodeJSONObject(t, resp.body)
-	require.EqualValues(t, 1_000_000, stored["max_spend_per_day"])
-	require.EqualValues(t, 9_000_000, stored["max_spend_per_month"])
+	require.EqualValues(t, 1_000_000, stored["low_balance_threshold"])
 	require.NotContains(t, stored, "billing_mode", "billing mode is merchant-granted, not customer self-service")
 
 	// --- GET usage / payments / invoices / payment-methods: all reachable and
@@ -163,7 +161,7 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPut, "/settings", map[string]any{"currency": "USD", "max_spend_per_day": 1}},
+		{http.MethodPut, "/settings", map[string]any{"currency": "USD", "low_balance_threshold": 1}},
 		{http.MethodGet, "/payment-methods", nil},
 		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"rail": "stripe"}}},
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},

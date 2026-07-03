@@ -30,6 +30,17 @@ const (
 	MerchantFindingsResolve = "merchant:findings:resolve"
 )
 
+// Platform-operator (root) permissions (#721). AuthKit's #111 rename made
+// `root:` the platform-operator namespace (was `platform:`); namespace purity
+// means root-persona roles may only hold `root:` perms, so openrails-saas #16's
+// platform:merchants:* map 1:1 onto these. They gate the cross-merchant
+// /v1/platform/merchants directory (standalone only).
+const (
+	RootMerchantsRead    = "root:merchants:read"
+	RootMerchantsDelete  = "root:merchants:delete"
+	RootMerchantsRestore = "root:merchants:restore"
+)
+
 // Customer (buyer/treasury) permissions.
 const (
 	CustomerBalanceRead            = "customer:balance:read"

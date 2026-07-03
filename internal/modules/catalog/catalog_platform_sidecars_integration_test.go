@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -104,23 +103,23 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_price_metered (price_id, merchant_id, meter_key, rate_micros, per_units)
-			 VALUES ($1, $2, $3, 100000, 100)`,
-			priceA, tA.UUID(), meterKey,
+			`INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+			 VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","per_unit":{"unit_amount":100000,"divide_by":100}}'::jsonb)`,
+			tA.UUID(), productA, meterKey,
 		)
 		return err
 	}))
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		var usageCount, bindingCount, meterCount, priceMeterCount int
+		var usageCount, bindingCount, meterCount, rateCardCount int
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_usage_limits WHERE key = $1`, usageKey).Scan(&usageCount))
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.product_usage_limit_bindings WHERE usage_limit_key = $1`, usageKey).Scan(&bindingCount))
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_price_metered WHERE price_id = $1`, priceA).Scan(&priceMeterCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
 		require.Equal(t, 1, usageCount)
 		require.Equal(t, 1, bindingCount)
 		require.Equal(t, 1, meterCount)
-		require.Equal(t, 1, priceMeterCount)
+		require.Equal(t, 1, rateCardCount)
 		return nil
 	}))
 
@@ -132,13 +131,13 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		var usageCount, meterCount, priceMeterCount int
+		var usageCount, meterCount, rateCardCount int
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_usage_limits WHERE key = $1`, usageKey).Scan(&usageCount))
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_price_metered WHERE price_id = $1`, priceA).Scan(&priceMeterCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
 		require.Equal(t, 0, usageCount)
 		require.Equal(t, 0, meterCount)
-		require.Equal(t, 0, priceMeterCount)
+		require.Equal(t, 0, rateCardCount)
 		return nil
 	}))
 
@@ -150,79 +149,4 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		return err
 	})
 	require.Error(t, err, "app role must not write catalog sidecars for another merchant")
-}
-
-func TestIdentityAnchorsAndProviderOwner_Integration(t *testing.T) {
-	ctx := context.Background()
-	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
-
-	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
-	require.NoError(t, err)
-	defer super.Close()
-
-	customerAnchor := "pg-customer-" + uuid.NewString()
-	merchantAnchor := "pg-merchant-" + uuid.NewString()
-	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.customer_anchors (permission_group_id) VALUES ($1)
-		 ON CONFLICT DO NOTHING`,
-		customerAnchor,
-	)
-	require.NoError(t, err)
-	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.merchant_anchors (permission_group_id) VALUES ($1)
-		 ON CONFLICT DO NOTHING`,
-		merchantAnchor,
-	)
-	require.NoError(t, err)
-
-	var anchorCount int
-	require.NoError(t, super.Pool().QueryRow(ctx, `
-		SELECT
-			(SELECT count(*) FROM openrails.customer_anchors WHERE permission_group_id = $1) +
-			(SELECT count(*) FROM openrails.merchant_anchors WHERE permission_group_id = $2)
-	`, customerAnchor, merchantAnchor).Scan(&anchorCount))
-	require.Equal(t, 2, anchorCount)
-
-	pool, err := pgxpool.New(ctx, appDSN)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	appDB, err := db.NewWithPGXPool(pool, "")
-	require.NoError(t, err)
-
-	tid := merchant.ID(uuid.New())
-	ctxTenant := merchant.WithID(ctx, tid)
-	accountID := "acct_" + uuid.NewString()[:8]
-	require.NoError(t, appDB.MerchantTx(ctxTenant, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
-			tid.UUID(), "owner-"+tid.String()[:8],
-		)
-		require.NoError(t, err)
-		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.rail_merchant_accounts
-			 (merchant_id, rail, environment, account_id, archived, owner)
-			 VALUES ($1, 'stripe', 'test', $2, false, 'platform')`,
-			tid.UUID(), accountID,
-		)
-		require.NoError(t, err)
-
-		var owner string
-		require.NoError(t, tx.QueryRow(ctx,
-			`SELECT owner FROM openrails.rail_merchant_accounts WHERE merchant_id = $1 AND account_id = $2`,
-			tid.UUID(), accountID,
-		).Scan(&owner))
-		require.Equal(t, "platform", owner)
-		return nil
-	}))
-
-	err = appDB.MerchantTx(ctxTenant, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.rail_merchant_accounts
-			 (merchant_id, rail, environment, account_id, archived, owner)
-			 VALUES ($1, 'stripe', 'test', $2, false, 'customer')`,
-			tid.UUID(), "acct_bad_"+uuid.NewString()[:8],
-		)
-		return err
-	})
-	require.Error(t, err, "provider account owner is limited to merchant/platform")
 }

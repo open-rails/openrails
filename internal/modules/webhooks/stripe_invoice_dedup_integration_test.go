@@ -47,7 +47,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		DisplayName:      "Dedup Product",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -59,7 +59,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		ProductID:           productID,
 		Amount:              2900,
 		Currency:            "usd",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,

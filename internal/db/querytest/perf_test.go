@@ -287,12 +287,12 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 		_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 			ID: pid, MerchantID: merchantID, Key: fmt.Sprintf("perf-product-%d", k),
 			DisplayName: "Perf", EntitlementsSpec: []byte(`[]`), CreditsSpec: []byte(`[]`),
-			TierGroup: nil, TierRank: 0, Status: "active", CreatedAt: now, UpdatedAt: now,
+			TierGroup: nil, TierRank: 0, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
 		_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 			ID: prid, ProductID: pid, MerchantID: merchantID, Amount: 1999, Currency: perfCurrency,
-			Status: "active", AutoRenew: false, Rails: []byte(`{}`), CreatedAt: now, UpdatedAt: now,
+			AutoRenew: false, Rails: []byte(`{}`), CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
 	}
@@ -325,15 +325,15 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// subscriptions: one active sub per customer on the base product (created_at spread).
 	copyRows(ctx, t, pool, "subscriptions",
-		[]string{"id", "product_id", "price_id", "status", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
+		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
 		scale, func(i int) []any {
-			return []any{perfSubUUID(i), productIDs[0], priceIDs[0], "active", merchantID, perfCustomerUUID(i), now.Add(720 * time.Hour), now, now.Add(-time.Duration(i) * time.Second), now}
+			return []any{perfSubUUID(i), productIDs[0], priceIDs[0], "active", "ccbill", merchantID, perfCustomerUUID(i), now.Add(720 * time.Hour), now, now.Add(-time.Duration(i) * time.Second), now}
 		})
 	// fat customer: an active sub in each extra product (active-sub fan-out for the LIMIT 1 path).
 	copyRows(ctx, t, pool, "subscriptions",
-		[]string{"id", "product_id", "price_id", "status", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
+		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
 		perfFatProducts, func(j int) []any {
-			return []any{perfSubUUID(scale + j), productIDs[j+1], priceIDs[j+1], "active", merchantID, fatCustomerID, now.Add(720 * time.Hour), now, now.Add(-time.Duration(j) * time.Minute), now}
+			return []any{perfSubUUID(scale + j), productIDs[j+1], priceIDs[j+1], "active", "ccbill", merchantID, fatCustomerID, now.Add(720 * time.Hour), now, now.Add(-time.Duration(j) * time.Minute), now}
 		})
 
 	// payments: one completed charge per subscription on the base price.
@@ -371,9 +371,9 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// money_settings: one row per customer.
 	copyRows(ctx, t, pool, "money_settings",
-		[]string{"id", "merchant_id", "customer_id", "billing_mode", "currency", "created_at", "updated_at"},
+		[]string{"merchant_id", "customer_id", "billing_mode", "currency", "created_at", "updated_at"},
 		scale, func(i int) []any {
-			return []any{perfMsUUID(i), merchantID, perfCustomerUUID(i), "prepaid", perfCurrency, now, now}
+			return []any{merchantID, perfCustomerUUID(i), "prepaid", perfCurrency, now, now}
 		})
 
 	// usage_events: one per customer (distinct idem tuple via source_id).
@@ -463,7 +463,6 @@ func perfEntUUID(i int) uuid.UUID      { return perfUUID("30000000", i) }
 func perfGrantUUID(i int) uuid.UUID    { return perfUUID("40000000", i) }
 func perfPayUUID(i int) uuid.UUID      { return perfUUID("50000000", i) }
 func perfLedgerUUID(i int) uuid.UUID   { return perfUUID("60000000", i) }
-func perfMsUUID(i int) uuid.UUID       { return perfUUID("70000000", i) }
 func perfUsageUUID(i int) uuid.UUID    { return perfUUID("80000000", i) }
 func perfPmUUID(i int) uuid.UUID       { return perfUUID("90000000", i) }
 

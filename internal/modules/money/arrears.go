@@ -93,7 +93,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)
-		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, nil, amount, now, map[string]any{
+		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, amount, now, map[string]any{
 			"source": source,
 		})
 	})
@@ -113,7 +113,7 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 		return err
 	}
 	return q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-		ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
+		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
 		BillingMode: mode, Now: now,
 	})
 }
@@ -354,20 +354,20 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		rail := optionalRail(res.Rail)
 		railPaymentID := optionalString(res.TransactionID)
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:                 uuidutil.NewV7(),
-			MerchantID:         r.MerchantID,
-			CustomerID:         r.CustomerID,
-			InvoiceID:          r.InvoiceID,
-			MoneyTransactionID: &storedTrx.ID,
-			Currency:           normalizeCurrency(r.Currency),
-			Amount:             snapshot,
-			Status:             "settled",
-			Rail:               rail,
-			RailPaymentID:      railPaymentID,
-			AttemptedAt:        now,
-			SettledAt:          &now,
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			ID:               uuidutil.NewV7(),
+			MerchantID:       r.MerchantID,
+			CustomerID:       r.CustomerID,
+			InvoiceID:        r.InvoiceID,
+			LedgerTransferID: &storedTrx.ID,
+			Currency:         normalizeCurrency(r.Currency),
+			Amount:           snapshot,
+			Status:           "settled",
+			Rail:             rail,
+			RailPaymentID:    railPaymentID,
+			AttemptedAt:      now,
+			SettledAt:        &now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}); err != nil {
 			return err
 		}
@@ -388,21 +388,21 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, rail, railPaymentID, failureCode, failureMessage *string, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return gen.New(tx).InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:                 uuidutil.NewV7(),
-			MerchantID:         r.MerchantID,
-			CustomerID:         r.CustomerID,
-			InvoiceID:          r.InvoiceID,
-			MoneyTransactionID: trxID,
-			Currency:           normalizeCurrency(r.Currency),
-			Amount:             r.AmountDue,
-			Status:             status,
-			Rail:               rail,
-			RailPaymentID:      railPaymentID,
-			FailureCode:        failureCode,
-			FailureMessage:     failureMessage,
-			AttemptedAt:        now,
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			ID:               uuidutil.NewV7(),
+			MerchantID:       r.MerchantID,
+			CustomerID:       r.CustomerID,
+			InvoiceID:        r.InvoiceID,
+			LedgerTransferID: trxID,
+			Currency:         normalizeCurrency(r.Currency),
+			Amount:           r.AmountDue,
+			Status:           status,
+			Rail:             rail,
+			RailPaymentID:    railPaymentID,
+			FailureCode:      failureCode,
+			FailureMessage:   failureMessage,
+			AttemptedAt:      now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		})
 	})
 }

@@ -404,7 +404,7 @@ func newFakeStripeServer(t *testing.T) *fakeStripeServer {
 
 func stripeIntegrationConfig(mode string) *config.Config {
 	return &config.Config{
-		Mode: mode,
+		ProviderWriteMode: mode,
 	}
 }
 
@@ -438,7 +438,7 @@ func (fx refundFixture) stripeEnqueueParams(amountCents int64) EnqueueParams {
 func TestStripeRefundSynchronousSuccessCarriesIdempotencyKey(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	stripe := newFakeStripeServer(t)
-	cfg := stripeIntegrationConfig(config.ModeFull)
+	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
 	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
 	require.NoError(t, err)
@@ -460,7 +460,7 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	stripe := newFakeStripeServer(t)
 	stripe.createStatus.Store(http.StatusInternalServerError)
-	cfg := stripeIntegrationConfig(config.ModeFull)
+	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
 	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
 	require.NoError(t, err)
@@ -489,7 +489,7 @@ func TestStripeRefundRefusalReleasesReservation(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	stripe := newFakeStripeServer(t)
 	stripe.createStatus.Store(http.StatusBadRequest)
-	cfg := stripeIntegrationConfig(config.ModeFull)
+	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
 	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
 	require.NoError(t, err)

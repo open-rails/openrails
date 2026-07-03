@@ -94,7 +94,7 @@ func archiveIntent(t *testing.T, intentType, objectID, markerKey string) gen.Ope
 	}
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
-		Provider:       "stripe",
+		Rail:           "stripe",
 		IntentType:     intentType,
 		Payload:        payload,
 		IdempotencyKey: StripeArchiveIdempotencyKey(intentType, objectID),

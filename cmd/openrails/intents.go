@@ -161,14 +161,14 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		var rows []gen.OpenrailsRailIntent
 		for _, statusFilter := range statusFilters {
 			n, err := q.CountRailIntents(ctx, gen.CountRailIntentsParams{
-				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
+				Status: statusFilter, Rail: providerFilter, IntentType: typeFilter,
 			})
 			if err != nil {
 				return fmt.Errorf("count provider intents: %w", err)
 			}
 			total += n
 			part, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
-				Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
+				Status: statusFilter, Rail: providerFilter, IntentType: typeFilter,
 				PageLimit: int64(limit), PageOffset: 0,
 			})
 			if err != nil {
@@ -193,7 +193,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 					"type":                     row.IntentType,
 					"origin":                   row.Origin,
 					"executes_under":           executesUnder(row.Origin),
-					"rail":                     row.Provider,
+					"rail":                     row.Rail,
 					"subscription_id":          row.SubscriptionID,
 					"payment_id":               row.PaymentID,
 					"status":                   row.Status,
@@ -242,7 +242,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 				row.CreatedAt.Format("2006-01-02 15:04"),
 				row.IntentType, row.Origin, executesUnder(row.Origin),
-				row.Provider, account, row.Status, row.Attempts, sub, reason)
+				row.Rail, account, row.Status, row.Attempts, sub, reason)
 		}
 		if err := w.Flush(); err != nil {
 			return err

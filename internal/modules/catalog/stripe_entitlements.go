@@ -261,9 +261,8 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 		feat, ok := featureByKey[key]
 		featureID := feat.ID
 		if !ok {
-			// ponytail: name = the entitlement string. Friendlier names from the
-			// entitlement_features table are a follow-up; the string is a valid
-			// Stripe Feature name and matches the user's mental model.
+			// name = the entitlement string: a valid Stripe Feature name that
+			// matches the user's mental model (entitlements are plain strings).
 			id, err := s.CreateFeature(ctx, key, key)
 			if err != nil {
 				return fmt.Errorf("create feature %q: %w", key, err)

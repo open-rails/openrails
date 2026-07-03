@@ -14,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -28,9 +30,9 @@ const liveRailOptIn = "OPENRAILS_LIVE_RAIL_TESTS"
 
 func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	requireLiveRailTest(t)
-	secretKey := liveEnvValue("RAILS_STRIPE_SECRET_KEY", "BILLING_RAILS_STRIPE_SECRET_KEY")
+	secretKey := liveEnvValue("OPENRAILS_TEST_STRIPE_SECRET_KEY")
 	if secretKey == "" {
-		t.Skip("Stripe test key missing")
+		t.Skip("Stripe test key missing (OPENRAILS_TEST_STRIPE_SECRET_KEY)")
 	}
 	if !strings.HasPrefix(secretKey, "sk_test_") && !strings.HasPrefix(secretKey, "rk_test_") {
 		t.Fatalf("refusing to run Stripe live invoice test without a Stripe test-mode key")
@@ -38,6 +40,18 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupInvoiceRows(t, pool, ctx, payer)
+
+	// Arm the charge path the way production arms rails (#699): self-discover
+	// the acct_… identity (the manifest resolver's GET /v1/account), seed the
+	// key into the merchant-secrets store as the test merchant's stripe rail
+	// credential, and resolve it back through the production store resolver.
+	// The raw env value is never handed to the service directly.
+	msvc := merchantsServiceForTest(t, dbi)
+	stripeAccountID := stripeAccountIdentity(t, secretKey)
+	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), stripeAccountID, map[string]string{"secret_key": secretKey})
+	storeCreds, err := msvc.LoadStripeCredentials(ctx, dbtest.TestMerchantID)
+	require.NoError(t, err)
+	require.Equal(t, secretKey, storeCreds.SecretKey, "production store resolution must return the seeded rail credential")
 
 	customerID := stripePost(t, secretKey, "/v1/customers", url.Values{
 		"email":                         {"openrails-invoice-test@example.invalid"},
@@ -53,7 +67,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), pmID)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), customerID)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
+	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
@@ -63,10 +77,16 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
+	// Same construction pattern production uses for store-armed Stripe work
+	// (catalog webhook registration): a rail set built from the STORE-resolved
+	// key, handed to the same StripeService+StripeCollectionAdapter types
+	// build_runtime wires into the arrears charger. ProviderWriteMode is
+	// declared full: unset now fails CLOSED to readonly, and this test's whole
+	// point is a real test-mode invoice write.
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestMode: true},
+		Config: &config.Config{Env: "dev", TestMode: true, ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: config.RailMerchantAccountSet{
-			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}},
+			"stripe": {Rail: models.RailStripe, AccountID: stripeAccountID, Stripe: &config.StripeRailConfig{SecretKey: storeCreds.SecretKey}},
 		},
 	}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
@@ -94,15 +114,30 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	requireLiveRailTest(t)
-	securityKey := liveEnvValue("NMI_SANDBOX_SECURITY_KEY", "RAILS_MOBIUS_SECURITY_KEY", "BILLING_RAILS_MOBIUS_SECURITY_KEY")
+	securityKey := liveEnvValue("NMI_SANDBOX_SECURITY_KEY")
 	if securityKey == "" {
-		t.Skip("NMI sandbox security key missing")
+		t.Skip("NMI sandbox security key missing (NMI_SANDBOX_SECURITY_KEY)")
 	}
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupInvoiceRows(t, pool, ctx, payer)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	// Store-armed like the Stripe leg: seed the sandbox key as the test
+	// merchant's NMI rail credential, then resolve it back through checkout's
+	// production seam (active account scope -> scoped secret name -> store Get,
+	// merchant_rail_secrets.go). NMI identity is operator-declared (#683), so
+	// the account_id is an opaque per-run label rather than self-discovered.
+	msvc := merchantsServiceForTest(t, dbi)
+	nmiAccountID := "live-invoice-" + uuid.NewString()[:8]
+	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccountID, map[string]string{"security_key": securityKey})
+	secretName, found, err := msvc.ActiveRailMerchantAccountSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
+	require.NoError(t, err)
+	require.True(t, found, "seeded NMI rail account must resolve")
+	storedSecret, err := msvc.Secrets().Get(ctx, dbtest.TestMerchantID, secretName)
+	require.NoError(t, err)
+	require.Equal(t, securityKey, storedSecret.Value, "production store resolution must return the seeded rail credential")
+
+	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: storedSecret.Value}, true)
 	require.NoError(t, err)
 	vaultID := createNMISandboxVault(t, client)
 	t.Cleanup(func() {
@@ -225,6 +260,37 @@ func readEnvFile(path string) map[string]string {
 		}
 	}
 	return out
+}
+
+// stripeAccountIdentity mirrors the manifest resolver's Stripe self-discovery
+// (GET /v1/account). A restricted test key (rk_test_) may lack account-read
+// permission; that case falls back to a declared opaque label (logged) so the
+// secret scoping still works the #683 way. Any other failure is fatal.
+func stripeAccountIdentity(t *testing.T, secretKey string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.stripe.com/v1/account", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		var out struct {
+			ID string `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		require.True(t, strings.HasPrefix(out.ID, "acct_"), "GET /v1/account must return the rail identity")
+		return out.ID
+	case resp.StatusCode == http.StatusForbidden:
+		t.Log("stripe: GET /v1/account denied for this restricted key; declaring an opaque rail identity label instead")
+		return "acct_openrails_live_invoice_test"
+	default:
+		t.Fatalf("Stripe API /v1/account failed with status %d: %s", resp.StatusCode, sanitizedStripeError(body))
+		return ""
+	}
 }
 
 func stripePost(t *testing.T, secretKey, path string, values url.Values) map[string]any {

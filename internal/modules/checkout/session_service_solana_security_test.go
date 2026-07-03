@@ -327,7 +327,7 @@ func (s *stubSolanaTransactionService) BuildPaymentTransactionFromQuote(ctx cont
 	return nil, nil
 }
 
-func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error {
+func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
 	return nil
 }
 

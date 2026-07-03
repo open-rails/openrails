@@ -170,7 +170,7 @@ func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsRailInte
 		ID:             uuid.New(),
 		MerchantID:     uuid.New(),
 		IntentType:     typ,
-		Provider:       "mobius",
+		Rail:           "mobius",
 		IdempotencyKey: "intent-" + uuid.NewString(),
 		Origin:         string(origin),
 		Attempts:       attempts,

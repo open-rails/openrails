@@ -47,7 +47,7 @@ products:
         unit_amount: 1500
         duration: 30d
         auto_renew: true
-        active: false
+        archived: true
         providers: [stripe]
         provider_links:
           stripe:
@@ -75,8 +75,8 @@ func TestLoad_Good(t *testing.T) {
 	}
 	// Historical prices are declared directly as archived.
 	legacy := craftsman.Prices[1]
-	if legacy.Active == nil || *legacy.Active {
-		t.Fatalf("historical price should be inactive, got %v", legacy.Active)
+	if !legacy.Archived {
+		t.Fatalf("historical price should be archived, got %v", legacy.Archived)
 	}
 	if got := legacy.ProviderLinks["stripe"]["price_id"]; got != "price_legacy123" {
 		t.Fatalf("provider_links.stripe.price_id not preserved: %q", got)
@@ -190,7 +190,7 @@ products:
     display_name: P
     prices:
       - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [mobius, ccbill, solana]}
-      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [solana], active: false}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [solana], archived: true}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -394,8 +394,110 @@ products:
 	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
 		t.Fatalf("qualified custom credit unit not preserved: %q", got)
 	}
-	if p.Prices[0].Metered.PerUnits != 1_000_000 {
-		t.Fatalf("metered per_units not preserved: %+v", p.Prices[0].Metered)
+	// #707: the metered: sugar translates into a rate card; the pure-usage
+	// (unit_amount 0) price row disappears.
+	if len(p.Prices) != 0 {
+		t.Fatalf("pure-usage metered price should be translated away, got %+v", p.Prices)
+	}
+	if len(p.RateCards) != 1 {
+		t.Fatalf("expected one translated rate card, got %+v", p.RateCards)
+	}
+	rc := p.RateCards[0]
+	if rc.Meter != "api-calls" || rc.PaymentTerm != PaymentInArrears {
+		t.Fatalf("translated rate card meter/term wrong: %+v", rc)
+	}
+	if rc.Price.Model != ModelPerUnit || rc.Price.PerUnit == nil ||
+		rc.Price.PerUnit.UnitAmount != 200_000 || rc.Price.PerUnit.DivideBy != 1_000_000 {
+		t.Fatalf("translated rate card price wrong: %+v", rc.Price)
+	}
+	if rc.Price.Currency != "usd" {
+		t.Fatalf("translated rate card currency wrong: %q", rc.Price.Currency)
+	}
+}
+
+// A gauge metered: price translates its per-duration into the divide_by
+// denominator (per_units x per-seconds) — the #599 gauge math, verbatim.
+func TestLoad_MeteredGaugeTranslatesPerSecondsDenominator(t *testing.T) {
+	body := `
+version: 1
+meters:
+  - {key: vm-seconds, kind: gauge}
+products:
+  - key: vm
+    display_name: VM
+    prices:
+      - currency: usd
+        unit_amount: 0
+        providers: []
+        metered: {meter: vm-seconds, rate: 500_000, per: 1h}
+`
+	m, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := m.TierGroups[0].Products[0]
+	if len(p.RateCards) != 1 {
+		t.Fatalf("expected one translated rate card, got %+v", p.RateCards)
+	}
+	pu := p.RateCards[0].Price.PerUnit
+	if pu == nil || pu.UnitAmount != 500_000 || pu.DivideBy != 3600 {
+		t.Fatalf("gauge translation wrong: %+v", pu)
+	}
+}
+
+// A metered: price with a base amount keeps its price row (minus the metered
+// block) and still gains the usage rate card.
+func TestLoad_MeteredWithBaseFeeKeepsPriceRow(t *testing.T) {
+	body := `
+version: 1
+meters:
+  - {key: api-calls, kind: counter}
+products:
+  - key: api
+    display_name: API
+    prices:
+      - currency: usd
+        unit_amount: 5_000_000
+        duration: 30d
+        auto_renew: true
+        providers: []
+        metered: {meter: api-calls, rate: 2_000}
+`
+	m, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := m.TierGroups[0].Products[0]
+	if len(p.Prices) != 1 || p.Prices[0].Metered != nil || p.Prices[0].UnitAmount != 5_000_000 {
+		t.Fatalf("base-fee price row not preserved: %+v", p.Prices)
+	}
+	if len(p.RateCards) != 1 || p.RateCards[0].Meter != "api-calls" {
+		t.Fatalf("expected translated rate card: %+v", p.RateCards)
+	}
+}
+
+// One meter, one usage price — across BOTH shapes: a rate card and a metered:
+// price on the same meter must be rejected (post-translation they collide).
+func TestLoad_MeteredAndRateCardShareMeterRejected(t *testing.T) {
+	body := `
+version: 1
+meters:
+  - {key: api-calls, kind: counter}
+products:
+  - key: api
+    display_name: API
+    rate_cards:
+      - meter: api-calls
+        price: {model: per_unit, per_unit: {unit_amount: 100}}
+    prices:
+      - currency: usd
+        unit_amount: 0
+        providers: []
+        metered: {meter: api-calls, rate: 2_000}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "one meter per usage rate card") {
+		t.Fatalf("want shared-meter rejection, got %v", err)
 	}
 }
 

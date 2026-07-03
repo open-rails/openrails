@@ -16,11 +16,8 @@ var merchantOwnedTables = []string{
 	"merchant_deks",
 	"merchant_secrets",
 	"merchant_exports",
-	"merchant_credential_audit",
 	"products",
 	"prices",
-	"entitlement_features",
-	"product_entitlement_features",
 	"payment_methods",
 	"subscriptions",
 	"payments",
@@ -55,11 +52,9 @@ var merchantOwnedTables = []string{
 	"catalog_usage_limits",
 	"product_usage_limit_bindings",
 	"catalog_meters",
-	"catalog_price_metered",
 	"product_includes",
 	"product_usage_limits",
 	"catalog_rate_cards",
-	"catalog_credit_purchases",
 	"catalog_credit_balances",
 	"catalog_credit_purchase_prices",
 	"customer_minimum_spend",
@@ -70,9 +65,9 @@ var merchantOwnedTables = []string{
 
 func loadSchema001(t *testing.T) string {
 	t.Helper()
-	b, err := FS.ReadFile("001_schema.up.sql")
+	b, err := FS.ReadFile("0001_schema.up.sql")
 	if err != nil {
-		t.Fatalf("read 001_schema.up.sql: %v", err)
+		t.Fatalf("read 0001_schema.up.sql: %v", err)
 	}
 	return string(b)
 }

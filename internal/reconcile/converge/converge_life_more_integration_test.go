@@ -92,7 +92,7 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID)
 		// a provider action that failed terminally and won't auto-retry
-		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, provider, intent_type, idempotency_key, status, origin, subscription_id)
+		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, subscription_id)
 		      VALUES ($1,$2,'nmi','cancel_subscription',$3,'failed_terminal','system',$4)`, intentID, merchantID, "pi-key-"+suffix, subID)
 		return nil
 	}))

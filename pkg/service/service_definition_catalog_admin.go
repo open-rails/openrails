@@ -136,8 +136,8 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 	return productToCatalogProduct(updated), nil
 }
 
-// DeactivateProduct archives a product (status=archived). Existing subscriptions
-// on its prices are grandfathered and keep openrails.
+// DeactivateProduct archives a product. Existing subscriptions on its prices
+// are grandfathered and keep billing.
 func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
 	if err != nil {
@@ -217,7 +217,6 @@ func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, li
 	return out, total, nil
 }
 
-// ActivatePrice sets status=active on a price.
 // propagatePriceActiveToStripe pushes a price's active flag to its linked Stripe
 // price (best-effort), mirroring propagateProductActiveToStripe — so archiving or
 // re-activating a price in OpenRails is reflected in Stripe.
@@ -256,8 +255,8 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 	return priceToCatalogPrice(updated), nil
 }
 
-// DeactivatePrice archives a price (status=archived). Existing subscriptions on
-// this price are grandfathered and keep billing; new purchases are rejected.
+// DeactivatePrice archives a price. Existing subscriptions on this price are
+// grandfathered and keep billing; new purchases are rejected.
 func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -274,53 +273,6 @@ func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*Cata
 		return nil, err
 	}
 	s.propagatePriceActiveToStripe(ctx, updated, false)
-	return priceToCatalogPrice(updated), nil
-}
-
-// SetProductStatus explicitly transitions a product to draft|active|archived.
-func (s *Service) SetProductStatus(ctx context.Context, productID uuid.UUID, status models.CatalogStatus) (*CatalogProduct, error) {
-	products, err := s.requireProductService()
-	if err != nil {
-		return nil, err
-	}
-	if productID == uuid.Nil {
-		return nil, fmt.Errorf("product_id required")
-	}
-	if !status.Valid() {
-		return nil, fmt.Errorf("invalid status %q", status)
-	}
-	if err := products.SetStatus(ctx, productID, status); err != nil {
-		return nil, err
-	}
-	updated, err := products.GetByID(ctx, productID)
-	if err != nil {
-		return nil, err
-	}
-	// active -> Stripe active=true; draft/archived -> active=false.
-	s.propagateProductActiveToStripe(ctx, productID, status == models.CatalogStatusActive)
-	return productToCatalogProduct(updated), nil
-}
-
-// SetPriceStatus explicitly transitions a price to draft|active|archived.
-func (s *Service) SetPriceStatus(ctx context.Context, priceID uuid.UUID, status models.CatalogStatus) (*CatalogPrice, error) {
-	prices, err := s.requirePriceService()
-	if err != nil {
-		return nil, err
-	}
-	if priceID == uuid.Nil {
-		return nil, fmt.Errorf("price_id required")
-	}
-	if !status.Valid() {
-		return nil, fmt.Errorf("invalid status %q", status)
-	}
-	if err := prices.SetStatus(ctx, priceID, status); err != nil {
-		return nil, err
-	}
-	updated, err := prices.GetByID(ctx, priceID)
-	if err != nil {
-		return nil, err
-	}
-	s.propagatePriceActiveToStripe(ctx, updated, status == models.CatalogStatusActive)
 	return priceToCatalogPrice(updated), nil
 }
 
@@ -345,7 +297,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		return nil, nil
 	}
 	local := &priceVerifyContext{
-		IsActive:   p.Status == models.CatalogStatusActive,
+		IsActive:   !p.Archived,
 		UnitAmount: p.Amount,
 		Currency:   p.Currency,
 	}
@@ -499,7 +451,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 				actions[name] = "skipped_remote_writes_disabled"
 				continue
 			}
-			active := local.Status == models.CatalogStatusActive
+			active := !local.Archived
 			if err := adapter.Update(ctx, state.IDs, mutableUpdate{
 				IsActive: &active,
 			}); err != nil {

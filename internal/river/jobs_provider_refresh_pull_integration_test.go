@@ -227,7 +227,7 @@ func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider strin
 	var watermark time.Time
 	err := dbi.Pool().QueryRow(context.Background(), `
 		SELECT watermark_at FROM openrails.rail_refresh_watermarks
-		 WHERE merchant_id = $1 AND provider = $2 AND event_domain = 'events'
+		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'
 		   AND last_succeeded_at IS NOT NULL AND last_error IS NULL`,
 		mid.UUID(), provider).Scan(&watermark)
 	if err != nil {

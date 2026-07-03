@@ -252,12 +252,12 @@ func (s *Service) disableRailMerchantAccount(ctx context.Context, id merchant.ID
 				       replaced_at = COALESCE(replaced_at, now()),
 				       updated_at = now()
 				 WHERE id = $1 AND merchant_id = $2
-				RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, owner, archived
+				RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived
 			`, accountID, id.UUID()).Scan(
 			&row.ID, &row.MerchantID, &row.Rail, &row.Environment, &row.AccountID,
 			&row.DisplayName, &row.Evidence,
 			&row.FirstSeenAt, &row.LastVerifiedAt, &row.ReplacedAt, &row.CreatedAt, &row.UpdatedAt,
-			&row.Owner, &row.Archived,
+			&row.Archived,
 		)
 	})
 	return row, err

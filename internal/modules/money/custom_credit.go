@@ -128,43 +128,6 @@ func FormatAmount(minor int64, decimals int) string {
 	return fmt.Sprintf("%s%d.%0*d", sign, whole, decimals, frac)
 }
 
-// --- Registry CRUD (merchant-scoped; RLS enforced) ---
-
-// DefineCustomCreditType upserts a custom credit unit for the ctx merchant
-// (idempotent on name; reactivates + updates decimals).
-func (s *MoneyService) DefineCustomCreditType(ctx context.Context, name string, decimals int) (gen.OpenrailsCustomCreditType, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return gen.OpenrailsCustomCreditType{}, err
-	}
-	name = strings.TrimSpace(name)
-	if name == "" || strings.ContainsAny(name, "/ ") {
-		return gen.OpenrailsCustomCreditType{}, fmt.Errorf("money: invalid custom credit name %q", name)
-	}
-	if decimals < 0 || decimals > 18 {
-		return gen.OpenrailsCustomCreditType{}, fmt.Errorf("money: decimals out of range [0,18]: %d", decimals)
-	}
-	return s.db.Gen(ctx).DefineCustomCreditType(ctx, gen.DefineCustomCreditTypeParams{
-		MerchantID: tid.UUID(), Name: name, Decimals: int32(decimals),
-	})
-}
-
-// ListCustomCreditTypes lists the ctx merchant's custom credit units.
-func (s *MoneyService) ListCustomCreditTypes(ctx context.Context) ([]gen.OpenrailsCustomCreditType, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).ListCustomCreditTypes(ctx, tid.UUID())
-}
-
-// SetCustomCreditTypeActive activates/deactivates a ctx-merchant custom credit unit.
-func (s *MoneyService) SetCustomCreditTypeActive(ctx context.Context, name string, active bool) (gen.OpenrailsCustomCreditType, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return gen.OpenrailsCustomCreditType{}, err
-	}
-	return s.db.Gen(ctx).SetCustomCreditTypeActive(ctx, gen.SetCustomCreditTypeActiveParams{
-		MerchantID: tid.UUID(), Name: strings.TrimSpace(name), Active: active,
-	})
-}
+// Registry writes live in the catalog sidecar push (#706): custom_credit_types
+// rows are auto-defined from catalog_credit_balances units. There is no admin
+// CRUD surface here.

@@ -181,7 +181,7 @@ INSERT INTO openrails.payments (
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
-    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
+    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.payment_status,
     $10, $11,
     $12, $13,
     $14, $15,
@@ -268,7 +268,7 @@ INSERT INTO openrails.payments (
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
-    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
+    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.payment_status,
     $10, $11,
     $12, $13,
     $14, $15,
@@ -593,7 +593,7 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.rail_merchant_account_id, p.id, p.product_id, p.amount, p.currency, p.rails, p.status, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.rail_merchant_account_id, p.id, p.product_id, p.amount, p.currency, p.rails, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -638,7 +638,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPrice.Amount,
 		&i.OpenrailsPrice.Currency,
 		&i.OpenrailsPrice.Rails,
-		&i.OpenrailsPrice.Status,
+		&i.OpenrailsPrice.Archived,
 		&i.OpenrailsPrice.CreatedAt,
 		&i.OpenrailsPrice.UpdatedAt,
 		&i.OpenrailsPrice.MerchantID,
@@ -654,7 +654,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsProduct.CreditsSpec,
 		&i.OpenrailsProduct.TierGroup,
 		&i.OpenrailsProduct.TierRank,
-		&i.OpenrailsProduct.Status,
+		&i.OpenrailsProduct.Archived,
 		&i.OpenrailsProduct.CreatedAt,
 		&i.OpenrailsProduct.UpdatedAt,
 		&i.OpenrailsProduct.MerchantID,
@@ -1063,7 +1063,7 @@ WHERE refunded_payment_id = $1
 
 type ListRefundRowsForTotalRow struct {
 	Amount int64
-	Status OpenrailsPurchaseStatus
+	Status OpenrailsPaymentStatus
 }
 
 func (q *Queries) ListRefundRowsForTotal(ctx context.Context, refundedPaymentID *uuid.UUID) ([]ListRefundRowsForTotalRow, error) {

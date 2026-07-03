@@ -93,9 +93,9 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Openra
 }
 
 func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
+	client, ok := h.Clients[strings.ToLower(intent.Rail)]
 	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
+		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -149,9 +149,9 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // the delete (whenever it happened) is done; present means it definitely has
 // not happened and the executor may retry.
 func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Provider)]
+	client, ok := h.Clients[strings.ToLower(intent.Rail)]
 	if !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {

@@ -13,18 +13,18 @@ import (
 // comments and payments schema).
 //
 // Originally validated migration 029; after squashing 001..029 into a single
-// baseline the check now targets 001_schema.up.sql.
+// baseline the check now targets 0001_schema.up.sql.
 //
 // This is a static test: it validates the migration file content, not a live
 // database. Run `bash scripts/test_integration.sh ./migrations/postgres` to
 // also verify apply-time correctness.
 func TestAmountValueChecks(t *testing.T) {
-	files, err := fs.Glob(FS, "001_*.sql")
+	files, err := fs.Glob(FS, "0001_*.sql")
 	if err != nil {
 		t.Fatalf("glob 001 migration: %v", err)
 	}
 	if len(files) == 0 {
-		t.Fatal("migration 001_schema.up.sql not found in embedded FS")
+		t.Fatal("migration 0001_schema.up.sql not found in embedded FS")
 	}
 
 	content, err := fs.ReadFile(FS, files[0])

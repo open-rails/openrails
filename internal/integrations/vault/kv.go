@@ -13,6 +13,7 @@
 package vault
 
 import (
+	"encoding/json"
 	"context"
 	"fmt"
 	"strings"
@@ -54,17 +55,17 @@ func (a *KVv2Adapter) metadataPath(full string) string {
 // secret does not exist (the tenancy layer maps a missing "value" to
 // ErrSecretNotFound). A transport/permission error propagates so callers can fail
 // closed and distinguish "Vault unreachable" (retry) from "absent" (terminal).
-func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, error) {
+func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, int, error) {
 	sec, err := a.client.Logical().ReadWithContext(ctx, a.dataPath(path))
 	if err != nil {
-		return nil, fmt.Errorf("vault kv read: %w", err)
+		return nil, 0, fmt.Errorf("vault kv read: %w", err)
 	}
 	if sec == nil || sec.Data == nil {
-		return nil, nil // not found
+		return nil, 0, nil // not found
 	}
 	inner, ok := sec.Data["data"].(map[string]any)
 	if !ok || inner == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
 	out := make(map[string]string, len(inner))
 	for k, v := range inner {
@@ -72,19 +73,37 @@ func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]s
 			out[k] = s
 		}
 	}
-	return out, nil
+	return out, kvResponseVersion(sec.Data["metadata"]), nil
 }
 
-func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) error {
+// kvResponseVersion extracts KV-v2's current version from a data-read metadata
+// block or a write response. 0 when absent (older mounts / malformed).
+func kvResponseVersion(raw any) int {
+	meta, ok := raw.(map[string]any)
+	if ok {
+		raw = meta["version"]
+	}
+	if n, ok := raw.(json.Number); ok {
+		if v, err := n.Int64(); err == nil {
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) (int, error) {
 	payload := make(map[string]any, len(data))
 	for k, v := range data {
 		payload[k] = v
 	}
-	_, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), map[string]any{"data": payload})
+	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), map[string]any{"data": payload})
 	if err != nil {
-		return fmt.Errorf("vault kv write: %w", err)
+		return 0, fmt.Errorf("vault kv write: %w", err)
 	}
-	return nil
+	if sec != nil {
+		return kvResponseVersion(sec.Data), nil
+	}
+	return 0, nil
 }
 
 // DeleteSecret purges ALL versions via the metadata endpoint (idempotent).
@@ -95,9 +114,30 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 	return nil
 }
 
-// ListSecrets enumerates child names under path (never values), via metadata.
+// ListSecrets enumerates LEAF secret names under path (never values), relative
+// to path, recursively descending KV-v2 directory entries ("name/"). KV-v2 LIST
+// returns one level only, but the merchant store's List contract (matching the
+// DB store, #724 backend parity) is full relative names such as
+// "rail_merchant_accounts/<rail>/<env>/<acct>/<key>" — without recursion the
+// status surfaces would see only "rail_merchant_accounts/" and report every
+// credential unconfigured.
 func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
-	sec, err := a.client.Logical().ListWithContext(ctx, a.metadataPath(path))
+	return a.listSecrets(ctx, strings.TrimSuffix(path, "/"), "", 0)
+}
+
+// maxListDepth bounds the recursive descent (canonical secret names are ≤5
+// segments; this is a loop guard, not a contract).
+const maxListDepth = 16
+
+func (a *KVv2Adapter) listSecrets(ctx context.Context, root, rel string, depth int) ([]string, error) {
+	if depth > maxListDepth {
+		return nil, fmt.Errorf("vault kv list: exceeded max depth %d under %q", maxListDepth, root)
+	}
+	full := root
+	if rel != "" {
+		full = root + "/" + rel
+	}
+	sec, err := a.client.Logical().ListWithContext(ctx, a.metadataPath(full))
 	if err != nil {
 		return nil, fmt.Errorf("vault kv list: %w", err)
 	}
@@ -105,11 +145,27 @@ func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, e
 		return nil, nil
 	}
 	raw, _ := sec.Data["keys"].([]any)
-	names := make([]string, 0, len(raw))
+	var names []string
 	for _, k := range raw {
-		if s, ok := k.(string); ok {
-			names = append(names, s)
+		s, ok := k.(string)
+		if !ok || s == "" {
+			continue
 		}
+		child := strings.TrimSuffix(s, "/")
+		if rel != "" {
+			child = rel + "/" + child
+		}
+		// A KV-v2 path can be both a leaf and a directory; LIST returns both
+		// "name" and "name/" entries, so each case is handled independently.
+		if strings.HasSuffix(s, "/") {
+			sub, err := a.listSecrets(ctx, root, child, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			names = append(names, sub...)
+			continue
+		}
+		names = append(names, child)
 	}
 	return names, nil
 }

@@ -131,20 +131,20 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			occurred = now
 		}
 		ev = &models.UsageEvent{
-			ID:                 uuidutil.NewV7(),
-			MerchantID:         tenantID,
-			CustomerID:         payerID,
-			Invoker:            params.Invoker,
-			Currency:           cur,
-			EventType:          params.EventType,
-			Dimensions:         params.Dimensions,
-			Amount:             params.Amount,
-			Source:             params.Source,
-			SourceID:           params.SourceID,
-			MoneyTransactionID: debitID,
-			Metadata:           params.Metadata,
-			OccurredAt:         occurred,
-			CreatedAt:          now,
+			ID:               uuidutil.NewV7(),
+			MerchantID:       tenantID,
+			CustomerID:       payerID,
+			Invoker:          params.Invoker,
+			Currency:         cur,
+			EventType:        params.EventType,
+			Dimensions:       params.Dimensions,
+			Amount:           params.Amount,
+			Source:           params.Source,
+			SourceID:         params.SourceID,
+			LedgerTransferID: debitID,
+			Metadata:         params.Metadata,
+			OccurredAt:       occurred,
+			CreatedAt:        now,
 		}
 		dims, jerr := toJSONBC(ev.Dimensions)
 		if jerr != nil {
@@ -155,21 +155,21 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return jerr
 		}
 		return q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
-			ID:                 ev.ID,
-			MerchantID:         ev.MerchantID,
-			CustomerID:         ev.CustomerID,
-			InvokerID:          ev.Invoker,
-			Currency:           ev.Currency,
-			Resource:           ev.Resource,
-			EventType:          ev.EventType,
-			Dimensions:         dims,
-			Amount:             ev.Amount,
-			Source:             ev.Source,
-			SourceID:           ev.SourceID,
-			MoneyTransactionID: ev.MoneyTransactionID,
-			Metadata:           meta,
-			OccurredAt:         ev.OccurredAt,
-			CreatedAt:          ev.CreatedAt,
+			ID:               ev.ID,
+			MerchantID:       ev.MerchantID,
+			CustomerID:       ev.CustomerID,
+			InvokerID:        ev.Invoker,
+			Currency:         ev.Currency,
+			Resource:         ev.Resource,
+			EventType:        ev.EventType,
+			Dimensions:       dims,
+			Amount:           ev.Amount,
+			Source:           ev.Source,
+			SourceID:         ev.SourceID,
+			LedgerTransferID: ev.LedgerTransferID,
+			Metadata:         meta,
+			OccurredAt:       ev.OccurredAt,
+			CreatedAt:        ev.CreatedAt,
 		})
 	})
 	if err != nil {

@@ -603,7 +603,7 @@ func cardExpiryStatus(expiry *string) string {
 	}
 }
 
-// chargeOutcome maps a raw purchase_status to the listing's outcome vocabulary.
+// chargeOutcome maps a raw payment_status to the listing's outcome vocabulary.
 func chargeOutcome(status string) string {
 	switch status {
 	case "completed":

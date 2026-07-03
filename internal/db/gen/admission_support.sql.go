@@ -39,39 +39,31 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 }
 
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
-SELECT id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
-WHERE merchant_id = $1 AND owner = $2
-  AND currency = $4
-  AND (customer_id = $3 OR customer_id IS NULL)
+SELECT id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
+WHERE merchant_id = $1
+  AND currency = $3
+  AND (customer_id = $2 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1
 `
 
 type GetEffectiveTierScheduleParams struct {
 	MerchantID uuid.UUID
-	Owner      string
 	CustomerID *uuid.UUID
 	Currency   string
 }
 
 // The effective schedule for a (tenant, subject): the subject's own override if
-// present, else the tenant-wide default (customer_id IS NULL). owner is
-// the read filter (auto-graduation reads owner='platform'). Subject-specific
+// present, else the tenant-wide default (customer_id IS NULL). Subject-specific
 // rows sort first so LIMIT 1 picks the override.
 func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffectiveTierScheduleParams) (OpenrailsTierSchedule, error) {
-	row := q.db.QueryRow(ctx, getEffectiveTierSchedule,
-		arg.MerchantID,
-		arg.Owner,
-		arg.CustomerID,
-		arg.Currency,
-	)
+	row := q.db.QueryRow(ctx, getEffectiveTierSchedule, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var i OpenrailsTierSchedule
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.Owner,
 		&i.Rungs,
 		&i.ScheduleVersion,
 		&i.CreatedAt,
@@ -272,9 +264,9 @@ func (q *Queries) UpsertPayerSpendLimitDefault(ctx context.Context, arg UpsertPa
 
 const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $7, $3, $4, 1, $5, $6)
-ON CONFLICT (merchant_id, owner, currency) WHERE (customer_id IS NULL) DO UPDATE SET
+    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $6, $3, 1, $4, $5)
+ON CONFLICT (merchant_id, currency) WHERE (customer_id IS NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
@@ -283,7 +275,6 @@ ON CONFLICT (merchant_id, owner, currency) WHERE (customer_id IS NULL) DO UPDATE
 type UpsertTierScheduleDefaultParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Owner      string
 	Rungs      []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -291,12 +282,11 @@ type UpsertTierScheduleDefaultParams struct {
 }
 
 // Tenant-wide tier schedule upsert (#476): customer_id IS NULL is the
-// tenant's default ladder. owner is supplied by the caller's authz path.
+// tenant's default ladder. Schedules are platform-owned.
 func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierScheduleDefaultParams) error {
 	_, err := q.db.Exec(ctx, upsertTierScheduleDefault,
 		arg.ID,
 		arg.MerchantID,
-		arg.Owner,
 		arg.Rungs,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -307,9 +297,9 @@ func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierS
 
 const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, $3, $8, $4, $5, 1, $6, $7)
-ON CONFLICT (merchant_id, customer_id, owner, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, $3, $7, $4, 1, $5, $6)
+ON CONFLICT (merchant_id, customer_id, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
@@ -319,7 +309,6 @@ type UpsertTierScheduleSubjectParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
-	Owner      string
 	Rungs      []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -333,7 +322,6 @@ func (q *Queries) UpsertTierScheduleSubject(ctx context.Context, arg UpsertTierS
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Owner,
 		arg.Rungs,
 		arg.CreatedAt,
 		arg.UpdatedAt,

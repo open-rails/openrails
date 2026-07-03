@@ -125,34 +125,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 					})
 				}
 			}
-			for _, price := range product.Prices {
-				if price.Metered == nil {
-					continue
-				}
-				cycle, err := normalizeDuration(price.Duration)
-				if err != nil {
-					return fmt.Errorf("product %q price %s duration: %w", product.Key, PriceLabel(product.Key, price), err)
-				}
-				var perSeconds *int64
-				if price.Metered.Per != "" {
-					d, err := ParseDurationSpec(price.Metered.Per)
-					if err != nil {
-						return fmt.Errorf("product %q price %s metered per: %w", product.Key, PriceLabel(product.Key, price), err)
-					}
-					seconds := int64(d.Seconds())
-					perSeconds = &seconds
-				}
-				req.MeteredPrices = append(req.MeteredPrices, billingservice.CatalogMeteredPriceSpec{
-					ProductKey:          product.Key,
-					UnitAmount:          price.UnitAmount,
-					Currency:            price.Currency,
-					AccessDurationHours: cycle,
-					MeterKey:            price.Metered.Meter,
-					RateMicros:          price.Metered.Rate,
-					PerUnits:            price.Metered.PerUnits,
-					PerSeconds:          perSeconds,
-				})
-			}
 		}
 	}
 	return a.Service.SyncCatalogSidecars(ctx, req)

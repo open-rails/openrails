@@ -5,30 +5,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // Active-entitlements SELF read (issue #245). #528 retired the admin
-// feature/product-feature CRUD surface (it was catalog/feature-definition, not
-// per-user billing admin); only the self read remains, surfacing a user's active
-// entitlements. Admin views embed entitlements via the user-detail composite.
+// feature/product-feature CRUD surface; #702 dropped the feature-definition
+// tables entirely — entitlements are plain strings (product.EntitlementsSpec
+// keys). The openrails.entitlements window ledger is the source of truth.
 
-func featureService(r *httprequest.Request) *entitlements.FeatureService {
-	if r.State == nil {
-		return nil
-	}
-	return r.State.FeatureService
+// activeEntitlement is one active entitlement window: the entitlement string
+// (lookup_key) plus its window/source fields.
+type activeEntitlement struct {
+	ID         uuid.UUID                    `json:"id"`
+	CustomerID string                       `json:"customer_id"`
+	LookupKey  string                       `json:"lookup_key"`
+	StartAt    time.Time                    `json:"start_at"`
+	EndAt      *time.Time                   `json:"end_at,omitempty"`
+	SourceType models.EntitlementSourceType `json:"source_type"`
+	SourceID   *uuid.UUID                   `json:"source_id,omitempty"`
 }
 
 // SelfGetActiveEntitlements handles the delegated self surface read. It derives
 // the acting user from the authenticated identity rather than accepting an
 // arbitrary user_id.
 func SelfGetActiveEntitlements(r *httprequest.Request) {
-	svc := featureService(r)
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "feature service unavailable")
+	if r.State == nil || r.State.EntitlementService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
 		return
 	}
 	user := r.GetUser()
@@ -40,14 +46,25 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	writeActiveEntitlements(r, svc, user.ID, at)
-}
-
-func writeActiveEntitlements(r *httprequest.Request, svc *entitlements.FeatureService, userID string, at time.Time) {
-	items, err := svc.GetActiveEntitlements(r.Request.Context(), userID, at)
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	windows, err := r.State.EntitlementService.ListActiveRecords(r.Request.Context(), user.ID, at)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve active entitlements")
 		return
+	}
+	items := make([]activeEntitlement, 0, len(windows))
+	for _, w := range windows {
+		items = append(items, activeEntitlement{
+			ID:         w.ID,
+			CustomerID: w.CustomerID.String(),
+			LookupKey:  w.Entitlement,
+			StartAt:    w.StartAt,
+			EndAt:      w.EndAt,
+			SourceType: w.SourceType,
+			SourceID:   w.SourceID,
+		})
 	}
 	// Stripe-shaped list envelope: object=list, has_more, data[].
 	r.JSON(http.StatusOK, map[string]any{
@@ -58,7 +75,7 @@ func writeActiveEntitlements(r *httprequest.Request, svc *entitlements.FeatureSe
 }
 
 // parseAtQuery reads an optional RFC3339 `at` query param. When absent, returns a
-// zero time (the service defaults it to now).
+// zero time (defaulted to now by the caller).
 func parseAtQuery(r *httprequest.Request) (time.Time, bool) {
 	atStr := strings.TrimSpace(r.Query("at"))
 	if atStr == "" {

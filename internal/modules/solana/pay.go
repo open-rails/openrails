@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -262,8 +263,11 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("failed to store pending payment: %w", err)
 	}
 
-	// Build Solana Pay Transfer Request URL
-	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference)
+	// Build Solana Pay Transfer Request URL. The memo field (#713) stamps the
+	// checkout session id on the wallet-built tx: per the Solana Pay spec the
+	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
+	// Discovery hint, never money truth.
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
 		URL:            url,
@@ -285,7 +289,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 }
 
 // buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
-func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference string) string {
+func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference, memo string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
@@ -313,6 +317,12 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	// Add reference for payment detection
 	params += fmt.Sprintf("&reference=%s", reference)
 
+	// #713 self-recognition memo (SPL Memo instruction, placed by the wallet
+	// before the transfer per spec).
+	if memo != "" {
+		params += fmt.Sprintf("&memo=%s", url.QueryEscape(memo))
+	}
+
 	// Add label
 	label := "Purchase"
 	if s.db != nil {
@@ -327,10 +337,37 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	return baseURL + params
 }
 
+// pendingReferenceMember encodes a pending-set member as "<merchant_id>|<ref>"
+// (#728): the poller fans out per merchant, so every pending reference carries
+// its merchant. References are base58, so '|' never collides.
+func pendingReferenceMember(mid merchant.ID, reference string) string {
+	return mid.String() + "|" + reference
+}
+
+// parsePendingReferenceMember splits a set member back into merchant + ref.
+// ok=false = a pre-#728 bare-reference member (unattributable; dropped).
+func parsePendingReferenceMember(member string) (merchant.ID, string, bool) {
+	midStr, ref, cut := strings.Cut(member, "|")
+	if !cut {
+		return merchant.ID{}, "", false
+	}
+	id, err := uuid.Parse(midStr)
+	if err != nil || id == uuid.Nil || strings.TrimSpace(ref) == "" {
+		return merchant.ID{}, "", false
+	}
+	return merchant.ID(id), strings.TrimSpace(ref), true
+}
+
 // storePendingPayment stores a pending payment in Redis
 func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference string, pending *PendingSolanaPayment) error {
 	if s.redis == nil {
 		return fmt.Errorf("redis not configured")
+	}
+	// #728: the pending set is merchant-attributed; a payment without a resolved
+	// merchant cannot be polled.
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("solana pending payment requires a merchant: %w", err)
 	}
 
 	key := solanaPayKeyPrefix + reference
@@ -345,7 +382,7 @@ func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference st
 	}
 
 	// Add to the pending payments set
-	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
+	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
 		// Try to cleanup the key we just set
 		s.redis.Del(ctx, key)
 		return fmt.Errorf("failed to add to pending set: %w", err)
@@ -384,18 +421,30 @@ func (s *SolanaPayService) GetPendingPayment(ctx context.Context, reference stri
 	return &pending, nil
 }
 
-// GetAllPendingReferences returns all pending payment references
-func (s *SolanaPayService) GetAllPendingReferences(ctx context.Context) ([]string, error) {
+// PendingReferencesByMerchant returns the pending payment references grouped
+// by merchant (#728) — the poller's per-merchant fan-out input. Pre-#728 bare
+// members carry no merchant attribution and are dropped with a WARN (their
+// Redis records expire on their own TTL).
+func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map[merchant.ID][]string, error) {
 	if s.redis == nil {
 		return nil, nil
 	}
 
-	refs, err := s.redis.SMembers(ctx, pendingSolanaPaymentsKey).Result()
+	members, err := s.redis.SMembers(ctx, pendingSolanaPaymentsKey).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending references: %w", err)
 	}
-
-	return refs, nil
+	out := make(map[merchant.ID][]string, len(members))
+	for _, member := range members {
+		mid, ref, ok := parsePendingReferenceMember(member)
+		if !ok {
+			log.WithField("member", member).Warn("Dropping merchant-unattributed Solana pending reference (#728)")
+			s.redis.SRem(ctx, pendingSolanaPaymentsKey, member)
+			continue
+		}
+		out[mid] = append(out[mid], ref)
+	}
+	return out, nil
 }
 
 // RegisterPendingReference adds an already-bound checkout-session reference to the
@@ -412,7 +461,12 @@ func (s *SolanaPayService) RegisterPendingReference(ctx context.Context, referen
 	if reference == "" {
 		return nil
 	}
-	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
+	// #728: merchant-attributed member so the poller polls it in the right scope.
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("solana pending reference requires a merchant: %w", err)
+	}
+	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
 		return fmt.Errorf("failed to add reference to pending set: %w", err)
 	}
 	return nil
@@ -431,8 +485,13 @@ func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference s
 	key := solanaPayKeyPrefix + reference
 	var removeErr error
 
-	// Remove from set
-	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
+	// Remove from set. Members are merchant-attributed (#728); the bare form is
+	// removed too so pre-#728 leftovers self-clean.
+	members := []interface{}{reference}
+	if mid, err := merchant.Require(ctx); err == nil {
+		members = append(members, pendingReferenceMember(mid, reference))
+	}
+	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, members...).Err(); err != nil {
 		removeErr = fmt.Errorf("failed to remove from pending set: %w", err)
 	}
 

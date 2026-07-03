@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,6 @@ import (
 func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	productID := uuid.New()
-	priceID := uuid.New()
 	merchantID := dbtest.TestMerchantID.UUID()
 	meterKey := "vm-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
@@ -31,9 +31,8 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_price_metered WHERE price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE key = $1", meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
@@ -42,20 +41,23 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Catalog: gauge meter (unit-seconds) + metered sidecar at 500_000 micros per
-	// 3600s — rounding-relevant aggregates below prove rate-once semantics.
+	// Catalog: legacy gauge meter (unit-seconds) + the translated rate card at
+	// 500_000 micros per 3600s — rounding-relevant aggregates below prove
+	// rate-once semantics.
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-watermark-"+uuid.NewString(), "Metered Watermark Product", merchantID)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency, access_duration_hours, auto_renew, status) VALUES ($1, $2, $3, $4, $5, $6, true, 'active')`,
-		priceID, merchantID, productID, int64(0), cur, 30)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
-	rateMicros, perUnits, perSeconds := int64(500_000), int64(1), int64(3600)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_price_metered (price_id, merchant_id, meter_key, rate_micros, per_units, per_seconds) VALUES ($1, $2, $3, $4, $5, $6)`,
-		priceID, merchantID, meterKey, rateMicros, perUnits, perSeconds)
+	rateMicros, divideBy := int64(500_000), int64(3600)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
+    'model', 'per_unit',
+    'currency', 'usd',
+    'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
+		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)
 
 	// Fixed period grid: all closes anchor at the same period start (the #672
@@ -82,10 +84,7 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 		require.NoError(t, err)
 	}
 	rate := func(aggregate int64) int64 {
-		v, err := money.RateMeteredAggregate(aggregate, money.MeteredRate{
-			Kind: money.MeterKindGauge, RateMicros: rateMicros, PerUnits: perUnits,
-			Per: time.Duration(perSeconds) * time.Second,
-		})
+		v, err := pricing.ChargeModel{Kind: pricing.ModelPerUnit, UnitAmount: rateMicros, DivideBy: divideBy}.Rate(aggregate)
 		require.NoError(t, err)
 		return v
 	}
@@ -131,7 +130,10 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	require.Equal(t, 2, n)
 	require.Equal(t, rate(2000), total)
 
-	// Watermark row reflects the cumulative accrued amount and the furthest close.
+	// Watermark row reflects the cumulative accrued amount and the furthest
+	// close. Its source is the STABLE meter identity (#707): a mid-period
+	// re-push replaces rate-card rows (fresh ids) but must not reset the
+	// watermark — the id is deliberately absent from the source.
 	var accrued int64
 	var ratedThrough time.Time
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -144,6 +146,24 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	// the FURTHEST close (stale re-close of mid2 cannot roll it back).
 	require.WithinDuration(t, end, ratedThrough, time.Millisecond,
 		"rated_through must be monotone (stale re-close cannot roll it back)")
+
+	// Replace the rate card mid-period (a re-push: delete + reinsert, new id).
+	// The next close accrues nothing new — the watermark survived.
+	_, err = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
+    'model', 'per_unit',
+    'currency', 'usd',
+    'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
+		merchantID, productID, meterKey, rateMicros, divideBy)
+	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, cur, from, end)
+	require.NoError(t, err)
+	n, total = accrualTotals()
+	require.Equal(t, 2, n)
+	require.Equal(t, rate(2000), total, "a mid-period rate-card re-push must not re-bill the prefix")
 
 	// The money conclusion: total outstanding equals rating the period once.
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)

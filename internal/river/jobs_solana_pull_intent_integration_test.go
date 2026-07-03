@@ -33,10 +33,10 @@ type smPresubmitCranker struct {
 }
 
 func (c *smPresubmitCranker) Crank(ctx context.Context, m merchant.ID, sub *models.SolanaSubscription, amt uint64) (string, error) {
-	return c.CrankWithPresubmit(ctx, m, sub, amt, nil)
+	return c.CrankWithPresubmit(ctx, m, sub, amt, uuid.Nil, nil)
 }
 
-func (c *smPresubmitCranker) CrankWithPresubmit(_ context.Context, _ merchant.ID, _ *models.SolanaSubscription, _ uint64, presubmit func(string) error) (string, error) {
+func (c *smPresubmitCranker) CrankWithPresubmit(_ context.Context, _ merchant.ID, _ *models.SolanaSubscription, _ uint64, _ uuid.UUID, presubmit func(string) error) (string, error) {
 	c.calls++
 	if presubmit != nil {
 		if perr := presubmit(c.sig); perr != nil {

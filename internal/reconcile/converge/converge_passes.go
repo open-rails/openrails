@@ -612,7 +612,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				Severity:   "high",
 				SubjectKey: "provider_intent:" + pi.ID.String(),
 				Provider:   "self",
-				Evidence:   map[string]any{"provider_intent_id": pi.ID.String(), "intent_type": pi.IntentType, "intent_status": pi.Status, "provider": pi.Provider},
+				Evidence:   map[string]any{"provider_intent_id": pi.ID.String(), "intent_type": pi.IntentType, "intent_status": pi.Status, "provider": pi.Rail},
 				// surface-only: no Repair (operator/provider action resolves it)
 			})
 		}
@@ -672,7 +672,7 @@ func stuckIntentFinding(si *gen.OpenrailsRailIntent, now time.Time) ConvergeFind
 	ev := map[string]any{
 		"intent_id":       si.ID.String(),
 		"intent_type":     si.IntentType,
-		"provider":        si.Provider,
+		"provider":        si.Rail,
 		"origin":          si.Origin,
 		"status":          si.Status,
 		"attempts":        si.Attempts,
@@ -701,7 +701,7 @@ func stuckIntentFinding(si *gen.OpenrailsRailIntent, now time.Time) ConvergeFind
 		Class:      ClassAdmin, // requires_review: needs a human
 		Severity:   "high",
 		SubjectKey: si.ID.String(),
-		Provider:   si.Provider,
+		Provider:   si.Rail,
 		Evidence:   ev,
 		// surface-only: check and converge never touch the intent itself.
 	}

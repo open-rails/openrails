@@ -16,6 +16,7 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -232,7 +233,15 @@ type DesiredWebhookEndpoint struct {
 	// reconcile recreates it to obtain a fresh secret (the secret can't be
 	// re-fetched from Stripe).
 	HaveSecret bool
+	// ForbidCreate refuses any create/recreate with ErrWebhookCreateForbidden
+	// BEFORE mutating Stripe. MODE 1 (#723): a minted signing secret would seed
+	// only process memory and be lost on reboot.
+	ForbidCreate bool
 }
+
+// ErrWebhookCreateForbidden is returned when reconcile would have to create a
+// managed endpoint (minting a signing secret) but ForbidCreate is set.
+var ErrWebhookCreateForbidden = errors.New("managed stripe webhook endpoint create refused: the minted signing secret cannot be persisted by this caller")
 
 // WebhookReconcileResult reports the action taken and, on Created/Recreated, the
 // new signing secret the caller must persist (empty otherwise — the existing
@@ -272,6 +281,9 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 	}
 
 	if existing == nil {
+		if desired.ForbidCreate {
+			return WebhookReconcileResult{}, ErrWebhookCreateForbidden
+		}
 		ep, secret, err := s.CreateWebhookEndpoint(ctx, desired.URL, desired.EnabledEvents)
 		if err != nil {
 			return WebhookReconcileResult{}, err
@@ -282,6 +294,10 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 	// Version drift or a lost secret both require a recreate (api_version isn't
 	// updatable; the secret can't be re-fetched).
 	if existing.APIVersion != stripeapi.APIVersion || !desired.HaveSecret {
+		if desired.ForbidCreate {
+			// Refuse BEFORE the delete: the existing endpoint must survive.
+			return WebhookReconcileResult{}, fmt.Errorf("recreate needed (api_version drift or lost secret): %w", ErrWebhookCreateForbidden)
+		}
 		if err := s.DeleteWebhookEndpoint(ctx, existing.ID); err != nil {
 			return WebhookReconcileResult{}, fmt.Errorf("recreate (delete old): %w", err)
 		}

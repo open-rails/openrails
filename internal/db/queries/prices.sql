@@ -2,13 +2,13 @@
 
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
-    id, merchant_id, product_id, status, amount, currency,
+    id, merchant_id, product_id, archived, amount, currency,
     access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
+    sqlc.arg(archived)::boolean,
     $3, $4,
     sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(rails),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -27,23 +27,23 @@ FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.id = ANY(sqlc.arg(ids)::uuid[]);
 
--- All prices for a product regardless of status (active + archived/draft) — the
--- catalog converge needs archived rows to reconcile legacy_import prices instead
--- of re-creating them (would violate unique_prices_product_amount_cycle).
+-- All prices for a product, archived included — the catalog converge needs
+-- archived rows to reconcile legacy_import prices instead of re-creating them
+-- (would violate unique_prices_product_amount_cycle).
 -- name: ListPricesByProduct :many
 SELECT * FROM openrails.prices price
 WHERE price.product_id = $1;
 
 -- name: ListActivePricesByProductOrdered :many
 SELECT * FROM openrails.prices price
-WHERE price.product_id = $1 AND price.status = 'active'
+WHERE price.product_id = $1 AND NOT price.archived
 ORDER BY price.amount ASC;
 
 -- name: ListAllActivePricesWithProduct :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.status = 'active'
+WHERE NOT price.archived
 ORDER BY price.amount ASC;
 
 -- name: ListAllPricesWithProduct :many
@@ -54,9 +54,7 @@ ORDER BY price.amount ASC;
 
 -- name: CountPricesFiltered :one
 SELECT count(*) FROM openrails.prices price
-WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
-  AND (NOT sqlc.arg(only_inactive)::boolean OR price.status <> 'active')
-  AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
+WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
@@ -66,9 +64,7 @@ WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
-  AND (NOT sqlc.arg(only_inactive)::boolean OR price.status <> 'active')
-  AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
+WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
@@ -80,8 +76,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 -- include_nmi_fallback consults the canonical "nmi" rail key when a non-"nmi"
 -- rail key is supplied (legacy compatibility).
 SELECT * FROM openrails.prices price
-WHERE price.status <> 'draft'
-  AND (price.rails -> sqlc.arg(rail)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
+WHERE (price.rails -> sqlc.arg(rail)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
        OR (sqlc.arg(include_nmi_fallback)::boolean
            AND price.rails -> 'nmi' ->> 'plan_id' = sqlc.arg(plan_id)::text))
 LIMIT 1;
@@ -92,7 +87,6 @@ FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE (price.rails -> 'ccbill' ->> 'flex_id' = sqlc.arg(ccbill_price_id)::text
        OR price.rails -> 'ccbill' ->> 'recurring_billing_option_id' = sqlc.arg(ccbill_price_id)::text)
-  AND price.status <> 'draft'
 LIMIT 1;
 
 -- name: GetPriceWithProductByStripePriceID :one
@@ -100,13 +94,12 @@ SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.rails -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
-  AND price.status <> 'draft'
 LIMIT 1;
 
 -- name: UpdatePrice :execrows
 UPDATE openrails.prices SET
     product_id = $2,
-    status = $3,
+    archived = $3,
     amount = $4,
     currency = $5,
     access_duration_hours = sqlc.narg(access_duration_hours),

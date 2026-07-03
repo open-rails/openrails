@@ -43,14 +43,14 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		EntitlementsSpec: map[string]*int{
 			"premium_duplicate_purchase": &durationDays,
 		},
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	price := &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		Amount:    1000,
 		Currency:  "USD",
 		CreatedAt: now,
@@ -172,14 +172,14 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 		EntitlementsSpec: map[string]*int{
 			"premium_grandfather": &durationDays,
 		},
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	price := &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		Amount:    1500,
 		Currency:  "USD",
 		CreatedAt: now,
@@ -223,9 +223,8 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 
 	archived, err := priceSvc.GetByID(ctx, priceID)
 	require.NoError(t, err)
-	require.Equal(t, models.CatalogStatusArchived, archived.Status, "Deactivate must archive, not draft")
+	require.True(t, archived.Archived, "Deactivate must archive")
 	require.False(t, archived.IsPurchasable(), "archived price must not be purchasable")
-	require.True(t, archived.IsBillable(), "archived price must remain billable")
 	require.Equal(t, int64(1500), archived.Amount, "renewal must still see the stored amount")
 
 	// Renewal/rebill path: load-by-id is status-agnostic and bills the stored
@@ -266,7 +265,7 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 		DisplayName:      product.DisplayName,
 		Description:      &product.Description,
 		EntitlementsSpec: entSpec,
-		Status:           string(product.Status),
+		Archived:         product.Archived,
 		CreatedAt:        product.CreatedAt,
 		UpdatedAt:        product.UpdatedAt,
 	})
@@ -283,7 +282,7 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 		ProductID:           price.ProductID,
 		Amount:              price.Amount,
 		Currency:            price.Currency,
-		Status:              string(price.Status),
+		Archived:            price.Archived,
 		AccessDurationHours: accessDays,
 		AutoRenew:           price.AutoRenew,
 		CreatedAt:           price.CreatedAt,

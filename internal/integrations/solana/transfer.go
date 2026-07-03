@@ -13,6 +13,7 @@ import (
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -24,6 +25,9 @@ type TransferRequest struct {
 	TokenMint   string
 	Amount      uint64
 	Reference   string
+	// Memo, when set, is stamped as an SPL Memo instruction BEFORE the transfer
+	// (#713 self-recognition; Solana Pay ordering). Discovery hint, never money truth.
+	Memo string
 }
 
 // TransferResponse contains a base64-encoded transaction payload.
@@ -39,7 +43,10 @@ type VerifyTransferRequest struct {
 	ExpectedTokenMint string
 	ExpectedPayer     string
 	ExpectedReference string
-	ProcessedNotAfter *time.Time
+	// ExpectedMemoLocalID, when non-nil, is checked against any #713 purchase
+	// memo on the transaction: mismatch fails, ABSENCE PASSES (pre-memo txs).
+	ExpectedMemoLocalID uuid.UUID
+	ProcessedNotAfter   *time.Time
 }
 
 // BuildTransferTransaction constructs a transfer transaction and returns its base64 encoding.
@@ -61,6 +68,35 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 		return nil, fmt.Errorf("failed to get blockhash: %w", err)
 	}
 
+	instructions, err := buildTransferInstructions(req, fromWallet, toWallet)
+	if err != nil {
+		return nil, err
+	}
+
+	transaction, err := solanago.NewTransaction(
+		instructions,
+		blockhash,
+		solanago.TransactionPayer(fromWallet),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	txBytes, err := transaction.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+
+	return &TransferResponse{
+		TransactionBase64: base64.StdEncoding.EncodeToString(txBytes),
+	}, nil
+}
+
+// buildTransferInstructions assembles the one-off purchase instruction list:
+// optional #713 SPL Memo FIRST, then the SOL/SPL transfer (Solana Pay orders
+// the memo immediately before the transfer), with the Solana Pay reference
+// meta appended to the transfer.
+func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanago.PublicKey) ([]solanago.Instruction, error) {
 	var referencePub *solanago.PublicKey
 	if ref := strings.TrimSpace(req.Reference); ref != "" {
 		refKey, err := solanago.PublicKeyFromBase58(ref)
@@ -71,6 +107,9 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 	}
 
 	var instructions []solanago.Instruction
+	if m := strings.TrimSpace(req.Memo); m != "" {
+		instructions = append(instructions, NewMemoInstruction(m))
+	}
 	if isNativeSOLSymbol(req.TokenSymbol) {
 		transfer := system.NewTransferInstruction(
 			req.Amount,
@@ -111,24 +150,7 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 		}
 		instructions = append(instructions, transfer.Build())
 	}
-
-	transaction, err := solanago.NewTransaction(
-		instructions,
-		blockhash,
-		solanago.TransactionPayer(fromWallet),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create transaction: %w", err)
-	}
-
-	txBytes, err := transaction.MarshalBinary()
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
-	}
-
-	return &TransferResponse{
-		TransactionBase64: base64.StdEncoding.EncodeToString(txBytes),
-	}, nil
+	return instructions, nil
 }
 
 // VerifyTransfer confirms the transaction and validates that it matches expected values.
@@ -154,7 +176,7 @@ func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferReques
 	}
 
 	reference := expectedReference
-	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference); err != nil {
+	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference, req.ExpectedMemoLocalID); err != nil {
 		return fmt.Errorf("transaction content validation failed: %w", err)
 	}
 
@@ -226,7 +248,7 @@ func validateTransferProcessedNotAfter(txResult *rpc.GetTransactionResult, notAf
 	return nil
 }
 
-func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error {
+func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID) error {
 	if txResult.Transaction == nil {
 		return fmt.Errorf("transaction data not available")
 	}
@@ -234,6 +256,11 @@ func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmou
 	tx, err := txResult.Transaction.GetTransaction()
 	if err != nil {
 		return fmt.Errorf("failed to decode transaction: %w", err)
+	}
+
+	// #713: a present purchase memo must name our record; absence passes.
+	if err := VerifyPurchaseMemo(tx, expectedMemoLocalID); err != nil {
+		return err
 	}
 
 	if expectedPayer != "" {

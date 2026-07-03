@@ -35,7 +35,7 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Key:         "test-product-" + productID.String(),
 		DisplayName: "Test Product",
-		Status:      string(models.CatalogStatusActive),
+		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})

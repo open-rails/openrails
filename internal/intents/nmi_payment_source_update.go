@@ -229,7 +229,7 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	}
 	client, _, ok := h.resolveClient(ctx, intent, sub)
 	if !ok {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
+		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	newVault, outcome, ok := h.targetVault(ctx, p)
 	if !ok {
@@ -276,7 +276,7 @@ func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, in
 func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.OpenrailsRailIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
 	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.DB, h.Clients, sub)
 	if err != nil {
-		return nil, Parked(fmt.Sprintf("resolve nmi client for provider %q: %v", intent.Provider, err)), false
+		return nil, Parked(fmt.Sprintf("resolve nmi client for provider %q: %v", intent.Rail, err)), false
 	}
 	if !ok {
 		return nil, Parked(fmt.Sprintf("nmi client not configured for provider account %q", key)), false

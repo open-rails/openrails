@@ -14,8 +14,10 @@ name: Live-Gated Integration
 #                                doujins Mobius sandbox; test card 4111 approved).
 #   NMI_WEBHOOK_SIGNING_SECRET — sandbox webhook signing secret (lifecycle e2e).
 #   NMI_TOKENIZATION_KEY       — optional; browser-tokenization legs.
-#   RAILS_STRIPE_SECRET_KEY    — Stripe TEST-mode key (sk_test_/rk_test_) for the
-#                                live invoice-collection proof.
+#   OPENRAILS_TEST_STRIPE_SECRET_KEY — Stripe TEST-mode key (sk_test_/rk_test_)
+#                                for the live invoice-collection proof (renamed
+#                                from RAILS_STRIPE_SECRET_KEY; the RAILS_ env
+#                                prefix is retired and config.Load rejects it).
 
 on:
   schedule:
@@ -93,11 +95,14 @@ jobs:
         env:
           OPENRAILS_LIVE_RAIL_TESTS: "1"
           TEST_MODE: "true"
-          RAILS_STRIPE_SECRET_KEY: ${{ secrets.RAILS_STRIPE_SECRET_KEY }}
+          OPENRAILS_TEST_STRIPE_SECRET_KEY: ${{ secrets.OPENRAILS_TEST_STRIPE_SECRET_KEY }}
           NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
         run: |
-          if [ -z "${RAILS_STRIPE_SECRET_KEY}" ] && [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
-            echo "no rail credentials set — live invoice tests will self-skip (skip-if-absent preserved)"
+          if [ -z "${OPENRAILS_TEST_STRIPE_SECRET_KEY}" ]; then
+            echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY not set — the Stripe invoice leg will self-skip (create the repo secret; RAILS_STRIPE_SECRET_KEY is retired)"
+          fi
+          if [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
+            echo "::warning::NMI_SANDBOX_SECURITY_KEY not set — the NMI invoice leg will self-skip"
           fi
           bash scripts/test_integration.sh \
             -run 'TestLiveStripeInvoiceCollectionAgainstTestAccount|TestLiveNMIInvoiceCollectionAgainstSandbox' \
@@ -127,10 +132,10 @@ jobs:
         run: go vet -tags stripe_integration ./internal/modules/subscriptions/
       - name: Stripe Model-B upgrade proration (real Stripe TEST mode)
         env:
-          STRIPE_SECRET_KEY: ${{ secrets.RAILS_STRIPE_SECRET_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.OPENRAILS_TEST_STRIPE_SECRET_KEY }}
         run: |
           if [ -z "${STRIPE_SECRET_KEY}" ]; then
-            echo "STRIPE_SECRET_KEY not set — test will self-skip (skip-if-absent preserved)"
+            echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY repo secret not set — test will self-skip (skip-if-absent preserved)"
           fi
           go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/
 

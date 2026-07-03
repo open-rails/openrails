@@ -44,11 +44,6 @@ SELECT * FROM openrails.payment_methods pm
 WHERE pm.rail = $1 AND pm.rail_method_ref = $2
 LIMIT 1;
 
--- name: GetPaymentMethodByInitialTransactionID :one
-SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = $1 AND pm.initial_transaction_id = $2
-LIMIT 1;
-
 -- name: UpdatePaymentMethod :execrows
 UPDATE openrails.payment_methods SET
     customer_id = $2,

@@ -8,7 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProviderRefreshProvidersExcludeSolana(t *testing.T) {
+// Only armed fetchers run — the allowed map gates lane readiness (solana
+// included since #714/#715), and per-merchant arming (#699) decides the rest.
+func TestProviderRefreshProvidersFollowArmedFetchers(t *testing.T) {
 	fetchers := map[reconcile.Provider]reconcile.RailFetcher{
 		reconcile.ProviderSolana: providerRefreshFakeFetcher{provider: reconcile.ProviderSolana},
 		reconcile.ProviderStripe: providerRefreshFakeFetcher{provider: reconcile.ProviderStripe},
@@ -19,8 +21,12 @@ func TestProviderRefreshProvidersExcludeSolana(t *testing.T) {
 	require.Equal(t, []reconcile.Provider{
 		reconcile.ProviderCCBill,
 		reconcile.ProviderNMI,
+		reconcile.ProviderSolana,
 		reconcile.ProviderStripe,
 	}, refreshProviders(fetchers))
+
+	// No fetcher armed (merchant has no accounts on any rail) => no pulls.
+	require.Empty(t, refreshProviders(nil))
 }
 
 type providerRefreshFakeFetcher struct {

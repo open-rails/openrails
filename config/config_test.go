@@ -2,13 +2,15 @@ package config
 
 import (
 	"encoding/base64"
-	"github.com/open-rails/openrails/internal/db/models"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 func TestLoad_EnvMapping(t *testing.T) {
@@ -102,6 +104,89 @@ func TestLoad_EnvMapping(t *testing.T) {
 		_, err := Load("nonexistent-config.yaml")
 		assert.ErrorContains(t, err, "billing_hot_path was removed")
 	})
+
+	// #710 regression: SECRET_BACKEND is a multi-word TOP-LEVEL key. The old
+	// first-underscore splitting mapped it to secret.backend and silently
+	// dropped it — dangerous under #661 declared-intent.
+	t.Run("maps SECRET_BACKEND to the top-level secret_backend (#710)", func(t *testing.T) {
+		t.Setenv("SECRET_BACKEND", "db")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		require.Equal(t, SecretBackendDB, cfg.SecretBackend)
+		require.Equal(t, SecretBackendDB, cfg.SecretStoreBackend())
+	})
+
+	t.Run("maps nested multi-underscore keys (clickhouse.http_addr)", func(t *testing.T) {
+		t.Setenv("CLICKHOUSE_HTTP_ADDR", "http://ch.example:8123")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		require.Equal(t, "http://ch.example:8123", cfg.ClickHouse.HTTPAddr)
+	})
+
+	t.Run("maps CATALOG_RECONCILIATION_INTERVAL to the top-level key (#712)", func(t *testing.T) {
+		t.Setenv("CATALOG_RECONCILIATION_INTERVAL", "30m")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		interval, enabled, err := cfg.CatalogReconciliationSchedule()
+		require.NoError(t, err)
+		require.True(t, enabled)
+		require.Equal(t, 30*time.Minute, interval)
+	})
+
+	t.Run("malformed CATALOG_RECONCILIATION_INTERVAL refuses to boot (#712)", func(t *testing.T) {
+		t.Setenv("CATALOG_RECONCILIATION_INTERVAL", "30minutes")
+
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "catalog_reconciliation_interval")
+	})
+
+	t.Run("maps DB_SQL_TRACE to db.sql_trace (#712)", func(t *testing.T) {
+		t.Setenv("DB_SQL_TRACE", "true")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		require.True(t, cfg.DB.SQLTrace)
+	})
+
+	// #710 hard cut: the deprecated provider_write_mode alias fails loudly.
+	t.Run("rejects retired mode alias env vars (#710)", func(t *testing.T) {
+		for _, name := range []string{"MODE", "BILLING_MODE"} {
+			t.Run(name, func(t *testing.T) {
+				t.Setenv(name, "full")
+				_, err := Load("nonexistent-config.yaml")
+				require.ErrorContains(t, err, "mode was removed")
+				require.ErrorContains(t, err, "provider_write_mode")
+			})
+		}
+	})
+
+	// #712 hard cut: retired library env knobs fail loudly with the new name.
+	t.Run("rejects retired OPENRAILS_ env knobs (#712)", func(t *testing.T) {
+		t.Run("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL", func(t *testing.T) {
+			t.Setenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL", "30m")
+			_, err := Load("nonexistent-config.yaml")
+			require.ErrorContains(t, err, "CATALOG_RECONCILIATION_INTERVAL")
+			require.ErrorContains(t, err, "renamed")
+		})
+		t.Run("OPENRAILS_SQL_TRACE", func(t *testing.T) {
+			t.Setenv("OPENRAILS_SQL_TRACE", "1")
+			_, err := Load("nonexistent-config.yaml")
+			require.ErrorContains(t, err, "db.sql_trace")
+		})
+	})
+}
+
+// #710: yaml `mode:` is a retired key and must fail loudly, not act as an alias.
+func TestLoad_RejectsRetiredModeYAMLKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("mode: readonly\n"), 0o600))
+
+	_, err := Load(cfgPath)
+	require.ErrorContains(t, err, "mode was removed")
 }
 
 func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
@@ -209,12 +294,12 @@ func TestIsTestMode(t *testing.T) {
 		assert.True(t, (&Config{TestMode: true}).IsTestMode())
 	})
 
-	t.Run("orthogonal to mode", func(t *testing.T) {
-		assert.False(t, (&Config{Mode: ModeFull}).IsTestMode())
-		assert.False(t, (&Config{Mode: ModeLimited}).IsTestMode())
-		assert.False(t, (&Config{Mode: ModeReadOnly}).IsTestMode())
-		assert.True(t, (&Config{Mode: ModeFull, TestMode: true}).IsTestMode())
-		assert.True(t, (&Config{Mode: ModeReadOnly, TestMode: true}).IsTestMode())
+	t.Run("orthogonal to provider_write_mode", func(t *testing.T) {
+		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsTestMode())
+		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeLimited}).IsTestMode())
+		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly}).IsTestMode())
+		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}).IsTestMode())
+		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: true}).IsTestMode())
 	})
 }
 
@@ -538,9 +623,8 @@ func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 		"mobius": {
 			Rail: models.RailNMI,
 			NMI: &NMIRailConfig{
-				SecurityKey:     "sec",
-				TokenizationKey: "tok",
-				WebhookSecret:   "wh",
+				SecurityKey:          "sec",
+				WebhookSigningSecret: "wh",
 			},
 		},
 		"stripe_old": {
@@ -551,7 +635,6 @@ func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 	}
 	require.NoError(t, ValidateRailSet(cfg, rails))
 	require.Equal(t, "sec", rails["mobius"].NMI.SecurityKey)
-	require.Equal(t, "tok", rails["mobius"].NMI.TokenizationKey)
 	require.Equal(t, "sk_live_old", rails["stripe_old"].Stripe.SecretKey)
 	require.True(t, rails["stripe_old"].Archived)
 }
@@ -566,7 +649,7 @@ func TestRailConfigRejectsWrongTypedBlock(t *testing.T) {
 // #697: CCBill composite identity is dash-joined; slash-form account ids are
 // rejected loudly (even in dev — a format bug, not a missing credential).
 func TestCCBillAccountIDRejectsSlash(t *testing.T) {
-	ccbillBlock := &CCBillRailConfig{ClientAccNum: "945280", ClientSubAcc: "0000", Salt: "s"}
+	ccbillBlock := &CCBillRailConfig{Salt: "s"}
 	err := ValidateRailSet(&Config{}, RailMerchantAccountSet{
 		"ccbill": {Rail: models.RailCCBill, AccountID: "945280/0000", CCBill: ccbillBlock},
 	})
@@ -576,6 +659,19 @@ func TestCCBillAccountIDRejectsSlash(t *testing.T) {
 	require.NoError(t, ValidateRailSet(&Config{}, RailMerchantAccountSet{
 		"ccbill": {Rail: models.RailCCBill, AccountID: "945280-0000", CCBill: ccbillBlock},
 	}))
+
+	// #711: identity is declared ONCE — the clientAccnum/clientSubacc pair
+	// derives from the dash-joined account_id; an empty account_id is rejected
+	// even in dev.
+	err = ValidateRailSet(&Config{}, RailMerchantAccountSet{
+		"ccbill": {Rail: models.RailCCBill, CCBill: ccbillBlock},
+	})
+	require.ErrorContains(t, err, "account_id is required")
+
+	derived := (&RailMerchantAccountConfig{Rail: models.RailCCBill, AccountID: "945280-0000", CCBill: ccbillBlock}).ToCCBillConfig()
+	require.Equal(t, "945280", derived.ClientAccNum)
+	require.Equal(t, "0000", derived.ClientSubAcc)
+	require.Equal(t, "s", derived.Salt)
 }
 
 func TestSolanaRPCProviderValidation(t *testing.T) {
@@ -596,7 +692,7 @@ func TestSolanaRPCProviderValidation(t *testing.T) {
 	require.ErrorContains(t, err, "rpc_provider public cannot use rpc_api_key")
 }
 
-// TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_secret is a
+// TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_signing_secret is a
 // hard boot error in production but only a warning in development.
 func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 	prodCfg := func() *Config {
@@ -614,42 +710,42 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 		rail      *RailMerchantAccountConfig
 		wantError bool
 	}{
-		// Stripe: missing webhook_secret
+		// Stripe: missing webhook_signing_secret
 		{
-			name:      "stripe/missing webhook_secret in dev → no error",
+			name:      "stripe/missing webhook_signing_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSigningSecret: ""}},
 			wantError: false,
 		},
 		{
-			name:      "stripe/missing webhook_secret in prod → error",
+			name:      "stripe/missing webhook_signing_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSigningSecret: ""}},
 			wantError: true,
 		},
 		{
-			name:      "stripe/present webhook_secret in prod → no error",
+			name:      "stripe/present webhook_signing_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSecret: "whsec_test_dummy"}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSigningSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
-		// NMI: missing webhook_secret (security_key also required outside dev)
+		// NMI: missing webhook_signing_secret (security_key also required outside dev)
 		{
-			name:      "nmi/missing webhook_secret in dev → no error",
+			name:      "nmi/missing webhook_signing_secret in dev → no error",
 			cfg:       devCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: ""}},
 			wantError: false,
 		},
 		{
-			name:      "nmi/missing webhook_secret in prod → error",
+			name:      "nmi/missing webhook_signing_secret in prod → error",
 			cfg:       prodCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: ""}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: ""}},
 			wantError: true,
 		},
 		{
-			name:      "nmi/present webhook_secret in prod → no error",
+			name:      "nmi/present webhook_signing_secret in prod → no error",
 			cfg:       prodCfg(),
-			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSecret: "whsec_test_dummy"}},
+			rail:      &RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: "whsec_test_dummy"}},
 			wantError: false,
 		},
 	}
@@ -763,9 +859,6 @@ func TestOperatingModes(t *testing.T) {
 	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "test"}), "must be one of full, limited, readonly")
 	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "production"}), "must be one of full, limited, readonly")
 
-	// legacy mode remains a compatibility alias while consumers migrate
-	require.True(t, (&Config{Mode: ModeLimited}).IsLimitedMode())
-	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: ProviderWriteModeFull, Mode: ModeLimited}), "conflicts")
 }
 
 func TestFlexiblePortRange(t *testing.T) {

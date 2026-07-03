@@ -248,8 +248,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			last_verified_at timestamptz,
 			replaced_at timestamptz,
 			created_at timestamptz NOT NULL DEFAULT current_timestamp,
-			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
-			owner text NOT NULL DEFAULT 'merchant'
+			updated_at timestamptz NOT NULL DEFAULT current_timestamp
 		);
 		CREATE UNIQUE INDEX uq_rail_merchant_accounts_identity ON openrails.rail_merchant_accounts (rail, environment, account_id);
 	`)

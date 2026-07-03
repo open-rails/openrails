@@ -21,11 +21,11 @@ func loadSchemaMigration(t *testing.T) string {
 		t.Fatalf("LoadFromFS: %v", err)
 	}
 	for _, m := range migrations {
-		if strings.HasPrefix(m.Name, "001_") {
+		if strings.HasPrefix(m.Name, "0001_") {
 			return m.Content
 		}
 	}
-	t.Fatal("migration 001_* not found among loaded up migrations")
+	t.Fatal("migration 0001_* not found among loaded up migrations")
 	return ""
 }
 

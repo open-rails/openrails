@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
@@ -43,7 +41,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, NMIResolver: r.CollectionResolver, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574): always-on provider truth refresh. It wraps
@@ -264,13 +262,18 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 // the #674 write-through kinds (checkout NMI sales, auto-top-up charges,
 // Solana recurring pulls).
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
+	// #730: manual rebills arm store-scoped NMI credentials at charge time
+	// through the ONE #725 builder; boot NMIClients stay the no-store-row
+	// fallback.
+	manualRebill := intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService)
+	manualRebill.SetNMIClientResolver(r.CollectionResolver)
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.NMIClients, clock), // #674: payment-method swap
 		intents.NewCCBillCancelHandler(r.DB, r.CCBillDataLink, clock),       // #696 (nil client parks)
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
-		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),
+		manualRebill,
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Rails, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
@@ -303,7 +306,11 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		solanaPullCore.Cranker = r.SolanaCranker
 	}
 	var solanaChain riverjobs.SolanaTxReader
-	if r.SolanaRPC != nil {
+	if r.SolanaRPCResolver != nil {
+		// #728: the verify leg reads the chain with the intent's merchant-armed
+		// client (store settings win; boot fallback lives inside the resolver).
+		solanaChain = r.SolanaRPCResolver.ChainReader()
+	} else if r.SolanaRPC != nil {
 		solanaChain = r.SolanaRPC
 	}
 	registry.Register(riverjobs.NewSolanaPullIntentHandler(solanaPullCore, intents.NewStore(r.DB), solanaChain))
@@ -337,27 +344,6 @@ func (r *Runtime) IntentRunner() *intents.Runner {
 		clock = clockwork.NewRealClock()
 	}
 	return r.intentRunner(r.buildIntentRegistry(clock), clock)
-}
-
-// catalogReconciliationInterval returns the schedule for the alert-only Stripe
-// catalog reconciliation loop (issue #209). Configurable via the
-// OPENRAILS_CATALOG_RECONCILIATION_INTERVAL env var (Go duration, e.g. "30m",
-// "2h"). Defaults to 1h. A value of "0" (or "0s") disables the loop entirely;
-// the returned ok=false signals the caller to skip scheduling it.
-func catalogReconciliationInterval() (interval time.Duration, ok bool) {
-	raw := strings.TrimSpace(os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL"))
-	if raw == "" {
-		return time.Hour, true
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		// Unparseable -> fall back to the safe default rather than disabling.
-		return time.Hour, true
-	}
-	if d <= 0 {
-		return 0, false // interval=0 disables the loop
-	}
-	return d, true
 }
 
 func (r *Runtime) validateBillingWorkerRuntime() error {
@@ -515,9 +501,13 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Catalog reconciliation loop (issue #209): pull the Stripe catalog and
 	// diff it against the OpenRails DB, recording drift + orphan events.
-	// Alert-only — never mutates Stripe or the catalog rows. Interval is
-	// configurable via OPENRAILS_CATALOG_RECONCILIATION_INTERVAL (0 disables).
-	if interval, ok := catalogReconciliationInterval(); ok {
+	// Alert-only — never mutates Stripe or the catalog rows. Interval is config
+	// catalog_reconciliation_interval (#712; 0 disables, malformed fails here).
+	interval, reconcileEnabled, err := r.Config.CatalogReconciliationSchedule()
+	if err != nil {
+		return nil, err
+	}
+	if reconcileEnabled {
 		jobs = append(jobs, r.healthPeriodic(
 			interval,
 			func() (river.JobArgs, *river.InsertOpts) {

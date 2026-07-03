@@ -70,15 +70,10 @@ func GetPrices(r *httprequest.Request) {
 		Type:     req.Type,
 	}
 
-	if req.Active == nil {
-		active := true
-		filter.Active = &active
-	} else if *req.Active {
-		filter.Active = req.Active
-	} else {
-		active := true
-		filter.Active = &active
-	}
+	// The public surface never exposes archived prices, whatever the caller
+	// asked for.
+	archived := false
+	filter.Archived = &archived
 
 	if req.Product != "" {
 		productID, err := api.ParseProductID(req.Product)

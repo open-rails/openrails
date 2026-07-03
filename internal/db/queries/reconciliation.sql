@@ -9,9 +9,9 @@
 
 -- name: CreateReconciliationRun :one
 INSERT INTO openrails.reconciliation_runs (
-    merchant_id, mode, providers, window_since, window_until, started_at, status
+    merchant_id, mode, rails, window_since, window_until, started_at, status
 ) VALUES (
-    sqlc.arg(merchant_id), sqlc.arg(mode), sqlc.arg(providers),
+    sqlc.arg(merchant_id), sqlc.arg(mode), sqlc.arg(rails),
     sqlc.narg(window_since), sqlc.narg(window_until), now(), 'running'
 )
 RETURNING *;
@@ -56,7 +56,7 @@ INSERT INTO openrails.reconciliation_findings (
     sqlc.narg(evidence)::jsonb,
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN now() ELSE NULL END,
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
-    sqlc.arg(run_id), sqlc.arg(run_id)
+    sqlc.narg(run_id), sqlc.narg(run_id)
 )
 ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
@@ -79,7 +79,7 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
-    last_seen_run = EXCLUDED.last_seen_run,
+    last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *;
@@ -283,13 +283,12 @@ FROM openrails.solana_subscriptions;
 
 -- Billable prices with their rail link blobs (provider_links): the PS-1
 -- materializer maps a remote plan id onto the local price whose rails
--- jsonb carries that id under the provider's key. Draft prices are excluded
--- (not billable); archived prices stay (grandfathered subscriptions bill them).
+-- jsonb carries that id under the provider's key. Archived prices stay
+-- (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, status, rails
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, rails
 FROM openrails.prices
-WHERE rails IS NOT NULL
-  AND status <> 'draft';
+WHERE rails IS NOT NULL;
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
@@ -471,7 +470,7 @@ SELECT s.id, s.status, s.rail,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
-              AND w.provider = s.rail
+              AND w.rail = s.rail
               AND (w.rail_merchant_account_id IS NULL OR w.rail_merchant_account_id = s.rail_merchant_account_id)
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
@@ -500,7 +499,7 @@ ORDER BY created_at;
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
 -- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
 -- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, provider FROM openrails.rail_intents
+SELECT id, intent_type, status, rail FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (

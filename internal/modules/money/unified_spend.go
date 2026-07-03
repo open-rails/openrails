@@ -282,7 +282,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		if itemSourceID == "" {
 			itemSourceID = uuidutil.NewV7().String()
 		}
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, fromOwed, now, map[string]any{
 			"source": source,
 		}); err != nil {
 			return 0, 0, err

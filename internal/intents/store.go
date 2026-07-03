@@ -64,7 +64,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	// provenance (for example an existing subscription pinned to an account).
 	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
 		MerchantID:            p.MerchantID,
-		Provider:              p.Provider,
+		Rail:                  p.Provider,
 		IntentType:            p.IntentType,
 		SubscriptionID:        p.SubscriptionID,
 		PaymentID:             p.PaymentID,

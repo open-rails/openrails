@@ -121,9 +121,9 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	productID, priceID := uuid.New(), uuid.New()
 	insertProductAndPrice(ctx, t, pool, &models.Product{
 		ID: productID, Key: "sale-intent-" + uuid.NewString()[:8], DisplayName: "Sale Intent Test",
-		Status: models.CatalogStatusActive, CreatedAt: now, UpdatedAt: now,
+		Archived: false, CreatedAt: now, UpdatedAt: now,
 	}, &models.Price{
-		ID: priceID, ProductID: productID, Status: models.CatalogStatusActive,
+		ID: priceID, ProductID: productID, Archived: false,
 		Amount: 5_000_000, Currency: "USD", CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
@@ -286,8 +286,8 @@ func TestNMISaleIntent_ChargedButRegistrationFails_VerifierRepairs(t *testing.T)
 	var productID uuid.UUID
 	require.NoError(t, pool.QueryRow(fx.ctx, "SELECT product_id FROM openrails.prices WHERE id = $1", realPriceID).Scan(&productID))
 	// A different amount dodges the (product, amount, window) uniqueness.
-	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, status, merchant_id)
-		VALUES ($1, $2, 6000000, 'USD', 'active', $3)`, missingPriceID, productID, dbtest.TestMerchantID.UUID())
+	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
+		VALUES ($1, $2, 6000000, 'USD', $3)`, missingPriceID, productID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.prices WHERE id = $1", missingPriceID)

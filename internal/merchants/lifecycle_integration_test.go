@@ -61,15 +61,6 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
     PRIMARY KEY (merchant_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_credential_audit (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL,
-    name       TEXT NOT NULL,
-    action     TEXT NOT NULL,
-    actor      TEXT,
-    detail     TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
-);
 
 CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -85,7 +76,6 @@ CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT current_timestamp NOT NULL,
     updated_at timestamptz DEFAULT current_timestamp NOT NULL,
-    owner text DEFAULT 'merchant' NOT NULL,
     PRIMARY KEY (id),
     UNIQUE (rail, environment, account_id)
 );
@@ -115,7 +105,6 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id  UUID NOT NULL,
     status       TEXT NOT NULL DEFAULT 'completed',
-    location     TEXT,
     row_counts   JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     completed_at TIMESTAMPTZ

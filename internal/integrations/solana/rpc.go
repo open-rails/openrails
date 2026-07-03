@@ -243,6 +243,13 @@ type SignatureInfo struct {
 
 // GetSignaturesForAddress finds transactions that reference a specific address.
 func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string, limit int) ([]SignatureInfo, error) {
+	return c.GetSignaturesForAddressPage(ctx, address, "", limit)
+}
+
+// GetSignaturesForAddressPage is GetSignaturesForAddress with a pagination
+// cursor: before != "" continues the newest-first walk strictly below that
+// signature (#714 wallet-scan pagination). limit caps the page (RPC max 1000).
+func (c *RPCClient) GetSignaturesForAddressPage(ctx context.Context, address string, before string, limit int) ([]SignatureInfo, error) {
 	pubkey, err := solanago.PublicKeyFromBase58(strings.TrimSpace(address))
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %w", err)
@@ -254,6 +261,13 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 	if limit > 0 {
 		limitVal := limit
 		opts.Limit = &limitVal
+	}
+	if before = strings.TrimSpace(before); before != "" {
+		sig, err := solanago.SignatureFromBase58(before)
+		if err != nil {
+			return nil, fmt.Errorf("invalid before cursor: %w", err)
+		}
+		opts.Before = sig
 	}
 
 	resp, err := c.fallback.GetSignaturesForAddressWithOpts(ctx, pubkey, opts)
@@ -275,6 +289,47 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 	}
 
 	return results, nil
+}
+
+// ProgramAccountFilter is one memcmp filter for GetProgramAccounts: account
+// data must equal Bytes at Offset. Filters AND together.
+type ProgramAccountFilter struct {
+	Offset uint64
+	Bytes  []byte
+}
+
+// ProgramAccount is one account returned by GetProgramAccounts.
+type ProgramAccount struct {
+	Address solanago.PublicKey
+	Data    []byte
+}
+
+// GetProgramAccounts lists the accounts owned by program that match every
+// memcmp filter — a bulk point-in-time listing (no slot gating), used by the
+// #714 per-plan subscription enumeration.
+func (c *RPCClient) GetProgramAccounts(ctx context.Context, program solanago.PublicKey, filters []ProgramAccountFilter) ([]ProgramAccount, error) {
+	opts := &rpc.GetProgramAccountsOpts{
+		Commitment: rpc.CommitmentFinalized,
+		Encoding:   solanago.EncodingBase64,
+	}
+	for _, f := range filters {
+		opts.Filters = append(opts.Filters, rpc.RPCFilter{
+			Memcmp: &rpc.RPCFilterMemcmp{Offset: f.Offset, Bytes: solanago.Base58(f.Bytes)},
+		})
+	}
+	resp, err := c.fallback.GetProgramAccountsWithOpts(ctx, program, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get program accounts for %s: %w", program.String(), err)
+	}
+	out := make([]ProgramAccount, 0, len(resp))
+	for _, acc := range resp {
+		pa := ProgramAccount{Address: acc.Pubkey}
+		if acc.Account != nil && acc.Account.Data != nil {
+			pa.Data = acc.Account.Data.GetBinary()
+		}
+		out = append(out, pa)
+	}
+	return out, nil
 }
 
 // TokenAccountInfo represents an SPL token account balance for a specific mint.

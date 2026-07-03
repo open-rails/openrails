@@ -71,6 +71,20 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	if opts.Config == nil {
 		return fmt.Errorf("config not loaded; in-process mode requires config")
 	}
+	// #723 two-mode doctrine. MODE 2 (api): the catalog is API-owned DB data —
+	// a mutating YAML push is a second truth and refuses (plan-only stays legal
+	// as a read-only diff). MODE 1 (manifest): the YAML wins unconditionally —
+	// a mutating push always runs the full converge (Insert+Overwrite+Prune),
+	// so partial flags cannot leave the DB projection drifted from the file.
+	if !opts.planOnly() {
+		if !opts.Config.IsManifestMerchantSource() {
+			return fmt.Errorf("merchant_source=api refuses a mutating catalog push (two truths, #723/#724): mutate the catalog via the API, or run merchant_source=manifest; plan-only remains available")
+		}
+		if !opts.Insert || !opts.Overwrite || !opts.Prune {
+			log.Info("merchant_source=manifest: catalog push upgraded to full converge (insert+overwrite+prune) — the YAML is the truth (#723)")
+			opts.Insert, opts.Overwrite, opts.Prune = true, true, true
+		}
+	}
 
 	manifests := make([]*catalog.Manifest, 0, len(targets))
 	for _, target := range targets {
@@ -327,7 +341,7 @@ func catalogNMIClients(cfg *config.Config, rails config.RailMerchantAccountSet, 
 		if providerKey == "" || procConfig == nil || procConfig.NMI == nil || strings.TrimSpace(procConfig.NMI.SecurityKey) == "" {
 			continue
 		}
-		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestMode())
+		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(), cfg.IsTestMode())
 		if err != nil {
 			log.WithError(err).WithField("provider", providerKey).Warn("NMI catalog client unavailable")
 			continue

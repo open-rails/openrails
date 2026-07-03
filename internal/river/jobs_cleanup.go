@@ -34,13 +34,22 @@ type CleanupConfig struct {
 	WebhookEventRetention time.Duration
 }
 
-// DefaultCleanupConfig returns sensible default retention periods
+// DefaultCleanupConfig is the ONE defaults path (#711): worker registration
+// passes it (or a test passes an explicit config); Work never re-defaults —
+// a zero retention is a wiring bug and fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
 		NotificationSeenRetention:   90 * 24 * time.Hour,
 		NotificationUnseenRetention: 180 * 24 * time.Hour,
 		WebhookEventRetention:       webhooks.WebhookIdempotencyTTL,
 	}
+}
+
+func (c CleanupConfig) validate() error {
+	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 {
+		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
+	}
+	return nil
 }
 
 type CleanupExpiredDataArgs struct{}
@@ -71,8 +80,8 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	}
 
 	config := w.Config
-	if config == (CleanupConfig{}) {
-		config = DefaultCleanupConfig()
+	if err := config.validate(); err != nil {
+		return err
 	}
 
 	now := clock.Now()
@@ -159,9 +168,6 @@ func (w CleanupExpiredDataWorker) cleanupOldNotifications(ctx context.Context, n
 // (same pattern as the converge sweep). One merchant's failure doesn't abort
 // the rest.
 func (w CleanupExpiredDataWorker) cleanupWebhookEvents(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	if retention <= 0 {
-		retention = webhooks.WebhookIdempotencyTTL
-	}
 	cutoff := now.Add(-retention)
 
 	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)

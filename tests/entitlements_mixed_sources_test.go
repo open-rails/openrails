@@ -41,7 +41,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 			"premium": nil,
 			"extra":   nil,
 		},
-		Status:     models.CatalogStatusActive,
+		Archived:   false,
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CreatedAt:  clock.Now().UTC(),
 		UpdatedAt:  clock.Now().UTC(),
@@ -50,7 +50,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	suite.InsertPrice(ctx, &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		Amount:    999,
 		Currency:  "usd",
 		// AutoRenew FALSE deliberately (#691): this test pins BOUNDED-window

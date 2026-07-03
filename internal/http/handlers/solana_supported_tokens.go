@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,11 +14,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchants"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -77,14 +80,56 @@ type TokenBalance struct {
 	Sufficient bool   `json:"sufficient"`
 }
 
+// effectiveSolanaRailConfig resolves the Solana runtime knobs for THIS request's
+// merchant (#711): the boot-plane rail config overlaid with the merchant's
+// declared rail-account `settings` (store-wins, #699). This is how standalone
+// reaches the knobs — its boot plane is empty; the manifest declares them per
+// merchant. nil (with nil error) means no Solana account on either plane.
+func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {
+	var base *config.SolanaRailConfig
+	if proc := r.State.Rails.GetSolanaRail(); proc != nil {
+		base = proc.Solana
+	}
+	testMode := r.State.Config != nil && r.State.Config.IsTestMode()
+	if r.State.Merchants != nil {
+		if mid, err := merchant.Require(r.Request.Context()); err == nil {
+			env := config.ExpectedProviderEnvironment(testMode)
+			scope, ok, err := r.State.Merchants.ActiveRailMerchantAccountScope(r.Request.Context(), mid, "solana", env)
+			if err != nil && !errors.Is(err, merchants.ErrNoActiveRailMerchantAccount) {
+				return nil, fmt.Errorf("resolve merchant solana account: %w", err)
+			}
+			if ok {
+				settings, err := config.ParseSolanaAccountSettings(scope.Settings)
+				if err != nil {
+					return nil, err
+				}
+				out := settings.ApplyTo(base)
+				if out.Network == "" {
+					// Network is always derived from test_mode (#349).
+					out.Network = "mainnet"
+					if testMode {
+						out.Network = "devnet"
+					}
+				}
+				return out, nil
+			}
+		}
+	}
+	return base, nil
+}
+
 func GetSupportedTokens(r *httprequest.Request) {
 	cfg := r.State.Config
 	if cfg == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
-	solanaProc := r.State.Rails.GetSolanaRail()
-	if solanaProc == nil {
+	solanaConf, err := effectiveSolanaRailConfig(r)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if solanaConf == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
@@ -94,13 +139,9 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
-	if solanaProc.Solana == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
-		return
-	}
-	tokenMap := normalizeTokenMap(solanaProc.Solana.Tokens)
+	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaProc.Solana.Network))
+		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaConf.Network))
 	}
 
 	mintSet := make(map[string]struct{})
@@ -201,14 +242,18 @@ func GetSolanaConfig(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
-	solanaProc := r.State.Rails.GetSolanaRail()
-	if solanaProc == nil || solanaProc.Solana == nil {
+	solanaConf, err := effectiveSolanaRailConfig(r)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if solanaConf == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
 
-	network := normalizeSolanaNetwork(solanaProc.Solana.Network)
-	tokenMap := normalizeTokenMap(solanaProc.Solana.Tokens)
+	network := normalizeSolanaNetwork(solanaConf.Network)
+	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 	if len(tokenMap) == 0 {
 		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(network))
 	}
@@ -249,9 +294,9 @@ func GetSolanaConfig(r *httprequest.Request) {
 	}
 	resp.Features.SolanaPay = true
 	resp.Features.RecurringSubscriptions = true
-	// Some wallets reject Solana Pay transaction requests that require a merchant
-	// co-signer; require deployments to opt in after validating target wallets.
-	resp.Features.SolanaPayRecurringSubscriptions = solanaProc.Solana.SolanaPayRecurringSubscriptions
+	// Always supported: rebillability is a property of the PRICE (catalog
+	// auto_renew), never merchant config (v2 transaction system).
+	resp.Features.SolanaPayRecurringSubscriptions = true
 
 	r.SuccessJSON(resp)
 }

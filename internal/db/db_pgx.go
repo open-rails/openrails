@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -270,13 +269,9 @@ type errRow struct{ err error }
 
 func (r errRow) Scan(...interface{}) error { return r.err }
 
-// newSQLTracerFromEnv installs a query tracer on the pgx pool when
-// OPENRAILS_SQL_TRACE is set (1/true/debug); off by default.
-func newSQLTracerFromEnv() *tracelog.TraceLog {
-	v := os.Getenv("OPENRAILS_SQL_TRACE")
-	if v == "" || v == "0" || v == "false" {
-		return nil
-	}
+// newSQLTracer is the debug-level pgx query tracer, enabled by config
+// db.sql_trace (#712; was the ad-hoc OPENRAILS_SQL_TRACE env read).
+func newSQLTracer() *tracelog.TraceLog {
 	return &tracelog.TraceLog{
 		Logger:   tracelog.LoggerFunc(logPGX),
 		LogLevel: tracelog.LogLevelDebug,

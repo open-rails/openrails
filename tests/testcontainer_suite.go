@@ -17,6 +17,7 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -190,12 +191,11 @@ func (suite *TestContainerSuite) boot() {
 func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
 	rails := config.RailMerchantAccountSet{
 		"ccbill": {
-			Rail:      models.RailCCBill,
+			Rail: models.RailCCBill,
+			// #711: the clientAccnum/clientSubacc pair derives from the account_id.
 			AccountID: "945280-0000",
 			CCBill: &config.CCBillRailConfig{
-				ClientAccNum: "945280",
-				ClientSubAcc: "0000",
-				Salt:         "test-salt",
+				Salt: "test-salt",
 			},
 		},
 		"solana": {
@@ -205,13 +205,14 @@ func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
 				Tokens: solanatokens.DefaultDevnetTokens(),
 			},
 		},
+		// Test-only env overrides use the OPENRAILS_TEST_* prefix (#711 — the
+		// runtime RAILS_ config prefix is retired; don't teach operators a dead one).
 		"mobius": {
 			Rail:      models.RailNMI,
-			AccountID: envOrDefault("RAILS_MOBIUS_GATEWAY_ID", "579145"),
+			AccountID: envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145"),
 			NMI: &config.NMIRailConfig{
-				SecurityKey:     envOrDefault("RAILS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
-				TokenizationKey: envOrDefault("RAILS_MOBIUS_TOKENIZATION_KEY", ""),
-				WebhookSecret:   envOrDefault("RAILS_MOBIUS_WEBHOOK_SECRET", ""),
+				SecurityKey:          envOrDefault("OPENRAILS_TEST_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
+				WebhookSigningSecret: envOrDefault("OPENRAILS_TEST_MOBIUS_WEBHOOK_SECRET", ""),
 			},
 		},
 	}
@@ -371,7 +372,7 @@ func (suite *TestContainerSuite) resetNMIClients() {
 	clients := make(map[string]*nmi.NMIClient)
 	for _, proc := range suite.Rails.ByRail(models.RailNMI) {
 		accountID := proc.EffectiveAccountID()
-		settings := proc.ToNMIProviderSettings(accountID)
+		settings := proc.ToNMIProviderSettings()
 		client, err := nmi.NewClient(accountID, settings, suite.Config.IsTestMode())
 		require.NoError(suite.t, err)
 		client.ReadOnly = suite.Config.IsProviderReadOnly()
@@ -398,6 +399,26 @@ func (suite *TestContainerSuite) resetNMIClients() {
 		if rt.CheckoutService.NMISaleService != nil {
 			rt.CheckoutService.NMISaleService.NMIClients = clients
 		}
+	}
+	suite.RearmIntentPlumbing()
+}
+
+// RearmIntentPlumbing rebuilds the inline intent runner + through-structs from
+// the runtime's CURRENT clients (#729). The intent registry captures NMIClients
+// at build time, so any test that swaps the map must re-arm or the #674
+// write-through paths keep talking to the boot-time clients.
+func (suite *TestContainerSuite) RearmIntentPlumbing() {
+	rt := suite.App.Runtime
+	runner := rt.IntentRunner()
+	rt.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: runner, DB: rt.DB}
+	if rt.CheckoutService != nil {
+		rt.CheckoutService.Intents = runner
+		if rt.CheckoutService.NMISaleService != nil {
+			rt.CheckoutService.NMISaleService.Intents = runner
+		}
+	}
+	if rt.VaultService != nil {
+		rt.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
 	}
 }
 

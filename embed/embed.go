@@ -129,7 +129,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 // the transcribed localClient — see unifiedClient and the localClient doc for
 // the authz reasoning.
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
-	c := &localClient{svc: r.svc}
+	c := &localClient{svc: r.svc, rt: r.emb.App().Runtime}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)

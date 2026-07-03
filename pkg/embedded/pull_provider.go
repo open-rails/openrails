@@ -3,6 +3,7 @@ package embedded
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +14,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -27,6 +30,11 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// BillingConfig / MerchantConfig alias the bootstrap merchant-manifest model
+// so hosts can hand their parsed manifest to the CLI lanes (#723).
+type BillingConfig = boot.BillingConfig
+type MerchantConfig = boot.MerchantConfig
 
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
@@ -42,6 +50,21 @@ type PullProviderOptions struct {
 	Overwrite           bool
 	Prune               bool
 	Out                 io.Writer
+
+	// MerchantManifest is the parsed MODE-1 merchant manifest (#723) for this
+	// one-off process — embedded hosts pass the same manifest they boot from.
+	// Nil falls back to MerchantManifestPath.
+	MerchantManifest *BillingConfig
+	// MerchantManifestPath reads the MODE-1 manifest from disk when
+	// MerchantManifest is nil. Empty tries the conventional
+	// bootstrap.DefaultMerchantConfigManifestPath (optional); an explicit path
+	// must load. Ignored in merchant_source=api.
+	MerchantManifestPath string
+
+	// Endpoints overrides provider base URLs on store-armed pull clients — a
+	// test seam for fake provider HTTP servers (mirrors the refresh worker's
+	// PullEndpoints). Zero value = real endpoints.
+	Endpoints reconcile.ProviderEndpoints
 }
 
 // PullProviderReportOptions mirrors `openrails pull-provider report`.
@@ -82,7 +105,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		providers = append(providers, reconcile.Provider(strings.ToLower(strings.TrimSpace(p))))
 	}
 
-	rt, cleanup, err := newPullProviderRuntime(ctx, opts.Config)
+	rt, cleanup, err := newPullProviderRuntime(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -127,6 +150,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			CCBillDataLink: rt.CCBillDataLink,
 			SolanaRPC:      rt.SolanaRPC,
 			AccountIDs:     accountPins,
+			Endpoints:      opts.Endpoints,
 		}.Build(ctx, merchantID)
 		fetchers := armed.Fetchers
 		if len(fetchers) == 0 {
@@ -286,7 +310,8 @@ type pullProviderRuntime struct {
 	SolanaRPC      *solanaint.RPCClient
 }
 
-func newPullProviderRuntime(ctx context.Context, cfg *config.Config) (*pullProviderRuntime, func(), error) {
+func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pullProviderRuntime, func(), error) {
+	cfg := opts.Config
 	if cfg == nil || cfg.DB == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
@@ -307,11 +332,21 @@ func newPullProviderRuntime(ctx context.Context, cfg *config.Config) (*pullProvi
 		cleanup()
 		return nil, nil, err
 	}
-	// #699: pulls arm from the per-merchant secrets store. A store build
-	// failure degrades loudly to the boot-config plane instead of aborting the
-	// operator command.
+	// #699: pulls arm from the per-merchant secrets store with the same
+	// semantics as the server's River pulls (store wins; a declared account
+	// with a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the
+	// manifest is on disk for a one-off process too — an ephemeral in-memory
+	// plane seeded from it IS the store. Mode-2 store build failure degrades
+	// loudly to the boot-config plane instead of aborting the operator command.
 	var merchantsSvc *merchants.Service
-	if backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool()); err != nil {
+	if cfg.IsManifestMerchantSource() {
+		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		merchantsSvc = svc
+	} else if backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool()); err != nil {
 		log.WithError(err).Warn("pull-provider: merchant secret store unavailable; pulls arm from boot-config rails only (#699)")
 	} else if svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode())); err != nil {
 		log.WithError(err).Warn("pull-provider: merchants service unavailable; pulls arm from boot-config rails only (#699)")
@@ -329,15 +364,77 @@ func newPullProviderRuntime(ctx context.Context, cfg *config.Config) (*pullProvi
 	}, cleanup, nil
 }
 
+// pullProviderManifestPlane builds the MODE-1 pull plane for a one-off process
+// (#723): the on-disk manifest seeds an EPHEMERAL in-memory secret store — the
+// same plane the server seeds at boot; nothing persists — and the merchants
+// service arms #699 pulls over it. No manifest passed and none at the
+// conventional path → nil service (boot-config rails only, e.g. a read-side
+// bind host); a manifest that fails to load or seed aborts the command.
+func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database *db.DB, opts PullProviderOptions) (*merchants.Service, error) {
+	manifest := opts.MerchantManifest
+	if manifest == nil {
+		path := strings.TrimSpace(opts.MerchantManifestPath)
+		explicit := path != ""
+		if !explicit {
+			path = boot.DefaultMerchantConfigManifestPath
+		}
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) && !explicit {
+			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; pulls arm from boot-config rails only (#723)")
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("pull-provider: read merchant manifest %s: %w", path, err)
+		}
+		manifest, err = boot.LoadMerchantConfigManifestBytes(raw)
+		if err != nil {
+			return nil, fmt.Errorf("pull-provider: merchant manifest %s: %w", path, err)
+		}
+	}
+	transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("pull-provider: %w", err)
+	}
+	plane := merchants.NewManifestSecretStore()
+	seeder := plane.Seeder()
+	for slug, mt := range manifest.Merchants {
+		var idStr string
+		err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).Scan(&idStr)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Never provisioned → no local mirror rows to pull for it.
+			log.WithField("merchant", slug).Warn("pull-provider: manifest merchant has no merchant row; skipping its secret plane")
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("pull-provider: resolve manifest merchant %q: %w", slug, err)
+		}
+		mid, err := merchant.ParseID(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("pull-provider: manifest merchant %q id: %w", slug, err)
+		}
+		if err := boot.SeedMerchantManifestSecretPlane(ctx, cfg, mid, mt, seeder, transit); err != nil {
+			return nil, fmt.Errorf("pull-provider: seed manifest secrets for %q: %w", slug, err)
+		}
+	}
+	svc, err := merchants.NewService(database.DataPool(), plane, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+	if err != nil {
+		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
+	}
+	return svc, nil
+}
+
 func pullProviderCCBillDataLink(cfg *config.Config, rails config.RailMerchantAccountSet) (*ccbill.DataLinkClient, error) {
 	_, proc, err := rails.ActiveRailByType(models.RailCCBill)
 	if err != nil {
 		return nil, err
 	}
-	if proc == nil || proc.CCBill == nil || proc.CCBill.DataLinkUsername == "" || proc.CCBill.DataLinkPassword == "" || proc.CCBill.ClientAccNum == "" {
+	if proc == nil || proc.CCBill == nil || proc.CCBill.DataLinkUsername == "" || proc.CCBill.DataLinkPassword == "" {
 		return nil, nil
 	}
 	ccbillConfig := proc.ToCCBillConfig()
+	if ccbillConfig.ClientAccNum == "" {
+		return nil, nil
+	}
 	ccbillConfig.TestMode = cfg.IsTestMode()
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }

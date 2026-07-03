@@ -34,20 +34,17 @@ func main() {
 
 			// --provider-write-mode rides the same koanf pipeline as everything
 			// else by overwriting PROVIDER_WRITE_MODE before Load: flag beats env
-			// beats yaml. --mode is retained as a deprecated alias.
+			// beats yaml. The deprecated --mode alias is gone (#710).
 			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
 				if err := os.Setenv("PROVIDER_WRITE_MODE", strings.TrimSpace(mode)); err != nil {
 					return fmt.Errorf("failed to apply --provider-write-mode: %w", err)
 				}
-			} else if mode, err := cmd.Flags().GetString("mode"); err == nil && strings.TrimSpace(mode) != "" {
-				if err := os.Setenv("MODE", strings.TrimSpace(mode)); err != nil {
-					return fmt.Errorf("failed to apply --mode: %w", err)
-				}
 			}
 
-			// --test-mode mirrors --mode: overwrite the TEST_MODE env var before
-			// Load so flag beats env beats yaml. Only applied when the flag was
-			// passed explicitly, so an unset flag never clobbers TEST_MODE.
+			// --test-mode mirrors --provider-write-mode: overwrite the TEST_MODE
+			// env var before Load so flag beats env beats yaml. Only applied when
+			// the flag was passed explicitly, so an unset flag never clobbers
+			// TEST_MODE.
 			if cmd.Flags().Changed("test-mode") {
 				testMode, err := cmd.Flags().GetBool("test-mode")
 				if err != nil {
@@ -73,8 +70,6 @@ func main() {
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
 		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required outside development)")
-	rootCmd.PersistentFlags().
-		String("mode", "", "Deprecated alias for --provider-write-mode")
 	rootCmd.PersistentFlags().
 		Bool("test-mode", false, "Use sandbox rail credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
 
@@ -155,9 +150,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	startWorkers := !noWorkers
 	config.LogStartupStatus(cfg)
-	if err := config.ConfigureProcessGlobals(cfg); err != nil {
-		return err
-	}
 
 	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
 	if err != nil {
@@ -302,9 +294,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 func runWorker(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	config.LogStartupStatus(cfg)
-	if err := config.ConfigureProcessGlobals(cfg); err != nil {
-		return err
-	}
 
 	application, err := app.Bootstrap(cfg)
 	if err != nil {

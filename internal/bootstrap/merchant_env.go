@@ -15,6 +15,8 @@ const MerchantBillingEnvPrefix = "BILLING_"
 //	-> merchants.doujins.accounts.ccbill.ccbill.secrets.datalink_username
 //	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
 //	-> merchants.doujins.accounts.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS
+//	-> merchants.doujins.delegated_invoker_wasted_spend_windows (JSON list value)
 //
 // Map-key spans are lower-kebab-cased. Keep merchant/provider account keys
 // lowercase, avoid underscores in the YAML keys, and avoid the fixed section
@@ -40,11 +42,11 @@ func MerchantBillingEnvKey(envName string) string {
 	rest := tokens[1+sectionIdx+sectionWidth:]
 	base := "merchants." + merchantKey + "." + section
 	switch section {
-	case "display_name":
+	case "display_name", "delegated_invoker_wasted_spend_windows":
 		if len(rest) == 0 {
 			return base
 		}
-	case "issuer", "profile", "invoice":
+	case "profile", "invoice":
 		if len(rest) > 0 {
 			return base + "." + strings.ToLower(strings.Join(rest, "_"))
 		}
@@ -60,7 +62,6 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		key string
 	}{
 		{"DISPLAY_NAME", "display_name"},
-		{"ISSUER", "issuer"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
 		{"ACCOUNTS", "accounts"},
@@ -122,23 +123,40 @@ func providerAccountEnvKey(base string, tokens []string) string {
 // nobody declared. The retired anchors are therefore poison token sequences
 // anywhere in the name (which also means a merchant key span must not contain
 // them, e.g. a merchant slugged "provider" cannot use env overlays).
+//
+// It also rejects any BILLING_MERCHANTS_* var that routes to no manifest field
+// (#710): the namespace is ours, so a typo'd or retired name (e.g. the removed
+// ISSUER section) is an error, never a silent drop.
 func rejectRenamedMerchantEnvVars() error {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(name, MerchantBillingEnvPrefix+"MERCHANTS_") {
-			continue
+		if err := rejectRenamedMerchantEnvName("env", name); err != nil {
+			return err
 		}
-		tokens := strings.Split(name, "_")
-		for _, old := range [][]string{
-			{"RAIL", "MERCHANT", "ACCOUNTS"},
-			{"PROVIDER", "ACCOUNTS"},
-		} {
-			for i := range tokens {
-				if hasPrefixTokens(tokens[i:], old) {
-					return fmt.Errorf("env %s: %s was renamed to ACCOUNTS (merchants.<slug>.accounts, #698); use BILLING_MERCHANTS_<MERCHANT>_ACCOUNTS_...", name, strings.Join(old, "_"))
-				}
+	}
+	return nil
+}
+
+// rejectRenamedMerchantEnvName applies the poison-token and no-route checks to
+// a single BILLING_MERCHANTS_* name; source labels the origin (env / secret
+// file) in the error.
+func rejectRenamedMerchantEnvName(source, name string) error {
+	if !strings.HasPrefix(name, MerchantBillingEnvPrefix+"MERCHANTS_") {
+		return nil
+	}
+	tokens := strings.Split(name, "_")
+	for _, old := range [][]string{
+		{"RAIL", "MERCHANT", "ACCOUNTS"},
+		{"PROVIDER", "ACCOUNTS"},
+	} {
+		for i := range tokens {
+			if hasPrefixTokens(tokens[i:], old) {
+				return fmt.Errorf("%s %s: %s was renamed to ACCOUNTS (merchants.<slug>.accounts, #698); use BILLING_MERCHANTS_<MERCHANT>_ACCOUNTS_...", source, name, strings.Join(old, "_"))
 			}
 		}
+	}
+	if MerchantBillingEnvKey(name) == "" {
+		return fmt.Errorf("%s %s does not route to a merchant manifest field (#710); see MerchantBillingEnvKey for the accepted BILLING_MERCHANTS_* shapes", source, name)
 	}
 	return nil
 }

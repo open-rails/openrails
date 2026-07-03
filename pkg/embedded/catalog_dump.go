@@ -141,7 +141,7 @@ func dumpProductIsCreditTopUp(p catalog.Product) bool {
 func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]uuid.UUID, map[uuid.UUID]*catalog.Product, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
 	SELECT id, key, display_name, COALESCE(description, ''), COALESCE(entitlements_spec, '{}'::jsonb),
-	       COALESCE(credits_spec, '{}'::jsonb), tier_group, tier_rank, status
+	       COALESCE(credits_spec, '{}'::jsonb), tier_group, tier_rank, archived
 	FROM openrails.products
 	WHERE merchant_id = $1
 	ORDER BY COALESCE(tier_group, ''), tier_rank, key`, merchantID)
@@ -157,16 +157,12 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 			p                           catalog.Product
 			entitlementsRaw, creditsRaw []byte
 			tierGroup                   sql.NullString
-			status                      string
 		)
-		if err := rows.Scan(&id, &p.Key, &p.DisplayName, &p.Description, &entitlementsRaw, &creditsRaw, &tierGroup, &p.TierRank, &status); err != nil {
+		if err := rows.Scan(&id, &p.Key, &p.DisplayName, &p.Description, &entitlementsRaw, &creditsRaw, &tierGroup, &p.TierRank, &p.Archived); err != nil {
 			return nil, nil, err
 		}
 		if tierGroup.Valid {
 			p.TierGroup = tierGroup.String
-		}
-		if status != "" && status != "active" {
-			p.Active = boolPtr(false)
 		}
 		p.Entitlements = entitlementKeys(entitlementsRaw)
 		p.Credits = creditGrants(creditsRaw)
@@ -297,12 +293,13 @@ ORDER BY product_id, usage_limit_key`, merchantID)
 }
 
 func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
+	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
+	// are translated at push time, so no price-attached metered shape exists.
 	rows, err := database.Qx(ctx).Query(ctx, `
 SELECT p.product_id, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
        p.trial_unit_amount, p.trial_duration_hours, COALESCE(p.rails, '{}'::jsonb),
-       p.status, pm.meter_key, pm.rate_micros, pm.per_units, pm.per_seconds
+       p.archived
 FROM openrails.prices p
-LEFT JOIN openrails.catalog_price_metered pm ON pm.price_id = p.id AND pm.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1
 ORDER BY p.product_id, p.amount, p.currency`, merchantID)
 	if err != nil {
@@ -316,12 +313,8 @@ ORDER BY p.product_id, p.amount, p.currency`, merchantID)
 			accessHours, trialHours sql.NullInt64
 			trialAmount             sql.NullInt64
 			railsRaw                []byte
-			status                  string
-			meterKey                sql.NullString
-			rateMicros, perUnits    sql.NullInt64
-			perSeconds              sql.NullInt64
 		)
-		if err := rows.Scan(&productID, &price.UnitAmount, &price.Currency, &accessHours, &price.AutoRenew, &trialAmount, &trialHours, &railsRaw, &status, &meterKey, &rateMicros, &perUnits, &perSeconds); err != nil {
+		if err := rows.Scan(&productID, &price.UnitAmount, &price.Currency, &accessHours, &price.AutoRenew, &trialAmount, &trialHours, &railsRaw, &price.Archived); err != nil {
 			return err
 		}
 		if p := byID[productID]; p != nil {
@@ -331,26 +324,11 @@ ORDER BY p.product_id, p.amount, p.currency`, merchantID)
 			if trialAmount.Valid && trialHours.Valid {
 				price.Trial = &catalog.PriceTrial{UnitAmount: trialAmount.Int64, Duration: hoursSpec(int(trialHours.Int64))}
 			}
-			if status != "" && status != "active" {
-				price.Active = boolPtr(false)
-			}
 			price.ProviderLinks = providerLinks(railsRaw)
 			for provider := range price.ProviderLinks {
 				price.Providers = append(price.Providers, provider)
 			}
 			sort.Strings(price.Providers)
-			if meterKey.Valid {
-				price.Metered = &catalog.MeteredPrice{Meter: meterKey.String}
-				if rateMicros.Valid {
-					price.Metered.Rate = rateMicros.Int64
-				}
-				if perUnits.Valid {
-					price.Metered.PerUnits = perUnits.Int64
-				}
-				if perSeconds.Valid {
-					price.Metered.Per = secondsSpec(perSeconds.Int64)
-				}
-			}
 			p.Prices = append(p.Prices, price)
 		}
 	}
@@ -402,7 +380,7 @@ ORDER BY product_id, ordinal`, merchantID)
 
 func dumpCatalogCreditPurchasePrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT product_id, credit_key, currency, providers, input_min, input_max, COALESCE(round, ''), price
+SELECT product_id, credit_key, currency, rails, input_min, input_max, COALESCE(round, ''), price
 FROM openrails.catalog_credit_purchase_prices
 WHERE merchant_id = $1
 ORDER BY product_id, ordinal`, merchantID)
@@ -507,5 +485,3 @@ func secondsSpec(seconds int64) string {
 	}
 	return fmt.Sprintf("%ds", seconds)
 }
-
-func boolPtr(v bool) *bool { return &v }

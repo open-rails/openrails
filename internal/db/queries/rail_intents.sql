@@ -21,11 +21,11 @@
 -- Always RETURNs the canonical row for the key.
 -- name: EnqueueRailIntent :one
 INSERT INTO openrails.rail_intents (
-    merchant_id, provider, intent_type, subscription_id, payment_id, price_id,
+    merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     expires_at, rail_merchant_account_id
 ) VALUES (
-    sqlc.arg(merchant_id), sqlc.arg(provider), sqlc.arg(intent_type),
+    sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
@@ -272,14 +272,14 @@ SELECT * FROM openrails.rail_intents WHERE id = $1;
 -- name: CountRailIntents :one
 SELECT count(*) FROM openrails.rail_intents
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid);
 
 -- name: ListRailIntents :many
 SELECT * FROM openrails.rail_intents
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
 ORDER BY created_at DESC, id

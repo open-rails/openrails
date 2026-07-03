@@ -164,40 +164,6 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (Openr
 	return i, err
 }
 
-const getPaymentMethodByInitialTransactionID = `-- name: GetPaymentMethodByInitialTransactionID :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver FROM openrails.payment_methods pm
-WHERE pm.rail = $1 AND pm.initial_transaction_id = $2
-LIMIT 1
-`
-
-type GetPaymentMethodByInitialTransactionIDParams struct {
-	Rail                 string
-	InitialTransactionID string
-}
-
-func (q *Queries) GetPaymentMethodByInitialTransactionID(ctx context.Context, arg GetPaymentMethodByInitialTransactionIDParams) (OpenrailsPaymentMethod, error) {
-	row := q.db.QueryRow(ctx, getPaymentMethodByInitialTransactionID, arg.Rail, arg.InitialTransactionID)
-	var i OpenrailsPaymentMethod
-	err := row.Scan(
-		&i.ID,
-		&i.Rail,
-		&i.InitialTransactionID,
-		&i.LastFour,
-		&i.CardType,
-		&i.ExpiryDate,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.RailMerchantAccountID,
-		&i.RailCustomerRef,
-		&i.RailMethodRef,
-		&i.RebillDriver,
-	)
-	return i, err
-}
-
 const getPaymentMethodByRailMethodRef = `-- name: GetPaymentMethodByRailMethodRef :one
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver FROM openrails.payment_methods pm
 WHERE pm.rail = $1 AND pm.rail_method_ref = $2
@@ -246,7 +212,7 @@ ORDER BY s.payment_method_id, p.purchased_at DESC
 type ListLatestChargeByPaymentMethodIDsRow struct {
 	PaymentMethodID *uuid.UUID
 	PurchasedAt     time.Time
-	Status          OpenrailsPurchaseStatus
+	Status          OpenrailsPaymentStatus
 }
 
 // #589 derived health: the most recent charge (purchased_at + status) per payment

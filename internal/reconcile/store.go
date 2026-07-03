@@ -29,8 +29,8 @@ type FindingRecord struct {
 	RemoteEvidence    map[string]any `json:"-"`
 	IntentEvidence    map[string]any `json:"-"`
 	ResolutionEvid    map[string]any `json:"-"`
-	FirstSeenRun      uuid.UUID      `json:"first_seen_run"`
-	LastSeenRun       uuid.UUID      `json:"last_seen_run"`
+	FirstSeenRun      *uuid.UUID     `json:"first_seen_run,omitempty"`
+	LastSeenRun       *uuid.UUID     `json:"last_seen_run,omitempty"`
 	LastSeenAt        time.Time      `json:"last_seen_at"`
 	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
 	Resolution        string         `json:"resolution,omitempty"`
@@ -134,7 +134,7 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
 		MerchantID:  tid.UUID(),
 		Mode:        string(mode),
-		Providers:   names,
+		Rails:       names,
 		WindowSince: since,
 		WindowUntil: until,
 	})
@@ -175,7 +175,7 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 		Status:            string(f.Status),
 		RecommendedAction: action,
 		Evidence:          findingEvidence(f),
-		RunID:             runID,
+		RunID:             &runID,
 	})
 	if err != nil {
 		return FindingRecord{}, err
@@ -204,7 +204,7 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, ru
 	providerStr := string(provider)
 	return s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
 		Provider:     &providerStr,
-		RunID:        runID,
+		RunID:        &runID,
 		FindingTypes: names,
 	})
 }
@@ -621,7 +621,7 @@ func runRecordFromRow(row gen.OpenrailsReconciliationRun) RunRecord {
 		ID:          row.ID,
 		MerchantID:  row.MerchantID,
 		Mode:        Mode(row.Mode),
-		Providers:   row.Providers,
+		Providers:   row.Rails,
 		WindowSince: row.WindowSince,
 		WindowUntil: row.WindowUntil,
 		StartedAt:   row.StartedAt,

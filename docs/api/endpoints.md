@@ -434,7 +434,7 @@ Auto-create support:
 - CCBill: link-only (provide `form_name` + `flex_id`).
 
 ### PATCH /v1/merchant/catalog/prices/{id}
-Update price display name, rails mapping, or active status.
+Update price rails mapping or the `archived` lifecycle flag.
 
 ### Provider registration & content-addressed dedup
 

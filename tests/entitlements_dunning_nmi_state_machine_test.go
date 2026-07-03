@@ -46,7 +46,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 			"premium": nil,
 			"extra":   nil,
 		},
-		Status:    models.CatalogStatusActive,
+		Archived:  false,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	})
@@ -54,7 +54,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	suite.InsertPrice(ctx, &models.Price{
 		ID:                  priceID,
 		ProductID:           productID,
-		Status:              models.CatalogStatusActive,
+		Archived:            false,
 		Amount:              999,
 		Currency:            "usd",
 		AccessDurationHours: &billingDays, AutoRenew: true,

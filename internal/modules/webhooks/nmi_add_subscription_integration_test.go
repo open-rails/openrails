@@ -140,7 +140,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 		DisplayName:      "Premium Membership",
 		Description:      &description,
 		EntitlementsSpec: entitlementsSpecJSON,
-		Status:           string(models.CatalogStatusActive),
+		Archived:         false,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -153,7 +153,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 		ProductID:           f.productID,
 		Amount:              23_990_000,
 		Currency:            "USD",
-		Status:              string(models.CatalogStatusActive),
+		Archived:            false,
 		AccessDurationHours: &billingCycleHours,
 		AutoRenew:           true,
 		CreatedAt:           now,

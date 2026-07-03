@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,11 +18,11 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/iputil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -69,8 +70,6 @@ type Config struct {
 	// explicitly sets full or limited. Outside development an explicit value is
 	// still REQUIRED (Validate refuses to boot without one).
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
-	// Mode is a deprecated compatibility alias for provider_write_mode.
-	Mode string `koanf:"mode,omitempty"`
 
 	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode. When
 	// true, every rail routes to its sandbox environment AND the
@@ -110,14 +109,79 @@ type Config struct {
 	// It is declared intent, never auto-detected and never auto-fallback — the data
 	// lives in exactly one place (#661). Empty derives from vault.enabled for
 	// backward-compat (historically vault.enabled=true implied Vault KV). Env:
-	// SECRET_BACKEND / BILLING_SECRET_BACKEND.
+	// SECRET_BACKEND. Only consulted in merchant_source=api mode — MODE 1 (#723)
+	// holds secrets in memory and never constructs a persistent secret store.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
+
+	// MerchantSource is the two-mode doctrine switch (#723/#724): where merchant
+	// config + catalog truth lives. ONE knob for both — deliberately no separate
+	// catalog_source.
+	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
+	//     manifest + catalog + BILLING_MERCHANTS_* env / secret-file overlays) IS
+	//     the truth, held in memory. No merchant-secret store is constructed;
+	//     catalog/provider-config mutation APIs are rejected (405); change =
+	//     edit the YAML + reboot. DB rows are boot-converged projections for FKs.
+	//   - "api": MODE 2. No manifests at boot (their presence refuses boot —
+	//     two truths); merchants/catalog/secrets live in the DB + secret backend
+	//     and mutate over the HTTP APIs.
+	// Deployment shape does NOT imply mode — embedded and standalone can run
+	// either. Env: MERCHANT_SOURCE. Unknown values refuse to load.
+	MerchantSource string `koanf:"merchant_source,omitempty"`
+
+	// CatalogReconciliationInterval schedules the alert-only catalog
+	// reconciliation pull loop (#209/#712): a Go duration ("30m", "2h"). Empty
+	// defaults to 1h; "0" disables the loop; malformed values refuse to boot.
+	// Env: CATALOG_RECONCILIATION_INTERVAL.
+	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval,omitempty"`
+}
+
+// CatalogReconciliationSchedule resolves the catalog reconciliation loop
+// schedule: empty → 1h default, <=0 → disabled. A malformed value is an error
+// — a typo must never silently pick a schedule (#712).
+func (cfg *Config) CatalogReconciliationSchedule() (interval time.Duration, enabled bool, err error) {
+	raw := ""
+	if cfg != nil {
+		raw = strings.TrimSpace(cfg.CatalogReconciliationInterval)
+	}
+	if raw == "" {
+		return time.Hour, true, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("catalog_reconciliation_interval %q is not a Go duration (e.g. 30m, 2h; 0 disables): %w", raw, err)
+	}
+	if d <= 0 {
+		return 0, false, nil
+	}
+	return d, true, nil
 }
 
 const (
 	SecretBackendDB    = "db"
 	SecretBackendVault = "vault"
 )
+
+// Merchant-source modes (#723/#724).
+const (
+	MerchantSourceManifest = "manifest"
+	MerchantSourceAPI      = "api"
+)
+
+// MerchantSourceMode returns the normalized merchant-source mode: "manifest"
+// (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
+// Validate; this accessor treats only an explicit "api" as mode 2.
+func (cfg *Config) MerchantSourceMode() string {
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.MerchantSource), MerchantSourceAPI) {
+		return MerchantSourceAPI
+	}
+	return MerchantSourceManifest
+}
+
+// IsManifestMerchantSource reports MODE 1 (#723): manifest-is-truth, secrets
+// in memory, mutation APIs rejected.
+func (cfg *Config) IsManifestMerchantSource() bool {
+	return cfg.MerchantSourceMode() == MerchantSourceManifest
+}
 
 // SecretStoreBackend returns where merchant secrets live: "vault" or "db".
 // Explicit secret_backend wins; empty derives from vault.enabled (back-compat).
@@ -204,6 +268,11 @@ type DBConfig struct {
 	// Read the effective value via DBConfig.SchemaName() (it applies the default and
 	// normalization). Do not read this field directly.
 	Schema string `koanf:"schema"`
+
+	// SQLTrace enables debug-level pgx query tracing on pools OpenRails
+	// constructs (#712; was the ad-hoc OPENRAILS_SQL_TRACE env read). Env:
+	// DB_SQL_TRACE.
+	SQLTrace bool `koanf:"sql_trace"`
 }
 
 // GetConnectionString returns the database connection string.
@@ -353,67 +422,75 @@ var ReservedAccountRails = map[string]models.Rail{
 //
 // For an account named after a self-contained gateway (ccbill, stripe, solana) the
 // rail is inferred from the name; other names (e.g. "mobius") must set Rail.
+//
+// PROGRAMMATIC-ONLY (#521/#711): no yaml/env loader parses these structs.
+// Embedded hosts build them in code (embedded.PaymentProvider); standalone
+// declares rail accounts in the merchant config manifest instead.
 type RailMerchantAccountConfig struct {
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
-	Rail models.Rail `koanf:"rail"`
+	Rail models.Rail
 	// AccountID is this account's rail-native identity (#641/#655): NMI
 	// gateway-id, Stripe acct_…, CCBill clientAccnum-clientSubacc (dash-joined,
 	// e.g. 945280-0000, #697), or Solana wallet (#592: operator-declared).
 	// REQUIRED — ValidateRailSet rejects an empty one.
-	AccountID string `koanf:"account_id"`
-	// Environment is test|live. A deployment is all-test or all-live; ValidateRailSet
-	// rejects any account whose environment contradicts test_mode (#641). Empty →
-	// derived from test_mode.
-	Environment string `koanf:"environment"`
+	AccountID string
+	// Environment is test|live — an ASSERTION cross-checked against test_mode
+	// (#641/#711), not a behavior selector. Sandbox-vs-live behavior is driven by
+	// test_mode alone; a declared environment that contradicts it refuses to
+	// boot. Empty → derived from test_mode.
+	Environment string
 	// Archived keeps an account addressable for existing obligations and inbound
 	// provider events, but excludes it from new checkout/subscription work.
-	Archived bool `koanf:"archived"`
+	Archived bool
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
 	// the typed block — there is no flat fallback.
-	NMI    *NMIRailConfig    `koanf:"nmi"`
-	CCBill *CCBillRailConfig `koanf:"ccbill"`
-	Stripe *StripeRailConfig `koanf:"stripe"`
-	Solana *SolanaRailConfig `koanf:"solana"`
+	NMI    *NMIRailConfig
+	CCBill *CCBillRailConfig
+	Stripe *StripeRailConfig
+	Solana *SolanaRailConfig
 }
 
+// NMIRailConfig — programmatic-only (see RailMerchantAccountConfig). Field
+// names match the store/manifest canonical secret keys (#711).
 type NMIRailConfig struct {
-	SecurityKey     string `koanf:"security_key"`
-	TokenizationKey string `koanf:"tokenization_key"`
-	WebhookSecret   string `koanf:"webhook_secret"`
+	SecurityKey          string
+	WebhookSigningSecret string
 }
 
+// CCBillRailConfig — programmatic-only. The clientAccnum/clientSubacc pair is
+// NOT declared here: it is derived from the account's dash-joined AccountID
+// (#697/#711), exactly like the store plane, so identity is declared once.
 type CCBillRailConfig struct {
-	Salt             string `koanf:"salt"`
-	ClientSubAcc     string `koanf:"client_sub_acc"`
-	ClientAccNum     string `koanf:"client_acc_num"`
-	DataLinkUsername string `koanf:"datalink_username"`
-	DataLinkPassword string `koanf:"datalink_password"`
-	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation); empty
-	// uses the documented default ranges. Parsed at boot — see iputil.Configure.
-	AllowedCIDRs []string `koanf:"allowed_cidrs"`
+	Salt             string
+	DataLinkUsername string
+	DataLinkPassword string
 }
 
+// StripeRailConfig — programmatic-only. Field names match the store/manifest
+// canonical secret keys (#711).
 type StripeRailConfig struct {
-	SecretKey     string `koanf:"secret_key"`
-	WebhookSecret string `koanf:"webhook_secret"`
-	// WebhookSecretThin is the signing secret of a Stripe "thin" Event
+	SecretKey            string
+	WebhookSigningSecret string
+	// WebhookSigningSecretThin is the signing secret of a Stripe "thin" Event
 	// Destination; when set, webhooks verify against either secret.
-	WebhookSecretThin string `koanf:"webhook_secret_thin"`
+	WebhookSigningSecretThin string
 }
 
+// SolanaRailConfig — programmatic-only boot plane. Standalone declares the same
+// knobs per merchant in the manifest rail-account `settings` block (#711, see
+// SolanaAccountSettings); store settings win over this boot plane (#699).
 type SolanaRailConfig struct {
 	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to
 	// "helius"; without rpc_api_key the client uses public RPC fallback.
-	RPCProvider string `koanf:"rpc_provider"`
+	RPCProvider string
 	// RPCAPIKey is the API key for the selected RPC provider (currently helius).
-	RPCAPIKey                       string                 `koanf:"rpc_api_key"`
-	Tokens                          map[string]TokenConfig `koanf:"tokens"`
-	SolanaPayRecurringSubscriptions bool                   `koanf:"solana_pay_recurring_subscriptions"`
+	RPCAPIKey string
+	Tokens    map[string]TokenConfig
 	// Network is DERIVED from test_mode at startup (devnet under test_mode,
 	// mainnet otherwise) — not configurable (#349).
-	Network string `koanf:"-"`
+	Network string
 }
 
 // RailMerchantAccountSet is an in-memory set of payment-provider credential entries. It
@@ -536,53 +613,64 @@ func (p *RailMerchantAccountConfig) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
 }
 
-// ToNMIProviderSettings converts the rail config to NMI provider settings.
+// ToNMIProviderSettings converts the rail config to NMI client settings.
 // Only valid for NMI-type rails.
-func (p *RailMerchantAccountConfig) ToNMIProviderSettings(name string) *NMIProviderSettings {
-	s := &NMIProviderSettings{Name: strings.ToLower(strings.TrimSpace(name))}
+func (p *RailMerchantAccountConfig) ToNMIProviderSettings() *NMIProviderSettings {
+	s := &NMIProviderSettings{}
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
-		s.TokenizationKey = p.NMI.TokenizationKey
-		s.WebhookSecret = p.NMI.WebhookSecret
+		s.WebhookSecret = p.NMI.WebhookSigningSecret
 	}
-	return s // TestMode set by caller based on test_mode
+	return s
 }
 
-// ToCCBillConfig converts the rail config to CCBillConfig.
-// Only valid for CCBill-type rails.
+// SplitCCBillAccountID splits the dash-joined CCBill composite identity
+// (clientAccnum-clientSubacc, #697) at the FIRST dash — both parts are
+// numeric in CCBill's own convention, so the first dash is the separator.
+func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
+	acc, sub, ok := strings.Cut(strings.TrimSpace(accountID), "-")
+	acc, sub = strings.TrimSpace(acc), strings.TrimSpace(sub)
+	if !ok || acc == "" || sub == "" {
+		return "", "", fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000 (got %q)", accountID)
+	}
+	return acc, sub, nil
+}
+
+// ToCCBillConfig converts the rail config to the CCBill client config. Only
+// valid for CCBill-type rails. The clientAccnum/clientSubacc pair is derived
+// from the declared AccountID (#711 — identity is declared once); a malformed
+// AccountID leaves the pair empty and is rejected by validateCCBillRail.
 func (p *RailMerchantAccountConfig) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
+	if acc, sub, err := SplitCCBillAccountID(p.EffectiveAccountID()); err == nil {
+		c.ClientAccNum = acc
+		c.ClientSubAcc = sub
+	}
 	if p.CCBill != nil {
 		c.Salt = p.CCBill.Salt
-		c.ClientSubAcc = p.CCBill.ClientSubAcc
-		c.ClientAccNum = p.CCBill.ClientAccNum
 		c.DataLinkUsername = p.CCBill.DataLinkUsername
 		c.DataLinkPassword = p.CCBill.DataLinkPassword
-		c.AllowedCIDRs = p.CCBill.AllowedCIDRs
 	}
 	return c
 }
 
+// NMIProviderSettings is what the NMI client actually reads (#710): the
+// credential pair. Sandbox posture is nmi.NewClient's testMode argument.
 type NMIProviderSettings struct {
-	Name            string
-	SecurityKey     string
-	TokenizationKey string
-	WebhookSecret   string
-	TestMode        bool
+	SecurityKey   string
+	WebhookSecret string
 }
 
+// CCBillConfig is the derived CCBill CLIENT config (programmatic-only): the
+// account pair split out of the dash-joined account_id plus credentials.
 type CCBillConfig struct {
-	Salt         string `koanf:"salt"`
-	ClientSubAcc string `koanf:"client_sub_acc"`
-	ClientAccNum string `koanf:"client_acc_num"`
-	TestMode     bool   `koanf:"test_mode"`
+	Salt         string
+	ClientSubAcc string
+	ClientAccNum string
+	TestMode     bool
 
-	DataLinkUsername string `koanf:"datalink_username"`
-	DataLinkPassword string `koanf:"datalink_password"`
-
-	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation).
-	// Empty means use iputil.DefaultCCBillIPRanges.
-	AllowedCIDRs []string `koanf:"allowed_cidrs"`
+	DataLinkUsername string
+	DataLinkPassword string
 }
 
 type RedisConfig struct {
@@ -610,11 +698,11 @@ type AuthConfig struct {
 	Issuer string `koanf:"issuer,omitempty"`
 }
 
-// TokenConfig defines configuration for a specific Solana token
+// TokenConfig defines configuration for a specific Solana token.
 type TokenConfig struct {
-	Mint     string `json:"mint" koanf:"mint"`         // Token mint address accepted on the configured Solana network.
-	Name     string `json:"name" koanf:"name"`         // Token name.
-	Decimals int    `json:"decimals" koanf:"decimals"` // Token decimal places.
+	Mint     string `json:"mint"`     // Token mint address accepted on the configured Solana network.
+	Name     string `json:"name"`     // Token name.
+	Decimals int    `json:"decimals"` // Token decimal places.
 }
 
 // RateLimitsConfig is a map of endpoint identifier -> rate limit config
@@ -627,11 +715,6 @@ const (
 	ProviderWriteModeFull     = "full"
 	ProviderWriteModeLimited  = "limited"
 	ProviderWriteModeReadOnly = "readonly"
-
-	// Deprecated: use ProviderWriteMode*.
-	ModeFull     = ProviderWriteModeFull
-	ModeLimited  = ProviderWriteModeLimited
-	ModeReadOnly = ProviderWriteModeReadOnly
 )
 
 // ValidProviderWriteModes contains all valid provider write values ("" = unset;
@@ -642,9 +725,6 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeLimited:  true,
 	ProviderWriteModeReadOnly: true,
 }
-
-// Deprecated: use ValidProviderWriteModes.
-var ValidModes = ValidProviderWriteModes
 
 // SendGridConfig holds process-wide SendGrid API configuration. Sender/display
 // metadata is merchant-scoped and loaded from merchant_configurations.
@@ -756,12 +836,15 @@ func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
 	// Provider write mode must be a known value — a typo (e.g. "redaonly") must
 	// never silently boot with full behavior (#346).
-	providerWriteMode, err := cfg.normalizedProviderWriteMode()
-	if err != nil {
-		return err
-	}
+	providerWriteMode := cfg.normalizedProviderWriteMode()
 	if !ValidProviderWriteModes[providerWriteMode] {
 		return fmt.Errorf("invalid provider_write_mode %q: must be one of full, limited, readonly", providerWriteMode)
+	}
+
+	// Malformed catalog_reconciliation_interval refuses to boot (#712): the old
+	// env knob silently fell back to 1h on a typo.
+	if _, _, err := cfg.CatalogReconciliationSchedule(); err != nil {
+		return err
 	}
 
 	// Port range (#349): UnmarshalText validates string-typed values, but an
@@ -823,8 +906,61 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
 	}
 
+	if err := validateMerchantSource(cfg, isDev); err != nil {
+		return fmt.Errorf("merchant_source config validation failed: %w", err)
+	}
+
 	return nil
 }
+
+// validateMerchantSource enforces the #723 boot matrix rows that are pure
+// config posture:
+//   - unknown merchant_source values refuse to load (a typo must never
+//     silently pick a truth model);
+//   - api mode (MODE 2) with manifest truth present — BILLING_MERCHANTS_* env
+//     vars or mounted secret files — refuses boot (two truths);
+//   - api mode outside development requires a merchant-secret backend (Vault,
+//     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
+//     from store-build time to declared-mode time.
+//
+// The manifest-mode rows (manifest file expected but unresolvable; api mode
+// with a merchants.yaml on disk) are enforced where manifests load: serverboot
+// (standalone) and embed.UpsertMerchantConfig (embedded).
+func validateMerchantSource(cfg *Config, isDev bool) error {
+	switch strings.ToLower(strings.TrimSpace(cfg.MerchantSource)) {
+	case "", MerchantSourceManifest, MerchantSourceAPI:
+	default:
+		return fmt.Errorf("merchant_source must be %q or %q (empty defaults to %q)", MerchantSourceManifest, MerchantSourceAPI, MerchantSourceManifest)
+	}
+	if cfg.MerchantSourceMode() != MerchantSourceAPI {
+		return nil
+	}
+	if hasEnvPrefix(merchantManifestEnvPrefix) {
+		return fmt.Errorf("merchant_source=api refuses %s* env overlays: merchant truth lives in the API/store, not a manifest (two truths, #723); unset them or run merchant_source=manifest", merchantManifestEnvPrefix)
+	}
+	files, err := SecretFiles()
+	if err != nil {
+		return err
+	}
+	for name := range files {
+		if strings.HasPrefix(name, merchantManifestEnvPrefix) {
+			return fmt.Errorf("merchant_source=api refuses mounted %s* secret files (%s): merchant truth lives in the API/store, not a manifest (two truths, #723)", merchantManifestEnvPrefix, name)
+		}
+	}
+	if !isDev {
+		vaultEnabled := cfg.Vault != nil && cfg.Vault.Enabled
+		hasMasterKey := cfg.Encryption != nil && strings.TrimSpace(cfg.Encryption.MasterKey) != ""
+		if !vaultEnabled && !hasMasterKey {
+			return fmt.Errorf("merchant_source=api requires a merchant-secret backend outside development: enable Vault (vault.enabled / secret_backend=vault) or set ENCRYPTION_MASTER_KEY for the DB store (#723/#667)")
+		}
+	}
+	return nil
+}
+
+// merchantManifestEnvPrefix mirrors bootstrap.MerchantBillingEnvPrefix +
+// "MERCHANTS_" (config cannot import internal/bootstrap; the prefix is part of
+// the documented BILLING_MERCHANTS_* wire shape).
+const merchantManifestEnvPrefix = "BILLING_MERCHANTS_"
 
 // validateSecretBackend checks the declared secret backend is valid and reachable.
 // secret_backend=vault needs a Vault connection to serve the KV store (#661).
@@ -949,8 +1085,9 @@ func validateRails(cfg *Config, rails RailMerchantAccountSet, isDev bool) error 
 			return err
 		}
 
-		// #641: all-test or all-live — a declared environment must match test_mode
-		// (empty is derived and always passes).
+		// #641: all-test or all-live — a declared environment is an ASSERTION
+		// cross-checked against test_mode (not a behavior selector; test_mode
+		// alone drives sandbox posture). Empty is derived and always passes.
 		if env := strings.ToLower(strings.TrimSpace(proc.Environment)); env != "" {
 			if env != ProviderEnvironmentTest && env != ProviderEnvironmentLive {
 				return fmt.Errorf("rail '%s' has unknown environment '%s' (want test|live)", name, env)
@@ -1007,8 +1144,8 @@ func validateNMIRail(name string, proc *RailMerchantAccountConfig, isDev bool) e
 		return fmt.Errorf("rail '%s' (nmi): security_key is required", name)
 	}
 
-	if strings.TrimSpace(nmi.WebhookSecret) == "" {
-		return fmt.Errorf("rail '%s' (nmi): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
+	if strings.TrimSpace(nmi.WebhookSigningSecret) == "" {
+		return fmt.Errorf("rail '%s' (nmi): webhook_signing_secret is required outside development (signature verification cannot be disabled in production)", name)
 	}
 
 	return nil
@@ -1016,10 +1153,14 @@ func validateNMIRail(name string, proc *RailMerchantAccountConfig, isDev bool) e
 
 // validateCCBillRail validates a CCBill-type rail
 func validateCCBillRail(name string, proc *RailMerchantAccountConfig, isDev bool) error {
-	// #697: format check runs even in dev — a slash-form account_id is a config
-	// bug (it breaks secret-name paths), not a missing credential.
+	// #697/#711: identity checks run even in dev — the clientAccnum/clientSubacc
+	// pair is DERIVED from the dash-joined account_id, so a missing or malformed
+	// account_id is a config bug, not a missing credential.
 	if err := ValidateRailAccountID(models.RailCCBill, proc.EffectiveAccountID()); err != nil {
 		return fmt.Errorf("rail '%s' (ccbill): %w", name, err)
+	}
+	if _, _, err := SplitCCBillAccountID(proc.EffectiveAccountID()); err != nil {
+		return fmt.Errorf("rail '%s' (ccbill): account_id is required (the pair is derived from it): %w", name, err)
 	}
 	if isDev {
 		return nil // Skip strict validation in dev
@@ -1027,14 +1168,6 @@ func validateCCBillRail(name string, proc *RailMerchantAccountConfig, isDev bool
 	ccbill := proc.CCBill
 	if ccbill == nil {
 		return fmt.Errorf("rail '%s' (ccbill): ccbill block is required", name)
-	}
-
-	if strings.TrimSpace(ccbill.ClientAccNum) == "" {
-		return fmt.Errorf("rail '%s' (ccbill): client_acc_num is required", name)
-	}
-
-	if strings.TrimSpace(ccbill.ClientSubAcc) == "" {
-		return fmt.Errorf("rail '%s' (ccbill): client_sub_acc is required", name)
 	}
 
 	hasUsername := strings.TrimSpace(ccbill.DataLinkUsername) != ""
@@ -1056,11 +1189,11 @@ func validateStripeRail(name string, proc *RailMerchantAccountConfig, isDev bool
 		log.Warnf("rail '%s' (stripe): secret_key not configured; checkout unavailable", name)
 	}
 
-	if strings.TrimSpace(stripe.WebhookSecret) == "" {
+	if strings.TrimSpace(stripe.WebhookSigningSecret) == "" {
 		if !isDev {
-			return fmt.Errorf("rail '%s' (stripe): webhook_secret is required outside development (signature verification cannot be disabled in production)", name)
+			return fmt.Errorf("rail '%s' (stripe): webhook_signing_secret is required outside development (signature verification cannot be disabled in production)", name)
 		}
-		log.Warnf("rail '%s' (stripe): webhook_secret not configured; signature verification disabled", name)
+		log.Warnf("rail '%s' (stripe): webhook_signing_secret not configured; signature verification disabled", name)
 	}
 
 	return nil
@@ -1203,37 +1336,24 @@ func (set RailMerchantAccountSet) RailOf(name string) models.Rail {
 	return proc.EffectiveRail(name)
 }
 
-func (cfg *Config) normalizedProviderWriteMode() (string, error) {
+func (cfg *Config) normalizedProviderWriteMode() string {
 	if cfg == nil {
-		return "", nil
+		return ""
 	}
-	providerWriteMode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode))
-	legacyMode := strings.ToLower(strings.TrimSpace(cfg.Mode))
-	if providerWriteMode != "" && legacyMode != "" && providerWriteMode != legacyMode {
-		return "", fmt.Errorf("provider_write_mode %q conflicts with legacy mode %q", cfg.ProviderWriteMode, cfg.Mode)
-	}
-	if providerWriteMode == "" {
-		providerWriteMode = legacyMode
-	}
-	return providerWriteMode, nil
+	return strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode))
 }
 
-// GetProviderWriteMode returns the normalized provider write mode. Unset,
-// invalid, or conflicting values all normalize to READONLY — fail closed (Paul
-// 2026-07-02): a boot that never declared its write policy (or typoed it before
-// Validate runs) must not execute provider writes. Explicit full|limited is the
-// only way to enable them.
+// GetProviderWriteMode returns the normalized provider write mode. Unset or
+// invalid values normalize to READONLY — fail closed (Paul 2026-07-02): a boot
+// that never declared its write policy (or typoed it before Validate runs)
+// must not execute provider writes. Explicit full|limited is the only way to
+// enable them.
 func (cfg *Config) GetProviderWriteMode() string {
-	mode, err := cfg.normalizedProviderWriteMode()
-	if err != nil || mode == "" || !ValidProviderWriteModes[mode] {
+	mode := cfg.normalizedProviderWriteMode()
+	if mode == "" || !ValidProviderWriteModes[mode] {
 		return ProviderWriteModeReadOnly
 	}
 	return mode
-}
-
-// GetMode is a deprecated compatibility wrapper for GetProviderWriteMode.
-func (cfg *Config) GetMode() string {
-	return cfg.GetProviderWriteMode()
 }
 
 // IsTestMode returns true if payment rails should use sandbox/test
@@ -1414,6 +1534,58 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 	return nil
 }
 
+// Top-level koanf keys, derived from the Config struct's tags so a new
+// multi-word top-level field can never silently miss the env mapping the way
+// SECRET_BACKEND did under first-underscore splitting (#710). Scalar keys map
+// only on an exact env-name match; nested keys (struct/map fields) also map
+// PREFIX_rest -> prefix.rest (DB_URL -> db.url).
+var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKoanfKeys()
+
+func topLevelKoanfKeys() (scalar, nested map[string]bool) {
+	scalar, nested = map[string]bool{}, map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("koanf"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		ft := t.Field(i).Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Struct || ft.Kind() == reflect.Map {
+			nested[name] = true
+		} else {
+			scalar[name] = true
+		}
+	}
+	return scalar, nested
+}
+
+// envKeyToConfigKey maps an env var name to its koanf config key.
+// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url,
+// CLICKHOUSE_HTTP_ADDR -> clickhouse.http_addr. Unknown names pass through
+// unchanged and are dropped at unmarshal.
+func envKeyToConfigKey(s string) string {
+	s = strings.ToLower(s)
+
+	// VAULT_ADDR is HashiCorp's canonical name for the server URL; the field is
+	// vault.address (the mechanical split would yield vault.addr).
+	if s == "vault_addr" {
+		return "vault.address"
+	}
+
+	if envTopLevelScalarKeys[s] || envTopLevelNestedKeys[s] {
+		return s
+	}
+	for prefix := range envTopLevelNestedKeys {
+		if rest, ok := strings.CutPrefix(s, prefix+"_"); ok && rest != "" {
+			return prefix + "." + rest
+		}
+	}
+	return s
+}
+
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
 
@@ -1439,49 +1611,6 @@ func Load(configPath string) (*Config, error) {
 
 	if err := loadConfigIfExists(k, configPath); err != nil {
 		return nil, err
-	}
-
-	// Load environment variables using koanf's env provider.
-	//
-	// This follows the same approach as other Go services in this workspace:
-	// - Lowercase env keys
-	// - Apply targeted hardcoded mappings for tricky cases
-	// - Otherwise, replace ONLY the first underscore with a dot (preserves snake_case field names)
-	//
-	// Examples:
-	// - DB_URL -> db.url
-	// - CLICKHOUSE_HTTP_ADDR -> clickhouse.http_addr
-	envKeyToConfigKey := func(s string) string {
-		s = strings.ToLower(s)
-
-		// Special case: API_URL -> api_url (top-level, not nested api.url)
-		if s == "api_url" {
-			return "api_url"
-		}
-
-		// Special case: TEST_MODE -> test_mode (top-level bool, not nested test.env)
-		if s == "test_mode" {
-			return "test_mode"
-		}
-		if s == "provider_write_mode" {
-			return "provider_write_mode"
-		}
-		if s == "mode" {
-			return "mode"
-		}
-
-		// Canonical Vault env vars: VAULT_ADDR is HashiCorp's standard name for
-		// the server URL, so map it to vault.address (the default first-underscore
-		// split would yield vault.addr). VAULT_TOKEN already splits correctly.
-		if s == "vault_addr" {
-			return "vault.address"
-		}
-
-		// Replace only the first underscore for other nested config keys.
-		if !strings.Contains(s, "_") {
-			return s
-		}
-		return strings.Replace(s, "_", ".", 1)
 	}
 
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
@@ -1511,6 +1640,25 @@ func Load(configPath string) (*Config, error) {
 		return mapped, v
 	}
 
+	// Operator-mounted secret files (filename = env-var name) load BELOW env,
+	// so env wins. This is the default non-SaaS secret path: Vault renders
+	// files into the mounted dir; no live Vault connection needed.
+	secretFiles, err := SecretFiles()
+	if err != nil {
+		return nil, err
+	}
+	if len(secretFiles) > 0 {
+		vals := map[string]interface{}{}
+		for name, value := range secretFiles {
+			if key, v := envCallbackWithValue(name, value); key != "" {
+				vals[key] = v
+			}
+		}
+		if err := k.Load(confmap.Provider(vals, "."), nil); err != nil {
+			return nil, fmt.Errorf("loading mounted secret files: %w", err)
+		}
+	}
+
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
 	}
@@ -1526,6 +1674,17 @@ func Load(configPath string) (*Config, error) {
 	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed (#519): browser CORS belongs to the host app, not OpenRails merchant config")
+	}
+	// HARD CUT (#710): the deprecated provider_write_mode alias is gone.
+	if k.Exists("mode") || os.Getenv("MODE") != "" || os.Getenv("BILLING_MODE") != "" {
+		return nil, fmt.Errorf("mode was removed (#710): set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
+	}
+	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
+	if os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL") != "" {
+		return nil, fmt.Errorf("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL was renamed (#712): set catalog_reconciliation_interval (env CATALOG_RECONCILIATION_INTERVAL)")
+	}
+	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
+		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed (#712): set db.sql_trace (env DB_SQL_TRACE)")
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
@@ -1641,23 +1800,6 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// ConfigureProcessGlobals applies runtime process-level configuration derived
-// from Config. It is intentionally outside Load: one-off CLIs should be able to
-// parse and validate config without mutating webhook globals or emitting server
-// startup banners.
-func ConfigureProcessGlobals(cfg *Config) error {
-	if cfg == nil {
-		return fmt.Errorf("config is nil")
-	}
-
-	// Configure the CCBill webhook IP allowlist from config. Empty list falls
-	// back to the documented default ranges.
-	if err := iputil.Configure(nil); err != nil {
-		return fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
-	}
-	return nil
 }
 
 // LogStartupStatus writes the operator-facing posture banners for long-running

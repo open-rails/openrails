@@ -30,6 +30,17 @@ func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 	return db.WrapPool(rawPool, config.DefaultSchema), ctx
 }
 
+// seedMerchant inserts a merchants row so merchant_deks_merchant_fk is satisfied.
+func seedMerchant(t *testing.T, ctx context.Context, pool *db.Pool) merchant.ID {
+	t.Helper()
+	id := uuid.New()
+	_, err := pool.Exec(ctx,
+		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		id, "crypto-"+id.String())
+	require.NoError(t, err)
+	return merchant.ID(id)
+}
+
 func masterKey(t *testing.T) string {
 	t.Helper()
 	k := make([]byte, keySize)
@@ -47,7 +58,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	enc, err := NewEncryptor(mk, store)
 	require.NoError(t, err)
 
-	tA := merchant.ID(uuid.New())
+	tA := seedMerchant(t, ctx, pool)
 
 	// No DEK row before first use.
 	var before int
@@ -82,8 +93,8 @@ func TestDBDEKStore_CrossMerchantCiphertextIsolation(t *testing.T) {
 	store, _ := NewDBDEKStore(pool)
 	enc, _ := NewEncryptor(masterKey(t), store)
 
-	tA := merchant.ID(uuid.New())
-	tB := merchant.ID(uuid.New())
+	tA := seedMerchant(t, ctx, pool)
+	tB := seedMerchant(t, ctx, pool)
 	ctA, err := enc.Encrypt(ctx, tA, []byte("A-only"))
 	require.NoError(t, err)
 	_, err = enc.Decrypt(ctx, tB, ctA)

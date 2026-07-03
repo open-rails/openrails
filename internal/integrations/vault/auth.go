@@ -56,12 +56,11 @@ func Login(ctx context.Context, cfg Config) (*vaultapi.Client, error) {
 		method = "token"
 	}
 	if method == "token" {
+		// No ambient VAULT_TOKEN fallback (#712): env is read once at the binary
+		// boundary (config vault.token maps from VAULT_TOKEN); absence fails here.
 		token := strings.TrimSpace(cfg.Token)
 		if token == "" {
-			token = strings.TrimSpace(os.Getenv("VAULT_TOKEN"))
-		}
-		if token == "" {
-			return nil, fmt.Errorf("vault: token auth selected but no token (set VAULT_TOKEN)")
+			return nil, fmt.Errorf("vault: token auth selected but no token (set vault.token; env VAULT_TOKEN feeds it via config.Load)")
 		}
 		client.SetToken(token)
 		return client, nil

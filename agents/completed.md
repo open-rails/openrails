@@ -14179,7 +14179,7 @@ BUILT + INTEGRATION-TESTED 2026-06-17 (8/8 green against real Redis via testcont
 
 SUBSUMES (hard-cut: delete on switch-over, do NOT coexist): `spendgate` replaces THREE current mechanisms that today split one decision — (1) the live Redis hold store `internal/modules/holds` (`Place`/`Release`/`ActiveAmount`, used by `pkg/service/service.go` + `admission.go`); (2) the Postgres money-capacity calc in `money.AuthorizeAndHold`; (3) the `budgets` Postgres window path (Phase A). All three collapse into the one Lua gate. After the cut, `internal/modules/holds` is deleted and `AuthorizeAndHold`'s capacity read is gone — there must NOT be two Redis-hold implementations (`holds.Store` + `spendgate`) running side by side.
 - [x] Admit = one `EVAL`: check `account_balance − Σ holds ≥ cost` AND every window `used + reserved + cost ≤ limit`; if all pass, place the request-id hold + bump reserved. One Redis round trip after the O(1) DB capacity/config reads.
-- [ ] Capture = one `EVAL`: move reserved→used by ACTUAL cost, drop the hold, and enqueue the durable spend (off hot path). 
+- [ ] Capture = one `EVAL`: move reserved→used by ACTUAL cost, drop the hold, and enqueue the durable spend (off hot path).
 - [ ] Fail/release = one `EVAL`: drop hold + reserved, bump the wasted-spend counter for abuse.
 - [x] Holds in SHARED Redis keyed by the provider/tensorhub request-id (cross-instance agreement); no balance cache remains.
 
@@ -26161,3 +26161,153 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 - [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
 - [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
 - [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).
+
+---
+
+# #718: permissionless memo purchases — AXED (Paul, 2026-07-02)
+
+Design considered and REJECTED same-day; recorded so it doesn't get re-invented. The idea: an
+inbound transfer >= price with a memo ("for <product>, deliver to <customer-uuid>") auto-fulfills
+as a purchase, no checkout session. Full design + rulings were drafted (plaintext UUID, price-at-
+slot verification, underpay parks / overpay kept, one-off only).
+
+Why axed:
+- No real user: purchases come through the site, which can always mint a checkout session — the
+  reference flow is strictly better whenever anyone is actually buying.
+- The legitimate motivations (self-recognition, chain-alone recovery) are fully covered by
+  #713 memo stamping + #714 recovery over checkout-constructed transactions.
+- It converts user error (typo'd product key, wrong UUID, off-by-a-cent) into parked findings and
+  support burden that sessions prevent by construction.
+- Third-party harm: anyone holding a customer UUID could publicly and permanently stamp a
+  "purchase for <uuid>" onto the chain AND have the system honor it — a harassment/account-linking
+  vector unique to unsolicited intake.
+Fallback behavior without it is already correct: #714 ignores unrecognized transfers; the money
+stays in the wallet; no obligation is created. Kept: the single-hot-key invariant (crank signs,
+receiving wallet stays cold), relocated into #713.
+
+---
+
+# #699: provider pull must arm from merchant secrets — manifest credentials alone should enable fetchers
+
+**Completed:** yes
+**Status:** IMPLEMENTED (2026-07-02) — see Progress below. Originally flagged by the doujins #731 enablement audit: reconcile fetchers (and the
+rail clients under them) are built from BOOT-TIME config (`embedded.Options.PaymentProviders` /
+`config.Rails` railSet), NOT from the merchant-secrets store the manifest seeds. A host like doujins that
+declares DataLink/NMI credentials ONLY in `openrails-merchant.yaml` (the intended #653 model: manifest seeds
+secrets, runtime reads the store) gets NO pull fetchers — dropping in real credentials does not arm provider
+refresh/unknown-resolution/probes end-to-end. The parked-unknown backlog (1,754 NMI + ~380 CCBill) cannot
+drain until this is fixed.
+
+## Metadata
+- Category: reconciliation / config
+- Status: implemented
+- Passes: true
+
+## Problem
+
+Two credential planes exist post-#653/#667: boot config (process-wide rails) and the per-merchant secret store
+(manifest-seeded, encrypted, request-time loaded). The WRITE/checkout paths already resolve per-merchant
+secrets; the PULL machinery (provider refresh job, unknown-cohort resolver, per-sub probers, engine fetchers)
+still builds clients exclusively from boot config: `reconcile.BuildFetchersWithOptions(cfg, rt.Rails, ...)`
+(pkg/embedded/pull_provider.go, internal/river/jobs_provider_refresh.go, wiring.go selectors). Embedded hosts
+don't pass `Options.PaymentProviders`, so fetcher maps come up empty even with a fully-seeded secret store.
+
+## Target
+
+Fetcher/prober construction resolves credentials PER MERCHANT from the merchant-secrets store (same
+choke-point clients), falling back to boot-config rails where configured — one resolution helper, used by:
+- the provider-refresh job's per-merchant loop (build the merchant's fetchers inside the merchant scope),
+- `ReconcileUnknownCohort` + `BuildSubscriptionProbers`,
+- `pkg/embedded/pull_provider.go` and the standalone CLI path.
+Secrets are loaded per-merchant at use-time (NEVER cached process-wide plaintext — #653's multi-merchant
+isolation decision holds); missing/incomplete secrets for a rail = that rail's fetcher absent + one boot/run
+WARN naming the missing key (no silent empty maps, per no-silent-fabrication).
+
+## Tasks
+
+- [x] Merchant-scoped credential resolution helper (merchant-secrets store → rail client configs) for the
+      pull plane; document the two-plane precedence (store overrides/extends boot rails? pick ONE rule —
+      recommend: store first, boot-config fallback, conflict = store wins with WARN).
+- [x] Rewire the four construction sites above; delete or demote `Options.PaymentProviders`-only assumptions
+      in embedded provisioning docs.
+- [x] Respect existing gates: test_mode filtering (test creds in test mode only), provider_write_mode
+      (readonly skips the refresh job entirely today — unchanged here), archived accounts excluded from NEW
+      pull targeting only where #655 semantics demand.
+- [x] Integration tests (real PG, fake provider HTTP): manifest-seeded ccbill datalink + nmi secrets, NO boot
+      rails → refresh job builds fetchers, pulls, advances watermarks; missing one secret → that rail absent +
+      WARN; standalone multi-merchant: two merchants with different secrets pull with their OWN credentials
+      inside their own scopes (no cross-merchant leakage); embedded doujins-shaped boot (no PaymentProviders)
+      arms from the store.
+- [x] Cross-repo note: with this landed, doujins enablement = manifest secrets + provider_write_mode=limited —
+      nothing else; update the #731 enablement subsection pointer.
+
+Acceptance: a host that seeds provider credentials via the merchant manifest (and sets
+provider_write_mode=limited+) gets working provider refresh, unknown resolution, and probes with NO
+boot-config rails; per-merchant isolation preserved (no process-wide plaintext credential tree); missing
+secrets fail loud per rail; the doujins parked-unknown backlog can drain on real credentials alone.
+
+## Progress
+
+**2026-07-02 — IMPLEMENTED.** The pull plane arms per merchant from the merchant-secrets store.
+
+- ONE resolution helper: `reconcile.MerchantFetcherBuilder` (internal/reconcile/merchant_wiring.go).
+  `Build(ctx, merchantID)` → `MerchantPullClients{Fetchers, Probers, CCBillDataLink}` built INSIDE the
+  merchant scope, per pass — clients are cheap per-merchant structs, no process-wide plaintext tree (#653),
+  no cross-merchant caching. PRECEDENCE (documented in-file): merchant-store FIRST, boot-config rails
+  fallback; a merchant that DECLARES a rail account row resolves from the store ONLY (missing/incomplete
+  secret = rail absent + ONE WARN naming merchant/rail/secret name — fail closed like checkout, never a
+  cross-plane fallback); both planes armed and differing = store wins + WARN. Per rail: NMI security_key
+  (+opportunistic webhook_signing_secret) → nmi client; CCBill datalink_username/password + dash-split
+  account_id (#697) → DataLink client; Stripe secret_key → fetcher + liveness prober; Solana needs no
+  per-merchant pull credential (private_key is signing-only) — a declared account row arms the fetcher on
+  the boot RPC client or a read-only public default.
+- Store scope resolution: `merchants.PullRailMerchantAccountScope` (active-for-new-work, else NEWEST
+  archived — #655: archived stays pull-addressable so obligations drain) +
+  `merchants.RailMerchantAccountScopeByAccountID` (explicit `--provider-account` pins, archived allowed).
+- Rewired sites: internal/river/jobs_provider_refresh.go (per-merchant build in the loop; DataLink lane
+  takes the merchant-resolved client; readonly skip unchanged), ReconcileUnknownCohort + probers fed from
+  the same build, pkg/embedded/pull_provider.go (CLI `pull-provider` routes here too — builds a merchants
+  service over the config DB; `--provider-account` now pins the store scope). `BuildFetchersWithOptions` /
+  `FetcherClients` / `FetcherOptions` / `BuildSubscriptionProbers` deleted (subsumed). Also fixed
+  `selectNMIClient` to resolve runtime client maps keyed by account_id (#641) — the boot plane previously
+  errored for any NMI rail not literally named "nmi".
+- Embedded arming: `Runtime.EnsureMerchantsService` (internal/app/merchants_wiring.go) builds the secret
+  backend + merchants service at worker registration (`addBillingWorkersToRegistry`) when the composition
+  root didn't — embedded hosts with RunWorkers/AddBillingWorkersTo get store-armed pulls (and the Stripe
+  webhook-reconcile worker's store) with no standalone server. Build failure = loud WARN + boot-plane-only
+  degradation (never a boot error; #667's hard gate still guards provisioning paths). Docs updated:
+  pkg/embedded README + Options.PaymentProviders + embed.PaymentProvider now describe the two planes.
+- Tests (all green, real testcontainers PG, fake provider HTTP only): internal/river
+  jobs_provider_refresh_pull_integration_test.go (store-armed refresh with NO boot rails: two merchants pull
+  with their OWN NMI keys + DataLink creds, watermarks advance, fake servers assert per-merchant credentials
+  and no leakage; missing security_key → rail absent + WARN naming merchant/rail/secret, ccbill unaffected;
+  readonly skip pinned), internal/reconcile merchant_wiring_integration_test.go (store-wins-with-WARN,
+  boot fallback when no store row, declared-account-never-falls-back), embed
+  pull_arming_integration_test.go (doujins-shaped embed.New, NO PaymentProviders, manifest Secrets →
+  AddBillingWorkersTo arms Merchants; builder yields nmi+ccbill fetchers AND probers carrying the seeded
+  credentials).
+- NOT observed green in this pass (pre-existing / sibling): embed + bootstrap integration suites fail on the
+  in-flight authkit v0.76.0 bump ("registration verification policy required but no sender") — reproduced
+  independent of #699 (clean HEAD passes; working tree carries the bump).
+- Remaining: doujins bump rides the next openrails release; enablement then = manifest secrets +
+  provider_write_mode=limited, nothing else (#731 pointer added in doujins).
+
+---
+
+# #730: manual-rebill (NMI dunning) arms from merchant-secrets store — last #725 leftover
+
+**Completed:** 2026-07-02 (uncommitted)
+
+intents.ManualRebillHandler now resolves its NMI client per merchant from the merchant-secrets
+store AT CHARGE TIME via the ONE #725 resolver (money.MerchantCollectionAdapterBuilder, exposed
+as money.NMIClientResolver): store wins (#699), declared-account-with-missing-secret fails
+CLOSED, no store row → boot NMIClients fallback (embedded hosts keep working), no caching
+(rotation-safe). Scope pick mirrors #725: the intent's stamped provenance account first
+(archived stays chargeable, #655), else PullRailMerchantAccountScope.
+
+- Wiring: Runtime.CollectionResolver (build_runtime.go) shared by ScopedCharger AND
+  DunningWorker.NMIResolver → handler.SetNMIClientResolver (river_register.go, jobs_dunning.go).
+- Tests (integration, real Postgres + fake NMI HTTP): manual_rebill_store_arming_integration_test.go
+  (store-only credentials charge succeeds + auth key asserted; fail-closed on missing secret;
+  boot-plane fallback) + manual_rebill_integration_test.go. All intents/money/river suites green.
+- NOTE: code comments initially stamped #727 (id collision with the rename issue); renumbered to #730.

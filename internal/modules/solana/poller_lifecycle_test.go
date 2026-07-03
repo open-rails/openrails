@@ -45,7 +45,7 @@ func (f *fakeLifecycleMarker) ConfirmSolanaSubscribeSession(ctx context.Context,
 func TestVerifyPayment_LifecycleSkipsTokenChecks(t *testing.T) {
 	p := &SolanaPayPoller{} // no transaction service / RPC needed for a lifecycle record
 	pending := &PendingSolanaPayment{Lifecycle: true}
-	if !p.verifyPayment(context.Background(), "ref", "sig", pending) {
+	if !p.verifyPayment(context.Background(), nil, "ref", "sig", pending) {
 		t.Error("lifecycle pending must verify on reference match alone (no token state)")
 	}
 }
@@ -59,7 +59,7 @@ func TestProcessConfirmedPayment_LifecycleRoutesToConfirm(t *testing.T) {
 		SessionID: sessionID.String(),
 		Lifecycle: true,
 	}
-	if err := p.processConfirmedPayment(context.Background(), "ref", "the-signature", pending); err != nil {
+	if err := p.processConfirmedPayment(context.Background(), nil, "ref", "the-signature", pending); err != nil {
 		t.Fatalf("processConfirmedPayment: %v", err)
 	}
 	if marker.confirmCalls != 1 {
@@ -78,7 +78,7 @@ func TestProcessConfirmedPayment_LifecycleRoutesToConfirm(t *testing.T) {
 func TestVerifyPayment_SubscribeSkipsTokenChecks(t *testing.T) {
 	p := &SolanaPayPoller{} // no transaction service / RPC needed for a subscribe record
 	pending := &PendingSolanaPayment{Subscribe: true}
-	if !p.verifyPayment(context.Background(), "ref", "sig", pending) {
+	if !p.verifyPayment(context.Background(), nil, "ref", "sig", pending) {
 		t.Error("subscribe pending must verify on reference match alone (no token state)")
 	}
 }
@@ -94,7 +94,7 @@ func TestProcessConfirmedPayment_SubscribeRoutesToEnroll(t *testing.T) {
 		SessionID: sessionID.String(),
 		Subscribe: true,
 	}
-	if err := p.processConfirmedPayment(context.Background(), "ref", "sub-sig", pending); err != nil {
+	if err := p.processConfirmedPayment(context.Background(), nil, "ref", "sub-sig", pending); err != nil {
 		t.Fatalf("processConfirmedPayment: %v", err)
 	}
 	if marker.subscribeCalls != 1 {
@@ -123,7 +123,7 @@ func TestProcessConfirmedPayment_SubscribePendingPropagates(t *testing.T) {
 		SessionID: sessionID.String(),
 		Subscribe: true,
 	}
-	err := p.processConfirmedPayment(context.Background(), "ref", "init-sig", pending)
+	err := p.processConfirmedPayment(context.Background(), nil, "ref", "init-sig", pending)
 	if !errors.Is(err, ErrSolanaSubscribePending) {
 		t.Fatalf("want ErrSolanaSubscribePending, got %v", err)
 	}

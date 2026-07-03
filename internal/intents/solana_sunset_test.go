@@ -71,7 +71,7 @@ func sunsetIntent(t *testing.T, pda string) gen.OpenrailsRailIntent {
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		MerchantID:     dbtest.TestMerchantID.UUID(),
-		Provider:       "solana",
+		Rail:           "solana",
 		IntentType:     TypeSolanaSunsetPlan,
 		Payload:        payload,
 		IdempotencyKey: SolanaSunsetIdempotencyKey(pda),
@@ -227,10 +227,10 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 	fx := newSunsetFixture()
 	intent := sunsetIntent(t, fx.pda)
 	cycle := 720
-	mkPrice := func(status models.CatalogStatus) *models.Price {
+	mkPrice := func(archived bool) *models.Price {
 		return &models.Price{
 			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "usd",
-			AccessDurationHours: &cycle, AutoRenew: true, Status: status,
+			AccessDurationHours: &cycle, AutoRenew: true, Archived: archived,
 			Rails: map[string]map[string]string{
 				string(models.RailSolana): {"plan_pda": fx.pda},
 			},
@@ -238,14 +238,14 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 	}
 
 	// Referenced only by an ARCHIVED price: still relevant.
-	fx.handler.LoadCatalog = stubCatalog(nil, []*models.Price{mkPrice(models.CatalogStatusArchived)})
+	fx.handler.LoadCatalog = stubCatalog(nil, []*models.Price{mkPrice(true)})
 	rel, err := fx.handler.CheckRelevance(context.Background(), intent)
 	if err != nil || !rel.Applicable {
 		t.Fatalf("archived-only reference: must stay relevant, got %+v err=%v", rel, err)
 	}
 
 	// A purchasable price references the PDA again: superseded.
-	fx.handler.LoadCatalog = stubCatalog(nil, []*models.Price{mkPrice(models.CatalogStatusActive)})
+	fx.handler.LoadCatalog = stubCatalog(nil, []*models.Price{mkPrice(false)})
 	rel, err = fx.handler.CheckRelevance(context.Background(), intent)
 	if err != nil || rel.Applicable {
 		t.Fatalf("plan rejoined the catalog: must supersede, got %+v err=%v", rel, err)

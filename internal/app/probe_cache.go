@@ -71,19 +71,19 @@ func probeKeyHash(securityKey string) string {
 
 // lookupProbeVerdict reads a cached verdict. ok=false on miss OR any error
 // (degrade to probing); errors are logged, never propagated.
-func lookupProbeVerdict(database *db.DB, provider, keyHash string) (verdict string, checkedAt time.Time, ok bool) {
+func lookupProbeVerdict(database *db.DB, rail, keyHash string) (verdict string, checkedAt time.Time, ok bool) {
 	if database == nil {
 		return "", time.Time{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	row, err := database.Gen(ctx).GetProbeVerdict(ctx, gen.GetProbeVerdictParams{
-		Provider: provider,
-		KeyHash:  keyHash,
+		Rail:    rail,
+		KeyHash: keyHash,
 	})
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			log.WithError(err).WithField("provider", provider).
+			log.WithError(err).WithField("rail", rail).
 				Warn("probe verdict cache read failed; probing as usual (#348)")
 		}
 		return "", time.Time{}, false
@@ -93,18 +93,18 @@ func lookupProbeVerdict(database *db.DB, provider, keyHash string) (verdict stri
 
 // storeProbeVerdict persists a conclusive probe verdict. Failures only log —
 // the cache is an optimization, never a correctness dependency.
-func storeProbeVerdict(database *db.DB, provider, keyHash, verdict string) {
+func storeProbeVerdict(database *db.DB, rail, keyHash, verdict string) {
 	if database == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := database.Gen(ctx).UpsertProbeVerdict(ctx, gen.UpsertProbeVerdictParams{
-		Provider: provider,
-		KeyHash:  keyHash,
-		Verdict:  verdict,
+		Rail:    rail,
+		KeyHash: keyHash,
+		Verdict: verdict,
 	}); err != nil {
-		log.WithError(err).WithField("provider", provider).
+		log.WithError(err).WithField("rail", rail).
 			Warn("probe verdict cache write failed; next boot will re-probe (#348)")
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -33,16 +32,14 @@ type SpendDecision struct {
 }
 
 // DefaultAccountSettings returns the implicit policy for an payer that has no
-// explicit settings row: prepaid, no caps, hard-stop on, 80% alerts, 365-day
-// default expiry. Used by GetAccountSettings and the enforcement path so an
-// unconfigured account "just works" (prepaid, balance-gated only).
+// explicit settings row: prepaid, 365-day default expiry. Used by
+// GetAccountSettings and the enforcement path so an unconfigured account "just
+// works" (prepaid, balance-gated only).
 func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
 	hours := 365 * 24
 	return &models.MoneyAccount{
 		CustomerID:               payer.UUID(),
 		BillingMode:              BillingModePrepaid,
-		HardStopOnBreach:         true,
-		AlertThresholdPct:        80,
 		DefaultCreditExpiryHours: &hours,
 	}
 }
@@ -89,16 +86,11 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
 	BillingMode              *string
-	MaxSpendPerDay           *int64
-	MaxSpendPerMonth         *int64
-	MaxOutstandingOwedAmount *int64
 	LowBalanceThreshold      *int64
 	AutoTopupEnabled         *bool
-	AutoTopupAmountCents     *int64
+	AutoTopupAmount          *int64
 	AutoTopupPaymentMethod   *uuid.UUID
 	DefaultCreditExpiryHours *int
-	HardStopOnBreach         *bool
-	AlertThresholdPct        *int
 }
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
@@ -123,9 +115,6 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		}
 		in.BillingMode = &m
 	}
-	if in.AlertThresholdPct != nil && (*in.AlertThresholdPct < 0 || *in.AlertThresholdPct > 100) {
-		return nil, fmt.Errorf("alert_threshold_pct must be 0..100")
-	}
 	tenantID := tid.UUID()
 	now := s.now()
 
@@ -137,35 +126,20 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
 	}
-	if in.MaxSpendPerDay != nil {
-		cur.MaxSpendPerDay = nilIfNeg(in.MaxSpendPerDay)
-	}
-	if in.MaxSpendPerMonth != nil {
-		cur.MaxSpendPerMonth = nilIfNeg(in.MaxSpendPerMonth)
-	}
-	if in.MaxOutstandingOwedAmount != nil {
-		cur.MaxOutstandingOwedAmount = nilIfNeg(in.MaxOutstandingOwedAmount)
-	}
 	if in.LowBalanceThreshold != nil {
 		cur.LowBalanceThreshold = nilIfNeg(in.LowBalanceThreshold)
 	}
 	if in.AutoTopupEnabled != nil {
 		cur.AutoTopupEnabled = *in.AutoTopupEnabled
 	}
-	if in.AutoTopupAmountCents != nil {
-		cur.AutoTopupAmountCents = nilIfNeg(in.AutoTopupAmountCents)
+	if in.AutoTopupAmount != nil {
+		cur.AutoTopupAmount = nilIfNeg(in.AutoTopupAmount)
 	}
 	if in.AutoTopupPaymentMethod != nil {
 		cur.AutoTopupPaymentMethod = in.AutoTopupPaymentMethod
 	}
 	if in.DefaultCreditExpiryHours != nil {
 		cur.DefaultCreditExpiryHours = in.DefaultCreditExpiryHours
-	}
-	if in.HardStopOnBreach != nil {
-		cur.HardStopOnBreach = *in.HardStopOnBreach
-	}
-	if in.AlertThresholdPct != nil {
-		cur.AlertThresholdPct = *in.AlertThresholdPct
 	}
 
 	cur.MerchantID = tenantID
@@ -176,8 +150,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		return nil, err
 	}
 	cur.UpdatedAt = now
-	if cur.ID == uuid.Nil {
-		cur.ID = uuidutil.NewV7()
+	if cur.CreatedAt.IsZero() {
 		cur.CreatedAt = now
 	}
 
@@ -186,23 +159,16 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryHours)
 		expiry = &v
 	}
-	alertPct, _ := safecast.Convert[int32](cur.AlertThresholdPct)
 	if err := s.db.Gen(ctx).UpsertMoneyAccountSettings(ctx, gen.UpsertMoneyAccountSettingsParams{
-		ID:                       cur.ID,
 		MerchantID:               cur.MerchantID,
 		CustomerID:               cur.CustomerID,
 		Currency:                 cur.Currency,
 		BillingMode:              cur.BillingMode,
-		MaxSpendPerDay:           cur.MaxSpendPerDay,
-		MaxSpendPerMonth:         cur.MaxSpendPerMonth,
-		MaxOutstandingOwedAmount: cur.MaxOutstandingOwedAmount,
 		LowBalanceThreshold:      cur.LowBalanceThreshold,
 		AutoTopupEnabled:         cur.AutoTopupEnabled,
-		AutoTopupAmountCents:     cur.AutoTopupAmountCents,
+		AutoTopupAmount:          cur.AutoTopupAmount,
 		AutoTopupPaymentMethodID: cur.AutoTopupPaymentMethod,
 		DefaultCreditExpiryHours: expiry,
-		HardStopOnBreach:         cur.HardStopOnBreach,
-		AlertThresholdPct:        alertPct,
 		CreatedAt:                cur.CreatedAt,
 		UpdatedAt:                cur.UpdatedAt,
 	}); err != nil {
