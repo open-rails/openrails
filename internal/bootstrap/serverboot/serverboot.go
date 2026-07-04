@@ -16,7 +16,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	internalauth "github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -93,11 +92,10 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 	}
 	authenticator := optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator })
 	if authenticator == nil {
-		cp := embcp.Get(application)
-		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
+		authenticator = embcp.Get(application).UserAuthenticator()
+		if authenticator == nil {
 			return nil, fmt.Errorf("control plane verifier unavailable")
 		}
-		authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
 	}
 
 	// MODE 1 (#723): the standalone server loads the merchant manifest at boot —

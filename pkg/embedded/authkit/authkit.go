@@ -18,9 +18,14 @@ import (
 // issuers, optionally constraining the token audience. Pass the returned value
 // as gin.MountOptions.Authenticator or a host Gate input.
 //
-// This is an explicit embedded-host bridge. Standalone OpenRails does not read
-// issuers from config; it authenticates with its own control-plane/AuthKit
-// tokens and merchant remote applications.
+// This is an explicit embedded-host bridge for REMOTE issuers: keys are
+// HTTP-fetched from each issuer's /.well-known/jwks.json. A host embedding the
+// control plane in-process should NOT verify its own tokens this way — use
+// ControlPlane.UserAuthenticator (#739), which shares the control plane's
+// in-memory verifier state; the JWKS HTTP route exists purely for external
+// verifiers. Standalone OpenRails does not read issuers from config; it
+// authenticates with its own control-plane/AuthKit tokens and merchant remote
+// applications.
 func NewVerifierAuthenticator(issuers []string, expectedAud string) (billingauth.Authenticator, error) {
 	v, err := auth.NewIssuerVerifier(issuers, expectedAud)
 	if err != nil {
