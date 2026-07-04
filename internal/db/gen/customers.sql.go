@@ -7,9 +7,28 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const countSearchCustomers = `-- name: CountSearchCustomers :one
+SELECT count(*) FROM openrails.customers c
+WHERE $1::text = ''
+   OR c.subject ILIKE $1 || '%'
+   OR c.id::text ILIKE $1 || '%'
+   OR EXISTS (
+        SELECT 1 FROM openrails.subscriptions se
+        WHERE se.customer_id = c.id
+          AND se.user_email ILIKE '%' || $1 || '%')
+`
+
+func (q *Queries) CountSearchCustomers(ctx context.Context, q_ string) (int64, error) {
+	row := q.db.QueryRow(ctx, countSearchCustomers, q_)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const ensureCustomer = `-- name: EnsureCustomer :one
 
@@ -85,6 +104,67 @@ func (q *Queries) LookupCustomerIDsBySubjects(ctx context.Context, arg LookupCus
 	for rows.Next() {
 		var i LookupCustomerIDsBySubjectsRow
 		if err := rows.Scan(&i.ID, &i.Subject); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchCustomers = `-- name: SearchCustomers :many
+SELECT c.id, c.subject, c.created_at, c.last_seen_at,
+  (SELECT s.user_email FROM openrails.subscriptions s
+     WHERE s.customer_id = c.id AND s.user_email IS NOT NULL
+     ORDER BY s.created_at DESC LIMIT 1) AS email
+FROM openrails.customers c
+WHERE $1::text = ''
+   OR c.subject ILIKE $1 || '%'
+   OR c.id::text ILIKE $1 || '%'
+   OR EXISTS (
+        SELECT 1 FROM openrails.subscriptions se
+        WHERE se.customer_id = c.id
+          AND se.user_email ILIKE '%' || $1 || '%')
+ORDER BY c.last_seen_at DESC
+LIMIT $3 OFFSET $2
+`
+
+type SearchCustomersParams struct {
+	Q          string
+	PageOffset int64
+	PageLimit  int64
+}
+
+type SearchCustomersRow struct {
+	ID         uuid.UUID
+	Subject    *string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	Email      *string
+}
+
+// Merchant-scoped customer list/search (#740). RLS pins the merchant (run on
+// a merchant conn). q matches subject (external ref) prefix, id prefix, or a
+// subscription email substring; empty q lists newest-touched first. email is
+// the latest subscription email on file (customers carry none themselves).
+func (q *Queries) SearchCustomers(ctx context.Context, arg SearchCustomersParams) ([]SearchCustomersRow, error) {
+	rows, err := q.db.Query(ctx, searchCustomers, arg.Q, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchCustomersRow
+	for rows.Next() {
+		var i SearchCustomersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Subject,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.Email,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -25,6 +25,36 @@ SELECT id, subject FROM openrails.customers
 WHERE merchant_id = $1
   AND subject = ANY(sqlc.arg(subjects)::text[]);
 
+-- name: SearchCustomers :many
+-- Merchant-scoped customer list/search (#740). RLS pins the merchant (run on
+-- a merchant conn). q matches subject (external ref) prefix, id prefix, or a
+-- subscription email substring; empty q lists newest-touched first. email is
+-- the latest subscription email on file (customers carry none themselves).
+SELECT c.id, c.subject, c.created_at, c.last_seen_at,
+  (SELECT s.user_email FROM openrails.subscriptions s
+     WHERE s.customer_id = c.id AND s.user_email IS NOT NULL
+     ORDER BY s.created_at DESC LIMIT 1) AS email
+FROM openrails.customers c
+WHERE sqlc.arg(q)::text = ''
+   OR c.subject ILIKE sqlc.arg(q) || '%'
+   OR c.id::text ILIKE sqlc.arg(q) || '%'
+   OR EXISTS (
+        SELECT 1 FROM openrails.subscriptions se
+        WHERE se.customer_id = c.id
+          AND se.user_email ILIKE '%' || sqlc.arg(q) || '%')
+ORDER BY c.last_seen_at DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountSearchCustomers :one
+SELECT count(*) FROM openrails.customers c
+WHERE sqlc.arg(q)::text = ''
+   OR c.subject ILIKE sqlc.arg(q) || '%'
+   OR c.id::text ILIKE sqlc.arg(q) || '%'
+   OR EXISTS (
+        SELECT 1 FROM openrails.subscriptions se
+        WHERE se.customer_id = c.id
+          AND se.user_email ILIKE '%' || sqlc.arg(q) || '%');
+
 -- name: UpsertCustomerBySubject :one
 -- Customer identity is the merchant plus the host/AuthKit stable UUID subject.
 -- The row id is that subject UUID; issuer is kept only as last-seen audit source.

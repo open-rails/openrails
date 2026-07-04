@@ -356,6 +356,9 @@ func New(deps Dependencies) (*Server, error) {
 	// /auth — never AuthKit DefaultAPI.
 	s.registerControlPlaneAuthRoutes(mux)
 
+	// Merchant admin console SPA (#740), config-gated (default off).
+	s.registerAdminConsoleRoutes(mux)
+
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
 	// the SAME public surface (issue #222 browser tier). Always mounted (#469);
 	// a host-supplied DelegatedAuthenticator overrides the control plane's

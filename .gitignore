@@ -29,6 +29,8 @@ go.work.sum
 
 # Build artifacts
 dist/
+# web/dist is the COMMITTED admin-console build (go:embed for module consumers, #740)
+!web/dist/
 build/
 bin/
 /openrails
