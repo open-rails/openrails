@@ -21,6 +21,9 @@ type RegisterPurchaseRequest struct {
 	DiscountReason   *string
 	DiscountMetadata map[string]any
 	Metadata         map[string]any
+	// AttemptKind stamps payments.attempt_kind (initial|renewal, #733);
+	// empty = unknown (manual/imported rows).
+	AttemptKind string
 }
 
 type RegisterPurchaseResponse struct {

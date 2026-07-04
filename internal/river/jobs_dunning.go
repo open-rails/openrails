@@ -514,11 +514,12 @@ func (w *DunningWorker) applyDeclinedRebill(
 	}
 
 	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           rail,
-		SubscriptionID: &sub.ID,
-		FailureReason:  &reason,
-		FailureCode:    failureCode,
-		HardDecline:    hardDecline,
+		Rail:                rail,
+		SubscriptionID:      &sub.ID,
+		FailureReason:       &reason,
+		FailureCode:         failureCode,
+		HardDecline:         hardDecline,
+		RecordFailedAttempt: true,
 	}); err != nil {
 		logEntry.WithError(err).Warn("apply failure policy after declined rebill")
 	}

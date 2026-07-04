@@ -100,6 +100,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
+	// #733: flush the Redis admission-denial counters to PG hourly aggregates.
+	// Redis may be nil (no-admission deployments); the worker no-ops then.
+	if err := addTrackedWorker(r, workers, &riverjobs.AdmissionDenialFlushWorker{
+		DB:    r.DB,
+		Redis: r.RedisClient,
+		Clock: clock,
+	}); err != nil {
+		return fmt.Errorf("add admission denial flush worker: %w", err)
+	}
 	// Convergence Engine sweep (#511): periodically run reconcile.Converge for
 	// every active merchant, catching internal-plane drift (stalled dunning,
 	// elapsed grace, abandoned checkouts, unmaterialized grant effects) that no
@@ -523,6 +532,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 5 minutes: flush admission-denial counters (#733) from Redis to PG.
+	jobs = append(jobs, r.healthPeriodic(
+		5*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.AdmissionDenialFlushArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

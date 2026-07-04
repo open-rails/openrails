@@ -963,6 +963,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 			Metadata:                 metadata,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
 			PurchasedAt:              now,
 			CreatedAt:                now,
 		}

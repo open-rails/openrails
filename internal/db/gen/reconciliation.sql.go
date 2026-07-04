@@ -1962,7 +1962,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, rail_merchant_account_id
+    customer_id, rail_merchant_account_id, reversal_kind
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -1971,7 +1971,7 @@ INSERT INTO openrails.payments (
     'completed', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $11, $12
+    $11, $12, 'refund'
 )
 ON CONFLICT DO NOTHING
 `

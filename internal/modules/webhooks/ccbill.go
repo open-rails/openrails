@@ -739,6 +739,35 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			}
 		}
 
+		// #733: durably record the declined initial attempt as a failed
+		// payments row (verbatim failureCode + normalized reason).
+		if price != nil && userID != "" && strings.TrimSpace(transactionID) != "" {
+			txdb := db.NewWithPgxTx(tx)
+			kind := payments.AttemptInitial
+			failed := &models.Payment{
+				ID:            uuidutil.NewV7(),
+				CustomerID:    identity.CustomerIDFromString(userID).UUID(),
+				PriceID:       price.ID,
+				Rail:          models.RailCCBill,
+				TransactionID: strings.TrimSpace(transactionID),
+				Amount:        price.Amount,
+				ListAmount:    price.Amount,
+				Currency:      price.Currency,
+				Status:        payments.PaymentStatusFailedValue,
+				AttemptKind:   &kind,
+				PurchasedAt:   s.now(),
+				CreatedAt:     s.now(),
+			}
+			if code := strings.TrimSpace(failureCode); code != "" {
+				reason := payments.NormalizeFailureReason(string(models.RailCCBill), code)
+				failed.FailureCode = &code
+				failed.FailureReason = &reason
+			}
+			if _, err := payments.NewPaymentService(txdb, s.Clock).CreateIfNotExists(ctx, failed); err != nil {
+				log.WithContext(ctx).WithError(err).WithField("transaction_id", transactionID).Error("failed to record CCBill new-sale decline payment row")
+			}
+		}
+
 		if s.CheckoutSessionService != nil && price != nil {
 			session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
 			if err != nil {
@@ -919,6 +948,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			Amount:         moneyutil.CentsToMicros(billedAmountCents),
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
+			AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
 			PurchasedAt:    purchasedAt,
 			CreatedAt:      now,
 		}
@@ -1450,7 +1480,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 						"refund_transaction_id": refundTransactionID,
 					}).Warn("No original payment found for CCBill refund ledger linkage")
 				} else {
-					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, moneyutil.CentsToMicros(refundAmountCents)); refundErr != nil {
+					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, moneyutil.CentsToMicros(refundAmountCents), payments.ReversalRefund); refundErr != nil {
 						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
 						if shouldTerminate {
 							refundLedgerErr = err
@@ -1627,7 +1657,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
-				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalRefund); refundErr != nil {
 					return fmt.Errorf("record void reversal: %w", refundErr)
 				}
 			}
@@ -1746,7 +1776,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
-				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalChargeback); refundErr != nil {
 					ledgerErr = fmt.Errorf("record CCBill chargeback reversal: %w", refundErr)
 					log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
 						"chargeback_transaction_id": reversalID,
@@ -2093,6 +2123,37 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 
 		if err := subService.Update(ctx, sub); err != nil {
 			return fmt.Errorf("failed to update subscription during renewal failure: %w", err)
+		}
+
+		// #733: durably record the declined rebill as a failed payments row
+		// (CCBill rebilling is provider-managed; this webhook is the only
+		// per-attempt decline visibility).
+		if price, perr := priceService.GetByID(ctx, sub.PriceID); perr == nil && strings.TrimSpace(transactionID) != "" {
+			kind := payments.AttemptRenewal
+			subID := sub.ID
+			failed := &models.Payment{
+				ID:             uuidutil.NewV7(),
+				CustomerID:     sub.CustomerID,
+				PriceID:        price.ID,
+				SubscriptionID: &subID,
+				Rail:           models.RailCCBill,
+				TransactionID:  strings.TrimSpace(transactionID),
+				Amount:         price.Amount,
+				ListAmount:     price.Amount,
+				Currency:       price.Currency,
+				Status:         payments.PaymentStatusFailedValue,
+				AttemptKind:    &kind,
+				PurchasedAt:    s.now(),
+				CreatedAt:      s.now(),
+			}
+			if code := strings.TrimSpace(data.FailureCode); code != "" {
+				reason := payments.NormalizeFailureReason(string(models.RailCCBill), code)
+				failed.FailureCode = &code
+				failed.FailureReason = &reason
+			}
+			if _, err := payments.NewPaymentService(txdb, s.Clock).CreateIfNotExists(ctx, failed); err != nil {
+				log.WithContext(ctx).WithError(err).WithField("transaction_id", transactionID).Error("failed to record CCBill renewal decline payment row")
+			}
 		}
 
 		subForLogs = sub

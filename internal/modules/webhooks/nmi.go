@@ -718,7 +718,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					if amountCents > match.AmountCents {
 						amountCents = match.AmountCents
 					}
-					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, moneyutil.CentsToMicros(amountCents)); refundErr != nil {
+					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, moneyutil.CentsToMicros(amountCents), payments.ReversalChargeback); refundErr != nil {
 						reconcileErrors++
 						cbMetadata["chargeback_payment_status"] = "failed"
 						cbMetadata["chargeback_payment_error"] = refundErr.Error()
@@ -978,7 +978,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
 				return fmt.Errorf("unable to resolve original payment %q for NMI refund transaction %q", originalTxnID, txnID)
 			} else {
-				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, moneyutil.CentsToMicros(refundAmountCents)); refundErr != nil {
+				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, moneyutil.CentsToMicros(refundAmountCents), payments.ReversalRefund); refundErr != nil {
 					log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
 						"refund_transaction_id":   txnID,
 						"original_payment_id":     originalPayment.ID,
@@ -1079,7 +1079,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 				"transaction_id": txnID,
 			}, nil))
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, moneyutil.CentsToMicros(refundAmountCents)); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, moneyutil.CentsToMicros(refundAmountCents), payments.ReversalRefund); err != nil {
 			return fmt.Errorf("record NMI refund: %w", err)
 		}
 	}
@@ -1167,7 +1167,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 				if amount <= 0 {
 					return MarkWebhookErrorNonRetryable(fmt.Errorf("cannot void payment with non-positive amount"))
 				}
-				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalRefund); refundErr != nil {
 					return fmt.Errorf("record void reversal: %w", refundErr)
 				}
 			}

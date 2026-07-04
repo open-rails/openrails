@@ -776,6 +776,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 			"solana_token_amount": pending.TokenAmount,
 			"solana_recipient":    pending.Recipient,
 		},
+		AttemptKind: payments.AttemptInitial,
 	})
 
 	if err != nil {

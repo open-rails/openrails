@@ -471,6 +471,10 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
 		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
 	}
+	if req.AttemptKind != "" {
+		k := req.AttemptKind
+		payment.AttemptKind = &k
+	}
 
 	created, err := s.PaymentService.CreateIfNotExists(ctx, payment)
 	if err != nil {

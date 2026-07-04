@@ -117,6 +117,11 @@ type FailMembershipParams struct {
 	// returns a permanent decline (stolen card, do-not-honor, account closed,
 	// expired card, pickup card). See ClassifyNMIDecline.
 	HardDecline bool
+	// RecordFailedAttempt writes a status='failed' payments row for this decline
+	// in the same tx (#733: attempt_kind=renewal, failure_code verbatim +
+	// normalized failure_reason). Callers set it when a real charge attempt was
+	// declined and no failed row was recorded elsewhere.
+	RecordFailedAttempt bool
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {
