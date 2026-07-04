@@ -100,6 +100,7 @@ func Groups() []authcore.PersonaDef {
 						PermMerchantPaymentsRead, PermMerchantPaymentsRefund,
 						PermMerchantSubscriptionsRead, PermMerchantSubscriptionsUpdate,
 						PermMerchantUsageRead, PermMerchantRepairAlertsRead, PermMerchantMetricsRead,
+						PermMerchantDashboardUpdate,
 					},
 				},
 				{
@@ -160,6 +161,7 @@ const (
 	PermMerchantUsageRead              = permissions.MerchantUsageRead
 	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
 	PermMerchantMetricsRead            = permissions.MerchantMetricsRead
+	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate
 	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
 
 	// --- Platform operator (root persona, #721): cross-merchant directory

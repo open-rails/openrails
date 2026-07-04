@@ -16,8 +16,9 @@ func (s *Server) registerAdminConsoleRoutes(mux *http.ServeMux) {
 		return
 	}
 	cfg := adminconsole.Config{
-		AuthBaseURL: s.cfg.AdminConsole.AuthBaseURL,
-		APIBaseURL:  s.cfg.AdminConsole.APIBaseURL,
+		AuthBaseURL:      s.cfg.AdminConsole.AuthBaseURL,
+		APIBaseURL:       s.cfg.AdminConsole.APIBaseURL,
+		NLWidgetsEnabled: s.cfg.LLM.IsConfigured(),
 	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = ControlPlaneAuthPrefix

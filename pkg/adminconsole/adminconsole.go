@@ -24,6 +24,10 @@ type Config struct {
 	// APIBaseURL is the merchant API base. Standalone default "/v1";
 	// embedded hosts typically "/billing/v1".
 	APIBaseURL string `json:"api_base_url"`
+	// NLWidgetsEnabled mirrors the #741 fail-closed LLM gate: false hides the
+	// natural-language widget box entirely (the generate endpoint would 501).
+	// The manual widget builder is always available.
+	NLWidgetsEnabled bool `json:"nl_widgets_enabled"`
 }
 
 // BuiltAssets reports whether a real Vite build is embedded (vs the

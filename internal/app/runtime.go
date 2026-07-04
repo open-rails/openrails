@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/metrics"
@@ -97,6 +98,9 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// MetricsService is the #733 merchant analytics query engine.
 	MetricsService *metrics.Service
+	// DashboardService is the #741 configurable dashboard (saved widgets +
+	// NL widget generation; nil-LLM = generation fail-closed).
+	DashboardService *dashboard.Service
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
 	AdmissionPolicyCache *admission.PolicyCache

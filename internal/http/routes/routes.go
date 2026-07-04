@@ -608,6 +608,14 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	metricsGrp.Handle(http.MethodPost, "/query", h(httphandlers.MerchantMetricsQuery), metricsRead...)
 	metricsGrp.Handle(http.MethodGet, "/schema", h(httphandlers.MerchantMetricsSchema), metricsRead...)
 
+	// #741 configurable dashboard: reads share the metrics permission (a
+	// dashboard is a saved view over metrics); writes + NL generation (the
+	// LLM call costs money) need the dashboard write grant.
+	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantDashboardUpdate)}, dbMW...)
+	rr.Handle(http.MethodGet, "/dashboard", h(httphandlers.GetMerchantDashboard), metricsRead...)
+	rr.Handle(http.MethodPut, "/dashboard", h(httphandlers.PutMerchantDashboard), dashboardWrite...)
+	rr.Handle(http.MethodPost, "/dashboard/widgets/generate", h(httphandlers.GenerateDashboardWidget), dashboardWrite...)
+
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 	// #689: worker-health dashboard — same operator repair surface/permission.
 	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetAdminWorkerHealth), repairRead...)

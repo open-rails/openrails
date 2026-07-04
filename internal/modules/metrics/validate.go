@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,7 +56,14 @@ type Plan struct {
 
 // Validate resolves a query against the registry and returns a compilable plan,
 // or every validation error at once. Exported for #741 (dry-run validation).
+// Relative ranges resolve against the wall clock; use ValidateAt for a pinned
+// clock (tests, deterministic fixtures).
 func Validate(q *Query) (*Plan, *ValidationError) {
+	return ValidateAt(q, time.Now().UTC())
+}
+
+// ValidateAt is Validate with an explicit "now" for relative-range resolution.
+func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	var errs []FieldError
 	add := func(fe FieldError) { errs = append(errs, fe) }
 
@@ -151,9 +160,21 @@ func Validate(q *Query) (*Plan, *ValidationError) {
 
 	// --- range -------------------------------------------------------------------
 	var from, to time.Time
-	if q.Range == nil || q.Range.From == "" || q.Range.To == "" {
+	if q.Range == nil || (q.Range.Last == "" && (q.Range.From == "" || q.Range.To == "")) {
 		add(FieldError{Code: "missing_range", Param: "range",
-			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive UTC days) or RFC3339 timestamps [from,to)`})
+			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive UTC days), RFC3339 timestamps [from,to), or a relative window {"last":"7d"} (Nd|Nw|Nm|Ny, ending today)`})
+	} else if q.Range.Last != "" {
+		if q.Range.From != "" || q.Range.To != "" {
+			add(FieldError{Code: "invalid_range", Param: "range",
+				Message: `range.last is mutually exclusive with range.from/range.to: use either a relative window or explicit dates`})
+		} else {
+			var ok bool
+			from, to, ok = resolveLast(q.Range.Last, now)
+			if !ok {
+				add(FieldError{Code: "invalid_range", Param: "range.last",
+					Message: fmt.Sprintf(`could not parse %q: use "<N>d", "<N>w", "<N>m" or "<N>y" (e.g. "7d" = the past 7 days incl. today)`, q.Range.Last)})
+			}
+		}
 	} else {
 		var okFrom, okTo bool
 		from, okFrom = parseRangeTime(q.Range.From, false)
@@ -310,6 +331,37 @@ func Validate(q *Query) (*Plan, *ValidationError) {
 		Order: q.Order, Limit: limit, Compare: compare,
 		ImplicitCurrency: implicitCurrency,
 	}, nil
+}
+
+var lastRangeRe = regexp.MustCompile(`^([0-9]+)([dwmy])$`)
+
+// resolveLast turns a relative window ("7d", "12w", "6m", "1y") into an
+// inclusive UTC day range ending today: "7d" = the past 7 calendar days
+// including today. Returned bounds match date-form from/to semantics
+// (from = day start, to = day end exclusive).
+func resolveLast(last string, now time.Time) (from, to time.Time, ok bool) {
+	m := lastRangeRe.FindStringSubmatch(last)
+	if m == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n < 1 {
+		return time.Time{}, time.Time{}, false
+	}
+	now = now.UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	to = today.AddDate(0, 0, 1) // inclusive of today
+	switch m[2] {
+	case "d":
+		from = to.AddDate(0, 0, -n)
+	case "w":
+		from = to.AddDate(0, 0, -7*n)
+	case "m":
+		from = to.AddDate(0, -n, 0)
+	case "y":
+		from = to.AddDate(-n, 0, 0)
+	}
+	return from, to, true
 }
 
 func filterableDimNames() []string {

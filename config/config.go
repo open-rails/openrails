@@ -108,6 +108,14 @@ type Config struct {
 	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
 	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
 
+	// LLM configures the server-side model behind the #741 dashboard
+	// natural-language widget generator. FAIL-CLOSED: no api_key → the
+	// generate endpoint answers 501 and the admin console hides the NL box;
+	// the dashboard itself never depends on an LLM. Env: LLM_PROVIDER,
+	// LLM_MODEL, LLM_API_KEY (secret — mounted secret files work like any
+	// other secret env name).
+	LLM *LLMConfig `koanf:"llm,omitempty"`
+
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
 	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
 	// It is declared intent, never auto-detected and never auto-fallback — the data
@@ -258,6 +266,45 @@ type AdminConsoleConfig struct {
 
 // IsEnabled reports whether the admin console SPA should be served.
 func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
+
+// LLM provider names (#741). Anthropic is the only wired provider; the knob
+// exists so adding one later is config, not code archaeology.
+const LLMProviderAnthropic = "anthropic"
+
+// LLMDefaultModel is used when llm.model is unset.
+const LLMDefaultModel = "claude-sonnet-5"
+
+// LLMConfig configures the #741 natural-language widget generator.
+type LLMConfig struct {
+	// Provider selects the API dialect. Empty = "anthropic" (the only
+	// supported value today); unknown values refuse to boot.
+	Provider string `koanf:"provider,omitempty"`
+	// Model is the provider model id. Empty = LLMDefaultModel.
+	Model string `koanf:"model,omitempty"`
+	// APIKey is the provider credential (SECRET — env LLM_API_KEY or a
+	// mounted secret file, never committed config). Empty = feature off.
+	APIKey string `koanf:"api_key,omitempty"`
+}
+
+// IsConfigured reports whether NL widget generation can run (fail-closed on a
+// missing key).
+func (c *LLMConfig) IsConfigured() bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
+
+// ResolvedProvider returns the effective provider name.
+func (c *LLMConfig) ResolvedProvider() string {
+	if c == nil || strings.TrimSpace(c.Provider) == "" {
+		return LLMProviderAnthropic
+	}
+	return strings.ToLower(strings.TrimSpace(c.Provider))
+}
+
+// ResolvedModel returns the effective model id.
+func (c *LLMConfig) ResolvedModel() string {
+	if c == nil || strings.TrimSpace(c.Model) == "" {
+		return LLMDefaultModel
+	}
+	return strings.TrimSpace(c.Model)
+}
 
 // DBConfig holds database configuration.
 // If URL is provided, it takes precedence. Otherwise, a PostgreSQL connection
@@ -916,6 +963,12 @@ func Validate(cfg *Config) error {
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
+	}
+
+	// #741: an unknown llm.provider must never silently boot with the
+	// anthropic dialect pointed at another vendor's key.
+	if cfg.LLM != nil && cfg.LLM.ResolvedProvider() != LLMProviderAnthropic {
+		return fmt.Errorf("invalid llm.provider %q: only %q is supported", cfg.LLM.Provider, LLMProviderAnthropic)
 	}
 
 	// Always validate database configuration
