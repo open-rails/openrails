@@ -1792,6 +1792,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 			"solana_token_amount": checkoutStateUint64(session.RailState, "token_amount"),
 			"solana_recipient":    checkoutStateString(session.RailState, "recipient"),
 		},
+		AttemptKind: payments.AttemptInitial,
 	})
 	if err != nil {
 		return nil, err

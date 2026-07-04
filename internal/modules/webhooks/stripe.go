@@ -529,6 +529,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		AmountProvided: true,
 		Currency:       sess.Currency,
 		Metadata:       stripeCheckoutPaymentMetadata(sess),
+		AttemptKind:    payments.AttemptInitial,
 	})
 	if err != nil {
 		return fmt.Errorf("register purchase: %w", err)
@@ -704,7 +705,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, moneyutil.CentsToMicros(refund.Amount)); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, moneyutil.CentsToMicros(refund.Amount), payments.ReversalRefund); err != nil {
 			return fmt.Errorf("record stripe refund: %w", err)
 		}
 	}
@@ -781,7 +782,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, moneyutil.CentsToMicros(dispute.Amount)); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, moneyutil.CentsToMicros(dispute.Amount), payments.ReversalChargeback); err != nil {
 			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
 			log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
 				"dispute_id":          disputeID,
@@ -886,6 +887,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			Amount:            -disputeReversal.Amount,
 			ListAmount:        original.ListAmount,
 			Currency:          original.Currency,
+			ReversalKind:      func() *string { k := payments.ReversalDisputeReversal; return &k }(),
 			PurchasedAt:       s.now(),
 			CreatedAt:         s.now(),
 		}

@@ -347,7 +347,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, rail_merchant_account_id
+    customer_id, rail_merchant_account_id, reversal_kind
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -356,7 +356,7 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
+    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id), 'refund'
 )
 ON CONFLICT DO NOTHING;
 

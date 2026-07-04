@@ -42,6 +42,16 @@ type Payment struct {
 	CardBrand *string `json:"card_brand,omitempty"`
 	CardLast4 *string `json:"card_last4,omitempty"`
 
+	// AttemptKind: initial|renewal, stamped at write time (#733). Nil = unknown
+	// (imported / pre-instrumentation rows).
+	AttemptKind *string `json:"attempt_kind,omitempty"`
+	// FailureCode is the raw rail decline code, verbatim; FailureReason the
+	// normalized category derived deterministically per rail (#733).
+	FailureCode   *string `json:"failure_code,omitempty"`
+	FailureReason *string `json:"failure_reason,omitempty"`
+	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal (#733).
+	ReversalKind *string `json:"reversal_kind,omitempty"`
+
 	DiscountCode     *string        `json:"discount_code,omitempty"`
 	DiscountReason   *string        `json:"discount_reason,omitempty"`
 	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`

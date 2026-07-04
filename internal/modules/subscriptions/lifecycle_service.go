@@ -535,6 +535,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			Metadata:                 params.PaymentMetadata,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
 			PurchasedAt:              purchasedAt,
 			CreatedAt:                now,
 		}
@@ -702,6 +703,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				Metadata:                 params.PaymentMetadata,
 				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+				AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
@@ -1661,6 +1663,51 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 	return nil
 }
 
+// recordFailedRenewalAttempt writes the declined renewal charge as a durable
+// status='failed' payments row (#733) inside the caller's tx. Best-effort:
+// a missing price is logged, never fails the dunning flow. Idempotent on the
+// synthetic per-attempt transaction id.
+func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Context, txDB *db.DB, priceService *catalog.PriceService, subscription *models.Subscription, params *FailMembershipParams, now time.Time) {
+	price := subscription.Price
+	if price == nil && subscription.PriceID != uuid.Nil {
+		if p, err := priceService.GetByID(ctx, subscription.PriceID); err == nil {
+			price = p
+		}
+	}
+	if price == nil {
+		log.WithContext(ctx).WithField("subscription_id", subscription.ID).Warn("declined renewal not recorded as payment row: no price")
+		return
+	}
+	attemptNum := 1
+	if subscription.RetryAttempts != nil {
+		attemptNum = *subscription.RetryAttempts
+	}
+	kind := payments.AttemptRenewal
+	failed := &models.Payment{
+		ID:             uuidutil.NewV7(),
+		CustomerID:     subscription.CustomerID,
+		PriceID:        price.ID,
+		SubscriptionID: &subscription.ID,
+		Rail:           subscription.Rail,
+		TransactionID:  fmt.Sprintf("renewal_declined:%s:attempt%d", subscription.ID, attemptNum),
+		Amount:         price.Amount,
+		ListAmount:     price.Amount,
+		Currency:       price.Currency,
+		Status:         payments.PaymentStatusFailedValue,
+		AttemptKind:    &kind,
+		PurchasedAt:    now,
+		CreatedAt:      now,
+	}
+	if code := normalize.FromPtr(params.FailureCode); code != "" {
+		reason := payments.NormalizeFailureReason(string(subscription.Rail), code)
+		failed.FailureCode = &code
+		failed.FailureReason = &reason
+	}
+	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("failed to record declined renewal payment row")
+	}
+}
+
 // FailMembership marks a subscription as failed due to payment issues.
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
@@ -1789,6 +1836,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// (#691: no grace windows are appended while dunning runs past the paid
 		// term — the auto-renew sub's STANDING window keeps access intact until a
 		// terminal outcome closes it.)
+
+		// #733: durably record the declined attempt as a failed payments row in
+		// this same tx. Terminal-without-charge callers pass
+		// RecordFailedAttempt=false (no attempt happened).
+		if params.RecordFailedAttempt {
+			s.recordFailedRenewalAttempt(ctx, db, priceService, subscription, params, now)
+		}
 
 		// #344 follow-up: a terminal payment-failure cancellation of an
 		// NMI-backed subscription must also stop the rail-side recurring

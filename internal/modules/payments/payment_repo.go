@@ -28,6 +28,7 @@ type PaymentFilters struct {
 	EndDate        *time.Time `form:"created_before" time_format:"2006-01-02"`
 	MinAmount      *int64     `form:"min_amount"`
 	MaxAmount      *int64     `form:"max_amount"`
+	Status         string     `form:"status"` // pending|completed|failed|refunded (#733 deep-link)
 	RefundsOnly    bool       `form:"refunds_only"`
 	SortBy         string     `form:"sort_by"`    // created_at (default), amount, purchased_at
 	SortOrder      string     `form:"sort_order"` // asc, desc (default)
@@ -87,6 +88,10 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		CardBrand:                p.CardBrand,
 		CardLast4:                p.CardLast4,
 		CustomerID:               p.CustomerID,
+		AttemptKind:              p.AttemptKind,
+		FailureCode:              p.FailureCode,
+		FailureReason:            p.FailureReason,
+		ReversalKind:             p.ReversalKind,
 	}, nil
 }
 
@@ -425,9 +430,12 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 			subID = &parsed
 		}
 	}
-	var rail, transactionID *string
+	var rail, transactionID, status *string
 	if f.Rail != "" {
 		rail = &f.Rail
+	}
+	if f.Status != "" {
+		status = &f.Status
 	}
 	if f.TransactionID != "" {
 		transactionID = &f.TransactionID
@@ -444,6 +452,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		PurchasedBefore: f.EndDate,
 		MinAmount:       f.MinAmount,
 		MaxAmount:       f.MaxAmount,
+		Status:          status,
 		RefundsOnly:     f.RefundsOnly,
 	})
 	if err != nil {
@@ -468,6 +477,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		PurchasedBefore: f.EndDate,
 		MinAmount:       f.MinAmount,
 		MaxAmount:       f.MaxAmount,
+		Status:          status,
 		RefundsOnly:     f.RefundsOnly,
 		SortBy:          sortBy,
 		SortDesc:        f.SortOrder != "asc",

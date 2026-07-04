@@ -52,6 +52,10 @@ type Admitter struct {
 	// nil disables it. invokerWastedWindows is the flat per-invoker backstop.
 	wasted               *abuse.WastedSpendGuard
 	invokerWastedWindows []abuse.WastedWindow
+
+	// denials is the optional #733 denial counter (Redis hourly aggregates);
+	// nil disables recording.
+	denials *DenialRecorder
 }
 
 // NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
@@ -64,6 +68,18 @@ func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, invokerWindows
 	a.wasted = guard
 	a.invokerWastedWindows = invokerWindows
 	return a
+}
+
+// WithDenialRecorder enables aggregated denial counting (#733).
+func (a *Admitter) WithDenialRecorder(r *DenialRecorder) *Admitter {
+	a.denials = r
+	return a
+}
+
+func (a *Admitter) recordDenial(ctx context.Context, merchantID string, customer identity.CustomerID, code string) {
+	if a.denials != nil {
+		a.denials.Record(ctx, merchantID, customer.UUID().String(), code, time.Now())
+	}
 }
 
 // AdmitRequest is one admission decision input.
@@ -132,6 +148,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			return AdmitDecision{}, werr
 		}
 		if over {
+			a.recordDenial(ctx, merchantID, req.CustomerID, DenyFailureRateLimited)
 			return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
 		}
 	}
@@ -146,6 +163,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// A delegated invoker must hold an explicit spend grant (#473 guarantee).
 	if !identity.IsDirectPayerInvoker(req.InvokerType) && !hasGrant {
+		a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelegatedSpendNotAllowed)
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
 	}
 
@@ -187,8 +205,10 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		if creditLine > 0 {
 			code = money.DenyInsufficientCredit
 		}
+		a.recordDenial(ctx, merchantID, req.CustomerID, code)
 		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: code, AvailableAmount: available}, nil
 	default: // window blocked
+		a.recordDenial(ctx, merchantID, req.CustomerID, DenyBudgetExceeded)
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available}, nil
 	}
 }

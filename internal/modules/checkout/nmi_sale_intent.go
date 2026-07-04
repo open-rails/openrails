@@ -212,6 +212,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, p NMISalePayload, o
 		Amount:        p.AmountMicros,
 		Currency:      p.Currency,
 		Metadata:      metadata,
+		AttemptKind:   payments.AttemptInitial,
 	})
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the

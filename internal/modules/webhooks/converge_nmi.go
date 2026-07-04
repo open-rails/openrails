@@ -264,7 +264,14 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				ListAmount:     amountMicros,
 				Currency:       currency,
 				Status:         "failed",
+				AttemptKind:    func() *string { k := payments.AttemptInitial; return &k }(),
 				PurchasedAt:    purchasedAt,
+			}
+			if probe.DeclineResponseCode != 0 {
+				code := strconv.Itoa(probe.DeclineResponseCode)
+				reason := payments.NormalizeFailureReason(rail, code)
+				failed.FailureCode = &code
+				failed.FailureReason = &reason
 			}
 			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
 				return fmt.Errorf("nmi converge: record fetched decline: %w", err)

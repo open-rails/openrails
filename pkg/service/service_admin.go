@@ -194,7 +194,7 @@ func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, r
 		return nil, fmt.Errorf("refund_transaction_id required")
 	}
 
-	refund, err := paymentsService.Refund(ctx, paymentID, req.RefundTransactionID, req.Amount)
+	refund, err := paymentsService.Refund(ctx, paymentID, req.RefundTransactionID, req.Amount, payments.ReversalRefund)
 	if err != nil {
 		return nil, err
 	}

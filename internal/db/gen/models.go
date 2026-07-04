@@ -112,6 +112,16 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
+// #733 hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
+type OpenrailsAdmissionDenialsHourly struct {
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	DenialReason string
+	HourAt       time.Time
+	Denials      int64
+	UpdatedAt    time.Time
+}
+
 type OpenrailsCatalogCreditBalance struct {
 	MerchantID   uuid.UUID
 	Key          string
@@ -618,6 +628,14 @@ type OpenrailsPayment struct {
 	CustomerID               uuid.UUID
 	// Provider account that produced this payment/charge mirror row.
 	RailMerchantAccountID *uuid.UUID
+	// #733 initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
+	AttemptKind *string
+	// #733 raw rail decline code, recorded verbatim (no fabrication).
+	FailureCode *string
+	// #733 normalized decline category, derived deterministically from failure_code per rail.
+	FailureReason *string
+	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
+	ReversalKind *string
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -942,6 +960,18 @@ type OpenrailsSubscription struct {
 	CustomerID          uuid.UUID
 	// Provider account that produced this remote subscription mirror row.
 	RailMerchantAccountID *uuid.UUID
+}
+
+// #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
+type OpenrailsSubscriptionStatusTransition struct {
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	FromStatus     *OpenrailsSubscriptionStatus
+	ToStatus       OpenrailsSubscriptionStatus
+	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
+	CancelType *string
+	OccurredAt time.Time
 }
 
 // Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. Platform-owned (subjects cannot edit). OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.

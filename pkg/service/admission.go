@@ -111,7 +111,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, err
 	}
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
-		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows)
+		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows).
+		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient))
 
 	var exp time.Time
 	switch {

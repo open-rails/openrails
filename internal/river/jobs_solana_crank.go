@@ -347,10 +347,11 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			code := string(cf.Code)
 			subID := row.SubscriptionID
 			if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-				Rail:           models.RailSolana,
-				SubscriptionID: &subID,
-				FailureReason:  &reason,
-				FailureCode:    &code,
+				Rail:                models.RailSolana,
+				SubscriptionID:      &subID,
+				FailureReason:       &reason,
+				FailureCode:         &code,
+				RecordFailedAttempt: true,
 			}); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: fail membership: %w", err)
 			}

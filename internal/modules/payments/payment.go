@@ -91,10 +91,22 @@ func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("payments cannot be deleted")
 }
 
-// Refund records a refund as a negative payment entry linked by transaction ID
-// Note: Rails should handle the actual money movement; this persists the event.
-// amount is in cents (smallest currency unit)
-func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64) (*models.Payment, error) {
+// Reversal kinds for the mirror rows Refund writes (#733): a chargeback is
+// recorded through the same negative-row mechanics as a refund, but the kind
+// discriminator keeps them distinguishable for metrics.
+const (
+	ReversalRefund           = "refund"
+	ReversalChargeback       = "chargeback"
+	ReversalDisputeReversal  = "dispute_reversal"
+)
+
+// Refund records a reversal as a negative payment entry linked by transaction
+// ID. reversalKind says WHAT the reversal is (refund vs chargeback); the rails
+// handle the actual money movement, this persists the event. amount is micros.
+func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
+	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
+		return nil, fmt.Errorf("invalid reversal kind %q", reversalKind)
+	}
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
 		return nil, err
@@ -121,6 +133,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
 		Status:        PaymentStatusCompletedValue,
+		ReversalKind:  &reversalKind,
 		PurchasedAt:   s.now(),
 		CreatedAt:     s.now(),
 	}
@@ -144,6 +157,7 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 	}
 
 	now := s.now()
+	kind := ReversalRefund
 	refund := &models.Payment{
 		ID:             uuidutil.NewV7(),
 		CustomerID:     orig.CustomerID,
@@ -159,6 +173,7 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
 		Status:        PaymentStatusPendingValue,
+		ReversalKind:  &kind,
 		Metadata:      metadata,
 		PurchasedAt:   now,
 		CreatedAt:     now,
