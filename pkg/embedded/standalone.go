@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	internalauth "github.com/open-rails/openrails/internal/auth"
 	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
@@ -44,13 +42,7 @@ func StandaloneServer(e *Embedded) (*server.Server, error) {
 			return nil, fmt.Errorf("attach control plane: %w", err)
 		}
 	}
-	authenticator := func() billingauth.Authenticator {
-		cp := embcp.Get(a)
-		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
-			return nil
-		}
-		return internalauth.NewAuthenticator(cp.AuthService().Verifier())
-	}()
+	authenticator := embcp.Get(a).UserAuthenticator()
 	if authenticator == nil {
 		return nil, fmt.Errorf("control plane verifier unavailable")
 	}

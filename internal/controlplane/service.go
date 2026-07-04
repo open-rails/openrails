@@ -17,7 +17,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
@@ -339,6 +341,25 @@ func (c *ControlPlane) AuthService() *authhttp.Service {
 		return nil
 	}
 	return c.authSvc
+}
+
+// UserAuthenticator returns the in-process billingauth.Authenticator for a host
+// embedding this control plane (#739): the host's own HTTP routes authenticate
+// bearer tokens against the SAME verifier state the control plane mints and
+// verifies with (issuer, audiences, API-key prefix, in-memory signing keys,
+// core-service enrichment) — no JWKS HTTP fetch, so mint and verify cannot
+// drift. It is exactly the authenticator the standalone server wires for its
+// user routes.
+//
+// Scope: hosts embedding the control plane use THIS for their own routes.
+// pkg/embedded/authkit.NewVerifierAuthenticator remains for verifying REMOTE
+// issuers over JWKS; a JWKS HTTP route exists purely for external verifiers.
+// Returns nil when the control plane or its verifier is absent.
+func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
+	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
+		return nil
+	}
+	return auth.NewAuthenticator(c.authSvc.Verifier())
 }
 
 // Pool returns the control plane's schema-aware pgx pool (the pool holding the
