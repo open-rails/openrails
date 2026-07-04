@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -57,7 +57,7 @@ func mintPlatformOperatorToken(t *testing.T, ctx context.Context, s *Surface, ro
 		_, err = core.EnsureRootGroup(ctx)
 		require.NoError(t, err, "ensure root group")
 		require.NoError(t,
-			core.AssignGroupRole(ctx, authcore.RootPersona, "", user.ID, authcore.SubjectKindUser, role),
+			core.Genesis().AssignGroupRole(ctx, authcore.RootPersona, "", user.ID, authcore.SubjectKindUser, role),
 			"assign root role %s", role)
 	}
 	token, _, err := core.IssueAccessToken(ctx, user.ID, nil)

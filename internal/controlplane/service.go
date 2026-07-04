@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit"
 	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	jwtkit "github.com/open-rails/authkit/jwtkit"
+	"github.com/open-rails/authkit/ratelimit"
 	"github.com/open-rails/authkit/verify"
+	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -63,11 +64,13 @@ type ControlPlane struct {
 }
 
 type options struct {
-	hosted         bool
-	email          authcore.EmailSender
-	sms            authcore.SMSSender
-	frontend       authcore.FrontendConfig
-	trustedProxies []string
+	hosted             bool
+	email              authcore.EmailSender
+	sms                authcore.SMSSender
+	frontend           authcore.FrontendConfig
+	trustedProxies     []string
+	rateLimitOverrides map[string]ratelimit.Limit
+	redis              *redis.Client
 }
 
 // Option configures the control plane for embedding hosts.
@@ -126,6 +129,32 @@ func WithFrontend(fc authcore.FrontendConfig) Option {
 func WithTrustedProxies(cidrs []string) Option {
 	return func(o *options) {
 		o.trustedProxies = cidrs
+	}
+}
+
+// WithRateLimitOverrides overlays bucket-specific limits onto AuthKit's
+// built-in rate-limit defaults (authhttp.WithRateLimitOverrides; #743 task 3,
+// unblocked by authkit v0.79.0's authkit#242 merge-style override API). Keys
+// are AuthKit's exported bucket names (authhttp.RLPasswordLogin, etc.);
+// unset buckets keep AuthKit's default. Never replaces the whole policy —
+// authhttp.WithRateLimiter/WithoutRateLimiter remain the (unforwarded,
+// advanced-only) full-replacement seam.
+func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
+	return func(o *options) {
+		o.rateLimitOverrides = overrides
+	}
+}
+
+// WithRedis wires a Redis client into the AuthKit engine's ephemeral store
+// (authcore.WithRedis) — #753. authhttp.NewServer (authkit v0.79.0, #210)
+// automatically reuses this SAME client for its own OIDC/SIWS state caches
+// and rate limiter, so this one call satisfies both layers' Redis needs.
+// Required outside development: authhttp.NewServer hard-fails construction
+// when Environment is non-development and no Redis-backed ephemeral store
+// was wired.
+func WithRedis(rd *redis.Client) Option {
+	return func(o *options) {
+		o.redis = rd
 	}
 }
 
@@ -292,7 +321,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// its own namespace directly; the flat case needs no cross-namespace grant).
 		RBAC: Groups(),
 		// Private standalone posture: no public user self-registration. Embedded
-		// bootstrap/core calls (CreatePermissionGroup/AssignGroupRole/MintAPIKey)
+		// bootstrap/core calls (CreatePermissionGroup/Genesis().AssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
 		// config/env knob opens this in standalone.
 		// Verification set EXPLICITLY: authkit v0.76.0 defaults unset to
@@ -316,6 +345,14 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	if options.sms != nil {
 		coreOpts = append(coreOpts, authcore.WithSMSSender(options.sms))
 	}
+	// #753: wire the engine's Redis client as AuthKit's ephemeral store.
+	// authhttp.NewServer below (authkit v0.79.0, #210) automatically reuses
+	// THIS SAME client for its own OIDC/SIWS caches and rate limiter — one
+	// wire satisfies both layers, and is REQUIRED outside development (see
+	// authhttp.NewServer's validate()).
+	if options.redis != nil {
+		coreOpts = append(coreOpts, authcore.WithRedis(options.redis))
+	}
 
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
@@ -325,10 +362,14 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
 	// registration/login rate limiter keys on the real client behind a load
-	// balancer instead of the LB's own peer address.
+	// balancer instead of the LB's own peer address; per-bucket rate-limit
+	// overrides layered onto AuthKit's defaults.
 	var authHTTPOpts []authhttp.Option
 	if len(options.trustedProxies) > 0 {
 		authHTTPOpts = append(authHTTPOpts, authhttp.WithTrustedProxies(options.trustedProxies...))
+	}
+	if len(options.rateLimitOverrides) > 0 {
+		authHTTPOpts = append(authHTTPOpts, authhttp.WithRateLimitOverrides(options.rateLimitOverrides))
 	}
 	authSvc, err := authhttp.NewServer(authClient, authHTTPOpts...)
 	if err != nil {
@@ -394,8 +435,19 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 }
 
 // Core returns the underlying AuthKit core service used for in-process
-// group/role/API key operations.
-func (c *ControlPlane) Core() authkit.Client {
+// group/role/API key operations. The return type is the concrete
+// *authcore.Client (not the authkit.Client interface): it satisfies
+// authkit.Client in full (every existing Core()-based call site keeps
+// compiling unchanged) AND additionally exposes .Genesis() (authkit v0.79.0,
+// #241) — the unchecked bootstrap/migration mutators (AssignGroupRole,
+// AssignRoleBySlug, RemoveRoleBySlug, RemoveGroupSubject) that authkit
+// deliberately dropped from the swappable Client interface. Bootstrap/seed/
+// lazy-materialization code (internal/controlplane/bootstrap.go,
+// customer_group.go, internal/bootstrap/merchant_manifest.go, the integration
+// harness) calls Core().Genesis().AssignGroupRole(...) etc.; runtime request
+// handlers must use the actor-checked *As methods on the Client interface
+// instead (never Genesis()).
+func (c *ControlPlane) Core() *authcore.Client {
 	if c == nil {
 		return nil
 	}

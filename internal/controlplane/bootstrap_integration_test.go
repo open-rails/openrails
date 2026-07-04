@@ -364,7 +364,7 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 
 	rootOperator, err := cp.Core().CreateUser(ctx, "root-operator@example.test", "rootoperator")
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().AssignGroupRole(ctx, authcore.RootPersona, "", rootOperator.ID, authcore.SubjectKindUser, authcore.OwnerRoleName))
+	require.NoError(t, cp.Core().Genesis().AssignGroupRole(ctx, authcore.RootPersona, "", rootOperator.ID, authcore.SubjectKindUser, authcore.OwnerRoleName))
 
 	canModerateMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
 	require.NoError(t, err)

@@ -52,7 +52,7 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	} else if err != nil {
 		return "", fmt.Errorf("controlplane: resolve customer group %q: %w", customerID, err)
 	} else if ownerSubject != "" {
-		if err := core.AssignGroupRole(ctx, CustomerType, customerID, ownerSubject, authcore.SubjectKindUser, CustomerRoleOwner); err != nil {
+		if err := core.Genesis().AssignGroupRole(ctx, CustomerType, customerID, ownerSubject, authcore.SubjectKindUser, CustomerRoleOwner); err != nil {
 			return "", fmt.Errorf("controlplane: assign customer owner: %w", err)
 		}
 	}
