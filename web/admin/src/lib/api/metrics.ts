@@ -45,38 +45,6 @@ export interface MetricsResult {
   compare_rows?: MetricsCell[][]
 }
 
-// --- metrics schema (drives the manual builder) --------------------------------
-
-export interface SchemaMeasure {
-  name: string
-  class: string
-  unit: string
-  description: string
-  formula: string
-  dims: string[]
-  money?: boolean
-}
-
-export interface SchemaDimension {
-  name: string
-  description: string
-  values?: string[]
-}
-
-export interface SchemaExample {
-  intent: string
-  query: MetricsQuery
-}
-
-export interface MetricsSchema {
-  measures: SchemaMeasure[]
-  dimensions: SchemaDimension[]
-  grains: string[]
-  examples: SchemaExample[]
-  limits: { max_buckets: number; max_limit: number }
-  query_shape: string
-}
-
 // --- dashboard ---------------------------------------------------------------
 
 export type WidgetViz = "stat" | "line" | "area" | "bar" | "donut" | "table"
@@ -116,15 +84,15 @@ export interface GeneratedWidget {
 export const metricsQuery = (query: MetricsQuery) =>
   api<MetricsResult>("/merchant/metrics/query", { method: "POST", body: query })
 
-export const metricsSchema = () => api<MetricsSchema>("/merchant/metrics/schema")
-
 export const getDashboard = () => api<Dashboard>("/merchant/dashboard")
 
 export const putDashboard = (widgets: Widget[]) =>
   api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })
 
-export const generateWidget = (prompt: string) =>
+// generateWidget: NL prompt → validated {query,title,viz}. baseQuery (an
+// existing widget's query) makes the prompt a refinement of it (#755).
+export const generateWidget = (prompt: string, baseQuery?: MetricsQuery) =>
   api<GeneratedWidget>("/merchant/dashboard/widgets/generate", {
     method: "POST",
-    body: { prompt },
+    body: baseQuery ? { prompt, base_query: baseQuery } : { prompt },
   })
