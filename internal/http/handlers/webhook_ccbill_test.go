@@ -150,7 +150,7 @@ func newCCBillWebhookRequestBehindProxy(t *testing.T, remoteAddr, forwardedFor s
 	req.SetPathValue("provider", "ccbill")
 	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
 	rt := &app.Runtime{
-		Config:         &config.Config{TestMode: false, TrustedProxies: trustedProxies},
+		Config:         &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: trustedProxies},
 		TrustedProxies: iputil.ParseTrustedProxies(trustedProxies),
 	}
 	return httprequest.NewHTTP(w, req, rt), w
