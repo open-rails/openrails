@@ -26,10 +26,12 @@ import (
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 // captureEmailSender implements the authkit/embedded EmailSender alias the way
-// an external host would: it records the verification code instead of sending.
+// an external host would: it records the verification code / reset link
+// instead of sending.
 type captureEmailSender struct {
-	mu    sync.Mutex
-	codes map[string]string // normalized email -> last verification code
+	mu         sync.Mutex
+	codes      map[string]string // normalized email -> last verification code
+	resetLinks map[string]string // normalized email -> last password reset link URL
 }
 
 func (s *captureEmailSender) SendVerification(_ context.Context, email, _ string, msg authcore.VerificationMessage) error {
@@ -41,7 +43,13 @@ func (s *captureEmailSender) SendVerification(_ context.Context, email, _ string
 	s.codes[email] = msg.Code
 	return nil
 }
-func (s *captureEmailSender) SendPasswordResetLink(context.Context, string, string, string) error {
+func (s *captureEmailSender) SendPasswordResetLink(_ context.Context, email, _, resetURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resetLinks == nil {
+		s.resetLinks = map[string]string{}
+	}
+	s.resetLinks[email] = resetURL
 	return nil
 }
 func (s *captureEmailSender) SendAccountRegistrationInvite(context.Context, string, string) error {
@@ -54,6 +62,12 @@ func (s *captureEmailSender) code(email string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.codes[email]
+}
+
+func (s *captureEmailSender) resetLink(email string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resetLinks[email]
 }
 
 func hostedTestConfig(dsn, issuer string) *config.Config {

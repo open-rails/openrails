@@ -2,9 +2,6 @@ package controlplane
 
 import (
 	"testing"
-	"time"
-
-	"github.com/open-rails/authkit"
 )
 
 func TestGroups_CustomerExposesRemoteApplications(t *testing.T) {
@@ -17,23 +14,6 @@ func TestGroups_CustomerExposesRemoteApplications(t *testing.T) {
 		}
 	}
 	t.Fatal("customer group persona missing")
-}
-
-func TestAnyLiveAPIKey(t *testing.T) {
-	now := time.Now()
-	revoked := &now
-	if anyLiveAPIKey(nil) {
-		t.Error("nil API keys should not be live")
-	}
-	if anyLiveAPIKey([]authkit.APIKey{{RevokedAt: revoked}}) {
-		t.Error("only-revoked API keys should not count as live")
-	}
-	if !anyLiveAPIKey([]authkit.APIKey{{RevokedAt: nil}}) {
-		t.Error("a non-revoked API key should count as live")
-	}
-	if !anyLiveAPIKey([]authkit.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
-		t.Error("a mix with one live API key should count as live")
-	}
 }
 
 // TestAdmissionCreatePermission_GateSemantics proves the admission hot-path gate:

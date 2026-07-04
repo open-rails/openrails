@@ -165,6 +165,76 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, dbtest.TestMerchantID, resolved.MerchantID)
 }
 
+// TestBootstrap_RevokedKeysNeverAutoRemint is #747's core regression guard: an
+// operator who revokes every API key for a merchant group (e.g. after a
+// suspected compromise) must never have a fresh one silently minted by a later
+// Bootstrap call — not even one that explicitly requests minting. Eligibility
+// is the merchant group's FULL key history, not just its current live count.
+func TestBootstrap_RevokedKeysNeverAutoRemint(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newTestControlPlane(t, pool)
+
+	// Genuine first run: no key history yet, explicit request mints.
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
+	require.NoError(t, err)
+	require.True(t, res1.APIKeyMinted, "genuine first run should mint")
+	require.NotEmpty(t, res1.APIKeySecret)
+
+	// Operator revokes the key.
+	keys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	revoked, err := cp.Core().RevokeAPIKey(ctx, MerchantType, dbtest.TestMerchantSlug, keys[0].ID)
+	require.NoError(t, err)
+	require.True(t, revoked)
+
+	// Sanity: zero LIVE keys now, but the key HISTORY is non-empty.
+	afterRevoke, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	require.NoError(t, err)
+	require.Len(t, afterRevoke, 1)
+	require.NotNil(t, afterRevoke[0].RevokedAt)
+
+	// A routine re-Bootstrap WITHOUT a mint request must not mint (trivially).
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
+	require.NoError(t, err)
+	require.False(t, res2.APIKeyMinted)
+
+	// #747's actual fix: an EXPLICIT mint request must ALSO not auto-heal the
+	// revocation — this merchant group has had a key before, so it is not a
+	// first-run state, regardless of what the caller asks for.
+	res3, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
+	require.NoError(t, err)
+	require.False(t, res3.APIKeyMinted, "an explicit mint request must never auto-heal a merchant that previously had a key")
+	require.Empty(t, res3.APIKeySecret)
+
+	// Exactly one API key exists ever (the original, revoked) — no replacement minted.
+	finalKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	require.NoError(t, err)
+	require.Len(t, finalKeys, 1, "no replacement key should have been minted after revocation")
+}
+
+// TestBootstrap_FreshMerchantMintsOnlyOnExplicitRequest proves the OTHER half
+// of #747's fix still works for a merchant that never had a key: the zero
+// value (MintInitialAPIKey: false) never mints, and an explicit true does.
+func TestBootstrap_FreshMerchantMintsOnlyOnExplicitRequest(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newTestControlPlane(t, pool)
+
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
+	require.NoError(t, err)
+	require.False(t, res1.APIKeyMinted, "the zero value must never mint")
+	keys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	require.NoError(t, err)
+	require.Empty(t, keys)
+
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
+	require.NoError(t, err)
+	require.True(t, res2.APIKeyMinted, "a genuinely first-run merchant mints on explicit request")
+	require.NotEmpty(t, res2.APIKeySecret)
+}
+
 func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
