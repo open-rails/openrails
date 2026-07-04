@@ -5,6 +5,9 @@
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
+  // #741 fail-closed LLM gate: false hides the natural-language widget box
+  // entirely (the generate endpoint would answer 501).
+  nl_widgets_enabled: boolean
 }
 
 export interface TokenPair {
