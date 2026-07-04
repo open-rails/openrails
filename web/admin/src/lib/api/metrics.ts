@@ -96,3 +96,21 @@ export const generateWidget = (prompt: string, baseQuery?: MetricsQuery) =>
     method: "POST",
     body: baseQuery ? { prompt, base_query: baseQuery } : { prompt },
   })
+
+// --- metrics ask (#756) --------------------------------------------------------
+
+// AskEvidence is one executed tool query: the query plus its VERBATIM result
+// (a MetricsResult) — on-screen numbers come from here, never from prose.
+export interface AskEvidence extends MetricsResult {
+  query: MetricsQuery
+}
+
+export interface AskResponse {
+  answer: string
+  evidence: AskEvidence[]
+}
+
+// askMetrics: free-form question → LLM-run metrics queries + answer. 501 when
+// llm.ask_enabled / the LLM key are not configured.
+export const askMetrics = (question: string) =>
+  api<AskResponse>("/merchant/metrics/ask", { method: "POST", body: { question } })

@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,11 +72,15 @@ func (f *fakeLLM) Complete(_ context.Context, _ string, msgs []LLMMessage) (stri
 	return f.responses[len(f.calls)-1], nil
 }
 
+func (f *fakeLLM) CompleteTools(context.Context, string, []ToolDef, []ToolMessage, int) (*ToolTurn, error) {
+	return nil, errors.New("fakeLLM: tool use not scripted")
+}
+
 const goldenResponse = `{"query":{"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations per day","viz":"line"}`
 
 func TestGenerate_HappyPathGolden(t *testing.T) {
 	llm := &fakeLLM{responses: []string{goldenResponse}}
-	svc := NewService(nil, llm, nil)
+	svc := NewService(Deps{LLM: llm})
 	res, err := svc.Generate(context.Background(), "count of users who cancelled per day, for the past 7 days", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
@@ -90,7 +95,7 @@ func TestGenerate_HappyPathGolden(t *testing.T) {
 func TestGenerate_RetryLoopFeedsErrorsBack(t *testing.T) {
 	invalid := `{"query":{"measures":["cancelations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations","viz":"line"}`
 	llm := &fakeLLM{responses: []string{invalid, goldenResponse}}
-	svc := NewService(nil, llm, nil)
+	svc := NewService(Deps{LLM: llm})
 	res, err := svc.Generate(context.Background(), "cancelled per day past week", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
@@ -110,7 +115,7 @@ func TestGenerate_RetryLoopFeedsErrorsBack(t *testing.T) {
 func TestGenerate_ExhaustedRetriesReturnsErrors(t *testing.T) {
 	invalid := `{"query":{"measures":["nope"],"range":{"last":"7d"}},"title":"x","viz":"stat"}`
 	llm := &fakeLLM{responses: []string{invalid, invalid, invalid}}
-	svc := NewService(nil, llm, nil)
+	svc := NewService(Deps{LLM: llm})
 	_, err := svc.Generate(context.Background(), "whatever", nil)
 	var gerr *GenerateInvalidError
 	require.ErrorAs(t, err, &gerr)
@@ -119,7 +124,7 @@ func TestGenerate_ExhaustedRetriesReturnsErrors(t *testing.T) {
 }
 
 func TestGenerate_Unconfigured(t *testing.T) {
-	svc := NewService(nil, nil, nil)
+	svc := NewService(Deps{})
 	_, err := svc.Generate(context.Background(), "anything", nil)
 	require.ErrorIs(t, err, ErrLLMNotConfigured)
 	require.False(t, svc.NLConfigured())
@@ -130,7 +135,7 @@ func TestGenerate_Unconfigured(t *testing.T) {
 func TestGenerate_BaseQueryRidesIntoUserTurn(t *testing.T) {
 	weekly := `{"query":{"measures":["cancellations"],"by":["time"],"grain":"week","range":{"last":"12w"}},"title":"Cancellations per week","viz":"line"}`
 	llm := &fakeLLM{responses: []string{weekly}}
-	svc := NewService(nil, llm, nil)
+	svc := NewService(Deps{LLM: llm})
 	base := &metrics.Query{
 		Measures: []string{"cancellations"},
 		By:       []string{"time"},
@@ -150,7 +155,7 @@ func TestGenerate_BaseQueryRidesIntoUserTurn(t *testing.T) {
 
 func TestGenerate_StripsCodeFences(t *testing.T) {
 	llm := &fakeLLM{responses: []string{"```json\n" + goldenResponse + "\n```"}}
-	svc := NewService(nil, llm, nil)
+	svc := NewService(Deps{LLM: llm})
 	res, err := svc.Generate(context.Background(), "cancellations per day", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
@@ -159,7 +164,7 @@ func TestGenerate_StripsCodeFences(t *testing.T) {
 // The system prompt is the LLM's whole world: it must carry the schema
 // document and the output contract.
 func TestGenerateSystemPrompt_CarriesSchema(t *testing.T) {
-	svc := NewService(nil, &fakeLLM{responses: []string{goldenResponse}}, nil)
+	svc := NewService(Deps{LLM: &fakeLLM{responses: []string{goldenResponse}}})
 	p := generateSystemPrompt(svc.clock.Now())
 	require.Contains(t, p, `"measures"`)
 	require.Contains(t, p, "cancellations")   // registry rode in

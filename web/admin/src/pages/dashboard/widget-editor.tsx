@@ -48,12 +48,17 @@ export function WidgetEditor({
   open,
   onOpenChange,
   initial,
+  seed,
   nlEnabled,
   onSave,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   initial: Widget | null
+  // seed pre-fills a NEW widget draft (#756 ask evidence → add-as-widget):
+  // the query previews immediately and the prompt refines it, but saving
+  // still ADDS a widget (initial stays null).
+  seed?: { title: string; viz: WidgetViz; query: MetricsQuery } | null
   nlEnabled: boolean
   onSave: (data: { title: string; viz: WidgetViz; query: MetricsQuery }) => void
 }) {
@@ -93,12 +98,17 @@ export function WidgetEditor({
       setViz(initial.viz)
       setQuery(initial.query)
       void runPreview(initial.query)
+    } else if (seed) {
+      setTitle(seed.title)
+      setViz(seed.viz)
+      setQuery(seed.query)
+      void runPreview(seed.query)
     } else {
       setTitle("")
       setViz("line")
       setQuery(null)
     }
-  }, [open, initial, runPreview])
+  }, [open, initial, seed, runPreview])
 
   const generate = async () => {
     if (!prompt.trim()) return

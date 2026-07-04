@@ -8,6 +8,9 @@ export interface BootstrapConfig {
   // #741 fail-closed LLM gate: false hides the natural-language widget box
   // entirely (the generate endpoint would answer 501).
   nl_widgets_enabled: boolean
+  // #756 metrics Q&A gate (llm.ask_enabled AND an LLM key): false renders the
+  // Ask panel as a pointed empty-state (the ask endpoint would answer 501).
+  ask_enabled: boolean
 }
 
 export interface TokenPair {

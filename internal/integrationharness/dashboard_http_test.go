@@ -5,6 +5,7 @@ package integrationharness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -253,6 +254,10 @@ func (f *scriptedLLM) Complete(_ context.Context, _ string, msgs []dashboard.LLM
 		i = len(f.responses) - 1
 	}
 	return f.responses[i], nil
+}
+
+func (f *scriptedLLM) CompleteTools(context.Context, string, []dashboard.ToolDef, []dashboard.ToolMessage, int) (*dashboard.ToolTurn, error) {
+	return nil, errors.New("scriptedLLM: tool use not scripted")
 }
 
 const goldenWidgetJSON = `{"query":{"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations per day","viz":"line"}`

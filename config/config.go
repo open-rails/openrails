@@ -329,7 +329,8 @@ const LLMProviderAnthropic = "anthropic"
 // bigger model only if generation quality measurably demands it.
 const LLMDefaultModel = "claude-haiku-4-5-20251001"
 
-// LLMConfig configures the #741 natural-language widget generator.
+// LLMConfig configures the #741 natural-language widget generator and the
+// #756 metrics Q&A endpoint.
 type LLMConfig struct {
 	// Provider selects the API dialect. Empty = "anthropic" (the only
 	// supported value today); unknown values refuse to boot.
@@ -339,11 +340,21 @@ type LLMConfig struct {
 	// APIKey is the provider credential (SECRET — env LLM_API_KEY or a
 	// mounted secret file, never committed config). Empty = feature off.
 	APIKey string `koanf:"api_key,omitempty"`
+	// AskEnabled arms POST /v1/merchant/metrics/ask (#756). SEPARATE consent
+	// from the api_key gate because the data flow differs: widget generation
+	// (#741) only ever sends the metrics schema to the provider, while /ask
+	// sends aggregate query RESULTS too. Default false (fail-closed). Env:
+	// LLM_ASK_ENABLED.
+	AskEnabled bool `koanf:"ask_enabled,omitempty"`
 }
 
 // IsConfigured reports whether NL widget generation can run (fail-closed on a
 // missing key).
 func (c *LLMConfig) IsConfigured() bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
+
+// AskConfigured reports whether metrics Q&A can run: a key AND the explicit
+// ask_enabled consent (results flow to the provider — never implied by the key).
+func (c *LLMConfig) AskConfigured() bool { return c.IsConfigured() && c.AskEnabled }
 
 // ResolvedProvider returns the effective provider name.
 func (c *LLMConfig) ResolvedProvider() string {
