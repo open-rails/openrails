@@ -608,7 +608,7 @@ func (s *Surface) MintUserAccessToken(username string) string {
 	require.NotNil(h.t, cp, "control plane attached")
 	user, err := cp.Core().CreateUser(h.ctx, username+"@example.com", username)
 	require.NoError(h.t, err, "create user")
-	token, _, err := cp.Core().IssueAccessToken(h.ctx, user.ID, nil)
+	token, _, err := cp.Core().MintAccessToken(h.ctx, user.ID, nil)
 	require.NoError(h.t, err, "mint user access token")
 	return token
 }

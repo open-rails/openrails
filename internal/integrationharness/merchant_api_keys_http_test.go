@@ -194,7 +194,7 @@ func TestMerchantSelfServeAPIKeys(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType,
 				dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, role))
-			token, _, err := core.IssueAccessToken(ctx, user.ID, nil)
+			token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 			require.NoError(t, err)
 			return token
 		}
