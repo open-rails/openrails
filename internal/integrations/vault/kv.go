@@ -13,8 +13,8 @@
 package vault
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -31,11 +31,38 @@ import (
 type KVv2Adapter struct {
 	client *vaultapi.Client
 	mount  string
+
+	// onPermissionDenied is called with every error a KV operation observes,
+	// letting a wired Supervisor decide (via NotifyPermissionDenied) whether
+	// it signals real token death (#751 task 5). Nil (the zero value / a bare
+	// NewKVv2Adapter) is a valid no-op — tests and one-off root/dedicated-
+	// container clients never need it.
+	onPermissionDenied func(error)
 }
 
 // NewKVv2Adapter builds a KV-v2 adapter for the given mount (e.g. "secret").
 func NewKVv2Adapter(client *vaultapi.Client, mount string) *KVv2Adapter {
 	return &KVv2Adapter{client: client, mount: strings.Trim(strings.TrimSpace(mount), "/")}
+}
+
+// WithReauthTrigger wires the adapter so every failed KV operation reports
+// its error to sup.NotifyPermissionDenied (#751 task 5): a permission-denied
+// response whose self-lookup confirms the token is dead triggers an
+// immediate re-auth instead of waiting out the current lease or the
+// merchant-secret cache TTL. Returns the adapter for chaining at
+// construction (e.g. merchantsecrets/store.go:
+// NewKVv2Adapter(client, mount).WithReauthTrigger(sup)). A nil sup is a no-op.
+func (a *KVv2Adapter) WithReauthTrigger(sup *Supervisor) *KVv2Adapter {
+	if sup != nil {
+		a.onPermissionDenied = sup.NotifyPermissionDenied
+	}
+	return a
+}
+
+func (a *KVv2Adapter) notifyErr(err error) {
+	if err != nil && a.onPermissionDenied != nil {
+		a.onPermissionDenied(err)
+	}
 }
 
 // rest strips the leading "<mount>/" the merchant store prepended.
@@ -58,6 +85,7 @@ func (a *KVv2Adapter) metadataPath(full string) string {
 func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, int, error) {
 	sec, err := a.client.Logical().ReadWithContext(ctx, a.dataPath(path))
 	if err != nil {
+		a.notifyErr(err)
 		return nil, 0, fmt.Errorf("vault kv read: %w", err)
 	}
 	if sec == nil || sec.Data == nil {
@@ -98,6 +126,7 @@ func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[str
 	}
 	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), map[string]any{"data": payload})
 	if err != nil {
+		a.notifyErr(err)
 		return 0, fmt.Errorf("vault kv write: %w", err)
 	}
 	if sec != nil {
@@ -109,6 +138,7 @@ func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[str
 // DeleteSecret purges ALL versions via the metadata endpoint (idempotent).
 func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 	if _, err := a.client.Logical().DeleteWithContext(ctx, a.metadataPath(path)); err != nil {
+		a.notifyErr(err)
 		return fmt.Errorf("vault kv delete: %w", err)
 	}
 	return nil
@@ -139,6 +169,7 @@ func (a *KVv2Adapter) listSecrets(ctx context.Context, root, rel string, depth i
 	}
 	sec, err := a.client.Logical().ListWithContext(ctx, a.metadataPath(full))
 	if err != nil {
+		a.notifyErr(err)
 		return nil, fmt.Errorf("vault kv list: %w", err)
 	}
 	if sec == nil || sec.Data == nil {
