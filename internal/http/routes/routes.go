@@ -598,8 +598,13 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
 
-	// GET /admin/metrics was ClickHouse-backed and deleted with #735; the
-	// PG-first metrics API (#733) rebuilds it.
+	// #733 PG-first metrics API (replaces the #735-deleted ClickHouse surface):
+	// one composable query endpoint + the registry/schema doc.
+	metricsRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantMetricsRead)}, dbMW...)
+	metricsGrp := rr.Group("/metrics")
+	metricsGrp.Handle(http.MethodPost, "/query", h(httphandlers.MerchantMetricsQuery), metricsRead...)
+	metricsGrp.Handle(http.MethodGet, "/schema", h(httphandlers.MerchantMetricsSchema), metricsRead...)
+
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 	// #689: worker-health dashboard — same operator repair surface/permission.
 	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetAdminWorkerHealth), repairRead...)
