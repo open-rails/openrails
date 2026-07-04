@@ -85,10 +85,13 @@ admin_console:
   # auth_base_url: /auth   # AuthKit authhttp base; embedded hosts set their host issuer base
   # api_base_url: /v1      # merchant API base; embedded hosts typically /billing/v1
 
-# Server-side LLM for the dashboard natural-language widget generator (#741).
-# FAIL-CLOSED: no api_key = the generate endpoint answers 501 and the console
-# hides the NL box; the dashboard's manual builder works without it.
+# Server-side LLM for the dashboard natural-language widget generator (#741)
+# and metrics Q&A (#756). FAIL-CLOSED: no api_key = the generate/ask endpoints
+# answer 501 and the console hides the NL box; the dashboard works without it.
 # llm:
 #   provider: anthropic      # default (only supported value)
 #   model: claude-haiku-4-5-20251001   # default (cheapest capable; schema does the heavy lifting)
 #   api_key: ""              # SECRET — set env LLM_API_KEY or a mounted secret file
+#   ask_enabled: false       # #756 consent: /metrics/ask sends aggregate query RESULTS to the
+#                            # LLM provider (widget generation sends only the schema) — opt in
+#                            # explicitly; env LLM_ASK_ENABLED

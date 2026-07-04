@@ -797,11 +797,27 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	metricsService := metrics.NewService(database)
 	// #741 dashboard: NL widget generation is armed only when an LLM key is
 	// configured — nil LLM = the generate endpoint fail-closes with 501.
+	// #756 metrics Q&A additionally requires the llm.ask_enabled consent
+	// (aggregate query results flow to the provider) and is rate-limited
+	// per merchant (Redis-backed when available, in-process fallback).
 	var dashboardLLM dashboard.LLM
 	if cfg.LLM.IsConfigured() {
 		dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), "")
 	}
-	dashboardService := dashboard.NewService(database, dashboardLLM, clock)
+	var askLimiter dashboard.AskLimiter
+	if redisClient != nil {
+		askLimiter = dashboard.NewAskLimiter(redisClient, clock.Now)
+	} else {
+		askLimiter = dashboard.NewAskLimiter(nil, clock.Now)
+	}
+	dashboardService := dashboard.NewService(dashboard.Deps{
+		DB:         database,
+		Metrics:    metricsService,
+		LLM:        dashboardLLM,
+		AskEnabled: cfg.LLM != nil && cfg.LLM.AskEnabled,
+		AskLimiter: askLimiter,
+		Clock:      clock,
+	})
 	railCustomerService := payments.NewRailCustomerService(database)
 	profileRepo := identity.NewProfileRepo(database)
 

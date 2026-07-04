@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/metrics"
 import { toastApiError } from "@/lib/toast"
 
+import { AskPanel } from "./ask-panel"
 import { newWidgetId } from "./lib"
 import { WidgetEditor } from "./widget-editor"
 import { WidgetTile } from "./widget-tile"
@@ -35,6 +36,14 @@ function nlWidgetsEnabled(): boolean {
   }
 }
 
+function askEnabled(): boolean {
+  try {
+    return getBootstrap().ask_enabled
+  } catch {
+    return false
+  }
+}
+
 // Default tile size per viz for newly added widgets.
 function defaultSize(viz: WidgetViz): { w: number; h: number } {
   return viz === "stat" ? { w: 3, h: 2 } : { w: 6, h: 4 }
@@ -45,6 +54,8 @@ export function DashboardPage() {
   const [widgets, setWidgets] = React.useState<Widget[] | null>(null)
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
+  // seed pre-fills the editor for a NEW widget (ask evidence → add-as-widget).
+  const [seed, setSeed] = React.useState<{ title: string; viz: WidgetViz; query: MetricsQuery } | null>(null)
   const { width, containerRef, mounted } = useContainerWidth()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -140,6 +151,14 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-3">
+      <AskPanel
+        enabled={askEnabled()}
+        onAddWidget={(draft) => {
+          setEditing(null)
+          setSeed(draft)
+          setEditorOpen(true)
+        }}
+      />
       <div className="flex items-center gap-3">
         {data?.is_default ? (
           <p className="text-muted-foreground text-sm">
@@ -153,6 +172,7 @@ export function DashboardPage() {
           className="ml-auto"
           onClick={() => {
             setEditing(null)
+            setSeed(null)
             setEditorOpen(true)
           }}
         >
@@ -176,6 +196,7 @@ export function DashboardPage() {
                   widget={w}
                   onEdit={() => {
                     setEditing(w)
+                    setSeed(null)
                     setEditorOpen(true)
                   }}
                   onDelete={() => removeWidget(w.id)}
@@ -194,6 +215,7 @@ export function DashboardPage() {
         open={editorOpen}
         onOpenChange={setEditorOpen}
         initial={editing}
+        seed={seed}
         nlEnabled={nlWidgetsEnabled()}
         onSave={(draft) => (editing ? editWidget(editing.id, draft) : addWidget(draft))}
       />

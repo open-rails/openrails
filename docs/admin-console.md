@@ -155,4 +155,30 @@ llm:
   # /schema examples + all-at-once corrective errors are designed so query generation needs
   # no model cleverness; configure a bigger model only if generation quality demands it
   api_key: "..."             # SECRET — prefer env LLM_API_KEY or a mounted secret file
+  # ask_enabled: true        # #756 metrics Q&A consent — see below; env LLM_ASK_ENABLED
 ```
+
+## Ask your metrics (#756)
+
+The Ask panel on the Dashboard page answers free-form questions ("why did revenue dip
+last week?") via `POST /v1/merchant/metrics/ask`: the server-side LLM runs
+compiler-validated #733 queries as tools (RLS-pinned to the caller's merchant,
+aggregates only — never entity rows) and answers from the results. The response shows
+its work: the answer PLUS the verbatim result of every executed query as evidence
+tables — on-screen numbers come from the API responses, never from the model's prose.
+Each evidence query has an "Add as widget" button into the normal preview/save flow.
+One-shot: a new question replaces the previous answer. Asking needs only
+`merchant:metrics:read` (it is read-only over the same data as `/query`); each merchant
+is rate-limited (10 asks/min, 200/day) and each ask is capped at 5 queries.
+
+DATA-FLOW CONSENT — why a second flag: NL widget generation (#741) sends ONLY the
+metrics schema to the LLM provider; `/ask` also sends the AGGREGATE QUERY RESULTS
+(that is the point — the model reads the numbers to answer). So ask has its own
+fail-closed flag, `llm.ask_enabled` (env `LLM_ASK_ENABLED`, default false), on top of
+the key: a merchant deployment can have NL widgets without NL answers. Keyless or
+unconsented, the endpoint answers 501, `config.json` carries `ask_enabled: false`, and
+the panel renders a pointed empty-state naming both knobs.
+
+External agents get the same power against the raw API (schema + query endpoints with
+a merchant API key) — see `docs/metrics-for-llms.md` for the two-endpoint recipe and a
+copy-paste tool definition.

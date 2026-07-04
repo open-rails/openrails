@@ -26,6 +26,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *http.ServeMux) error {
 		AuthBaseURL:      s.cfg.AdminConsole.AuthBaseURL,
 		APIBaseURL:       s.cfg.AdminConsole.APIBaseURL,
 		NLWidgetsEnabled: s.cfg.LLM.IsConfigured(),
+		AskEnabled:       s.cfg.LLM.AskConfigured(),
 	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = ControlPlaneAuthPrefix

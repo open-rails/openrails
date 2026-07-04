@@ -116,6 +116,7 @@ POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
 POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
+POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/subscriptions/{id}/cancel
