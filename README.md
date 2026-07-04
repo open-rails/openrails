@@ -327,29 +327,35 @@ The handler is framework-neutral `net/http` — OpenRails links no web framework
 Your frontend now calls these routes with its **normal session credential**.
 `Authenticator` protects checkout/user routes; `Gate` protects merchant routes.
 
-**Rate-limiting & captcha (built in).** The embedded surface runs OpenRails' own
-per-IP/per-user rate limiting + captcha **in-process** — you do not need to front it
-with your own gateway. It is on but **inert until you set `Config.RateLimits`** (a
-safe no-op otherwise). Set it on the config you pass to `embedded.New`/`embed.New`
-(Redis-backed when `Options.Redis` is set, in-memory per-process otherwise):
+**Rate-limiting & captcha (built in, on by default).** The embedded surface runs
+OpenRails' own per-IP/per-user rate limiting + captcha **in-process** — you do not
+need to front it with your own gateway. `embedded.New`/`embed.New` seed the same
+curated `Config.RateLimits` (Redis-backed when `Options.Redis` is set, in-memory
+per-process otherwise) standalone `config.Load` uses whenever you leave it nil (#742):
 
 ```go
-cfg.RateLimits = &config.RateLimitsConfig{
-    "default":   {RequestsPerMinute: 300},  // general API (SPA/NAT-friendly)
-    "checkout":  {RequestsPerMinute: 10},   // tight: deters card-testing
-    "subscribe": {RequestsPerMinute: 20},
-    "payment":   {RequestsPerMinute: 40},
-    "webhook":   {RequestsPerMinute: 1200}, // per source IP; absorbs rail bursts
-}
+config.GetDefaultBillingConfig().RateLimits // == what embedded.New seeds when Config.RateLimits is nil
+// {
+//   "default":   {RequestsPerMinute: 300},  // general API (SPA/NAT-friendly)
+//   "checkout":  {RequestsPerMinute: 10},   // tight: deters card-testing
+//   "subscribe": {RequestsPerMinute: 20},
+//   "payment":   {RequestsPerMinute: 40},
+//   "webhook":   {RequestsPerMinute: 1200}, // per source IP; absorbs rail bursts
+// }
+
+// Set your own to override the defaults instead of accepting them:
+cfg.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 5}}
 // Optional captcha escalation on extreme abuse (needs your Turnstile/reCAPTCHA keys):
 // cfg.Captcha = &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile,
 //     SiteKey: "...", SecretKey: "..."}
+
+// A host that truly fronts billing with its own gateway/limiter can opt all the
+// way out — RateLimitHTTP then runs as a pure passthrough:
+// cfg.RateLimitsDisabled = true
 ```
 
 Buckets key per-IP **and** per-authenticated-user (strictest wins), and apply to both
-the user surface and the delegated self/admin surface (`embgin.SelfHandler`). The
-values above mirror the standalone defaults. **Embedding hosts: do this when you wire
-the engine — it's easy to forget, and without it billing endpoints are unthrottled.**
+the user surface and the delegated self/admin surface (`embgin.SelfHandler`).
 
 ### 3. Call OpenRails in-process
 
@@ -426,10 +432,10 @@ or your own tooling instead — admin routes without a permission checker fail c
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** live `merchant:*` permissions evaluated at request time in
   the caller's merchant group (see embedded guide §5). Never derived from role names.
-- **Sandbox vs live:** `TEST_MODE=true` routes every rail to its test/sandbox
+- **Sandbox vs live:** `TEST_MODE=sandbox` routes every rail to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
-  card. It defaults on in development, must be explicit for live local runs, and is
-  rejected outside development (see Operating modes below).
+  card. It defaults to sandbox in development, must be explicit (`live`) for live local
+  runs, and is rejected outside development (see Operating modes below).
 
 ## Configuration
 
@@ -448,7 +454,9 @@ Two orthogonal settings:
   One of `full | limited | readonly`. The old `mode` / `MODE` / `--mode` alias is
   removed (#710) — a set key fails loudly at load.
 - **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
-  **credential** axis: `true` enforces sandbox rail credentials. Default `false`.
+  **credential** axis: `sandbox | live`, no other values (and no bare boolean).
+  Embedded hosts must set it explicitly; unset has no default and construction
+  refuses to boot (#745).
 
 | `PROVIDER_WRITE_MODE=` | What runs |
 |---|---|
@@ -458,7 +466,7 @@ Two orthogonal settings:
 
 ### `test_mode` — sandbox credentials, orthogonal to provider write mode
 
-`TEST_MODE=true` is sandbox money with whatever behavior `provider_write_mode` selects
+`TEST_MODE=sandbox` is sandbox money with whatever behavior `provider_write_mode` selects
 (typically `full`): every rail routes to its test/sandbox environment, and the
 **credential guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
 configured NMI account is probed at boot with one auth on the non-issued test card —
@@ -469,12 +477,12 @@ verdicts are cached for 12h in `billing.probe_verdicts` keyed by sha256 of the k
 crash-looping supervisor pays one declined auth total, not one per restart — a fresh
 `simulated` verdict skips the probe, and a rotated key or stale verdict always
 re-probes (cache failures degrade to probing); CCBill uses
-`sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_mode=true` is
+`sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_mode=sandbox` is
 **rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
-is exactly `TEST_MODE=true` + `PROVIDER_WRITE_MODE=full`.
+is exactly `TEST_MODE=sandbox` + `PROVIDER_WRITE_MODE=full`.
 
 At a glance — what each provider write mode permits (the `test_mode` axis applies orthogonally: with
-`TEST_MODE=true` the same matrix holds against sandbox rails, so no real money can
+`TEST_MODE=sandbox` the same matrix holds against sandbox rails, so no real money can
 move in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
@@ -497,7 +505,9 @@ usable; `readonly` = reconciliation/forensics boots that must only observe.
 
 `provider_write_mode` is **required outside development** (the server refuses to boot
 without one); unset in dev defaults to `full`. `test_mode` defaults to sandbox in
-development and live outside development. Set `TEST_MODE=false` (or `--test-mode=false`)
+development and live outside development for standalone `config.Load` boots only —
+embedded hosts build `Config` programmatically and must set it explicitly, or
+construction refuses to boot (#745). Set `TEST_MODE=live` (or `--test-mode=live`)
 for a deliberate live local run. The old `mode=test` and `mode=production` values no
 longer exist.
 

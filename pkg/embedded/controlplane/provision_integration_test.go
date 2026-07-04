@@ -73,7 +73,7 @@ func (s *captureEmailSender) resetLink(email string) string {
 func hostedTestConfig(dsn, issuer string) *config.Config {
 	return &config.Config{
 		Env:      "dev",
-		TestMode: true,
+		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.
 		MerchantSource: config.MerchantSourceAPI,

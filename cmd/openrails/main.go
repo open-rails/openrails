@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -41,16 +40,10 @@ func main() {
 				}
 			}
 
-			// --test-mode mirrors --provider-write-mode: overwrite the TEST_MODE
-			// env var before Load so flag beats env beats yaml. Only applied when
-			// the flag was passed explicitly, so an unset flag never clobbers
-			// TEST_MODE.
-			if cmd.Flags().Changed("test-mode") {
-				testMode, err := cmd.Flags().GetBool("test-mode")
-				if err != nil {
-					return fmt.Errorf("failed to get test-mode flag: %w", err)
-				}
-				if err := os.Setenv("TEST_MODE", strconv.FormatBool(testMode)); err != nil {
+			// --test-mode rides the same koanf pipeline as --provider-write-mode:
+			// overwrite TEST_MODE before Load so flag beats env beats yaml.
+			if posture, err := cmd.Flags().GetString("test-mode"); err == nil && strings.TrimSpace(posture) != "" {
+				if err := os.Setenv("TEST_MODE", strings.TrimSpace(posture)); err != nil {
 					return fmt.Errorf("failed to apply --test-mode: %w", err)
 				}
 			}
@@ -71,7 +64,7 @@ func main() {
 	rootCmd.PersistentFlags().
 		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required outside development)")
 	rootCmd.PersistentFlags().
-		Bool("test-mode", false, "Use sandbox rail credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; development only")
+		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; sandbox is development-only")
 
 	serverCmd := &cobra.Command{
 		Use:     "run-server",

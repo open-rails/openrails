@@ -15,7 +15,7 @@ func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 
 	cfg := config.GetDefaultBillingConfig()
 	cfg.ProviderWriteMode = config.ProviderWriteModeFull
-	cfg.TestMode = true
+	cfg.TestMode = config.CredentialPostureSandbox
 	rails := config.RailMerchantAccountSet{
 		"ccbill": {
 			Rail: models.RailCCBill,
@@ -70,7 +70,11 @@ func solanaCfg(t *testing.T, testMode bool, tokens map[string]config.TokenConfig
 	t.Helper()
 	cfg := config.GetDefaultBillingConfig()
 	cfg.ProviderWriteMode = config.ProviderWriteModeFull
-	cfg.TestMode = testMode
+	posture := config.CredentialPostureLive
+	if testMode {
+		posture = config.CredentialPostureSandbox
+	}
+	cfg.TestMode = posture
 	rails := config.RailMerchantAccountSet{
 		"solana": {Rail: models.RailSolana, Solana: &config.SolanaRailConfig{Tokens: tokens}},
 	}

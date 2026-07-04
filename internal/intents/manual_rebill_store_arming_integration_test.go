@@ -27,8 +27,8 @@ import (
 // only the external NMI gateway is a fake HTTP server.
 
 func storeRebillConfig() *config.Config {
-	// TestMode=true → provider environment "test", matching the seeding below.
-	return &config.Config{Env: "dev", TestMode: true, ProviderWriteMode: config.ProviderWriteModeFull}
+	// TestMode=sandbox → provider environment "test", matching the seeding below.
+	return &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
 func rebillMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
@@ -161,7 +161,7 @@ func TestManualRebillNoStoreRow_FallsBackToBootClients(t *testing.T) {
 	// only ever declare test-environment accounts, so the pull scope is
 	// deterministically empty here even when other packages concurrently seed
 	// NMI rows for the shared test merchant.
-	liveCfg := &config.Config{Env: "dev", TestMode: false, ProviderWriteMode: config.ProviderWriteModeFull}
+	liveCfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}
 
 	cfg := storeRebillConfig()
 	boot := map[string]*nmi.NMIClient{"mobius": bootClient}

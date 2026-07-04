@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -37,10 +37,15 @@ var (
 
 type Options struct {
 	// Config is built programmatically by the host — embedded mode never runs
-	// config.Load, so none of Load's defaulting applies. In particular set
-	// Config.TestMode EXPLICITLY: the zero value means LIVE credential posture
-	// (standalone dev boots default to sandbox; embedded ones do not). New()
-	// warns when TestMode is left false in a dev-like Env (#711).
+	// config.Load, so none of Load's defaulting applies. New() refuses to
+	// construct unless the host has declared its posture explicitly (#745):
+	//   - Config.Env must be non-empty (no implicit dev-like "" posture).
+	//   - Config.TestMode must be config.CredentialPostureSandbox or
+	//     config.CredentialPostureLive (the zero value is UNSET, never "live"
+	//     by default — supersedes #711's warn-only).
+	// New() also seeds Config.RateLimits/Config.Captcha with the same curated
+	// defaults config.Load applies whenever the host leaves them nil (#742),
+	// unless Config.RateLimitsDisabled opts out.
 	Config *config.Config
 	// PGXPool is the host-supplied database handle (pgx/v5). The bun-era
 	// *sql.DB option was removed with the ORM (#334).
@@ -72,18 +77,12 @@ func New(opts Options) (*Embedded, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+	if err := applyEmbeddedDefaults(opts.Config); err != nil {
+		return nil, err
+	}
 	rails, err := ApplyPaymentProviders(opts.PaymentProviders)
 	if err != nil {
 		return nil, err
-	}
-
-	// #711: warn on the embedded test_mode zero-value fail-open. Standalone
-	// Load() defaults a dev-like boot to sandbox; embedded hosts build Config
-	// programmatically, so a forgotten TestMode silently means LIVE credentials.
-	// Warn-only (an explicit TestMode=false is indistinguishable from omission).
-	if opts.Config.IsDev() && !opts.Config.TestMode {
-		log.Warn("openrails embedded: Config.TestMode is false in a dev-like env — LIVE credential posture. " +
-			"Standalone defaults dev boots to sandbox; set TestMode explicitly (true for sandbox, false if live is intended).")
 	}
 
 	// Build the application graph only; HTTP surfaces (StandaloneHandler /
@@ -101,6 +100,50 @@ func New(opts Options) (*Embedded, error) {
 	}
 
 	return &Embedded{app: application}, nil
+}
+
+// applyEmbeddedDefaults enforces the posture embedded construction must
+// declare explicitly (#745) and seeds the protective defaults config.Load
+// applies (#742) — both because embedded hosts build Config programmatically
+// and never run Load's defaulting/validation pipeline. Mutates cfg in place;
+// called once, early, before the application graph is built.
+func applyEmbeddedDefaults(cfg *config.Config) error {
+	// #745: an empty Env reads as "development" throughout this package
+	// (IsDev/RequiresRLS/RequiresSecretEncryption/Validate's isDev gate),
+	// disabling every hard-gate check below. Standalone Load() defaults dev
+	// boots to sandbox-safe behavior on top of that; embedded construction has
+	// no such safety net, so it must never inherit the dev-like default by
+	// omission — the host must say which environment this is.
+	if strings.TrimSpace(cfg.Env) == "" {
+		return fmt.Errorf("embedded: config.Env is required (#745) — embedded construction never runs config.Load's dev-like empty-Env default; set it explicitly (e.g. \"development\", \"staging\", \"production\")")
+	}
+	// #745: the zero value of the old bool TestMode field silently meant LIVE
+	// credentials; CredentialPosture keeps that trap from recurring by making
+	// "unset" a third, rejected state instead of overlapping with "live"
+	// (supersedes #711's warn-only). Standalone Load() resolves this
+	// explicitly (dev defaults to sandbox, everything else to live) before
+	// Validate ever runs; embedded construction has no such step.
+	switch cfg.TestMode {
+	case config.CredentialPostureSandbox, config.CredentialPostureLive:
+	default:
+		return fmt.Errorf("embedded: config.TestMode is required (#745) — set config.CredentialPostureSandbox or config.CredentialPostureLive explicitly; embedded construction never runs config.Load's dev-defaults-to-sandbox fallback, so an unset value must never be assumed")
+	}
+
+	// #742: RateLimitHTTP(nil, ...) is a full passthrough — a host that never
+	// set RateLimits ships completely unthrottled. Seed the same curated
+	// defaults config.Load applies, unless the host explicitly opted out (a
+	// host that fronts billing with its own gateway/rate limiter). A host that
+	// already set its own RateLimits/Captcha is left alone either way.
+	if !cfg.RateLimitsDisabled {
+		defaults := config.GetDefaultBillingConfig()
+		if cfg.RateLimits == nil {
+			cfg.RateLimits = defaults.RateLimits
+		}
+		if cfg.Captcha == nil {
+			cfg.Captcha = defaults.Captcha
+		}
+	}
+	return nil
 }
 
 // App returns the application graph, the bridge the HTTP surface constructors

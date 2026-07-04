@@ -74,7 +74,7 @@ Minimum set (fill in real values):
 
 ```bash
 # sandbox mode
-TEST_MODE=true
+TEST_MODE=sandbox
 
 # NMI sandbox values used by the bootstrap manifest and helper scripts.
 NMI_SANDBOX_SECURITY_KEY=...
@@ -92,7 +92,7 @@ E2E_NMI_PLAN_ID=openrails_e2e_nmi_daily_999
 
 Notes:
 - Billing uses fixed NMI gateway endpoints for direct-post and query calls. Use
-  sandbox/test credentials when `TEST_MODE=true`.
+  sandbox/test credentials when `TEST_MODE=sandbox`.
 - OpenRails does not read RAILS_* from `.env`. Seed merchant-scoped
   provider credentials through `openrails push-merchant-config`:
 

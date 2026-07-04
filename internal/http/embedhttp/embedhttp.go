@@ -121,12 +121,15 @@ func FromApp(a *app.App) *Assembler {
 // CORS, body limit, merchant resolution) — the gin-free analogue of the global
 // engine middleware. The returned handler imports zero gin on the request path.
 //
-// Rate-limiting + the captcha challenge flow ARE enforced here: the embedded
-// surface runs OpenRails' own per-IP/per-user rate limits and captcha via the
-// gin-free middleware.RateLimitHTTP, so an embedded host does not need to front
-// billing with its own gateway. billingauth.Optional runs ahead of the limiter so
-// an authenticated caller is keyed per-user, not only per-IP (mirroring the
-// standalone engine's authProvider.Optional() → RateLimit order).
+// Rate-limiting + the captcha challenge flow ARE enforced here BY DEFAULT
+// (#742): embedded.New seeds config.Config.RateLimits/Captcha with the same
+// curated defaults config.Load applies whenever the host leaves them nil, so
+// an embedded host does not need to front billing with its own gateway unless
+// it explicitly opts out (config.Config.RateLimitsDisabled) — RateLimitHTTP
+// runs as a passthrough only then. billingauth.Optional runs ahead of the
+// limiter so an authenticated caller is keyed per-user, not only per-IP
+// (mirroring the standalone engine's authProvider.Optional() → RateLimit
+// order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	routeSets := routeSetMap(opts.RouteSets)
 	if err := s.validateAuthBoundary(routeSets); err != nil {

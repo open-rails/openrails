@@ -17,6 +17,15 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// credentialPostureFromBool maps the test helpers' legacy bool parameter onto
+// the explicit posture enum (#745).
+func credentialPostureFromBool(sandbox bool) config.CredentialPosture {
+	if sandbox {
+		return config.CredentialPostureSandbox
+	}
+	return config.CredentialPostureLive
+}
+
 // stubCCBillLiveProbe swaps the catalog probe for the duration of a test.
 func stubCCBillLiveProbe(t *testing.T, hasLive bool, err error) {
 	t.Helper()
@@ -33,7 +42,7 @@ func newCCBillWebhookRequest(t *testing.T, testMode bool, remoteAddr string) (*h
 	req.RemoteAddr = remoteAddr
 	req.SetPathValue("provider", "ccbill")
 	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
-	rt := &app.Runtime{Config: &config.Config{TestMode: testMode}}
+	rt := &app.Runtime{Config: &config.Config{TestMode: credentialPostureFromBool(testMode)}}
 	return httprequest.NewHTTP(w, req, rt), w
 }
 
@@ -67,7 +76,7 @@ func TestCCBillWebhookSandboxPostureKeepsDevBypass(t *testing.T) {
 func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 	newReq := func(testMode bool) *httprequest.Request {
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", nil)
-		return httprequest.NewHTTP(httptest.NewRecorder(), req, &app.Runtime{Config: &config.Config{TestMode: testMode}})
+		return httprequest.NewHTTP(httptest.NewRecorder(), req, &app.Runtime{Config: &config.Config{TestMode: credentialPostureFromBool(testMode)}})
 	}
 
 	// Allowlisted CCBill source IP always passes, regardless of posture.

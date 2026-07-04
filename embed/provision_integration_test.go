@@ -28,7 +28,7 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 	pool := appDB.Pool()
 
 	slug := fmt.Sprintf("embed-provision-%d", time.Now().UnixNano())
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
 		Options: embedded.Options{Config: cfg},
 	})

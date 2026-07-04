@@ -65,8 +65,8 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "stripe", "test", "acct_acme_test", "webhook_signing_secret", "whsec_acme_test")
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", "nmi_acme_test", "webhook_signing_secret", "nmi_acme_test")
 
-	rt := &app.Runtime{Config: &config.Config{TestMode: true}, Merchants: svc}
-	globalRT := &app.Runtime{Config: &config.Config{TestMode: true}, Merchants: svc}
+	rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}, Merchants: svc}
+	globalRT := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}, Merchants: svc}
 	mux := http.NewServeMux()
 	httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/global", globalRT), globalRT)
 	httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, "/v1", rt), rt)

@@ -7,7 +7,7 @@
 
 env: development
 provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
-test_mode: true           # sandbox credentials; development only
+test_mode: sandbox        # sandbox | live; sandbox is development-only
 
 host: 0.0.0.0
 port: 3053

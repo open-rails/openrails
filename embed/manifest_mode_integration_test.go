@@ -40,7 +40,8 @@ import (
 
 func manifestModeConfig(dsn string) *config.Config {
 	return &config.Config{
-		Env: "dev",
+		Env:      "dev",
+		TestMode: config.CredentialPostureLive,
 		// Explicit default (#723): manifest-is-truth.
 		MerchantSource: config.MerchantSourceManifest,
 		// full: the loop test executes a (fake-provider) charge.
@@ -361,6 +362,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	slug := fmt.Sprintf("mapi%d", nano)
 	cfg := &config.Config{
 		Env:               "dev",
+		TestMode:          config.CredentialPostureLive,
 		MerchantSource:    config.MerchantSourceAPI,
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
@@ -414,6 +416,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 	slug := fmt.Sprintf("mrefuse%d", nano)
 	cfg := &config.Config{
 		Env:            "dev",
+		TestMode:       config.CredentialPostureLive,
 		MerchantSource: config.MerchantSourceAPI,
 		DB:             &config.DBConfig{URL: dsn},
 	}

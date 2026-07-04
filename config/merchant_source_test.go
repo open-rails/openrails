@@ -14,6 +14,10 @@ func validAPIBase(env string) *Config {
 		MerchantSource:    MerchantSourceAPI,
 		ProviderWriteMode: ProviderWriteModeReadOnly,
 		DB:                &DBConfig{URL: "postgres://u:p@localhost:5432/x"},
+		// #742: Validate refuses nil rate_limits outside development —
+		// orthogonal to what this test exercises (merchant_source), so give it
+		// a posture rather than tripping that gate incidentally.
+		RateLimits: GetDefaultBillingConfig().RateLimits,
 	}
 }
 
@@ -85,6 +89,7 @@ func TestMerchantSourceManifestIgnoresEncryptionPosture(t *testing.T) {
 		MerchantSource:    MerchantSourceManifest,
 		ProviderWriteMode: ProviderWriteModeReadOnly,
 		DB:                &DBConfig{URL: "postgres://u:p@localhost:5432/x"},
+		RateLimits:        GetDefaultBillingConfig().RateLimits,
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("manifest mode must not require an encryption/secret backend: %v", err)

@@ -242,7 +242,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
 	rt, err := embed.New(h.ctx, embed.Options{
 		Options: embedded.Options{Config: cfg, Redis: h.Redis},
 	})
@@ -377,7 +377,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 
 	cfg := &config.Config{
 		Env:      "dev",
-		TestMode: true,
+		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the standalone harness IS the API-driven SaaS shape —
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.

@@ -29,9 +29,9 @@ import (
 // fallback and the fail-closed (declared-but-secretless) contract.
 
 func storeCollectionTestConfig() *config.Config {
-	// TestMode=true → provider environment "test", matching
+	// TestMode=sandbox → provider environment "test", matching
 	// merchantsServiceForTest / seedRailMerchantAccountSecrets.
-	return &config.Config{Env: "dev", TestMode: true, ProviderWriteMode: config.ProviderWriteModeFull}
+	return &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
 func storeArmedCharger(dbi *db.DB, msvc *merchants.Service, boot map[string]money.CollectionAdapter, endpoints money.CollectionEndpoints) *money.ScopedCharger {

@@ -33,7 +33,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 
 	cfg := &config.Config{
 		Env:      "dev",
-		TestMode: true,
+		TestMode: config.CredentialPostureSandbox,
 		Host:     "127.0.0.1",
 		Port:     0,
 		DB:       &config.DBConfig{URL: appDSN},

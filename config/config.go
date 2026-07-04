@@ -54,6 +54,30 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 
 const ConfigContextKey string = "config"
 
+// CredentialPosture is the sandbox-credential axis (#355/#745): "sandbox" or
+// "live", never a bare true/false. The Go zero value (empty string) means
+// UNSET — it can never be mistaken for "live" the way a bool's false zero
+// value could. UnmarshalText keeps config.yaml/TEST_MODE/--test-mode decoding
+// through koanf (the same encoding.TextUnmarshaler pattern FlexiblePort uses
+// above, #349).
+type CredentialPosture string
+
+const (
+	CredentialPostureSandbox CredentialPosture = "sandbox"
+	CredentialPostureLive    CredentialPosture = "live"
+)
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (p *CredentialPosture) UnmarshalText(text []byte) error {
+	switch s := CredentialPosture(strings.ToLower(strings.TrimSpace(string(text)))); s {
+	case "", CredentialPostureSandbox, CredentialPostureLive:
+		*p = s
+		return nil
+	default:
+		return fmt.Errorf("invalid test_mode %q: must be %q or %q", s, CredentialPostureSandbox, CredentialPostureLive)
+	}
+}
+
 type Config struct {
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
@@ -71,18 +95,23 @@ type Config struct {
 	// still REQUIRED (Validate refuses to boot without one).
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 
-	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode. When
-	// true, every rail routes to its sandbox environment AND the
+	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode.
+	// "sandbox" routes every rail to its sandbox environment AND the
 	// credential guarantees attach: a live Stripe key (sk_live_/rk_live_)
 	// refuses to boot, configured NMI accounts are probed at boot (a decline
 	// of the non-issued test card proves production credentials and refuses
 	// the boot), CCBill uses the sandbox URL, and Solana derives devnet.
-	// When omitted, defaults to sandbox in development and live outside it
-	// (Load sets this fail-closed; see #355) — so a local boot is sandbox by
-	// default and a prod boot is live by default. test_mode=true is rejected
-	// outside env=development — sandbox money is dev-only. Set test_mode=false
-	// explicitly to run live credentials locally.
-	TestMode bool `koanf:"test_mode,omitempty"`
+	// "live" runs production credentials. Two explicit states ONLY (#745,
+	// replaces the bool whose zero value silently meant live money): the
+	// empty Go zero value is UNSET, tolerated only by standalone Load() —
+	// which defaults it to sandbox in development and live outside it (#355)
+	// — so a local boot is sandbox by default and a prod boot is live by
+	// default. embedded.New never runs Load's defaulting and refuses to
+	// construct with it unset — an embedded host must declare its posture,
+	// never guess (supersedes #711's warn-only). test_mode=sandbox is
+	// rejected outside env=development — sandbox money is dev-only. Set
+	// test_mode=live explicitly to run live credentials locally.
+	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
 	// Used for generating URLs (e.g., Solana Pay transaction_request URLs).
@@ -99,9 +128,19 @@ type Config struct {
 	Logger     *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid   *SendGridConfig   `koanf:"sendgrid,omitempty"`
 	RateLimits *RateLimitsConfig `koanf:"rate_limits,omitempty"`
-	Captcha    *CaptchaConfig    `koanf:"captcha,omitempty"`
-	Encryption *EncryptionConfig `koanf:"encryption,omitempty"`
-	Vault      *VaultConfig      `koanf:"vault,omitempty"`
+	// RateLimitsDisabled explicitly opts OUT of OpenRails' built-in rate
+	// limiting/captcha enforcement (#742) — for a host that fronts billing
+	// with its own gateway/limiter and deliberately wants RateLimitHTTP to
+	// run as a passthrough. Zero value (false) keeps hosts PROTECTED:
+	// embedded.New seeds the same curated RateLimits/Captcha defaults
+	// config.Load applies whenever the host leaves them nil, unless this is
+	// explicitly set. Standalone Load() never needs it — GetDefaultBillingConfig
+	// always seeds RateLimits — but the knob is honored there too. Env:
+	// RATE_LIMITS_DISABLED.
+	RateLimitsDisabled bool              `koanf:"rate_limits_disabled,omitempty"`
+	Captcha            *CaptchaConfig    `koanf:"captcha,omitempty"`
+	Encryption         *EncryptionConfig `koanf:"encryption,omitempty"`
+	Vault              *VaultConfig      `koanf:"vault,omitempty"`
 
 	// AdminConsole gates the embedded merchant admin console SPA served at
 	// /admin/ (#740). Default OFF. Env: ADMIN_CONSOLE_ENABLED,
@@ -941,12 +980,22 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid port %d: must be 1-65535", cfg.Port)
 	}
 
+	// A garbage TestMode value can only reach here via a direct Config{}
+	// literal (koanf's UnmarshalText already rejects it on the Load path) —
+	// defense in depth so a typo can never silently take an unrecognized
+	// branch (#745).
+	switch cfg.TestMode {
+	case "", CredentialPostureSandbox, CredentialPostureLive:
+	default:
+		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
+	}
+
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
 		// Sandbox credentials are dev-only (#355): a production deployment
 		// must never boot pointed at sandbox rails.
-		if cfg.TestMode {
-			return fmt.Errorf("test_mode=true is not allowed outside development")
+		if cfg.TestMode == CredentialPostureSandbox {
+			return fmt.Errorf("test_mode=sandbox is not allowed outside development")
 		}
 		// Outside development the operating mode must be declared explicitly —
 		// "I forgot to set it" must never silently pick a behavior. Checked on
@@ -969,6 +1018,16 @@ func Validate(cfg *Config) error {
 			if issuer := strings.TrimSpace(cfg.Auth.Issuer); issuer != "" && !strings.HasPrefix(strings.ToLower(issuer), "https://") {
 				return fmt.Errorf("auth issuer %q must use https outside development", issuer)
 			}
+		}
+		// #742: a nil RateLimits map is a passthrough in RateLimitHTTP — every
+		// endpoint runs unthrottled. embedded.New seeds the curated defaults
+		// whenever a host leaves this nil, so this only trips for a host that
+		// built its own Config directly (bypassing embedded.New) or a
+		// standalone config.yaml that explicitly nulled the map — either way,
+		// "forgot to configure rate limits" must never silently ship
+		// unprotected outside development.
+		if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
+			return fmt.Errorf("rate_limits is required outside development unless rate_limits_disabled is set (#742): set rate_limits, or rate_limits_disabled=true if this host fronts OpenRails with its own gateway/limiter")
 		}
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
@@ -1161,7 +1220,7 @@ func validateStripeKeyForTestMode(cfg *Config, rails RailMerchantAccountSet, isD
 				return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed outside development when test_mode is disabled; use a live key or set test_mode=true", strings.ToLower(strings.TrimSpace(name)))
 			}
 			log.Warnf("⚠️  Stripe test key provided for rail %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
-			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=true for sandbox testing")
+			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=sandbox for sandbox testing")
 			stripeProc.Stripe.SecretKey = ""
 		}
 	}
@@ -1460,11 +1519,14 @@ func (cfg *Config) GetProviderWriteMode() string {
 // IsTestMode returns true if payment rails should use sandbox/test
 // environments and the sandbox-credential guarantees apply (#355): Stripe
 // live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
-// Orthogonal to ProviderWriteMode (pure behavior). When unset, Load defaults it
-// to sandbox in development and live outside it (#355); Validate rejects
-// test_mode=true outside development.
+// Orthogonal to ProviderWriteMode (pure behavior). Unset (empty) reads as
+// live, matching the historical bool zero value; standalone Load() always
+// resolves TestMode explicitly before this is read, and embedded.New refuses
+// to construct with it unset (#745), so "unset" in practice only reaches this
+// accessor via a direct Config{} literal in a test. Validate rejects
+// test_mode=sandbox outside development.
 func (cfg *Config) IsTestMode() bool {
-	return cfg.TestMode
+	return cfg.TestMode == CredentialPostureSandbox
 }
 
 // IsLimitedMode returns true if proactive payment-provider operations
@@ -1861,18 +1923,23 @@ func Load(configPath string) (*Config, error) {
 	// migration, but they no longer participate in runtime configuration. Keep
 	// Load permissive while ensuring the returned struct reflects the supported
 	// infrastructure-only config surface.
-	// Sandbox-by-default in development (#355): when test_mode is not explicitly
-	// provided, a dev-like boot defaults to sandbox credentials so a local run
-	// can never accidentally move real money against live rail credentials
-	// — the dangerous case is silent ("forgot to set it"), so the safe value is
-	// the one you get by omission. Outside development the default stays live
-	// (false), and an explicit test_mode=true is still rejected by Validate: prod
-	// opts into live only by omission and can never opt into sandbox. To run
-	// live locally, set test_mode=false explicitly (env TEST_MODE=false, flag
-	// --test-mode=false). This only governs standalone Load(); embedded hosts
-	// build the Config programmatically and supply their own value.
+	// Sandbox-by-default in development (#355/#745): when test_mode is not
+	// explicitly provided, a dev-like boot defaults to sandbox credentials so a
+	// local run can never accidentally move real money against live rail
+	// credentials — the dangerous case is silent ("forgot to set it"), so the
+	// safe value is the one you get by omission. Outside development the
+	// default stays live, and an explicit test_mode=sandbox is still rejected
+	// by Validate: prod opts into live only by omission and can never opt into
+	// sandbox. To run live locally, set test_mode=live explicitly (env
+	// TEST_MODE=live, flag --test-mode=live). This only governs standalone
+	// Load(); embedded hosts build the Config programmatically and MUST
+	// supply their own value — embedded.New refuses to construct otherwise.
 	if !k.Exists("test_mode") {
-		cfg.TestMode = cfg.IsDev()
+		if cfg.IsDev() {
+			cfg.TestMode = CredentialPostureSandbox
+		} else {
+			cfg.TestMode = CredentialPostureLive
+		}
 	}
 
 	// The control plane is mandatory in standalone mode (#469). In development
@@ -1953,10 +2020,10 @@ func logTestModeStatus(cfg *Config) {
 		log.Info("   Payment providers will use production environments")
 
 		// Warn if running real charges in dev environment. This only happens when
-		// TEST_MODE=false is set explicitly; omitted test_mode defaults to sandbox in dev.
+		// TEST_MODE=live is set explicitly; omitted test_mode defaults to sandbox in dev.
 		if cfg.IsDev() {
 			log.Warn("⚠️  Real payment processing enabled in dev environment")
-			log.Warn("   Set test_mode=true (env TEST_MODE=true, flag --test-mode) to use sandbox environments")
+			log.Warn("   Set test_mode=sandbox (env TEST_MODE=sandbox, flag --test-mode=sandbox) to use sandbox environments")
 		}
 	}
 }
