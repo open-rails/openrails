@@ -62,10 +62,11 @@ import "embed"
 var FS embed.FS
 ```
 
-Build the dist from the openrails module cache (no vendoring, no checkout):
+Build the dist from the openrails module cache (no vendoring, no checkout —
+via `bash`, since module-cache files are not executable):
 
 ```sh
-"$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
+bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
 ```
 
 (The script copies `web/admin` out of the read-only module cache to a temp dir
