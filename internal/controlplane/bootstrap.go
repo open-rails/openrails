@@ -75,7 +75,7 @@ type BootstrapOptions struct {
 // optionally minted under the merchant group when none exists.
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (EnsureRootGroup / CreatePermissionGroup / AssignGroupRole /
+// CORE calls (EnsureRootGroup / CreatePermissionGroup / Genesis().AssignGroupRole /
 // MintAPIKeyWithOptions) — never raw AuthKit SQL or a private HTTP route.
 // Re-running it is safe: group creation and owner assignment are idempotent; the
 // API key is minted only when none already exists.
@@ -125,7 +125,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		return nil, fmt.Errorf("controlplane: resolve merchant group %q: %w", slug, err)
 	} else if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
 		// Group already existed: ensure the admin holds the owner role (idempotent).
-		if aerr := core.AssignGroupRole(ctx, MerchantType, slug, adminID, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
+		if aerr := core.Genesis().AssignGroupRole(ctx, MerchantType, slug, adminID, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
 			return nil, fmt.Errorf("controlplane: assign merchant owner to initial admin: %w", aerr)
 		}
 		log.WithFields(log.Fields{"merchant": slug, "user_id": adminID}).
@@ -164,7 +164,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 				if err != nil {
 					return nil, err
 				}
-				if aerr := core.AssignGroupRole(ctx, MerchantType, slug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
+				if aerr := core.Genesis().AssignGroupRole(ctx, MerchantType, slug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
 					return nil, fmt.Errorf("controlplane: assign bootstrap api-key actor owner: %w", aerr)
 				}
 			}
@@ -220,7 +220,7 @@ func (c *ControlPlane) EnsureMerchantAPIKeyActor(ctx context.Context, merchantSl
 	if err != nil {
 		return "", err
 	}
-	if err := c.Core().AssignGroupRole(ctx, MerchantType, merchantSlug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); err != nil {
+	if err := c.Core().Genesis().AssignGroupRole(ctx, MerchantType, merchantSlug, createdBy, authcore.SubjectKindUser, MerchantRoleOwner); err != nil {
 		return "", fmt.Errorf("controlplane: assign api-key actor merchant owner: %w", err)
 	}
 	return createdBy, nil

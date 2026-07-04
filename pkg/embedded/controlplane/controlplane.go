@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit/ratelimit"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -70,14 +71,16 @@ import (
 // authcore.Option (engine-construction functional options):
 //   - WithEmailSender / WithSMSSender: FORWARDED via AttachOptions.EmailSender
 //     / SMSSender (#738).
-//   - WithEphemeralStore / embedded.WithRedis: NOT forwarded — DISCOVERED GAP,
-//     not fixed here (out of #743's scope): the control-plane engine built by
-//     internal/controlplane.New never wires Redis/an ephemeral store at all.
+//   - WithEphemeralStore / embedded.WithRedis: FORWARDED (#753) — AttachWithOptions
+//     wires the app graph's OWN Redis client (app.App.RedisClient, the same
+//     client pkg/embedded.Options.Redis produced) into
+//     controlplane.WithRedis whenever the app has one, rather than adding a
+//     redundant AttachOptions field for state the app graph already holds.
 //     authhttp's own construction-time validate() hard-fails when
-//     Environment is not dev-like and no Redis was supplied — so today ANY
-//     hosted attach with a production-like Environment string and no Redis
-//     wired some other way will fail to boot. Flagged for a follow-up issue,
-//     not silently absorbed into this one.
+//     Environment is not dev-like and no Redis was supplied, so a hosted
+//     attach in a non-development environment now requires the app to have
+//     Redis configured (pkg/embedded.Options.Redis / app.BootstrapOptions.Redis);
+//     the resulting error names the requirement.
 //   - WithEntitlements / WithClickHouse: NOT forwarded — unrelated feature
 //     areas OpenRails' control plane does not use.
 //
@@ -87,13 +90,15 @@ import (
 //     "normal knob", per its own doc); exposing a raw ClientIPFunc would let a
 //     host inject arbitrary, unaudited client-IP logic. Advanced/test-only by
 //     authhttp's own doc.
-//   - WithRateLimiter / WithoutRateLimiter: NOT forwarded — BLOCKED on authkit
-//     #242 (a merge-style per-bucket override API). The raw options are a
-//     full-policy-replacement footgun ("ADVANCED/TEST ONLY" per authhttp's own
-//     doc); forwarding them today would let a host disable rate limiting
-//     entirely instead of tuning one bucket. Tracked, not implemented.
-//   - WithRedis: NOT forwarded — see the WithEphemeralStore gap above; the
-//     HTTP layer reuses whatever the engine wired (nothing, today).
+//   - WithRateLimiter / WithoutRateLimiter: NOT forwarded — full-policy-replacement
+//     footguns ("ADVANCED/TEST ONLY" per authhttp's own doc); forwarding them
+//     would let a host disable rate limiting entirely instead of tuning one
+//     bucket. Use AuthRateLimitOverrides for per-bucket tuning instead.
+//   - WithRateLimitOverrides: FORWARDED (#743 task 3, unblocked by authkit
+//     v0.79.0's merge-style override API) via AttachOptions.AuthRateLimitOverrides.
+//   - WithRedis: NOT separately forwarded — the HTTP layer automatically
+//     reuses whatever Redis client the engine was wired with above (authkit
+//     v0.79.0, #210); a host never needs to pass Redis twice.
 //   - WithLanguageConfig: NOT forwarded — i18n is not wired into
 //     AttachOptions; no host has asked for it yet.
 type AttachOptions struct {
@@ -136,6 +141,15 @@ type AttachOptions struct {
 	// deliberately a standalone AttachOptions field, not a shared config key,
 	// until that unification lands.
 	TrustedProxies []string
+
+	// AuthRateLimitOverrides overlays bucket-specific limits onto AuthKit's
+	// built-in rate-limit defaults (#743 task 3, unblocked by authkit
+	// v0.79.0's authhttp.WithRateLimitOverrides). Keys are AuthKit's exported
+	// bucket names (authhttp.RLPasswordLogin, authhttp.RLAuthRegister, ...);
+	// a host tunes only the buckets it names, every other bucket keeps
+	// AuthKit's default. The type is authkit/ratelimit's own exported Limit —
+	// no OpenRails wrapper needed, matching Frontend/EmailSender above.
+	AuthRateLimitOverrides map[string]ratelimit.Limit
 }
 
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
@@ -193,6 +207,19 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 	if len(opts.TrustedProxies) > 0 {
 		cpOpts = append(cpOpts, controlplane.WithTrustedProxies(opts.TrustedProxies))
+	}
+	if len(opts.AuthRateLimitOverrides) > 0 {
+		cpOpts = append(cpOpts, controlplane.WithRateLimitOverrides(opts.AuthRateLimitOverrides))
+	}
+	// #753: reuse the app graph's OWN Redis client (the same client
+	// pkg/embedded.Options.Redis / app.BootstrapOptions.Redis produced) as
+	// AuthKit's ephemeral store, rather than adding a redundant AttachOptions
+	// field for state the app already holds. Nil (no Redis configured) is
+	// passed through unchanged — authhttp.NewServer below fails construction
+	// with a clear error naming the Redis requirement whenever Environment
+	// is non-development and no Redis was wired.
+	if a.RedisClient != nil {
+		cpOpts = append(cpOpts, controlplane.WithRedis(a.RedisClient))
 	}
 	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
 	if err != nil {

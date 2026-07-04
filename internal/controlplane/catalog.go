@@ -10,7 +10,7 @@
 //   - bootstraps the merchant permission-group, the OpenRails permission catalog
 //     (`merchant:*` / `customer:*`), and an initial deployment admin API key
 //     through in-process AuthKit CORE calls (CreatePermissionGroup /
-//     AssignGroupRole / MintAPIKey) — never raw SQL or a private HTTP route.
+//     Genesis().AssignGroupRole / MintAPIKey) — never raw SQL or a private HTTP route.
 //
 // HARDCUT (#567): merchant-local authority is evaluated in the caller's merchant
 // permission-group using OpenRails' app permissions (`merchant:*` seller,

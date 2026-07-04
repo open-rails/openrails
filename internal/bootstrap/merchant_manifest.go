@@ -1426,7 +1426,7 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		if err != nil {
 			return "", fmt.Errorf("merchant bootstrap: register remote_application for %q: %w", slug, err)
 		}
-		if err := core.AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
+		if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
 			return "", fmt.Errorf("merchant bootstrap: grant remote_application owner role for %q: %w", slug, err)
 		}
 	}
