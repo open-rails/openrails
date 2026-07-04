@@ -449,48 +449,61 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	// Standard secret keys (sk_*)
 	t.Run("sk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "live key in test env must refuse to boot")
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()), "live key in test env must refuse to boot")
 	})
 
 	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
 		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "test key in test env should be kept")
 	})
 
-	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
+	t.Run("sk_test_ + test_mode=false disables Stripe in development", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "test key in live env should be disabled")
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
+		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "test key in live env should be disabled in dev")
+	})
+
+	t.Run("sk_test_ + test_mode=false outside development is a hard error (#748)", func(t *testing.T) {
+		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
+		cfg.Env = "production"
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()), "test key under live mode must refuse to boot outside development")
+		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "a hard-failed validation must not silently mutate the config")
 	})
 
 	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("sk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
 		assert.Equal(t, "sk_live_abc123", rails["stripe"].Stripe.SecretKey, "live key in live env should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
 	t.Run("rk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "restricted live key in test env must refuse to boot")
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()), "restricted live key in test env must refuse to boot")
 	})
 
 	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
 		assert.Equal(t, "rk_test_abc123", rails["stripe"].Stripe.SecretKey, "restricted test key in test env should be kept")
 	})
 
-	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
+	t.Run("rk_test_ + test_mode=false disables Stripe in development", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "restricted test key in live env should be disabled")
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
+		assert.Empty(t, rails["stripe"].Stripe.SecretKey, "restricted test key in live env should be disabled in dev")
+	})
+
+	t.Run("rk_test_ + test_mode=false outside development is a hard error (#748)", func(t *testing.T) {
+		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
+		cfg.Env = "production"
+		assert.Error(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()), "restricted test key under live mode must refuse to boot outside development")
 	})
 
 	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg, rails := stripeTestModeConfig("rk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
 		assert.Equal(t, "rk_live_abc123", rails["stripe"].Stripe.SecretKey, "restricted live key in live env should be kept")
 	})
 
@@ -500,7 +513,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
 			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
 		}
-		require.NoError(t, validateStripeKeyForTestMode(cfg, rails))
+		require.NoError(t, validateStripeKeyForTestMode(cfg, rails, cfg.IsDev()))
 		require.Equal(t, "sk_live_primary", rails["stripe_primary"].Stripe.SecretKey)
 		require.Empty(t, rails["stripe_archived"].Stripe.SecretKey)
 	})

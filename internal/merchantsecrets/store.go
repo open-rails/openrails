@@ -35,9 +35,38 @@ type Store struct {
 	SecretWrite   bool
 	// VaultAuth is the #751 auth-health probe for the Vault client backing
 	// this store: nil when Vault isn't enabled, non-nil (call .AuthState())
-	// otherwise. NOT wired into any readiness surface by this package — #748
-	// is expected to consume it from a future Embedded.Ready.
+	// otherwise. Ping folds it in so readiness sees auth death too.
 	VaultAuth *vault.Supervisor
+	// vclient is the authenticated Vault client Build logged in with, kept ONLY
+	// when Vault actually serves the merchant-secret KV store (secret_backend=vault).
+	// nil for the DB-backed store and for BuildManifest — Ping is then a no-op,
+	// since those backends have no separate liveness signal beyond the runtime DB
+	// ping / in-memory plane (#748 Ready()).
+	vclient *vaultapi.Client
+}
+
+// Ping reports whether the merchant-secret backend is usable RIGHT NOW — the
+// live counterpart to Build's construction-time capability probe (#748).
+// DB-backed stores need no separate check (nil receiver client -> always nil,
+// the runtime DB ping already covers them). Vault-backed stores first check
+// the #751 auth supervisor (a dead/unrecoverable token is a readiness failure
+// even while the server is reachable), then re-run the same
+// sys/capabilities-self probe Build used, on the SAME authenticated client, so
+// a Vault that goes unreachable/sealed/paused AFTER boot is caught by
+// readiness instead of only surfacing at request time.
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.vclient == nil {
+		return nil
+	}
+	if s.VaultAuth != nil {
+		if err := s.VaultAuth.AuthState(); err != nil {
+			return fmt.Errorf("vault auth: %w", err)
+		}
+	}
+	if _, err := vault.SelfCapabilities(ctx, s.vclient, vaultKVMount); err != nil {
+		return fmt.Errorf("vault unreachable: %w", err)
+	}
+	return nil
 }
 
 // deriveRouteGates computes the advisory route-gating signals. localKeys: the
@@ -134,6 +163,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			SolanaCanSign: solanaCanSign,
 			SecretWrite:   secretWrite,
 			VaultAuth:     vaultAuth,
+			vclient:       vclient,
 		}, nil
 	}
 

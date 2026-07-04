@@ -789,8 +789,11 @@ func apiModeReconcileConfig() *config.Config {
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env:  "test",
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
+		Env: "test",
+		// MintDisabled: "test" is not a dev-like env (#748: verify-only must be
+		// declared outside development), and this control plane is never asked
+		// to mint in these manifest-reconcile tests.
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
 	}
 	cp, err := controlplane.New(context.Background(), cfg, pool)
 	require.NoError(t, err)

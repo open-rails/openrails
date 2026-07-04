@@ -117,7 +117,7 @@ func (e *Embedded) App() *app.App {
 // A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 //
 // Note: billing health endpoints are not exposed in embedded mode.
-// If a host wants billing readiness, call IsBillingReady and include it in the host's /readyz.
+// If a host wants billing readiness, call (*Embedded).Ready (#748) and include it in the host's /readyz.
 type HTTPHandlerOptions struct {
 	RouteSets      []RouteSet
 	ProviderRoutes *ProviderRoutes

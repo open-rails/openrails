@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -13,9 +14,19 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
 )
 
-func TestMain(m *testing.M) { dbtest.RunMain(m) }
+// TestMain composes dbtest's and vaulttest's shared-container teardowns (both
+// RunMain variants os.Exit, so they cannot nest) — this package's #748
+// readiness tests need a real Vault alongside the shared Postgres.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	vaulttest.TerminateShared()
+	dbtest.TerminateShared()
+	dbtest.TerminateSharedRedis()
+	os.Exit(code)
+}
 
 // TestProbeVerdictCacheRoundtrip exercises the #348 probe-cooldown persistence
 // exactly as the boot path uses it: the unprivileged openrails_app role on a

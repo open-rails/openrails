@@ -112,6 +112,13 @@ type Runtime struct {
 	// consumers read it through Merchants like any other store. The DB/Vault
 	// store is never constructed in this mode.
 	ManifestSecrets *merchants.ManifestSecretStore
+	// MerchantSecretPing, when set, live-probes whether the merchant-secret
+	// backend built for Merchants is reachable RIGHT NOW (#748 Ready()) — the
+	// counterpart to Merchants' boot-time arming. Nil when arming hasn't run
+	// (see Ready's armed/unarmed check) or the backend needs no separate
+	// liveness probe (e.g. MODE 1's in-memory manifest plane). Set by
+	// EnsureMerchantsService / the standalone server alongside Merchants.
+	MerchantSecretPing func(ctx context.Context) error
 	// CollectionResolver is the ONE #725 store-armed per-merchant credential
 	// builder (arrears/top-up adapters + #730 manual-rebill NMI clients).
 	CollectionResolver *money.MerchantCollectionAdapterBuilder
